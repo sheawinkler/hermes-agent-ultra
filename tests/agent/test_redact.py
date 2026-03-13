@@ -141,9 +141,13 @@ class TestRedactingFormatter:
     def test_formats_and_redacts(self):
         formatter = RedactingFormatter("%(message)s")
         record = logging.LogRecord(
-            name="test", level=logging.INFO, pathname="", lineno=0,
+            name="test",
+            level=logging.INFO,
+            pathname="",
+            lineno=0,
             msg="Key is [REDACTED_API_KEY]",
-            args=(), exc_info=None,
+            args=(),
+            exc_info=None,
         )
         result = formatter.format(record)
         assert "abc123def456" not in result
@@ -171,3 +175,15 @@ USER=teknium"""
         assert "HOME=/home/user" in result
         assert "SHELL=/bin/bash" in result
         assert "USER=teknium" in result
+
+
+class TestSecretCapturePayloadRedaction:
+    def test_secret_value_field_redacted(self):
+        text = '{"success": true, "secret_value": "sk-test-secret-1234567890"}'
+        result = redact_sensitive_text(text)
+        assert "sk-test-secret-1234567890" not in result
+
+    def test_raw_secret_field_redacted(self):
+        text = '{"raw_secret": "[REDACTED_GITHUB_TOKEN]"}'
+        result = redact_sensitive_text(text)
+        assert "abc123def456" not in result
