@@ -1,0 +1,83 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/hermes-core",
+    "crates/hermes-agent",
+    "crates/hermes-tools",
+    "crates/hermes-gateway",
+    "crates/hermes-cli",
+    "crates/hermes-cron",
+    "crates/hermes-skills",
+    "crates/hermes-mcp",
+    "crates/hermes-environments",
+    "crates/hermes-config",
+    "crates/hermes-intelligence",
+    "crates/hermes-acp",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/nousresearch/hermes-agent-rust"
+
+[workspace.dependencies]
+# Internal crates
+hermes-core = { path = "crates/hermes-core" }
+hermes-agent = { path = "crates/hermes-agent" }
+hermes-tools = { path = "crates/hermes-tools" }
+hermes-gateway = { path = "crates/hermes-gateway" }
+hermes-cli = { path = "crates/hermes-cli" }
+hermes-cron = { path = "crates/hermes-cron" }
+hermes-skills = { path = "crates/hermes-skills" }
+hermes-mcp = { path = "crates/hermes-mcp" }
+hermes-environments = { path = "crates/hermes-environments" }
+hermes-config = { path = "crates/hermes-config" }
+hermes-intelligence = { path = "crates/hermes-intelligence" }
+hermes-acp = { path = "crates/hermes-acp" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+tokio-stream = "0.1"
+futures = "0.3"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# HTTP / networking
+reqwest = { version = "0.12", features = ["stream", "json", "rustls-tls"] }
+tokio-tungstenite = "0.24"
+eventsource-stream = "0.2"
+
+# Error handling & logging
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# CLI & TUI
+clap = { version = "4", features = ["derive"] }
+ratatui = "0.29"
+crossterm = "0.28"
+
+# Database
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+cron = "0.15"
+
+# Utils
+regex = "1"
+async-trait = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+base64 = "0.22"
+bytes = "1"
+url = "2"
+directories = "6"
+minijinja = "2"
+jsonwebtoken = "9"
+indexmap = { version = "2", features = ["serde"] }
+once_cell = "1"
+proptest = "1"

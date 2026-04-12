@@ -1,0 +1,28 @@
+[package]
+name = "hermes-skills"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Skills system for Hermes Agent"
+
+[dependencies]
+hermes-core = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+tracing = { workspace = true }
+reqwest = { workspace = true }
+jsonwebtoken = { workspace = true }
+minijinja = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+sha2 = "0.10"
+regex = { workspace = true }
+directories = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

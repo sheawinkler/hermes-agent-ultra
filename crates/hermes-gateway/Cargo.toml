@@ -1,0 +1,45 @@
+[package]
+name = "hermes-gateway"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Message gateway and platform adapters for Hermes Agent"
+
+[features]
+default = []
+telegram = []
+discord = []
+slack = []
+whatsapp = []
+signal = []
+matrix = []
+mattermost = []
+dingtalk = []
+feishu = []
+wecom = []
+weixin = []
+bluebubbles = []
+email = []
+sms = []
+homeassistant = []
+
+[dependencies]
+hermes-core = { workspace = true }
+hermes-config = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+reqwest = { workspace = true, features = ["multipart"] }
+tokio-tungstenite = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+url = { workspace = true }
+futures = { workspace = true }
+regex = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+proptest = { workspace = true }

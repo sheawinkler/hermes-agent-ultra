@@ -1,0 +1,41 @@
+[package]
+name = "hermes-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "CLI/TUI interface for Hermes Agent"
+
+[[bin]]
+name = "hermes"
+path = "src/main.rs"
+
+[dependencies]
+hermes-core = { workspace = true }
+hermes-agent = { workspace = true }
+hermes-tools = { workspace = true }
+hermes-config = { workspace = true }
+hermes-gateway = { workspace = true }
+hermes-cron = { workspace = true }
+hermes-environments = { workspace = true }
+hermes-mcp = { workspace = true }
+hermes-skills = { workspace = true }
+hermes-intelligence = { workspace = true }
+clap = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+thiserror = { workspace = true }
+dirs = "6"
+
+[dev-dependencies]
+tempfile = "3"
