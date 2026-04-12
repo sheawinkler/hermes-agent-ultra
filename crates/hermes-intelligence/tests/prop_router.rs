@@ -6,7 +6,9 @@
 
 use proptest::prelude::*;
 
-use hermes_intelligence::{ModelCapability, ModelInfo, ModelRequirements, SmartModelRouter};
+use hermes_intelligence::{
+    ModelCapability, ModelRequirements, RouterModelInfo as ModelInfo, SmartModelRouter,
+};
 
 // ---------------------------------------------------------------------------
 // Strategies

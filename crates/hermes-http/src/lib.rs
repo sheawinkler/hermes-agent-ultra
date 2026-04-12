@@ -17,15 +17,19 @@ use axum::extract::ws::{Message as WsMessage, WebSocket};
 use axum::extract::{Path, State, WebSocketUpgrade};
 use axum::http::header;
 use axum::http::StatusCode;
-use axum::response::{IntoResponse, Response};
 use axum::middleware;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
 use futures::StreamExt;
 use hermes_agent::agent_loop::ToolRegistry as AgentToolRegistry;
-use hermes_agent::provider::{AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider};
-use hermes_agent::providers_extra::{CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider};
+use hermes_agent::provider::{
+    AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider,
+};
+use hermes_agent::providers_extra::{
+    CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
+};
 use hermes_agent::{AgentConfig, AgentLoop};
 use hermes_config::GatewayConfig;
 use hermes_core::errors::GatewayError;
@@ -138,9 +142,7 @@ impl HttpServerState {
         let adapter = Arc::new(HttpPlatformAdapter {
             buf: outbound.clone(),
         });
-        gateway
-            .register_adapter(HTTP_PLATFORM, adapter)
-            .await;
+        gateway.register_adapter(HTTP_PLATFORM, adapter).await;
 
         let tool_registry = Arc::new(ToolRegistry::new());
         let agent_tools = Arc::new(bridge_tool_registry(&tool_registry));
@@ -190,7 +192,10 @@ impl HttpServerState {
             }))
             .await;
 
-        gateway.start_all().await.map_err(|e| AgentError::Io(e.to_string()))?;
+        gateway
+            .start_all()
+            .await
+            .map_err(|e| AgentError::Io(e.to_string()))?;
 
         Ok(Self {
             config: Arc::new(config),
@@ -466,7 +471,9 @@ async fn ws_upgrade(
 
 async fn handle_ws(mut socket: WebSocket, state: HttpServerState, session_id: String) {
     let _ = socket
-        .send(WsMessage::Text(format!("connected session={}", session_id).into()))
+        .send(WsMessage::Text(
+            format!("connected session={}", session_id).into(),
+        ))
         .await;
     while let Some(Ok(msg)) = socket.next().await {
         match msg {
@@ -522,7 +529,11 @@ impl std::fmt::Display for HttpError {
 
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
-        (self.status, Json(serde_json::json!({ "error": self.message }))).into_response()
+        (
+            self.status,
+            Json(serde_json::json!({ "error": self.message })),
+        )
+            .into_response()
     }
 }
 
@@ -531,20 +542,10 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         max_turns: config.max_turns,
         budget: config.budget.clone(),
         model: model.to_string(),
-        api_mode: Default::default(),
-        retry: Default::default(),
         system_prompt: config.system_prompt.clone(),
         personality: config.personality.clone(),
-        extra_body: None,
         stream: config.streaming.enabled,
-        temperature: None,
-        max_tokens: None,
-        max_concurrent_delegates: 1,
-        memory_flush_interval: 5,
-        session_id: None,
-        hermes_home: None,
-        skip_memory: false,
-        provider: None,
+        ..AgentConfig::default()
     }
 }
 
@@ -556,9 +557,11 @@ pub fn bridge_tool_registry(tools: &ToolRegistry) -> AgentToolRegistry {
         agent_registry.register(
             name.clone(),
             schema,
-            Arc::new(move |params: Value| -> Result<String, hermes_core::ToolError> {
-                Ok(tools_clone.dispatch(&name, params))
-            }),
+            Arc::new(
+                move |params: Value| -> Result<String, hermes_core::ToolError> {
+                    Ok(tools_clone.dispatch(&name, params))
+                },
+            ),
         );
     }
     agent_registry
@@ -567,7 +570,9 @@ pub fn bridge_tool_registry(tools: &ToolRegistry) -> AgentToolRegistry {
 pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvider> {
     let (provider_name, model_name) = model.split_once(':').unwrap_or(("openai", model));
     let provider_config = config.llm_providers.get(provider_name);
-    let api_key = provider_config.and_then(|c| c.api_key.clone()).unwrap_or_default();
+    let api_key = provider_config
+        .and_then(|c| c.api_key.clone())
+        .unwrap_or_default();
     if api_key.is_empty() {
         return Arc::new(GenericProvider::new(
             "https://api.openai.com/v1".to_string(),
@@ -639,7 +644,8 @@ fn build_agent_for_gateway_context(
     ctx: &GatewayRuntimeContext,
     agent_tools: Arc<hermes_agent::agent_loop::ToolRegistry>,
 ) -> AgentLoop {
-    let effective_model = resolve_model_for_gateway(config.model.as_deref().unwrap_or("gpt-4o"), ctx);
+    let effective_model =
+        resolve_model_for_gateway(config.model.as_deref().unwrap_or("gpt-4o"), ctx);
     let provider = build_provider(config, &effective_model);
     let mut agent_config = build_agent_config(config, &effective_model);
     if let Some(personality) = ctx.personality.clone() {

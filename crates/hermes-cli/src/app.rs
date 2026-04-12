@@ -11,15 +11,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use hermes_agent::{AgentLoop, AgentConfig, InterruptController};
 use hermes_agent::agent_loop::ToolRegistry as AgentToolRegistry;
 use hermes_agent::provider::{
     AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider,
 };
 use hermes_agent::providers_extra::{
-    QwenProvider, KimiProvider, MiniMaxProvider, NousProvider, CopilotProvider,
+    CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
 };
-use hermes_config::{GatewayConfig, load_config};
+use hermes_agent::{AgentConfig, AgentLoop, InterruptController};
+use hermes_config::{load_config, GatewayConfig};
 use hermes_core::{AgentError, LlmProvider};
 use hermes_environments::LocalBackend;
 use hermes_skills::{FileSkillStore, SkillManager};
@@ -115,10 +115,7 @@ impl App {
             config.personality = Some(personality.clone());
         }
 
-        let current_model = config
-            .model
-            .clone()
-            .unwrap_or_else(|| "gpt-4o".to_string());
+        let current_model = config.model.clone().unwrap_or_else(|| "gpt-4o".to_string());
         let current_personality = config.personality.clone();
 
         let tool_registry = Arc::new(ToolRegistry::new());
@@ -133,11 +130,7 @@ impl App {
         let agent_config = build_agent_config(&config, &current_model);
         let provider = build_provider(&config, &current_model);
 
-        let agent = Arc::new(AgentLoop::new(
-            agent_config,
-            agent_tool_registry,
-            provider,
-        ));
+        let agent = Arc::new(AgentLoop::new(agent_config, agent_tool_registry, provider));
 
         Ok(Self {
             config: Arc::new(config),
@@ -161,10 +154,15 @@ impl App {
     pub async fn run_interactive(&mut self) -> Result<(), AgentError> {
         // The actual TUI loop is in crate::tui::run()
         // This method exists so non-TUI callers can drive the loop manually.
-        while self.running {
-            // In a real implementation, the TUI event loop would drive this.
-            // Here we just mark that we're ready.
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        if self.running {
+            loop {
+                if !self.running {
+                    break;
+                }
+                // In a real implementation, the TUI event loop would drive this.
+                // Here we just mark that we're ready.
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            }
         }
         Ok(())
     }
@@ -292,11 +290,7 @@ impl App {
         let agent_config = build_agent_config(&self.config, &self.current_model);
         let agent_tool_registry = Arc::new(bridge_tool_registry(&self.tool_registry));
 
-        self.agent = Arc::new(AgentLoop::new(
-            agent_config,
-            agent_tool_registry,
-            provider,
-        ));
+        self.agent = Arc::new(AgentLoop::new(agent_config, agent_tool_registry, provider));
 
         tracing::info!("Switched model to: {}", provider_model);
     }
@@ -357,7 +351,9 @@ impl App {
     pub fn history_prev(&mut self) -> Option<&str> {
         if self.history_index > 0 {
             self.history_index -= 1;
-            self.input_history.get(self.history_index).map(|s| s.as_str())
+            self.input_history
+                .get(self.history_index)
+                .map(|s| s.as_str())
         } else {
             None
         }
@@ -368,7 +364,9 @@ impl App {
         if self.history_index < self.input_history.len() {
             self.history_index += 1;
             if self.history_index < self.input_history.len() {
-                self.input_history.get(self.history_index).map(|s| s.as_str())
+                self.input_history
+                    .get(self.history_index)
+                    .map(|s| s.as_str())
             } else {
                 None
             }
@@ -407,20 +405,10 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         max_turns: config.max_turns,
         budget: config.budget.clone(),
         model: model.to_string(),
-        api_mode: Default::default(),
-        retry: Default::default(),
         system_prompt: config.system_prompt.clone(),
         personality: config.personality.clone(),
-        extra_body: None,
         stream: config.streaming.enabled,
-        temperature: None,
-        max_tokens: None,
-        max_concurrent_delegates: 1,
-        memory_flush_interval: 5,
-        session_id: None,
-        hermes_home: None,
-        skip_memory: false,
-        provider: None,
+        ..AgentConfig::default()
     }
 }
 
@@ -436,9 +424,11 @@ pub fn bridge_tool_registry(tools: &ToolRegistry) -> AgentToolRegistry {
         agent_registry.register(
             name.clone(),
             schema,
-            Arc::new(move |params: Value| -> Result<String, hermes_core::ToolError> {
-                Ok(tools_clone.dispatch(&name, params))
-            }),
+            Arc::new(
+                move |params: Value| -> Result<String, hermes_core::ToolError> {
+                    Ok(tools_clone.dispatch(&name, params))
+                },
+            ),
         );
     }
     agent_registry
@@ -542,7 +532,8 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
             let p = CopilotProvider::new(
                 base_url.unwrap_or_else(|| "https://api.github.com/copilot".to_string()),
                 &api_key,
-            ).with_model(model_name);
+            )
+            .with_model(model_name);
             Arc::new(p)
         }
         _ => {

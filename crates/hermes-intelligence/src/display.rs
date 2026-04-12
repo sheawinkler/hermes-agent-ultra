@@ -32,7 +32,11 @@ const BAR_WIDTH: usize = 20;
 // ---------------------------------------------------------------------------
 
 /// Build a short preview of a tool call's primary argument for display.
-pub fn build_tool_preview(tool_name: &str, args: &serde_json::Value, max_len: usize) -> Option<String> {
+pub fn build_tool_preview(
+    tool_name: &str,
+    args: &serde_json::Value,
+    max_len: usize,
+) -> Option<String> {
     let obj = args.as_object()?;
     if obj.is_empty() {
         return None;
@@ -71,15 +75,16 @@ pub fn build_tool_preview(tool_name: &str, args: &serde_json::Value, max_len: us
             .filter(|s| !s.is_empty())
             .copied()
             .collect();
-        return if parts.is_empty() { None } else { Some(parts.join(" ")) };
+        return if parts.is_empty() {
+            None
+        } else {
+            Some(parts.join(" "))
+        };
     }
 
     if tool_name == "todo" {
         let todos = obj.get("todos");
-        let merge = obj
-            .get("merge")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let merge = obj.get("merge").and_then(|v| v.as_bool()).unwrap_or(false);
         return match todos {
             None => Some("reading task list".to_string()),
             Some(t) => {
@@ -115,7 +120,9 @@ pub fn build_tool_preview(tool_name: &str, args: &serde_json::Value, max_len: us
 
     // Look up the primary argument for this tool
     let key = primary_args.get(tool_name).copied().or_else(|| {
-        for fallback in &["query", "text", "command", "path", "name", "prompt", "code", "goal"] {
+        for fallback in &[
+            "query", "text", "command", "path", "name", "prompt", "code", "goal",
+        ] {
             if obj.contains_key(*fallback) {
                 return Some(*fallback);
             }
@@ -199,11 +206,36 @@ pub fn get_cute_tool_message(
     };
 
     let line = match tool_name {
-        "web_search" => format!("{} 🔍 search    {}  {}", prefix, trunc(&get_str("query"), 42), dur),
-        "terminal" => format!("{} 💻 $         {}  {}", prefix, trunc(&get_str("command"), 42), dur),
-        "read_file" => format!("{} 📖 read      {}  {}", prefix, path_trunc(&get_str("path"), 35), dur),
-        "write_file" => format!("{} ✍️  write     {}  {}", prefix, path_trunc(&get_str("path"), 35), dur),
-        "patch" => format!("{} 🔧 patch     {}  {}", prefix, path_trunc(&get_str("path"), 35), dur),
+        "web_search" => format!(
+            "{} 🔍 search    {}  {}",
+            prefix,
+            trunc(&get_str("query"), 42),
+            dur
+        ),
+        "terminal" => format!(
+            "{} 💻 $         {}  {}",
+            prefix,
+            trunc(&get_str("command"), 42),
+            dur
+        ),
+        "read_file" => format!(
+            "{} 📖 read      {}  {}",
+            prefix,
+            path_trunc(&get_str("path"), 35),
+            dur
+        ),
+        "write_file" => format!(
+            "{} ✍️  write     {}  {}",
+            prefix,
+            path_trunc(&get_str("path"), 35),
+            dur
+        ),
+        "patch" => format!(
+            "{} 🔧 patch     {}  {}",
+            prefix,
+            path_trunc(&get_str("path"), 35),
+            dur
+        ),
         "search_files" => {
             let pattern = trunc(&get_str("pattern"), 35);
             let target = get_str("target");
@@ -289,7 +321,11 @@ pub fn format_usage_stats(
     let mut out = String::new();
     let _ = writeln!(out, "Model: {}", model);
     let _ = writeln!(out, "  Input tokens:  {}", format_token_count(input_tokens));
-    let _ = writeln!(out, "  Output tokens: {}", format_token_count(output_tokens));
+    let _ = writeln!(
+        out,
+        "  Output tokens: {}",
+        format_token_count(output_tokens)
+    );
     let _ = writeln!(
         out,
         "  Total tokens:  {}",
@@ -520,21 +556,9 @@ pub mod spinners {
     pub const STAR: &[&str] = &["✶", "✷", "✸", "✹", "✺", "✹", "✸", "✷"];
     pub const PULSE: &[&str] = &["◜", "◠", "◝", "◞", "◡", "◟"];
 
-    pub const KAWAII_WAITING: &[&str] = &[
-        "(｡◕‿◕｡)",
-        "(◕‿◕✿)",
-        "٩(◕‿◕｡)۶",
-        "(✿◠‿◠)",
-        "( ˘▽˘)っ",
-    ];
+    pub const KAWAII_WAITING: &[&str] = &["(｡◕‿◕｡)", "(◕‿◕✿)", "٩(◕‿◕｡)۶", "(✿◠‿◠)", "( ˘▽˘)っ"];
 
-    pub const KAWAII_THINKING: &[&str] = &[
-        "(｡•́︿•̀｡)",
-        "(◔_◔)",
-        "(¬‿¬)",
-        "( •_•)>⌐■-■",
-        "(⌐■_■)",
-    ];
+    pub const KAWAII_THINKING: &[&str] = &["(｡•́︿•̀｡)", "(◔_◔)", "(¬‿¬)", "( •_•)>⌐■-■", "(⌐■_■)"];
 
     pub const THINKING_VERBS: &[&str] = &[
         "pondering",
@@ -588,7 +612,7 @@ mod tests {
         assert_eq!(format_cost(0.0), "included");
         assert_eq!(format_cost(0.001), "~$0.0010");
         assert_eq!(format_cost(0.50), "~$0.50");
-        assert_eq!(format_cost(3.14), "~$3.14");
+        assert_eq!(format_cost(3.15), "~$3.15");
     }
 
     #[test]
