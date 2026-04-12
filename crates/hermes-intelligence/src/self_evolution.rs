@@ -256,9 +256,9 @@ pub struct PolicyVersion {
 impl PolicyVersion {
     pub fn from_engine(engine: AdaptivePolicyEngine, rollout_ratio: f64) -> Self {
         let now = now_epoch_secs();
-        let now_ms = now_epoch_millis();
+        let version = next_version_tag();
         Self {
-            version: format!("policy-{}-{}", now, now_ms),
+            version,
             created_at_epoch_secs: now,
             rollout_ratio: rollout_ratio.clamp(0.0, 1.0),
             engine,
@@ -544,6 +544,15 @@ fn now_epoch_millis() -> u128 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0)
+}
+
+/// Monotonically increasing version counter to avoid collisions within the same millisecond.
+static VERSION_COUNTER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn next_version_tag() -> String {
+    let secs = now_epoch_secs();
+    let seq = VERSION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("policy-{}-{}", secs, seq)
 }
 
 fn should_explore(seed: &str, ratio: f64) -> bool {
