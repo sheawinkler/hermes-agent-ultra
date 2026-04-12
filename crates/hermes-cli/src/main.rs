@@ -113,6 +113,7 @@ async fn main() {
         CliCommand::Dump { session, output } => run_dump(cli, session, output).await,
         CliCommand::Completion { shell } => run_completion(shell),
         CliCommand::Uninstall { yes } => run_uninstall(yes).await,
+        CliCommand::Lumio { action, model } => run_lumio(action, model).await,
     };
 
     if let Err(e) = result {
@@ -1246,6 +1247,46 @@ async fn run_uninstall(yes: bool) -> Result<(), AgentError> {
         println!("Removed {}", home.display());
     } else {
         println!("Nothing to uninstall.");
+    }
+    Ok(())
+}
+
+/// Handle `hermes lumio [action]`.
+async fn run_lumio(action: Option<String>, model: Option<String>) -> Result<(), AgentError> {
+    match action.as_deref() {
+        None | Some("login") => {
+            hermes_cli::lumio::setup(model.as_deref(), true).await?;
+        }
+        Some("logout") => {
+            hermes_cli::lumio::clear_token();
+            println!("✅ Lumio token removed.");
+        }
+        Some("status") => match hermes_cli::lumio::load_token() {
+            Some(t) => {
+                let user = if t.username.is_empty() {
+                    "(unknown)"
+                } else {
+                    &t.username
+                };
+                println!("Lumio: logged in as {}", user);
+                println!("  API: {}", t.base_url);
+                println!(
+                    "  Token: {}...{}",
+                    &t.token[..8.min(t.token.len())],
+                    &t.token[t.token.len().saturating_sub(4)..]
+                );
+            }
+            None => {
+                println!("Lumio: not logged in");
+                println!("  Run `hermes lumio` to login.");
+            }
+        },
+        Some(other) => {
+            println!(
+                "Unknown lumio action: '{}'. Use: login, logout, status.",
+                other
+            );
+        }
     }
     Ok(())
 }
