@@ -325,6 +325,23 @@ impl SessionManager {
         false
     }
 
+    /// Expire idle sessions according to their reset policy.
+    ///
+    /// Returns the number of removed sessions.
+    pub async fn expire_idle_sessions(&self) -> usize {
+        let mut sessions = self.sessions.write().await;
+        let before = sessions.len();
+        let stale_ids: Vec<String> = sessions
+            .iter()
+            .filter(|(_, s)| s.should_reset())
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in &stale_ids {
+            sessions.remove(id);
+        }
+        before.saturating_sub(sessions.len())
+    }
+
     /// Infer the session type from the chat_id format.
     /// By convention, DMs have negative or small numeric IDs,
     /// groups have positive IDs. Override as needed.

@@ -424,6 +424,124 @@ impl Gateway {
     pub async fn adapter_names(&self) -> Vec<String> {
         self.adapters.read().await.keys().cloned().collect()
     }
+
+    /// Periodically expires inactive sessions.
+    pub async fn session_expiry_watcher(&self, interval_secs: u64) {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(interval_secs.max(30)));
+        loop {
+            ticker.tick().await;
+            let expired = self.session_manager.expire_idle_sessions().await;
+            if expired > 0 {
+                tracing::info!(expired, "Expired idle sessions");
+            }
+        }
+    }
+
+    /// Monitors adapter health and attempts reconnect through stop/start.
+    pub async fn platform_reconnect_watcher(&self, interval_secs: u64) {
+        let mut ticker = tokio::time::interval(std::time::Duration::from_secs(interval_secs.max(20)));
+        loop {
+            ticker.tick().await;
+            let snapshot = self.adapters.read().await.clone();
+            for (name, adapter) in snapshot {
+                if !adapter.is_running() {
+                    tracing::warn!(platform = %name, "Adapter appears offline, reconnecting");
+                    let _ = adapter.start().await;
+                }
+            }
+        }
+    }
+
+    /// Attach vision hint for image-bearing messages.
+    pub fn enrich_message_with_vision(&self, text: &str) -> String {
+        if text.contains("http://") || text.contains("https://") {
+            format!("[vision_candidate]\n{}", text)
+        } else {
+            text.to_string()
+        }
+    }
+
+    /// Attach transcription hint for audio-bearing messages.
+    pub fn enrich_message_with_transcription(&self, text: &str) -> String {
+        if text.contains(".mp3") || text.contains(".wav") || text.contains(".m4a") {
+            format!("[transcription_candidate]\n{}", text)
+        } else {
+            text.to_string()
+        }
+    }
+
+    /// Build deterministic signature for config-change detection.
+    pub fn agent_config_signature(&self) -> String {
+        let s = serde_json::to_string(&self.config).unwrap_or_default();
+        format!("{:x}", md5::compute(s))
+    }
+
+    /// Load optional prefill messages.
+    pub fn load_prefill_messages(&self, path: &std::path::Path) -> Vec<Message> {
+        let Ok(content) = std::fs::read_to_string(path) else {
+            return vec![];
+        };
+        content
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .map(Message::user)
+            .collect()
+    }
+
+    /// Load optional ephemeral system prompt.
+    pub fn load_ephemeral_system_prompt(&self, path: &std::path::Path) -> Option<String> {
+        std::fs::read_to_string(path).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+    }
+
+    /// Resolve model routing candidate for a message.
+    pub fn load_smart_model_routing(&self, text: &str) -> Option<String> {
+        if text.len() > 2000 || text.contains("analyze") || text.contains("refactor") {
+            Some("openai:gpt-4o".to_string())
+        } else if text.contains("quick") || text.contains("summary") {
+            Some("openai:gpt-4o-mini".to_string())
+        } else {
+            None
+        }
+    }
+
+    /// Authorize user based on DM manager and platform context.
+    pub async fn is_user_authorized(&self, user_id: &str, platform: &str) -> bool {
+        let dm = self.dm_manager.read().await;
+        dm.is_authorized(user_id) || dm.handle_dm(user_id, platform).await == DmDecision::Allow
+    }
+
+    /// Send update notification message to a chat.
+    pub async fn send_update_notification(
+        &self,
+        platform: &str,
+        chat_id: &str,
+        latest_version: &str,
+    ) -> Result<(), GatewayError> {
+        let msg = format!("Update available: Hermes {}", latest_version);
+        self.send_message(platform, chat_id, &msg, None).await
+    }
+
+    /// Watch external process output and forward to a callback.
+    pub async fn run_process_watcher(
+        &self,
+        mut child: tokio::process::Child,
+        on_output: Arc<dyn Fn(String) + Send + Sync>,
+    ) -> Result<(), GatewayError> {
+        use tokio::io::{AsyncBufReadExt, BufReader};
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| GatewayError::Platform("Process has no stdout".into()))?;
+        let mut lines = BufReader::new(stdout).lines();
+        while let Some(line) = lines
+            .next_line()
+            .await
+            .map_err(|e| GatewayError::Platform(format!("Watcher read error: {}", e)))?
+        {
+            on_output(line);
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

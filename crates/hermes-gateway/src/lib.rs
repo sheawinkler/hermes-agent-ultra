@@ -14,13 +14,18 @@
 pub mod adapter;
 pub mod background;
 pub mod commands;
+pub mod channel_directory;
+pub mod delivery;
 pub mod dm;
 pub mod format;
 pub mod gateway;
 pub mod hooks;
 pub mod markdown_split;
 pub mod media;
+pub mod mirror;
+pub mod pairing;
 pub mod session;
+pub mod sticker_cache;
 pub mod ssrf;
 pub mod stream;
 pub mod voice;
@@ -48,6 +53,11 @@ pub use ssrf::{is_safe_url, validate_url};
 
 // Re-export DM management
 pub use dm::{DmDecision, DmManager};
+pub use pairing::{PairingManager, PairingState};
+pub use mirror::MirrorManager;
+pub use sticker_cache::{StickerCache, StickerMeta};
+pub use delivery::{DeliveryItem, DeliveryQueue};
+pub use channel_directory::{ChannelDirectory, ChannelEntry};
 
 // Re-export adapter base
 pub use adapter::BasePlatformAdapter;
