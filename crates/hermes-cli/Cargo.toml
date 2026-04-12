@@ -43,11 +43,12 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 thiserror = { workspace = true }
 dirs = "6"
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["blocking"] }
 flate2 = "1"
 tar = "0.4"
 serde_yaml = "0.9"
 regex = { workspace = true }
+urlencoding = "2"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

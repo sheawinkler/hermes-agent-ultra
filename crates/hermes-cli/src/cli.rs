@@ -287,6 +287,21 @@ pub enum CliCommand {
         #[arg(long)]
         yes: bool,
     },
+
+    /// Lumio API Gateway login and setup.
+    ///
+    /// Examples:
+    ///   hermes lumio                    — login to Lumio via OAuth
+    ///   hermes lumio --model gpt-4o     — login and set model
+    ///   hermes lumio logout             — remove saved Lumio token
+    ///   hermes lumio status             — show current Lumio login status
+    Lumio {
+        /// Action: login (default), logout, status.
+        action: Option<String>,
+        /// Model to use after login (default: deepseek/deepseek-chat).
+        #[arg(short, long)]
+        model: Option<String>,
+    },
 }
 
 // ---------------------------------------------------------------------------
