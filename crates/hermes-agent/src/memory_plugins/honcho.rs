@@ -93,7 +93,9 @@ struct HonchoConfig {
 impl HonchoConfig {
     fn from_env() -> Self {
         let api_key = std::env::var("HONCHO_API_KEY").unwrap_or_default();
-        let base_url = std::env::var("HONCHO_BASE_URL").ok().filter(|s| !s.is_empty());
+        let base_url = std::env::var("HONCHO_BASE_URL")
+            .ok()
+            .filter(|s| !s.is_empty());
         Self {
             enabled: !api_key.is_empty() || base_url.is_some(),
             api_key,
@@ -215,7 +217,10 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
         *self.session_key.lock().unwrap() = session_id.to_string();
         *self.config.lock().unwrap() = Some(config);
 
-        tracing::info!("Honcho memory plugin initialized for session {}", session_id);
+        tracing::info!(
+            "Honcho memory plugin initialized for session {}",
+            session_id
+        );
     }
 
     fn system_prompt_block(&self) -> String {
@@ -305,10 +310,7 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
                     .to_string()
             }
             "honcho_search" => {
-                let query = args
-                    .get("query")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
                 if query.is_empty() {
                     return json!({"error": "Missing required parameter: query"}).to_string();
                 }
@@ -317,10 +319,7 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
                     .to_string()
             }
             "honcho_context" => {
-                let query = args
-                    .get("query")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
                 if query.is_empty() {
                     return json!({"error": "Missing required parameter: query"}).to_string();
                 }
@@ -355,7 +354,10 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
             return;
         }
         // Mirror built-in user profile writes as Honcho conclusions
-        tracing::debug!("Honcho memory mirror: {}", &content[..content.len().min(80)]);
+        tracing::debug!(
+            "Honcho memory mirror: {}",
+            &content[..content.len().min(80)]
+        );
     }
 
     fn shutdown(&self) {
@@ -417,6 +419,8 @@ mod tests {
         assert!(plugin.system_prompt_block().contains("tools-only mode"));
 
         *plugin.recall_mode.lock().unwrap() = "context".to_string();
-        assert!(plugin.system_prompt_block().contains("context-injection mode"));
+        assert!(plugin
+            .system_prompt_block()
+            .contains("context-injection mode"));
     }
 }

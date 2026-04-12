@@ -45,7 +45,10 @@ impl BackgroundTaskManager {
     /// Submit a new background task.
     pub fn submit(&self, prompt: String) -> Result<String, String> {
         let tasks = self.tasks.lock().unwrap();
-        let running_count = tasks.values().filter(|t| t.status == TaskStatus::Running).count();
+        let running_count = tasks
+            .values()
+            .filter(|t| t.status == TaskStatus::Running)
+            .count();
         if running_count >= self.max_concurrent {
             return Err(format!(
                 "Maximum concurrent background tasks ({}) reached. Wait for a task to complete.",
@@ -105,23 +108,28 @@ impl BackgroundTaskManager {
 
     /// List all tasks.
     pub fn list_tasks(&self) -> Vec<(String, TaskStatus, String)> {
-        self.tasks.lock().unwrap().values().map(|t| {
-            (t.id.clone(), t.status.clone(), t.prompt.clone())
-        }).collect()
+        self.tasks
+            .lock()
+            .unwrap()
+            .values()
+            .map(|t| (t.id.clone(), t.status.clone(), t.prompt.clone()))
+            .collect()
     }
 
     /// Get a task's result.
     pub fn get_result(&self, id: &str) -> Option<String> {
-        self.tasks.lock().unwrap().get(id).and_then(|t| t.result.clone())
+        self.tasks
+            .lock()
+            .unwrap()
+            .get(id)
+            .and_then(|t| t.result.clone())
     }
 
     /// Clean up completed/failed/cancelled tasks older than the given duration.
     pub fn cleanup(&self, max_age: chrono::Duration) {
         let cutoff = chrono::Utc::now() - max_age;
         let mut tasks = self.tasks.lock().unwrap();
-        tasks.retain(|_, t| {
-            t.status == TaskStatus::Running || t.created_at > cutoff
-        });
+        tasks.retain(|_, t| t.status == TaskStatus::Running || t.created_at > cutoff);
     }
 }
 

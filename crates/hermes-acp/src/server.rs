@@ -84,11 +84,8 @@ impl AcpServer {
             let request: AcpRequest = match serde_json::from_str(&line) {
                 Ok(r) => r,
                 Err(e) => {
-                    let error_resp = AcpResponse::error(
-                        None,
-                        -32700,
-                        format!("Parse error: {}", e),
-                    );
+                    let error_resp =
+                        AcpResponse::error(None, -32700, format!("Parse error: {}", e));
                     let json = serde_json::to_string(&error_resp)?;
                     stdout.write_all(json.as_bytes()).await?;
                     stdout.write_all(b"\n").await?;
@@ -133,11 +130,8 @@ impl AcpServer {
             let request: AcpRequest = match serde_json::from_str(&line) {
                 Ok(r) => r,
                 Err(e) => {
-                    let error_resp = AcpResponse::error(
-                        None,
-                        -32700,
-                        format!("Parse error: {}", e),
-                    );
+                    let error_resp =
+                        AcpResponse::error(None, -32700, format!("Parse error: {}", e));
                     let json = serde_json::to_string(&error_resp)?;
                     writer.write_all(json.as_bytes()).await?;
                     writer.write_all(b"\n").await?;

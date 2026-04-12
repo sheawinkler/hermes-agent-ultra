@@ -32,8 +32,12 @@ pub struct ApiServerConfig {
     pub auth_token: Option<String>,
 }
 
-fn default_host() -> String { "0.0.0.0".to_string() }
-fn default_port() -> u16 { 8090 }
+fn default_host() -> String {
+    "0.0.0.0".to_string()
+}
+fn default_port() -> u16 {
+    8090
+}
 
 impl Default for ApiServerConfig {
     fn default() -> Self {
@@ -150,7 +154,11 @@ pub struct ApiServerAdapter {
 impl ApiServerAdapter {
     pub fn new(config: ApiServerConfig) -> Self {
         let token = config.auth_token.clone().unwrap_or_default();
-        let base = BasePlatformAdapter::new(if token.is_empty() { "api-server" } else { &token });
+        let base = BasePlatformAdapter::new(if token.is_empty() {
+            "api-server"
+        } else {
+            &token
+        });
         Self {
             base,
             config,
@@ -160,13 +168,22 @@ impl ApiServerAdapter {
         }
     }
 
-    pub fn config(&self) -> &ApiServerConfig { &self.config }
-
-    fn make_completion_id() -> String {
-        format!("chatcmpl-{}", uuid::Uuid::new_v4().to_string().replace('-', "")[..24].to_string())
+    pub fn config(&self) -> &ApiServerConfig {
+        &self.config
     }
 
-    fn make_non_streaming_response(request_id: &str, model: &str, content: &str) -> ChatCompletionResponse {
+    fn make_completion_id() -> String {
+        format!(
+            "chatcmpl-{}",
+            uuid::Uuid::new_v4().to_string().replace('-', "")[..24].to_string()
+        )
+    }
+
+    fn make_non_streaming_response(
+        request_id: &str,
+        model: &str,
+        content: &str,
+    ) -> ChatCompletionResponse {
         let prompt_tokens = 0_u32;
         let completion_tokens = content.len() as u32 / 4;
         ChatCompletionResponse {
@@ -190,7 +207,12 @@ impl ApiServerAdapter {
         }
     }
 
-    fn make_stream_chunk(request_id: &str, model: &str, content: Option<&str>, finish: bool) -> StreamChunkResponse {
+    fn make_stream_chunk(
+        request_id: &str,
+        model: &str,
+        content: Option<&str>,
+        finish: bool,
+    ) -> StreamChunkResponse {
         StreamChunkResponse {
             id: request_id.to_string(),
             object: "chat.completion.chunk".to_string(),
@@ -199,10 +221,18 @@ impl ApiServerAdapter {
             choices: vec![StreamChoice {
                 index: 0,
                 delta: StreamDelta {
-                    role: if content.is_none() && !finish { Some("assistant".to_string()) } else { None },
+                    role: if content.is_none() && !finish {
+                        Some("assistant".to_string())
+                    } else {
+                        None
+                    },
                     content: content.map(|s| s.to_string()),
                 },
-                finish_reason: if finish { Some("stop".to_string()) } else { None },
+                finish_reason: if finish {
+                    Some("stop".to_string())
+                } else {
+                    None
+                },
             }],
         }
     }
@@ -211,7 +241,10 @@ impl ApiServerAdapter {
 #[async_trait]
 impl PlatformAdapter for ApiServerAdapter {
     async fn start(&self) -> Result<(), GatewayError> {
-        info!("API server adapter starting on {}:{}", self.config.host, self.config.port);
+        info!(
+            "API server adapter starting on {}:{}",
+            self.config.host, self.config.port
+        );
 
         let addr: SocketAddr = format!("{}:{}", self.config.host, self.config.port)
             .parse()
@@ -317,8 +350,12 @@ impl PlatformAdapter for ApiServerAdapter {
         self.send_message(chat_id, &msg, None).await
     }
 
-    fn is_running(&self) -> bool { self.base.is_running() }
-    fn platform_name(&self) -> &str { "api-server" }
+    fn is_running(&self) -> bool {
+        self.base.is_running()
+    }
+    fn platform_name(&self) -> &str {
+        "api-server"
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -336,7 +373,9 @@ async fn handle_connection(
     let mut buf = vec![0u8; 65536];
     let (mut reader, mut writer) = stream.into_split();
     let n = reader.read(&mut buf).await?;
-    if n == 0 { return Ok(()); }
+    if n == 0 {
+        return Ok(());
+    }
 
     let request = String::from_utf8_lossy(&buf[..n]);
     let first_line = request.lines().next().unwrap_or("");
@@ -345,12 +384,14 @@ async fn handle_connection(
     let path = parts.get(1).copied().unwrap_or("/");
 
     // Extract Authorization header
-    let auth_header = request.lines()
+    let auth_header = request
+        .lines()
         .find(|l| l.to_lowercase().starts_with("authorization:"))
         .map(|l| l.splitn(2, ':').nth(1).unwrap_or("").trim().to_string());
 
     if let Some(ref expected) = auth_token {
-        let valid = auth_header.as_deref()
+        let valid = auth_header
+            .as_deref()
             .and_then(|v| v.strip_prefix("Bearer "))
             .map(|t| t == expected)
             .unwrap_or(false);
@@ -376,7 +417,9 @@ async fn handle_connection(
                 Ok(req) => {
                     let request_id = ApiServerAdapter::make_completion_id();
                     let model = req.model.as_deref().unwrap_or("hermes").to_string();
-                    let last_msg = req.messages.last()
+                    let last_msg = req
+                        .messages
+                        .last()
                         .map(|m| m.content.clone())
                         .unwrap_or_default();
 
@@ -388,24 +431,38 @@ async fn handle_connection(
                         writer.write_all(header.as_bytes()).await?;
 
                         // Role chunk
-                        let role_chunk = ApiServerAdapter::make_stream_chunk(&request_id, &model, None, false);
+                        let role_chunk =
+                            ApiServerAdapter::make_stream_chunk(&request_id, &model, None, false);
                         let data = format!("data: {}\n\n", serde_json::to_string(&role_chunk)?);
                         writer.write_all(data.as_bytes()).await?;
 
                         // Content chunks
                         for chunk in reply.as_bytes().chunks(20) {
                             let text = String::from_utf8_lossy(chunk);
-                            let sc = ApiServerAdapter::make_stream_chunk(&request_id, &model, Some(&text), false);
+                            let sc = ApiServerAdapter::make_stream_chunk(
+                                &request_id,
+                                &model,
+                                Some(&text),
+                                false,
+                            );
                             let data = format!("data: {}\n\n", serde_json::to_string(&sc)?);
                             writer.write_all(data.as_bytes()).await?;
                         }
 
                         // Finish chunk
-                        let done_chunk = ApiServerAdapter::make_stream_chunk(&request_id, &model, None, true);
-                        let data = format!("data: {}\n\ndata: [DONE]\n\n", serde_json::to_string(&done_chunk)?);
+                        let done_chunk =
+                            ApiServerAdapter::make_stream_chunk(&request_id, &model, None, true);
+                        let data = format!(
+                            "data: {}\n\ndata: [DONE]\n\n",
+                            serde_json::to_string(&done_chunk)?
+                        );
                         writer.write_all(data.as_bytes()).await?;
                     } else {
-                        let response = ApiServerAdapter::make_non_streaming_response(&request_id, &model, &reply);
+                        let response = ApiServerAdapter::make_non_streaming_response(
+                            &request_id,
+                            &model,
+                            &reply,
+                        );
                         let body = serde_json::to_string(&response)?;
                         let resp = format!(
                             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
@@ -429,7 +486,8 @@ async fn handle_connection(
             let body = r#"{"status":"ok","adapter":"api-server"}"#;
             let resp = format!(
                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-                body.len(), body
+                body.len(),
+                body
             );
             writer.write_all(resp.as_bytes()).await?;
         }

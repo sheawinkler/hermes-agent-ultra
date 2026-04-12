@@ -200,10 +200,7 @@ impl CodexProvider {
 
         let usage = json.get("usage").and_then(|u| {
             let input = u.get("input_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
-            let output = u
-                .get("output_tokens")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0);
+            let output = u.get("output_tokens").and_then(|v| v.as_u64()).unwrap_or(0);
             Some(UsageStats {
                 prompt_tokens: input,
                 completion_tokens: output,

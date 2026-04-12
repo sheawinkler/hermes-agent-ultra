@@ -179,7 +179,9 @@ impl DingTalkAdapter {
             .json(&body)
             .send()
             .await
-            .map_err(|e| GatewayError::ConnectionFailed(format!("DingTalk open_connection: {e}")))?;
+            .map_err(|e| {
+                GatewayError::ConnectionFailed(format!("DingTalk open_connection: {e}"))
+            })?;
         let status = resp.status();
         if !status.is_success() {
             let t = resp.text().await.unwrap_or_default();
@@ -232,7 +234,11 @@ impl DingTalkAdapter {
                 .to_string()
         } else if data.get("msgtype").and_then(|v| v.as_str()) == Some("richText") {
             let mut parts = Vec::new();
-            if let Some(arr) = data.get("content").and_then(|c| c.get("richText")).and_then(|r| r.as_array()) {
+            if let Some(arr) = data
+                .get("content")
+                .and_then(|c| c.get("richText"))
+                .and_then(|r| r.as_array())
+            {
                 for item in arr {
                     if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
                         parts.push(t);
@@ -283,7 +289,10 @@ impl DingTalkAdapter {
     }
 
     /// 处理一条 WS 文本帧。对聊天机器人 CALLBACK 返回待发送的 ACK JSON 字符串（与 Python Stream SDK 一致，应尽快回 ACK）。
-    async fn handle_ws_message(inner: &DingTalkInner, txt: &str) -> Result<Option<String>, GatewayError> {
+    async fn handle_ws_message(
+        inner: &DingTalkInner,
+        txt: &str,
+    ) -> Result<Option<String>, GatewayError> {
         let v: Value = serde_json::from_str(txt)
             .map_err(|e| GatewayError::Platform(format!("DingTalk WS JSON: {e}")))?;
         let msg_type = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
@@ -490,8 +499,7 @@ impl PlatformAdapter for DingTalkAdapter {
     async fn start(&self) -> Result<(), GatewayError> {
         info!(
             "DingTalk Stream adapter starting (client_id={}, endpoint={})",
-            self.inner.config.client_id,
-            self.inner.config.openapi_endpoint
+            self.inner.config.client_id, self.inner.config.openapi_endpoint
         );
         self.inner.base.mark_running();
         let inner = self.inner.clone();
@@ -548,7 +556,8 @@ impl PlatformAdapter for DingTalkAdapter {
         } else {
             format!("{cap}\n\n[local file: {file_path}]")
         };
-        self.send_markdown_session(chat_id, "Attachment", &msg).await
+        self.send_markdown_session(chat_id, "Attachment", &msg)
+            .await
     }
 
     fn is_running(&self) -> bool {
@@ -600,7 +609,10 @@ mod dingtalk_ack_tests {
         assert_eq!(v.get("code"), Some(&serde_json::json!(200)));
         assert_eq!(v.get("message"), Some(&serde_json::json!("OK")));
         let headers = v.get("headers").unwrap();
-        assert_eq!(headers.get("messageId"), Some(&serde_json::json!("abc-123")));
+        assert_eq!(
+            headers.get("messageId"),
+            Some(&serde_json::json!("abc-123"))
+        );
         assert_eq!(
             headers.get("contentType"),
             Some(&serde_json::json!("application/json"))

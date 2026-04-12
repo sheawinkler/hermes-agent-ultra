@@ -42,12 +42,9 @@ impl ToolCallParser for HermesToolCallParser {
     fn parse(&self, content: &str) -> Result<Vec<ToolCall>, AgentError> {
         let mut calls = Vec::new();
 
-        let func_calls_re =
-            Regex::new(r"(?s)<function_calls>(.*?)</function_calls>").unwrap();
-        let invoke_re =
-            Regex::new(r#"(?s)<invoke\s+name="([^"]+)">(.*?)</invoke>"#).unwrap();
-        let param_re =
-            Regex::new(r#"<parameter\s+name="([^"]+)">(.*?)</parameter>"#).unwrap();
+        let func_calls_re = Regex::new(r"(?s)<function_calls>(.*?)</function_calls>").unwrap();
+        let invoke_re = Regex::new(r#"(?s)<invoke\s+name="([^"]+)">(.*?)</invoke>"#).unwrap();
+        let param_re = Regex::new(r#"<parameter\s+name="([^"]+)">(.*?)</parameter>"#).unwrap();
 
         for fc_caps in func_calls_re.captures_iter(content) {
             let block = fc_caps.get(1).unwrap().as_str();
@@ -76,15 +73,11 @@ impl ToolCallParser for HermesToolCallParser {
 
         // Also try ```tool_call blocks if no XML calls were found
         if calls.is_empty() {
-            let tool_call_re =
-                Regex::new(r"(?s)```tool_call\s*\n(.*?)\n```").unwrap();
+            let tool_call_re = Regex::new(r"(?s)```tool_call\s*\n(.*?)\n```").unwrap();
             for caps in tool_call_re.captures_iter(content) {
                 let raw = caps.get(1).unwrap().as_str().trim();
                 let parsed: serde_json::Value = serde_json::from_str(raw).map_err(|e| {
-                    AgentError::InvalidToolCall(format!(
-                        "Invalid JSON in tool_call block: {}",
-                        e
-                    ))
+                    AgentError::InvalidToolCall(format!("Invalid JSON in tool_call block: {}", e))
                 })?;
 
                 let name = parsed
@@ -136,13 +129,11 @@ pub fn separate_text_and_calls(content: &str) -> (String, Vec<ToolCall>) {
     let mut result = content.to_string();
 
     // Remove <function_calls>...</function_calls> blocks
-    let func_calls_re =
-        Regex::new(r"(?s)<function_calls>.*?</function_calls>").unwrap();
+    let func_calls_re = Regex::new(r"(?s)<function_calls>.*?</function_calls>").unwrap();
     result = func_calls_re.replace_all(&result, "").to_string();
 
     // Remove ```tool_call ... ``` blocks
-    let tool_call_re =
-        Regex::new(r"(?s)```tool_call\s*\n.*?\n```").unwrap();
+    let tool_call_re = Regex::new(r"(?s)```tool_call\s*\n.*?\n```").unwrap();
     result = tool_call_re.replace_all(&result, "").to_string();
 
     // Trim excessive whitespace left behind
@@ -228,8 +219,7 @@ I'll look that up for you.
         let calls = parse_tool_calls(content).unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].function.name, "search");
-        let args: serde_json::Value =
-            serde_json::from_str(&calls[0].function.arguments).unwrap();
+        let args: serde_json::Value = serde_json::from_str(&calls[0].function.arguments).unwrap();
         assert_eq!(args["query"], "rust async traits");
     }
 
@@ -244,8 +234,7 @@ Let me run that.
         let calls = parse_tool_calls(content).unwrap();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].function.name, "calculator");
-        let args: serde_json::Value =
-            serde_json::from_str(&calls[0].function.arguments).unwrap();
+        let args: serde_json::Value = serde_json::from_str(&calls[0].function.arguments).unwrap();
         assert_eq!(args["expr"], "2+2");
     }
 
@@ -345,8 +334,7 @@ Hello! Let me search for that.
 "#;
         let calls = parse_tool_calls(content).unwrap();
         assert_eq!(calls.len(), 1);
-        let args: serde_json::Value =
-            serde_json::from_str(&calls[0].function.arguments).unwrap();
+        let args: serde_json::Value = serde_json::from_str(&calls[0].function.arguments).unwrap();
         // "42" is not valid JSON object value, so it should be a string
         assert_eq!(args["count"], 42);
         assert_eq!(args["enabled"], true);

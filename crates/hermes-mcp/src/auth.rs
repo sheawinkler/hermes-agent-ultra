@@ -188,10 +188,7 @@ impl OAuthConfig {
 
         let expires_at = token_response
             .expires_in
-            .map(|secs| {
-                std::time::SystemTime::now()
-                    + std::time::Duration::from_secs(secs)
-            });
+            .map(|secs| std::time::SystemTime::now() + std::time::Duration::from_secs(secs));
 
         Ok(OAuthToken {
             access_token: token_response.access_token,
@@ -243,7 +240,7 @@ fn default_token_type() -> String {
 
 // Note: We use a simpler approach for OAuth since async_trait + interior mutability
 // with cached tokens requires more complex synchronization. For now, each get_token
-// call fetches a fresh token. A production implementation would use Arc<Mutex<>> 
+// call fetches a fresh token. A production implementation would use Arc<Mutex<>>
 // to cache the token.
 
 #[async_trait::async_trait]

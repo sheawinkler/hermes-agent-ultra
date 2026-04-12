@@ -318,13 +318,7 @@ impl CredentialPool {
 
     /// Add a new credential to the pool.
     pub fn add_entry(&mut self, mut entry: PooledCredential) {
-        let next_priority = self
-            .entries
-            .iter()
-            .map(|e| e.priority)
-            .max()
-            .unwrap_or(-1)
-            + 1;
+        let next_priority = self.entries.iter().map(|e| e.priority).max().unwrap_or(-1) + 1;
         entry.priority = next_priority;
         self.entries.push(entry);
     }
@@ -440,11 +434,7 @@ impl PoolManager {
     }
 
     /// Mark a key as exhausted (rate limited).
-    pub fn mark_key_exhausted(
-        &self,
-        provider: &str,
-        status_code: Option<u16>,
-    ) -> Option<String> {
+    pub fn mark_key_exhausted(&self, provider: &str, status_code: Option<u16>) -> Option<String> {
         let mut pools = self.pools.lock().unwrap();
         let pool = pools.get_mut(provider)?;
         pool.mark_exhausted_and_rotate(status_code, None, None, None)

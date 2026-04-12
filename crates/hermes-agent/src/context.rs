@@ -126,10 +126,7 @@ impl ContextCompressor {
                 MessageRole::Tool => "Tool",
             };
 
-            let content = msg
-                .content
-                .as_deref()
-                .unwrap_or("<no content>");
+            let content = msg.content.as_deref().unwrap_or("<no content>");
 
             // For each message add a single line; truncate long content.
             let remaining = MAX_SUMMARY_CHARS.saturating_sub(buf.len());
@@ -231,22 +228,30 @@ impl ContextManager {
     /// Older messages are removed from the middle until the total fits.
     pub fn truncate_to_budget(&mut self, budget: &BudgetConfig) {
         let max_chars = budget.max_aggregate_chars.min(self.max_context_chars);
-        let total_chars: usize = self.messages.iter().map(|m| {
-            m.content.as_deref().map(|c| c.len()).unwrap_or(0)
-        }).sum();
+        let total_chars: usize = self
+            .messages
+            .iter()
+            .map(|m| m.content.as_deref().map(|c| c.len()).unwrap_or(0))
+            .sum();
 
         if total_chars <= max_chars {
             return;
         }
 
         // Identify system messages (to preserve) and the last user message
-        let system_end = self.messages.iter().take_while(|m| m.role == MessageRole::System).count();
+        let system_end = self
+            .messages
+            .iter()
+            .take_while(|m| m.role == MessageRole::System)
+            .count();
 
         // Keep removing oldest non-system messages until we're under budget
         loop {
-            let current_total: usize = self.messages.iter().map(|m| {
-                m.content.as_deref().map(|c| c.len()).unwrap_or(0)
-            }).sum();
+            let current_total: usize = self
+                .messages
+                .iter()
+                .map(|m| m.content.as_deref().map(|c| c.len()).unwrap_or(0))
+                .sum();
 
             if current_total <= max_chars {
                 break;
@@ -417,11 +422,8 @@ impl SystemPromptBuilder {
 
     /// Add the SOUL.md personality or default identity.
     pub fn with_personality(mut self, soul_content: Option<&str>) -> Self {
-        self.parts.push(
-            soul_content
-                .unwrap_or(DEFAULT_AGENT_IDENTITY)
-                .to_string(),
-        );
+        self.parts
+            .push(soul_content.unwrap_or(DEFAULT_AGENT_IDENTITY).to_string());
         self.cached = None;
         self
     }
@@ -659,7 +661,10 @@ mod tests {
         );
         cm.compress();
         // After compression the message count should be smaller.
-        assert!(cm.len() < len_before, "compression should reduce message count");
+        assert!(
+            cm.len() < len_before,
+            "compression should reduce message count"
+        );
         // System prompt preserved.
         assert_eq!(
             cm.get_messages()[0].content.as_deref(),
@@ -753,8 +758,7 @@ mod tests {
 
     #[test]
     fn test_system_prompt_builder_default_identity() {
-        let mut builder = SystemPromptBuilder::new()
-            .with_personality(None);
+        let mut builder = SystemPromptBuilder::new().with_personality(None);
 
         let prompt = builder.build();
         assert!(prompt.contains("Hermes"));
@@ -762,8 +766,7 @@ mod tests {
 
     #[test]
     fn test_system_prompt_builder_caching() {
-        let mut builder = SystemPromptBuilder::new()
-            .with_personality(Some("Test"));
+        let mut builder = SystemPromptBuilder::new().with_personality(Some("Test"));
 
         // First build
         let p1 = builder.build().to_string();

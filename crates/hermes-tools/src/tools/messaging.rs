@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
 use std::sync::Arc;
 
@@ -16,7 +16,12 @@ use std::sync::Arc;
 #[async_trait]
 pub trait MessagingBackend: Send + Sync {
     /// Send a message to a recipient on a platform.
-    async fn send(&self, platform: &str, recipient: &str, message: &str) -> Result<String, ToolError>;
+    async fn send(
+        &self,
+        platform: &str,
+        recipient: &str,
+        message: &str,
+    ) -> Result<String, ToolError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -37,15 +42,18 @@ impl SendMessageHandler {
 #[async_trait]
 impl ToolHandler for SendMessageHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
-        let platform = params.get("platform")
+        let platform = params
+            .get("platform")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'platform' parameter".into()))?;
 
-        let recipient = params.get("recipient")
+        let recipient = params
+            .get("recipient")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'recipient' parameter".into()))?;
 
-        let message = params.get("message")
+        let message = params
+            .get("message")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'message' parameter".into()))?;
 
@@ -59,19 +67,28 @@ impl ToolHandler for SendMessageHandler {
             "description": "Platform to send the message on (e.g. 'telegram', 'discord', 'slack')",
             "enum": ["telegram", "discord", "slack", "whatsapp", "signal", "email", "sms"]
         }));
-        props.insert("recipient".into(), json!({
-            "type": "string",
-            "description": "Recipient identifier (chat ID, user ID, email, phone number)"
-        }));
-        props.insert("message".into(), json!({
-            "type": "string",
-            "description": "Message content to send"
-        }));
+        props.insert(
+            "recipient".into(),
+            json!({
+                "type": "string",
+                "description": "Recipient identifier (chat ID, user ID, email, phone number)"
+            }),
+        );
+        props.insert(
+            "message".into(),
+            json!({
+                "type": "string",
+                "description": "Message content to send"
+            }),
+        );
 
         tool_schema(
             "send_message",
             "Send a message to a recipient on a specific platform.",
-            JsonSchema::object(props, vec!["platform".into(), "recipient".into(), "message".into()]),
+            JsonSchema::object(
+                props,
+                vec!["platform".into(), "recipient".into(), "message".into()],
+            ),
         )
     }
 }
@@ -83,8 +100,16 @@ mod tests {
     struct MockMessagingBackend;
     #[async_trait]
     impl MessagingBackend for MockMessagingBackend {
-        async fn send(&self, platform: &str, recipient: &str, message: &str) -> Result<String, ToolError> {
-            Ok(format!("Sent to {} on {}: {}", recipient, platform, message))
+        async fn send(
+            &self,
+            platform: &str,
+            recipient: &str,
+            message: &str,
+        ) -> Result<String, ToolError> {
+            Ok(format!(
+                "Sent to {} on {}: {}",
+                recipient, platform, message
+            ))
         }
     }
 
@@ -97,11 +122,14 @@ mod tests {
     #[tokio::test]
     async fn test_send_message_execute() {
         let handler = SendMessageHandler::new(Arc::new(MockMessagingBackend));
-        let result = handler.execute(json!({
-            "platform": "telegram",
-            "recipient": "12345",
-            "message": "Hello!"
-        })).await.unwrap();
+        let result = handler
+            .execute(json!({
+                "platform": "telegram",
+                "recipient": "12345",
+                "message": "Hello!"
+            }))
+            .await
+            .unwrap();
         assert!(result.contains("telegram"));
         assert!(result.contains("12345"));
     }

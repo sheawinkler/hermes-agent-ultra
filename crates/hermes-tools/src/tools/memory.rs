@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{AgentError, JsonSchema, MemoryProvider, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{
+    tool_schema, AgentError, JsonSchema, MemoryProvider, ToolError, ToolHandler, ToolSchema,
+};
 
 use std::sync::Arc;
 
@@ -43,59 +45,73 @@ impl MemoryHandler {
 #[async_trait]
 impl ToolHandler for MemoryHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
-        let action = params.get("action")
+        let action = params
+            .get("action")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'action' parameter".into()))?;
 
         match action {
             "add" => {
-                let key = params.get("key")
+                let key = params
+                    .get("key")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'key' parameter".into()))?;
-                let value = params.get("value")
+                let value = params
+                    .get("value")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'value' parameter".into()))?;
                 self.backend.add(key, value).await
             }
             "replace" => {
-                let key = params.get("key")
+                let key = params
+                    .get("key")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'key' parameter".into()))?;
-                let value = params.get("value")
+                let value = params
+                    .get("value")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'value' parameter".into()))?;
                 self.backend.replace(key, value).await
             }
             "remove" => {
-                let key = params.get("key")
+                let key = params
+                    .get("key")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'key' parameter".into()))?;
                 self.backend.remove(key).await
             }
-            "list" => {
-                self.backend.list().await
-            }
+            "list" => self.backend.list().await,
             other => Err(ToolError::InvalidParams(format!(
-                "Unknown action: '{}'. Use 'add', 'replace', 'remove', or 'list'.", other
+                "Unknown action: '{}'. Use 'add', 'replace', 'remove', or 'list'.",
+                other
             ))),
         }
     }
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("action".into(), json!({
-            "type": "string",
-            "description": "Action to perform: add, replace, remove, or list",
-            "enum": ["add", "replace", "remove", "list"]
-        }));
-        props.insert("key".into(), json!({
-            "type": "string",
-            "description": "Memory key (for add, replace, remove)"
-        }));
-        props.insert("value".into(), json!({
-            "type": "string",
-            "description": "Memory value (for add, replace)"
-        }));
+        props.insert(
+            "action".into(),
+            json!({
+                "type": "string",
+                "description": "Action to perform: add, replace, remove, or list",
+                "enum": ["add", "replace", "remove", "list"]
+            }),
+        );
+        props.insert(
+            "key".into(),
+            json!({
+                "type": "string",
+                "description": "Memory key (for add, replace, remove)"
+            }),
+        );
+        props.insert(
+            "value".into(),
+            json!({
+                "type": "string",
+                "description": "Memory value (for add, replace)"
+            }),
+        );
 
         tool_schema(
             "memory",
@@ -129,7 +145,10 @@ mod tests {
     #[tokio::test]
     async fn test_memory_add() {
         let handler = MemoryHandler::new(Arc::new(MockMemoryBackend));
-        let result = handler.execute(json!({"action": "add", "key": "name", "value": "Hermes"})).await.unwrap();
+        let result = handler
+            .execute(json!({"action": "add", "key": "name", "value": "Hermes"}))
+            .await
+            .unwrap();
         assert!(result.contains("Added"));
     }
 

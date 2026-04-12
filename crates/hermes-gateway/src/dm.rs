@@ -5,8 +5,8 @@
 //! - Pair: Create a session and request admin approval
 //! - Ignore: Silently discard the message
 
-use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 use hermes_config::session::SessionResetPolicy;
 use hermes_config::UnauthorizedDmBehavior;

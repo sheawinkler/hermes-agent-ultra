@@ -10,7 +10,10 @@ pub struct JsonSchema {
     pub properties: Option<IndexMap<String, serde_json::Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub required: Option<Vec<String>>,
-    #[serde(rename = "additionalProperties", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "additionalProperties",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub additional_properties: Option<bool>,
 }
 
@@ -26,10 +29,7 @@ impl JsonSchema {
     }
 
     /// Create an object-type schema with the given properties and required fields.
-    pub fn object(
-        properties: IndexMap<String, serde_json::Value>,
-        required: Vec<String>,
-    ) -> Self {
+    pub fn object(properties: IndexMap<String, serde_json::Value>, required: Vec<String>) -> Self {
         Self {
             schema_type: Some("object".to_string()),
             properties: Some(properties),

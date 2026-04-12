@@ -9,8 +9,8 @@
 
 use std::sync::Arc;
 
-use hermes_agent::{AgentConfig, AgentLoop};
 use hermes_agent::agent_loop::ToolRegistry;
+use hermes_agent::{AgentConfig, AgentLoop};
 use hermes_core::{AgentResult, LlmProvider, Message, ToolSchema};
 
 use crate::job::{CronJob, DeliverConfig, DeliverTarget};
@@ -30,10 +30,7 @@ pub struct CronRunner {
 
 impl CronRunner {
     /// Create a new cron runner.
-    pub fn new(
-        llm_provider: Arc<dyn LlmProvider>,
-        tool_registry: Arc<ToolRegistry>,
-    ) -> Self {
+    pub fn new(llm_provider: Arc<dyn LlmProvider>, tool_registry: Arc<ToolRegistry>) -> Self {
         Self {
             llm_provider,
             tool_registry,
@@ -48,7 +45,11 @@ impl CronRunner {
     /// The agent is run with a restricted tool set that excludes the
     /// `cronjob` tool to prevent recursive scheduling.
     pub async fn run_job(&self, job: &CronJob) -> Result<AgentResult, CronError> {
-        tracing::info!("Running cron job '{}' ({})", job.name.as_deref().unwrap_or(&job.id), job.id);
+        tracing::info!(
+            "Running cron job '{}' ({})",
+            job.name.as_deref().unwrap_or(&job.id),
+            job.id
+        );
 
         // Build agent config from job settings
         let mut config = AgentConfig::default();
@@ -69,22 +70,25 @@ impl CronRunner {
         let tools = self.filtered_tool_schemas();
 
         // Create a fresh agent loop
-        let agent_loop = AgentLoop::new(config, self.tool_registry.clone(), self.llm_provider.clone());
+        let agent_loop = AgentLoop::new(
+            config,
+            self.tool_registry.clone(),
+            self.llm_provider.clone(),
+        );
 
         // Build initial messages
         let messages = self.build_messages(job);
 
         // Run the agent loop
-        let result = agent_loop.run(messages, Some(tools)).await.map_err(CronError::Agent)?;
+        let result = agent_loop
+            .run(messages, Some(tools))
+            .await
+            .map_err(CronError::Agent)?;
 
         // Deliver results if configured
         if let Some(ref deliver) = job.deliver {
             if let Err(e) = self.deliver_result(&result, deliver).await {
-                tracing::warn!(
-                    "Failed to deliver result for job '{}': {}",
-                    job.id,
-                    e
-                );
+                tracing::warn!("Failed to deliver result for job '{}': {}", job.id, e);
             }
         }
 
@@ -105,10 +109,8 @@ impl CronRunner {
         // Include skill context if skills are configured
         if let Some(ref skills) = job.skills {
             if !skills.is_empty() {
-                let skill_context = format!(
-                    "Available skills for this task: {}",
-                    skills.join(", ")
-                );
+                let skill_context =
+                    format!("Available skills for this task: {}", skills.join(", "));
                 messages.push(Message::user(skill_context));
             }
         }
@@ -205,7 +207,9 @@ mod tests {
                 "Manage cron jobs",
                 hermes_core::JsonSchema::new("object"),
             ),
-            Arc::new(|_params: serde_json::Value| -> Result<String, ToolError> { Ok("ok".to_string()) }),
+            Arc::new(|_params: serde_json::Value| -> Result<String, ToolError> {
+                Ok("ok".to_string())
+            }),
         );
         registry.register(
             "terminal",
@@ -214,7 +218,9 @@ mod tests {
                 "Run commands",
                 hermes_core::JsonSchema::new("object"),
             ),
-            Arc::new(|_params: serde_json::Value| -> Result<String, ToolError> { Ok("ok".to_string()) }),
+            Arc::new(|_params: serde_json::Value| -> Result<String, ToolError> {
+                Ok("ok".to_string())
+            }),
         );
 
         let runner = CronRunner {
@@ -290,7 +296,10 @@ mod tests {
             _temperature: Option<f64>,
             _model: Option<&str>,
             _extra_body: Option<&serde_json::Value>,
-        ) -> futures::stream::BoxStream<'static, Result<hermes_core::StreamChunk, hermes_core::AgentError>> {
+        ) -> futures::stream::BoxStream<
+            'static,
+            Result<hermes_core::StreamChunk, hermes_core::AgentError>,
+        > {
             Box::pin(futures::stream::empty())
         }
     }

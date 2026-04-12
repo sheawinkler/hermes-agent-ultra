@@ -65,7 +65,9 @@ pub fn load_dotenv() {
 }
 
 fn strip_quotes(s: &str) -> &str {
-    if s.len() >= 2 && ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\''))) {
+    if s.len() >= 2
+        && ((s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')))
+    {
         &s[1..s.len() - 1]
     } else {
         s
@@ -213,7 +215,10 @@ fn apply_user_config_patch_flat(
         }
         "max_turns" => {
             config.max_turns = value.parse().map_err(|_| {
-                ConfigError::ValidationError(format!("max_turns must be a non-negative integer: {}", value))
+                ConfigError::ValidationError(format!(
+                    "max_turns must be a non-negative integer: {}",
+                    value
+                ))
             })?;
         }
         "system_prompt" => {
@@ -337,15 +342,17 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .unwrap_or_else(|| "(not set)".to_string())),
-        ["llm", provider, "api_key"] => Ok(match config
-            .llm_providers
-            .get(*provider)
-            .and_then(|c| c.api_key.as_deref())
-            .filter(|s| !s.is_empty())
-        {
-            Some(s) => mask_secret(s),
-            None => "(not set)".to_string(),
-        }),
+        ["llm", provider, "api_key"] => Ok(
+            match config
+                .llm_providers
+                .get(*provider)
+                .and_then(|c| c.api_key.as_deref())
+                .filter(|s| !s.is_empty())
+            {
+                Some(s) => mask_secret(s),
+                None => "(not set)".to_string(),
+            },
+        ),
         ["llm", provider, "base_url"] => Ok(config
             .llm_providers
             .get(*provider)
@@ -440,11 +447,15 @@ pub fn apply_env_overrides(config: &mut GatewayConfig) {
         config.system_prompt = Some(v);
     }
     if let Ok(v) = std::env::var("HERMES_PROXY_HTTP") {
-        let proxy = config.proxy.get_or_insert_with(crate::config::ProxyConfig::default);
+        let proxy = config
+            .proxy
+            .get_or_insert_with(crate::config::ProxyConfig::default);
         proxy.http_proxy = Some(v);
     }
     if let Ok(v) = std::env::var("HERMES_PROXY_SOCKS") {
-        let proxy = config.proxy.get_or_insert_with(crate::config::ProxyConfig::default);
+        let proxy = config
+            .proxy
+            .get_or_insert_with(crate::config::ProxyConfig::default);
         proxy.socks_proxy = Some(v);
     }
     if let Ok(v) = std::env::var("HERMES_LLM_API_KEY") {
@@ -603,7 +614,8 @@ mod tests {
     fn apply_patch_dotted_llm_proxy_budget() {
         let mut c = GatewayConfig::default();
         apply_user_config_patch(&mut c, "llm.openai.api_key", "sk-test").unwrap();
-        apply_user_config_patch(&mut c, "llm.openai.base_url", "https://api.openai.com/v1").unwrap();
+        apply_user_config_patch(&mut c, "llm.openai.base_url", "https://api.openai.com/v1")
+            .unwrap();
         apply_user_config_patch(&mut c, "proxy.http", "http://127.0.0.1:8080").unwrap();
         apply_user_config_patch(&mut c, "budget.max_result_size_chars", "500").unwrap();
         assert_eq!(

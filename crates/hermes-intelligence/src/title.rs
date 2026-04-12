@@ -173,7 +173,9 @@ mod tests {
     #[test]
     fn test_truncate_long_messages() {
         let gen = TitleGenerator::for_test().with_max_message_chars(20);
-        let messages = vec![Message::user("This is a very long message that should be truncated")];
+        let messages = vec![Message::user(
+            "This is a very long message that should be truncated",
+        )];
         let result = gen.truncate_messages(&messages);
         // The truncated content should be at most 20 chars
         let content_line = result.split(':').nth(1).unwrap().trim();
@@ -219,7 +221,8 @@ mod tests {
                     _temperature: Option<f64>,
                     _model: Option<&str>,
                     _extra_body: Option<&serde_json::Value>,
-                ) -> futures::stream::BoxStream<'static, Result<hermes_core::StreamChunk, AgentError>> {
+                ) -> futures::stream::BoxStream<'static, Result<hermes_core::StreamChunk, AgentError>>
+                {
                     panic!("MockProvider should not be called in this test")
                 }
             }

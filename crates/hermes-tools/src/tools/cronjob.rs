@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
 use std::sync::Arc;
 
@@ -16,11 +16,23 @@ use std::sync::Arc;
 #[async_trait]
 pub trait CronjobBackend: Send + Sync {
     /// Create a new cron job.
-    async fn create(&self, name: &str, schedule: &str, task: &str, toolset: Option<&str>) -> Result<String, ToolError>;
+    async fn create(
+        &self,
+        name: &str,
+        schedule: &str,
+        task: &str,
+        toolset: Option<&str>,
+    ) -> Result<String, ToolError>;
     /// List all cron jobs.
     async fn list(&self) -> Result<String, ToolError>;
     /// Update a cron job.
-    async fn update(&self, id: &str, schedule: Option<&str>, task: Option<&str>, enabled: Option<bool>) -> Result<String, ToolError>;
+    async fn update(
+        &self,
+        id: &str,
+        schedule: Option<&str>,
+        task: Option<&str>,
+        enabled: Option<bool>,
+    ) -> Result<String, ToolError>;
     /// Pause a cron job.
     async fn pause(&self, id: &str) -> Result<String, ToolError>;
     /// Resume a cron job.
@@ -49,29 +61,35 @@ impl CronjobHandler {
 #[async_trait]
 impl ToolHandler for CronjobHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
-        let action = params.get("action")
+        let action = params
+            .get("action")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'action' parameter".into()))?;
 
         match action {
             "create" => {
-                let name = params.get("name")
+                let name = params
+                    .get("name")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'name' parameter".into()))?;
-                let schedule = params.get("schedule")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidParams("Missing 'schedule' parameter".into()))?;
-                let task = params.get("task")
+                let schedule =
+                    params
+                        .get("schedule")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| {
+                            ToolError::InvalidParams("Missing 'schedule' parameter".into())
+                        })?;
+                let task = params
+                    .get("task")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'task' parameter".into()))?;
                 let toolset = params.get("toolset").and_then(|v| v.as_str());
                 self.backend.create(name, schedule, task, toolset).await
             }
-            "list" => {
-                self.backend.list().await
-            }
+            "list" => self.backend.list().await,
             "update" => {
-                let id = params.get("id")
+                let id = params
+                    .get("id")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'id' parameter".into()))?;
                 let schedule = params.get("schedule").and_then(|v| v.as_str());
@@ -80,66 +98,92 @@ impl ToolHandler for CronjobHandler {
                 self.backend.update(id, schedule, task, enabled).await
             }
             "pause" => {
-                let id = params.get("id")
+                let id = params
+                    .get("id")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'id' parameter".into()))?;
                 self.backend.pause(id).await
             }
             "resume" => {
-                let id = params.get("id")
+                let id = params
+                    .get("id")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'id' parameter".into()))?;
                 self.backend.resume(id).await
             }
             "remove" => {
-                let id = params.get("id")
+                let id = params
+                    .get("id")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'id' parameter".into()))?;
                 self.backend.remove(id).await
             }
             "run" => {
-                let id = params.get("id")
+                let id = params
+                    .get("id")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'id' parameter".into()))?;
                 self.backend.run(id).await
             }
             other => Err(ToolError::InvalidParams(format!(
-                "Unknown action: '{}'. Use create, list, update, pause, resume, remove, or run.", other
+                "Unknown action: '{}'. Use create, list, update, pause, resume, remove, or run.",
+                other
             ))),
         }
     }
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("action".into(), json!({
-            "type": "string",
-            "description": "Action to perform",
-            "enum": ["create", "list", "update", "pause", "resume", "remove", "run"]
-        }));
-        props.insert("id".into(), json!({
-            "type": "string",
-            "description": "Cron job ID (for update, pause, resume, remove, run)"
-        }));
-        props.insert("name".into(), json!({
-            "type": "string",
-            "description": "Cron job name (for create)"
-        }));
-        props.insert("schedule".into(), json!({
-            "type": "string",
-            "description": "Cron schedule expression (e.g. '0 9 * * *' for 9am daily)"
-        }));
-        props.insert("task".into(), json!({
-            "type": "string",
-            "description": "Task description for the cron job"
-        }));
-        props.insert("toolset".into(), json!({
-            "type": "string",
-            "description": "Toolset to assign to the cron job's agent"
-        }));
-        props.insert("enabled".into(), json!({
-            "type": "boolean",
-            "description": "Whether the cron job is enabled (for update)"
-        }));
+        props.insert(
+            "action".into(),
+            json!({
+                "type": "string",
+                "description": "Action to perform",
+                "enum": ["create", "list", "update", "pause", "resume", "remove", "run"]
+            }),
+        );
+        props.insert(
+            "id".into(),
+            json!({
+                "type": "string",
+                "description": "Cron job ID (for update, pause, resume, remove, run)"
+            }),
+        );
+        props.insert(
+            "name".into(),
+            json!({
+                "type": "string",
+                "description": "Cron job name (for create)"
+            }),
+        );
+        props.insert(
+            "schedule".into(),
+            json!({
+                "type": "string",
+                "description": "Cron schedule expression (e.g. '0 9 * * *' for 9am daily)"
+            }),
+        );
+        props.insert(
+            "task".into(),
+            json!({
+                "type": "string",
+                "description": "Task description for the cron job"
+            }),
+        );
+        props.insert(
+            "toolset".into(),
+            json!({
+                "type": "string",
+                "description": "Toolset to assign to the cron job's agent"
+            }),
+        );
+        props.insert(
+            "enabled".into(),
+            json!({
+                "type": "boolean",
+                "description": "Whether the cron job is enabled (for update)"
+            }),
+        );
 
         tool_schema(
             "cronjob",
@@ -156,17 +200,39 @@ mod tests {
     struct MockCronBackend;
     #[async_trait]
     impl CronjobBackend for MockCronBackend {
-        async fn create(&self, name: &str, _schedule: &str, _task: &str, _toolset: Option<&str>) -> Result<String, ToolError> {
+        async fn create(
+            &self,
+            name: &str,
+            _schedule: &str,
+            _task: &str,
+            _toolset: Option<&str>,
+        ) -> Result<String, ToolError> {
             Ok(format!("Created cronjob: {}", name))
         }
-        async fn list(&self) -> Result<String, ToolError> { Ok("[]".to_string()) }
-        async fn update(&self, id: &str, _schedule: Option<&str>, _task: Option<&str>, _enabled: Option<bool>) -> Result<String, ToolError> {
+        async fn list(&self) -> Result<String, ToolError> {
+            Ok("[]".to_string())
+        }
+        async fn update(
+            &self,
+            id: &str,
+            _schedule: Option<&str>,
+            _task: Option<&str>,
+            _enabled: Option<bool>,
+        ) -> Result<String, ToolError> {
             Ok(format!("Updated cronjob: {}", id))
         }
-        async fn pause(&self, id: &str) -> Result<String, ToolError> { Ok(format!("Paused: {}", id)) }
-        async fn resume(&self, id: &str) -> Result<String, ToolError> { Ok(format!("Resumed: {}", id)) }
-        async fn remove(&self, id: &str) -> Result<String, ToolError> { Ok(format!("Removed: {}", id)) }
-        async fn run(&self, id: &str) -> Result<String, ToolError> { Ok(format!("Ran: {}", id)) }
+        async fn pause(&self, id: &str) -> Result<String, ToolError> {
+            Ok(format!("Paused: {}", id))
+        }
+        async fn resume(&self, id: &str) -> Result<String, ToolError> {
+            Ok(format!("Resumed: {}", id))
+        }
+        async fn remove(&self, id: &str) -> Result<String, ToolError> {
+            Ok(format!("Removed: {}", id))
+        }
+        async fn run(&self, id: &str) -> Result<String, ToolError> {
+            Ok(format!("Ran: {}", id))
+        }
     }
 
     #[tokio::test]

@@ -193,8 +193,7 @@ impl Theme {
 
     /// Load a theme from a file (JSON or TOML).
     pub fn load_theme(path: &Path) -> Result<Self, ThemeError> {
-        let content = std::fs::read_to_string(path)
-            .map_err(|e| ThemeError::Io(e.to_string()))?;
+        let content = std::fs::read_to_string(path).map_err(|e| ThemeError::Io(e.to_string()))?;
 
         let ext = path
             .extension()
@@ -203,8 +202,7 @@ impl Theme {
             .to_lowercase();
 
         match ext.as_str() {
-            "json" => serde_json::from_str(&content)
-                .map_err(|e| ThemeError::Parse(e.to_string())),
+            "json" => serde_json::from_str(&content).map_err(|e| ThemeError::Parse(e.to_string())),
             "toml" => {
                 // TOML parsing requires the `toml` crate. If not available,
                 // we return a parse error suggesting JSON.
@@ -258,53 +256,53 @@ pub fn default_theme() -> Theme {
     Theme {
         name: "dark".to_string(),
         colors: ThemeColors {
-            primary: "#7c9eff".to_string(),       // Soft blue
-            secondary: "#a0a0c0".to_string(),     // Muted purple-gray
-            accent: "#ff79c6".to_string(),         // Pink
-            background: "#1a1b26".to_string(),    // Dark navy
-            foreground: "#c0caf5".to_string(),     // Light blue-gray
-            error: "#f7768e".to_string(),          // Red-pink
-            warning: "#e0af68".to_string(),        // Gold
-            success: "#9ece6a".to_string(),        // Green
+            primary: "#7c9eff".to_string(),    // Soft blue
+            secondary: "#a0a0c0".to_string(),  // Muted purple-gray
+            accent: "#ff79c6".to_string(),     // Pink
+            background: "#1a1b26".to_string(), // Dark navy
+            foreground: "#c0caf5".to_string(), // Light blue-gray
+            error: "#f7768e".to_string(),      // Red-pink
+            warning: "#e0af68".to_string(),    // Gold
+            success: "#9ece6a".to_string(),    // Green
         },
         styles: ThemeStyles {
             user_input: StyleDef {
-                fg: Some("#7aa2f7".to_string()),   // Blue
+                fg: Some("#7aa2f7".to_string()), // Blue
                 bg: None,
                 bold: true,
                 italic: false,
                 underline: false,
             },
             assistant_response: StyleDef {
-                fg: Some("#c0caf5".to_string()),   // Foreground
+                fg: Some("#c0caf5".to_string()), // Foreground
                 bg: None,
                 bold: false,
                 italic: false,
                 underline: false,
             },
             system_message: StyleDef {
-                fg: Some("#565f89".to_string()),    // Dim gray-blue
+                fg: Some("#565f89".to_string()), // Dim gray-blue
                 bg: None,
                 bold: false,
                 italic: true,
                 underline: false,
             },
             tool_call: StyleDef {
-                fg: Some("#ff9e64".to_string()),    // Orange
+                fg: Some("#ff9e64".to_string()), // Orange
                 bg: None,
                 bold: false,
                 italic: false,
                 underline: false,
             },
             tool_result: StyleDef {
-                fg: Some("#9ece6a".to_string()),    // Green
+                fg: Some("#9ece6a".to_string()), // Green
                 bg: None,
                 bold: false,
                 italic: false,
                 underline: false,
             },
             error: StyleDef {
-                fg: Some("#f7768e".to_string()),    // Red-pink
+                fg: Some("#f7768e".to_string()), // Red-pink
                 bg: None,
                 bold: true,
                 italic: false,
@@ -319,53 +317,53 @@ pub fn light_theme() -> Theme {
     Theme {
         name: "light".to_string(),
         colors: ThemeColors {
-            primary: "#2e5cb8".to_string(),       // Deep blue
-            secondary: "#5a5a8a".to_string(),      // Muted purple
-            accent: "#c0509a".to_string(),         // Dark pink
-            background: "#f5f5f5".to_string(),     // Off-white
-            foreground: "#333333".to_string(),      // Dark gray
-            error: "#cc3333".to_string(),          // Red
-            warning: "#b8860b".to_string(),         // Dark goldenrod
-            success: "#2e8b57".to_string(),         // Sea green
+            primary: "#2e5cb8".to_string(),    // Deep blue
+            secondary: "#5a5a8a".to_string(),  // Muted purple
+            accent: "#c0509a".to_string(),     // Dark pink
+            background: "#f5f5f5".to_string(), // Off-white
+            foreground: "#333333".to_string(), // Dark gray
+            error: "#cc3333".to_string(),      // Red
+            warning: "#b8860b".to_string(),    // Dark goldenrod
+            success: "#2e8b57".to_string(),    // Sea green
         },
         styles: ThemeStyles {
             user_input: StyleDef {
-                fg: Some("#2e5cb8".to_string()),    // Blue
+                fg: Some("#2e5cb8".to_string()), // Blue
                 bg: None,
                 bold: true,
                 italic: false,
                 underline: false,
             },
             assistant_response: StyleDef {
-                fg: Some("#333333".to_string()),     // Foreground
+                fg: Some("#333333".to_string()), // Foreground
                 bg: None,
                 bold: false,
                 italic: false,
                 underline: false,
             },
             system_message: StyleDef {
-                fg: Some("#888888".to_string()),     // Gray
+                fg: Some("#888888".to_string()), // Gray
                 bg: None,
                 bold: false,
                 italic: true,
                 underline: false,
             },
             tool_call: StyleDef {
-                fg: Some("#b8600a".to_string()),     // Dark orange
+                fg: Some("#b8600a".to_string()), // Dark orange
                 bg: None,
                 bold: false,
                 italic: false,
                 underline: false,
             },
             tool_result: StyleDef {
-                fg: Some("#2e8b57".to_string()),     // Green
+                fg: Some("#2e8b57".to_string()), // Green
                 bg: None,
                 bold: false,
                 italic: false,
                 underline: false,
             },
             error: StyleDef {
-                fg: Some("#cc3333".to_string()),      // Red
+                fg: Some("#cc3333".to_string()), // Red
                 bg: None,
                 bold: true,
                 italic: false,

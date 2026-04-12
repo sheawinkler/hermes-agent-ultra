@@ -140,7 +140,8 @@ impl ContextEngine for DefaultContextEngine {
         let new_tokens = self.estimate_tokens(&result);
         if new_tokens > target_tokens && result.len() > 3 {
             let excess_ratio = new_tokens as f64 / target_tokens as f64;
-            let additional_remove = ((result.len() - 2) as f64 * (1.0 - 1.0 / excess_ratio)) as usize;
+            let additional_remove =
+                ((result.len() - 2) as f64 * (1.0 - 1.0 / excess_ratio)) as usize;
             if additional_remove > 0 && additional_remove < result.len() - 1 {
                 let second_summary = format!(
                     "[Additional compression: {} more messages removed to fit context window.]",
@@ -225,9 +226,8 @@ impl ContextEngine for ImportanceBasedEngine {
             .enumerate()
             .map(|(i, m)| {
                 let score = self.score_message(m, i, total);
-                let tokens = estimate_tokens_rough(
-                    m.get("content").and_then(|c| c.as_str()).unwrap_or(""),
-                );
+                let tokens =
+                    estimate_tokens_rough(m.get("content").and_then(|c| c.as_str()).unwrap_or(""));
                 (i, score, tokens)
             })
             .collect();
@@ -307,10 +307,7 @@ pub fn count_content_tokens(content: &Value) -> u64 {
 /// Estimate total tokens for a full message including role overhead.
 pub fn estimate_message_tokens(msg: &Value) -> u64 {
     let role_overhead: u64 = 4; // ~4 tokens for role metadata
-    let content_tokens = msg
-        .get("content")
-        .map(count_content_tokens)
-        .unwrap_or(0);
+    let content_tokens = msg.get("content").map(count_content_tokens).unwrap_or(0);
     let tool_calls_tokens = msg
         .get("tool_calls")
         .and_then(|tc| tc.as_array())
@@ -385,10 +382,12 @@ mod tests {
     #[test]
     fn test_count_content_tokens() {
         assert!(count_content_tokens(&json!("hello world")) > 0);
-        assert!(count_content_tokens(&json!([
-            {"type": "text", "text": "hello"},
-            {"type": "text", "text": "world"},
-        ])) > 0);
+        assert!(
+            count_content_tokens(&json!([
+                {"type": "text", "text": "hello"},
+                {"type": "text", "text": "world"},
+            ])) > 0
+        );
     }
 
     #[test]

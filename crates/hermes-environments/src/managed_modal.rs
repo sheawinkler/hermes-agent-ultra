@@ -78,10 +78,7 @@ impl ManagedModalBackend {
             .await
             .map_err(|e| AgentError::Io(format!("Failed to parse workspace response: {}", e)))?;
 
-        let id = data["id"]
-            .as_str()
-            .unwrap_or("unknown")
-            .to_string();
+        let id = data["id"].as_str().unwrap_or("unknown").to_string();
 
         self.workspace_id = Some(id.clone());
         tracing::info!("Created managed Modal workspace: {}", id);
@@ -107,11 +104,7 @@ impl ManagedModalBackend {
         if !resp.status().is_success() {
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
-            tracing::warn!(
-                "Modal workspace destruction returned {}: {}",
-                status,
-                text
-            );
+            tracing::warn!("Modal workspace destruction returned {}: {}", status, text);
         } else {
             tracing::info!("Destroyed managed Modal workspace: {}", id);
         }
@@ -183,12 +176,8 @@ impl TerminalBackend for ManagedModalBackend {
 
         Ok(CommandOutput {
             exit_code: data["exit_code"].as_i64().unwrap_or(-1) as i32,
-            stdout: self.truncate_output(
-                data["stdout"].as_str().unwrap_or("").to_string(),
-            ),
-            stderr: self.truncate_output(
-                data["stderr"].as_str().unwrap_or("").to_string(),
-            ),
+            stdout: self.truncate_output(data["stdout"].as_str().unwrap_or("").to_string()),
+            stderr: self.truncate_output(data["stderr"].as_str().unwrap_or("").to_string()),
         })
     }
 
@@ -202,7 +191,13 @@ impl TerminalBackend for ManagedModalBackend {
             return Err(AgentError::Io("No workspace active".into()));
         }
         let output = self
-            .execute_command(&format!("cat {}", shell_escape(path)), None, None, false, false)
+            .execute_command(
+                &format!("cat {}", shell_escape(path)),
+                None,
+                None,
+                false,
+                false,
+            )
             .await?;
         if output.exit_code != 0 {
             return Err(AgentError::Io(format!(
@@ -219,9 +214,7 @@ impl TerminalBackend for ManagedModalBackend {
         }
         let escaped = content.replace('\'', "'\\''");
         let cmd = format!("printf '%s' '{}' > {}", escaped, shell_escape(path));
-        let output = self
-            .execute_command(&cmd, None, None, false, false)
-            .await?;
+        let output = self.execute_command(&cmd, None, None, false, false).await?;
         if output.exit_code != 0 {
             return Err(AgentError::Io(format!(
                 "write_file failed (exit {}): {}",

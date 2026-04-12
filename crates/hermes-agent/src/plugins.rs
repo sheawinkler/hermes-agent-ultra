@@ -339,26 +339,24 @@ impl PluginManager {
             }
 
             match std::fs::read_to_string(&manifest_path) {
-                Ok(content) => {
-                    match serde_yaml::from_str::<PluginManifest>(&content) {
-                        Ok(manifest) => {
-                            tracing::debug!(
-                                "Discovered plugin: {} v{} at {}",
-                                manifest.name,
-                                manifest.version,
-                                path.display()
-                            );
-                            discovered.push((manifest, path));
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                "Failed to parse plugin.yaml at {}: {}",
-                                manifest_path.display(),
-                                e
-                            );
-                        }
+                Ok(content) => match serde_yaml::from_str::<PluginManifest>(&content) {
+                    Ok(manifest) => {
+                        tracing::debug!(
+                            "Discovered plugin: {} v{} at {}",
+                            manifest.name,
+                            manifest.version,
+                            path.display()
+                        );
+                        discovered.push((manifest, path));
                     }
-                }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to parse plugin.yaml at {}: {}",
+                            manifest_path.display(),
+                            e
+                        );
+                    }
+                },
                 Err(e) => {
                     tracing::warn!(
                         "Failed to read plugin.yaml at {}: {}",

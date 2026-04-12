@@ -23,8 +23,7 @@ fn arb_json_object() -> impl Strategy<Value = String> {
         Just("{}".to_string()),
         arb_identifier().prop_map(|k| format!(r#"{{"{k}": "value"}}"#)),
         (arb_identifier(), 0i64..1000).prop_map(|(k, v)| format!(r#"{{"{k}": {v}}}"#)),
-        (arb_identifier(), proptest::bool::ANY)
-            .prop_map(|(k, v)| format!(r#"{{"{k}": {v}}}"#)),
+        (arb_identifier(), proptest::bool::ANY).prop_map(|(k, v)| format!(r#"{{"{k}": {v}}}"#)),
     ]
 }
 

@@ -87,10 +87,12 @@ mod unix {
         job.next_run = Some(Utc::now() - Duration::minutes(5));
         job.repeat = Some(1);
 
-        let job_json =
-            serde_json::to_string_pretty(&job).expect("serialize CronJob");
-        fs::write(cron_dir.join(format!("{}.json", job.id)), job_json.as_bytes())
-            .expect("write job json");
+        let job_json = serde_json::to_string_pretty(&job).expect("serialize CronJob");
+        fs::write(
+            cron_dir.join(format!("{}.json", job.id)),
+            job_json.as_bytes(),
+        )
+        .expect("write job json");
 
         let hook_url = format!("{}/hook", mock.uri());
         let webhooks = json!({
@@ -100,8 +102,11 @@ mod unix {
                 "created_at": "2020-01-01T00:00:00Z"
             }]
         });
-        fs::write(home.join("webhooks.json"), serde_json::to_vec_pretty(&webhooks).unwrap())
-            .expect("webhooks.json");
+        fs::write(
+            home.join("webhooks.json"),
+            serde_json::to_vec_pretty(&webhooks).unwrap(),
+        )
+        .expect("webhooks.json");
 
         let mut child = SysCommand::new(cargo_bin("hermes"))
             .env("HERMES_HOME", home)
@@ -128,11 +133,7 @@ mod unix {
                 if Instant::now() > deadline {
                     panic!("timeout waiting for webhook POST to WireMock");
                 }
-                let n = mock
-                    .received_requests()
-                    .await
-                    .map(|v| v.len())
-                    .unwrap_or(0);
+                let n = mock.received_requests().await.map(|v| v.len()).unwrap_or(0);
                 if n >= 1 {
                     break;
                 }
@@ -149,8 +150,14 @@ mod unix {
         assert_eq!(body["event"], "cron_job_finished");
         assert_eq!(body["job_id"], job.id);
         assert_eq!(body["trigger"], "schedule");
-        assert_eq!(body["ok"], false, "no API key → StubProvider fails; webhook still fires");
-        assert!(body["error"].is_string(), "expected error string when run fails");
+        assert_eq!(
+            body["ok"], false,
+            "no API key → StubProvider fails; webhook still fires"
+        );
+        assert!(
+            body["error"].is_string(),
+            "expected error string when run fails"
+        );
 
         let kill_st = SysCommand::new("kill")
             .args(["-INT", &file_pid.to_string()])

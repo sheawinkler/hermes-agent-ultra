@@ -3,39 +3,39 @@
 //! Initializes logging, parses CLI arguments, and dispatches to the
 //! appropriate subcommand handler.
 
-use clap::Parser;
 use clap::CommandFactory;
+use clap::Parser;
 use clap_complete::{generate, Shell as CompletionShell};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use hermes_cli::cli::{Cli, CliCommand};
-use hermes_cli::App;
+use hermes_agent::AgentLoop;
+use hermes_auth::{AuthManager, FileTokenStore, OAuthCredential};
 use hermes_cli::app::{
     bridge_tool_registry, build_agent_config, build_provider, provider_api_key_from_env,
 };
-use tokio::sync::broadcast;
+use hermes_cli::cli::{Cli, CliCommand};
+use hermes_cli::App;
 use hermes_config::{
     apply_user_config_patch, gateway_pid_path_in, hermes_home, load_config, load_user_config_file,
     save_config_yaml, state_dir, user_config_field_display, validate_config, ConfigError,
     PlatformConfig,
 };
 use hermes_core::AgentError;
-use hermes_core::{MessageRole, StreamChunk};
 use hermes_core::PlatformAdapter;
-use hermes_agent::AgentLoop;
-use hermes_auth::{AuthManager, FileTokenStore, OAuthCredential};
+use hermes_core::{MessageRole, StreamChunk};
 use hermes_cron::{
     cron_scheduler_for_data_dir, CronCompletionEvent, CronError, CronRunner, CronScheduler,
     FileJobPersistence,
 };
-use hermes_gateway::{Gateway, GatewayRuntimeContext, SessionManager, DmManager};
-use hermes_gateway::gateway::IncomingMessage as GatewayIncomingMessage;
-use hermes_gateway::gateway::GatewayConfig as RuntimeGatewayConfig;
-use hermes_gateway::platforms::telegram::{TelegramAdapter, TelegramConfig};
-use hermes_telemetry::init_telemetry_from_env;
 use hermes_environments::LocalBackend;
+use hermes_gateway::gateway::GatewayConfig as RuntimeGatewayConfig;
+use hermes_gateway::gateway::IncomingMessage as GatewayIncomingMessage;
+use hermes_gateway::platforms::telegram::{TelegramAdapter, TelegramConfig};
+use hermes_gateway::{DmManager, Gateway, GatewayRuntimeContext, SessionManager};
 use hermes_skills::{FileSkillStore, SkillManager};
+use hermes_telemetry::init_telemetry_from_env;
 use hermes_tools::ToolRegistry;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio::sync::broadcast;
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -47,9 +47,11 @@ async fn main() {
 
     let result = match cli.effective_command() {
         CliCommand::Hermes => run_interactive(cli).await,
-        CliCommand::Chat { query, preload_skill, yolo } => {
-            hermes_cli::commands::handle_cli_chat(query, preload_skill, yolo).await
-        }
+        CliCommand::Chat {
+            query,
+            preload_skill,
+            yolo,
+        } => hermes_cli::commands::handle_cli_chat(query, preload_skill, yolo).await,
         CliCommand::Model { provider_model } => run_model(cli, provider_model).await,
         CliCommand::Tools { action } => run_tools(cli, action).await,
         CliCommand::Config { action, key, value } => run_config(cli, action, key, value).await,
@@ -61,9 +63,11 @@ async fn main() {
         CliCommand::Logs { lines, follow } => run_logs(cli, lines, follow).await,
         CliCommand::Profile { action, name } => run_profile(cli, action, name).await,
         CliCommand::Auth { action, provider } => run_auth(cli, action, provider).await,
-        CliCommand::Skills { action, name, extra } => {
-            hermes_cli::commands::handle_cli_skills(action, name, extra).await
-        }
+        CliCommand::Skills {
+            action,
+            name,
+            extra,
+        } => hermes_cli::commands::handle_cli_skills(action, name, extra).await,
         CliCommand::Plugins {
             action,
             name,
@@ -78,9 +82,7 @@ async fn main() {
             )
             .await
         }
-        CliCommand::Memory { action } => {
-            hermes_cli::commands::handle_cli_memory(action).await
-        }
+        CliCommand::Memory { action } => hermes_cli::commands::handle_cli_memory(action).await,
         CliCommand::Mcp { action, server } => {
             hermes_cli::commands::handle_cli_mcp(action, server).await
         }
@@ -90,30 +92,16 @@ async fn main() {
         CliCommand::Insights { days, source } => {
             hermes_cli::commands::handle_cli_insights(days, source).await
         }
-        CliCommand::Login { provider } => {
-            hermes_cli::commands::handle_cli_login(provider).await
-        }
-        CliCommand::Logout { provider } => {
-            hermes_cli::commands::handle_cli_logout(provider).await
-        }
-        CliCommand::Whatsapp { action } => {
-            hermes_cli::commands::handle_cli_whatsapp(action).await
-        }
+        CliCommand::Login { provider } => hermes_cli::commands::handle_cli_login(provider).await,
+        CliCommand::Logout { provider } => hermes_cli::commands::handle_cli_logout(provider).await,
+        CliCommand::Whatsapp { action } => hermes_cli::commands::handle_cli_whatsapp(action).await,
         CliCommand::Pairing { action, device_id } => {
             hermes_cli::commands::handle_cli_pairing(action, device_id).await
         }
-        CliCommand::Claw { action } => {
-            hermes_cli::commands::handle_cli_claw(action).await
-        }
-        CliCommand::Acp { action } => {
-            hermes_cli::commands::handle_cli_acp(action).await
-        }
-        CliCommand::Backup { output } => {
-            hermes_cli::commands::handle_cli_backup(output).await
-        }
-        CliCommand::Import { path } => {
-            hermes_cli::commands::handle_cli_import(path).await
-        }
+        CliCommand::Claw { action } => hermes_cli::commands::handle_cli_claw(action).await,
+        CliCommand::Acp { action } => hermes_cli::commands::handle_cli_acp(action).await,
+        CliCommand::Backup { output } => hermes_cli::commands::handle_cli_backup(output).await,
+        CliCommand::Import { path } => hermes_cli::commands::handle_cli_import(path).await,
         CliCommand::Version => hermes_cli::commands::handle_cli_version(),
         CliCommand::Cron {
             action,
@@ -147,8 +135,8 @@ async fn run_interactive(cli: Cli) -> Result<(), AgentError> {
 
 /// Handle `hermes model [provider:model]`.
 async fn run_model(cli: Cli, provider_model: Option<String>) -> Result<(), AgentError> {
-    let config = load_config(cli.config_dir.as_deref())
-        .map_err(|e| AgentError::Config(e.to_string()))?;
+    let config =
+        load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;
 
     match provider_model {
         Some(pm) => {
@@ -181,9 +169,21 @@ async fn run_tools(cli: Cli, action: Option<String>) -> Result<(), AgentError> {
                 println!("No tools registered (tools are loaded at runtime).");
                 println!("\nBuilt-in tool categories:");
                 let categories = [
-                    "web", "terminal", "file", "browser", "vision", "image_gen",
-                    "skills", "memory", "session_search", "todo", "clarify",
-                    "code_execution", "delegation", "cronjob", "messaging",
+                    "web",
+                    "terminal",
+                    "file",
+                    "browser",
+                    "vision",
+                    "image_gen",
+                    "skills",
+                    "memory",
+                    "session_search",
+                    "todo",
+                    "clarify",
+                    "code_execution",
+                    "delegation",
+                    "cronjob",
+                    "messaging",
                     "homeassistant",
                 ];
                 for cat in &categories {
@@ -210,8 +210,8 @@ async fn run_config(
     key: Option<String>,
     value: Option<String>,
 ) -> Result<(), AgentError> {
-    let config = load_config(cli.config_dir.as_deref())
-        .map_err(|e| AgentError::Config(e.to_string()))?;
+    let config =
+        load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;
 
     match action.as_deref() {
         None => {
@@ -221,7 +221,9 @@ async fn run_config(
             println!("{}", json);
         }
         Some("get") => {
-            let key = key.ok_or_else(|| AgentError::Config("Missing key. Usage: hermes config get <key>".into()))?;
+            let key = key.ok_or_else(|| {
+                AgentError::Config("Missing key. Usage: hermes config get <key>".into())
+            })?;
             match user_config_field_display(&config, &key) {
                 Ok(s) => println!("{}", s),
                 Err(ConfigError::NotFound(_)) => println!("Unknown config key: {}", key),
@@ -229,16 +231,22 @@ async fn run_config(
             }
         }
         Some("set") => {
-            let key = key.ok_or_else(|| AgentError::Config("Missing key. Usage: hermes config set <key> <value>".into()))?;
-            let value = value.ok_or_else(|| AgentError::Config("Missing value. Usage: hermes config set <key> <value>".into()))?;
+            let key = key.ok_or_else(|| {
+                AgentError::Config("Missing key. Usage: hermes config set <key> <value>".into())
+            })?;
+            let value = value.ok_or_else(|| {
+                AgentError::Config("Missing value. Usage: hermes config set <key> <value>".into())
+            })?;
             let base: PathBuf = cli
                 .config_dir
                 .as_ref()
                 .map(PathBuf::from)
                 .unwrap_or_else(hermes_home);
             let cfg_path = base.join("config.yaml");
-            let mut disk = load_user_config_file(&cfg_path).map_err(|e| AgentError::Config(e.to_string()))?;
-            apply_user_config_patch(&mut disk, &key, &value).map_err(|e| AgentError::Config(e.to_string()))?;
+            let mut disk =
+                load_user_config_file(&cfg_path).map_err(|e| AgentError::Config(e.to_string()))?;
+            apply_user_config_patch(&mut disk, &key, &value)
+                .map_err(|e| AgentError::Config(e.to_string()))?;
             validate_config(&disk).map_err(|e| AgentError::Config(e.to_string()))?;
             save_config_yaml(&cfg_path, &disk).map_err(|e| AgentError::Config(e.to_string()))?;
             println!("Saved {} = {} -> {}", key, value, cfg_path.display());
@@ -282,9 +290,7 @@ async fn run_config(
             let cfg_path = base.join("config.yaml");
             let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".into());
             println!("Opening {} with {}...", cfg_path.display(), editor);
-            let status = std::process::Command::new(&editor)
-                .arg(&cfg_path)
-                .status();
+            let status = std::process::Command::new(&editor).arg(&cfg_path).status();
             match status {
                 Ok(s) if s.success() => println!("Config saved."),
                 Ok(s) => println!("Editor exited with: {}", s),
@@ -378,8 +384,8 @@ fn gateway_pid_terminate(_pid: u32) -> std::io::Result<()> {
 
 /// Handle `hermes gateway [action]`.
 async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError> {
-    let config = load_config(cli.config_dir.as_deref())
-        .map_err(|e| AgentError::Config(e.to_string()))?;
+    let config =
+        load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;
 
     match action.as_deref() {
         Some("setup") => {
@@ -421,7 +427,11 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
             if !enabled.is_empty() {
                 println!(
                     "Enabled platforms: {}",
-                    enabled.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                    enabled
+                        .iter()
+                        .map(|s| s.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 );
             }
 
@@ -456,7 +466,8 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
                     let config = config_arc.clone();
                     let agent_tools = agent_tools_for_msg.clone();
                     Box::pin(async move {
-                        let agent = build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools);
+                        let agent =
+                            build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools);
                         let result = agent
                             .run(messages, None)
                             .await
@@ -470,7 +481,8 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
                     let config = config_arc_stream.clone();
                     let agent_tools = agent_tools_for_stream.clone();
                     Box::pin(async move {
-                        let agent = build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools);
+                        let agent =
+                            build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools);
                         let emit = on_chunk.clone();
                         let stream_cb: Box<dyn Fn(StreamChunk) + Send + Sync> =
                             Box::new(move |chunk: StreamChunk| {
@@ -492,13 +504,9 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
 
             // Cron: same on-disk dir as `hermes cron` + real LLM/tools as the gateway agent.
             let cron_dir = hermes_state_root(&cli).join("cron");
-            std::fs::create_dir_all(&cron_dir).map_err(|e| {
-                AgentError::Io(format!("cron dir {}: {}", cron_dir.display(), e))
-            })?;
-            let default_model = config
-                .model
-                .clone()
-                .unwrap_or_else(|| "gpt-4o".to_string());
+            std::fs::create_dir_all(&cron_dir)
+                .map_err(|e| AgentError::Io(format!("cron dir {}: {}", cron_dir.display(), e)))?;
+            let default_model = config.model.clone().unwrap_or_else(|| "gpt-4o".to_string());
             let cron_persistence = Arc::new(FileJobPersistence::with_dir(cron_dir.clone()));
             let cron_llm = build_provider(&config, &default_model);
             let cron_runner = Arc::new(CronRunner::new(cron_llm, agent_tools_for_cron));
@@ -531,7 +539,8 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
 
             if let Some(platform_cfg) = config.platforms.get("telegram") {
                 if platform_cfg.enabled {
-                    if let Some(token) = platform_cfg.token.clone().filter(|t| !t.trim().is_empty()) {
+                    if let Some(token) = platform_cfg.token.clone().filter(|t| !t.trim().is_empty())
+                    {
                         let telegram_config = build_telegram_config(platform_cfg, token);
                         let telegram_adapter = Arc::new(TelegramAdapter::new(telegram_config)?);
                         gateway
@@ -542,7 +551,9 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
                             run_telegram_poll_loop(gw_clone, telegram_adapter).await;
                         }));
                     } else {
-                        println!("Telegram is enabled but token is missing; skipping telegram adapter.");
+                        println!(
+                            "Telegram is enabled but token is missing; skipping telegram adapter."
+                        );
                     }
                 }
             }
@@ -594,10 +605,7 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
                         );
                     }
                     Err(_) => {
-                        println!(
-                            "Gateway status: invalid PID file at {}",
-                            pid_path.display()
-                        );
+                        println!("Gateway status: invalid PID file at {}", pid_path.display());
                     }
                 },
                 Err(_) => {
@@ -630,7 +638,10 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
             }
         }
         Some(other) => {
-            println!("Unknown gateway action: {}. Use 'start', 'stop', or 'status'.", other);
+            println!(
+                "Unknown gateway action: {}. Use 'start', 'stop', or 'status'.",
+                other
+            );
         }
     }
     Ok(())
@@ -664,7 +675,8 @@ fn build_agent_for_gateway_context(
     ctx: &GatewayRuntimeContext,
     agent_tools: Arc<hermes_agent::agent_loop::ToolRegistry>,
 ) -> AgentLoop {
-    let effective_model = resolve_model_for_gateway(config.model.as_deref().unwrap_or("gpt-4o"), ctx);
+    let effective_model =
+        resolve_model_for_gateway(config.model.as_deref().unwrap_or("gpt-4o"), ctx);
     let provider = build_provider(config, &effective_model);
     let mut agent_config = build_agent_config(config, &effective_model);
     if let Some(personality) = ctx.personality.clone() {
@@ -807,18 +819,19 @@ async fn telegram_bot_token_from_env_or_prompt() -> Result<String, AgentError> {
     let t = line.trim().to_string();
     if t.is_empty() {
         return Err(AgentError::Config(
-            "Telegram bot token cannot be empty (set TELEGRAM_BOT_TOKEN or paste token)"
-                .into(),
+            "Telegram bot token cannot be empty (set TELEGRAM_BOT_TOKEN or paste token)".into(),
         ));
     }
     Ok(t)
 }
 
-async fn run_auth(cli: Cli, action: Option<String>, provider: Option<String>) -> Result<(), AgentError> {
+async fn run_auth(
+    cli: Cli,
+    action: Option<String>,
+    provider: Option<String>,
+) -> Result<(), AgentError> {
     let provider = resolve_auth_provider(provider);
-    let auth_store_path = hermes_home()
-        .join("auth")
-        .join("tokens.json");
+    let auth_store_path = hermes_home().join("auth").join("tokens.json");
     let token_store = FileTokenStore::new(auth_store_path).await?;
     let manager = AuthManager::new(token_store.clone());
     match action.as_deref().unwrap_or("status") {
@@ -835,7 +848,8 @@ async fn run_auth(cli: Cli, action: Option<String>, provider: Option<String>) ->
                 tg.token = Some(token);
                 tg.enabled = true;
                 validate_config(&disk).map_err(|e| AgentError::Config(e.to_string()))?;
-                save_config_yaml(&cfg_path, &disk).map_err(|e| AgentError::Config(e.to_string()))?;
+                save_config_yaml(&cfg_path, &disk)
+                    .map_err(|e| AgentError::Config(e.to_string()))?;
                 println!(
                     "Telegram: token saved and platform enabled in {}",
                     cfg_path.display()
@@ -883,7 +897,8 @@ async fn run_auth(cli: Cli, action: Option<String>, provider: Option<String>) ->
                     tg.enabled = false;
                 }
                 validate_config(&disk).map_err(|e| AgentError::Config(e.to_string()))?;
-                save_config_yaml(&cfg_path, &disk).map_err(|e| AgentError::Config(e.to_string()))?;
+                save_config_yaml(&cfg_path, &disk)
+                    .map_err(|e| AgentError::Config(e.to_string()))?;
                 println!(
                     "Telegram: token cleared and platform disabled in {}",
                     cfg_path.display()
@@ -964,12 +979,15 @@ async fn run_cron(
         }
         "create" => {
             let schedule = schedule.unwrap_or_else(|| "0 * * * *".to_string());
-            let prompt = prompt.ok_or_else(|| {
-                AgentError::Config("cron create: use --prompt \"...\"".into())
-            })?;
+            let prompt = prompt
+                .ok_or_else(|| AgentError::Config("cron create: use --prompt \"...\"".into()))?;
             let job = hermes_cron::CronJob::new(schedule, prompt);
             let jid = sched.create_job(job).await.map_err(cron_cli_error)?;
-            println!("Created cron job id={} (persisted under {})", jid, data_dir.display());
+            println!(
+                "Created cron job id={} (persisted under {})",
+                jid,
+                data_dir.display()
+            );
         }
         "delete" | "pause" | "resume" | "run" | "history" => {
             let act = action.as_deref().unwrap_or("cron");
@@ -1046,7 +1064,8 @@ async fn resolve_llm_login_token(cli: &Cli, provider: &str) -> Result<String, Ag
     if let Some(k) = provider_api_key_from_env(provider) {
         return Ok(k);
     }
-    let cfg = load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;
+    let cfg =
+        load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;
     if let Some(k) = cfg
         .llm_providers
         .get(provider)
@@ -1163,15 +1182,23 @@ async fn run_cron_webhook_delivery_loop(
             Err(RecvError::Closed) => break,
         };
 
-        if let Err(e) =
-            hermes_cli::webhook_delivery::deliver_cron_completion_to_webhooks(&webhooks_json, &ev, &client).await
+        if let Err(e) = hermes_cli::webhook_delivery::deliver_cron_completion_to_webhooks(
+            &webhooks_json,
+            &ev,
+            &client,
+        )
+        .await
         {
             tracing::warn!("cron webhook delivery: {e}");
         }
     }
 }
 
-async fn run_dump(cli: Cli, session: Option<String>, output: Option<String>) -> Result<(), AgentError> {
+async fn run_dump(
+    cli: Cli,
+    session: Option<String>,
+    output: Option<String>,
+) -> Result<(), AgentError> {
     let home = cli
         .config_dir
         .as_deref()
@@ -1185,8 +1212,11 @@ async fn run_dump(cli: Cli, session: Option<String>, output: Option<String>) -> 
         "source_dir": sessions_dir,
         "note": "Session export scaffold"
     });
-    std::fs::write(&out, serde_json::to_string_pretty(&payload).unwrap_or_default())
-        .map_err(|e| AgentError::Io(format!("Failed to write dump: {}", e)))?;
+    std::fs::write(
+        &out,
+        serde_json::to_string_pretty(&payload).unwrap_or_default(),
+    )
+    .map_err(|e| AgentError::Io(format!("Failed to write dump: {}", e)))?;
     println!("Wrote dump to {}", out);
     Ok(())
 }
@@ -1239,8 +1269,9 @@ async fn run_setup() -> Result<(), AgentError> {
         if dir.exists() {
             println!("  ✓ {} exists", dir.display());
         } else {
-            std::fs::create_dir_all(&dir)
-                .map_err(|e| AgentError::Io(format!("Failed to create {}: {}", dir.display(), e)))?;
+            std::fs::create_dir_all(&dir).map_err(|e| {
+                AgentError::Io(format!("Failed to create {}: {}", dir.display(), e))
+            })?;
             println!("  ✓ Created {}", dir.display());
         }
     }
@@ -1279,7 +1310,11 @@ async fn run_setup() -> Result<(), AgentError> {
     let mut personality = String::new();
     reader.read_line(&mut personality).ok();
     let personality = personality.trim();
-    let personality = if personality.is_empty() { "default" } else { personality };
+    let personality = if personality.is_empty() {
+        "default"
+    } else {
+        personality
+    };
 
     // 5. Write config.yaml
     if config_path.exists() {
@@ -1370,11 +1405,7 @@ async fn run_doctor(cli: Cli) -> Result<(), AgentError> {
 
     // Check external tools
     println!("\nExternal tools:");
-    let tool_checks = [
-        ("docker", "Docker"),
-        ("ssh", "SSH"),
-        ("git", "Git"),
-    ];
+    let tool_checks = [("docker", "Docker"), ("ssh", "SSH"), ("git", "Git")];
 
     for (cmd, name) in &tool_checks {
         print!("  {}... ", name);
@@ -1394,7 +1425,10 @@ async fn run_doctor(cli: Cli) -> Result<(), AgentError> {
     match load_config(cli.config_dir.as_deref()) {
         Ok(config) => {
             println!("✓");
-            println!("  Model: {}", config.model.as_deref().unwrap_or("(default)"));
+            println!(
+                "  Model: {}",
+                config.model.as_deref().unwrap_or("(default)")
+            );
             println!("  Max turns: {}", config.max_turns);
             let platform_count = config.platforms.iter().filter(|(_, p)| p.enabled).count();
             println!("  Enabled platforms: {}", platform_count);
@@ -1422,10 +1456,13 @@ async fn run_status(cli: Cli) -> Result<(), AgentError> {
 
     println!("Version: {}", env!("CARGO_PKG_VERSION"));
 
-    let config = load_config(cli.config_dir.as_deref())
-        .map_err(|e| AgentError::Config(e.to_string()))?;
+    let config =
+        load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;
 
-    println!("Model:   {}", config.model.as_deref().unwrap_or("(default: gpt-4o)"));
+    println!(
+        "Model:   {}",
+        config.model.as_deref().unwrap_or("(default: gpt-4o)")
+    );
     println!(
         "Personality: {}",
         config.personality.as_deref().unwrap_or("(none)")
@@ -1571,15 +1608,16 @@ async fn run_profile(
             let config = load_config(cli.config_dir.as_deref())
                 .map_err(|e| AgentError::Config(e.to_string()))?;
             println!("Current profile:");
-            println!("  Model:       {}", config.model.as_deref().unwrap_or("gpt-4o"));
+            println!(
+                "  Model:       {}",
+                config.model.as_deref().unwrap_or("gpt-4o")
+            );
             println!(
                 "  Personality: {}",
                 config.personality.as_deref().unwrap_or("default")
             );
             println!("  Max turns:   {}", config.max_turns);
-            println!(
-                "\nUse `hermes profile list` to see all profiles."
-            );
+            println!("\nUse `hermes profile list` to see all profiles.");
         }
         Some("list") => {
             if !profiles_dir.exists() {
@@ -1615,7 +1653,9 @@ async fn run_profile(
         }
         Some("create") => {
             let name = name.ok_or_else(|| {
-                AgentError::Config("Missing profile name. Usage: hermes profile create <name>".into())
+                AgentError::Config(
+                    "Missing profile name. Usage: hermes profile create <name>".into(),
+                )
             })?;
 
             std::fs::create_dir_all(&profiles_dir)
@@ -1623,7 +1663,11 @@ async fn run_profile(
 
             let profile_path = profiles_dir.join(format!("{}.yaml", name));
             if profile_path.exists() {
-                println!("Profile '{}' already exists at {}", name, profile_path.display());
+                println!(
+                    "Profile '{}' already exists at {}",
+                    name,
+                    profile_path.display()
+                );
                 return Ok(());
             }
 
@@ -1634,11 +1678,16 @@ async fn run_profile(
             std::fs::write(&profile_path, content)
                 .map_err(|e| AgentError::Io(format!("Failed to write profile: {}", e)))?;
             println!("Created profile '{}' at {}", name, profile_path.display());
-            println!("Edit it to customize, then switch with `hermes profile switch {}`.", name);
+            println!(
+                "Edit it to customize, then switch with `hermes profile switch {}`.",
+                name
+            );
         }
         Some("switch") => {
             let name = name.ok_or_else(|| {
-                AgentError::Config("Missing profile name. Usage: hermes profile switch <name>".into())
+                AgentError::Config(
+                    "Missing profile name. Usage: hermes profile switch <name>".into(),
+                )
             })?;
 
             let profile_path = profiles_dir.join(format!("{}.yaml", &name));
@@ -1646,10 +1695,7 @@ async fn run_profile(
                 // Also try .yml
                 let alt = profiles_dir.join(format!("{}.yml", &name));
                 if !alt.exists() {
-                    println!(
-                        "Profile '{}' not found. Available profiles:",
-                        name
-                    );
+                    println!("Profile '{}' not found. Available profiles:", name);
                     if let Ok(rd) = std::fs::read_dir(&profiles_dir) {
                         for entry in rd.filter_map(|e| e.ok()) {
                             if let Some(stem) = entry.path().file_stem() {

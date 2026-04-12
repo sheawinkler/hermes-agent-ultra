@@ -90,15 +90,17 @@ fn resolve_brv_path() -> Option<String> {
 fn run_brv(args: &[&str], timeout_secs: u64, cwd: &str) -> (bool, String) {
     let brv_path = match resolve_brv_path() {
         Some(p) => p,
-        None => return (false, "brv CLI not found. Install: npm install -g byterover-cli".into()),
+        None => {
+            return (
+                false,
+                "brv CLI not found. Install: npm install -g byterover-cli".into(),
+            )
+        }
     };
 
     let _ = std::fs::create_dir_all(cwd);
 
-    let result = Command::new(&brv_path)
-        .args(args)
-        .current_dir(cwd)
-        .output();
+    let result = Command::new(&brv_path).args(args).current_dir(cwd).output();
 
     match result {
         Ok(output) => {
@@ -166,7 +168,10 @@ impl MemoryProviderPlugin for ByteRoverPlugin {
         *self.session_id.lock().unwrap() = session_id.to_string();
         *self.turn_count.lock().unwrap() = 0;
 
-        tracing::info!("ByteRover memory plugin initialized for session {}", session_id);
+        tracing::info!(
+            "ByteRover memory plugin initialized for session {}",
+            session_id
+        );
     }
 
     fn system_prompt_block(&self) -> String {
@@ -234,7 +239,11 @@ impl MemoryProviderPlugin for ByteRoverPlugin {
         if cwd.is_empty() {
             return;
         }
-        let label = if target == "user" { "User profile" } else { "Agent memory" };
+        let label = if target == "user" {
+            "User profile"
+        } else {
+            "Agent memory"
+        };
         let tagged = format!("[{}] {}", label, content);
         std::thread::spawn(move || {
             let (ok, _) = run_brv(&["curate", "--", &tagged], CURATE_TIMEOUT_SECS, &cwd);

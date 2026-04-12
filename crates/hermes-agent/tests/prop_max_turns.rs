@@ -10,8 +10,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use hermes_agent::agent_loop::{AgentConfig, AgentLoop, ToolRegistry};
 use hermes_core::{
-    AgentError, FunctionCall, LlmProvider, LlmResponse, Message, StreamChunk, ToolCall,
-    ToolError, ToolSchema, UsageStats,
+    AgentError, FunctionCall, LlmProvider, LlmResponse, Message, StreamChunk, ToolCall, ToolError,
+    ToolSchema, UsageStats,
 };
 use serde_json::Value;
 

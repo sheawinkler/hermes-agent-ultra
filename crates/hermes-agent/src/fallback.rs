@@ -70,10 +70,7 @@ impl FallbackChain {
         if state.active_index < self.fallbacks.len() {
             state.active_index += 1;
             state.fallback_activated_at = Some(Instant::now());
-            tracing::warn!(
-                "Activated fallback provider (index {})",
-                state.active_index
-            );
+            tracing::warn!("Activated fallback provider (index {})", state.active_index);
             true
         } else {
             tracing::error!("No more fallback providers available");

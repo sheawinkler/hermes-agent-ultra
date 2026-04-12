@@ -152,31 +152,27 @@ impl TerminalBackend for SingularityBackend {
 
         let binary = self.binary().to_string();
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(timeout_secs),
-            async {
-                let mut cmd = TokioCommand::new(&binary);
-                cmd.args(&args);
+        let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
+            let mut cmd = TokioCommand::new(&binary);
+            cmd.args(&args);
 
-                if background {
-                    cmd.stdin(std::process::Stdio::null());
-                }
+            if background {
+                cmd.stdin(std::process::Stdio::null());
+            }
 
-                let output = cmd
-                    .output()
-                    .await
-                    .map_err(|e| AgentError::Io(format!("Failed to execute singularity command: {}", e)))?;
+            let output = cmd.output().await.map_err(|e| {
+                AgentError::Io(format!("Failed to execute singularity command: {}", e))
+            })?;
 
-                let stdout = self.truncate_output(String::from_utf8_lossy(&output.stdout).to_string());
-                let stderr = self.truncate_output(String::from_utf8_lossy(&output.stderr).to_string());
+            let stdout = self.truncate_output(String::from_utf8_lossy(&output.stdout).to_string());
+            let stderr = self.truncate_output(String::from_utf8_lossy(&output.stderr).to_string());
 
-                Ok(CommandOutput {
-                    exit_code: output.status.code().unwrap_or(-1),
-                    stdout,
-                    stderr,
-                })
-            },
-        )
+            Ok(CommandOutput {
+                exit_code: output.status.code().unwrap_or(-1),
+                stdout,
+                stderr,
+            })
+        })
         .await;
 
         match result {
@@ -201,7 +197,12 @@ impl TerminalBackend for SingularityBackend {
         let inner_cmd = if offset.is_some() || limit.is_some() {
             let start = offset.unwrap_or(0) + 1; // sed is 1-indexed
             if let Some(lim) = limit {
-                format!("sed -n '{},{}p' {}", start, start + lim - 1, shlex_quote_singularity(path))
+                format!(
+                    "sed -n '{},{}p' {}",
+                    start,
+                    start + lim - 1,
+                    shlex_quote_singularity(path)
+                )
             } else {
                 format!("sed -n '{},\\$p' {}", start, shlex_quote_singularity(path))
             }
@@ -224,26 +225,25 @@ impl TerminalBackend for SingularityBackend {
         let binary = self.binary().to_string();
         let timeout_secs = self.default_timeout;
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(timeout_secs),
-            async {
-                let output = TokioCommand::new(&binary)
-                    .args(&args)
-                    .output()
-                    .await
-                    .map_err(|e| AgentError::Io(format!("Failed to read file via singularity: {}", e)))?;
+        let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
+            let output = TokioCommand::new(&binary)
+                .args(&args)
+                .output()
+                .await
+                .map_err(|e| {
+                    AgentError::Io(format!("Failed to read file via singularity: {}", e))
+                })?;
 
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    return Err(AgentError::Io(format!(
-                        "Failed to read file '{}': {}",
-                        path, stderr
-                    )));
-                }
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(AgentError::Io(format!(
+                    "Failed to read file '{}': {}",
+                    path, stderr
+                )));
+            }
 
-                Ok(String::from_utf8_lossy(&output.stdout).to_string())
-            },
-        )
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        })
         .await;
 
         match result {
@@ -282,7 +282,12 @@ impl TerminalBackend for SingularityBackend {
                 .args(&mkdir_args)
                 .output()
                 .await
-                .map_err(|e| AgentError::Io(format!("Failed to create parent dir via singularity: {}", e)))?;
+                .map_err(|e| {
+                    AgentError::Io(format!(
+                        "Failed to create parent dir via singularity: {}",
+                        e
+                    ))
+                })?;
 
             if !mkdir_output.status.success() {
                 let stderr = String::from_utf8_lossy(&mkdir_output.stderr);
@@ -359,7 +364,10 @@ impl TerminalBackend for SingularityBackend {
 fn shlex_quote_singularity(s: &str) -> String {
     if s.is_empty() {
         "''".to_string()
-    } else if !s.chars().any(|c| c.is_whitespace() || c == '\'' || c == '"' || c == '\\' || c == '$' || c == '`') {
+    } else if !s
+        .chars()
+        .any(|c| c.is_whitespace() || c == '\'' || c == '"' || c == '\\' || c == '$' || c == '`')
+    {
         s.to_string()
     } else {
         format!("'{}'", s.replace('\'', "'\\''"))
@@ -372,12 +380,7 @@ mod tests {
 
     #[test]
     fn test_singularity_backend_default() {
-        let backend = SingularityBackend::new(
-            Some("ubuntu.sif".to_string()),
-            None,
-            120,
-            1_048_576,
-        );
+        let backend = SingularityBackend::new(Some("ubuntu.sif".to_string()), None, 120, 1_048_576);
         assert_eq!(backend.image_path().unwrap(), "ubuntu.sif");
     }
 
@@ -401,6 +404,9 @@ mod tests {
     fn test_shlex_quote_singularity() {
         assert_eq!(shlex_quote_singularity("simple"), "simple");
         assert_eq!(shlex_quote_singularity(""), "''");
-        assert_eq!(shlex_quote_singularity("/path/with spaces"), "'/path/with spaces'");
+        assert_eq!(
+            shlex_quote_singularity("/path/with spaces"),
+            "'/path/with spaces'"
+        );
     }
 }

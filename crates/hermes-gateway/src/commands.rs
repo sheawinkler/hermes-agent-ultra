@@ -89,36 +89,186 @@ pub struct CommandInfo {
 /// All registered gateway slash commands.
 pub fn all_commands() -> Vec<CommandInfo> {
     vec![
-        CommandInfo { name: "/new", aliases: &[], description: "Start a new conversation", usage: "/new" },
-        CommandInfo { name: "/reset", aliases: &["/clear"], description: "Reset the current session", usage: "/reset" },
-        CommandInfo { name: "/model", aliases: &[], description: "Show or switch the LLM model", usage: "/model [name]" },
-        CommandInfo { name: "/personality", aliases: &["/persona"], description: "Show or switch personality", usage: "/personality [name]" },
-        CommandInfo { name: "/retry", aliases: &[], description: "Retry the last message", usage: "/retry" },
-        CommandInfo { name: "/undo", aliases: &[], description: "Undo the last exchange", usage: "/undo" },
-        CommandInfo { name: "/compress", aliases: &[], description: "Compress conversation context", usage: "/compress" },
-        CommandInfo { name: "/usage", aliases: &["/cost"], description: "Show token usage and cost", usage: "/usage" },
-        CommandInfo { name: "/stop", aliases: &["/cancel"], description: "Stop the running agent", usage: "/stop" },
-        CommandInfo { name: "/background", aliases: &["/bg"], description: "Run a task in the background", usage: "/background <prompt>" },
-        CommandInfo { name: "/btw", aliases: &[], description: "Side conversation without context", usage: "/btw <prompt>" },
-        CommandInfo { name: "/reasoning", aliases: &["/think"], description: "Toggle reasoning display", usage: "/reasoning" },
-        CommandInfo { name: "/fast", aliases: &[], description: "Switch to fast model", usage: "/fast" },
-        CommandInfo { name: "/verbose", aliases: &[], description: "Toggle verbose output", usage: "/verbose" },
-        CommandInfo { name: "/yolo", aliases: &[], description: "Toggle auto-approve mode", usage: "/yolo" },
-        CommandInfo { name: "/sethome", aliases: &[], description: "Set the working directory", usage: "/sethome <path>" },
-        CommandInfo { name: "/status", aliases: &[], description: "Show current status", usage: "/status" },
-        CommandInfo { name: "/approve", aliases: &[], description: "Authorize a user id for DM access (admin only)", usage: "/approve <user_id>" },
-        CommandInfo { name: "/deny", aliases: &[], description: "Revoke a user id from DM access (admin only)", usage: "/deny <user_id>" },
-        CommandInfo { name: "/reload_mcp", aliases: &["/mcp_reload"], description: "Reload MCP tool/server registrations", usage: "/reload_mcp" },
-        CommandInfo { name: "/provider", aliases: &[], description: "Show or switch provider", usage: "/provider [name]" },
-        CommandInfo { name: "/profile", aliases: &[], description: "Show or switch profile", usage: "/profile [name]" },
-        CommandInfo { name: "/branch", aliases: &[], description: "Show or switch branch context", usage: "/branch [name]" },
-        CommandInfo { name: "/rollback", aliases: &[], description: "Rollback N latest messages (default 2)", usage: "/rollback [steps]" },
-        CommandInfo { name: "/update", aliases: &[], description: "Check for updates", usage: "/update" },
-        CommandInfo { name: "/tools", aliases: &[], description: "List, enable, or disable tools", usage: "/tools [list|enable|disable] [name]" },
-        CommandInfo { name: "/sessions", aliases: &[], description: "List or switch sessions", usage: "/sessions [id]" },
-        CommandInfo { name: "/budget", aliases: &[], description: "Show or set usage budget", usage: "/budget [amount]" },
-        CommandInfo { name: "/insights", aliases: &[], description: "Show conversation insights", usage: "/insights" },
-        CommandInfo { name: "/help", aliases: &["/commands"], description: "Show this help message", usage: "/help" },
+        CommandInfo {
+            name: "/new",
+            aliases: &[],
+            description: "Start a new conversation",
+            usage: "/new",
+        },
+        CommandInfo {
+            name: "/reset",
+            aliases: &["/clear"],
+            description: "Reset the current session",
+            usage: "/reset",
+        },
+        CommandInfo {
+            name: "/model",
+            aliases: &[],
+            description: "Show or switch the LLM model",
+            usage: "/model [name]",
+        },
+        CommandInfo {
+            name: "/personality",
+            aliases: &["/persona"],
+            description: "Show or switch personality",
+            usage: "/personality [name]",
+        },
+        CommandInfo {
+            name: "/retry",
+            aliases: &[],
+            description: "Retry the last message",
+            usage: "/retry",
+        },
+        CommandInfo {
+            name: "/undo",
+            aliases: &[],
+            description: "Undo the last exchange",
+            usage: "/undo",
+        },
+        CommandInfo {
+            name: "/compress",
+            aliases: &[],
+            description: "Compress conversation context",
+            usage: "/compress",
+        },
+        CommandInfo {
+            name: "/usage",
+            aliases: &["/cost"],
+            description: "Show token usage and cost",
+            usage: "/usage",
+        },
+        CommandInfo {
+            name: "/stop",
+            aliases: &["/cancel"],
+            description: "Stop the running agent",
+            usage: "/stop",
+        },
+        CommandInfo {
+            name: "/background",
+            aliases: &["/bg"],
+            description: "Run a task in the background",
+            usage: "/background <prompt>",
+        },
+        CommandInfo {
+            name: "/btw",
+            aliases: &[],
+            description: "Side conversation without context",
+            usage: "/btw <prompt>",
+        },
+        CommandInfo {
+            name: "/reasoning",
+            aliases: &["/think"],
+            description: "Toggle reasoning display",
+            usage: "/reasoning",
+        },
+        CommandInfo {
+            name: "/fast",
+            aliases: &[],
+            description: "Switch to fast model",
+            usage: "/fast",
+        },
+        CommandInfo {
+            name: "/verbose",
+            aliases: &[],
+            description: "Toggle verbose output",
+            usage: "/verbose",
+        },
+        CommandInfo {
+            name: "/yolo",
+            aliases: &[],
+            description: "Toggle auto-approve mode",
+            usage: "/yolo",
+        },
+        CommandInfo {
+            name: "/sethome",
+            aliases: &[],
+            description: "Set the working directory",
+            usage: "/sethome <path>",
+        },
+        CommandInfo {
+            name: "/status",
+            aliases: &[],
+            description: "Show current status",
+            usage: "/status",
+        },
+        CommandInfo {
+            name: "/approve",
+            aliases: &[],
+            description: "Authorize a user id for DM access (admin only)",
+            usage: "/approve <user_id>",
+        },
+        CommandInfo {
+            name: "/deny",
+            aliases: &[],
+            description: "Revoke a user id from DM access (admin only)",
+            usage: "/deny <user_id>",
+        },
+        CommandInfo {
+            name: "/reload_mcp",
+            aliases: &["/mcp_reload"],
+            description: "Reload MCP tool/server registrations",
+            usage: "/reload_mcp",
+        },
+        CommandInfo {
+            name: "/provider",
+            aliases: &[],
+            description: "Show or switch provider",
+            usage: "/provider [name]",
+        },
+        CommandInfo {
+            name: "/profile",
+            aliases: &[],
+            description: "Show or switch profile",
+            usage: "/profile [name]",
+        },
+        CommandInfo {
+            name: "/branch",
+            aliases: &[],
+            description: "Show or switch branch context",
+            usage: "/branch [name]",
+        },
+        CommandInfo {
+            name: "/rollback",
+            aliases: &[],
+            description: "Rollback N latest messages (default 2)",
+            usage: "/rollback [steps]",
+        },
+        CommandInfo {
+            name: "/update",
+            aliases: &[],
+            description: "Check for updates",
+            usage: "/update",
+        },
+        CommandInfo {
+            name: "/tools",
+            aliases: &[],
+            description: "List, enable, or disable tools",
+            usage: "/tools [list|enable|disable] [name]",
+        },
+        CommandInfo {
+            name: "/sessions",
+            aliases: &[],
+            description: "List or switch sessions",
+            usage: "/sessions [id]",
+        },
+        CommandInfo {
+            name: "/budget",
+            aliases: &[],
+            description: "Show or set usage budget",
+            usage: "/budget [amount]",
+        },
+        CommandInfo {
+            name: "/insights",
+            aliases: &[],
+            description: "Show conversation insights",
+            usage: "/insights",
+        },
+        CommandInfo {
+            name: "/help",
+            aliases: &["/commands"],
+            description: "Show this help message",
+            usage: "/help",
+        },
     ]
 }
 
@@ -138,7 +288,9 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
         "/reset" | "/clear" => GatewayCommandResult::ResetSession("🔄 Session reset.".to_string()),
         "/model" => {
             if args.is_empty() {
-                GatewayCommandResult::Reply("Current model shown in status. Use /model <name> to switch.".to_string())
+                GatewayCommandResult::Reply(
+                    "Current model shown in status. Use /model <name> to switch.".to_string(),
+                )
             } else {
                 GatewayCommandResult::SwitchModel {
                     model: args.to_string(),
@@ -177,26 +329,36 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
             }
         }
         "/compress" => GatewayCommandResult::CompressContext("📦 Context compressed.".to_string()),
-        "/usage" | "/cost" => GatewayCommandResult::ShowUsage("Usage statistics will be shown.".to_string()),
+        "/usage" | "/cost" => {
+            GatewayCommandResult::ShowUsage("Usage statistics will be shown.".to_string())
+        }
         "/stop" | "/cancel" => GatewayCommandResult::StopAgent("⏹ Agent stopped.".to_string()),
         "/background" | "/bg" => {
             if args.is_empty() {
                 GatewayCommandResult::Reply("Usage: /background <prompt>".to_string())
             } else {
-                GatewayCommandResult::BackgroundTask { prompt: args.to_string() }
+                GatewayCommandResult::BackgroundTask {
+                    prompt: args.to_string(),
+                }
             }
         }
         "/btw" => {
             if args.is_empty() {
                 GatewayCommandResult::Reply("Usage: /btw <prompt>".to_string())
             } else {
-                GatewayCommandResult::BtwTask { prompt: args.to_string() }
+                GatewayCommandResult::BtwTask {
+                    prompt: args.to_string(),
+                }
             }
         }
-        "/reasoning" | "/think" => GatewayCommandResult::ToggleReasoning("🧠 Reasoning display toggled.".to_string()),
+        "/reasoning" | "/think" => {
+            GatewayCommandResult::ToggleReasoning("🧠 Reasoning display toggled.".to_string())
+        }
         "/fast" => GatewayCommandResult::SwitchFast("⚡ Switched to fast model.".to_string()),
         "/verbose" => GatewayCommandResult::ToggleVerbose("📝 Verbose mode toggled.".to_string()),
-        "/yolo" => GatewayCommandResult::ToggleYolo("🤠 YOLO mode toggled. Auto-approving all actions.".to_string()),
+        "/yolo" => GatewayCommandResult::ToggleYolo(
+            "🤠 YOLO mode toggled. Auto-approving all actions.".to_string(),
+        ),
         "/sethome" => {
             if args.is_empty() {
                 GatewayCommandResult::Reply("Usage: /sethome <path>".to_string())
@@ -207,11 +369,15 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
                 }
             }
         }
-        "/status" => GatewayCommandResult::ShowStatus("Status information will be shown.".to_string()),
+        "/status" => {
+            GatewayCommandResult::ShowStatus("Status information will be shown.".to_string())
+        }
         "/reload_mcp" | "/mcp_reload" => GatewayCommandResult::ReloadMcp,
         "/provider" => {
             if args.is_empty() {
-                GatewayCommandResult::Reply("Current provider shown in status. Use /provider <name> to switch.".to_string())
+                GatewayCommandResult::Reply(
+                    "Current provider shown in status. Use /provider <name> to switch.".to_string(),
+                )
             } else {
                 GatewayCommandResult::SwitchProvider {
                     provider: args.to_string(),
@@ -221,7 +387,9 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
         }
         "/profile" => {
             if args.is_empty() {
-                GatewayCommandResult::Reply("Current profile shown in status. Use /profile <name> to switch.".to_string())
+                GatewayCommandResult::Reply(
+                    "Current profile shown in status. Use /profile <name> to switch.".to_string(),
+                )
             } else {
                 GatewayCommandResult::SwitchProfile {
                     profile: args.to_string(),
@@ -265,13 +433,15 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
                     name: rest.join(" "),
                 },
                 ["enable"] | ["disable"] => GatewayCommandResult::Reply(
-                    "Usage: /tools [list] [filter] | /tools enable <name> | /tools disable <name>".to_string(),
+                    "Usage: /tools [list] [filter] | /tools enable <name> | /tools disable <name>"
+                        .to_string(),
                 ),
                 [only] => GatewayCommandResult::ListTools {
                     filter: Some((*only).to_string()),
                 },
                 _ => GatewayCommandResult::Reply(
-                    "Usage: /tools [list] [filter] | /tools enable <name> | /tools disable <name>".to_string(),
+                    "Usage: /tools [list] [filter] | /tools enable <name> | /tools disable <name>"
+                        .to_string(),
                 ),
             }
         }
@@ -293,7 +463,8 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
                         new_budget: Some(v),
                     },
                     _ => GatewayCommandResult::Reply(
-                        "Usage: /budget [amount] — amount must be a non-negative number.".to_string(),
+                        "Usage: /budget [amount] — amount must be a non-negative number."
+                            .to_string(),
                     ),
                 }
             }
@@ -304,11 +475,17 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
         "/help" | "/commands" => {
             let mut help = String::from("📖 **Available Commands:**\n\n");
             for cmd_info in all_commands() {
-                help.push_str(&format!("  `{}` — {}\n", cmd_info.usage, cmd_info.description));
+                help.push_str(&format!(
+                    "  `{}` — {}\n",
+                    cmd_info.usage, cmd_info.description
+                ));
             }
             GatewayCommandResult::ShowHelp(help)
         }
-        _ => GatewayCommandResult::Unknown(format!("Unknown command: {}. Type /help for available commands.", cmd)),
+        _ => GatewayCommandResult::Unknown(format!(
+            "Unknown command: {}. Type /help for available commands.",
+            cmd
+        )),
     }
 }
 
@@ -431,7 +608,9 @@ mod tests {
             other => panic!("Expected ListTools, got {:?}", other),
         }
         match handle_command("/tools list grep") {
-            GatewayCommandResult::ListTools { filter } => assert_eq!(filter.as_deref(), Some("grep")),
+            GatewayCommandResult::ListTools { filter } => {
+                assert_eq!(filter.as_deref(), Some("grep"))
+            }
             other => panic!("Expected ListTools with filter, got {:?}", other),
         }
         match handle_command("/tools enable fs_read") {
@@ -447,7 +626,9 @@ mod tests {
             other => panic!("Expected Reply for bare enable, got {:?}", other),
         }
         match handle_command("/tools my_filter") {
-            GatewayCommandResult::ListTools { filter } => assert_eq!(filter.as_deref(), Some("my_filter")),
+            GatewayCommandResult::ListTools { filter } => {
+                assert_eq!(filter.as_deref(), Some("my_filter"))
+            }
             other => panic!("Expected ListTools with shorthand filter, got {:?}", other),
         }
     }
@@ -463,7 +644,9 @@ mod tests {
             other => panic!("Expected SwitchSession, got {:?}", other),
         }
         match handle_command("/sessions multi word id") {
-            GatewayCommandResult::SwitchSession { session_id } => assert_eq!(session_id, "multi word id"),
+            GatewayCommandResult::SwitchSession { session_id } => {
+                assert_eq!(session_id, "multi word id")
+            }
             other => panic!("Expected SwitchSession, got {:?}", other),
         }
         match handle_command("/budget") {

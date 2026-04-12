@@ -536,8 +536,7 @@ impl StreamConsumer {
     pub fn mark_edit_failed(&mut self, is_flood: bool) {
         if is_flood {
             self.flood_strikes += 1;
-            self.current_edit_interval_ms =
-                (self.current_edit_interval_ms * 2).min(10_000);
+            self.current_edit_interval_ms = (self.current_edit_interval_ms * 2).min(10_000);
 
             if self.flood_strikes < self.max_flood_strikes {
                 self.last_edit_time = Some(Instant::now());

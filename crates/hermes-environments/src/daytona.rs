@@ -141,10 +141,9 @@ impl TerminalBackend for DaytonaBackend {
                     )));
                 }
 
-                let data: ExecuteResponse = resp
-                    .json()
-                    .await
-                    .map_err(|e| AgentError::Io(format!("Failed to parse Daytona response: {}", e)))?;
+                let data: ExecuteResponse = resp.json().await.map_err(|e| {
+                    AgentError::Io(format!("Failed to parse Daytona response: {}", e))
+                })?;
 
                 Ok(CommandOutput {
                     exit_code: data.exit_code,

@@ -42,7 +42,9 @@ pub struct SignalConfig {
     pub proxy: AdapterProxyConfig,
 }
 
-fn default_signal_api_url() -> String { "http://localhost:8080".to_string() }
+fn default_signal_api_url() -> String {
+    "http://localhost:8080".to_string()
+}
 
 // ---------------------------------------------------------------------------
 // SignalAdapter
@@ -57,14 +59,20 @@ pub struct SignalAdapter {
 
 impl SignalAdapter {
     pub fn new(config: SignalConfig) -> Result<Self, GatewayError> {
-        let base = BasePlatformAdapter::new(&config.phone_number)
-            .with_proxy(config.proxy.clone());
+        let base = BasePlatformAdapter::new(&config.phone_number).with_proxy(config.proxy.clone());
         base.validate_token()?;
         let client = base.build_client()?;
-        Ok(Self { base, config, client, stop_signal: Arc::new(Notify::new()) })
+        Ok(Self {
+            base,
+            config,
+            client,
+            stop_signal: Arc::new(Notify::new()),
+        })
     }
 
-    pub fn config(&self) -> &SignalConfig { &self.config }
+    pub fn config(&self) -> &SignalConfig {
+        &self.config
+    }
 
     /// Send a message via signal-cli REST API.
     pub async fn send_text(&self, recipient: &str, text: &str) -> Result<(), GatewayError> {
@@ -75,12 +83,20 @@ impl SignalAdapter {
             "recipients": [recipient]
         });
 
-        let resp = self.client.post(&url).json(&body).send().await
+        let resp = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("Signal send failed: {}", e)))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("Signal API error: {}", text)));
+            return Err(GatewayError::SendFailed(format!(
+                "Signal API error: {}",
+                text
+            )));
         }
         Ok(())
     }
@@ -91,7 +107,10 @@ impl SignalAdapter {
     pub fn parse_received_message(msg: &serde_json::Value) -> Option<IncomingSignalMessage> {
         let envelope = msg.get("envelope")?;
         let source = envelope.get("source").and_then(|v| v.as_str())?.to_string();
-        let timestamp = envelope.get("timestamp").and_then(|v| v.as_u64()).unwrap_or(0);
+        let timestamp = envelope
+            .get("timestamp")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
 
         let data_message = envelope.get("dataMessage")?;
         let text = data_message
@@ -127,11 +146,18 @@ impl SignalAdapter {
 
     /// Receive messages via signal-cli REST API polling.
     pub async fn receive_messages(&self) -> Result<Vec<serde_json::Value>, GatewayError> {
-        let url = format!("{}/v1/receive/{}", self.config.api_url, self.config.phone_number);
-        let resp = self.client.get(&url).send().await
-            .map_err(|e| GatewayError::ConnectionFailed(format!("Signal receive failed: {}", e)))?;
+        let url = format!(
+            "{}/v1/receive/{}",
+            self.config.api_url, self.config.phone_number
+        );
+        let resp =
+            self.client.get(&url).send().await.map_err(|e| {
+                GatewayError::ConnectionFailed(format!("Signal receive failed: {}", e))
+            })?;
 
-        let messages: Vec<serde_json::Value> = resp.json().await
+        let messages: Vec<serde_json::Value> = resp
+            .json()
+            .await
             .map_err(|e| GatewayError::ConnectionFailed(format!("Signal parse failed: {}", e)))?;
         Ok(messages)
     }
@@ -140,7 +166,10 @@ impl SignalAdapter {
 #[async_trait]
 impl PlatformAdapter for SignalAdapter {
     async fn start(&self) -> Result<(), GatewayError> {
-        info!("Signal adapter starting (number: {})", self.config.phone_number);
+        info!(
+            "Signal adapter starting (number: {})",
+            self.config.phone_number
+        );
         self.base.mark_running();
         Ok(())
     }
@@ -152,17 +181,33 @@ impl PlatformAdapter for SignalAdapter {
         Ok(())
     }
 
-    async fn send_message(&self, chat_id: &str, text: &str, _parse_mode: Option<ParseMode>) -> Result<(), GatewayError> {
+    async fn send_message(
+        &self,
+        chat_id: &str,
+        text: &str,
+        _parse_mode: Option<ParseMode>,
+    ) -> Result<(), GatewayError> {
         self.send_text(chat_id, text).await
     }
 
-    async fn edit_message(&self, _chat_id: &str, _message_id: &str, _text: &str) -> Result<(), GatewayError> {
+    async fn edit_message(
+        &self,
+        _chat_id: &str,
+        _message_id: &str,
+        _text: &str,
+    ) -> Result<(), GatewayError> {
         debug!("Signal does not support message editing");
         Ok(())
     }
 
-    async fn send_file(&self, chat_id: &str, file_path: &str, caption: Option<&str>) -> Result<(), GatewayError> {
-        let file_bytes = tokio::fs::read(file_path).await
+    async fn send_file(
+        &self,
+        chat_id: &str,
+        file_path: &str,
+        caption: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        let file_bytes = tokio::fs::read(file_path)
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("Failed to read file: {e}")))?;
 
         let b64 = base64_encode(&file_bytes);
@@ -175,18 +220,29 @@ impl PlatformAdapter for SignalAdapter {
             "base64_attachments": [b64]
         });
 
-        let resp = self.client.post(&url).json(&body).send().await
+        let resp = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("Signal attachment send failed: {e}")))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("Signal attachment error: {text}")));
+            return Err(GatewayError::SendFailed(format!(
+                "Signal attachment error: {text}"
+            )));
         }
         Ok(())
     }
 
-    fn is_running(&self) -> bool { self.base.is_running() }
-    fn platform_name(&self) -> &str { "signal" }
+    fn is_running(&self) -> bool {
+        self.base.is_running()
+    }
+    fn platform_name(&self) -> &str {
+        "signal"
+    }
 }
 
 /// Simple base64 encoding using the `base64` crate convention (standard alphabet).

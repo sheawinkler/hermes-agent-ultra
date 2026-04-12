@@ -10,13 +10,13 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use base64::Engine;
+use rand::Rng;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use tokio::sync::{mpsc, Mutex, Notify, RwLock};
 use tracing::{debug, info, warn};
 use url::Url;
-use rand::Rng;
 use uuid::Uuid;
 
 use aes::cipher::generic_array::GenericArray;
@@ -152,17 +152,12 @@ fn parse_aes_key(aes_key_b64: &str) -> Result<[u8; 16], GatewayError> {
     }
     if decoded.len() == 32 {
         let text = String::from_utf8_lossy(&decoded);
-        if text
-            .chars()
-            .all(|c| c.is_ascii_hexdigit())
-            && text.len() == 32
-        {
+        if text.chars().all(|c| c.is_ascii_hexdigit()) && text.len() == 32 {
             let mut k = [0u8; 16];
             for i in 0..16 {
                 let pair = &text[i * 2..i * 2 + 2];
-                k[i] = u8::from_str_radix(pair, 16).map_err(|_| {
-                    GatewayError::Platform("weixin: invalid hex in aes key".into())
-                })?;
+                k[i] = u8::from_str_radix(pair, 16)
+                    .map_err(|_| GatewayError::Platform("weixin: invalid hex in aes key".into()))?;
             }
             return Ok(k);
         }
@@ -176,20 +171,22 @@ fn parse_aes_key(aes_key_b64: &str) -> Result<[u8; 16], GatewayError> {
 fn cdn_download_url(cdn_base: &str, encrypted_query_param: &str) -> Result<String, GatewayError> {
     let b = cdn_base.trim_end_matches('/');
     let u = format!("{b}/download");
-    let mut url = Url::parse(&u).map_err(|e| {
-        GatewayError::ConnectionFailed(format!("weixin cdn download url: {e}"))
-    })?;
+    let mut url = Url::parse(&u)
+        .map_err(|e| GatewayError::ConnectionFailed(format!("weixin cdn download url: {e}")))?;
     url.query_pairs_mut()
         .append_pair("encrypted_query_param", encrypted_query_param);
     Ok(url.into())
 }
 
-fn cdn_upload_url(cdn_base: &str, upload_param: &str, filekey: &str) -> Result<String, GatewayError> {
+fn cdn_upload_url(
+    cdn_base: &str,
+    upload_param: &str,
+    filekey: &str,
+) -> Result<String, GatewayError> {
     let b = cdn_base.trim_end_matches('/');
     let u = format!("{b}/upload");
-    let mut url = Url::parse(&u).map_err(|e| {
-        GatewayError::ConnectionFailed(format!("weixin cdn upload url: {e}"))
-    })?;
+    let mut url = Url::parse(&u)
+        .map_err(|e| GatewayError::ConnectionFailed(format!("weixin cdn upload url: {e}")))?;
     url.query_pairs_mut()
         .append_pair("encrypted_query_param", upload_param)
         .append_pair("filekey", filekey);
@@ -392,7 +389,11 @@ impl WeChatAdapter {
         let p = Self::account_json_path(account_id);
         let s = std::fs::read_to_string(p).ok()?;
         let v: Value = serde_json::from_str(&s).ok()?;
-        v.get("token").and_then(|t| t.as_str()).map(str::trim).filter(|x| !x.is_empty()).map(String::from)
+        v.get("token")
+            .and_then(|t| t.as_str())
+            .map(str::trim)
+            .filter(|x| !x.is_empty())
+            .map(String::from)
     }
 
     fn load_sync_buf(account_id: &str) -> String {
@@ -516,8 +517,12 @@ impl WeChatAdapter {
                 let media = Self::media_map(item, "image_item")?;
                 let enc = media.get("encrypt_query_param").and_then(|v| v.as_str());
                 let full = media.get("full_url").and_then(|v| v.as_str());
-                let key_b64 = Self::image_aes_key_b64(item)
-                    .or_else(|| media.get("aes_key").and_then(|v| v.as_str()).map(String::from));
+                let key_b64 = Self::image_aes_key_b64(item).or_else(|| {
+                    media
+                        .get("aes_key")
+                        .and_then(|v| v.as_str())
+                        .map(String::from)
+                });
                 Self::download_and_decrypt_media(
                     inner,
                     enc,
@@ -547,14 +552,8 @@ impl WeChatAdapter {
                 let enc = media.get("encrypt_query_param").and_then(|v| v.as_str());
                 let full = media.get("full_url").and_then(|v| v.as_str());
                 let key_b64 = media.get("aes_key").and_then(|v| v.as_str());
-                Self::download_and_decrypt_media(
-                    inner,
-                    enc,
-                    key_b64,
-                    full,
-                    Duration::from_secs(60),
-                )
-                .await
+                Self::download_and_decrypt_media(inner, enc, key_b64, full, Duration::from_secs(60))
+                    .await
             }
             ITEM_VOICE => {
                 let voice = item.get("voice_item")?;
@@ -571,24 +570,20 @@ impl WeChatAdapter {
                 let enc = media.get("encrypt_query_param").and_then(|v| v.as_str());
                 let full = media.get("full_url").and_then(|v| v.as_str());
                 let key_b64 = media.get("aes_key").and_then(|v| v.as_str());
-                Self::download_and_decrypt_media(
-                    inner,
-                    enc,
-                    key_b64,
-                    full,
-                    Duration::from_secs(60),
-                )
-                .await
+                Self::download_and_decrypt_media(inner, enc, key_b64, full, Duration::from_secs(60))
+                    .await
             }
             _ => return None,
         };
         match res {
             Ok(data) => {
                 let line = match typ {
-                    ITEM_IMAGE => Self::write_media_cache(".jpg", &data)
-                        .map(|p| format!("[图片: {p}]")),
-                    ITEM_VIDEO => Self::write_media_cache(".mp4", &data)
-                        .map(|p| format!("[视频: {p}]")),
+                    ITEM_IMAGE => {
+                        Self::write_media_cache(".jpg", &data).map(|p| format!("[图片: {p}]"))
+                    }
+                    ITEM_VIDEO => {
+                        Self::write_media_cache(".mp4", &data).map(|p| format!("[视频: {p}]"))
+                    }
                     ITEM_FILE => {
                         let name = item
                             .get("file_item")
@@ -602,8 +597,9 @@ impl WeChatAdapter {
                             .unwrap_or_else(|| ".bin".into());
                         Self::write_media_cache(&ext, &data).map(|p| format!("[文件 {name}: {p}]"))
                     }
-                    ITEM_VOICE => Self::write_media_cache(".silk", &data)
-                        .map(|p| format!("[语音: {p}]")),
+                    ITEM_VOICE => {
+                        Self::write_media_cache(".silk", &data).map(|p| format!("[语音: {p}]"))
+                    }
                     _ => return None,
                 };
                 match line {
@@ -751,10 +747,7 @@ impl WeChatAdapter {
         let mut g = inner.context_tokens.lock().await;
         for (uid, tok) in map {
             if !tok.is_empty() {
-                g.insert(
-                    format!("{}:{}", inner.config.account_id, uid),
-                    tok,
-                );
+                g.insert(format!("{}:{}", inner.config.account_id, uid), tok);
             }
         }
     }
@@ -815,10 +808,7 @@ impl WeChatAdapter {
         payload: Value,
         timeout_ms: u64,
     ) -> Result<Value, GatewayError> {
-        let mut obj = payload
-            .as_object()
-            .cloned()
-            .unwrap_or_default();
+        let mut obj = payload.as_object().cloned().unwrap_or_default();
         obj.insert(
             "base_info".into(),
             json!({ "channel_version": CHANNEL_VERSION }),
@@ -869,11 +859,12 @@ impl WeChatAdapter {
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .trim();
-        let msg_type = message.get("msg_type").and_then(|v| v.as_i64()).unwrap_or(0);
-        let is_group = !room_id.is_empty()
-            || (!to_user.is_empty()
-                && to_user != account_id
-                && msg_type == 1);
+        let msg_type = message
+            .get("msg_type")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(0);
+        let is_group =
+            !room_id.is_empty() || (!to_user.is_empty() && to_user != account_id && msg_type == 1);
         if is_group {
             (
                 "group",
@@ -893,7 +884,11 @@ impl WeChatAdapter {
     fn extract_text(item_list: &[Value]) -> String {
         for item in item_list {
             if item.get("type").and_then(|v| v.as_i64()) == Some(ITEM_TEXT as i64) {
-                if let Some(t) = item.get("text_item").and_then(|x| x.get("text")).and_then(|v| v.as_str()) {
+                if let Some(t) = item
+                    .get("text_item")
+                    .and_then(|x| x.get("text"))
+                    .and_then(|v| v.as_str())
+                {
                     return t.to_string();
                 }
             }
@@ -962,7 +957,11 @@ impl WeChatAdapter {
             .filter(|s| !s.is_empty())
         {
             let key = format!("{}:{}", inner.config.account_id, sender);
-            inner.context_tokens.lock().await.insert(key, ct.to_string());
+            inner
+                .context_tokens
+                .lock()
+                .await
+                .insert(key, ct.to_string());
             let _ = Self::persist_context(&inner).await;
         }
 
@@ -1085,7 +1084,9 @@ impl WeChatAdapter {
                 "item_list": [{"type": ITEM_TEXT, "text_item": {"text": chunk}}],
             });
             if let Some(ref t) = ctx {
-                msg.as_object_mut().unwrap().insert("context_token".into(), json!(t));
+                msg.as_object_mut()
+                    .unwrap()
+                    .insert("context_token".into(), json!(t));
             }
             Self::ilink_post(
                 &self.inner,
@@ -1115,7 +1116,9 @@ impl WeChatAdapter {
             .map_err(|e| GatewayError::SendFailed(format!("weixin read file: {e}")))?;
         let (filekey, aes_key, aeskey_hex) = {
             let mut rng = rand::thread_rng();
-            let filekey: String = (0..16).map(|_| format!("{:02x}", rng.gen::<u8>())).collect();
+            let filekey: String = (0..16)
+                .map(|_| format!("{:02x}", rng.gen::<u8>()))
+                .collect();
             let aes_key: [u8; 16] = rng.gen();
             let aeskey_hex: String = aes_key.iter().map(|b| format!("{b:02x}")).collect();
             (filekey, aes_key, aeskey_hex)
@@ -1359,7 +1362,6 @@ mod weixin_crypto_tests {
     }
 }
 
-
 #[cfg(test)]
 mod weixin_send_file_tests {
     use super::*;
@@ -1436,8 +1438,14 @@ mod weixin_send_file_tests {
             up_json.pointer("/to_user_id").and_then(|v| v.as_str()),
             Some("wxid_target")
         );
-        assert_eq!(up_json.pointer("/media_type").and_then(|v| v.as_i64()), Some(MEDIA_FILE as i64));
-        assert_eq!(up_json.pointer("/rawsize").and_then(|v| v.as_u64()), Some(plain.len() as u64));
+        assert_eq!(
+            up_json.pointer("/media_type").and_then(|v| v.as_i64()),
+            Some(MEDIA_FILE as i64)
+        );
+        assert_eq!(
+            up_json.pointer("/rawsize").and_then(|v| v.as_u64()),
+            Some(plain.len() as u64)
+        );
         assert_eq!(
             up_json.pointer("/filesize").and_then(|v| v.as_u64()),
             Some(aes_padded_size(plain.len()) as u64)
@@ -1466,12 +1474,10 @@ mod weixin_send_file_tests {
                 .as_deref(),
             Some("up_param_1")
         );
-        assert!(
-            cdn_req
-                .url
-                .query_pairs()
-                .any(|(k, v)| k == "filekey" && !v.is_empty())
-        );
+        assert!(cdn_req
+            .url
+            .query_pairs()
+            .any(|(k, v)| k == "filekey" && !v.is_empty()));
         assert_eq!(cdn_req.body.len() % 16, 0);
         assert_ne!(cdn_req.body, plain);
 
@@ -1481,11 +1487,15 @@ mod weixin_send_file_tests {
             .expect("sendmessage request");
         let send_json: Value = serde_json::from_slice(&send_req.body).expect("send json");
         assert_eq!(
-            send_json.pointer("/msg/to_user_id").and_then(|v| v.as_str()),
+            send_json
+                .pointer("/msg/to_user_id")
+                .and_then(|v| v.as_str()),
             Some("wxid_target")
         );
         assert_eq!(
-            send_json.pointer("/msg/item_list/0/type").and_then(|v| v.as_i64()),
+            send_json
+                .pointer("/msg/item_list/0/type")
+                .and_then(|v| v.as_i64()),
             Some(ITEM_FILE as i64)
         );
         assert_eq!(

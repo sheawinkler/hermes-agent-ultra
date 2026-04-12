@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
 #[derive(Clone, Default)]
 pub struct ToolResultStorageHandler {
@@ -15,7 +15,10 @@ pub struct ToolResultStorageHandler {
 #[async_trait]
 impl ToolHandler for ToolResultStorageHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
-        let action = params.get("action").and_then(|v| v.as_str()).unwrap_or("get");
+        let action = params
+            .get("action")
+            .and_then(|v| v.as_str())
+            .unwrap_or("get");
         let key = params.get("key").and_then(|v| v.as_str()).unwrap_or("");
         if key.is_empty() {
             return Err(ToolError::InvalidParams("Missing 'key'".into()));
@@ -43,9 +46,16 @@ impl ToolHandler for ToolResultStorageHandler {
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("action".into(), json!({"type":"string","enum":["get","set"]}));
+        props.insert(
+            "action".into(),
+            json!({"type":"string","enum":["get","set"]}),
+        );
         props.insert("key".into(), json!({"type":"string"}));
         props.insert("value".into(), json!({"type":"string"}));
-        tool_schema("tool_result_storage", "Persist/retrieve tool results by key.", JsonSchema::object(props, vec!["key".into()]))
+        tool_schema(
+            "tool_result_storage",
+            "Persist/retrieve tool results by key.",
+            JsonSchema::object(props, vec!["key".into()]),
+        )
     }
 }

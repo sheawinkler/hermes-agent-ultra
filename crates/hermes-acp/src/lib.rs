@@ -17,23 +17,22 @@ pub mod protocol;
 pub mod server;
 pub mod session;
 
-pub use server::AcpServer;
+pub use events::{AcpEvent, AcpEventKind, EventSink, ToolCallIdTracker};
+pub use handler::{AcpHandler, DefaultAcpHandler, HermesAcpHandler};
+pub use permissions::{
+    ApprovalCallback, PermissionKind, PermissionOption, PermissionOutcome, PermissionRequest,
+    PermissionStore,
+};
 pub use protocol::{
-    AcpError, AcpMethod, AcpRequest, AcpResponse,
-    AgentCapabilities, AuthMethod, AvailableCommand, ClientCapabilities,
-    ContentBlock, Implementation, InitializeResponse, McpServerConfig,
+    AcpError, AcpMethod, AcpRequest, AcpResponse, AgentCapabilities, AuthMethod, AvailableCommand,
+    ClientCapabilities, ContentBlock, Implementation, InitializeResponse, McpServerConfig,
     PromptResponse, SessionCapabilities, SessionUpdate, StopReason, Usage,
 };
-pub use handler::{AcpHandler, DefaultAcpHandler, HermesAcpHandler};
+pub use server::AcpServer;
 pub use session::{SessionInfo, SessionManager, SessionPhase, SessionState};
-pub use events::{AcpEvent, AcpEventKind, EventSink, ToolCallIdTracker};
-pub use permissions::{
-    ApprovalCallback, PermissionKind, PermissionOption, PermissionOutcome,
-    PermissionRequest, PermissionStore,
-};
 
-use std::sync::Arc;
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 
 // ---------------------------------------------------------------------------
 // CLI integration

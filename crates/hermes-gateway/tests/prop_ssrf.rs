@@ -16,20 +16,15 @@ use hermes_gateway::is_safe_url;
 fn arb_private_ipv4() -> impl Strategy<Value = String> {
     prop_oneof![
         // 10.0.0.0/8
-        (0u8..=255, 0u8..=255, 0u8..=255)
-            .prop_map(|(b, c, d)| format!("10.{b}.{c}.{d}")),
+        (0u8..=255, 0u8..=255, 0u8..=255).prop_map(|(b, c, d)| format!("10.{b}.{c}.{d}")),
         // 172.16.0.0/12
-        (16u8..=31, 0u8..=255, 0u8..=255)
-            .prop_map(|(b, c, d)| format!("172.{b}.{c}.{d}")),
+        (16u8..=31, 0u8..=255, 0u8..=255).prop_map(|(b, c, d)| format!("172.{b}.{c}.{d}")),
         // 192.168.0.0/16
-        (0u8..=255, 0u8..=255)
-            .prop_map(|(c, d)| format!("192.168.{c}.{d}")),
+        (0u8..=255, 0u8..=255).prop_map(|(c, d)| format!("192.168.{c}.{d}")),
         // 127.0.0.0/8
-        (0u8..=255, 0u8..=255, 0u8..=255)
-            .prop_map(|(b, c, d)| format!("127.{b}.{c}.{d}")),
+        (0u8..=255, 0u8..=255, 0u8..=255).prop_map(|(b, c, d)| format!("127.{b}.{c}.{d}")),
         // 169.254.0.0/16
-        (0u8..=255, 0u8..=255)
-            .prop_map(|(c, d)| format!("169.254.{c}.{d}")),
+        (0u8..=255, 0u8..=255).prop_map(|(c, d)| format!("169.254.{c}.{d}")),
     ]
 }
 

@@ -131,13 +131,30 @@ fn classify_llm_api_message(msg: &str) -> ErrorCategory {
     let lower = msg.to_lowercase();
 
     // Common patterns from OpenAI, Anthropic, and Google APIs
-    if lower.contains("rate_limit") || lower.contains("rate limit") || lower.contains("too many requests") {
-        ErrorCategory::RateLimit { retry_after_secs: None }
-    } else if lower.contains("authentication") || lower.contains("invalid api key") || lower.contains("unauthorized") || lower.contains("401") {
+    if lower.contains("rate_limit")
+        || lower.contains("rate limit")
+        || lower.contains("too many requests")
+    {
+        ErrorCategory::RateLimit {
+            retry_after_secs: None,
+        }
+    } else if lower.contains("authentication")
+        || lower.contains("invalid api key")
+        || lower.contains("unauthorized")
+        || lower.contains("401")
+    {
         ErrorCategory::AuthFailed
-    } else if lower.contains("context_length_exceeded") || lower.contains("context length") || lower.contains("token limit") || lower.contains("maximum context") {
+    } else if lower.contains("context_length_exceeded")
+        || lower.contains("context length")
+        || lower.contains("token limit")
+        || lower.contains("maximum context")
+    {
         ErrorCategory::ContextTooLong
-    } else if lower.contains("overloaded") || lower.contains("capacity") || lower.contains("503") || lower.contains("service unavailable") {
+    } else if lower.contains("overloaded")
+        || lower.contains("capacity")
+        || lower.contains("503")
+        || lower.contains("service unavailable")
+    {
         ErrorCategory::ModelOverloaded
     } else if lower.contains("timeout") || lower.contains("timed out") {
         ErrorCategory::Timeout
@@ -173,7 +190,12 @@ mod tests {
         let classifier = ErrorClassifier::new();
         let err = AgentError::LlmApi("rate_limit exceeded".into());
         let cat = classifier.classify(&err);
-        assert_eq!(cat, ErrorCategory::RateLimit { retry_after_secs: None });
+        assert_eq!(
+            cat,
+            ErrorCategory::RateLimit {
+                retry_after_secs: None
+            }
+        );
     }
 
     #[test]
@@ -203,7 +225,9 @@ mod tests {
     #[test]
     fn test_retry_strategy_rate_limit() {
         let classifier = ErrorClassifier::new();
-        let cat = ErrorCategory::RateLimit { retry_after_secs: Some(10) };
+        let cat = ErrorCategory::RateLimit {
+            retry_after_secs: Some(10),
+        };
         let strat = classifier.recommend_strategy(&cat);
         assert_eq!(
             strat,

@@ -179,25 +179,53 @@ mod tests {
     fn test_denied_commands() {
         assert_eq!(check_approval("rm -rf /"), ApprovalDecision::Denied);
         assert_eq!(check_approval("rm -fr /home"), ApprovalDecision::Denied);
-        assert_eq!(check_approval("mkfs.ext4 /dev/sda1"), ApprovalDecision::Denied);
-        assert_eq!(check_approval("chmod 777 /etc/passwd"), ApprovalDecision::Denied);
+        assert_eq!(
+            check_approval("mkfs.ext4 /dev/sda1"),
+            ApprovalDecision::Denied
+        );
+        assert_eq!(
+            check_approval("chmod 777 /etc/passwd"),
+            ApprovalDecision::Denied
+        );
     }
 
     #[test]
     fn test_requires_confirmation() {
-        assert_eq!(check_approval("sudo apt install something"), ApprovalDecision::RequiresConfirmation);
-        assert_eq!(check_approval("systemctl restart nginx"), ApprovalDecision::RequiresConfirmation);
-        assert_eq!(check_approval("kill -9 1234"), ApprovalDecision::RequiresConfirmation);
+        assert_eq!(
+            check_approval("sudo apt install something"),
+            ApprovalDecision::RequiresConfirmation
+        );
+        assert_eq!(
+            check_approval("systemctl restart nginx"),
+            ApprovalDecision::RequiresConfirmation
+        );
+        assert_eq!(
+            check_approval("kill -9 1234"),
+            ApprovalDecision::RequiresConfirmation
+        );
     }
 
     #[test]
     fn test_custom_patterns() {
         let mut manager = ApprovalManager::new();
-        manager.add_denied_pattern(r"(?i)\bdangerous_cmd\b").unwrap();
-        manager.add_confirm_pattern(r"(?i)\bcautious_cmd\b").unwrap();
+        manager
+            .add_denied_pattern(r"(?i)\bdangerous_cmd\b")
+            .unwrap();
+        manager
+            .add_confirm_pattern(r"(?i)\bcautious_cmd\b")
+            .unwrap();
 
-        assert_eq!(manager.check_approval("dangerous_cmd"), ApprovalDecision::Denied);
-        assert_eq!(manager.check_approval("cautious_cmd"), ApprovalDecision::RequiresConfirmation);
-        assert_eq!(manager.check_approval("safe_cmd"), ApprovalDecision::Approved);
+        assert_eq!(
+            manager.check_approval("dangerous_cmd"),
+            ApprovalDecision::Denied
+        );
+        assert_eq!(
+            manager.check_approval("cautious_cmd"),
+            ApprovalDecision::RequiresConfirmation
+        );
+        assert_eq!(
+            manager.check_approval("safe_cmd"),
+            ApprovalDecision::Approved
+        );
     }
 }

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
 use std::sync::Arc;
 
@@ -16,7 +16,12 @@ use std::sync::Arc;
 #[async_trait]
 pub trait CodeExecutionBackend: Send + Sync {
     /// Execute Python code and return the output.
-    async fn execute(&self, code: &str, language: Option<&str>, timeout: Option<u64>) -> Result<String, ToolError>;
+    async fn execute(
+        &self,
+        code: &str,
+        language: Option<&str>,
+        timeout: Option<u64>,
+    ) -> Result<String, ToolError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -37,7 +42,8 @@ impl ExecuteCodeHandler {
 #[async_trait]
 impl ToolHandler for ExecuteCodeHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
-        let code = params.get("code")
+        let code = params
+            .get("code")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'code' parameter".into()))?;
 
@@ -49,21 +55,30 @@ impl ToolHandler for ExecuteCodeHandler {
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("code".into(), json!({
-            "type": "string",
-            "description": "The code to execute"
-        }));
-        props.insert("language".into(), json!({
-            "type": "string",
-            "description": "Programming language (default: 'python')",
-            "enum": ["python", "javascript", "typescript"],
-            "default": "python"
-        }));
-        props.insert("timeout".into(), json!({
-            "type": "integer",
-            "description": "Execution timeout in seconds (default: 30)",
-            "default": 30
-        }));
+        props.insert(
+            "code".into(),
+            json!({
+                "type": "string",
+                "description": "The code to execute"
+            }),
+        );
+        props.insert(
+            "language".into(),
+            json!({
+                "type": "string",
+                "description": "Programming language (default: 'python')",
+                "enum": ["python", "javascript", "typescript"],
+                "default": "python"
+            }),
+        );
+        props.insert(
+            "timeout".into(),
+            json!({
+                "type": "integer",
+                "description": "Execution timeout in seconds (default: 30)",
+                "default": 30
+            }),
+        );
 
         tool_schema(
             "execute_code",
@@ -80,7 +95,12 @@ mod tests {
     struct MockCodeBackend;
     #[async_trait]
     impl CodeExecutionBackend for MockCodeBackend {
-        async fn execute(&self, code: &str, _language: Option<&str>, _timeout: Option<u64>) -> Result<String, ToolError> {
+        async fn execute(
+            &self,
+            code: &str,
+            _language: Option<&str>,
+            _timeout: Option<u64>,
+        ) -> Result<String, ToolError> {
             Ok(format!("Output of: {}", code))
         }
     }
@@ -94,7 +114,10 @@ mod tests {
     #[tokio::test]
     async fn test_execute_code() {
         let handler = ExecuteCodeHandler::new(Arc::new(MockCodeBackend));
-        let result = handler.execute(json!({"code": "print(1+1)"})).await.unwrap();
+        let result = handler
+            .execute(json!({"code": "print(1+1)"}))
+            .await
+            .unwrap();
         assert!(result.contains("print(1+1)"));
     }
 }

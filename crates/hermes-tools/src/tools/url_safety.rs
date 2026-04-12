@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
 pub struct UrlSafetyHandler;
 
@@ -14,12 +14,19 @@ impl ToolHandler for UrlSafetyHandler {
             return Err(ToolError::InvalidParams("Missing 'url'".into()));
         }
         let risky = url.starts_with("http://");
-        Ok(json!({"url":url,"safe":!risky,"reason":if risky {"non_https"} else {"ok"}}).to_string())
+        Ok(
+            json!({"url":url,"safe":!risky,"reason":if risky {"non_https"} else {"ok"}})
+                .to_string(),
+        )
     }
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
         props.insert("url".into(), json!({"type":"string"}));
-        tool_schema("url_safety", "Check whether a URL is safe to access.", JsonSchema::object(props, vec!["url".into()]))
+        tool_schema(
+            "url_safety",
+            "Check whether a URL is safe to access.",
+            JsonSchema::object(props, vec!["url".into()]),
+        )
     }
 }

@@ -17,8 +17,10 @@ use crate::context_files::scan_context_content;
 
 /// Context files to look for in subdirectories, in priority order.
 const HINT_FILENAMES: &[&str] = &[
-    "AGENTS.md", "agents.md",
-    "CLAUDE.md", "claude.md",
+    "AGENTS.md",
+    "agents.md",
+    "CLAUDE.md",
+    "claude.md",
     ".cursorrules",
 ];
 
@@ -83,11 +85,7 @@ impl SubdirectoryHintTracker {
     }
 
     /// Extract directory paths from tool call arguments.
-    fn extract_directories(
-        &self,
-        tool_name: &str,
-        args: &serde_json::Value,
-    ) -> Vec<PathBuf> {
+    fn extract_directories(&self, tool_name: &str, args: &serde_json::Value) -> Vec<PathBuf> {
         let mut candidates = HashSet::new();
 
         // Direct path arguments
@@ -155,7 +153,10 @@ impl SubdirectoryHintTracker {
                 continue;
             }
             // Skip URLs
-            if token.starts_with("http://") || token.starts_with("https://") || token.starts_with("git@") {
+            if token.starts_with("http://")
+                || token.starts_with("https://")
+                || token.starts_with("git@")
+            {
                 continue;
             }
             self.add_path_candidate(token, candidates);
@@ -273,7 +274,11 @@ pub fn generate_project_hints(working_dir: &Path) -> String {
             return format!(
                 "Working directory: {}\nProject type: {}\nSubdirectories: {}",
                 working_dir.display(),
-                if hints.len() > 1 { hints[..hints.len()-1].join(", ") } else { "unknown".to_string() },
+                if hints.len() > 1 {
+                    hints[..hints.len() - 1].join(", ")
+                } else {
+                    "unknown".to_string()
+                },
                 dir_list
             );
         }
@@ -374,6 +379,9 @@ mod tests {
         let args = serde_json::json!({"command": "cat src/main.rs"});
         let dirs = tracker.extract_directories("terminal", &args);
         // Should extract src directory from the command
-        assert!(!dirs.is_empty(), "Expected directories from command path extraction");
+        assert!(
+            !dirs.is_empty(),
+            "Expected directories from command path extraction"
+        );
     }
 }

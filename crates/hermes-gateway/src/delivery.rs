@@ -149,7 +149,9 @@ impl DeliveryRouter {
         match target {
             DeliveryTarget::Origin => {
                 let platform_name = origin_platform.ok_or_else(|| {
-                    GatewayError::SendFailed("Origin target but no origin platform specified".into())
+                    GatewayError::SendFailed(
+                        "Origin target but no origin platform specified".into(),
+                    )
                 })?;
                 let chat_id = origin_chat_id.ok_or_else(|| {
                     GatewayError::SendFailed("Origin target but no origin chat_id specified".into())
@@ -182,19 +184,26 @@ impl DeliveryRouter {
         match adapters.get(platform_name) {
             Some(adapter) => {
                 if !adapter.is_running() {
-                    warn!(platform = platform_name, "Adapter is not running, attempting delivery anyway");
+                    warn!(
+                        platform = platform_name,
+                        "Adapter is not running, attempting delivery anyway"
+                    );
                 }
                 adapter.send_message(chat_id, message, None).await
             }
             None => {
-                error!(platform = platform_name, "No adapter registered for platform");
+                error!(
+                    platform = platform_name,
+                    "No adapter registered for platform"
+                );
                 self.fallback_queue.enqueue(DeliveryItem {
                     platform: platform_name.to_string(),
                     chat_id: chat_id.to_string(),
                     text: message.to_string(),
                 });
                 Err(GatewayError::SendFailed(format!(
-                    "No adapter registered for platform '{}'", platform_name
+                    "No adapter registered for platform '{}'",
+                    platform_name
                 )))
             }
         }
@@ -221,7 +230,11 @@ impl DeliveryRouter {
             }
             DeliveryTarget::Local => {
                 debug!("File delivery to local is not supported, queueing as text");
-                let msg = format!("[file:{}]{}", file_path, caption.map(|c| format!(" {c}")).unwrap_or_default());
+                let msg = format!(
+                    "[file:{}]{}",
+                    file_path,
+                    caption.map(|c| format!(" {c}")).unwrap_or_default()
+                );
                 self.fallback_queue.enqueue(DeliveryItem {
                     platform: "local".to_string(),
                     chat_id: "local".to_string(),
@@ -236,7 +249,8 @@ impl DeliveryRouter {
         match adapters.get(platform_name) {
             Some(adapter) => adapter.send_file(chat_id, file_path, caption).await,
             None => Err(GatewayError::SendFailed(format!(
-                "No adapter registered for platform '{}'", platform_name
+                "No adapter registered for platform '{}'",
+                platform_name
             ))),
         }
     }
@@ -272,11 +286,17 @@ mod tests {
     fn test_parse_target_platform() {
         assert_eq!(
             parse_target("telegram:12345"),
-            DeliveryTarget::Platform { name: "telegram".into(), chat_id: "12345".into() }
+            DeliveryTarget::Platform {
+                name: "telegram".into(),
+                chat_id: "12345".into()
+            }
         );
         assert_eq!(
             parse_target("discord:channel_abc"),
-            DeliveryTarget::Platform { name: "discord".into(), chat_id: "channel_abc".into() }
+            DeliveryTarget::Platform {
+                name: "discord".into(),
+                chat_id: "channel_abc".into()
+            }
         );
     }
 
@@ -289,7 +309,11 @@ mod tests {
     fn test_delivery_queue() {
         let q = DeliveryQueue::new();
         assert!(q.is_empty());
-        q.enqueue(DeliveryItem { platform: "test".into(), chat_id: "1".into(), text: "hello".into() });
+        q.enqueue(DeliveryItem {
+            platform: "test".into(),
+            chat_id: "1".into(),
+            text: "hello".into(),
+        });
         assert_eq!(q.len(), 1);
         let item = q.dequeue().unwrap();
         assert_eq!(item.text, "hello");

@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Mutex;
 
-use hermes_core::ToolError;
 use crate::tools::todo::TodoBackend;
+use hermes_core::ToolError;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct TodoItem {
@@ -42,7 +42,9 @@ impl FileTodoBackend {
 
     pub fn default_path() -> Self {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        let path = std::path::Path::new(&home).join(".hermes").join("todos.json");
+        let path = std::path::Path::new(&home)
+            .join(".hermes")
+            .join("todos.json");
         Self::new(path)
     }
 
@@ -61,8 +63,16 @@ impl FileTodoBackend {
 
 #[async_trait]
 impl TodoBackend for FileTodoBackend {
-    async fn create(&self, title: &str, description: Option<&str>, priority: Option<&str>) -> Result<String, ToolError> {
-        let mut items = self.items.lock().map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
+    async fn create(
+        &self,
+        title: &str,
+        description: Option<&str>,
+        priority: Option<&str>,
+    ) -> Result<String, ToolError> {
+        let mut items = self
+            .items
+            .lock()
+            .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
         let id = uuid::Uuid::new_v4().to_string();
         let item = TodoItem {
             id: id.clone(),
@@ -77,36 +87,62 @@ impl TodoBackend for FileTodoBackend {
         Ok(json!({"status": "ok", "id": id, "title": title}).to_string())
     }
 
-    async fn update(&self, id: &str, title: Option<&str>, description: Option<&str>, status: Option<&str>, priority: Option<&str>) -> Result<String, ToolError> {
-        let mut items = self.items.lock().map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
-        let item = items.iter_mut().find(|i| i.id == id)
+    async fn update(
+        &self,
+        id: &str,
+        title: Option<&str>,
+        description: Option<&str>,
+        status: Option<&str>,
+        priority: Option<&str>,
+    ) -> Result<String, ToolError> {
+        let mut items = self
+            .items
+            .lock()
+            .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
+        let item = items
+            .iter_mut()
+            .find(|i| i.id == id)
             .ok_or_else(|| ToolError::NotFound(format!("Todo '{}' not found", id)))?;
 
-        if let Some(t) = title { item.title = t.to_string(); }
-        if let Some(d) = description { item.description = Some(d.to_string()); }
-        if let Some(s) = status { item.status = s.to_string(); }
-        if let Some(p) = priority { item.priority = p.to_string(); }
+        if let Some(t) = title {
+            item.title = t.to_string();
+        }
+        if let Some(d) = description {
+            item.description = Some(d.to_string());
+        }
+        if let Some(s) = status {
+            item.status = s.to_string();
+        }
+        if let Some(p) = priority {
+            item.priority = p.to_string();
+        }
 
         self.save(&items)?;
         Ok(json!({"status": "ok", "id": id, "action": "updated"}).to_string())
     }
 
     async fn list(&self, status: Option<&str>) -> Result<String, ToolError> {
-        let items = self.items.lock().map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
+        let items = self
+            .items
+            .lock()
+            .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
         let filtered: Vec<&TodoItem> = match status {
             Some(s) => items.iter().filter(|i| i.status == s).collect(),
             None => items.iter().collect(),
         };
-        let result: Vec<serde_json::Value> = filtered.iter().map(|i| {
-            json!({
-                "id": i.id,
-                "title": i.title,
-                "description": i.description,
-                "status": i.status,
-                "priority": i.priority,
-                "created_at": i.created_at,
+        let result: Vec<serde_json::Value> = filtered
+            .iter()
+            .map(|i| {
+                json!({
+                    "id": i.id,
+                    "title": i.title,
+                    "description": i.description,
+                    "status": i.status,
+                    "priority": i.priority,
+                    "created_at": i.created_at,
+                })
             })
-        }).collect();
+            .collect();
         Ok(json!({"todos": result, "total": result.len()}).to_string())
     }
 }

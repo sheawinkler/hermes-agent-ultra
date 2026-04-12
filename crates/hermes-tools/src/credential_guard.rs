@@ -6,8 +6,8 @@
 use std::path::Path;
 use std::sync::LazyLock;
 
-use regex::Regex;
 use hermes_core::ToolError;
+use regex::Regex;
 
 // ---------------------------------------------------------------------------
 // Protected file patterns
@@ -43,17 +43,11 @@ const PROTECTED_FILE_NAMES: &[&str] = &[
     ".pfx",
     ".jks",
     ".keystore",
-    ".pub",   // SSH public keys — still sensitive in some contexts
+    ".pub", // SSH public keys — still sensitive in some contexts
 ];
 
 /// Directory names that are always protected.
-const PROTECTED_DIR_NAMES: &[&str] = &[
-    ".ssh",
-    ".gnupg",
-    ".aws",
-    ".config/gcloud",
-    ".kube",
-];
+const PROTECTED_DIR_NAMES: &[&str] = &[".ssh", ".gnupg", ".aws", ".config/gcloud", ".kube"];
 
 // ---------------------------------------------------------------------------
 // Content secret patterns
@@ -61,18 +55,54 @@ const PROTECTED_DIR_NAMES: &[&str] = &[
 
 static SECRET_PATTERNS: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| {
     vec![
-        ("Private key", Regex::new(r"(?i)-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----").unwrap()),
-        ("API key (sk-)", Regex::new(r"\bsk-[a-zA-Z0-9]{20,}\b").unwrap()),
-        ("API key (sk_live)", Regex::new(r"\bsk_live_[a-zA-Z0-9]{20,}\b").unwrap()),
-        ("GitHub token", Regex::new(r"\bgh[ps]_[a-zA-Z0-9]{36,}\b").unwrap()),
-        ("AWS access key", Regex::new(r"\bAKIA[0-9A-Z]{16}\b").unwrap()),
-        ("AWS secret key", Regex::new(r"(?i)aws_secret_access_key\s*=\s*\S+").unwrap()),
-        ("Google API key", Regex::new(r"\bAIza[0-9A-Za-z\-_]{35}\b").unwrap()),
-        ("Slack token", Regex::new(r"\bxox[bpras]-[0-9a-zA-Z\-]{10,}\b").unwrap()),
-        ("Stripe key", Regex::new(r"\b[rk]k_live_[0-9a-zA-Z]{24,}\b").unwrap()),
-        ("JWT token", Regex::new(r"\beyJ[A-Za-z0-9-_]+\.eyJ[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\b").unwrap()),
-        ("Password assignment", Regex::new(r"(?i)(?:password|passwd|pwd)\s*[:=]\s*\S+").unwrap()),
-        ("Generic secret assignment", Regex::new(r"(?i)(?:secret|token|api_key|apikey|access_key)\s*[:=]\s*\S{8,}").unwrap()),
+        (
+            "Private key",
+            Regex::new(r"(?i)-----BEGIN (?:RSA |EC |DSA )?PRIVATE KEY-----").unwrap(),
+        ),
+        (
+            "API key (sk-)",
+            Regex::new(r"\bsk-[a-zA-Z0-9]{20,}\b").unwrap(),
+        ),
+        (
+            "API key (sk_live)",
+            Regex::new(r"\bsk_live_[a-zA-Z0-9]{20,}\b").unwrap(),
+        ),
+        (
+            "GitHub token",
+            Regex::new(r"\bgh[ps]_[a-zA-Z0-9]{36,}\b").unwrap(),
+        ),
+        (
+            "AWS access key",
+            Regex::new(r"\bAKIA[0-9A-Z]{16}\b").unwrap(),
+        ),
+        (
+            "AWS secret key",
+            Regex::new(r"(?i)aws_secret_access_key\s*=\s*\S+").unwrap(),
+        ),
+        (
+            "Google API key",
+            Regex::new(r"\bAIza[0-9A-Za-z\-_]{35}\b").unwrap(),
+        ),
+        (
+            "Slack token",
+            Regex::new(r"\bxox[bpras]-[0-9a-zA-Z\-]{10,}\b").unwrap(),
+        ),
+        (
+            "Stripe key",
+            Regex::new(r"\b[rk]k_live_[0-9a-zA-Z]{24,}\b").unwrap(),
+        ),
+        (
+            "JWT token",
+            Regex::new(r"\beyJ[A-Za-z0-9-_]+\.eyJ[A-Za-z0-9-_]+\.[A-Za-z0-9-_]+\b").unwrap(),
+        ),
+        (
+            "Password assignment",
+            Regex::new(r"(?i)(?:password|passwd|pwd)\s*[:=]\s*\S+").unwrap(),
+        ),
+        (
+            "Generic secret assignment",
+            Regex::new(r"(?i)(?:secret|token|api_key|apikey|access_key)\s*[:=]\s*\S{8,}").unwrap(),
+        ),
     ]
 });
 
@@ -212,7 +242,8 @@ fn is_protected_file_with_extra(path: &Path, extra: &[String]) -> bool {
         }
 
         // Substring matches for credential/secret
-        if lower.contains("credential") || lower.contains("secret") || lower.contains("private_key") {
+        if lower.contains("credential") || lower.contains("secret") || lower.contains("private_key")
+        {
             return true;
         }
 
@@ -267,7 +298,9 @@ mod tests {
     #[test]
     fn test_protected_directory() {
         assert!(is_protected_file(Path::new("/home/user/.ssh/config")));
-        assert!(is_protected_file(Path::new("/home/user/.gnupg/pubring.gpg")));
+        assert!(is_protected_file(Path::new(
+            "/home/user/.gnupg/pubring.gpg"
+        )));
         assert!(is_protected_file(Path::new("/home/user/.aws/credentials")));
     }
 
@@ -293,7 +326,9 @@ mod tests {
     fn test_check_read_access_blocked() {
         let guard = CredentialGuard::new();
         assert!(guard.check_read_access(Path::new(".env")).is_err());
-        assert!(guard.check_read_access(Path::new("/home/.ssh/id_rsa")).is_err());
+        assert!(guard
+            .check_read_access(Path::new("/home/.ssh/id_rsa"))
+            .is_err());
     }
 
     #[test]
@@ -306,26 +341,39 @@ mod tests {
     #[test]
     fn test_check_write_access_blocked_path() {
         let guard = CredentialGuard::new();
-        assert!(guard.check_write_access(Path::new(".env"), "hello").is_err());
+        assert!(guard
+            .check_write_access(Path::new(".env"), "hello")
+            .is_err());
     }
 
     #[test]
     fn test_check_write_access_blocked_content() {
         let guard = CredentialGuard::new();
         // Contains an API key pattern
-        assert!(guard.check_write_access(Path::new("config.txt"), "[REDACTED_API_KEY]").is_err());
+        assert!(guard
+            .check_write_access(
+                Path::new("config.txt"),
+                "[REDACTED_API_KEY]"
+            )
+            .is_err());
         // Contains a private key
-        assert!(guard.check_write_access(
-            Path::new("notes.txt"),
-            "[REDACTED_PRIVATE_KEY_BLOCK]\nsomekey"
-        ).is_err());
+        assert!(guard
+            .check_write_access(
+                Path::new("notes.txt"),
+                "[REDACTED_PRIVATE_KEY_BLOCK]\nsomekey"
+            )
+            .is_err());
     }
 
     #[test]
     fn test_check_write_access_allowed() {
         let guard = CredentialGuard::new();
-        assert!(guard.check_write_access(Path::new("output.txt"), "Hello world").is_ok());
-        assert!(guard.check_write_access(Path::new("main.rs"), "fn main() {}").is_ok());
+        assert!(guard
+            .check_write_access(Path::new("output.txt"), "Hello world")
+            .is_ok());
+        assert!(guard
+            .check_write_access(Path::new("main.rs"), "fn main() {}")
+            .is_ok());
     }
 
     #[test]
@@ -334,7 +382,12 @@ mod tests {
         // Path check still works
         assert!(guard.check_read_access(Path::new(".env")).is_err());
         // But content scanning is disabled
-        assert!(guard.check_write_access(Path::new("output.txt"), "[REDACTED_API_KEY]").is_ok());
+        assert!(guard
+            .check_write_access(
+                Path::new("output.txt"),
+                "[REDACTED_API_KEY]"
+            )
+            .is_ok());
     }
 
     #[test]

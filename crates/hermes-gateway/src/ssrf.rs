@@ -100,8 +100,12 @@ fn is_private_ipv6(ip: &Ipv6Addr) -> bool {
     // Check if this is an IPv4-mapped address and delegate to IPv4 check
     // Manual check: last two segments are 0xffff, first four are 0
     let segments = ip.segments();
-    if segments[0] == 0 && segments[1] == 0 && segments[2] == 0 && segments[3] == 0
-        && segments[4] == 0 && segments[5] == 0xffff
+    if segments[0] == 0
+        && segments[1] == 0
+        && segments[2] == 0
+        && segments[3] == 0
+        && segments[4] == 0
+        && segments[5] == 0xffff
     {
         // Extract the IPv4 portion and check it
         let ipv4 = ip.to_ipv4_mapped().unwrap();
@@ -212,9 +216,9 @@ pub fn validate_url(url: &str) -> Result<Url, GatewayError> {
     }
 
     // Check the host
-    let host = parsed.host_str().ok_or_else(|| {
-        GatewayError::ConnectionFailed(format!("URL has no host: {}", url))
-    })?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| GatewayError::ConnectionFailed(format!("URL has no host: {}", url)))?;
 
     // Check if the host is a raw IP in a private range
     if let Ok(ip) = IpAddr::from_str(host) {
@@ -234,11 +238,7 @@ pub fn validate_url(url: &str) -> Result<Url, GatewayError> {
 
     // Block known dangerous hostnames
     let lowercase_host = host.to_lowercase();
-    let dangerous_hosts = [
-        "localhost",
-        "metadata.google.internal",
-        "metadata.internal",
-    ];
+    let dangerous_hosts = ["localhost", "metadata.google.internal", "metadata.internal"];
     if dangerous_hosts.contains(&lowercase_host.as_str()) {
         return Err(GatewayError::ConnectionFailed(format!(
             "URL hostname is blocked: {}",

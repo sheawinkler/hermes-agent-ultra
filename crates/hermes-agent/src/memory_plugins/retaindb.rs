@@ -120,7 +120,9 @@ impl MemoryProviderPlugin for RetainDbMemoryPlugin {
     }
 
     fn is_available(&self) -> bool {
-        !std::env::var("RETAINDB_API_KEY").unwrap_or_default().is_empty()
+        !std::env::var("RETAINDB_API_KEY")
+            .unwrap_or_default()
+            .is_empty()
     }
 
     fn initialize(&self, session_id: &str, hermes_home: &str) {
@@ -143,10 +145,7 @@ impl MemoryProviderPlugin for RetainDbMemoryPlugin {
                 format!("hermes-{}", profile)
             }
         });
-        let client = match Client::builder()
-            .timeout(Duration::from_secs(45))
-            .build()
-        {
+        let client = match Client::builder().timeout(Duration::from_secs(45)).build() {
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!("RetainDB client build failed: {}", e);

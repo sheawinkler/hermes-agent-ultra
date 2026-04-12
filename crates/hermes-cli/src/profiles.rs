@@ -7,6 +7,11 @@ pub fn list_profiles(config_dir: &Path) -> Vec<String> {
     };
     entries
         .flatten()
-        .filter_map(|e| e.path().file_stem().and_then(|s| s.to_str()).map(|s| s.to_string()))
+        .filter_map(|e| {
+            e.path()
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(|s| s.to_string())
+        })
         .collect()
 }

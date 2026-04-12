@@ -7,8 +7,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use hermes_core::AgentError;
 use crate::memory_manager::MemoryProviderPlugin;
+use hermes_core::AgentError;
 
 /// Honcho API base URL.
 const DEFAULT_HONCHO_BASE_URL: &str = "https://api.honcho.dev/v1";
@@ -87,7 +87,8 @@ impl HonchoProvider {
             "content": content,
         });
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .json(&body)
@@ -104,10 +105,7 @@ impl HonchoProvider {
     }
 
     /// Prefetch user context (dialectic insights) from Honcho.
-    pub async fn prefetch_context(
-        &self,
-        user_id: &str,
-    ) -> Result<Option<String>, AgentError> {
+    pub async fn prefetch_context(&self, user_id: &str) -> Result<Option<String>, AgentError> {
         if !self.config.prefetch {
             return Ok(None);
         }
@@ -117,7 +115,8 @@ impl HonchoProvider {
             self.base_url, self.config.app_id, user_id
         );
 
-        let resp = self.client
+        let resp = self
+            .client
             .get(&url)
             .header("Authorization", format!("Bearer {}", self.config.api_key))
             .send()
@@ -177,10 +176,13 @@ mod tests {
 
     #[test]
     fn test_honcho_config_defaults() {
-        let config: HonchoConfig = serde_json::from_str(r#"{
+        let config: HonchoConfig = serde_json::from_str(
+            r#"{
             "api_key": "test-key",
             "app_id": "test-app"
-        }"#).unwrap();
+        }"#,
+        )
+        .unwrap();
 
         assert!(config.auto_sync);
         assert!(config.prefetch);

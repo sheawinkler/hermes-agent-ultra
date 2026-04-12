@@ -63,7 +63,15 @@ pub async fn dispatch_tools(
         let max_chars = budget.max_result_size_chars;
         join_set.spawn(async move {
             let start = Instant::now();
-            let result = registry.dispatch_async(&call.function.name, call.function.arguments.parse().unwrap_or(serde_json::Value::Null)).await;
+            let result = registry
+                .dispatch_async(
+                    &call.function.name,
+                    call.function
+                        .arguments
+                        .parse()
+                        .unwrap_or(serde_json::Value::Null),
+                )
+                .await;
             let duration_ms = start.elapsed().as_millis() as u64;
 
             // Check if result is an error
@@ -105,7 +113,10 @@ pub async fn dispatch_tools(
             }
             Err(e) => {
                 // Join error — treat as a tool error
-                results.push(ToolResult::err("unknown", format!("Task join error: {}", e)));
+                results.push(ToolResult::err(
+                    "unknown",
+                    format!("Task join error: {}", e),
+                ));
             }
         }
     }
@@ -138,7 +149,15 @@ pub async fn dispatch_single(
     max_result_size_chars: usize,
 ) -> ToolResult {
     let start = Instant::now();
-    let result = registry.dispatch_async(&call.function.name, call.function.arguments.parse().unwrap_or(serde_json::Value::Null)).await;
+    let result = registry
+        .dispatch_async(
+            &call.function.name,
+            call.function
+                .arguments
+                .parse()
+                .unwrap_or(serde_json::Value::Null),
+        )
+        .await;
     let duration_ms = start.elapsed().as_millis() as u64;
 
     let is_error = result.starts_with(r#"{"error"#);

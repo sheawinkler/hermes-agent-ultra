@@ -107,7 +107,10 @@ async fn local_write_read_file() {
     assert_eq!(content, "line2\nline3");
 
     // Read with offset + limit
-    let content = backend.read_file(&path_str, Some(1), Some(1)).await.unwrap();
+    let content = backend
+        .read_file(&path_str, Some(1), Some(1))
+        .await
+        .unwrap();
     assert_eq!(content, "line2");
 
     // Cleanup
@@ -119,12 +122,10 @@ async fn local_write_read_file() {
 async fn local_file_exists() {
     let backend = LocalBackend::default();
     assert!(backend.file_exists("/tmp").await.unwrap());
-    assert!(
-        !backend
-            .file_exists("/tmp/hermes_nonexistent_xyz_12345")
-            .await
-            .unwrap()
-    );
+    assert!(!backend
+        .file_exists("/tmp/hermes_nonexistent_xyz_12345")
+        .await
+        .unwrap());
 }
 
 #[tokio::test]
@@ -134,7 +135,10 @@ async fn local_write_creates_parent_dirs() {
     let path = dir.join("file.txt");
     let path_str = path.to_string_lossy().to_string();
 
-    backend.write_file(&path_str, "nested content").await.unwrap();
+    backend
+        .write_file(&path_str, "nested content")
+        .await
+        .unwrap();
     assert!(backend.file_exists(&path_str).await.unwrap());
 
     let content = backend.read_file(&path_str, None, None).await.unwrap();

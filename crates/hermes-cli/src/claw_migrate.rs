@@ -344,8 +344,8 @@ fn migrate_skills_dir(
 /// Merge environment variables from source .env into destination .env.
 /// Returns the number of keys imported.
 fn merge_env_files(src: &Path, dst: &Path) -> Result<usize, String> {
-    let src_content = std::fs::read_to_string(src)
-        .map_err(|e| format!("Failed to read source .env: {}", e))?;
+    let src_content =
+        std::fs::read_to_string(src).map_err(|e| format!("Failed to read source .env: {}", e))?;
 
     let existing = if dst.exists() {
         std::fs::read_to_string(dst).unwrap_or_default()
@@ -384,8 +384,7 @@ fn merge_env_files(src: &Path, dst: &Path) -> Result<usize, String> {
         content.push_str(&new_lines.join("\n"));
         content.push('\n');
 
-        std::fs::write(dst, content)
-            .map_err(|e| format!("Failed to write .env: {}", e))?;
+        std::fs::write(dst, content).map_err(|e| format!("Failed to write .env: {}", e))?;
     }
 
     Ok(count)

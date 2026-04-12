@@ -75,10 +75,7 @@ pub async fn start_copilot_device_flow() -> Result<String, AgentError> {
         .build()
         .map_err(|e| AgentError::Io(e.to_string()))?;
 
-    let body = form_body(&[
-        ("client_id", &client_id),
-        ("scope", &scope),
-    ]);
+    let body = form_body(&[("client_id", &client_id), ("scope", &scope)]);
 
     let dcr: DeviceCodeResponse = http
         .post("https://github.com/login/device/code")
@@ -133,10 +130,7 @@ pub async fn start_copilot_device_flow() -> Result<String, AgentError> {
         let poll_body = form_body(&[
             ("client_id", &client_id),
             ("device_code", &device_code),
-            (
-                "grant_type",
-                "urn:ietf:params:oauth:grant-type:device_code",
-            ),
+            ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
         ]);
 
         let resp = http
@@ -175,10 +169,7 @@ pub async fn start_copilot_device_flow() -> Result<String, AgentError> {
                 continue;
             }
             Some(other) => {
-                let desc = token_resp
-                    .error_description
-                    .clone()
-                    .unwrap_or_default();
+                let desc = token_resp.error_description.clone().unwrap_or_default();
                 return Err(AgentError::AuthFailed(format!(
                     "GitHub OAuth error: {other}: {desc}"
                 )));

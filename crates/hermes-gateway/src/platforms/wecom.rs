@@ -43,14 +43,21 @@ pub struct WeComAdapter {
 
 impl WeComAdapter {
     pub fn new(config: WeComConfig) -> Result<Self, GatewayError> {
-        let base = BasePlatformAdapter::new(&config.corp_id)
-            .with_proxy(config.proxy.clone());
+        let base = BasePlatformAdapter::new(&config.corp_id).with_proxy(config.proxy.clone());
         base.validate_token()?;
         let client = base.build_client()?;
-        Ok(Self { base, config, client, access_token: RwLock::new(None), stop_signal: Arc::new(Notify::new()) })
+        Ok(Self {
+            base,
+            config,
+            client,
+            access_token: RwLock::new(None),
+            stop_signal: Arc::new(Notify::new()),
+        })
     }
 
-    pub fn config(&self) -> &WeComConfig { &self.config }
+    pub fn config(&self) -> &WeComConfig {
+        &self.config
+    }
 
     /// Get or refresh the access token.
     pub async fn get_access_token(&self) -> Result<String, GatewayError> {
@@ -63,13 +70,20 @@ impl WeComAdapter {
             WECOM_API_BASE, self.config.corp_id, self.config.secret
         );
 
-        let resp = self.client.get(&url).send().await
+        let resp = self
+            .client
+            .get(&url)
+            .send()
+            .await
             .map_err(|e| GatewayError::Auth(format!("WeCom auth failed: {}", e)))?;
 
-        let result: serde_json::Value = resp.json().await
+        let result: serde_json::Value = resp
+            .json()
+            .await
             .map_err(|e| GatewayError::Auth(format!("WeCom auth parse failed: {}", e)))?;
 
-        let token = result.get("access_token")
+        let token = result
+            .get("access_token")
             .and_then(|v| v.as_str())
             .ok_or_else(|| GatewayError::Auth("No access_token in WeCom response".into()))?
             .to_string();
@@ -103,12 +117,20 @@ impl WeComAdapter {
             })
         };
 
-        let resp = self.client.post(&url).json(&body).send().await
+        let resp = self
+            .client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("WeCom send failed: {}", e)))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("WeCom API error: {}", text)));
+            return Err(GatewayError::SendFailed(format!(
+                "WeCom API error: {}",
+                text
+            )));
         }
         Ok(())
     }
@@ -129,23 +151,39 @@ impl PlatformAdapter for WeComAdapter {
         Ok(())
     }
 
-    async fn send_message(&self, chat_id: &str, text: &str, _parse_mode: Option<ParseMode>) -> Result<(), GatewayError> {
+    async fn send_message(
+        &self,
+        chat_id: &str,
+        text: &str,
+        _parse_mode: Option<ParseMode>,
+    ) -> Result<(), GatewayError> {
         self.send_text(chat_id, text).await
     }
 
-    async fn edit_message(&self, _chat_id: &str, _message_id: &str, _text: &str) -> Result<(), GatewayError> {
+    async fn edit_message(
+        &self,
+        _chat_id: &str,
+        _message_id: &str,
+        _text: &str,
+    ) -> Result<(), GatewayError> {
         debug!("WeCom does not support message editing");
         Ok(())
     }
 
-    async fn send_file(&self, chat_id: &str, file_path: &str, caption: Option<&str>) -> Result<(), GatewayError> {
+    async fn send_file(
+        &self,
+        chat_id: &str,
+        file_path: &str,
+        caption: Option<&str>,
+    ) -> Result<(), GatewayError> {
         use crate::platforms::helpers::{media_category, mime_from_extension};
 
         let path = std::path::Path::new(file_path);
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let mime = mime_from_extension(ext);
         let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-        let file_bytes = tokio::fs::read(file_path).await
+        let file_bytes = tokio::fs::read(file_path)
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("Failed to read file: {e}")))?;
 
         let token = self.get_access_token().await?;
@@ -169,19 +207,27 @@ impl PlatformAdapter for WeComAdapter {
             .map_err(|e| GatewayError::SendFailed(format!("MIME error: {e}")))?;
         let form = reqwest::multipart::Form::new().part("media", part);
 
-        let resp = self.client.post(&upload_url)
+        let resp = self
+            .client
+            .post(&upload_url)
             .multipart(form)
-            .send().await
+            .send()
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("WeCom media upload failed: {e}")))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("WeCom upload error: {text}")));
+            return Err(GatewayError::SendFailed(format!(
+                "WeCom upload error: {text}"
+            )));
         }
 
-        let result: serde_json::Value = resp.json().await
+        let result: serde_json::Value = resp
+            .json()
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("WeCom upload parse failed: {e}")))?;
-        let media_id = result.get("media_id")
+        let media_id = result
+            .get("media_id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| GatewayError::SendFailed("No media_id in WeCom response".into()))?;
 
@@ -261,18 +307,27 @@ impl PlatformAdapter for WeComAdapter {
             }
         };
 
-        let resp = self.client.post(&send_url)
+        let resp = self
+            .client
+            .post(&send_url)
             .json(&body)
-            .send().await
+            .send()
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("WeCom media send failed: {e}")))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("WeCom media send error: {text}")));
+            return Err(GatewayError::SendFailed(format!(
+                "WeCom media send error: {text}"
+            )));
         }
         Ok(())
     }
 
-    fn is_running(&self) -> bool { self.base.is_running() }
-    fn platform_name(&self) -> &str { "wecom" }
+    fn is_running(&self) -> bool {
+        self.base.is_running()
+    }
+    fn platform_name(&self) -> &str {
+        "wecom"
+    }
 }

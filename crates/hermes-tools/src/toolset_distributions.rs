@@ -175,8 +175,16 @@ fn make_safe() -> ToolsetDistribution {
 fn make_balanced() -> ToolsetDistribution {
     let mut w = HashMap::new();
     for key in [
-        "web", "terminal", "file", "browser", "vision", "skills",
-        "memory", "todo", "clarify", "code_execution",
+        "web",
+        "terminal",
+        "file",
+        "browser",
+        "vision",
+        "skills",
+        "memory",
+        "todo",
+        "clarify",
+        "code_execution",
     ] {
         w.insert(key.into(), 0.5);
     }
@@ -326,9 +334,7 @@ fn make_mixed_tasks() -> ToolsetDistribution {
 
 /// Get a built-in distribution by name.
 pub fn get_distribution(name: &str) -> Option<ToolsetDistribution> {
-    builtin_distributions()
-        .into_iter()
-        .find(|d| d.name == name)
+    builtin_distributions().into_iter().find(|d| d.name == name)
 }
 
 /// List all available distribution names.
@@ -409,7 +415,11 @@ mod tests {
         let mut names: Vec<_> = dists.iter().map(|d| d.name.clone()).collect();
         names.sort();
         names.dedup();
-        assert_eq!(names.len(), dists.len(), "Duplicate distribution names found");
+        assert_eq!(
+            names.len(),
+            dists.len(),
+            "Duplicate distribution names found"
+        );
     }
 
     #[test]
@@ -441,15 +451,13 @@ mod tests {
 
     #[test]
     fn test_validate_distribution_bad_weight() {
-        let dist = ToolsetDistribution::new("test", "test")
-            .with_weight("web", 1.5);
+        let dist = ToolsetDistribution::new("test", "test").with_weight("web", 1.5);
         assert!(validate_distribution(&dist).is_err());
     }
 
     #[test]
     fn test_validate_distribution_negative_weight() {
-        let dist = ToolsetDistribution::new("test", "test")
-            .with_weight("web", -0.1);
+        let dist = ToolsetDistribution::new("test", "test").with_weight("web", -0.1);
         assert!(validate_distribution(&dist).is_err());
     }
 

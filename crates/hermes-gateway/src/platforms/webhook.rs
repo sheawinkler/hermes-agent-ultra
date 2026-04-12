@@ -31,8 +31,12 @@ pub struct WebhookConfig {
     pub secret: String,
 }
 
-fn default_webhook_port() -> u16 { 9000 }
-fn default_webhook_path() -> String { "/webhook".to_string() }
+fn default_webhook_port() -> u16 {
+    9000
+}
+fn default_webhook_path() -> String {
+    "/webhook".to_string()
+}
 
 // ---------------------------------------------------------------------------
 // Incoming payload
@@ -83,7 +87,9 @@ impl WebhookAdapter {
         }
     }
 
-    pub fn config(&self) -> &WebhookConfig { &self.config }
+    pub fn config(&self) -> &WebhookConfig {
+        &self.config
+    }
 
     /// Set a channel to forward inbound webhook payloads to.
     pub async fn set_inbound_sender(&self, tx: tokio::sync::mpsc::Sender<WebhookPayload>) {
@@ -122,7 +128,10 @@ impl WebhookAdapter {
 #[async_trait]
 impl PlatformAdapter for WebhookAdapter {
     async fn start(&self) -> Result<(), GatewayError> {
-        info!("Webhook adapter starting on port {} at path {}", self.config.port, self.config.path);
+        info!(
+            "Webhook adapter starting on port {} at path {}",
+            self.config.port, self.config.path
+        );
 
         let addr: SocketAddr = format!("0.0.0.0:{}", self.config.port)
             .parse()
@@ -228,8 +237,12 @@ impl PlatformAdapter for WebhookAdapter {
         self.send_message(chat_id, &text, None).await
     }
 
-    fn is_running(&self) -> bool { self.base.is_running() }
-    fn platform_name(&self) -> &str { "webhook" }
+    fn is_running(&self) -> bool {
+        self.base.is_running()
+    }
+    fn platform_name(&self) -> &str {
+        "webhook"
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -249,7 +262,9 @@ async fn handle_webhook_request(
     let mut buf = vec![0u8; 65536];
     let (mut reader, mut writer) = stream.into_split();
     let n = reader.read(&mut buf).await?;
-    if n == 0 { return Ok(()); }
+    if n == 0 {
+        return Ok(());
+    }
 
     let request = String::from_utf8_lossy(&buf[..n]);
     let first_line = request.lines().next().unwrap_or("");
@@ -257,7 +272,8 @@ async fn handle_webhook_request(
     let method = parts.first().copied().unwrap_or("GET");
     let path = parts.get(1).copied().unwrap_or("/");
 
-    let signature = request.lines()
+    let signature = request
+        .lines()
         .find(|l| l.to_lowercase().starts_with("x-signature:"))
         .map(|l| l.splitn(2, ':').nth(1).unwrap_or("").trim().to_string())
         .unwrap_or_default();
@@ -267,7 +283,8 @@ async fn handle_webhook_request(
         let body_bytes = &buf[body_start..n];
 
         if !WebhookAdapter::verify_signature(secret, body_bytes, &signature) {
-            let resp = "HTTP/1.1 403 Forbidden\r\nContent-Length: 22\r\n\r\n{\"error\":\"bad signature\"}";
+            let resp =
+                "HTTP/1.1 403 Forbidden\r\nContent-Length: 22\r\n\r\n{\"error\":\"bad signature\"}";
             writer.write_all(resp.as_bytes()).await?;
             return Ok(());
         }
@@ -295,7 +312,8 @@ async fn handle_webhook_request(
         let body = serde_json::to_string(&messages)?;
         let resp = format!(
             "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-            body.len(), body
+            body.len(),
+            body
         );
         writer.write_all(resp.as_bytes()).await?;
     } else {

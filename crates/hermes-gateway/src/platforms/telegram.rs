@@ -341,8 +341,7 @@ pub struct TelegramAdapter {
 impl TelegramAdapter {
     /// Create a new Telegram adapter with the given configuration.
     pub fn new(config: TelegramConfig) -> Result<Self, GatewayError> {
-        let base = BasePlatformAdapter::new(&config.token)
-            .with_proxy(config.proxy.clone());
+        let base = BasePlatformAdapter::new(&config.token).with_proxy(config.proxy.clone());
 
         base.validate_token()?;
 
@@ -440,15 +439,13 @@ impl TelegramAdapter {
             // Attach keyboard only to the last chunk.
             if i == chunks.len() - 1 {
                 if let Some(ref kb) = keyboard {
-                    body["reply_markup"] = serde_json::to_value(kb)
-                        .unwrap_or(serde_json::Value::Null);
+                    body["reply_markup"] =
+                        serde_json::to_value(kb).unwrap_or(serde_json::Value::Null);
                 }
             }
 
             let url = format!("{}/sendMessage", self.api_base);
-            let resp: TelegramResponse<SentMessage> = self
-                .post_json(&url, &body)
-                .await?;
+            let resp: TelegramResponse<SentMessage> = self.post_json(&url, &body).await?;
 
             if let Some(msg) = resp.result {
                 message_ids.push(msg.message_id);
@@ -573,11 +570,7 @@ impl TelegramAdapter {
     }
 
     /// Send a sticker by file path.
-    pub async fn send_sticker(
-        &self,
-        chat_id: &str,
-        file_path: &str,
-    ) -> Result<i64, GatewayError> {
+    pub async fn send_sticker(&self, chat_id: &str, file_path: &str) -> Result<i64, GatewayError> {
         self.send_multipart(chat_id, file_path, None, "sendSticker", "sticker")
             .await
     }
@@ -596,11 +589,12 @@ impl TelegramAdapter {
         let url = format!("{}/sendSticker", self.api_base);
         let resp: TelegramResponse<SentMessage> = self.post_json(&url, &body).await?;
 
-        resp.result
-            .map(|m| m.message_id)
-            .ok_or_else(|| GatewayError::SendFailed(
-                resp.description.unwrap_or_else(|| "sendSticker failed".into())
-            ))
+        resp.result.map(|m| m.message_id).ok_or_else(|| {
+            GatewayError::SendFailed(
+                resp.description
+                    .unwrap_or_else(|| "sendSticker failed".into()),
+            )
+        })
     }
 
     /// Shared multipart upload for all media-sending endpoints.
@@ -614,11 +608,9 @@ impl TelegramAdapter {
     ) -> Result<i64, GatewayError> {
         let url = format!("{}/{}", self.api_base, method);
 
-        let file_bytes = tokio::fs::read(file_path)
-            .await
-            .map_err(|e| GatewayError::SendFailed(
-                format!("Failed to read file {}: {}", file_path, e),
-            ))?;
+        let file_bytes = tokio::fs::read(file_path).await.map_err(|e| {
+            GatewayError::SendFailed(format!("Failed to read file {}: {}", file_path, e))
+        })?;
 
         let file_name = std::path::Path::new(file_path)
             .file_name()
@@ -626,8 +618,7 @@ impl TelegramAdapter {
             .unwrap_or("file")
             .to_string();
 
-        let part = reqwest::multipart::Part::bytes(file_bytes)
-            .file_name(file_name);
+        let part = reqwest::multipart::Part::bytes(file_bytes).file_name(file_name);
 
         let mut form = reqwest::multipart::Form::new()
             .text("chat_id", chat_id.to_string())
@@ -637,7 +628,8 @@ impl TelegramAdapter {
             form = form.text("caption", cap.to_string());
         }
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(&url)
             .multipart(form)
             .send()
@@ -647,23 +639,23 @@ impl TelegramAdapter {
         let status = resp.status();
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             let body_text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(
-                format!("Rate limited on {}: {}", method, body_text),
-            ));
+            return Err(GatewayError::SendFailed(format!(
+                "Rate limited on {}: {}",
+                method, body_text
+            )));
         }
 
-        let result: TelegramResponse<SentMessage> = resp
-            .json()
-            .await
-            .map_err(|e| GatewayError::SendFailed(
-                format!("Failed to parse {} response: {}", method, e),
-            ))?;
+        let result: TelegramResponse<SentMessage> = resp.json().await.map_err(|e| {
+            GatewayError::SendFailed(format!("Failed to parse {} response: {}", method, e))
+        })?;
 
-        result.result
-            .map(|m| m.message_id)
-            .ok_or_else(|| GatewayError::SendFailed(
-                result.description.unwrap_or_else(|| format!("{} failed", method))
-            ))
+        result.result.map(|m| m.message_id).ok_or_else(|| {
+            GatewayError::SendFailed(
+                result
+                    .description
+                    .unwrap_or_else(|| format!("{} failed", method)),
+            )
+        })
     }
 
     // -----------------------------------------------------------------------
@@ -685,10 +677,7 @@ impl TelegramAdapter {
 
         if let Some(updates) = resp.result {
             if let Some(last) = updates.last() {
-                self.poll_offset.store(
-                    last.update_id + 1,
-                    Ordering::SeqCst,
-                );
+                self.poll_offset.store(last.update_id + 1, Ordering::SeqCst);
             }
             Ok(updates)
         } else {
@@ -725,7 +714,10 @@ impl TelegramAdapter {
                     e
                 );
 
-                PollResult::Backoff { error: e, delay_ms: next }
+                PollResult::Backoff {
+                    error: e,
+                    delay_ms: next,
+                }
             }
         }
     }
@@ -773,16 +765,15 @@ impl TelegramAdapter {
         let voice_file_id = msg.voice.as_ref().map(|v| v.file_id.clone());
 
         let is_photo = msg.photo.is_some();
-        let photo_file_id = msg.photo.as_ref().and_then(|photos| {
-            photos.last().map(|p| p.file_id.clone())
-        });
+        let photo_file_id = msg
+            .photo
+            .as_ref()
+            .and_then(|photos| photos.last().map(|p| p.file_id.clone()));
 
         let is_sticker = msg.sticker.is_some();
         let sticker_file_id = msg.sticker.as_ref().map(|s| s.file_id.clone());
 
-        let reply_to_message_id = msg.reply_to_message
-            .as_ref()
-            .map(|r| r.message_id);
+        let reply_to_message_id = msg.reply_to_message.as_ref().map(|r| r.message_id);
 
         let chat_type = ChatKind::from_str(&msg.chat.chat_type);
         let is_group = chat_type.is_group_like();
@@ -859,13 +850,13 @@ impl TelegramAdapter {
 
         let file = resp.result.ok_or_else(|| {
             GatewayError::ConnectionFailed(
-                resp.description.unwrap_or_else(|| "getFile failed".into())
+                resp.description.unwrap_or_else(|| "getFile failed".into()),
             )
         })?;
 
-        let file_path = file.file_path.ok_or_else(|| {
-            GatewayError::ConnectionFailed("File path not available".into())
-        })?;
+        let file_path = file
+            .file_path
+            .ok_or_else(|| GatewayError::ConnectionFailed("File path not available".into()))?;
 
         Ok(format!(
             "https://api.telegram.org/file/bot{}/{}",
@@ -893,19 +884,19 @@ impl TelegramAdapter {
 
         resp.result.ok_or_else(|| {
             GatewayError::Platform(
-                resp.description.unwrap_or_else(|| "getChatMember failed".into()),
+                resp.description
+                    .unwrap_or_else(|| "getChatMember failed".into()),
             )
         })
     }
 
     /// Check if a user is an admin or creator in a chat.
-    pub async fn is_admin(
-        &self,
-        chat_id: &str,
-        user_id: i64,
-    ) -> Result<bool, GatewayError> {
+    pub async fn is_admin(&self, chat_id: &str, user_id: i64) -> Result<bool, GatewayError> {
         let member = self.get_chat_member(chat_id, user_id).await?;
-        Ok(matches!(member.status.as_str(), "administrator" | "creator"))
+        Ok(matches!(
+            member.status.as_str(),
+            "administrator" | "creator"
+        ))
     }
 
     /// Check whether a text message mentions this bot (for group filtering).
@@ -950,14 +941,9 @@ impl TelegramAdapter {
         let mut retries = 0u32;
 
         loop {
-            let resp = self.client
-                .post(url)
-                .json(body)
-                .send()
-                .await
-                .map_err(|e| GatewayError::ConnectionFailed(
-                    format!("Telegram API request failed: {}", e),
-                ))?;
+            let resp = self.client.post(url).json(body).send().await.map_err(|e| {
+                GatewayError::ConnectionFailed(format!("Telegram API request failed: {}", e))
+            })?;
 
             let status = resp.status();
 
@@ -971,12 +957,10 @@ impl TelegramAdapter {
 
                 retries += 1;
                 if retries > RATE_LIMIT_MAX_RETRIES {
-                    return Err(GatewayError::SendFailed(
-                        format!(
-                            "Rate limited after {} retries (retry_after={}s): {}",
-                            retries, retry_after, text
-                        ),
-                    ));
+                    return Err(GatewayError::SendFailed(format!(
+                        "Rate limited after {} retries (retry_after={}s): {}",
+                        retries, retry_after, text
+                    )));
                 }
 
                 warn!(
@@ -991,15 +975,17 @@ impl TelegramAdapter {
             if !status.is_success() {
                 let text = resp.text().await.unwrap_or_default();
                 return Err(GatewayError::SendFailed(format!(
-                    "Telegram API returned HTTP {}: {}", status, text
+                    "Telegram API returned HTTP {}: {}",
+                    status, text
                 )));
             }
 
-            return resp.json::<TelegramResponse<T>>()
-                .await
-                .map_err(|e| GatewayError::ConnectionFailed(format!(
-                    "Failed to parse Telegram API response: {}", e
-                )));
+            return resp.json::<TelegramResponse<T>>().await.map_err(|e| {
+                GatewayError::ConnectionFailed(format!(
+                    "Failed to parse Telegram API response: {}",
+                    e
+                ))
+            });
         }
     }
 
@@ -1086,7 +1072,8 @@ impl PlatformAdapter for TelegramAdapter {
             .to_lowercase();
 
         let (method, field) = Self::media_method_for_extension(&ext);
-        self.send_multipart(chat_id, file_path, caption, method, field).await?;
+        self.send_multipart(chat_id, file_path, caption, method, field)
+            .await?;
         Ok(())
     }
 
@@ -1275,8 +1262,18 @@ mod tests {
                 text: None,
                 voice: None,
                 photo: Some(vec![
-                    PhotoSize { file_id: "small".into(), file_unique_id: "s1".into(), width: 90, height: 90 },
-                    PhotoSize { file_id: "large".into(), file_unique_id: "s2".into(), width: 800, height: 600 },
+                    PhotoSize {
+                        file_id: "small".into(),
+                        file_unique_id: "s1".into(),
+                        width: 90,
+                        height: 90,
+                    },
+                    PhotoSize {
+                        file_id: "large".into(),
+                        file_unique_id: "s2".into(),
+                        width: 800,
+                        height: 600,
+                    },
                 ]),
                 caption: Some("my photo".into()),
                 sticker: None,
@@ -1789,10 +1786,7 @@ mod tests {
     #[test]
     fn strip_mention_removes_at_mention() {
         let adapter = make_adapter_with_bot_username(Some("mybot"));
-        assert_eq!(
-            adapter.strip_mention("@mybot do something"),
-            "do something"
-        );
+        assert_eq!(adapter.strip_mention("@mybot do something"), "do something");
         assert_eq!(
             adapter.strip_mention("hey @mybot please help"),
             "hey  please help"

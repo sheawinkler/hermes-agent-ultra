@@ -76,7 +76,10 @@ impl RunManager {
     /// Update run status.
     pub fn set_status(&mut self, id: &str, status: TrainingStatus) -> bool {
         if let Some(run) = self.runs.get_mut(id) {
-            if matches!(status, TrainingStatus::Completed | TrainingStatus::Failed | TrainingStatus::Stopped) {
+            if matches!(
+                status,
+                TrainingStatus::Completed | TrainingStatus::Failed | TrainingStatus::Stopped
+            ) {
                 run.finished_at = Some(Utc::now());
             }
             run.status = status;

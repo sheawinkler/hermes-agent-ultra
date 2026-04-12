@@ -205,7 +205,10 @@ impl SessionPersistence {
         if let Some(m) = model {
             content.push_str(&format!("Model: {m}\n"));
         }
-        content.push_str(&format!("Date: {}\n\n---\n\n", Utc::now().format("%Y-%m-%d %H:%M:%S UTC")));
+        content.push_str(&format!(
+            "Date: {}\n\n---\n\n",
+            Utc::now().format("%Y-%m-%d %H:%M:%S UTC")
+        ));
 
         for msg in messages {
             let role_label = match msg.role {
@@ -300,8 +303,7 @@ impl SessionPersistence {
                     _ => MessageRole::User,
                 };
 
-                let tool_calls = tool_calls_json
-                    .and_then(|json| serde_json::from_str(&json).ok());
+                let tool_calls = tool_calls_json.and_then(|json| serde_json::from_str(&json).ok());
 
                 Ok(Message {
                     role,
@@ -337,8 +339,14 @@ mod tests {
             Message::assistant("Hi there!"),
         ];
 
-        sp.persist_session("test-session-1", &messages, Some("gpt-4o"), None, Some("Test"))
-            .unwrap();
+        sp.persist_session(
+            "test-session-1",
+            &messages,
+            Some("gpt-4o"),
+            None,
+            Some("Test"),
+        )
+        .unwrap();
 
         let loaded = sp.load_session("test-session-1").unwrap();
         assert_eq!(loaded.len(), 3);
@@ -352,10 +360,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let sp = SessionPersistence::new(tmp.path());
 
-        let messages = vec![
-            Message::user("What is 2+2?"),
-            Message::assistant("4"),
-        ];
+        let messages = vec![Message::user("What is 2+2?"), Message::assistant("4")];
 
         let path = sp
             .save_session_log("log-test", &messages, Some("gpt-4o"))

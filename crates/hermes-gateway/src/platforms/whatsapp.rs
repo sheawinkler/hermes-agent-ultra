@@ -74,19 +74,28 @@ pub struct WhatsAppAdapter {
 impl WhatsAppAdapter {
     /// Create a new WhatsApp adapter with the given configuration.
     pub fn new(config: WhatsAppConfig) -> Result<Self, GatewayError> {
-        let base = BasePlatformAdapter::new(&config.token)
-            .with_proxy(config.proxy.clone());
+        let base = BasePlatformAdapter::new(&config.token).with_proxy(config.proxy.clone());
         base.validate_token()?;
         let client = base.build_client()?;
 
-        Ok(Self { base, config, client, stop_signal: Arc::new(Notify::new()) })
+        Ok(Self {
+            base,
+            config,
+            client,
+            stop_signal: Arc::new(Notify::new()),
+        })
     }
 
-    pub fn config(&self) -> &WhatsAppConfig { &self.config }
+    pub fn config(&self) -> &WhatsAppConfig {
+        &self.config
+    }
 
     /// Send a text message via WhatsApp Cloud API.
     pub async fn send_text(&self, to: &str, text: &str) -> Result<(), GatewayError> {
-        let phone_id = self.config.phone_number_id.as_deref()
+        let phone_id = self
+            .config
+            .phone_number_id
+            .as_deref()
             .ok_or_else(|| GatewayError::SendFailed("phone_number_id not configured".into()))?;
 
         let url = format!("{}/{}/messages", WHATSAPP_API_BASE, phone_id);
@@ -97,15 +106,21 @@ impl WhatsAppAdapter {
             "text": { "body": text }
         });
 
-        let resp = self.client.post(&url)
+        let resp = self
+            .client
+            .post(&url)
             .header("Authorization", format!("Bearer {}", self.config.token))
             .json(&body)
-            .send().await
+            .send()
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("WhatsApp send failed: {}", e)))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("WhatsApp API error: {}", text)));
+            return Err(GatewayError::SendFailed(format!(
+                "WhatsApp API error: {}",
+                text
+            )));
         }
         Ok(())
     }
@@ -154,10 +169,26 @@ impl WhatsAppAdapter {
                     None => continue,
                 };
                 for msg in msgs {
-                    let from = msg.get("from").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let message_id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
-                    let message_type = msg.get("type").and_then(|v| v.as_str()).unwrap_or("text").to_string();
-                    let timestamp = msg.get("timestamp").and_then(|v| v.as_str()).unwrap_or("").to_string();
+                    let from = msg
+                        .get("from")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let message_id = msg
+                        .get("id")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let message_type = msg
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("text")
+                        .to_string();
+                    let timestamp = msg
+                        .get("timestamp")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .to_string();
 
                     let text = msg
                         .get("text")
@@ -182,7 +213,10 @@ impl WhatsAppAdapter {
 
     /// Mark a message as read via the WhatsApp Cloud API.
     pub async fn mark_as_read(&self, message_id: &str) -> Result<(), GatewayError> {
-        let phone_id = self.config.phone_number_id.as_deref()
+        let phone_id = self
+            .config
+            .phone_number_id
+            .as_deref()
             .ok_or_else(|| GatewayError::SendFailed("phone_number_id not configured".into()))?;
 
         let url = format!("{}/{}/messages", WHATSAPP_API_BASE, phone_id);
@@ -192,15 +226,23 @@ impl WhatsAppAdapter {
             "message_id": message_id
         });
 
-        let resp = self.client.post(&url)
+        let resp = self
+            .client
+            .post(&url)
             .header("Authorization", format!("Bearer {}", self.config.token))
             .json(&body)
-            .send().await
-            .map_err(|e| GatewayError::SendFailed(format!("WhatsApp mark_as_read failed: {}", e)))?;
+            .send()
+            .await
+            .map_err(|e| {
+                GatewayError::SendFailed(format!("WhatsApp mark_as_read failed: {}", e))
+            })?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("WhatsApp mark_as_read error: {}", text)));
+            return Err(GatewayError::SendFailed(format!(
+                "WhatsApp mark_as_read error: {}",
+                text
+            )));
         }
         Ok(())
     }
@@ -212,7 +254,10 @@ impl WhatsAppAdapter {
         message_id: &str,
         emoji: &str,
     ) -> Result<(), GatewayError> {
-        let phone_id = self.config.phone_number_id.as_deref()
+        let phone_id = self
+            .config
+            .phone_number_id
+            .as_deref()
             .ok_or_else(|| GatewayError::SendFailed("phone_number_id not configured".into()))?;
 
         let url = format!("{}/{}/messages", WHATSAPP_API_BASE, phone_id);
@@ -226,15 +271,23 @@ impl WhatsAppAdapter {
             }
         });
 
-        let resp = self.client.post(&url)
+        let resp = self
+            .client
+            .post(&url)
             .header("Authorization", format!("Bearer {}", self.config.token))
             .json(&body)
-            .send().await
-            .map_err(|e| GatewayError::SendFailed(format!("WhatsApp reaction send failed: {}", e)))?;
+            .send()
+            .await
+            .map_err(|e| {
+                GatewayError::SendFailed(format!("WhatsApp reaction send failed: {}", e))
+            })?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("WhatsApp reaction error: {}", text)));
+            return Err(GatewayError::SendFailed(format!(
+                "WhatsApp reaction error: {}",
+                text
+            )));
         }
         Ok(())
     }
@@ -247,7 +300,10 @@ impl WhatsAppAdapter {
         media_url: &str,
         caption: Option<&str>,
     ) -> Result<(), GatewayError> {
-        let phone_id = self.config.phone_number_id.as_deref()
+        let phone_id = self
+            .config
+            .phone_number_id
+            .as_deref()
             .ok_or_else(|| GatewayError::SendFailed("phone_number_id not configured".into()))?;
 
         let url = format!("{}/{}/messages", WHATSAPP_API_BASE, phone_id);
@@ -263,15 +319,21 @@ impl WhatsAppAdapter {
             media_type: media_obj
         });
 
-        let resp = self.client.post(&url)
+        let resp = self
+            .client
+            .post(&url)
             .header("Authorization", format!("Bearer {}", self.config.token))
             .json(&body)
-            .send().await
+            .send()
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("WhatsApp media send failed: {}", e)))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("WhatsApp API error: {}", text)));
+            return Err(GatewayError::SendFailed(format!(
+                "WhatsApp API error: {}",
+                text
+            )));
         }
         Ok(())
     }
@@ -292,26 +354,45 @@ impl PlatformAdapter for WhatsAppAdapter {
         Ok(())
     }
 
-    async fn send_message(&self, chat_id: &str, text: &str, _parse_mode: Option<ParseMode>) -> Result<(), GatewayError> {
+    async fn send_message(
+        &self,
+        chat_id: &str,
+        text: &str,
+        _parse_mode: Option<ParseMode>,
+    ) -> Result<(), GatewayError> {
         self.send_text(chat_id, text).await
     }
 
-    async fn edit_message(&self, _chat_id: &str, _message_id: &str, _text: &str) -> Result<(), GatewayError> {
+    async fn edit_message(
+        &self,
+        _chat_id: &str,
+        _message_id: &str,
+        _text: &str,
+    ) -> Result<(), GatewayError> {
         // WhatsApp does not natively support message editing
         debug!("WhatsApp does not support message editing");
         Ok(())
     }
 
-    async fn send_file(&self, chat_id: &str, file_path: &str, caption: Option<&str>) -> Result<(), GatewayError> {
+    async fn send_file(
+        &self,
+        chat_id: &str,
+        file_path: &str,
+        caption: Option<&str>,
+    ) -> Result<(), GatewayError> {
         use crate::platforms::helpers::{media_category, mime_from_extension};
 
-        let phone_id = self.config.phone_number_id.as_deref()
+        let phone_id = self
+            .config
+            .phone_number_id
+            .as_deref()
             .ok_or_else(|| GatewayError::SendFailed("phone_number_id not configured".into()))?;
 
         let path = std::path::Path::new(file_path);
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let mime = mime_from_extension(ext);
-        let file_bytes = tokio::fs::read(file_path).await
+        let file_bytes = tokio::fs::read(file_path)
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("Failed to read file: {e}")))?;
         let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
 
@@ -325,18 +406,25 @@ impl PlatformAdapter for WhatsAppAdapter {
             .text("messaging_product", "whatsapp")
             .part("file", part);
 
-        let resp = self.client.post(&upload_url)
+        let resp = self
+            .client
+            .post(&upload_url)
             .header("Authorization", format!("Bearer {}", self.config.token))
             .multipart(form)
-            .send().await
+            .send()
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("WhatsApp media upload failed: {e}")))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("WhatsApp media upload error: {text}")));
+            return Err(GatewayError::SendFailed(format!(
+                "WhatsApp media upload error: {text}"
+            )));
         }
 
-        let result: serde_json::Value = resp.json().await
+        let result: serde_json::Value = resp
+            .json()
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("WhatsApp upload parse failed: {e}")))?;
         let media_id = result.get("id").and_then(|v| v.as_str()).unwrap_or("");
 
@@ -364,19 +452,28 @@ impl PlatformAdapter for WhatsAppAdapter {
             media_type: media_obj
         });
 
-        let resp = self.client.post(&send_url)
+        let resp = self
+            .client
+            .post(&send_url)
             .header("Authorization", format!("Bearer {}", self.config.token))
             .json(&body)
-            .send().await
+            .send()
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("WhatsApp media send failed: {e}")))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("WhatsApp media send error: {text}")));
+            return Err(GatewayError::SendFailed(format!(
+                "WhatsApp media send error: {text}"
+            )));
         }
         Ok(())
     }
 
-    fn is_running(&self) -> bool { self.base.is_running() }
-    fn platform_name(&self) -> &str { "whatsapp" }
+    fn is_running(&self) -> bool {
+        self.base.is_running()
+    }
+    fn platform_name(&self) -> &str {
+        "whatsapp"
+    }
 }

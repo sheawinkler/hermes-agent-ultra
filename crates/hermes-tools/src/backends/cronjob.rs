@@ -6,8 +6,8 @@
 use async_trait::async_trait;
 use serde_json::json;
 
-use hermes_core::ToolError;
 use crate::tools::cronjob::CronjobBackend;
+use hermes_core::ToolError;
 
 /// Cronjob backend that signals the cron scheduler for CRUD operations.
 /// The actual scheduling integration happens at the binary level.
@@ -27,7 +27,13 @@ impl Default for SignalCronjobBackend {
 
 #[async_trait]
 impl CronjobBackend for SignalCronjobBackend {
-    async fn create(&self, name: &str, schedule: &str, task: &str, toolset: Option<&str>) -> Result<String, ToolError> {
+    async fn create(
+        &self,
+        name: &str,
+        schedule: &str,
+        task: &str,
+        toolset: Option<&str>,
+    ) -> Result<String, ToolError> {
         Ok(json!({
             "type": "cronjob_request",
             "action": "create",
@@ -35,17 +41,25 @@ impl CronjobBackend for SignalCronjobBackend {
             "schedule": schedule,
             "task": task,
             "toolset": toolset,
-        }).to_string())
+        })
+        .to_string())
     }
 
     async fn list(&self) -> Result<String, ToolError> {
         Ok(json!({
             "type": "cronjob_request",
             "action": "list",
-        }).to_string())
+        })
+        .to_string())
     }
 
-    async fn update(&self, id: &str, schedule: Option<&str>, task: Option<&str>, enabled: Option<bool>) -> Result<String, ToolError> {
+    async fn update(
+        &self,
+        id: &str,
+        schedule: Option<&str>,
+        task: Option<&str>,
+        enabled: Option<bool>,
+    ) -> Result<String, ToolError> {
         Ok(json!({
             "type": "cronjob_request",
             "action": "update",
@@ -53,7 +67,8 @@ impl CronjobBackend for SignalCronjobBackend {
             "schedule": schedule,
             "task": task,
             "enabled": enabled,
-        }).to_string())
+        })
+        .to_string())
     }
 
     async fn pause(&self, id: &str) -> Result<String, ToolError> {

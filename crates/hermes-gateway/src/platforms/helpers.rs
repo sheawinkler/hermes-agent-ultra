@@ -44,7 +44,8 @@ pub fn split_long_message(text: &str, max_len: usize) -> Vec<String> {
 
 fn find_last_sentence_break(text: &str) -> Option<usize> {
     let terminators = [". ", "! ", "? ", ".\n", "!\n", "?\n"];
-    terminators.iter()
+    terminators
+        .iter()
         .filter_map(|t| text.rfind(t).map(|i| i + t.len()))
         .max()
 }
@@ -83,9 +84,7 @@ pub fn truncate_with_ellipsis(text: &str, max_len: usize) -> String {
 /// Extract all URLs from text.
 pub fn extract_urls(text: &str) -> Vec<String> {
     let re = Regex::new(r"https?://[^\s<>\[\](){}]+").expect("valid regex");
-    re.find_iter(text)
-        .map(|m| m.as_str().to_string())
-        .collect()
+    re.find_iter(text).map(|m| m.as_str().to_string()).collect()
 }
 
 /// Format a code block with optional language tag.
@@ -201,13 +200,19 @@ mod tests {
 
     #[test]
     fn test_format_code_block() {
-        assert_eq!(format_code_block("let x = 1;", Some("rust")), "```rust\nlet x = 1;\n```");
+        assert_eq!(
+            format_code_block("let x = 1;", Some("rust")),
+            "```rust\nlet x = 1;\n```"
+        );
         assert_eq!(format_code_block("hello", None), "```\nhello\n```");
     }
 
     #[test]
     fn test_sanitize_html() {
-        assert_eq!(sanitize_html("<b>bold</b> &amp; <i>italic</i>"), "bold & italic");
+        assert_eq!(
+            sanitize_html("<b>bold</b> &amp; <i>italic</i>"),
+            "bold & italic"
+        );
     }
 
     #[test]

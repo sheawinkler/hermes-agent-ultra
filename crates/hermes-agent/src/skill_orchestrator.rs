@@ -189,16 +189,14 @@ impl SkillOrchestrator {
 
         let (frontmatter, body) = parse_frontmatter(&content);
 
-        let name = frontmatter
-            .name
-            .unwrap_or_else(|| {
-                skill_md_path
-                    .parent()
-                    .and_then(|p| p.file_name())
-                    .and_then(|n| n.to_str())
-                    .unwrap_or("unknown")
-                    .to_string()
-            });
+        let name = frontmatter.name.unwrap_or_else(|| {
+            skill_md_path
+                .parent()
+                .and_then(|p| p.file_name())
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string()
+        });
 
         if seen_names.contains(&name) {
             return;
@@ -312,9 +310,7 @@ impl SkillOrchestrator {
 
             // Try to resolve as a command key
             let cmd_key = self.resolve_skill_command_key(identifier);
-            let info = cmd_key
-                .as_ref()
-                .and_then(|k| self.commands.get(k));
+            let info = cmd_key.as_ref().and_then(|k| self.commands.get(k));
 
             match info {
                 Some(info) => {

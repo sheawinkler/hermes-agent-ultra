@@ -113,30 +113,126 @@ fn official_pricing_db() -> HashMap<(&'static str, &'static str), PricingEntry> 
     };
 
     // Anthropic
-    add(&mut db, "anthropic", "claude-opus-4-20250514", 15.0, 75.0, Some(1.50), Some(18.75));
-    add(&mut db, "anthropic", "claude-sonnet-4-20250514", 3.0, 15.0, Some(0.30), Some(3.75));
-    add(&mut db, "anthropic", "claude-3-5-sonnet-20241022", 3.0, 15.0, Some(0.30), Some(3.75));
-    add(&mut db, "anthropic", "claude-3-5-haiku-20241022", 0.80, 4.0, Some(0.08), Some(1.00));
-    add(&mut db, "anthropic", "claude-3-opus-20240229", 15.0, 75.0, Some(1.50), Some(18.75));
-    add(&mut db, "anthropic", "claude-3-haiku-20240307", 0.25, 1.25, Some(0.03), Some(0.30));
+    add(
+        &mut db,
+        "anthropic",
+        "claude-opus-4-20250514",
+        15.0,
+        75.0,
+        Some(1.50),
+        Some(18.75),
+    );
+    add(
+        &mut db,
+        "anthropic",
+        "claude-sonnet-4-20250514",
+        3.0,
+        15.0,
+        Some(0.30),
+        Some(3.75),
+    );
+    add(
+        &mut db,
+        "anthropic",
+        "claude-3-5-sonnet-20241022",
+        3.0,
+        15.0,
+        Some(0.30),
+        Some(3.75),
+    );
+    add(
+        &mut db,
+        "anthropic",
+        "claude-3-5-haiku-20241022",
+        0.80,
+        4.0,
+        Some(0.08),
+        Some(1.00),
+    );
+    add(
+        &mut db,
+        "anthropic",
+        "claude-3-opus-20240229",
+        15.0,
+        75.0,
+        Some(1.50),
+        Some(18.75),
+    );
+    add(
+        &mut db,
+        "anthropic",
+        "claude-3-haiku-20240307",
+        0.25,
+        1.25,
+        Some(0.03),
+        Some(0.30),
+    );
 
     // OpenAI
     add(&mut db, "openai", "gpt-4o", 2.50, 10.0, Some(1.25), None);
-    add(&mut db, "openai", "gpt-4o-mini", 0.15, 0.60, Some(0.075), None);
+    add(
+        &mut db,
+        "openai",
+        "gpt-4o-mini",
+        0.15,
+        0.60,
+        Some(0.075),
+        None,
+    );
     add(&mut db, "openai", "gpt-4.1", 2.00, 8.0, Some(0.50), None);
-    add(&mut db, "openai", "gpt-4.1-mini", 0.40, 1.60, Some(0.10), None);
-    add(&mut db, "openai", "gpt-4.1-nano", 0.10, 0.40, Some(0.025), None);
+    add(
+        &mut db,
+        "openai",
+        "gpt-4.1-mini",
+        0.40,
+        1.60,
+        Some(0.10),
+        None,
+    );
+    add(
+        &mut db,
+        "openai",
+        "gpt-4.1-nano",
+        0.10,
+        0.40,
+        Some(0.025),
+        None,
+    );
     add(&mut db, "openai", "o3", 10.0, 40.0, Some(2.50), None);
     add(&mut db, "openai", "o3-mini", 1.10, 4.40, Some(0.55), None);
 
     // Google Gemini
     add(&mut db, "google", "gemini-2.5-pro", 1.25, 10.0, None, None);
-    add(&mut db, "google", "gemini-2.5-flash", 0.15, 0.60, None, None);
-    add(&mut db, "google", "gemini-2.0-flash", 0.10, 0.40, None, None);
+    add(
+        &mut db,
+        "google",
+        "gemini-2.5-flash",
+        0.15,
+        0.60,
+        None,
+        None,
+    );
+    add(
+        &mut db,
+        "google",
+        "gemini-2.0-flash",
+        0.10,
+        0.40,
+        None,
+        None,
+    );
 
     // DeepSeek
     add(&mut db, "deepseek", "deepseek-chat", 0.14, 0.28, None, None);
-    add(&mut db, "deepseek", "deepseek-reasoner", 0.55, 2.19, None, None);
+    add(
+        &mut db,
+        "deepseek",
+        "deepseek-reasoner",
+        0.55,
+        2.19,
+        None,
+        None,
+    );
 
     db
 }
@@ -191,7 +287,11 @@ pub fn resolve_billing_route(
     }
 
     BillingRoute {
-        provider: if provider_name.is_empty() { "unknown".into() } else { provider_name },
+        provider: if provider_name.is_empty() {
+            "unknown".into()
+        } else {
+            provider_name
+        },
         model: model.split('/').last().unwrap_or(&model).to_string(),
         base_url: base,
         billing_mode: BillingMode::Unknown,
@@ -303,11 +403,7 @@ pub fn format_cost(usd: f64) -> String {
 }
 
 /// Check whether we have pricing data for a model+route.
-pub fn has_known_pricing(
-    model_name: &str,
-    provider: Option<&str>,
-    base_url: Option<&str>,
-) -> bool {
+pub fn has_known_pricing(model_name: &str, provider: Option<&str>, base_url: Option<&str>) -> bool {
     let route = resolve_billing_route(model_name, provider, base_url);
     if route.billing_mode == BillingMode::SubscriptionIncluded {
         return true;
@@ -316,11 +412,7 @@ pub fn has_known_pricing(
 }
 
 /// Backward-compatible thin wrapper returning input/output pricing.
-pub fn get_pricing(
-    model_name: &str,
-    provider: Option<&str>,
-    base_url: Option<&str>,
-) -> (f64, f64) {
+pub fn get_pricing(model_name: &str, provider: Option<&str>, base_url: Option<&str>) -> (f64, f64) {
     match get_pricing_entry(model_name, provider, base_url) {
         Some(entry) => (
             entry.input_cost_per_million.unwrap_or(0.0),
@@ -526,7 +618,11 @@ mod tests {
     #[test]
     fn test_has_known_pricing() {
         assert!(has_known_pricing("gpt-4o", Some("openai"), None));
-        assert!(has_known_pricing("claude-sonnet-4-20250514", Some("anthropic"), None));
+        assert!(has_known_pricing(
+            "claude-sonnet-4-20250514",
+            Some("anthropic"),
+            None
+        ));
         assert!(!has_known_pricing("unknown-model", Some("unknown"), None));
     }
 }

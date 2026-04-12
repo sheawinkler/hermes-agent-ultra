@@ -5,9 +5,5 @@
 //! platform-specific format.
 
 pub use crate::markdown_split::{
-    split_markdown,
-    strip_markdown,
-    to_discord_markdown,
-    to_slack_mrkdwn,
-    to_telegram_markdown_v2,
+    split_markdown, strip_markdown, to_discord_markdown, to_slack_mrkdwn, to_telegram_markdown_v2,
 };

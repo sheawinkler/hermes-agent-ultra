@@ -34,14 +34,20 @@ pub struct SmsAdapter {
 
 impl SmsAdapter {
     pub fn new(config: SmsConfig) -> Result<Self, GatewayError> {
-        let base = BasePlatformAdapter::new(&config.account_sid)
-            .with_proxy(config.proxy.clone());
+        let base = BasePlatformAdapter::new(&config.account_sid).with_proxy(config.proxy.clone());
         base.validate_token()?;
         let client = base.build_client()?;
-        Ok(Self { base, config, client, stop_signal: Arc::new(Notify::new()) })
+        Ok(Self {
+            base,
+            config,
+            client,
+            stop_signal: Arc::new(Notify::new()),
+        })
     }
 
-    pub fn config(&self) -> &SmsConfig { &self.config }
+    pub fn config(&self) -> &SmsConfig {
+        &self.config
+    }
 
     /// Send an SMS via Twilio API.
     pub async fn send_sms(&self, to: &str, body: &str) -> Result<(), GatewayError> {
@@ -56,15 +62,21 @@ impl SmsAdapter {
             ("Body", body),
         ];
 
-        let resp = self.client.post(&url)
+        let resp = self
+            .client
+            .post(&url)
             .basic_auth(&self.config.account_sid, Some(&self.config.auth_token))
             .form(&params)
-            .send().await
+            .send()
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("Twilio send failed: {}", e)))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("Twilio API error: {}", text)));
+            return Err(GatewayError::SendFailed(format!(
+                "Twilio API error: {}",
+                text
+            )));
         }
         Ok(())
     }
@@ -73,7 +85,10 @@ impl SmsAdapter {
 #[async_trait]
 impl PlatformAdapter for SmsAdapter {
     async fn start(&self) -> Result<(), GatewayError> {
-        info!("SMS adapter starting (provider: {}, from: {})", self.config.provider, self.config.from_number);
+        info!(
+            "SMS adapter starting (provider: {}, from: {})",
+            self.config.provider, self.config.from_number
+        );
         self.base.mark_running();
         Ok(())
     }
@@ -85,16 +100,31 @@ impl PlatformAdapter for SmsAdapter {
         Ok(())
     }
 
-    async fn send_message(&self, chat_id: &str, text: &str, _parse_mode: Option<ParseMode>) -> Result<(), GatewayError> {
+    async fn send_message(
+        &self,
+        chat_id: &str,
+        text: &str,
+        _parse_mode: Option<ParseMode>,
+    ) -> Result<(), GatewayError> {
         self.send_sms(chat_id, text).await
     }
 
-    async fn edit_message(&self, _chat_id: &str, _message_id: &str, _text: &str) -> Result<(), GatewayError> {
+    async fn edit_message(
+        &self,
+        _chat_id: &str,
+        _message_id: &str,
+        _text: &str,
+    ) -> Result<(), GatewayError> {
         debug!("SMS does not support message editing");
         Ok(())
     }
 
-    async fn send_file(&self, chat_id: &str, file_path: &str, caption: Option<&str>) -> Result<(), GatewayError> {
+    async fn send_file(
+        &self,
+        chat_id: &str,
+        file_path: &str,
+        caption: Option<&str>,
+    ) -> Result<(), GatewayError> {
         // Twilio MMS: send a message with MediaUrl pointing to a publicly accessible URL.
         // If file_path is a local file, we need to host it or base64-encode it.
         // For URLs, we can use them directly via the MediaUrl parameter.
@@ -114,26 +144,37 @@ impl PlatformAdapter for SmsAdapter {
                 ("MediaUrl", file_path),
             ];
 
-            let resp = self.client.post(&url)
+            let resp = self
+                .client
+                .post(&url)
                 .basic_auth(&self.config.account_sid, Some(&self.config.auth_token))
                 .form(&params)
-                .send().await
+                .send()
+                .await
                 .map_err(|e| GatewayError::SendFailed(format!("Twilio MMS send failed: {e}")))?;
 
             if !resp.status().is_success() {
                 let text = resp.text().await.unwrap_or_default();
-                return Err(GatewayError::SendFailed(format!("Twilio MMS error: {text}")));
+                return Err(GatewayError::SendFailed(format!(
+                    "Twilio MMS error: {text}"
+                )));
             }
         } else {
             // Local file: send as text with file info since Twilio requires a public URL
             let file_name = std::path::Path::new(file_path)
-                .file_name().and_then(|n| n.to_str()).unwrap_or("file");
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("file");
             let msg = format!("[Attachment: {}] {}", file_name, body_text);
             self.send_sms(chat_id, &msg).await?;
         }
         Ok(())
     }
 
-    fn is_running(&self) -> bool { self.base.is_running() }
-    fn platform_name(&self) -> &str { "sms" }
+    fn is_running(&self) -> bool {
+        self.base.is_running()
+    }
+    fn platform_name(&self) -> &str {
+        "sms"
+    }
 }

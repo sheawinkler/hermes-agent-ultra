@@ -141,7 +141,13 @@ impl SupermemoryConfig {
 fn sanitize_tag(raw: &str) -> String {
     let tag: String = raw
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     let tag = tag.trim_matches('_').to_string();
     if tag.is_empty() {
@@ -195,10 +201,7 @@ impl MemoryProviderPlugin for SupermemoryMemoryPlugin {
         *self.config.lock().unwrap() = Some(config);
 
         if has_key {
-            tracing::info!(
-                "SuperMemory plugin initialized for session {}",
-                session_id
-            );
+            tracing::info!("SuperMemory plugin initialized for session {}", session_id);
         }
     }
 
@@ -266,10 +269,7 @@ impl MemoryProviderPlugin for SupermemoryMemoryPlugin {
 
         match tool_name {
             "supermemory_store" => {
-                let content = args
-                    .get("content")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("");
                 if content.is_empty() {
                     return json!({"error": "content is required"}).to_string();
                 }
@@ -277,10 +277,7 @@ impl MemoryProviderPlugin for SupermemoryMemoryPlugin {
                 json!({"saved": true, "preview": &content[..content.len().min(80)]}).to_string()
             }
             "supermemory_search" => {
-                let query = args
-                    .get("query")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
                 if query.is_empty() {
                     return json!({"error": "query is required"}).to_string();
                 }
@@ -288,14 +285,8 @@ impl MemoryProviderPlugin for SupermemoryMemoryPlugin {
                 json!({"results": [], "count": 0}).to_string()
             }
             "supermemory_forget" => {
-                let id = args
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let query = args
-                    .get("query")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let id = args.get("id").and_then(|v| v.as_str()).unwrap_or("");
+                let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
                 if id.is_empty() && query.is_empty() {
                     return json!({"error": "Provide either id or query"}).to_string();
                 }

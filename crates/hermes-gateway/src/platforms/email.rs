@@ -32,9 +32,15 @@ pub struct EmailConfig {
     pub proxy: AdapterProxyConfig,
 }
 
-fn default_imap_port() -> u16 { 993 }
-fn default_smtp_port() -> u16 { 587 }
-fn default_poll_interval() -> u64 { 60 }
+fn default_imap_port() -> u16 {
+    993
+}
+fn default_smtp_port() -> u16 {
+    587
+}
+fn default_poll_interval() -> u64 {
+    60
+}
 
 pub struct EmailAdapter {
     base: BasePlatformAdapter,
@@ -44,16 +50,26 @@ pub struct EmailAdapter {
 
 impl EmailAdapter {
     pub fn new(config: EmailConfig) -> Result<Self, GatewayError> {
-        let base = BasePlatformAdapter::new(&config.username)
-            .with_proxy(config.proxy.clone());
+        let base = BasePlatformAdapter::new(&config.username).with_proxy(config.proxy.clone());
         base.validate_token()?;
-        Ok(Self { base, config, stop_signal: Arc::new(Notify::new()) })
+        Ok(Self {
+            base,
+            config,
+            stop_signal: Arc::new(Notify::new()),
+        })
     }
 
-    pub fn config(&self) -> &EmailConfig { &self.config }
+    pub fn config(&self) -> &EmailConfig {
+        &self.config
+    }
 
     /// Send an email via raw SMTP over TCP.
-    pub async fn send_email(&self, to: &str, subject: &str, body: &str) -> Result<(), GatewayError> {
+    pub async fn send_email(
+        &self,
+        to: &str,
+        subject: &str,
+        body: &str,
+    ) -> Result<(), GatewayError> {
         let smtp_host = self.config.smtp_host.clone();
         let smtp_port = self.config.smtp_port;
         let username = self.config.username.clone();
@@ -64,7 +80,9 @@ impl EmailAdapter {
         let from = username.clone();
 
         tokio::task::spawn_blocking(move || {
-            smtp_send_raw(&smtp_host, smtp_port, &username, &password, &from, &to, &subject, &body, None)
+            smtp_send_raw(
+                &smtp_host, smtp_port, &username, &password, &from, &to, &subject, &body, None,
+            )
         })
         .await
         .map_err(|e| GatewayError::SendFailed(format!("Email task join error: {e}")))?
@@ -88,7 +106,10 @@ impl EmailAdapter {
 #[async_trait]
 impl PlatformAdapter for EmailAdapter {
     async fn start(&self) -> Result<(), GatewayError> {
-        info!("Email adapter starting (user: {}, IMAP: {}:{})", self.config.username, self.config.imap_host, self.config.imap_port);
+        info!(
+            "Email adapter starting (user: {}, IMAP: {}:{})",
+            self.config.username, self.config.imap_host, self.config.imap_port
+        );
         self.base.mark_running();
         Ok(())
     }
@@ -100,23 +121,42 @@ impl PlatformAdapter for EmailAdapter {
         Ok(())
     }
 
-    async fn send_message(&self, chat_id: &str, text: &str, _parse_mode: Option<ParseMode>) -> Result<(), GatewayError> {
+    async fn send_message(
+        &self,
+        chat_id: &str,
+        text: &str,
+        _parse_mode: Option<ParseMode>,
+    ) -> Result<(), GatewayError> {
         self.send_email(chat_id, "Hermes Agent", text).await
     }
 
-    async fn edit_message(&self, _chat_id: &str, _message_id: &str, _text: &str) -> Result<(), GatewayError> {
+    async fn edit_message(
+        &self,
+        _chat_id: &str,
+        _message_id: &str,
+        _text: &str,
+    ) -> Result<(), GatewayError> {
         debug!("Email does not support message editing");
         Ok(())
     }
 
-    async fn send_file(&self, chat_id: &str, file_path: &str, caption: Option<&str>) -> Result<(), GatewayError> {
+    async fn send_file(
+        &self,
+        chat_id: &str,
+        file_path: &str,
+        caption: Option<&str>,
+    ) -> Result<(), GatewayError> {
         use crate::platforms::helpers::mime_from_extension;
 
         let path = std::path::Path::new(file_path);
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let mime_type = mime_from_extension(ext);
-        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("attachment");
-        let file_bytes = tokio::fs::read(file_path).await
+        let file_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("attachment");
+        let file_bytes = tokio::fs::read(file_path)
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("Failed to read file: {e}")))?;
 
         let to = chat_id.to_string();
@@ -131,32 +171,53 @@ impl PlatformAdapter for EmailAdapter {
         let mime_type = mime_type.to_string();
 
         tokio::task::spawn_blocking(move || {
-            let boundary = format!("hermes-{}", uuid::Uuid::new_v4().to_string().replace('-', ""));
+            let boundary = format!(
+                "hermes-{}",
+                uuid::Uuid::new_v4().to_string().replace('-', "")
+            );
 
             let mut email_body = String::new();
-            email_body.push_str(&format!("Content-Type: multipart/mixed; boundary=\"{boundary}\"\r\n"));
+            email_body.push_str(&format!(
+                "Content-Type: multipart/mixed; boundary=\"{boundary}\"\r\n"
+            ));
             email_body.push_str("MIME-Version: 1.0\r\n\r\n");
             email_body.push_str(&format!("--{boundary}\r\n"));
             email_body.push_str("Content-Type: text/plain; charset=utf-8\r\n\r\n");
             email_body.push_str(&caption_owned);
             email_body.push_str("\r\n");
             email_body.push_str(&format!("--{boundary}\r\n"));
-            email_body.push_str(&format!("Content-Type: {mime_type}; name=\"{file_name}\"\r\n"));
-            email_body.push_str(&format!("Content-Disposition: attachment; filename=\"{file_name}\"\r\n"));
+            email_body.push_str(&format!(
+                "Content-Type: {mime_type}; name=\"{file_name}\"\r\n"
+            ));
+            email_body.push_str(&format!(
+                "Content-Disposition: attachment; filename=\"{file_name}\"\r\n"
+            ));
             email_body.push_str("Content-Transfer-Encoding: base64\r\n\r\n");
             email_body.push_str(&base64_encode_lines(&file_bytes));
             email_body.push_str(&format!("\r\n--{boundary}--\r\n"));
 
             smtp_send_raw(
-                &smtp_host, smtp_port, &username, &password,
-                &from, &to, &subject, &email_body, Some("multipart/mixed"),
+                &smtp_host,
+                smtp_port,
+                &username,
+                &password,
+                &from,
+                &to,
+                &subject,
+                &email_body,
+                Some("multipart/mixed"),
             )
-        }).await
-            .map_err(|e| GatewayError::SendFailed(format!("Email task join error: {e}")))?
+        })
+        .await
+        .map_err(|e| GatewayError::SendFailed(format!("Email task join error: {e}")))?
     }
 
-    fn is_running(&self) -> bool { self.base.is_running() }
-    fn platform_name(&self) -> &str { "email" }
+    fn is_running(&self) -> bool {
+        self.base.is_running()
+    }
+    fn platform_name(&self) -> &str {
+        "email"
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -187,17 +248,21 @@ fn smtp_send_raw(
     let mut read_line = |stream: &TcpStream| -> Result<String, GatewayError> {
         let mut reader = BufReader::new(stream);
         let mut line = String::new();
-        reader.read_line(&mut line)
+        reader
+            .read_line(&mut line)
             .map_err(|e| GatewayError::SendFailed(format!("SMTP read: {e}")))?;
         Ok(line)
     };
 
     let send_cmd = |stream: &mut TcpStream, cmd: &str| -> Result<String, GatewayError> {
-        stream.write_all(cmd.as_bytes())
+        stream
+            .write_all(cmd.as_bytes())
             .map_err(|e| GatewayError::SendFailed(format!("SMTP write: {e}")))?;
-        stream.write_all(b"\r\n")
+        stream
+            .write_all(b"\r\n")
             .map_err(|e| GatewayError::SendFailed(format!("SMTP write: {e}")))?;
-        stream.flush()
+        stream
+            .flush()
             .map_err(|e| GatewayError::SendFailed(format!("SMTP flush: {e}")))?;
         read_line(&*stream)
     };
@@ -220,7 +285,10 @@ fn smtp_send_raw(
     let _user = send_cmd(&mut stream, &base64_encode_simple(username.as_bytes()))?;
     let auth_resp = send_cmd(&mut stream, &base64_encode_simple(password.as_bytes()))?;
     if !auth_resp.starts_with("235") {
-        return Err(GatewayError::SendFailed(format!("SMTP AUTH failed: {}", auth_resp.trim())));
+        return Err(GatewayError::SendFailed(format!(
+            "SMTP AUTH failed: {}",
+            auth_resp.trim()
+        )));
     }
 
     // MAIL FROM
@@ -242,13 +310,18 @@ fn smtp_send_raw(
     msg.push_str(body);
     msg.push_str("\r\n.\r\n");
 
-    stream.write_all(msg.as_bytes())
+    stream
+        .write_all(msg.as_bytes())
         .map_err(|e| GatewayError::SendFailed(format!("SMTP DATA write: {e}")))?;
-    stream.flush()
+    stream
+        .flush()
         .map_err(|e| GatewayError::SendFailed(format!("SMTP flush: {e}")))?;
     let data_resp = read_line(&stream)?;
     if !data_resp.starts_with("250") {
-        return Err(GatewayError::SendFailed(format!("SMTP DATA rejected: {}", data_resp.trim())));
+        return Err(GatewayError::SendFailed(format!(
+            "SMTP DATA rejected: {}",
+            data_resp.trim()
+        )));
     }
 
     // QUIT
@@ -268,19 +341,25 @@ fn imap_fetch_unseen(
     username: &str,
     password: &str,
 ) -> Result<Vec<IncomingMessage>, GatewayError> {
-    use std::io::{BufRead, BufReader, Write};
+    use std::io::{Read, Write};
     use std::net::TcpStream;
     use std::time::Duration;
 
     let addr = format!("{host}:{port}");
 
-    let connector = native_tls::TlsConnector::new()
+    let root_store =
+        rustls::RootCertStore::from_iter(webpki_roots::TLS_SERVER_ROOTS.iter().cloned());
+    let config = rustls::ClientConfig::builder()
+        .with_root_certificates(root_store)
+        .with_no_client_auth();
+    let server_name = rustls::pki_types::ServerName::try_from(host.to_owned())
+        .map_err(|e| GatewayError::Platform(format!("Invalid server name: {e}")))?;
+    let mut conn = rustls::ClientConnection::new(Arc::new(config), server_name)
         .map_err(|e| GatewayError::Platform(format!("TLS init: {e}")))?;
     let tcp = TcpStream::connect(&addr)
         .map_err(|e| GatewayError::Platform(format!("IMAP connect {addr}: {e}")))?;
     tcp.set_read_timeout(Some(Duration::from_secs(30))).ok();
-    let mut stream = connector.connect(host, tcp)
-        .map_err(|e| GatewayError::Platform(format!("IMAP TLS: {e}")))?;
+    let mut stream = rustls::StreamOwned::new(conn, tcp);
 
     let mut tag = 0u32;
     let mut next_tag = || -> String {
@@ -288,21 +367,33 @@ fn imap_fetch_unseen(
         format!("A{:04}", tag)
     };
 
-    let read_response = |stream: &mut native_tls::TlsStream<TcpStream>, tag: &str| -> Result<Vec<String>, GatewayError> {
-        let mut reader = BufReader::new(stream.get_ref().try_clone()
-            .map_err(|e| GatewayError::Platform(format!("Clone: {e}")))?);
+    fn read_response(
+        stream: &mut rustls::StreamOwned<rustls::ClientConnection, TcpStream>,
+        tag: &str,
+    ) -> Result<Vec<String>, GatewayError> {
         let mut lines = Vec::new();
+        let mut buf = Vec::new();
+        let mut byte = [0u8; 1];
         loop {
-            let mut line = String::new();
-            let n = reader.read_line(&mut line)
-                .map_err(|e| GatewayError::Platform(format!("IMAP read: {e}")))?;
-            if n == 0 { break; }
-            let done = line.starts_with(tag);
-            lines.push(line);
-            if done { break; }
+            match stream.read(&mut byte) {
+                Ok(0) => break,
+                Ok(_) => {
+                    buf.push(byte[0]);
+                    if byte[0] == b'\n' {
+                        let line = String::from_utf8_lossy(&buf).to_string();
+                        let done = line.starts_with(tag);
+                        lines.push(line);
+                        buf.clear();
+                        if done {
+                            break;
+                        }
+                    }
+                }
+                Err(_) => break,
+            }
         }
         Ok(lines)
-    };
+    }
 
     // Read greeting
     {
@@ -313,7 +404,8 @@ fn imap_fetch_unseen(
     // LOGIN
     let t = next_tag();
     let cmd = format!("{t} LOGIN {username} {password}\r\n");
-    stream.write_all(cmd.as_bytes())
+    stream
+        .write_all(cmd.as_bytes())
         .map_err(|e| GatewayError::Platform(format!("IMAP write: {e}")))?;
     let login_resp = read_response(&mut stream, &t)?;
     let last = login_resp.last().map(|s| s.as_str()).unwrap_or("");
@@ -324,14 +416,16 @@ fn imap_fetch_unseen(
     // SELECT INBOX
     let t = next_tag();
     let cmd = format!("{t} SELECT INBOX\r\n");
-    stream.write_all(cmd.as_bytes())
+    stream
+        .write_all(cmd.as_bytes())
         .map_err(|e| GatewayError::Platform(format!("IMAP write: {e}")))?;
     let _ = read_response(&mut stream, &t)?;
 
     // SEARCH UNSEEN
     let t = next_tag();
     let cmd = format!("{t} SEARCH UNSEEN\r\n");
-    stream.write_all(cmd.as_bytes())
+    stream
+        .write_all(cmd.as_bytes())
         .map_err(|e| GatewayError::Platform(format!("IMAP write: {e}")))?;
     let search_resp = read_response(&mut stream, &t)?;
 
@@ -351,7 +445,8 @@ fn imap_fetch_unseen(
     for mid in msg_ids.iter().take(10) {
         let t = next_tag();
         let cmd = format!("{t} FETCH {mid} (BODY[TEXT] BODY[HEADER.FIELDS (FROM SUBJECT)])\r\n");
-        stream.write_all(cmd.as_bytes())
+        stream
+            .write_all(cmd.as_bytes())
             .map_err(|e| GatewayError::Platform(format!("IMAP write: {e}")))?;
         let fetch_resp = read_response(&mut stream, &t)?;
 
@@ -379,7 +474,11 @@ fn imap_fetch_unseen(
                 platform: "email".to_string(),
                 chat_id: from_addr.clone(),
                 user_id: from_addr,
-                text: if body.trim().is_empty() { subject } else { body.trim().to_string() },
+                text: if body.trim().is_empty() {
+                    subject
+                } else {
+                    body.trim().to_string()
+                },
                 message_id: Some(mid.clone()),
                 is_dm: true,
             });
@@ -408,8 +507,16 @@ fn base64_encode_simple(data: &[u8]) -> String {
         let triple = (b0 << 16) | (b1 << 8) | b2;
         result.push(ALPHABET[((triple >> 18) & 0x3F) as usize] as char);
         result.push(ALPHABET[((triple >> 12) & 0x3F) as usize] as char);
-        result.push(if chunk.len() > 1 { ALPHABET[((triple >> 6) & 0x3F) as usize] as char } else { '=' });
-        result.push(if chunk.len() > 2 { ALPHABET[(triple & 0x3F) as usize] as char } else { '=' });
+        result.push(if chunk.len() > 1 {
+            ALPHABET[((triple >> 6) & 0x3F) as usize] as char
+        } else {
+            '='
+        });
+        result.push(if chunk.len() > 2 {
+            ALPHABET[(triple & 0x3F) as usize] as char
+        } else {
+            '='
+        });
     }
     result
 }
@@ -425,8 +532,16 @@ fn base64_encode_lines(data: &[u8]) -> String {
         let triple = (b0 << 16) | (b1 << 8) | b2;
         result.push(ALPHABET[((triple >> 18) & 0x3F) as usize] as char);
         result.push(ALPHABET[((triple >> 12) & 0x3F) as usize] as char);
-        result.push(if chunk.len() > 1 { ALPHABET[((triple >> 6) & 0x3F) as usize] as char } else { '=' });
-        result.push(if chunk.len() > 2 { ALPHABET[(triple & 0x3F) as usize] as char } else { '=' });
+        result.push(if chunk.len() > 1 {
+            ALPHABET[((triple >> 6) & 0x3F) as usize] as char
+        } else {
+            '='
+        });
+        result.push(if chunk.len() > 2 {
+            ALPHABET[(triple & 0x3F) as usize] as char
+        } else {
+            '='
+        });
         col += 4;
         if col >= 76 {
             result.push_str("\r\n");

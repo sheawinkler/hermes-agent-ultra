@@ -39,6 +39,9 @@ impl PairingManager {
     }
 
     pub fn state(&self, user_id: &str) -> Option<PairingState> {
-        self.sessions.read().ok().and_then(|s| s.get(user_id).cloned())
+        self.sessions
+            .read()
+            .ok()
+            .and_then(|s| s.get(user_id).cloned())
     }
 }

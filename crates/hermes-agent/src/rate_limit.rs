@@ -265,8 +265,14 @@ mod tests {
     #[test]
     fn test_parse_duration_string() {
         assert_eq!(parse_duration_string("1s"), Some(Duration::from_secs(1)));
-        assert_eq!(parse_duration_string("200ms"), Some(Duration::from_millis(200)));
-        assert_eq!(parse_duration_string("1.5s"), Some(Duration::from_secs_f64(1.5)));
+        assert_eq!(
+            parse_duration_string("200ms"),
+            Some(Duration::from_millis(200))
+        );
+        assert_eq!(
+            parse_duration_string("1.5s"),
+            Some(Duration::from_secs_f64(1.5))
+        );
         assert_eq!(parse_duration_string("2m"), Some(Duration::from_secs(120)));
         assert_eq!(parse_duration_string("5"), Some(Duration::from_secs(5)));
     }

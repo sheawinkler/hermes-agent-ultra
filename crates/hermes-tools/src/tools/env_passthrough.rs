@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
 pub struct EnvPassthroughHandler;
 
@@ -25,7 +25,14 @@ impl ToolHandler for EnvPassthroughHandler {
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("keys".into(), json!({"type":"array","items":{"type":"string"}}));
-        tool_schema("env_passthrough", "Expose selected env vars to tool workflows.", JsonSchema::object(props, vec!["keys".into()]))
+        props.insert(
+            "keys".into(),
+            json!({"type":"array","items":{"type":"string"}}),
+        );
+        tool_schema(
+            "env_passthrough",
+            "Expose selected env vars to tool workflows.",
+            JsonSchema::object(props, vec!["keys".into()]),
+        )
     }
 }

@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use regex::Regex;
 use serde_json::{json, Value};
 
-use hermes_core::ToolError;
 use crate::tools::file::{PatchBackend, SearchBackend};
+use hermes_core::ToolError;
 
 // ---------------------------------------------------------------------------
 // LocalPatchBackend
@@ -89,7 +89,12 @@ impl LocalPatchBackend {
                 }
             }
             if matches {
-                return Some(Self::line_positions(haystack, &haystack_lines, i, i + needle_lines.len()));
+                return Some(Self::line_positions(
+                    haystack,
+                    &haystack_lines,
+                    i,
+                    i + needle_lines.len(),
+                ));
             }
         }
         None
@@ -126,7 +131,12 @@ impl LocalPatchBackend {
                 }
             }
             if matches {
-                return Some(Self::line_positions(haystack, &haystack_lines, i, i + needle_lines.len()));
+                return Some(Self::line_positions(
+                    haystack,
+                    &haystack_lines,
+                    i,
+                    i + needle_lines.len(),
+                ));
             }
         }
         None
@@ -143,7 +153,9 @@ impl LocalPatchBackend {
             return None; // No escapes to convert
         }
 
-        haystack.find(&unescaped).map(|pos| (pos, pos + unescaped.len()))
+        haystack
+            .find(&unescaped)
+            .map(|pos| (pos, pos + unescaped.len()))
     }
 
     /// Strategy 6: Trim whitespace from first and last lines only.
@@ -163,7 +175,10 @@ impl LocalPatchBackend {
         let n = needle_lines.len();
 
         for i in 0..haystack_lines.len().saturating_sub(n - 1) {
-            let mut check_lines: Vec<String> = haystack_lines[i..i + n].iter().map(|l| l.to_string()).collect();
+            let mut check_lines: Vec<String> = haystack_lines[i..i + n]
+                .iter()
+                .map(|l| l.to_string())
+                .collect();
             check_lines[0] = check_lines[0].trim().to_string();
             if check_lines.len() > 1 {
                 let last = check_lines.len() - 1;
@@ -259,7 +274,8 @@ impl LocalPatchBackend {
             if orig_bytes[orig_idx].is_ascii_whitespace() {
                 orig_idx += 1;
                 if norm_idx < norm_pos {
-                    while orig_idx < orig_bytes.len() && orig_bytes[orig_idx].is_ascii_whitespace() {
+                    while orig_idx < orig_bytes.len() && orig_bytes[orig_idx].is_ascii_whitespace()
+                    {
                         orig_idx += 1;
                     }
                     norm_idx += 1;
@@ -274,7 +290,12 @@ impl LocalPatchBackend {
     }
 
     /// Calculate start and end byte positions from line indices.
-    fn line_positions(content: &str, lines: &[&str], start_line: usize, end_line: usize) -> (usize, usize) {
+    fn line_positions(
+        content: &str,
+        lines: &[&str],
+        start_line: usize,
+        end_line: usize,
+    ) -> (usize, usize) {
         let start: usize = lines[..start_line].iter().map(|l| l.len() + 1).sum();
         let end: usize = lines[..end_line].iter().map(|l| l.len() + 1).sum();
         let end = (end.saturating_sub(1)).min(content.len());
@@ -346,9 +367,9 @@ impl PatchBackend for LocalPatchBackend {
             } else {
                 format!("{}\n{}", content, new_string)
             };
-            tokio::fs::write(path, &new_content)
-                .await
-                .map_err(|e| ToolError::ExecutionFailed(format!("Failed to write '{}': {}", path, e)))?;
+            tokio::fs::write(path, &new_content).await.map_err(|e| {
+                ToolError::ExecutionFailed(format!("Failed to write '{}': {}", path, e))
+            })?;
             return Ok(json!({"status": "ok", "message": "Content appended"}).to_string());
         }
 
@@ -356,15 +377,16 @@ impl PatchBackend for LocalPatchBackend {
             // Simple replace all occurrences
             if !content.contains(old_string) {
                 return Err(ToolError::ExecutionFailed(format!(
-                    "Could not find '{}' in '{}'", 
-                    &old_string[..old_string.len().min(100)], path
+                    "Could not find '{}' in '{}'",
+                    &old_string[..old_string.len().min(100)],
+                    path
                 )));
             }
             let new_content = content.replace(old_string, new_string);
             let count = content.matches(old_string).count();
-            tokio::fs::write(path, &new_content)
-                .await
-                .map_err(|e| ToolError::ExecutionFailed(format!("Failed to write '{}': {}", path, e)))?;
+            tokio::fs::write(path, &new_content).await.map_err(|e| {
+                ToolError::ExecutionFailed(format!("Failed to write '{}': {}", path, e))
+            })?;
             return Ok(json!({"status": "ok", "replacements": count}).to_string());
         }
 
@@ -376,17 +398,16 @@ impl PatchBackend for LocalPatchBackend {
                 new_content.push_str(new_string);
                 new_content.push_str(&content[end..]);
 
-                tokio::fs::write(path, &new_content)
-                    .await
-                    .map_err(|e| ToolError::ExecutionFailed(format!("Failed to write '{}': {}", path, e)))?;
+                tokio::fs::write(path, &new_content).await.map_err(|e| {
+                    ToolError::ExecutionFailed(format!("Failed to write '{}': {}", path, e))
+                })?;
 
                 Ok(json!({"status": "ok", "replacements": 1}).to_string())
             }
-            None => {
-                Err(ToolError::ExecutionFailed(format!(
-                    "Could not find a match for the specified text in '{}'", path
-                )))
-            }
+            None => Err(ToolError::ExecutionFailed(format!(
+                "Could not find a match for the specified text in '{}'",
+                path
+            ))),
         }
     }
 }
@@ -427,7 +448,10 @@ impl SearchBackend for LocalSearchBackend {
 
         let path = std::path::Path::new(path);
         if !path.exists() {
-            return Err(ToolError::ExecutionFailed(format!("Path '{}' does not exist", path.display())));
+            return Err(ToolError::ExecutionFailed(format!(
+                "Path '{}' does not exist",
+                path.display()
+            )));
         }
 
         Self::search_dir_content(&re, path, file_glob, max, &mut results).await;
@@ -436,19 +460,19 @@ impl SearchBackend for LocalSearchBackend {
             "matches": results,
             "total": results.len(),
             "pattern": pattern,
-        }).to_string())
+        })
+        .to_string())
     }
 
-    async fn search_files(
-        &self,
-        pattern: &str,
-        path: &str,
-    ) -> Result<String, ToolError> {
+    async fn search_files(&self, pattern: &str, path: &str) -> Result<String, ToolError> {
         let mut results: Vec<Value> = Vec::new();
         let base = std::path::Path::new(path);
 
         if !base.exists() {
-            return Err(ToolError::ExecutionFailed(format!("Path '{}' does not exist", base.display())));
+            return Err(ToolError::ExecutionFailed(format!(
+                "Path '{}' does not exist",
+                base.display()
+            )));
         }
 
         Self::search_dir_names(pattern, base, &mut results).await;
@@ -457,7 +481,8 @@ impl SearchBackend for LocalSearchBackend {
             "files": results,
             "total": results.len(),
             "pattern": pattern,
-        }).to_string())
+        })
+        .to_string())
     }
 }
 
@@ -488,7 +513,11 @@ impl LocalSearchBackend {
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
             // Skip hidden dirs and common non-text dirs
-            if name.starts_with('.') || name == "node_modules" || name == "target" || name == "__pycache__" {
+            if name.starts_with('.')
+                || name == "node_modules"
+                || name == "target"
+                || name == "__pycache__"
+            {
                 continue;
             }
 
@@ -521,11 +550,7 @@ impl LocalSearchBackend {
         }
     }
 
-    async fn search_dir_names(
-        pattern: &str,
-        dir: &std::path::Path,
-        results: &mut Vec<Value>,
-    ) {
+    async fn search_dir_names(pattern: &str, dir: &std::path::Path, results: &mut Vec<Value>) {
         let entries = match tokio::fs::read_dir(dir).await {
             Ok(e) => e,
             Err(_) => return,

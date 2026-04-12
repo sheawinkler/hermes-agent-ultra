@@ -110,8 +110,7 @@ impl EventBridge {
             {
                 let q = self.queue.lock().unwrap();
                 for e in q.iter() {
-                    if e.cursor > after_cursor
-                        && session_key.map_or(true, |sk| e.session_key == sk)
+                    if e.cursor > after_cursor && session_key.map_or(true, |sk| e.session_key == sk)
                     {
                         return Some(e.clone());
                     }
@@ -303,9 +302,7 @@ pub struct HermesMcpServe {
 }
 
 impl HermesMcpServe {
-    pub fn new(
-        session_store: Arc<dyn SessionStore>,
-    ) -> Self {
+    pub fn new(session_store: Arc<dyn SessionStore>) -> Self {
         Self {
             event_bridge: Arc::new(EventBridge::new()),
             session_store,
@@ -325,11 +322,7 @@ impl HermesMcpServe {
     }
 
     /// Handle an incoming MCP tool call.
-    pub async fn handle_tool_call(
-        &self,
-        tool_name: &str,
-        args: Value,
-    ) -> Result<Value, McpError> {
+    pub async fn handle_tool_call(&self, tool_name: &str, args: Value) -> Result<Value, McpError> {
         match tool_name {
             "session_list" => self.tool_session_list(args),
             "session_read" => self.tool_session_read(args),
@@ -501,7 +494,10 @@ impl HermesMcpServe {
     }
 
     fn tool_events_poll(&self, args: Value) -> Result<Value, McpError> {
-        let after = args.get("after_cursor").and_then(|v| v.as_u64()).unwrap_or(0);
+        let after = args
+            .get("after_cursor")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         let session_key = args.get("session_key").and_then(|v| v.as_str());
         let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
 
@@ -514,7 +510,10 @@ impl HermesMcpServe {
     }
 
     async fn tool_events_wait(&self, args: Value) -> Result<Value, McpError> {
-        let after = args.get("after_cursor").and_then(|v| v.as_u64()).unwrap_or(0);
+        let after = args
+            .get("after_cursor")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
         let session_key = args.get("session_key").and_then(|v| v.as_str());
         let timeout_ms = args
             .get("timeout_ms")
@@ -523,10 +522,7 @@ impl HermesMcpServe {
             .min(300_000); // cap at 5 minutes
 
         let timeout = Duration::from_millis(timeout_ms);
-        let event = self
-            .event_bridge
-            .wait(after, session_key, timeout)
-            .await;
+        let event = self.event_bridge.wait(after, session_key, timeout).await;
 
         match event {
             Some(e) => Ok(json!({"event": e})),
@@ -573,11 +569,7 @@ impl HermesMcpServe {
     }
 
     /// Handle a full MCP JSON-RPC request (initialize, tools/list, tools/call).
-    pub async fn handle_request(
-        &self,
-        method: &str,
-        params: Value,
-    ) -> Result<Value, McpError> {
+    pub async fn handle_request(&self, method: &str, params: Value) -> Result<Value, McpError> {
         match method {
             "initialize" => Ok(json!({
                 "protocolVersion": "2024-11-05",
@@ -598,10 +590,7 @@ impl HermesMcpServe {
                     .get("name")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| McpError::InvalidParams("missing tool name".into()))?;
-                let arguments = params
-                    .get("arguments")
-                    .cloned()
-                    .unwrap_or(json!({}));
+                let arguments = params.get("arguments").cloned().unwrap_or(json!({}));
                 let result = self.handle_tool_call(tool_name, arguments).await?;
                 Ok(json!({
                     "content": [{"type": "text", "text": serde_json::to_string(&result).unwrap_or_default()}],
@@ -678,12 +667,15 @@ mod tests {
             display_name: "Test Session".into(),
             updated_at: "2024-01-01".into(),
         });
-        store.add_message("sid1", SessionMessage {
-            id: "m1".into(),
-            role: "user".into(),
-            content: "Hello".into(),
-            timestamp: "2024-01-01".into(),
-        });
+        store.add_message(
+            "sid1",
+            SessionMessage {
+                id: "m1".into(),
+                role: "user".into(),
+                content: "Hello".into(),
+                timestamp: "2024-01-01".into(),
+            },
+        );
 
         let sessions = store.list_sessions();
         assert_eq!(sessions.len(), 1);

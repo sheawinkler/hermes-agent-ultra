@@ -56,9 +56,9 @@ impl TerminalBackend for LocalBackend {
             {
                 let mut pty_cmd = TokioCommand::new("script");
                 pty_cmd
-                    .arg("-q")       // quiet mode
+                    .arg("-q") // quiet mode
                     .arg("/dev/null") // discard typescript file
-                    .arg("-c")       // command to execute
+                    .arg("-c") // command to execute
                     .arg(command)
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
@@ -68,9 +68,8 @@ impl TerminalBackend for LocalBackend {
                     pty_cmd.current_dir(dir);
                 }
 
-                let result = tokio::time::timeout(
-                    std::time::Duration::from_secs(timeout_secs),
-                    async {
+                let result =
+                    tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
                         let output = pty_cmd.output().await.map_err(|e| {
                             AgentError::Io(format!("Failed to spawn PTY command: {}", e))
                         })?;
@@ -89,9 +88,8 @@ impl TerminalBackend for LocalBackend {
                                 stderr
                             },
                         })
-                    },
-                )
-                .await;
+                    })
+                    .await;
 
                 return match result {
                     Ok(Ok(output)) => Ok(output),
@@ -124,63 +122,64 @@ impl TerminalBackend for LocalBackend {
             cmd.stdin(Stdio::null());
         }
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(timeout_secs),
-            async {
-                let child = cmd.spawn().map_err(|e| {
-                    AgentError::Io(format!("Failed to spawn command: {}", e))
-                })?;
+        let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
+            let child = cmd
+                .spawn()
+                .map_err(|e| AgentError::Io(format!("Failed to spawn command: {}", e)))?;
 
-                // In background mode, track the PID and return immediately.
-                if background {
-                    if let Some(id) = child.id() {
-                        self.background_processes
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .push(id);
-                    }
-                    return Ok(CommandOutput {
-                        exit_code: 0,
-                        stdout: format!("Process started in background (pid: {})", child.id().unwrap_or(0)),
-                        stderr: String::new(),
-                    });
+            // In background mode, track the PID and return immediately.
+            if background {
+                if let Some(id) = child.id() {
+                    self.background_processes
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .push(id);
                 }
+                return Ok(CommandOutput {
+                    exit_code: 0,
+                    stdout: format!(
+                        "Process started in background (pid: {})",
+                        child.id().unwrap_or(0)
+                    ),
+                    stderr: String::new(),
+                });
+            }
 
-                let output = child.wait_with_output().await.map_err(|e| {
-                    AgentError::Io(format!("Failed to wait for command: {}", e))
-                })?;
+            let output = child
+                .wait_with_output()
+                .await
+                .map_err(|e| AgentError::Io(format!("Failed to wait for command: {}", e)))?;
 
-                let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
-                // Truncate output if it exceeds max_output_size
-                let stdout = if stdout.len() > self.max_output_size {
-                    tracing::warn!(
-                        "Command output exceeded max size ({} bytes), truncating",
-                        stdout.len()
-                    );
-                    stdout[..self.max_output_size].to_string()
-                } else {
-                    stdout
-                };
+            // Truncate output if it exceeds max_output_size
+            let stdout = if stdout.len() > self.max_output_size {
+                tracing::warn!(
+                    "Command output exceeded max size ({} bytes), truncating",
+                    stdout.len()
+                );
+                stdout[..self.max_output_size].to_string()
+            } else {
+                stdout
+            };
 
-                let stderr = if stderr.len() > self.max_output_size {
-                    tracing::warn!(
-                        "Command stderr exceeded max size ({} bytes), truncating",
-                        stderr.len()
-                    );
-                    stderr[..self.max_output_size].to_string()
-                } else {
-                    stderr
-                };
+            let stderr = if stderr.len() > self.max_output_size {
+                tracing::warn!(
+                    "Command stderr exceeded max size ({} bytes), truncating",
+                    stderr.len()
+                );
+                stderr[..self.max_output_size].to_string()
+            } else {
+                stderr
+            };
 
-                Ok(CommandOutput {
-                    exit_code: output.status.code().unwrap_or(-1),
-                    stdout,
-                    stderr,
-                })
-            },
-        )
+            Ok(CommandOutput {
+                exit_code: output.status.code().unwrap_or(-1),
+                stdout,
+                stderr,
+            })
+        })
         .await;
 
         match result {
@@ -224,14 +223,12 @@ impl TerminalBackend for LocalBackend {
         // Ensure parent directory exists
         if let Some(parent) = std::path::Path::new(path).parent() {
             if !parent.as_os_str().is_empty() {
-                tokio::fs::create_dir_all(parent)
-                    .await
-                    .map_err(|e| {
-                        AgentError::Io(format!(
-                            "Failed to create parent directory for '{}': {}",
-                            path, e
-                        ))
-                    })?;
+                tokio::fs::create_dir_all(parent).await.map_err(|e| {
+                    AgentError::Io(format!(
+                        "Failed to create parent directory for '{}': {}",
+                        path, e
+                    ))
+                })?;
             }
         }
 
@@ -313,7 +310,10 @@ mod tests {
 
         let backend = LocalBackend::default();
 
-        backend.write_file(&path_str, "hello\nworld\nfoo\nbar").await.unwrap();
+        backend
+            .write_file(&path_str, "hello\nworld\nfoo\nbar")
+            .await
+            .unwrap();
         let content = backend.read_file(&path_str, None, None).await.unwrap();
         assert_eq!(content, "hello\nworld\nfoo\nbar");
 
@@ -322,7 +322,10 @@ mod tests {
         assert_eq!(content, "world\nfoo\nbar");
 
         // Test with offset and limit
-        let content = backend.read_file(&path_str, Some(1), Some(2)).await.unwrap();
+        let content = backend
+            .read_file(&path_str, Some(1), Some(2))
+            .await
+            .unwrap();
         assert_eq!(content, "world\nfoo");
 
         // Cleanup
@@ -338,6 +341,9 @@ mod tests {
         assert!(backend.file_exists("/tmp").await.unwrap());
 
         // A path that should not exist
-        assert!(!backend.file_exists("/tmp/hermes_nonexistent_test_file_xyz").await.unwrap());
+        assert!(!backend
+            .file_exists("/tmp/hermes_nonexistent_test_file_xyz")
+            .await
+            .unwrap());
     }
 }

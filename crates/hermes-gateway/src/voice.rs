@@ -186,17 +186,24 @@ impl VoiceManager {
         }
 
         // Compute average absolute amplitude from raw PCM-like data
-        let sum: u64 = audio_data.iter().map(|&b| {
-            let signed = b as i8;
-            signed.unsigned_abs() as u64
-        }).sum();
+        let sum: u64 = audio_data
+            .iter()
+            .map(|&b| {
+                let signed = b as i8;
+                signed.unsigned_abs() as u64
+            })
+            .sum();
         let avg = sum / audio_data.len() as u64;
 
         // Threshold: if average amplitude is above ~10, consider it voice
         avg > 10
     }
 
-    async fn transcribe_whisper(&self, audio_data: &[u8], format: &str) -> Result<String, AgentError> {
+    async fn transcribe_whisper(
+        &self,
+        audio_data: &[u8],
+        format: &str,
+    ) -> Result<String, AgentError> {
         let api_key = std::env::var("OPENAI_API_KEY")
             .map_err(|_| AgentError::Config("OPENAI_API_KEY not set for Whisper STT".into()))?;
 
@@ -229,12 +236,22 @@ impl VoiceManager {
             return Err(AgentError::LlmApi(format!("Whisper error: {body}")));
         }
 
-        let json: serde_json::Value = resp.json().await
+        let json: serde_json::Value = resp
+            .json()
+            .await
             .map_err(|e| AgentError::LlmApi(format!("Parse error: {e}")))?;
-        Ok(json.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string())
+        Ok(json
+            .get("text")
+            .and_then(|t| t.as_str())
+            .unwrap_or("")
+            .to_string())
     }
 
-    async fn transcribe_deepgram(&self, audio_data: &[u8], format: &str) -> Result<String, AgentError> {
+    async fn transcribe_deepgram(
+        &self,
+        audio_data: &[u8],
+        format: &str,
+    ) -> Result<String, AgentError> {
         let api_key = std::env::var("DEEPGRAM_API_KEY")
             .map_err(|_| AgentError::Config("DEEPGRAM_API_KEY not set for Deepgram STT".into()))?;
 
@@ -244,9 +261,11 @@ impl VoiceManager {
             "ogg" | "oga" => "audio/ogg",
             "webm" => "audio/webm",
             "flac" => "audio/flac",
-            other => return Err(AgentError::Config(format!(
+            other => {
+                return Err(AgentError::Config(format!(
                 "Unsupported audio format for Deepgram: '{other}' (try wav, mp3, webm, flac, ogg)"
-            ))),
+            )))
+            }
         };
 
         let model = std::env::var("DEEPGRAM_MODEL").unwrap_or_else(|_| "nova-2".to_string());
@@ -289,7 +308,12 @@ impl VoiceManager {
         Ok(transcript)
     }
 
-    async fn transcribe_custom(&self, url: &str, audio_data: &[u8], format: &str) -> Result<String, AgentError> {
+    async fn transcribe_custom(
+        &self,
+        url: &str,
+        audio_data: &[u8],
+        format: &str,
+    ) -> Result<String, AgentError> {
         let mime = format!("audio/{}", format);
         let client = reqwest::Client::new();
         let mut req = client
@@ -363,14 +387,17 @@ impl VoiceManager {
             return Err(AgentError::LlmApi(format!("TTS error: {body}")));
         }
 
-        let bytes = resp.bytes().await
+        let bytes = resp
+            .bytes()
+            .await
             .map_err(|e| AgentError::LlmApi(format!("TTS read error: {e}")))?;
         Ok(bytes.to_vec())
     }
 
     async fn tts_elevenlabs(&self, text: &str) -> Result<Vec<u8>, AgentError> {
-        let api_key = std::env::var("ELEVENLABS_API_KEY")
-            .map_err(|_| AgentError::Config("ELEVENLABS_API_KEY not set for ElevenLabs TTS".into()))?;
+        let api_key = std::env::var("ELEVENLABS_API_KEY").map_err(|_| {
+            AgentError::Config("ELEVENLABS_API_KEY not set for ElevenLabs TTS".into())
+        })?;
 
         let voice_id = std::env::var("ELEVENLABS_VOICE_ID")
             .unwrap_or_else(|_| "21m00Tcm4TlvDq8ikWAM".to_string());

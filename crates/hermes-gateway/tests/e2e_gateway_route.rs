@@ -2,10 +2,10 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use hermes_config::session::SessionConfig;
+use hermes_core::GatewayError;
 use hermes_gateway::dm::DmManager;
 use hermes_gateway::gateway::{GatewayConfig, IncomingMessage};
 use hermes_gateway::{Gateway, ParseMode, PlatformAdapter, SessionManager};
-use hermes_core::GatewayError;
 
 struct RecordingAdapter {
     sent: Arc<Mutex<Vec<String>>>,
@@ -70,7 +70,10 @@ async fn e2e_gateway_routes_message_and_replies() {
     gateway
         .set_message_handler(Arc::new(|messages| {
             Box::pin(async move {
-                let user_count = messages.iter().filter(|m| matches!(m.role, hermes_core::MessageRole::User)).count();
+                let user_count = messages
+                    .iter()
+                    .filter(|m| matches!(m.role, hermes_core::MessageRole::User))
+                    .count();
                 Ok(format!("ack users={}", user_count))
             })
         }))

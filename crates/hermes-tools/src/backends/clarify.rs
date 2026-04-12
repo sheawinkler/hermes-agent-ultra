@@ -3,8 +3,8 @@
 use async_trait::async_trait;
 use serde_json::json;
 
-use hermes_core::ToolError;
 use crate::tools::clarify::ClarifyBackend;
+use hermes_core::ToolError;
 
 /// Clarify backend that returns a JSON signal for the CLI/gateway layer
 /// to present the question to the user. The actual UI interaction is

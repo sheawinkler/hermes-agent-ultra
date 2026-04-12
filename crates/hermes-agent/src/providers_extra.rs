@@ -76,8 +76,14 @@ impl LlmProvider for QwenProvider {
         model: Option<&str>,
         extra_body: Option<&Value>,
     ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-        self.inner
-            .chat_completion_stream(messages, tools, max_tokens, temperature, model, extra_body)
+        self.inner.chat_completion_stream(
+            messages,
+            tools,
+            max_tokens,
+            temperature,
+            model,
+            extra_body,
+        )
     }
 }
 
@@ -97,11 +103,7 @@ pub struct KimiProvider {
 impl KimiProvider {
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
-            inner: GenericProvider::new(
-                "https://api.moonshot.cn/v1",
-                api_key,
-                "moonshot-v1-8k",
-            ),
+            inner: GenericProvider::new("https://api.moonshot.cn/v1", api_key, "moonshot-v1-8k"),
         }
     }
 
@@ -143,8 +145,14 @@ impl LlmProvider for KimiProvider {
         model: Option<&str>,
         extra_body: Option<&Value>,
     ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-        self.inner
-            .chat_completion_stream(messages, tools, max_tokens, temperature, model, extra_body)
+        self.inner.chat_completion_stream(
+            messages,
+            tools,
+            max_tokens,
+            temperature,
+            model,
+            extra_body,
+        )
     }
 }
 
@@ -164,11 +172,7 @@ pub struct MiniMaxProvider {
 impl MiniMaxProvider {
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
-            inner: GenericProvider::new(
-                "https://api.minimax.chat/v1",
-                api_key,
-                "abab6.5s-chat",
-            ),
+            inner: GenericProvider::new("https://api.minimax.chat/v1", api_key, "abab6.5s-chat"),
         }
     }
 
@@ -210,8 +214,14 @@ impl LlmProvider for MiniMaxProvider {
         model: Option<&str>,
         extra_body: Option<&Value>,
     ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-        self.inner
-            .chat_completion_stream(messages, tools, max_tokens, temperature, model, extra_body)
+        self.inner.chat_completion_stream(
+            messages,
+            tools,
+            max_tokens,
+            temperature,
+            model,
+            extra_body,
+        )
     }
 }
 
@@ -277,8 +287,14 @@ impl LlmProvider for NousProvider {
         model: Option<&str>,
         extra_body: Option<&Value>,
     ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-        self.inner
-            .chat_completion_stream(messages, tools, max_tokens, temperature, model, extra_body)
+        self.inner.chat_completion_stream(
+            messages,
+            tools,
+            max_tokens,
+            temperature,
+            model,
+            extra_body,
+        )
     }
 }
 
@@ -339,8 +355,14 @@ impl LlmProvider for CopilotProvider {
         model: Option<&str>,
         extra_body: Option<&Value>,
     ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-        self.inner
-            .chat_completion_stream(messages, tools, max_tokens, temperature, model, extra_body)
+        self.inner.chat_completion_stream(
+            messages,
+            tools,
+            max_tokens,
+            temperature,
+            model,
+            extra_body,
+        )
     }
 }
 
@@ -355,7 +377,10 @@ mod tests {
     #[test]
     fn qwen_provider_defaults() {
         let p = QwenProvider::new("test-key");
-        assert_eq!(p.inner.base_url, "https://dashscope.aliyuncs.com/compatible-mode/v1");
+        assert_eq!(
+            p.inner.base_url,
+            "https://dashscope.aliyuncs.com/compatible-mode/v1"
+        );
         assert_eq!(p.inner.model, "qwen-turbo");
     }
 
@@ -388,7 +413,10 @@ mod tests {
     #[test]
     fn nous_provider_defaults() {
         let p = NousProvider::new("test-key");
-        assert_eq!(p.inner.base_url, "https://inference-api.nousresearch.com/v1");
+        assert_eq!(
+            p.inner.base_url,
+            "https://inference-api.nousresearch.com/v1"
+        );
         assert_eq!(p.inner.model, "hermes-3-llama-3.1-405b");
     }
 

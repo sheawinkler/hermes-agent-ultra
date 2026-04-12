@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::{json, Value};
 
-use hermes_core::ToolError;
 use crate::tools::homeassistant::HomeAssistantBackend;
+use hermes_core::ToolError;
 
 /// Home Assistant backend using the REST API.
 pub struct HaRestBackend {
@@ -24,15 +24,18 @@ impl HaRestBackend {
     }
 
     pub fn from_env() -> Result<Self, ToolError> {
-        let base_url = std::env::var("HASS_URL")
-            .map_err(|_| ToolError::ExecutionFailed("HASS_URL environment variable not set".into()))?;
-        let token = std::env::var("HASS_TOKEN")
-            .map_err(|_| ToolError::ExecutionFailed("HASS_TOKEN environment variable not set".into()))?;
+        let base_url = std::env::var("HASS_URL").map_err(|_| {
+            ToolError::ExecutionFailed("HASS_URL environment variable not set".into())
+        })?;
+        let token = std::env::var("HASS_TOKEN").map_err(|_| {
+            ToolError::ExecutionFailed("HASS_TOKEN environment variable not set".into())
+        })?;
         Ok(Self::new(base_url, token))
     }
 
     async fn get(&self, path: &str) -> Result<Value, ToolError> {
-        let resp = self.client
+        let resp = self
+            .client
             .get(format!("{}{}", self.base_url, path))
             .header("Authorization", format!("Bearer {}", self.token))
             .send()
@@ -40,11 +43,15 @@ impl HaRestBackend {
             .map_err(|e| ToolError::ExecutionFailed(format!("HA API request failed: {}", e)))?;
 
         let status = resp.status();
-        let text = resp.text().await
-            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to read HA response: {}", e)))?;
+        let text = resp.text().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to read HA response: {}", e))
+        })?;
 
         if !status.is_success() {
-            return Err(ToolError::ExecutionFailed(format!("HA API error ({}): {}", status, text)));
+            return Err(ToolError::ExecutionFailed(format!(
+                "HA API error ({}): {}",
+                status, text
+            )));
         }
 
         serde_json::from_str(&text)
@@ -52,7 +59,8 @@ impl HaRestBackend {
     }
 
     async fn post(&self, path: &str, body: &Value) -> Result<Value, ToolError> {
-        let resp = self.client
+        let resp = self
+            .client
             .post(format!("{}{}", self.base_url, path))
             .header("Authorization", format!("Bearer {}", self.token))
             .json(body)
@@ -61,11 +69,15 @@ impl HaRestBackend {
             .map_err(|e| ToolError::ExecutionFailed(format!("HA API request failed: {}", e)))?;
 
         let status = resp.status();
-        let text = resp.text().await
-            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to read HA response: {}", e)))?;
+        let text = resp.text().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to read HA response: {}", e))
+        })?;
 
         if !status.is_success() {
-            return Err(ToolError::ExecutionFailed(format!("HA API error ({}): {}", status, text)));
+            return Err(ToolError::ExecutionFailed(format!(
+                "HA API error ({}): {}",
+                status, text
+            )));
         }
 
         serde_json::from_str(&text)
@@ -80,7 +92,8 @@ impl HomeAssistantBackend for HaRestBackend {
         let empty = vec![];
         let entities = states.as_array().unwrap_or(&empty);
 
-        let filtered: Vec<Value> = entities.iter()
+        let filtered: Vec<Value> = entities
+            .iter()
             .filter(|e| {
                 if let Some(d) = domain {
                     e.get("entity_id")
@@ -118,16 +131,22 @@ impl HomeAssistantBackend for HaRestBackend {
         let all = services.as_array().unwrap_or(&empty);
 
         let filtered: Vec<&Value> = match domain {
-            Some(d) => all.iter().filter(|s| {
-                s.get("domain").and_then(|v| v.as_str()) == Some(d)
-            }).collect(),
+            Some(d) => all
+                .iter()
+                .filter(|s| s.get("domain").and_then(|v| v.as_str()) == Some(d))
+                .collect(),
             None => all.iter().collect(),
         };
 
         Ok(json!({"services": filtered, "total": filtered.len()}).to_string())
     }
 
-    async fn call_service(&self, service: &str, entity_id: &str, data: Option<&Value>) -> Result<String, ToolError> {
+    async fn call_service(
+        &self,
+        service: &str,
+        entity_id: &str,
+        data: Option<&Value>,
+    ) -> Result<String, ToolError> {
         // Parse service as "domain.service" or just "service" with domain from entity_id
         let (domain, svc) = if let Some(dot_pos) = service.find('.') {
             (&service[..dot_pos], &service[dot_pos + 1..])
@@ -141,7 +160,9 @@ impl HomeAssistantBackend for HaRestBackend {
             obj.insert("entity_id".to_string(), json!(entity_id));
         }
 
-        let result = self.post(&format!("/api/services/{}/{}", domain, svc), &body).await?;
+        let result = self
+            .post(&format!("/api/services/{}/{}", domain, svc), &body)
+            .await?;
         Ok(json!({"status": "ok", "result": result}).to_string())
     }
 }

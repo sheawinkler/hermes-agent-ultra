@@ -7,49 +7,52 @@
 pub mod agent_loop;
 pub mod api_bridge;
 pub mod budget;
-pub mod context;
 pub mod compression;
+pub mod context;
 pub mod context_files;
 pub mod credential_pool;
 pub mod fallback;
 pub mod honcho_provider;
 pub mod interrupt;
 pub mod memory_manager;
+pub mod memory_plugins;
+pub mod oauth;
+pub mod plugins;
 pub mod provider;
 pub mod providers_extra;
-pub mod oauth;
 pub mod rate_limit;
 pub mod reasoning;
 pub mod session_persistence;
-pub mod memory_plugins;
-pub mod plugins;
 pub mod skill_orchestrator;
 pub mod subdirectory_hints;
 
 // Re-export primary agent types
-pub use agent_loop::{AgentCallbacks, AgentConfig, AgentLoop, ApiMode, ErrorClass, RetryConfig, TurnMetrics};
+pub use agent_loop::{
+    AgentCallbacks, AgentConfig, AgentLoop, ApiMode, ErrorClass, RetryConfig, TurnMetrics,
+};
 
 // Re-export context management
-pub use context::{ContextManager, SystemPromptBuilder, load_soul_md, load_soul_md_from, switch_personality, load_context_files};
 pub use compression::summarize_messages_with_llm;
+pub use context::{
+    load_context_files, load_soul_md, load_soul_md_from, switch_personality, ContextManager,
+    SystemPromptBuilder,
+};
 
 // Re-export budget enforcement
 pub use budget::{check_aggregate_budget, enforce_budget, truncate_result};
 
 // Re-export LLM providers
-pub use provider::{
-    AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider,
-};
-pub use providers_extra::{
-    QwenProvider, KimiProvider, MiniMaxProvider, NousProvider, CopilotProvider,
-};
 pub use api_bridge::CodexProvider;
+pub use provider::{AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider};
+pub use providers_extra::{
+    CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
+};
 
 // Re-export rate limiting, credential pool, and fallback chain
-pub use rate_limit::RateLimitTracker;
 pub use credential_pool::CredentialPool;
 pub use fallback::FallbackChain;
 pub use oauth::{OAuthManager, OAuthToken, TokenFetcher};
+pub use rate_limit::RateLimitTracker;
 
 // Re-export reasoning parser
 pub use reasoning::parse_reasoning;
@@ -58,7 +61,9 @@ pub use reasoning::parse_reasoning;
 pub use interrupt::InterruptController;
 
 // Re-export memory manager
-pub use memory_manager::{MemoryManager, MemoryProviderPlugin, sanitize_context, build_memory_context_block};
+pub use memory_manager::{
+    build_memory_context_block, sanitize_context, MemoryManager, MemoryProviderPlugin,
+};
 
 // Re-export plugin system
 pub use plugins::{Plugin, PluginManager, PluginMeta};
@@ -73,7 +78,7 @@ pub use session_persistence::SessionPersistence;
 pub use context_files::{load_hermes_context_files, load_workspace_context, scan_context_content};
 
 // Re-export subdirectory hints
-pub use subdirectory_hints::{SubdirectoryHintTracker, generate_project_hints};
+pub use subdirectory_hints::{generate_project_hints, SubdirectoryHintTracker};
 
 // Re-export honcho provider
 pub use honcho_provider::HonchoProvider;

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
 use std::sync::Arc;
 
@@ -22,7 +22,12 @@ pub trait HomeAssistantBackend: Send + Sync {
     /// List available services.
     async fn list_services(&self, domain: Option<&str>) -> Result<String, ToolError>;
     /// Call a service.
-    async fn call_service(&self, service: &str, entity_id: &str, data: Option<&Value>) -> Result<String, ToolError>;
+    async fn call_service(
+        &self,
+        service: &str,
+        entity_id: &str,
+        data: Option<&Value>,
+    ) -> Result<String, ToolError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -48,10 +53,13 @@ impl ToolHandler for HaListEntitiesHandler {
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("domain".into(), json!({
-            "type": "string",
-            "description": "Optional domain filter (e.g. 'light', 'switch', 'sensor')"
-        }));
+        props.insert(
+            "domain".into(),
+            json!({
+                "type": "string",
+                "description": "Optional domain filter (e.g. 'light', 'switch', 'sensor')"
+            }),
+        );
 
         tool_schema(
             "ha_list_entities",
@@ -78,7 +86,8 @@ impl HaGetStateHandler {
 #[async_trait]
 impl ToolHandler for HaGetStateHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
-        let entity_id = params.get("entity_id")
+        let entity_id = params
+            .get("entity_id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'entity_id' parameter".into()))?;
         self.backend.get_state(entity_id).await
@@ -86,10 +95,13 @@ impl ToolHandler for HaGetStateHandler {
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("entity_id".into(), json!({
-            "type": "string",
-            "description": "Entity ID to get state for (e.g. 'light.living_room')"
-        }));
+        props.insert(
+            "entity_id".into(),
+            json!({
+                "type": "string",
+                "description": "Entity ID to get state for (e.g. 'light.living_room')"
+            }),
+        );
 
         tool_schema(
             "ha_get_state",
@@ -122,10 +134,13 @@ impl ToolHandler for HaListServicesHandler {
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("domain".into(), json!({
-            "type": "string",
-            "description": "Optional domain filter (e.g. 'light', 'switch')"
-        }));
+        props.insert(
+            "domain".into(),
+            json!({
+                "type": "string",
+                "description": "Optional domain filter (e.g. 'light', 'switch')"
+            }),
+        );
 
         tool_schema(
             "ha_list_services",
@@ -152,11 +167,13 @@ impl HaCallServiceHandler {
 #[async_trait]
 impl ToolHandler for HaCallServiceHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
-        let service = params.get("service")
+        let service = params
+            .get("service")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'service' parameter".into()))?;
 
-        let entity_id = params.get("entity_id")
+        let entity_id = params
+            .get("entity_id")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'entity_id' parameter".into()))?;
 
@@ -170,18 +187,27 @@ impl ToolHandler for HaCallServiceHandler {
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("service".into(), json!({
-            "type": "string",
-            "description": "Service to call (e.g. 'turn_on', 'turn_off', 'toggle')"
-        }));
-        props.insert("entity_id".into(), json!({
-            "type": "string",
-            "description": "Entity ID to call the service on (e.g. 'light.living_room')"
-        }));
-        props.insert("data".into(), json!({
-            "type": "object",
-            "description": "Additional service data (e.g. brightness, color)"
-        }));
+        props.insert(
+            "service".into(),
+            json!({
+                "type": "string",
+                "description": "Service to call (e.g. 'turn_on', 'turn_off', 'toggle')"
+            }),
+        );
+        props.insert(
+            "entity_id".into(),
+            json!({
+                "type": "string",
+                "description": "Entity ID to call the service on (e.g. 'light.living_room')"
+            }),
+        );
+        props.insert(
+            "data".into(),
+            json!({
+                "type": "object",
+                "description": "Additional service data (e.g. brightness, color)"
+            }),
+        );
 
         tool_schema(
             "ha_call_service",
@@ -207,7 +233,12 @@ mod tests {
         async fn list_services(&self, domain: Option<&str>) -> Result<String, ToolError> {
             Ok(format!("Services (domain: {:?})", domain))
         }
-        async fn call_service(&self, service: &str, entity_id: &str, _data: Option<&Value>) -> Result<String, ToolError> {
+        async fn call_service(
+            &self,
+            service: &str,
+            entity_id: &str,
+            _data: Option<&Value>,
+        ) -> Result<String, ToolError> {
             Ok(format!("Called {} on {}", service, entity_id))
         }
     }
@@ -226,22 +257,40 @@ mod tests {
     #[tokio::test]
     async fn test_ha_get_state() {
         let handler = HaGetStateHandler::new(backend());
-        let result = handler.execute(json!({"entity_id": "light.living_room"})).await.unwrap();
+        let result = handler
+            .execute(json!({"entity_id": "light.living_room"}))
+            .await
+            .unwrap();
         assert!(result.contains("light.living_room"));
     }
 
     #[tokio::test]
     async fn test_ha_call_service() {
         let handler = HaCallServiceHandler::new(backend());
-        let result = handler.execute(json!({"service": "turn_on", "entity_id": "light.living_room"})).await.unwrap();
+        let result = handler
+            .execute(json!({"service": "turn_on", "entity_id": "light.living_room"}))
+            .await
+            .unwrap();
         assert!(result.contains("turn_on"));
     }
 
     #[tokio::test]
     async fn test_ha_schemas() {
-        assert_eq!(HaListEntitiesHandler::new(backend()).schema().name, "ha_list_entities");
-        assert_eq!(HaGetStateHandler::new(backend()).schema().name, "ha_get_state");
-        assert_eq!(HaListServicesHandler::new(backend()).schema().name, "ha_list_services");
-        assert_eq!(HaCallServiceHandler::new(backend()).schema().name, "ha_call_service");
+        assert_eq!(
+            HaListEntitiesHandler::new(backend()).schema().name,
+            "ha_list_entities"
+        );
+        assert_eq!(
+            HaGetStateHandler::new(backend()).schema().name,
+            "ha_get_state"
+        );
+        assert_eq!(
+            HaListServicesHandler::new(backend()).schema().name,
+            "ha_list_services"
+        );
+        assert_eq!(
+            HaCallServiceHandler::new(backend()).schema().name,
+            "ha_call_service"
+        );
     }
 }

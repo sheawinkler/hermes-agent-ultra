@@ -62,9 +62,7 @@ pub async fn check_for_updates() -> Result<String, AgentError> {
     if remote == current {
         Ok(format!(
             "Hermes v{} is up to date with latest GitHub release {} ({}).",
-            current,
-            rel.tag_name,
-            rel.html_url
+            current, rel.tag_name, rel.html_url
         ))
     } else {
         Ok(format!(

@@ -58,7 +58,11 @@ impl Insights {
         }
 
         let mut results: Vec<(String, ModelUsage)> = model_totals.into_iter().collect();
-        results.sort_by(|a, b| b.1.cost.partial_cmp(&a.1.cost).unwrap_or(std::cmp::Ordering::Equal));
+        results.sort_by(|a, b| {
+            b.1.cost
+                .partial_cmp(&a.1.cost)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         results.truncate(limit);
         results
     }

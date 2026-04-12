@@ -26,14 +26,10 @@ async fn exchange_authorization_code_parses_token_json() {
         scopes: vec!["openid".to_string()],
     };
 
-    let cred = exchange_authorization_code(
-        "acme",
-        &endpoints,
-        "auth-code-xyz",
-        "pkce-verifier-secret",
-    )
-    .await
-    .expect("token exchange");
+    let cred =
+        exchange_authorization_code("acme", &endpoints, "auth-code-xyz", "pkce-verifier-secret")
+            .await
+            .expect("token exchange");
 
     assert_eq!(cred.provider, "acme");
     assert_eq!(cred.access_token, "at-ok");

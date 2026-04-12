@@ -107,14 +107,8 @@ pub struct OpenVikingMemoryPlugin {
 
 fn viking_headers(st: &VikingState) -> reqwest::header::HeaderMap {
     let mut h = reqwest::header::HeaderMap::new();
-    h.insert(
-        "Content-Type",
-        "application/json".parse().expect("mime"),
-    );
-    h.insert(
-        "X-OpenViking-Account",
-        st.account.parse().expect("account"),
-    );
+    h.insert("Content-Type", "application/json".parse().expect("mime"));
+    h.insert("X-OpenViking-Account", st.account.parse().expect("account"));
     h.insert("X-OpenViking-User", st.user.parse().expect("user"));
     if !st.api_key.is_empty() {
         h.insert("X-API-Key", st.api_key.parse().expect("key"));
@@ -150,10 +144,7 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
         let api_key = std::env::var("OPENVIKING_API_KEY").unwrap_or_default();
         let account = std::env::var("OPENVIKING_ACCOUNT").unwrap_or_else(|_| "root".into());
         let user = std::env::var("OPENVIKING_USER").unwrap_or_else(|_| "default".into());
-        let client = match Client::builder()
-            .timeout(Duration::from_secs(45))
-            .build()
-        {
+        let client = match Client::builder().timeout(Duration::from_secs(45)).build() {
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!("OpenViking client: {}", e);
@@ -190,10 +181,7 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
 
     fn system_prompt_block(&self) -> String {
         let guard = self.state.lock().unwrap();
-        let ep = guard
-            .as_ref()
-            .map(|s| s.endpoint.as_str())
-            .unwrap_or("");
+        let ep = guard.as_ref().map(|s| s.endpoint.as_str()).unwrap_or("");
         if ep.is_empty() {
             return String::new();
         }
@@ -275,10 +263,7 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
             return;
         }
         let h = viking_headers(&st);
-        let url = format!(
-            "{}/api/v1/sessions/{}/commit",
-            st.endpoint, st.session_id
-        );
+        let url = format!("{}/api/v1/sessions/{}/commit", st.endpoint, st.session_id);
         let _ = st.client.post(&url).headers(h).send();
     }
 
@@ -327,20 +312,17 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
                 if uri.is_empty() {
                     return json!({"error": "uri is required"}).to_string();
                 }
-                let level = args.get("level").and_then(|v| v.as_str()).unwrap_or("overview");
+                let level = args
+                    .get("level")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("overview");
                 let path = match level {
                     "abstract" => "/api/v1/content/abstract",
                     "full" => "/api/v1/content/read",
                     _ => "/api/v1/content/overview",
                 };
                 let url = format!("{}{}", st.endpoint, path);
-                match st
-                    .client
-                    .get(&url)
-                    .headers(h)
-                    .query(&[("uri", uri)])
-                    .send()
-                {
+                match st.client.get(&url).headers(h).query(&[("uri", uri)]).send() {
                     Ok(r) if r.status().is_success() => match r.json::<Value>() {
                         Ok(v) => v.to_string(),
                         Err(e) => json!({"error": e.to_string()}).to_string(),
@@ -350,7 +332,10 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
                 }
             }
             "viking_browse" => {
-                let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("list");
+                let action = args
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("list");
                 let path_uri = args
                     .get("path")
                     .and_then(|v| v.as_str())
@@ -384,15 +369,10 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
                 } else {
                     format!("[Remember — {}] {}", cat, content)
                 };
-                let url = format!(
-                    "{}/api/v1/sessions/{}/messages",
-                    st.endpoint, st.session_id
-                );
+                let url = format!("{}/api/v1/sessions/{}/messages", st.endpoint, st.session_id);
                 let body = json!({"role": "user", "parts": [{"type": "text", "text": text}]});
                 match st.client.post(&url).headers(h).json(&body).send() {
-                    Ok(r) if r.status().is_success() => {
-                        json!({"status": "stored"}).to_string()
-                    }
+                    Ok(r) if r.status().is_success() => json!({"status": "stored"}).to_string(),
                     Ok(r) => json!({"error": format!("HTTP {}", r.status())}).to_string(),
                     Err(e) => json!({"error": e.to_string()}).to_string(),
                 }
@@ -408,9 +388,10 @@ impl MemoryProviderPlugin for OpenVikingMemoryPlugin {
                 }
                 let url = format!("{}/api/v1/resources", st.endpoint);
                 match st.client.post(&url).headers(h).json(&body).send() {
-                    Ok(resp) if resp.status().is_success() => {
-                        resp.json().unwrap_or(json!({"status": "added"})).to_string()
-                    }
+                    Ok(resp) if resp.status().is_success() => resp
+                        .json()
+                        .unwrap_or(json!({"status": "added"}))
+                        .to_string(),
                     Ok(r) => json!({"error": format!("HTTP {}", r.status())}).to_string(),
                     Err(e) => json!({"error": e.to_string()}).to_string(),
                 }
@@ -441,10 +422,7 @@ impl OpenVikingPrefetch {
         let h = {
             let mut hm = reqwest::header::HeaderMap::new();
             hm.insert("Content-Type", "application/json".parse().unwrap());
-            hm.insert(
-                "X-OpenViking-Account",
-                self.st.account.parse().unwrap(),
-            );
+            hm.insert("X-OpenViking-Account", self.st.account.parse().unwrap());
             hm.insert("X-OpenViking-User", self.st.user.parse().unwrap());
             if !self.st.api_key.is_empty() {
                 hm.insert("X-API-Key", self.st.api_key.parse().unwrap());

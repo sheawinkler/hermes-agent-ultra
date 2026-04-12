@@ -50,53 +50,43 @@ impl BackendManager {
                 Arc::new(LocalBackend::new(config.timeout, config.max_output_size))
             }
             #[cfg(feature = "docker")]
-            TerminalBackendType::Docker => {
-                Arc::new(DockerBackend::new(
-                    None,
-                    None,
-                    config.timeout,
-                    config.max_output_size,
-                ))
-            }
+            TerminalBackendType::Docker => Arc::new(DockerBackend::new(
+                None,
+                None,
+                config.timeout,
+                config.max_output_size,
+            )),
             #[cfg(feature = "ssh")]
-            TerminalBackendType::Ssh => {
-                Arc::new(SshBackend::new(
-                    "localhost".to_string(),
-                    22,
-                    None,
-                    None,
-                    config.timeout,
-                    config.max_output_size,
-                ))
-            }
+            TerminalBackendType::Ssh => Arc::new(SshBackend::new(
+                "localhost".to_string(),
+                22,
+                None,
+                None,
+                config.timeout,
+                config.max_output_size,
+            )),
             #[cfg(feature = "daytona")]
-            TerminalBackendType::Daytona => {
-                Arc::new(DaytonaBackend::new(
-                    None,
-                    None,
-                    None,
-                    config.timeout,
-                    config.max_output_size,
-                ))
-            }
+            TerminalBackendType::Daytona => Arc::new(DaytonaBackend::new(
+                None,
+                None,
+                None,
+                config.timeout,
+                config.max_output_size,
+            )),
             #[cfg(feature = "modal")]
-            TerminalBackendType::Modal => {
-                Arc::new(ModalBackend::new(
-                    None,
-                    None,
-                    config.timeout,
-                    config.max_output_size,
-                ))
-            }
+            TerminalBackendType::Modal => Arc::new(ModalBackend::new(
+                None,
+                None,
+                config.timeout,
+                config.max_output_size,
+            )),
             #[cfg(feature = "singularity")]
-            TerminalBackendType::Singularity => {
-                Arc::new(SingularityBackend::new(
-                    None,
-                    None,
-                    config.timeout,
-                    config.max_output_size,
-                ))
-            }
+            TerminalBackendType::Singularity => Arc::new(SingularityBackend::new(
+                None,
+                None,
+                config.timeout,
+                config.max_output_size,
+            )),
             #[allow(unreachable_patterns)]
             _ => {
                 tracing::warn!(

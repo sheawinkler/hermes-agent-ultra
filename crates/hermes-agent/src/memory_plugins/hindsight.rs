@@ -121,8 +121,7 @@ impl HindsightConfig {
         let profile_path = std::path::Path::new(hermes_home)
             .join("hindsight")
             .join("config.json");
-        let legacy_path = dirs::home_dir()
-            .map(|h| h.join(".hindsight").join("config.json"));
+        let legacy_path = dirs::home_dir().map(|h| h.join(".hindsight").join("config.json"));
 
         let content = std::fs::read_to_string(&profile_path)
             .ok()
@@ -130,7 +129,10 @@ impl HindsightConfig {
 
         if let Some(text) = content {
             if let Ok(raw) = serde_json::from_str::<Value>(&text) {
-                if let Some(key) = raw.get("apiKey").or(raw.get("api_key")).and_then(|v| v.as_str())
+                if let Some(key) = raw
+                    .get("apiKey")
+                    .or(raw.get("api_key"))
+                    .and_then(|v| v.as_str())
                 {
                     if !key.is_empty() {
                         config.api_key = key.to_string();
@@ -301,10 +303,7 @@ impl MemoryProviderPlugin for HindsightPlugin {
         let api_key = std::env::var("HINDSIGHT_API_KEY").unwrap_or_default();
         let api_url = std::env::var("HINDSIGHT_API_URL").unwrap_or_default();
         let mode = std::env::var("HINDSIGHT_MODE").unwrap_or_default();
-        if matches!(
-            mode.as_str(),
-            "local" | "local_embedded" | "local_external"
-        ) {
+        if matches!(mode.as_str(), "local" | "local_embedded" | "local_external") {
             return true;
         }
         // Cloud mode requires credentials (or explicit API URL for self-hosted).
@@ -407,10 +406,7 @@ impl MemoryProviderPlugin for HindsightPlugin {
         let cfg = config.clone();
         let out = Arc::clone(&self.prefetch_result);
         std::thread::spawn(move || {
-            let client = match Client::builder()
-                .timeout(Duration::from_secs(45))
-                .build()
-            {
+            let client = match Client::builder().timeout(Duration::from_secs(45)).build() {
                 Ok(c) => c,
                 Err(e) => {
                     tracing::debug!("Hindsight prefetch client build failed: {}", e);
@@ -486,10 +482,7 @@ impl MemoryProviderPlugin for HindsightPlugin {
         };
 
         std::thread::spawn(move || {
-            let client = match Client::builder()
-                .timeout(Duration::from_secs(120))
-                .build()
-            {
+            let client = match Client::builder().timeout(Duration::from_secs(120)).build() {
                 Ok(c) => c,
                 Err(e) => {
                     tracing::debug!("Hindsight sync client: {}", e);
@@ -536,10 +529,7 @@ impl MemoryProviderPlugin for HindsightPlugin {
             None => return json!({"error": "Hindsight not initialized"}).to_string(),
         };
 
-        let client = match Client::builder()
-            .timeout(Duration::from_secs(90))
-            .build()
-        {
+        let client = match Client::builder().timeout(Duration::from_secs(90)).build() {
             Ok(c) => c,
             Err(e) => return json!({"error": format!("HTTP client: {}", e)}).to_string(),
         };
@@ -660,7 +650,11 @@ fn hindsight_recall(
     }
     let resp = req.send().map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-        return Err(format!("recall HTTP {}: {}", resp.status(), resp.text().unwrap_or_default()));
+        return Err(format!(
+            "recall HTTP {}: {}",
+            resp.status(),
+            resp.text().unwrap_or_default()
+        ));
     }
     let v: Value = resp.json().map_err(|e| e.to_string())?;
     let lines: Vec<String> = v
@@ -668,7 +662,11 @@ fn hindsight_recall(
         .and_then(|r| r.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|item| item.get("text").and_then(|t| t.as_str()).map(|s| s.to_string()))
+                .filter_map(|item| {
+                    item.get("text")
+                        .and_then(|t| t.as_str())
+                        .map(|s| s.to_string())
+                })
                 .collect()
         })
         .unwrap_or_default();

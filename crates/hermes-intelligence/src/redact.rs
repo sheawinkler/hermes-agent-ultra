@@ -45,7 +45,8 @@ static BUILTIN_PATTERNS: LazyLock<Vec<RedactionPattern>> = LazyLock::new(|| {
         // API keys: sk-..., pk-..., key-..., etc.
         RedactionPattern {
             name: "api_key".into(),
-            regex: Regex::new(r#"(?i)(sk-|pk-|key-|api[_-]?key[_\s]*[:=]\s*)[a-zA-Z0-9\-_]{20,}"#).unwrap(),
+            regex: Regex::new(r#"(?i)(sk-|pk-|key-|api[_-]?key[_\s]*[:=]\s*)[a-zA-Z0-9\-_]{20,}"#)
+                .unwrap(),
             replacement: "[REDACTED_API_KEY]".into(),
         },
         // Generic secret tokens (Bearer, token, etc.)
@@ -75,7 +76,8 @@ static BUILTIN_PATTERNS: LazyLock<Vec<RedactionPattern>> = LazyLock::new(|| {
         // Phone numbers (US-style and international)
         RedactionPattern {
             name: "phone".into(),
-            regex: Regex::new(r#"(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}"#).unwrap(),
+            regex: Regex::new(r#"(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}"#)
+                .unwrap(),
             replacement: "[REDACTED_PHONE]".into(),
         },
         // Credit card numbers (basic pattern for 13-19 digit numbers)
@@ -161,7 +163,10 @@ impl Redactor {
     pub fn redact(&self, text: &str) -> String {
         let mut result = text.to_string();
         for pattern in &self.patterns {
-            result = pattern.regex.replace_all(&result, pattern.replacement.as_str()).to_string();
+            result = pattern
+                .regex
+                .replace_all(&result, pattern.replacement.as_str())
+                .to_string();
         }
         result
     }
@@ -258,7 +263,9 @@ mod tests {
     #[test]
     fn test_redact_message() {
         let redactor = Redactor::new();
-        let msg = Message::user("My email is test@example.com and my key is [REDACTED_API_KEY]");
+        let msg = Message::user(
+            "My email is test@example.com and my key is [REDACTED_API_KEY]",
+        );
         let redacted = redactor.redact_message(&msg);
         assert_eq!(redacted.role, MessageRole::User);
         let content = redacted.content.unwrap();

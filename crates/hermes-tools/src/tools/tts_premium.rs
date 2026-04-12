@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
 pub struct TtsPremiumHandler;
 
@@ -18,8 +18,18 @@ impl ToolHandler for TtsPremiumHandler {
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("text".into(), json!({"type":"string","description":"Text to synthesize"}));
-        props.insert("voice".into(), json!({"type":"string","description":"Premium voice id"}));
-        tool_schema("tts_premium", "Premium TTS generation (e.g., ElevenLabs).", JsonSchema::object(props, vec!["text".into()]))
+        props.insert(
+            "text".into(),
+            json!({"type":"string","description":"Text to synthesize"}),
+        );
+        props.insert(
+            "voice".into(),
+            json!({"type":"string","description":"Premium voice id"}),
+        );
+        tool_schema(
+            "tts_premium",
+            "Premium TTS generation (e.g., ElevenLabs).",
+            JsonSchema::object(props, vec!["text".into()]),
+        )
     }
 }

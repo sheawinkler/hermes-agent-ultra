@@ -89,13 +89,8 @@ pub enum AnthropicContentBlock {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ImageSource {
-    Base64 {
-        media_type: String,
-        data: String,
-    },
-    Url {
-        url: String,
-    },
+    Base64 { media_type: String, data: String },
+    Url { url: String },
 }
 
 /// An Anthropic-format message.
@@ -207,9 +202,19 @@ pub fn sanitize_tool_id(tool_id: &str) -> String {
     }
     let sanitized: String = tool_id
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
-    if sanitized.is_empty() { "tool_0".to_string() } else { sanitized }
+    if sanitized.is_empty() {
+        "tool_0".to_string()
+    } else {
+        sanitized
+    }
 }
 
 /// Convert OpenAI tool definitions to Anthropic format.
@@ -277,7 +282,10 @@ pub fn convert_messages_to_anthropic(
 
     for m in messages {
         let role = m.get("role").and_then(|r| r.as_str()).unwrap_or("user");
-        let content = m.get("content").cloned().unwrap_or(Value::String(String::new()));
+        let content = m
+            .get("content")
+            .cloned()
+            .unwrap_or(Value::String(String::new()));
 
         match role {
             "system" => {
@@ -312,8 +320,8 @@ pub fn convert_messages_to_anthropic(
                             .get("arguments")
                             .and_then(|a| a.as_str())
                             .unwrap_or("{}");
-                        let parsed_args: Value =
-                            serde_json::from_str(args_str).unwrap_or(Value::Object(Default::default()));
+                        let parsed_args: Value = serde_json::from_str(args_str)
+                            .unwrap_or(Value::Object(Default::default()));
                         blocks.push(AnthropicContentBlock::ToolUse {
                             id: sanitize_tool_id(
                                 tc.get("id").and_then(|i| i.as_str()).unwrap_or(""),
@@ -342,7 +350,11 @@ pub fn convert_messages_to_anthropic(
             }
             "tool" => {
                 let result_content = if let Some(s) = content.as_str() {
-                    if s.is_empty() { "(no output)".to_string() } else { s.to_string() }
+                    if s.is_empty() {
+                        "(no output)".to_string()
+                    } else {
+                        s.to_string()
+                    }
                 } else {
                     serde_json::to_string(&content).unwrap_or_else(|_| "(no output)".to_string())
                 };
@@ -376,10 +388,8 @@ pub fn convert_messages_to_anthropic(
             _ => {
                 // Regular user message
                 if let Some(arr) = content.as_array() {
-                    let blocks: Vec<AnthropicContentBlock> = arr
-                        .iter()
-                        .filter_map(convert_content_part)
-                        .collect();
+                    let blocks: Vec<AnthropicContentBlock> =
+                        arr.iter().filter_map(convert_content_part).collect();
                     let blocks = if blocks.is_empty() {
                         vec![AnthropicContentBlock::Text {
                             text: "(empty message)".to_string(),
@@ -394,7 +404,11 @@ pub fn convert_messages_to_anthropic(
                     });
                 } else {
                     let text = content.as_str().unwrap_or("(empty message)");
-                    let text = if text.trim().is_empty() { "(empty message)" } else { text };
+                    let text = if text.trim().is_empty() {
+                        "(empty message)"
+                    } else {
+                        text
+                    };
                     result.push(AnthropicMessage {
                         role: "user".to_string(),
                         content: AnthropicContent::Text(text.to_string()),
@@ -426,7 +440,11 @@ fn convert_content_part(part: &Value) -> Option<AnthropicContentBlock> {
     let ptype = part.get("type").and_then(|t| t.as_str()).unwrap_or("");
     match ptype {
         "text" | "input_text" => Some(AnthropicContentBlock::Text {
-            text: part.get("text").and_then(|t| t.as_str()).unwrap_or("").to_string(),
+            text: part
+                .get("text")
+                .and_then(|t| t.as_str())
+                .unwrap_or("")
+                .to_string(),
             cache_control: part.get("cache_control").cloned(),
         }),
         "image_url" | "input_image" => {
@@ -570,9 +588,7 @@ fn strip_stale_thinking_blocks(messages: &mut [AnthropicMessage], base_url: Opti
         .map(|url| !url.is_empty() && !url.contains("anthropic.com"))
         .unwrap_or(false);
 
-    let last_assistant_idx = messages
-        .iter()
-        .rposition(|m| m.role == "assistant");
+    let last_assistant_idx = messages.iter().rposition(|m| m.role == "assistant");
 
     for (idx, m) in messages.iter_mut().enumerate() {
         if m.role != "assistant" {
@@ -644,7 +660,9 @@ pub fn normalize_anthropic_response(
                         .to_string(),
                     name,
                     arguments: serde_json::to_string(
-                        block.get("input").unwrap_or(&Value::Object(Default::default())),
+                        block
+                            .get("input")
+                            .unwrap_or(&Value::Object(Default::default())),
                     )
                     .unwrap_or_else(|_| "{}".to_string()),
                 });
@@ -790,15 +808,24 @@ mod tests {
             normalize_model_name("anthropic/claude-opus-4.6", true),
             "claude-opus-4.6"
         );
-        assert_eq!(normalize_model_name("claude-sonnet-4", false), "claude-sonnet-4");
+        assert_eq!(
+            normalize_model_name("claude-sonnet-4", false),
+            "claude-sonnet-4"
+        );
     }
 
     #[test]
     fn test_get_anthropic_max_output() {
         assert_eq!(get_anthropic_max_output("claude-opus-4-6"), 128_000);
-        assert_eq!(get_anthropic_max_output("claude-sonnet-4-6-20260101"), 64_000);
+        assert_eq!(
+            get_anthropic_max_output("claude-sonnet-4-6-20260101"),
+            64_000
+        );
         assert_eq!(get_anthropic_max_output("claude-3-opus-20240229"), 4_096);
-        assert_eq!(get_anthropic_max_output("unknown-model"), ANTHROPIC_DEFAULT_OUTPUT_LIMIT);
+        assert_eq!(
+            get_anthropic_max_output("unknown-model"),
+            ANTHROPIC_DEFAULT_OUTPUT_LIMIT
+        );
     }
 
     #[test]

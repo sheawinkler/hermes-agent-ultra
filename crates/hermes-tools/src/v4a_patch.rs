@@ -196,16 +196,28 @@ pub fn parse_v4a_patch(patch_content: &str) -> (Vec<PatchOperation>, Option<Stri
             }
             if let Some(ref mut hunk) = current_hunk {
                 if line.starts_with('+') {
-                    hunk.lines.push(HunkLine { prefix: '+', content: line[1..].to_string() });
+                    hunk.lines.push(HunkLine {
+                        prefix: '+',
+                        content: line[1..].to_string(),
+                    });
                 } else if line.starts_with('-') {
-                    hunk.lines.push(HunkLine { prefix: '-', content: line[1..].to_string() });
+                    hunk.lines.push(HunkLine {
+                        prefix: '-',
+                        content: line[1..].to_string(),
+                    });
                 } else if line.starts_with(' ') {
-                    hunk.lines.push(HunkLine { prefix: ' ', content: line[1..].to_string() });
+                    hunk.lines.push(HunkLine {
+                        prefix: ' ',
+                        content: line[1..].to_string(),
+                    });
                 } else if line.starts_with('\\') {
                     // "\ No newline at end of file" — skip
                 } else {
                     // Treat as context line (implicit space prefix)
-                    hunk.lines.push(HunkLine { prefix: ' ', content: line.to_string() });
+                    hunk.lines.push(HunkLine {
+                        prefix: ' ',
+                        content: line.to_string(),
+                    });
                 }
             }
         }
@@ -358,10 +370,22 @@ mod tests {
         let hunk = Hunk {
             context_hint: None,
             lines: vec![
-                HunkLine { prefix: ' ', content: "fn test() {".to_string() },
-                HunkLine { prefix: '-', content: "    old();".to_string() },
-                HunkLine { prefix: '+', content: "    new();".to_string() },
-                HunkLine { prefix: ' ', content: "}".to_string() },
+                HunkLine {
+                    prefix: ' ',
+                    content: "fn test() {".to_string(),
+                },
+                HunkLine {
+                    prefix: '-',
+                    content: "    old();".to_string(),
+                },
+                HunkLine {
+                    prefix: '+',
+                    content: "    new();".to_string(),
+                },
+                HunkLine {
+                    prefix: ' ',
+                    content: "}".to_string(),
+                },
             ],
         };
         let (search, replace) = hunk_to_search_replace(&hunk);

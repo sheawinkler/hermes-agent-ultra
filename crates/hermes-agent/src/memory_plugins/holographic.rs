@@ -207,7 +207,13 @@ impl HolographicMemoryPlugin {
         }
     }
 
-    fn search_facts(&self, query: &str, category: Option<&str>, min_trust: f64, limit: usize) -> Vec<Value> {
+    fn search_facts(
+        &self,
+        query: &str,
+        category: Option<&str>,
+        min_trust: f64,
+        limit: usize,
+    ) -> Vec<Value> {
         let guard = match self.conn.lock() {
             Ok(g) => g,
             Err(_) => return Vec::new(),
@@ -265,7 +271,10 @@ impl HolographicMemoryPlugin {
             if let Ok(rows) = rows {
                 for row in rows.flatten() {
                     let fid = row["fact_id"].as_i64().unwrap_or(0);
-                    if !results.iter().any(|r: &Value| r["fact_id"].as_i64() == Some(fid)) {
+                    if !results
+                        .iter()
+                        .any(|r: &Value| r["fact_id"].as_i64() == Some(fid))
+                    {
                         results.push(row);
                     }
                 }
@@ -273,7 +282,8 @@ impl HolographicMemoryPlugin {
         }
 
         // Update retrieval counts
-        let ids: Vec<i64> = results.iter()
+        let ids: Vec<i64> = results
+            .iter()
             .filter_map(|r| r["fact_id"].as_i64())
             .collect();
         for id in ids {
@@ -296,10 +306,7 @@ impl HolographicMemoryPlugin {
             return id;
         }
 
-        let _ = conn.execute(
-            "INSERT INTO entities (name) VALUES (?1)",
-            params![name],
-        );
+        let _ = conn.execute("INSERT INTO entities (name) VALUES (?1)", params![name]);
         conn.last_insert_rowid()
     }
 
@@ -315,7 +322,11 @@ impl HolographicMemoryPlugin {
             )
             .map_err(|_| format!("fact_id {} not found", fact_id))?;
 
-        let delta = if helpful { HELPFUL_DELTA } else { UNHELPFUL_DELTA };
+        let delta = if helpful {
+            HELPFUL_DELTA
+        } else {
+            UNHELPFUL_DELTA
+        };
         let new_trust = clamp_trust(old_trust + delta);
         let helpful_inc: i64 = if helpful { 1 } else { 0 };
 
@@ -370,7 +381,10 @@ impl MemoryProviderPlugin for HolographicMemoryPlugin {
                 *self.db_path.lock().unwrap() = Some(db_path);
                 *self.conn.lock().unwrap() = Some(conn);
                 *self.session_id.lock().unwrap() = session_id.to_string();
-                tracing::info!("Holographic memory plugin initialized for session {}", session_id);
+                tracing::info!(
+                    "Holographic memory plugin initialized for session {}",
+                    session_id
+                );
             }
             Err(e) => {
                 tracing::warn!("Failed to open holographic memory DB: {}", e);
@@ -436,7 +450,11 @@ impl MemoryProviderPlugin for HolographicMemoryPlugin {
 
     fn on_memory_write(&self, action: &str, target: &str, content: &str) {
         if action == "add" && !content.is_empty() {
-            let category = if target == "user" { "user_pref" } else { "general" };
+            let category = if target == "user" {
+                "user_pref"
+            } else {
+                "general"
+            };
             let _ = self.add_fact(content, category, "");
         }
     }
@@ -474,9 +492,14 @@ impl HolographicMemoryPlugin {
             "add" => {
                 let content = match args.get("content").and_then(|c| c.as_str()) {
                     Some(c) => c,
-                    None => return json!({"error": "Missing required argument: content"}).to_string(),
+                    None => {
+                        return json!({"error": "Missing required argument: content"}).to_string()
+                    }
                 };
-                let category = args.get("category").and_then(|c| c.as_str()).unwrap_or("general");
+                let category = args
+                    .get("category")
+                    .and_then(|c| c.as_str())
+                    .unwrap_or("general");
                 let tags = args.get("tags").and_then(|t| t.as_str()).unwrap_or("");
                 match self.add_fact(content, category, tags) {
                     Ok(id) => json!({"fact_id": id, "status": "added"}).to_string(),
@@ -486,10 +509,15 @@ impl HolographicMemoryPlugin {
             "search" => {
                 let query = match args.get("query").and_then(|q| q.as_str()) {
                     Some(q) => q,
-                    None => return json!({"error": "Missing required argument: query"}).to_string(),
+                    None => {
+                        return json!({"error": "Missing required argument: query"}).to_string()
+                    }
                 };
                 let category = args.get("category").and_then(|c| c.as_str());
-                let min_trust = args.get("min_trust").and_then(|m| m.as_f64()).unwrap_or(self.min_trust);
+                let min_trust = args
+                    .get("min_trust")
+                    .and_then(|m| m.as_f64())
+                    .unwrap_or(self.min_trust);
                 let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(10) as usize;
                 let results = self.search_facts(query, category, min_trust, limit);
                 json!({"results": results, "count": results.len()}).to_string()
@@ -497,7 +525,9 @@ impl HolographicMemoryPlugin {
             "update" => {
                 let fact_id = match args.get("fact_id").and_then(|f| f.as_i64()) {
                     Some(id) => id,
-                    None => return json!({"error": "Missing required argument: fact_id"}).to_string(),
+                    None => {
+                        return json!({"error": "Missing required argument: fact_id"}).to_string()
+                    }
                 };
                 let guard = match self.conn.lock() {
                     Ok(g) => g,
@@ -543,7 +573,8 @@ impl HolographicMemoryPlugin {
                 );
                 sql_params.push(Box::new(fact_id));
 
-                let param_refs: Vec<&dyn rusqlite::types::ToSql> = sql_params.iter().map(|p| p.as_ref()).collect();
+                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                    sql_params.iter().map(|p| p.as_ref()).collect();
                 match conn.execute(&sql, param_refs.as_slice()) {
                     Ok(n) => json!({"updated": n > 0}).to_string(),
                     Err(e) => json!({"error": e.to_string()}).to_string(),
@@ -552,7 +583,9 @@ impl HolographicMemoryPlugin {
             "remove" => {
                 let fact_id = match args.get("fact_id").and_then(|f| f.as_i64()) {
                     Some(id) => id,
-                    None => return json!({"error": "Missing required argument: fact_id"}).to_string(),
+                    None => {
+                        return json!({"error": "Missing required argument: fact_id"}).to_string()
+                    }
                 };
                 let guard = match self.conn.lock() {
                     Ok(g) => g,
@@ -562,8 +595,13 @@ impl HolographicMemoryPlugin {
                     Some(c) => c,
                     None => return json!({"error": "Not initialized"}).to_string(),
                 };
-                let _ = conn.execute("DELETE FROM fact_entities WHERE fact_id = ?1", params![fact_id]);
-                let n = conn.execute("DELETE FROM facts WHERE fact_id = ?1", params![fact_id]).unwrap_or(0);
+                let _ = conn.execute(
+                    "DELETE FROM fact_entities WHERE fact_id = ?1",
+                    params![fact_id],
+                );
+                let n = conn
+                    .execute("DELETE FROM facts WHERE fact_id = ?1", params![fact_id])
+                    .unwrap_or(0);
                 json!({"removed": n > 0}).to_string()
             }
             "list" => {
@@ -576,24 +614,29 @@ impl HolographicMemoryPlugin {
                     None => return json!({"error": "Not initialized"}).to_string(),
                 };
                 let category = args.get("category").and_then(|c| c.as_str());
-                let min_trust = args.get("min_trust").and_then(|m| m.as_f64()).unwrap_or(0.0);
+                let min_trust = args
+                    .get("min_trust")
+                    .and_then(|m| m.as_f64())
+                    .unwrap_or(0.0);
                 let limit = args.get("limit").and_then(|l| l.as_u64()).unwrap_or(10) as i64;
 
-                let (sql, param_list): (String, Vec<Box<dyn rusqlite::types::ToSql>>) = if let Some(cat) = category {
-                    (
+                let (sql, param_list): (String, Vec<Box<dyn rusqlite::types::ToSql>>) =
+                    if let Some(cat) = category {
+                        (
                         "SELECT fact_id, content, category, tags, trust_score, retrieval_count, helpful_count, created_at, updated_at \
                          FROM facts WHERE trust_score >= ?1 AND category = ?2 ORDER BY trust_score DESC LIMIT ?3".to_string(),
                         vec![Box::new(min_trust) as Box<dyn rusqlite::types::ToSql>, Box::new(cat.to_string()), Box::new(limit)],
                     )
-                } else {
-                    (
+                    } else {
+                        (
                         "SELECT fact_id, content, category, tags, trust_score, retrieval_count, helpful_count, created_at, updated_at \
                          FROM facts WHERE trust_score >= ?1 ORDER BY trust_score DESC LIMIT ?2".to_string(),
                         vec![Box::new(min_trust) as Box<dyn rusqlite::types::ToSql>, Box::new(limit)],
                     )
-                };
+                    };
 
-                let param_refs: Vec<&dyn rusqlite::types::ToSql> = param_list.iter().map(|p| p.as_ref()).collect();
+                let param_refs: Vec<&dyn rusqlite::types::ToSql> =
+                    param_list.iter().map(|p| p.as_ref()).collect();
                 let mut stmt = match conn.prepare(&sql) {
                     Ok(s) => s,
                     Err(e) => return json!({"error": e.to_string()}).to_string(),
@@ -689,7 +732,10 @@ mod tests {
 
         let results = plugin.search_facts("dark mode", None, 0.0, 10);
         assert!(!results.is_empty());
-        assert!(results[0]["content"].as_str().unwrap().contains("dark mode"));
+        assert!(results[0]["content"]
+            .as_str()
+            .unwrap()
+            .contains("dark mode"));
     }
 
     #[test]

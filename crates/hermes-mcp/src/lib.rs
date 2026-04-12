@@ -27,10 +27,7 @@ pub enum McpError {
 
     /// Error in the MCP protocol (JSON-RPC error codes).
     #[error("Protocol error (code {code}): {message}")]
-    Protocol {
-        code: i64,
-        message: String,
-    },
+    Protocol { code: i64, message: String },
 
     /// Serialization or deserialization error.
     #[error("Serialization error: {0}")]
@@ -84,13 +81,14 @@ impl From<serde_json::Error> for McpError {
 // Re-export primary types
 pub use auth::{BearerTokenAuth, McpAuthProvider, OAuthConfig};
 pub use client::{
-    McpClient, McpManager, McpProbeResult, McpServerConfig, McpServerStatus,
-    PromptArgument, PromptInfo, PromptMessage, PromptResult, ResourceInfo,
-    SamplingConfig,
+    McpClient, McpManager, McpProbeResult, McpServerConfig, McpServerStatus, PromptArgument,
+    PromptInfo, PromptMessage, PromptResult, ResourceInfo, SamplingConfig,
 };
 pub use serve::{
     ApprovalStore as McpApprovalStore, BridgeEvent, EventBridge, HermesMcpServe,
     InMemorySessionStore, PendingApproval, SessionEntry, SessionMessage, SessionStore,
 };
 pub use server::McpServer;
-pub use transport::{HttpSseTransport, HttpTransport, McpTransport, ServerStdioTransport, StdioTransport};
+pub use transport::{
+    HttpSseTransport, HttpTransport, McpTransport, ServerStdioTransport, StdioTransport,
+};

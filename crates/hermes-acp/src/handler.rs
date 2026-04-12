@@ -112,11 +112,7 @@ impl HermesAcpHandler {
     fn handle_slash_command(&self, text: &str, session_id: &str) -> Option<String> {
         let parts: Vec<&str> = text.splitn(2, ' ').collect();
         let cmd = parts[0].trim_start_matches('/').to_lowercase();
-        let _args = if parts.len() > 1 {
-            parts[1].trim()
-        } else {
-            ""
-        };
+        let _args = if parts.len() > 1 { parts[1].trim() } else { "" };
 
         match cmd.as_str() {
             "help" => {
@@ -164,11 +160,13 @@ impl HermesAcpHandler {
                 self.session_manager.save_session(session_id);
                 Some("Conversation history cleared.".to_string())
             }
-            "compact" => Some(
-                "Context compression is not yet implemented in the Rust agent.".to_string(),
-            ),
+            "compact" => {
+                Some("Context compression is not yet implemented in the Rust agent.".to_string())
+            }
             "version" => Some(format!("Hermes Agent v{}", self.version)),
-            "tools" => Some("Use /tools to list tools (not yet implemented in Rust agent).".to_string()),
+            "tools" => {
+                Some("Use /tools to list tools (not yet implemented in Rust agent).".to_string())
+            }
             _ => None,
         }
     }
@@ -210,9 +208,7 @@ impl AcpHandler for HermesAcpHandler {
                 AcpResponse::success(request.id, serde_json::to_value(&resp).unwrap())
             }
 
-            AcpMethod::Authenticate => {
-                AcpResponse::success(request.id, json!({}))
-            }
+            AcpMethod::Authenticate => AcpResponse::success(request.id, json!({})),
 
             // -- Session management -----------------------------------------
             AcpMethod::NewSession => {
@@ -220,10 +216,7 @@ impl AcpHandler for HermesAcpHandler {
                     .and_then(|p| param_str(p, "cwd"))
                     .unwrap_or(".");
                 let state = self.session_manager.create_session(cwd);
-                AcpResponse::success(
-                    request.id,
-                    json!({"session_id": state.session_id}),
-                )
+                AcpResponse::success(request.id, json!({"session_id": state.session_id}))
             }
 
             AcpMethod::LoadSession => {
@@ -255,10 +248,7 @@ impl AcpHandler for HermesAcpHandler {
                     AcpResponse::success(request.id, json!({}))
                 } else {
                     let state = self.session_manager.create_session(cwd);
-                    AcpResponse::success(
-                        request.id,
-                        json!({"session_id": state.session_id}),
-                    )
+                    AcpResponse::success(request.id, json!({"session_id": state.session_id}))
                 }
             }
 
@@ -342,19 +332,14 @@ impl AcpHandler for HermesAcpHandler {
                 };
 
                 if user_text.trim().is_empty() {
-                    return AcpResponse::success(
-                        request.id,
-                        json!({"stop_reason": "end_turn"}),
-                    );
+                    return AcpResponse::success(request.id, json!({"stop_reason": "end_turn"}));
                 }
 
                 // Intercept slash commands
                 if user_text.starts_with('/') {
                     if let Some(response_text) = self.handle_slash_command(&user_text, session_id) {
-                        self.event_sink.push(AcpEvent::message_complete(
-                            session_id,
-                            &response_text,
-                        ));
+                        self.event_sink
+                            .push(AcpEvent::message_complete(session_id, &response_text));
                         return AcpResponse::success(
                             request.id,
                             json!({"stop_reason": "end_turn"}),
@@ -378,10 +363,7 @@ impl AcpHandler for HermesAcpHandler {
                 self.session_manager
                     .set_phase(session_id, SessionPhase::Idle);
 
-                AcpResponse::success(
-                    request.id,
-                    json!({"stop_reason": "end_turn"}),
-                )
+                AcpResponse::success(request.id, json!({"stop_reason": "end_turn"}))
             }
 
             // -- Session configuration --------------------------------------
@@ -432,10 +414,7 @@ impl AcpHandler for HermesAcpHandler {
             // -- Legacy methods ---------------------------------------------
             AcpMethod::CreateConversation => {
                 let state = self.session_manager.create_session(".");
-                AcpResponse::success(
-                    request.id,
-                    json!({"conversation_id": state.session_id}),
-                )
+                AcpResponse::success(request.id, json!({"conversation_id": state.session_id}))
             }
 
             AcpMethod::SendMessage => {
@@ -490,9 +469,7 @@ impl AcpHandler for HermesAcpHandler {
                 AcpResponse::success(request.id, json!({"messages": messages}))
             }
 
-            AcpMethod::ListTools => {
-                AcpResponse::success(request.id, json!({"tools": []}))
-            }
+            AcpMethod::ListTools => AcpResponse::success(request.id, json!({"tools": []})),
 
             AcpMethod::ExecuteTool => {
                 let Some(p) = params_obj(&request.params) else {
@@ -518,15 +495,13 @@ impl AcpHandler for HermesAcpHandler {
                 )
             }
 
-            AcpMethod::GetStatus => {
-                AcpResponse::success(
-                    request.id,
-                    json!({
-                        "status": "ready",
-                        "version": self.version,
-                    }),
-                )
-            }
+            AcpMethod::GetStatus => AcpResponse::success(
+                request.id,
+                json!({
+                    "status": "ready",
+                    "version": self.version,
+                }),
+            ),
 
             AcpMethod::Unknown(method) => {
                 AcpResponse::error(request.id, -32601, format!("Method not found: {}", method))

@@ -9,9 +9,9 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
+use hermes_core::{ToolError, ToolHandler, ToolSchema};
 use serde_json::Value;
 use tracing::warn;
-use hermes_core::{ToolError, ToolHandler, ToolSchema};
 
 // ---------------------------------------------------------------------------
 // ToolEntry
@@ -157,9 +157,7 @@ impl ToolRegistry {
 
         // Use tokio to run the async handler
         let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async {
-                handler.execute(params).await
-            })
+            tokio::runtime::Handle::current().block_on(async { handler.execute(params).await })
         });
 
         match result {
@@ -183,7 +181,11 @@ impl ToolRegistry {
         let (handler, max_chars) = {
             let inner = self.inner.lock().unwrap();
             match inner.tools.get(name) {
-                Some(e) => (Arc::clone(&e.handler), e.max_result_size_chars.unwrap_or(inner.global_max_result_size_chars)),
+                Some(e) => (
+                    Arc::clone(&e.handler),
+                    e.max_result_size_chars
+                        .unwrap_or(inner.global_max_result_size_chars),
+                ),
                 None => return Self::tool_error(&format!("Tool not found: {}", name)),
             }
         };
@@ -242,11 +244,7 @@ impl ToolRegistry {
     /// List distinct toolset names.
     pub fn list_toolsets(&self) -> Vec<String> {
         let inner = self.inner.lock().unwrap();
-        let mut sets: Vec<String> = inner
-            .tools
-            .values()
-            .map(|e| e.toolset.clone())
-            .collect();
+        let mut sets: Vec<String> = inner.tools.values().map(|e| e.toolset.clone()).collect();
         sets.sort();
         sets.dedup();
         sets
@@ -299,8 +297,8 @@ pub struct ToolEntryInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hermes_core::{JsonSchema, tool_schema};
     use async_trait::async_trait;
+    use hermes_core::{tool_schema, JsonSchema};
 
     struct EchoHandler;
 

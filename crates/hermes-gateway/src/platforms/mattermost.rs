@@ -59,14 +59,20 @@ pub struct MattermostAdapter {
 
 impl MattermostAdapter {
     pub fn new(config: MattermostConfig) -> Result<Self, GatewayError> {
-        let base = BasePlatformAdapter::new(&config.token)
-            .with_proxy(config.proxy.clone());
+        let base = BasePlatformAdapter::new(&config.token).with_proxy(config.proxy.clone());
         base.validate_token()?;
         let client = base.build_client()?;
-        Ok(Self { base, config, client, stop_signal: Arc::new(Notify::new()) })
+        Ok(Self {
+            base,
+            config,
+            client,
+            stop_signal: Arc::new(Notify::new()),
+        })
     }
 
-    pub fn config(&self) -> &MattermostConfig { &self.config }
+    pub fn config(&self) -> &MattermostConfig {
+        &self.config
+    }
 
     /// Send a message via Mattermost REST API.
     pub async fn send_text(&self, channel_id: &str, text: &str) -> Result<String, GatewayError> {
@@ -76,20 +82,32 @@ impl MattermostAdapter {
             "message": text
         });
 
-        let resp = self.client.post(&url)
+        let resp = self
+            .client
+            .post(&url)
             .header("Authorization", format!("Bearer {}", self.config.token))
             .json(&body)
-            .send().await
+            .send()
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("Mattermost send failed: {}", e)))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("Mattermost API error: {}", text)));
+            return Err(GatewayError::SendFailed(format!(
+                "Mattermost API error: {}",
+                text
+            )));
         }
 
-        let result: serde_json::Value = resp.json().await
+        let result: serde_json::Value = resp
+            .json()
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("Mattermost parse failed: {}", e)))?;
-        Ok(result.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string())
+        Ok(result
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string())
     }
 
     /// Parse a Mattermost WebSocket event into an incoming message.
@@ -107,7 +125,11 @@ impl MattermostAdapter {
         let post_id = post.get("id").and_then(|v| v.as_str())?.to_string();
         let channel_id = post.get("channel_id").and_then(|v| v.as_str())?.to_string();
         let user_id = post.get("user_id").and_then(|v| v.as_str())?.to_string();
-        let message = post.get("message").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let message = post
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
 
         let is_bot = post
             .get("props")
@@ -128,18 +150,27 @@ impl MattermostAdapter {
     /// Fetch the authenticated user's profile (`GET /api/v4/users/me`).
     pub async fn get_me(&self) -> Result<serde_json::Value, GatewayError> {
         let url = format!("{}/api/v4/users/me", self.config.server_url);
-        let resp = self.client.get(&url)
+        let resp = self
+            .client
+            .get(&url)
             .header("Authorization", format!("Bearer {}", self.config.token))
-            .send().await
-            .map_err(|e| GatewayError::ConnectionFailed(format!("Mattermost get_me failed: {}", e)))?;
+            .send()
+            .await
+            .map_err(|e| {
+                GatewayError::ConnectionFailed(format!("Mattermost get_me failed: {}", e))
+            })?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::ConnectionFailed(format!("Mattermost get_me error: {}", text)));
+            return Err(GatewayError::ConnectionFailed(format!(
+                "Mattermost get_me error: {}",
+                text
+            )));
         }
 
-        resp.json().await
-            .map_err(|e| GatewayError::ConnectionFailed(format!("Mattermost get_me parse failed: {}", e)))
+        resp.json().await.map_err(|e| {
+            GatewayError::ConnectionFailed(format!("Mattermost get_me parse failed: {}", e))
+        })
     }
 
     /// Edit a message via Mattermost REST API.
@@ -147,15 +178,21 @@ impl MattermostAdapter {
         let url = format!("{}/api/v4/posts/{}", self.config.server_url, post_id);
         let body = serde_json::json!({ "id": post_id, "message": text });
 
-        let resp = self.client.put(&url)
+        let resp = self
+            .client
+            .put(&url)
             .header("Authorization", format!("Bearer {}", self.config.token))
             .json(&body)
-            .send().await
+            .send()
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("Mattermost edit failed: {}", e)))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("Mattermost edit error: {}", text)));
+            return Err(GatewayError::SendFailed(format!(
+                "Mattermost edit error: {}",
+                text
+            )));
         }
         Ok(())
     }
@@ -164,7 +201,10 @@ impl MattermostAdapter {
 #[async_trait]
 impl PlatformAdapter for MattermostAdapter {
     async fn start(&self) -> Result<(), GatewayError> {
-        info!("Mattermost adapter starting (server: {})", self.config.server_url);
+        info!(
+            "Mattermost adapter starting (server: {})",
+            self.config.server_url
+        );
         self.base.mark_running();
         Ok(())
     }
@@ -176,23 +216,39 @@ impl PlatformAdapter for MattermostAdapter {
         Ok(())
     }
 
-    async fn send_message(&self, chat_id: &str, text: &str, _parse_mode: Option<ParseMode>) -> Result<(), GatewayError> {
+    async fn send_message(
+        &self,
+        chat_id: &str,
+        text: &str,
+        _parse_mode: Option<ParseMode>,
+    ) -> Result<(), GatewayError> {
         self.send_text(chat_id, text).await?;
         Ok(())
     }
 
-    async fn edit_message(&self, _chat_id: &str, message_id: &str, text: &str) -> Result<(), GatewayError> {
+    async fn edit_message(
+        &self,
+        _chat_id: &str,
+        message_id: &str,
+        text: &str,
+    ) -> Result<(), GatewayError> {
         self.edit_text(message_id, text).await
     }
 
-    async fn send_file(&self, chat_id: &str, file_path: &str, caption: Option<&str>) -> Result<(), GatewayError> {
+    async fn send_file(
+        &self,
+        chat_id: &str,
+        file_path: &str,
+        caption: Option<&str>,
+    ) -> Result<(), GatewayError> {
         use crate::platforms::helpers::mime_from_extension;
 
         let path = std::path::Path::new(file_path);
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let mime = mime_from_extension(ext);
         let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-        let file_bytes = tokio::fs::read(file_path).await
+        let file_bytes = tokio::fs::read(file_path)
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("Failed to read file: {e}")))?;
 
         // Step 1: Upload file via Mattermost API
@@ -205,24 +261,33 @@ impl PlatformAdapter for MattermostAdapter {
             .text("channel_id", chat_id.to_string())
             .part("files", part);
 
-        let resp = self.client.post(&upload_url)
+        let resp = self
+            .client
+            .post(&upload_url)
             .header("Authorization", format!("Bearer {}", self.config.token))
             .multipart(form)
-            .send().await
+            .send()
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("Mattermost file upload failed: {e}")))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("Mattermost upload error: {text}")));
+            return Err(GatewayError::SendFailed(format!(
+                "Mattermost upload error: {text}"
+            )));
         }
 
-        let result: serde_json::Value = resp.json().await
-            .map_err(|e| GatewayError::SendFailed(format!("Mattermost upload parse failed: {e}")))?;
-        let file_ids: Vec<String> = result.get("file_infos")
+        let result: serde_json::Value = resp.json().await.map_err(|e| {
+            GatewayError::SendFailed(format!("Mattermost upload parse failed: {e}"))
+        })?;
+        let file_ids: Vec<String> = result
+            .get("file_infos")
             .and_then(|v| v.as_array())
-            .map(|arr| arr.iter()
-                .filter_map(|f| f.get("id").and_then(|id| id.as_str()).map(String::from))
-                .collect())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|f| f.get("id").and_then(|id| id.as_str()).map(String::from))
+                    .collect()
+            })
             .unwrap_or_default();
 
         // Step 2: Create a post with the uploaded file IDs
@@ -233,19 +298,28 @@ impl PlatformAdapter for MattermostAdapter {
             "file_ids": file_ids
         });
 
-        let resp = self.client.post(&post_url)
+        let resp = self
+            .client
+            .post(&post_url)
             .header("Authorization", format!("Bearer {}", self.config.token))
             .json(&body)
-            .send().await
+            .send()
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("Mattermost file post failed: {e}")))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("Mattermost file post error: {text}")));
+            return Err(GatewayError::SendFailed(format!(
+                "Mattermost file post error: {text}"
+            )));
         }
         Ok(())
     }
 
-    fn is_running(&self) -> bool { self.base.is_running() }
-    fn platform_name(&self) -> &str { "mattermost" }
+    fn is_running(&self) -> bool {
+        self.base.is_running()
+    }
+    fn platform_name(&self) -> &str {
+        "mattermost"
+    }
 }

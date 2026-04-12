@@ -17,8 +17,8 @@ use tokio::task::JoinSet;
 use tokio::time::sleep;
 
 use hermes_core::{
-    AgentError, AgentResult, BudgetConfig, LlmProvider, Message, StreamChunk,
-    ToolCall, ToolError, ToolResult, ToolSchema, UsageStats,
+    AgentError, AgentResult, BudgetConfig, LlmProvider, Message, StreamChunk, ToolCall, ToolError,
+    ToolResult, ToolSchema, UsageStats,
 };
 
 use crate::budget;
@@ -73,7 +73,8 @@ impl ToolRegistry {
         schema: ToolSchema,
         handler: Arc<dyn Fn(Value) -> Result<String, ToolError> + Send + Sync>,
     ) {
-        self.tools.insert(name.into(), ToolEntry { schema, handler });
+        self.tools
+            .insert(name.into(), ToolEntry { schema, handler });
     }
 
     /// Look up a tool by name.
@@ -134,9 +135,15 @@ pub struct RetryConfig {
     pub fallback_model: Option<String>,
 }
 
-fn default_max_retries() -> u32 { 3 }
-fn default_base_delay_ms() -> u64 { 1000 }
-fn default_max_delay_ms() -> u64 { 30_000 }
+fn default_max_retries() -> u32 {
+    3
+}
+fn default_base_delay_ms() -> u64 {
+    1000
+}
+fn default_max_delay_ms() -> u64 {
+    30_000
+}
 
 impl Default for RetryConfig {
     fn default() -> Self {
@@ -362,16 +369,23 @@ fn classify_error(err: &str) -> ErrorClass {
     let lower = err.to_lowercase();
     if lower.contains("rate limit") || lower.contains("429") || lower.contains("too many") {
         ErrorClass::RateLimit
-    } else if lower.contains("context length") || lower.contains("maximum context")
-        || lower.contains("token limit") || lower.contains("context_length_exceeded")
+    } else if lower.contains("context length")
+        || lower.contains("maximum context")
+        || lower.contains("token limit")
+        || lower.contains("context_length_exceeded")
     {
         ErrorClass::ContextOverflow
-    } else if lower.contains("401") || lower.contains("403") || lower.contains("unauthorized")
+    } else if lower.contains("401")
+        || lower.contains("403")
+        || lower.contains("unauthorized")
         || lower.contains("authentication")
     {
         ErrorClass::Auth
-    } else if lower.contains("500") || lower.contains("502") || lower.contains("503")
-        || lower.contains("timeout") || lower.contains("connection")
+    } else if lower.contains("500")
+        || lower.contains("502")
+        || lower.contains("503")
+        || lower.contains("timeout")
+        || lower.contains("connection")
         || lower.contains("overloaded")
     {
         ErrorClass::Retryable
@@ -385,8 +399,7 @@ fn jittered_backoff(attempt: u32, base_ms: u64, max_ms: u64) -> Duration {
     let exp = base_ms.saturating_mul(1u64 << attempt.min(10));
     let capped = exp.min(max_ms);
     let jitter = capped / 4;
-    let delay = capped.saturating_sub(jitter / 2)
-        + (rand_u64_range(0, jitter.max(1)));
+    let delay = capped.saturating_sub(jitter / 2) + (rand_u64_range(0, jitter.max(1)));
     Duration::from_millis(delay)
 }
 
@@ -397,7 +410,11 @@ fn rand_u64_range(min: u64, max: u64) -> u64 {
     std::time::SystemTime::now().hash(&mut hasher);
     std::thread::current().id().hash(&mut hasher);
     let h = hasher.finish();
-    if max <= min { min } else { min + h % (max - min) }
+    if max <= min {
+        min
+    } else {
+        min + h % (max - min)
+    }
 }
 
 /// The main agent loop.
@@ -569,7 +586,13 @@ impl AgentLoop {
         ctx: &'a ContextManager,
         tool_schemas: &'a [ToolSchema],
         model_override: Option<&'a str>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<hermes_core::LlmResponse, AgentError>> + Send + 'a>> {
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<hermes_core::LlmResponse, AgentError>>
+                + Send
+                + 'a,
+        >,
+    > {
         Box::pin(self.call_llm_with_retry_inner(ctx, tool_schemas, model_override))
     }
 
@@ -630,11 +653,8 @@ impl AgentLoop {
                                 }
                                 return Err(AgentError::LlmApi(err_str));
                             }
-                            let delay = jittered_backoff(
-                                attempt,
-                                retry.base_delay_ms,
-                                retry.max_delay_ms,
-                            );
+                            let delay =
+                                jittered_backoff(attempt, retry.base_delay_ms, retry.max_delay_ms);
                             tracing::info!(
                                 "Retrying in {}ms (attempt {}/{})",
                                 delay.as_millis(),
@@ -677,7 +697,9 @@ impl AgentLoop {
         self.hydrate_todo_store(&ctx);
 
         // Memory prefetch for first user message
-        let first_user = ctx.get_messages().iter()
+        let first_user = ctx
+            .get_messages()
+            .iter()
             .filter(|m| matches!(m.role, hermes_core::MessageRole::User))
             .last()
             .and_then(|m| m.content.clone())
@@ -688,8 +710,7 @@ impl AgentLoop {
         }
 
         // Determine which tools to expose
-        let tool_schemas: Vec<ToolSchema> = tools
-            .unwrap_or_else(|| self.tool_registry.schemas());
+        let tool_schemas: Vec<ToolSchema> = tools.unwrap_or_else(|| self.tool_registry.schemas());
 
         let mut total_turns: u32 = 0;
         let mut _total_api_time_ms: u64 = 0;
@@ -782,7 +803,9 @@ impl AgentLoop {
             }
 
             if let Some(limit) = self.config.max_cost_usd {
-                if !cost_warned && session_cost_usd >= limit * self.config.cost_guard_degrade_at_ratio {
+                if !cost_warned
+                    && session_cost_usd >= limit * self.config.cost_guard_degrade_at_ratio
+                {
                     cost_warned = true;
                     if active_model_override.is_none() {
                         if let Some(model) = self.resolve_cost_degrade_model() {
@@ -859,8 +882,8 @@ impl AgentLoop {
                 self.invoke_hook(HookType::PreToolCall, &tc_ctx);
 
                 if let Some(ref cb) = self.callbacks.on_tool_start {
-                    let args: Value = serde_json::from_str(&tc.function.arguments)
-                        .unwrap_or(Value::Null);
+                    let args: Value =
+                        serde_json::from_str(&tc.function.arguments).unwrap_or(Value::Null);
                     cb(&tc.function.name, &args);
                 }
             }
@@ -868,7 +891,9 @@ impl AgentLoop {
             // --- Execute tool calls in parallel ---
             self.interrupt.check_interrupt()?;
             let tool_start = Instant::now();
-            let results = self.execute_tool_calls(&tool_calls, total_turns, &mut tool_errors).await;
+            let results = self
+                .execute_tool_calls(&tool_calls, total_turns, &mut tool_errors)
+                .await;
             let tool_elapsed = tool_start.elapsed().as_millis() as u64;
             _total_tool_time_ms += tool_elapsed;
 
@@ -954,7 +979,9 @@ impl AgentLoop {
         self.hydrate_todo_store(&ctx);
 
         // Memory prefetch
-        let first_user = ctx.get_messages().iter()
+        let first_user = ctx
+            .get_messages()
+            .iter()
             .filter(|m| matches!(m.role, hermes_core::MessageRole::User))
             .last()
             .and_then(|m| m.content.clone())
@@ -964,8 +991,7 @@ impl AgentLoop {
             ctx.add_message(Message::system(&mem_ctx));
         }
 
-        let tool_schemas: Vec<ToolSchema> = tools
-            .unwrap_or_else(|| self.tool_registry.schemas());
+        let tool_schemas: Vec<ToolSchema> = tools.unwrap_or_else(|| self.tool_registry.schemas());
 
         let mut total_turns: u32 = 0;
         let mut accumulated_usage: Option<UsageStats> = None;
@@ -1098,7 +1124,9 @@ impl AgentLoop {
             }
 
             if let Some(limit) = self.config.max_cost_usd {
-                if !cost_warned && session_cost_usd >= limit * self.config.cost_guard_degrade_at_ratio {
+                if !cost_warned
+                    && session_cost_usd >= limit * self.config.cost_guard_degrade_at_ratio
+                {
                     cost_warned = true;
                     if active_model_override.is_none() {
                         if let Some(model) = self.resolve_cost_degrade_model() {
@@ -1138,10 +1166,16 @@ impl AgentLoop {
             self.invoke_hook(HookType::PostLlmCall, &post_ctx);
 
             // Build assistant message
-            let assistant_msg = if tool_calls.is_empty() || tool_calls.iter().all(|tc| tc.function.name.is_empty()) {
+            let assistant_msg = if tool_calls.is_empty()
+                || tool_calls.iter().all(|tc| tc.function.name.is_empty())
+            {
                 Message::assistant(&content)
             } else {
-                let content_opt = if content.is_empty() { None } else { Some(content.clone()) };
+                let content_opt = if content.is_empty() {
+                    None
+                } else {
+                    Some(content.clone())
+                };
                 Message::assistant_with_tool_calls(content_opt, tool_calls.clone())
             };
 
@@ -1179,13 +1213,15 @@ impl AgentLoop {
                 let tc_ctx = serde_json::json!({"tool": &tc.function.name, "turn": total_turns});
                 self.invoke_hook(HookType::PreToolCall, &tc_ctx);
                 if let Some(ref cb) = self.callbacks.on_tool_start {
-                    let args: Value = serde_json::from_str(&tc.function.arguments)
-                        .unwrap_or(Value::Null);
+                    let args: Value =
+                        serde_json::from_str(&tc.function.arguments).unwrap_or(Value::Null);
                     cb(&tc.function.name, &args);
                 }
             }
 
-            let mut results = self.execute_tool_calls(&tool_calls, total_turns, &mut tool_errors).await;
+            let mut results = self
+                .execute_tool_calls(&tool_calls, total_turns, &mut tool_errors)
+                .await;
 
             let turn_tool_error_count = results.iter().filter(|r| r.is_error).count() as u32;
             if self.config.rollback_on_tool_error_threshold > 0
@@ -1263,9 +1299,10 @@ impl AgentLoop {
             return true;
         }
 
-        if let Some(name) = names.iter().find(|n| {
-            n.to_lowercase().contains(&target) || target.contains(&n.to_lowercase())
-        }) {
+        if let Some(name) = names
+            .iter()
+            .find(|n| n.to_lowercase().contains(&target) || target.contains(&n.to_lowercase()))
+        {
             tracing::info!(
                 "Repaired tool call (fuzzy): '{}' → '{}'",
                 tc.function.name,
@@ -1474,11 +1511,15 @@ impl AgentLoop {
 
 /// Extract the last user and assistant content from a message slice for memory sync.
 fn extract_last_user_assistant(messages: &[Message]) -> (String, String) {
-    let user = messages.iter().rev()
+    let user = messages
+        .iter()
+        .rev()
         .find(|m| matches!(m.role, hermes_core::MessageRole::User))
         .and_then(|m| m.content.clone())
         .unwrap_or_default();
-    let assistant = messages.iter().rev()
+    let assistant = messages
+        .iter()
+        .rev()
         .find(|m| matches!(m.role, hermes_core::MessageRole::Assistant))
         .and_then(|m| m.content.clone())
         .unwrap_or_default();
@@ -1499,11 +1540,7 @@ fn default_model_cost_per_million(model: &str) -> Option<(f64, f64)> {
     None
 }
 
-fn estimate_usage_cost_usd(
-    usage: &UsageStats,
-    model: &str,
-    config: &AgentConfig,
-) -> Option<f64> {
+fn estimate_usage_cost_usd(usage: &UsageStats, model: &str, config: &AgentConfig) -> Option<f64> {
     if let Some(v) = usage.estimated_cost {
         return Some(v.max(0.0));
     }

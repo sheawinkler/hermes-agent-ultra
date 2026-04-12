@@ -69,9 +69,7 @@ impl OAuthManager {
             }
         }
 
-        let refresh = guard
-            .as_ref()
-            .and_then(|c| c.token.refresh_token.clone());
+        let refresh = guard.as_ref().and_then(|c| c.token.refresh_token.clone());
 
         let token = (self.fetcher)(refresh).await?;
         *guard = Some(CachedToken {

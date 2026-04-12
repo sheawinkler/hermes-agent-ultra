@@ -441,14 +441,9 @@ mod tests {
 
     #[test]
     fn cli_parse_config_set() {
-        let cli =
-            Cli::try_parse_from(vec!["hermes", "config", "set", "model", "gpt-4o"]).unwrap();
+        let cli = Cli::try_parse_from(vec!["hermes", "config", "set", "model", "gpt-4o"]).unwrap();
         match cli.command {
-            Some(CliCommand::Config {
-                action,
-                key,
-                value,
-            }) => {
+            Some(CliCommand::Config { action, key, value }) => {
                 assert_eq!(action.as_deref(), Some("set"));
                 assert_eq!(key.as_deref(), Some("model"));
                 assert_eq!(value.as_deref(), Some("gpt-4o"));

@@ -15,9 +15,7 @@ pub fn truncate_result(content: &str, max_chars: usize) -> String {
     }
     let truncated = &content[..max_chars];
     let removed = content.len() - max_chars;
-    format!(
-        "{truncated}\n\n[... truncated {removed} characters ...]"
-    )
+    format!("{truncated}\n\n[... truncated {removed} characters ...]")
 }
 
 /// Enforce budget on a batch of tool results.
@@ -92,18 +90,13 @@ mod tests {
 
     #[test]
     fn test_check_aggregate_budget_pass() {
-        let results = vec![
-            ToolResult::ok("1", "hello"),
-            ToolResult::ok("2", "world"),
-        ];
+        let results = vec![ToolResult::ok("1", "hello"), ToolResult::ok("2", "world")];
         assert!(check_aggregate_budget(&results, 100));
     }
 
     #[test]
     fn test_check_aggregate_budget_fail() {
-        let results = vec![
-            ToolResult::ok("1", "x".repeat(500)),
-        ];
+        let results = vec![ToolResult::ok("1", "x".repeat(500))];
         assert!(!check_aggregate_budget(&results, 100));
     }
 }

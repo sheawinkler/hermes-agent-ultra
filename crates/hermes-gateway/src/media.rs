@@ -73,14 +73,16 @@ impl MediaCache {
         let cache_dir = PathBuf::from(&config.cache_dir);
 
         // Create the cache directory if it doesn't exist
-        std::fs::create_dir_all(&cache_dir)
-            .map_err(|e| GatewayError::ConnectionFailed(format!(
-                "Failed to create cache directory {:?}: {}", cache_dir, e
-            )))?;
+        std::fs::create_dir_all(&cache_dir).map_err(|e| {
+            GatewayError::ConnectionFailed(format!(
+                "Failed to create cache directory {:?}: {}",
+                cache_dir, e
+            ))
+        })?;
 
-        let client = reqwest::Client::builder()
-            .build()
-            .map_err(|e| GatewayError::ConnectionFailed(format!("Failed to build HTTP client: {}", e)))?;
+        let client = reqwest::Client::builder().build().map_err(|e| {
+            GatewayError::ConnectionFailed(format!("Failed to build HTTP client: {}", e))
+        })?;
 
         Ok(Self {
             cache_dir,
@@ -106,7 +108,11 @@ impl MediaCache {
     }
 
     /// Cache a document from a URL.
-    pub async fn cache_document(&self, url: &str, file_name: &str) -> Result<PathBuf, GatewayError> {
+    pub async fn cache_document(
+        &self,
+        url: &str,
+        file_name: &str,
+    ) -> Result<PathBuf, GatewayError> {
         self.cache_file(url, "documents", file_name).await
     }
 
@@ -121,11 +127,12 @@ impl MediaCache {
         crate::ssrf::validate_url(url)?;
 
         let dest_dir = self.cache_dir.join(subdir);
-        fs::create_dir_all(&dest_dir)
-            .await
-            .map_err(|e| GatewayError::ConnectionFailed(format!(
-                "Failed to create cache subdirectory {:?}: {}", dest_dir, e
-            )))?;
+        fs::create_dir_all(&dest_dir).await.map_err(|e| {
+            GatewayError::ConnectionFailed(format!(
+                "Failed to create cache subdirectory {:?}: {}",
+                dest_dir, e
+            ))
+        })?;
 
         let dest_path = dest_dir.join(file_name);
 
@@ -153,20 +160,21 @@ impl MediaCache {
 
         // Download the file
         debug!("Downloading {} -> {:?}", url, dest_path);
-        let response = self.client.get(url)
-            .send()
-            .await
-            .map_err(|e| GatewayError::ConnectionFailed(format!("Failed to download {}: {}", url, e)))?;
+        let response = self.client.get(url).send().await.map_err(|e| {
+            GatewayError::ConnectionFailed(format!("Failed to download {}: {}", url, e))
+        })?;
 
         if !response.status().is_success() {
             return Err(GatewayError::ConnectionFailed(format!(
-                "HTTP {} when downloading {}", response.status(), url
+                "HTTP {} when downloading {}",
+                response.status(),
+                url
             )));
         }
 
-        let bytes = response.bytes()
-            .await
-            .map_err(|e| GatewayError::ConnectionFailed(format!("Failed to read response body: {}", e)))?;
+        let bytes = response.bytes().await.map_err(|e| {
+            GatewayError::ConnectionFailed(format!("Failed to read response body: {}", e))
+        })?;
 
         // Check cache size limits
         if self.max_size > 0 {
@@ -177,22 +185,17 @@ impl MediaCache {
         }
 
         // Write to file
-        let mut file = fs::File::create(&dest_path)
-            .await
-            .map_err(|e| GatewayError::ConnectionFailed(format!(
-                "Failed to create file {:?}: {}", dest_path, e
-            )))?;
+        let mut file = fs::File::create(&dest_path).await.map_err(|e| {
+            GatewayError::ConnectionFailed(format!("Failed to create file {:?}: {}", dest_path, e))
+        })?;
 
-        file.write_all(&bytes)
-            .await
-            .map_err(|e| GatewayError::ConnectionFailed(format!(
-                "Failed to write file {:?}: {}", dest_path, e
-            )))?;
+        file.write_all(&bytes).await.map_err(|e| {
+            GatewayError::ConnectionFailed(format!("Failed to write file {:?}: {}", dest_path, e))
+        })?;
 
-        file.flush().await
-            .map_err(|e| GatewayError::ConnectionFailed(format!(
-                "Failed to flush file {:?}: {}", dest_path, e
-            )))?;
+        file.flush().await.map_err(|e| {
+            GatewayError::ConnectionFailed(format!("Failed to flush file {:?}: {}", dest_path, e))
+        })?;
 
         debug!("Cached {} -> {:?}", url, dest_path);
         Ok(dest_path)
@@ -220,19 +223,16 @@ impl MediaCache {
         ttl_seconds: u64,
         now: &'a SystemTime,
         removed: &'a mut u64,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), GatewayError>> + Send + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), GatewayError>> + Send + 'a>>
+    {
         Box::pin(async move {
-            let mut entries = fs::read_dir(dir)
-                .await
-                .map_err(|e| GatewayError::ConnectionFailed(format!(
-                    "Failed to read directory {:?}: {}", dir, e
-                )))?;
+            let mut entries = fs::read_dir(dir).await.map_err(|e| {
+                GatewayError::ConnectionFailed(format!("Failed to read directory {:?}: {}", dir, e))
+            })?;
 
-            while let Some(entry) = entries.next_entry().await
-                .map_err(|e| GatewayError::ConnectionFailed(format!(
-                    "Failed to read directory entry: {}", e
-                )))?
-            {
+            while let Some(entry) = entries.next_entry().await.map_err(|e| {
+                GatewayError::ConnectionFailed(format!("Failed to read directory entry: {}", e))
+            })? {
                 let path = entry.path();
                 if path.is_dir() {
                     self.cleanup_dir(&path, ttl_seconds, now, removed).await?;
@@ -257,7 +257,8 @@ impl MediaCache {
     /// Calculate the total size of all cached files.
     async fn calculate_cache_size(&self) -> Result<u64, GatewayError> {
         let mut total_size: u64 = 0;
-        self.calculate_dir_size(&self.cache_dir, &mut total_size).await?;
+        self.calculate_dir_size(&self.cache_dir, &mut total_size)
+            .await?;
         Ok(total_size)
     }
 
@@ -266,19 +267,16 @@ impl MediaCache {
         &'a self,
         dir: &'a Path,
         total_size: &'a mut u64,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), GatewayError>> + Send + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), GatewayError>> + Send + 'a>>
+    {
         Box::pin(async move {
-            let mut entries = fs::read_dir(dir)
-                .await
-                .map_err(|e| GatewayError::ConnectionFailed(format!(
-                    "Failed to read directory {:?}: {}", dir, e
-                )))?;
+            let mut entries = fs::read_dir(dir).await.map_err(|e| {
+                GatewayError::ConnectionFailed(format!("Failed to read directory {:?}: {}", dir, e))
+            })?;
 
-            while let Some(entry) = entries.next_entry().await
-                .map_err(|e| GatewayError::ConnectionFailed(format!(
-                    "Failed to read directory entry: {}", e
-                )))?
-            {
+            while let Some(entry) = entries.next_entry().await.map_err(|e| {
+                GatewayError::ConnectionFailed(format!("Failed to read directory entry: {}", e))
+            })? {
                 let path = entry.path();
                 if path.is_dir() {
                     self.calculate_dir_size(&path, total_size).await?;

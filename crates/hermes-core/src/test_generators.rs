@@ -30,7 +30,10 @@ pub fn arb_cache_control() -> impl Strategy<Value = CacheControl> {
 }
 
 pub fn arb_reasoning_format() -> impl Strategy<Value = ReasoningFormat> {
-    prop_oneof![Just(ReasoningFormat::Simple), Just(ReasoningFormat::Details),]
+    prop_oneof![
+        Just(ReasoningFormat::Simple),
+        Just(ReasoningFormat::Details),
+    ]
 }
 
 // ---------------------------------------------------------------------------
@@ -48,10 +51,8 @@ pub fn arb_short_text() -> impl Strategy<Value = String> {
 }
 
 pub fn arb_function_call() -> impl Strategy<Value = FunctionCall> {
-    (arb_identifier(), arb_json_object_string()).prop_map(|(name, arguments)| FunctionCall {
-        name,
-        arguments,
-    })
+    (arb_identifier(), arb_json_object_string())
+        .prop_map(|(name, arguments)| FunctionCall { name, arguments })
 }
 
 pub fn arb_tool_call() -> impl Strategy<Value = ToolCall> {
@@ -67,8 +68,7 @@ pub fn arb_json_object_string() -> impl Strategy<Value = String> {
         Just("{}".to_string()),
         arb_identifier().prop_map(|k| format!(r#"{{"{k}": "value"}}"#)),
         (arb_identifier(), 0i64..1000).prop_map(|(k, v)| format!(r#"{{"{k}": {v}}}"#)),
-        (arb_identifier(), proptest::bool::ANY)
-            .prop_map(|(k, v)| format!(r#"{{"{k}": {v}}}"#)),
+        (arb_identifier(), proptest::bool::ANY).prop_map(|(k, v)| format!(r#"{{"{k}": {v}}}"#)),
     ]
 }
 
@@ -113,14 +113,19 @@ pub fn arb_tool_result() -> impl Strategy<Value = ToolResult> {
 }
 
 pub fn arb_usage_stats() -> impl Strategy<Value = UsageStats> {
-    (0u64..100_000, 0u64..100_000, proptest::option::of(0.0f64..100.0)).prop_map(
-        |(prompt_tokens, completion_tokens, estimated_cost)| UsageStats {
-            prompt_tokens,
-            completion_tokens,
-            total_tokens: prompt_tokens + completion_tokens,
-            estimated_cost,
-        },
+    (
+        0u64..100_000,
+        0u64..100_000,
+        proptest::option::of(0.0f64..100.0),
     )
+        .prop_map(
+            |(prompt_tokens, completion_tokens, estimated_cost)| UsageStats {
+                prompt_tokens,
+                completion_tokens,
+                total_tokens: prompt_tokens + completion_tokens,
+                estimated_cost,
+            },
+        )
 }
 
 pub fn arb_tool_error_record() -> impl Strategy<Value = ToolErrorRecord> {
@@ -134,12 +139,12 @@ pub fn arb_tool_error_record() -> impl Strategy<Value = ToolErrorRecord> {
 }
 
 pub fn arb_budget_config() -> impl Strategy<Value = BudgetConfig> {
-    (1usize..500_000, 1usize..5_000_000).prop_map(
-        |(max_result_size_chars, max_aggregate_chars)| BudgetConfig {
+    (1usize..500_000, 1usize..5_000_000).prop_map(|(max_result_size_chars, max_aggregate_chars)| {
+        BudgetConfig {
             max_result_size_chars,
             max_aggregate_chars,
-        },
-    )
+        }
+    })
 }
 
 pub fn arb_agent_result() -> impl Strategy<Value = AgentResult> {

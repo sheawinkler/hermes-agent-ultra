@@ -110,51 +110,21 @@ pub async fn handle_slash_command(
             println!("[Last exchange undone]");
             Ok(CommandResult::Handled)
         }
-        "/model" => {
-            handle_model_command(app, args)
-        }
-        "/personality" => {
-            handle_personality_command(app, args)
-        }
-        "/skills" => {
-            handle_skills_command(app)
-        }
-        "/tools" => {
-            handle_tools_command(app)
-        }
-        "/config" => {
-            handle_config_command(app, args)
-        }
-        "/compress" => {
-            handle_compress_command(app)
-        }
-        "/usage" => {
-            handle_usage_command(app)
-        }
-        "/stop" => {
-            handle_stop_command(app)
-        }
-        "/status" => {
-            handle_status_command(app)
-        }
-        "/save" => {
-            handle_save_command(app, args)
-        }
-        "/load" => {
-            handle_load_command(app, args)
-        }
-        "/background" => {
-            handle_background_command(app, args)
-        }
-        "/verbose" => {
-            handle_verbose_command(app)
-        }
-        "/yolo" => {
-            handle_yolo_command(app)
-        }
-        "/reasoning" => {
-            handle_reasoning_command(app)
-        }
+        "/model" => handle_model_command(app, args),
+        "/personality" => handle_personality_command(app, args),
+        "/skills" => handle_skills_command(app),
+        "/tools" => handle_tools_command(app),
+        "/config" => handle_config_command(app, args),
+        "/compress" => handle_compress_command(app),
+        "/usage" => handle_usage_command(app),
+        "/stop" => handle_stop_command(app),
+        "/status" => handle_status_command(app),
+        "/save" => handle_save_command(app, args),
+        "/load" => handle_load_command(app, args),
+        "/background" => handle_background_command(app, args),
+        "/verbose" => handle_verbose_command(app),
+        "/yolo" => handle_yolo_command(app),
+        "/reasoning" => handle_reasoning_command(app),
         "/help" => {
             print_help();
             Ok(CommandResult::Handled)
@@ -164,7 +134,10 @@ pub async fn handle_slash_command(
             Ok(CommandResult::Quit)
         }
         _ => {
-            println!("Unknown command: {}. Type /help for available commands.", cmd);
+            println!(
+                "Unknown command: {}. Type /help for available commands.",
+                cmd
+            );
             Ok(CommandResult::Handled)
         }
     }
@@ -253,10 +226,7 @@ fn handle_config_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
                 }
             }
             _ => {
-                println!(
-                    "Unknown config action '{}'. Use 'get' or 'set'.",
-                    args[0]
-                );
+                println!("Unknown config action '{}'. Use 'get' or 'set'.", args[0]);
             }
         }
     }
@@ -325,7 +295,8 @@ fn handle_compress_command(app: &mut App) -> Result<CommandResult, AgentError> {
     let split_at = app.messages.len() - keep;
     let retained = app.messages.split_off(split_at);
     app.messages.clear();
-    app.messages.push(hermes_core::Message::system(summary_text));
+    app.messages
+        .push(hermes_core::Message::system(summary_text));
     app.messages.extend(retained);
 
     println!(
@@ -423,8 +394,8 @@ fn handle_save_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Ag
         }).collect::<Vec<_>>(),
     });
 
-    let json = serde_json::to_string_pretty(&data)
-        .map_err(|e| AgentError::Config(e.to_string()))?;
+    let json =
+        serde_json::to_string_pretty(&data).map_err(|e| AgentError::Config(e.to_string()))?;
     std::fs::write(&path, json)
         .map_err(|e| AgentError::Io(format!("Failed to save session: {}", e)))?;
 
@@ -486,14 +457,8 @@ fn handle_load_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Ag
     if let Some(messages) = data.get("messages").and_then(|m| m.as_array()) {
         app.messages.clear();
         for msg in messages {
-            let role_str = msg
-                .get("role")
-                .and_then(|r| r.as_str())
-                .unwrap_or("User");
-            let content_str = msg
-                .get("content")
-                .and_then(|c| c.as_str())
-                .unwrap_or("");
+            let role_str = msg.get("role").and_then(|r| r.as_str()).unwrap_or("User");
+            let content_str = msg.get("content").and_then(|c| c.as_str()).unwrap_or("");
             let message = match role_str {
                 "Assistant" => hermes_core::Message::assistant(content_str),
                 "System" => hermes_core::Message::system(content_str),
@@ -606,21 +571,17 @@ pub async fn handle_cli_chat(
         println!("[YOLO mode: tool confirmations disabled]");
     }
 
-    let mut config = load_config(None)
-        .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
+    let mut config =
+        load_config(None).map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
 
     if yolo {
         config.approval.require_approval = false;
     }
 
-    let current_model = config
-        .model
-        .clone()
-        .unwrap_or_else(|| "gpt-4o".to_string());
+    let current_model = config.model.clone().unwrap_or_else(|| "gpt-4o".to_string());
 
     let tool_registry = Arc::new(ToolRegistry::new());
-    let terminal_backend: Arc<dyn hermes_core::TerminalBackend> =
-        Arc::new(LocalBackend::default());
+    let terminal_backend: Arc<dyn hermes_core::TerminalBackend> = Arc::new(LocalBackend::default());
     let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
     let skill_provider: Arc<dyn hermes_core::SkillProvider> =
         Arc::new(SkillManager::new(skill_store));
@@ -670,7 +631,10 @@ pub async fn handle_cli_skills(
     match action.as_deref().unwrap_or("list") {
         "list" => {
             if !skills_dir.exists() {
-                println!("No skills directory found at {}. Run `hermes setup` first.", skills_dir.display());
+                println!(
+                    "No skills directory found at {}. Run `hermes setup` first.",
+                    skills_dir.display()
+                );
                 return Ok(());
             }
             let mut count = 0u32;
@@ -683,7 +647,11 @@ pub async fn handle_cli_skills(
                         let dir_name = path.file_name().unwrap_or_default().to_string_lossy();
                         let first_line = std::fs::read_to_string(&skill_md)
                             .ok()
-                            .and_then(|c| c.lines().find(|l| l.starts_with('#')).map(|l| l.trim_start_matches('#').trim().to_string()))
+                            .and_then(|c| {
+                                c.lines()
+                                    .find(|l| l.starts_with('#'))
+                                    .map(|l| l.trim_start_matches('#').trim().to_string())
+                            })
                             .unwrap_or_else(|| "(no description)".to_string());
                         println!("  • {} — {}", dir_name, first_line);
                         count += 1;
@@ -701,23 +669,33 @@ pub async fn handle_cli_skills(
             }
             println!("Skills Browser");
             println!("==============\n");
-            let mut categories: std::collections::HashMap<String, Vec<(String, String)>> = std::collections::HashMap::new();
+            let mut categories: std::collections::HashMap<String, Vec<(String, String)>> =
+                std::collections::HashMap::new();
             if let Ok(entries) = std::fs::read_dir(&skills_dir) {
                 for entry in entries.filter_map(|e| e.ok()) {
                     let path = entry.path();
                     let skill_md = path.join("SKILL.md");
                     if path.is_dir() && skill_md.exists() {
-                        let dir_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                        let dir_name = path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
                         let content = std::fs::read_to_string(&skill_md).unwrap_or_default();
-                        let first_line = content.lines()
+                        let first_line = content
+                            .lines()
                             .find(|l| l.starts_with('#'))
                             .map(|l| l.trim_start_matches('#').trim().to_string())
                             .unwrap_or_else(|| "(no description)".to_string());
-                        let category = path.parent()
+                        let category = path
+                            .parent()
                             .and_then(|p| p.file_name())
                             .map(|n| n.to_string_lossy().to_string())
                             .unwrap_or_else(|| "general".to_string());
-                        categories.entry(category).or_default().push((dir_name, first_line));
+                        categories
+                            .entry(category)
+                            .or_default()
+                            .push((dir_name, first_line));
                     }
                 }
             }
@@ -754,9 +732,16 @@ pub async fn handle_cli_skills(
                             } else {
                                 println!("Found {} skill(s):", results.len());
                                 for skill in results {
-                                    let name = skill.get("name").and_then(|n| n.as_str()).unwrap_or("?");
-                                    let desc = skill.get("description").and_then(|d| d.as_str()).unwrap_or("");
-                                    let version = skill.get("version").and_then(|v| v.as_str()).unwrap_or("?");
+                                    let name =
+                                        skill.get("name").and_then(|n| n.as_str()).unwrap_or("?");
+                                    let desc = skill
+                                        .get("description")
+                                        .and_then(|d| d.as_str())
+                                        .unwrap_or("");
+                                    let version = skill
+                                        .get("version")
+                                        .and_then(|v| v.as_str())
+                                        .unwrap_or("?");
                                     println!("  • {} (v{}) — {}", name, version, desc);
                                 }
                                 println!("\nInstall with: hermes skills install <name>");
@@ -777,16 +762,27 @@ pub async fn handle_cli_skills(
         }
         "install" => {
             let skill_name = name.ok_or_else(|| {
-                hermes_core::AgentError::Config("Missing skill name. Usage: hermes skills install <name>".into())
+                hermes_core::AgentError::Config(
+                    "Missing skill name. Usage: hermes skills install <name>".into(),
+                )
             })?;
             println!("Installing skill: {}", skill_name);
             let target = skills_dir.join(&skill_name);
-            std::fs::create_dir_all(&target)
-                .map_err(|e| hermes_core::AgentError::Io(format!("Failed to create skill dir: {}", e)))?;
+            std::fs::create_dir_all(&target).map_err(|e| {
+                hermes_core::AgentError::Io(format!("Failed to create skill dir: {}", e))
+            })?;
             let skill_md = target.join("SKILL.md");
             if !skill_md.exists() {
-                std::fs::write(&skill_md, format!("# {}\n\nInstalled via CLI. Replace with actual skill content.\n", skill_name))
-                    .map_err(|e| hermes_core::AgentError::Io(format!("Failed to write SKILL.md: {}", e)))?;
+                std::fs::write(
+                    &skill_md,
+                    format!(
+                        "# {}\n\nInstalled via CLI. Replace with actual skill content.\n",
+                        skill_name
+                    ),
+                )
+                .map_err(|e| {
+                    hermes_core::AgentError::Io(format!("Failed to write SKILL.md: {}", e))
+                })?;
             }
             println!("Skill '{}' installed to {}", skill_name, target.display());
         }
@@ -803,12 +799,15 @@ pub async fn handle_cli_skills(
         }
         "uninstall" => {
             let skill_name = name.ok_or_else(|| {
-                hermes_core::AgentError::Config("Missing skill name. Usage: hermes skills uninstall <name>".into())
+                hermes_core::AgentError::Config(
+                    "Missing skill name. Usage: hermes skills uninstall <name>".into(),
+                )
             })?;
             let target = skills_dir.join(&skill_name);
             if target.exists() {
-                std::fs::remove_dir_all(&target)
-                    .map_err(|e| hermes_core::AgentError::Io(format!("Failed to remove skill: {}", e)))?;
+                std::fs::remove_dir_all(&target).map_err(|e| {
+                    hermes_core::AgentError::Io(format!("Failed to remove skill: {}", e))
+                })?;
                 println!("Skill '{}' uninstalled.", skill_name);
             } else {
                 println!("Skill '{}' not found.", skill_name);
@@ -823,8 +822,14 @@ pub async fn handle_cli_skills(
                 if let Ok(entries) = std::fs::read_dir(&skills_dir) {
                     for entry in entries.filter_map(|e| e.ok()) {
                         let path = entry.path();
-                        if !path.is_dir() { continue; }
-                        let dir_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                        if !path.is_dir() {
+                            continue;
+                        }
+                        let dir_name = path
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
                         let skill_md = path.join("SKILL.md");
                         if !skill_md.exists() {
                             println!("  ✗ {} — missing SKILL.md", dir_name);
@@ -856,7 +861,10 @@ pub async fn handle_cli_skills(
                     println!("Skill '{}': OK", skill_name);
                     println!("  Path: {}", skill_path.display());
                     println!("  SKILL.md: {} lines", lines);
-                    println!("  Frontmatter: {}", if has_frontmatter { "yes" } else { "no" });
+                    println!(
+                        "  Frontmatter: {}",
+                        if has_frontmatter { "yes" } else { "no" }
+                    );
                 }
             }
         }
@@ -880,19 +888,32 @@ pub async fn handle_cli_skills(
             if let Ok(entries) = std::fs::read_dir(&skills_dir) {
                 for entry in entries.filter_map(|e| e.ok()) {
                     let path = entry.path();
-                    if !path.is_dir() { continue; }
+                    if !path.is_dir() {
+                        continue;
+                    }
                     let skill_md = path.join("SKILL.md");
-                    if !skill_md.exists() { continue; }
+                    if !skill_md.exists() {
+                        continue;
+                    }
 
-                    let dir_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                    let dir_name = path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
                     let content = std::fs::read_to_string(&skill_md).unwrap_or_default();
                     let (fm, _body) = hermes_tools::tools::skill_utils::parse_frontmatter(&content);
-                    let version = fm.get("version")
+                    let version = fm
+                        .get("version")
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown")
                         .to_string();
 
-                    installed.push(LocalSkill { name: dir_name, version, path: path.clone() });
+                    installed.push(LocalSkill {
+                        name: dir_name,
+                        version,
+                        path: path.clone(),
+                    });
                 }
             }
 
@@ -901,7 +922,10 @@ pub async fn handle_cli_skills(
                 return Ok(());
             }
 
-            println!("{:30} {:>12} {:>12}   {}", "Skill", "Local", "Hub", "Status");
+            println!(
+                "{:30} {:>12} {:>12}   {}",
+                "Skill", "Local", "Hub", "Status"
+            );
             println!("{}", "-".repeat(75));
 
             let client = reqwest::Client::new();
@@ -909,7 +933,10 @@ pub async fn handle_cli_skills(
 
             for skill in &installed {
                 // Query Hub for latest version
-                let hub_url = format!("https://agentskills.io/api/v1/skills/{}/versions", skill.name);
+                let hub_url = format!(
+                    "https://agentskills.io/api/v1/skills/{}/versions",
+                    skill.name
+                );
                 let hub_result = client
                     .get(&hub_url)
                     .timeout(std::time::Duration::from_secs(10))
@@ -919,7 +946,8 @@ pub async fn handle_cli_skills(
                 match hub_result {
                     Ok(resp) if resp.status().is_success() => {
                         if let Ok(data) = resp.json::<serde_json::Value>().await {
-                            let latest = data.get("latest")
+                            let latest = data
+                                .get("latest")
                                 .and_then(|v| v.as_str())
                                 .unwrap_or("unknown");
 
@@ -928,21 +956,31 @@ pub async fn handle_cli_skills(
                             } else {
                                 match hermes_skills::compare_versions(&skill.version, latest) {
                                     std::cmp::Ordering::Less => {
-                                        updates_available.push((skill.name.clone(), latest.to_string()));
+                                        updates_available
+                                            .push((skill.name.clone(), latest.to_string()));
                                         "⬆ update available".to_string()
                                     }
                                     std::cmp::Ordering::Equal => "✓ up-to-date".to_string(),
                                     std::cmp::Ordering::Greater => "⚠ local is newer".to_string(),
                                 }
                             };
-                            println!("{:30} {:>12} {:>12}   {}", skill.name, skill.version, latest, status);
+                            println!(
+                                "{:30} {:>12} {:>12}   {}",
+                                skill.name, skill.version, latest, status
+                            );
                         }
                     }
                     Ok(resp) if resp.status() == reqwest::StatusCode::NOT_FOUND => {
-                        println!("{:30} {:>12} {:>12}   {}", skill.name, skill.version, "-", "not on hub");
+                        println!(
+                            "{:30} {:>12} {:>12}   {}",
+                            skill.name, skill.version, "-", "not on hub"
+                        );
                     }
                     _ => {
-                        println!("{:30} {:>12} {:>12}   {}", skill.name, skill.version, "?", "hub unreachable");
+                        println!(
+                            "{:30} {:>12} {:>12}   {}",
+                            skill.name, skill.version, "?", "hub unreachable"
+                        );
                     }
                 }
             }
@@ -990,11 +1028,16 @@ pub async fn handle_cli_skills(
         }
         "publish" => {
             let skill_name = name.ok_or_else(|| {
-                hermes_core::AgentError::Config("Missing skill name. Usage: hermes skills publish <name>".into())
+                hermes_core::AgentError::Config(
+                    "Missing skill name. Usage: hermes skills publish <name>".into(),
+                )
             })?;
             let skill_path = skills_dir.join(&skill_name);
             if !skill_path.exists() {
-                return Err(hermes_core::AgentError::Config(format!("Skill '{}' not found.", skill_name)));
+                return Err(hermes_core::AgentError::Config(format!(
+                    "Skill '{}' not found.",
+                    skill_name
+                )));
             }
             println!("Publishing skill '{}' to Skills Hub...", skill_name);
             println!("  Source: {}", skill_path.display());
@@ -1007,20 +1050,35 @@ pub async fn handle_cli_skills(
 
             let content = std::fs::read_to_string(&skill_md)
                 .map_err(|e| hermes_core::AgentError::Io(format!("Read error: {}", e)))?;
-            let (frontmatter, _body) = hermes_tools::tools::skill_utils::parse_frontmatter(&content);
+            let (frontmatter, _body) =
+                hermes_tools::tools::skill_utils::parse_frontmatter(&content);
 
             let fm_name = frontmatter.get("name").and_then(|v| v.as_str());
             let fm_version = frontmatter.get("version").and_then(|v| v.as_str());
             let fm_desc = frontmatter.get("description").and_then(|v| v.as_str());
             let fm_category = frontmatter.get("category").and_then(|v| v.as_str());
 
-            if fm_name.is_none() || fm_version.is_none() || fm_desc.is_none() || fm_category.is_none() {
-                println!("  ✗ SKILL.md frontmatter must include: name, version, description, category");
+            if fm_name.is_none()
+                || fm_version.is_none()
+                || fm_desc.is_none()
+                || fm_category.is_none()
+            {
+                println!(
+                    "  ✗ SKILL.md frontmatter must include: name, version, description, category"
+                );
                 let mut missing = Vec::new();
-                if fm_name.is_none() { missing.push("name"); }
-                if fm_version.is_none() { missing.push("version"); }
-                if fm_desc.is_none() { missing.push("description"); }
-                if fm_category.is_none() { missing.push("category"); }
+                if fm_name.is_none() {
+                    missing.push("name");
+                }
+                if fm_version.is_none() {
+                    missing.push("version");
+                }
+                if fm_desc.is_none() {
+                    missing.push("description");
+                }
+                if fm_category.is_none() {
+                    missing.push("category");
+                }
                 println!("    Missing: {}", missing.join(", "));
                 return Ok(());
             }
@@ -1029,17 +1087,23 @@ pub async fn handle_cli_skills(
             let publish_version = fm_version.unwrap();
             let publish_desc = fm_desc.unwrap();
             let publish_category = fm_category.unwrap();
-            println!("  ✓ name={}, version={}, category={}", publish_name, publish_version, publish_category);
+            println!(
+                "  ✓ name={}, version={}, category={}",
+                publish_name, publish_version, publish_category
+            );
             println!("  ✓ description: {}", publish_desc);
 
             // Package skill directory into a tarball in memory
             let mut tar_buf = Vec::new();
             {
-                let enc = flate2::write::GzEncoder::new(&mut tar_buf, flate2::Compression::default());
+                let enc =
+                    flate2::write::GzEncoder::new(&mut tar_buf, flate2::Compression::default());
                 let mut tar_builder = tar::Builder::new(enc);
-                tar_builder.append_dir_all(&skill_name, &skill_path)
+                tar_builder
+                    .append_dir_all(&skill_name, &skill_path)
                     .map_err(|e| hermes_core::AgentError::Io(format!("Tar error: {}", e)))?;
-                tar_builder.finish()
+                tar_builder
+                    .finish()
                     .map_err(|e| hermes_core::AgentError::Io(format!("Tar finish error: {}", e)))?;
             }
             println!("  ✓ Packaged {} bytes", tar_buf.len());
@@ -1091,7 +1155,10 @@ pub async fn handle_cli_skills(
                     println!("  URL: {}", url);
                 }
                 Ok(resp) if resp.status() == reqwest::StatusCode::CONFLICT => {
-                    println!("  ✗ Version {} already exists on Skills Hub.", publish_version);
+                    println!(
+                        "  ✗ Version {} already exists on Skills Hub.",
+                        publish_version
+                    );
                     println!("    Bump the version in SKILL.md frontmatter and try again.");
                 }
                 Ok(resp) if resp.status() == reqwest::StatusCode::UNAUTHORIZED => {
@@ -1113,7 +1180,10 @@ pub async fn handle_cli_skills(
             match sub {
                 "export" => {
                     let output = extra.unwrap_or_else(|| {
-                        format!("skills-snapshot-{}.tar.gz", chrono::Utc::now().format("%Y%m%d-%H%M%S"))
+                        format!(
+                            "skills-snapshot-{}.tar.gz",
+                            chrono::Utc::now().format("%Y%m%d-%H%M%S")
+                        )
                     });
                     println!("Exporting skills snapshot to: {}", output);
                     if !skills_dir.exists() {
@@ -1121,29 +1191,38 @@ pub async fn handle_cli_skills(
                         return Ok(());
                     }
                     // Create a tar.gz archive of skills directory
-                    let tar_gz = std::fs::File::create(&output)
-                        .map_err(|e| hermes_core::AgentError::Io(format!("Failed to create archive: {}", e)))?;
+                    let tar_gz = std::fs::File::create(&output).map_err(|e| {
+                        hermes_core::AgentError::Io(format!("Failed to create archive: {}", e))
+                    })?;
                     let enc = flate2::write::GzEncoder::new(tar_gz, flate2::Compression::default());
                     let mut tar = tar::Builder::new(enc);
-                    tar.append_dir_all("skills", &skills_dir)
-                        .map_err(|e| hermes_core::AgentError::Io(format!("Failed to archive: {}", e)))?;
-                    tar.finish()
-                        .map_err(|e| hermes_core::AgentError::Io(format!("Failed to finalize archive: {}", e)))?;
+                    tar.append_dir_all("skills", &skills_dir).map_err(|e| {
+                        hermes_core::AgentError::Io(format!("Failed to archive: {}", e))
+                    })?;
+                    tar.finish().map_err(|e| {
+                        hermes_core::AgentError::Io(format!("Failed to finalize archive: {}", e))
+                    })?;
                     println!("Snapshot exported to: {}", output);
                 }
                 "import" => {
                     let input = extra.ok_or_else(|| {
-                        hermes_core::AgentError::Config("Missing snapshot path. Usage: hermes skills snapshot import <path>".into())
+                        hermes_core::AgentError::Config(
+                            "Missing snapshot path. Usage: hermes skills snapshot import <path>"
+                                .into(),
+                        )
                     })?;
                     println!("Importing skills snapshot from: {}", input);
-                    let tar_gz = std::fs::File::open(&input)
-                        .map_err(|e| hermes_core::AgentError::Io(format!("Failed to open archive: {}", e)))?;
+                    let tar_gz = std::fs::File::open(&input).map_err(|e| {
+                        hermes_core::AgentError::Io(format!("Failed to open archive: {}", e))
+                    })?;
                     let dec = flate2::read::GzDecoder::new(tar_gz);
                     let mut archive = tar::Archive::new(dec);
-                    std::fs::create_dir_all(&skills_dir)
-                        .map_err(|e| hermes_core::AgentError::Io(format!("Failed to create skills dir: {}", e)))?;
-                    archive.unpack(hermes_config::hermes_home())
-                        .map_err(|e| hermes_core::AgentError::Io(format!("Failed to extract archive: {}", e)))?;
+                    std::fs::create_dir_all(&skills_dir).map_err(|e| {
+                        hermes_core::AgentError::Io(format!("Failed to create skills dir: {}", e))
+                    })?;
+                    archive.unpack(hermes_config::hermes_home()).map_err(|e| {
+                        hermes_core::AgentError::Io(format!("Failed to extract archive: {}", e))
+                    })?;
                     println!("Snapshot imported successfully.");
                 }
                 _ => {
@@ -1174,10 +1253,13 @@ pub async fn handle_cli_skills(
                 }
                 "add" => {
                     let url = extra.ok_or_else(|| {
-                        hermes_core::AgentError::Config("Missing tap URL. Usage: hermes skills tap add <url>".into())
+                        hermes_core::AgentError::Config(
+                            "Missing tap URL. Usage: hermes skills tap add <url>".into(),
+                        )
                     })?;
                     let mut taps: Vec<String> = if taps_file.exists() {
-                        let content = std::fs::read_to_string(&taps_file).unwrap_or_else(|_| "[]".to_string());
+                        let content = std::fs::read_to_string(&taps_file)
+                            .unwrap_or_else(|_| "[]".to_string());
                         serde_json::from_str(&content).unwrap_or_default()
                     } else {
                         Vec::new()
@@ -1195,11 +1277,15 @@ pub async fn handle_cli_skills(
                 }
                 "remove" => {
                     let url = extra.ok_or_else(|| {
-                        hermes_core::AgentError::Config("Missing tap URL. Usage: hermes skills tap remove <url>".into())
+                        hermes_core::AgentError::Config(
+                            "Missing tap URL. Usage: hermes skills tap remove <url>".into(),
+                        )
                     })?;
                     if taps_file.exists() {
-                        let content = std::fs::read_to_string(&taps_file).unwrap_or_else(|_| "[]".to_string());
-                        let mut taps: Vec<String> = serde_json::from_str(&content).unwrap_or_default();
+                        let content = std::fs::read_to_string(&taps_file)
+                            .unwrap_or_else(|_| "[]".to_string());
+                        let mut taps: Vec<String> =
+                            serde_json::from_str(&content).unwrap_or_default();
                         let before_len = taps.len();
                         taps.retain(|t| t != &url);
                         if taps.len() < before_len {
@@ -1222,7 +1308,9 @@ pub async fn handle_cli_skills(
         }
         "config" => {
             let skill_name = name.ok_or_else(|| {
-                hermes_core::AgentError::Config("Missing skill name. Usage: hermes skills config <name> [key] [value]".into())
+                hermes_core::AgentError::Config(
+                    "Missing skill name. Usage: hermes skills config <name> [key] [value]".into(),
+                )
             })?;
             let config_file = skills_dir.join(&skill_name).join("config.json");
             if let Some(key) = extra {
@@ -1230,7 +1318,8 @@ pub async fn handle_cli_skills(
                 let parts: Vec<&str> = key.splitn(2, '=').collect();
                 if parts.len() == 2 {
                     let mut config: serde_json::Value = if config_file.exists() {
-                        let c = std::fs::read_to_string(&config_file).unwrap_or_else(|_| "{}".to_string());
+                        let c = std::fs::read_to_string(&config_file)
+                            .unwrap_or_else(|_| "{}".to_string());
                         serde_json::from_str(&c).unwrap_or(serde_json::json!({}))
                     } else {
                         serde_json::json!({})
@@ -1244,8 +1333,10 @@ pub async fn handle_cli_skills(
                 } else {
                     // Get value
                     if config_file.exists() {
-                        let c = std::fs::read_to_string(&config_file).unwrap_or_else(|_| "{}".to_string());
-                        let config: serde_json::Value = serde_json::from_str(&c).unwrap_or(serde_json::json!({}));
+                        let c = std::fs::read_to_string(&config_file)
+                            .unwrap_or_else(|_| "{}".to_string());
+                        let config: serde_json::Value =
+                            serde_json::from_str(&c).unwrap_or(serde_json::json!({}));
                         match config.get(&key) {
                             Some(v) => println!("{} = {}", key, v),
                             None => println!("Key '{}' not found in skill config.", key),
@@ -1281,40 +1372,72 @@ pub async fn handle_cli_skills(
             }
 
             let shell_injection_patterns: &[(&str, &str)] = &[
-                (r"(?i)\b(rm\s+-rf|mkfs|dd\s+if=)", "Shell command injection (destructive command)"),
+                (
+                    r"(?i)\b(rm\s+-rf|mkfs|dd\s+if=)",
+                    "Shell command injection (destructive command)",
+                ),
                 (r"(?i)(:\(\)\{.*;\}|fork\s+bomb)", "Fork bomb pattern"),
                 (r"(?i)\b(sudo\s+|su\s+-\s)", "Privilege escalation attempt"),
-                (r"(?i)(export\s+PATH|PATH\s*=\s*/)", "PATH environment manipulation"),
-                (r"(?i)chmod\s+[0-7]*777", "Overly permissive file permissions"),
+                (
+                    r"(?i)(export\s+PATH|PATH\s*=\s*/)",
+                    "PATH environment manipulation",
+                ),
+                (
+                    r"(?i)chmod\s+[0-7]*777",
+                    "Overly permissive file permissions",
+                ),
                 (r"(?i)\beval\s*\(", "Dynamic code evaluation (eval)"),
                 (r"(?i)\bexec\s*\(", "Dynamic code execution (exec)"),
-                (r"(?i)(os\.system|subprocess\.call|subprocess\.run|subprocess\.Popen)", "Subprocess execution"),
+                (
+                    r"(?i)(os\.system|subprocess\.call|subprocess\.run|subprocess\.Popen)",
+                    "Subprocess execution",
+                ),
             ];
 
-            let path_traversal_patterns: &[(&str, &str)] = &[
-                (r"\.\.[\\/]", "Path traversal (../)"),
-            ];
+            let path_traversal_patterns: &[(&str, &str)] =
+                &[(r"\.\.[\\/]", "Path traversal (../)")];
 
             let network_patterns: &[(&str, &str)] = &[
                 (r"(?i)://127\.0\.0\.1", "Internal network URL (127.0.0.1)"),
                 (r"(?i)://localhost", "Internal network URL (localhost)"),
-                (r"(?i)://10\.\d+\.\d+\.\d+", "Internal network URL (10.x.x.x)"),
-                (r"(?i)://192\.168\.\d+\.\d+", "Internal network URL (192.168.x.x)"),
+                (
+                    r"(?i)://10\.\d+\.\d+\.\d+",
+                    "Internal network URL (10.x.x.x)",
+                ),
+                (
+                    r"(?i)://192\.168\.\d+\.\d+",
+                    "Internal network URL (192.168.x.x)",
+                ),
                 (r"(?i)://0\.0\.0\.0", "Internal network URL (0.0.0.0)"),
                 (r"(?i)://\[::1\]", "Internal network URL (::1)"),
             ];
 
             let credential_patterns: &[(&str, &str)] = &[
-                (r#"(?i)(password\s*=\s*['"][^'"]{3,}['"])"#, "Hardcoded password"),
-                (r#"(?i)(api[_-]?key\s*=\s*['"][^'"]{3,}['"])"#, "Hardcoded API key"),
-                (r#"(?i)(secret\s*=\s*['"][^'"]{3,}['"])"#, "Hardcoded secret"),
+                (
+                    r#"(?i)(password\s*=\s*['"][^'"]{3,}['"])"#,
+                    "Hardcoded password",
+                ),
+                (
+                    r#"(?i)(api[_-]?key\s*=\s*['"][^'"]{3,}['"])"#,
+                    "Hardcoded API key",
+                ),
+                (
+                    r#"(?i)(secret\s*=\s*['"][^'"]{3,}['"])"#,
+                    "Hardcoded secret",
+                ),
                 (r"(?i)(sk-[a-zA-Z0-9]{20,})", "Exposed API key (sk-...)"),
                 (r"(?i)(ghp_[a-zA-Z0-9]{30,})", "Exposed GitHub PAT"),
             ];
 
             let base64_suspicious: &[(&str, &str)] = &[
-                (r"(?i)(base64[._-]?decode|atob)\s*\(", "Base64 decode invocation (potential obfuscation)"),
-                (r"[A-Za-z0-9+/]{100,}={0,2}", "Long base64-encoded content (potential obfuscation)"),
+                (
+                    r"(?i)(base64[._-]?decode|atob)\s*\(",
+                    "Base64 decode invocation (potential obfuscation)",
+                ),
+                (
+                    r"[A-Za-z0-9+/]{100,}={0,2}",
+                    "Long base64-encoded content (potential obfuscation)",
+                ),
             ];
 
             let mut total = 0u32;
@@ -1337,17 +1460,26 @@ pub async fn handle_cli_skills(
             if let Ok(entries) = std::fs::read_dir(&skills_dir) {
                 for entry in entries.filter_map(|e| e.ok()) {
                     let path = entry.path();
-                    if !path.is_dir() { continue; }
+                    if !path.is_dir() {
+                        continue;
+                    }
                     total += 1;
-                    let dir_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                    let dir_name = path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
                     let mut findings: Vec<AuditFinding> = Vec::new();
 
                     let mut all_files = Vec::new();
                     scan_dir_recursive(&path, &mut all_files);
 
                     for fp in &all_files {
-                        let Ok(content) = std::fs::read_to_string(fp) else { continue };
-                        let fname = fp.strip_prefix(&path)
+                        let Ok(content) = std::fs::read_to_string(fp) else {
+                            continue;
+                        };
+                        let fname = fp
+                            .strip_prefix(&path)
                             .unwrap_or(fp)
                             .to_string_lossy()
                             .to_string();
@@ -1421,15 +1553,24 @@ pub async fn handle_cli_skills(
                     if findings.is_empty() {
                         println!("  ✓ {} — clean", dir_name);
                     } else {
-                        let crit_count = findings.iter().filter(|f| f.severity == "critical").count();
-                        let warn_count = findings.iter().filter(|f| f.severity == "warning").count();
+                        let crit_count =
+                            findings.iter().filter(|f| f.severity == "critical").count();
+                        let warn_count =
+                            findings.iter().filter(|f| f.severity == "warning").count();
                         total_critical += crit_count as u32;
                         total_warnings += warn_count as u32;
 
                         let icon = if crit_count > 0 { "✗" } else { "⚠" };
-                        println!("  {} {} — {} critical, {} warning(s):", icon, dir_name, crit_count, warn_count);
+                        println!(
+                            "  {} {} — {} critical, {} warning(s):",
+                            icon, dir_name, crit_count, warn_count
+                        );
                         for f in &findings {
-                            let sev_icon = if f.severity == "critical" { "CRIT" } else { "WARN" };
+                            let sev_icon = if f.severity == "critical" {
+                                "CRIT"
+                            } else {
+                                "WARN"
+                            };
                             println!("    [{}] {} — {}", sev_icon, f.file, f.pattern);
                         }
                     }
@@ -1493,13 +1634,25 @@ fn plugin_git_host_allowed(url: &str, allow_untrusted: bool) -> bool {
     let host_part = if lower.contains("://") {
         lower.split("://").nth(1).unwrap_or("")
     } else if lower.starts_with("git@") {
-        lower.trim_start_matches("git@").split(':').next().unwrap_or("")
+        lower
+            .trim_start_matches("git@")
+            .split(':')
+            .next()
+            .unwrap_or("")
     } else {
         return false;
     };
-    let host = host_part.split('/').next().unwrap_or(host_part).split('@').last().unwrap_or(host_part);
+    let host = host_part
+        .split('/')
+        .next()
+        .unwrap_or(host_part)
+        .split('@')
+        .last()
+        .unwrap_or(host_part);
     let host = host.split(':').next().unwrap_or(host).to_lowercase();
-    hosts.iter().any(|h| host == *h || host.ends_with(&format!(".{}", h)))
+    hosts
+        .iter()
+        .any(|h| host == *h || host.ends_with(&format!(".{}", h)))
 }
 
 /// Static scan of a cloned plugin tree: risky patterns in scripts/config.
@@ -1524,19 +1677,17 @@ fn scan_plugin_security(root: &std::path::Path) -> Vec<String> {
         }
     }
 
-    let risky_file_patterns: &[(&str, &[(&str, &str)])] = &[
-        (
-            r"\.(sh|bash|zsh|py|rb|ps1|fish)$",
-            &[
-                (r"(?i)\bcurl\s+[^|\n]*\|\s*(ba)?sh", "curl piped to shell"),
-                (r"(?i)\bwget\s+[^|\n]*\|\s*(ba)?sh", "wget piped to shell"),
-                (r"(?i)\beval\s*\(", "eval("),
-                (r"(?i)\bexec\s*\(", "exec("),
-                (r"(?i)(base64[._-]?decode|atob)\s*\(", "base64 decode"),
-                (r"(?i)\brm\s+-rf\s+/", "rm -rf on absolute path"),
-            ],
-        ),
-    ];
+    let risky_file_patterns: &[(&str, &[(&str, &str)])] = &[(
+        r"\.(sh|bash|zsh|py|rb|ps1|fish)$",
+        &[
+            (r"(?i)\bcurl\s+[^|\n]*\|\s*(ba)?sh", "curl piped to shell"),
+            (r"(?i)\bwget\s+[^|\n]*\|\s*(ba)?sh", "wget piped to shell"),
+            (r"(?i)\beval\s*\(", "eval("),
+            (r"(?i)\bexec\s*\(", "exec("),
+            (r"(?i)(base64[._-]?decode|atob)\s*\(", "base64 decode"),
+            (r"(?i)\brm\s+-rf\s+/", "rm -rf on absolute path"),
+        ],
+    )];
 
     fn walk(dir: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
         let name = dir.file_name().and_then(|n| n.to_str()).unwrap_or("");
@@ -1635,7 +1786,11 @@ pub async fn handle_cli_plugins(
                     if path.is_dir() && manifest.exists() {
                         let dir_name = path.file_name().unwrap_or_default().to_string_lossy();
                         let disabled_marker = path.join(".disabled");
-                        let status = if disabled_marker.exists() { "disabled" } else { "enabled" };
+                        let status = if disabled_marker.exists() {
+                            "disabled"
+                        } else {
+                            "enabled"
+                        };
                         println!("  • {} [{}]", dir_name, status);
                         count += 1;
                     }
@@ -1647,20 +1802,28 @@ pub async fn handle_cli_plugins(
         }
         "enable" => {
             let plugin_name = name.ok_or_else(|| {
-                hermes_core::AgentError::Config("Missing plugin name. Usage: hermes plugins enable <name>".into())
+                hermes_core::AgentError::Config(
+                    "Missing plugin name. Usage: hermes plugins enable <name>".into(),
+                )
             })?;
             let disabled_marker = plugins_dir.join(&plugin_name).join(".disabled");
             if disabled_marker.exists() {
-                std::fs::remove_file(&disabled_marker)
-                    .map_err(|e| hermes_core::AgentError::Io(format!("Failed to enable plugin: {}", e)))?;
+                std::fs::remove_file(&disabled_marker).map_err(|e| {
+                    hermes_core::AgentError::Io(format!("Failed to enable plugin: {}", e))
+                })?;
                 println!("Plugin '{}' enabled.", plugin_name);
             } else {
-                println!("Plugin '{}' is already enabled (or not installed).", plugin_name);
+                println!(
+                    "Plugin '{}' is already enabled (or not installed).",
+                    plugin_name
+                );
             }
         }
         "disable" => {
             let plugin_name = name.ok_or_else(|| {
-                hermes_core::AgentError::Config("Missing plugin name. Usage: hermes plugins disable <name>".into())
+                hermes_core::AgentError::Config(
+                    "Missing plugin name. Usage: hermes plugins disable <name>".into(),
+                )
             })?;
             let plugin_dir = plugins_dir.join(&plugin_name);
             if !plugin_dir.exists() {
@@ -1668,13 +1831,16 @@ pub async fn handle_cli_plugins(
                 return Ok(());
             }
             let disabled_marker = plugin_dir.join(".disabled");
-            std::fs::write(&disabled_marker, "")
-                .map_err(|e| hermes_core::AgentError::Io(format!("Failed to disable plugin: {}", e)))?;
+            std::fs::write(&disabled_marker, "").map_err(|e| {
+                hermes_core::AgentError::Io(format!("Failed to disable plugin: {}", e))
+            })?;
             println!("Plugin '{}' disabled.", plugin_name);
         }
         "install" => {
             let plugin_name = name.ok_or_else(|| {
-                hermes_core::AgentError::Config("Missing plugin name. Usage: hermes plugins install <name|url>".into())
+                hermes_core::AgentError::Config(
+                    "Missing plugin name. Usage: hermes plugins install <name|url>".into(),
+                )
             })?;
             println!("Installing plugin: {}...", plugin_name);
 
@@ -1703,7 +1869,9 @@ pub async fn handle_cli_plugins(
 
                 // Also handle git@ SSH URLs like git@github.com:user/repo.git
                 let repo_name = if repo_name.contains(':') {
-                    repo_name.rsplit(':').next()
+                    repo_name
+                        .rsplit(':')
+                        .next()
                         .unwrap_or(&repo_name)
                         .trim_end_matches(".git")
                         .rsplit('/')
@@ -1716,16 +1884,27 @@ pub async fn handle_cli_plugins(
 
                 let target = plugins_dir.join(&repo_name);
                 if target.exists() {
-                    println!("Plugin '{}' is already installed at {}", repo_name, target.display());
+                    println!(
+                        "Plugin '{}' is already installed at {}",
+                        repo_name,
+                        target.display()
+                    );
                     return Ok(());
                 }
 
-                std::fs::create_dir_all(&plugins_dir)
-                    .map_err(|e| hermes_core::AgentError::Io(format!("Failed to create plugins dir: {}", e)))?;
+                std::fs::create_dir_all(&plugins_dir).map_err(|e| {
+                    hermes_core::AgentError::Io(format!("Failed to create plugins dir: {}", e))
+                })?;
 
                 println!("  Cloning {} ...", plugin_name);
                 let output = tokio::process::Command::new("git")
-                    .args(["clone", "--depth", "1", &plugin_name, &target.to_string_lossy()])
+                    .args([
+                        "clone",
+                        "--depth",
+                        "1",
+                        &plugin_name,
+                        &target.to_string_lossy(),
+                    ])
                     .output()
                     .await
                     .map_err(|e| hermes_core::AgentError::Io(format!("git clone failed: {}", e)))?;
@@ -1757,12 +1936,21 @@ pub async fn handle_cli_plugins(
                 // Parse and display plugin info
                 let manifest_content = std::fs::read_to_string(&manifest_path)
                     .map_err(|e| hermes_core::AgentError::Io(format!("Read error: {}", e)))?;
-                let manifest: serde_json::Value = serde_yaml::from_str(&manifest_content)
-                    .unwrap_or(serde_json::json!({}));
+                let manifest: serde_json::Value =
+                    serde_yaml::from_str(&manifest_content).unwrap_or(serde_json::json!({}));
 
-                let p_name = manifest.get("name").and_then(|v| v.as_str()).unwrap_or(&repo_name);
-                let p_version = manifest.get("version").and_then(|v| v.as_str()).unwrap_or("unknown");
-                let p_desc = manifest.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                let p_name = manifest
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(&repo_name);
+                let p_version = manifest
+                    .get("version")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let p_desc = manifest
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
 
                 // Security scan of cloned files
                 let suspicious = scan_plugin_security(&target);
@@ -1806,8 +1994,9 @@ pub async fn handle_cli_plugins(
                     return Ok(());
                 }
 
-                std::fs::create_dir_all(&plugins_dir)
-                    .map_err(|e| hermes_core::AgentError::Io(format!("Failed to create plugins dir: {}", e)))?;
+                std::fs::create_dir_all(&plugins_dir).map_err(|e| {
+                    hermes_core::AgentError::Io(format!("Failed to create plugins dir: {}", e))
+                })?;
 
                 println!("  Cloning from GitHub: {}", git_url);
                 let output = tokio::process::Command::new("git")
@@ -1839,12 +2028,21 @@ pub async fn handle_cli_plugins(
                 }
 
                 let manifest_content = std::fs::read_to_string(&manifest_path).unwrap_or_default();
-                let manifest: serde_json::Value = serde_yaml::from_str(&manifest_content)
-                    .unwrap_or(serde_json::json!({}));
+                let manifest: serde_json::Value =
+                    serde_yaml::from_str(&manifest_content).unwrap_or(serde_json::json!({}));
 
-                let p_name = manifest.get("name").and_then(|v| v.as_str()).unwrap_or(repo_name);
-                let p_version = manifest.get("version").and_then(|v| v.as_str()).unwrap_or("unknown");
-                let p_desc = manifest.get("description").and_then(|v| v.as_str()).unwrap_or("");
+                let p_name = manifest
+                    .get("name")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or(repo_name);
+                let p_version = manifest
+                    .get("version")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let p_desc = manifest
+                    .get("description")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
 
                 let suspicious = scan_plugin_security(&target);
                 let hard_block = suspicious.iter().any(|s| {
@@ -1884,14 +2082,20 @@ pub async fn handle_cli_plugins(
                 // Registry lookup
                 println!("  Looking up '{}' in plugin registry...", plugin_name);
                 match reqwest::Client::new()
-                    .get(&format!("https://plugins.hermes.run/api/v1/{}", plugin_name))
+                    .get(&format!(
+                        "https://plugins.hermes.run/api/v1/{}",
+                        plugin_name
+                    ))
                     .timeout(std::time::Duration::from_secs(10))
                     .send()
                     .await
                 {
                     Ok(resp) if resp.status().is_success() => {
                         if let Ok(data) = resp.json::<serde_json::Value>().await {
-                            let version = data.get("version").and_then(|v| v.as_str()).unwrap_or("latest");
+                            let version = data
+                                .get("version")
+                                .and_then(|v| v.as_str())
+                                .unwrap_or("latest");
                             let git_url = data.get("git_url").and_then(|v| v.as_str());
                             println!("  Found {} v{}", plugin_name, version);
 
@@ -1907,7 +2111,12 @@ pub async fn handle_cli_plugins(
                                     .args(["clone", "--depth", "1", url, &target.to_string_lossy()])
                                     .output()
                                     .await
-                                    .map_err(|e| hermes_core::AgentError::Io(format!("git clone failed: {}", e)))?;
+                                    .map_err(|e| {
+                                        hermes_core::AgentError::Io(format!(
+                                            "git clone failed: {}",
+                                            e
+                                        ))
+                                    })?;
 
                                 if output.status.success() {
                                     if let Some(gr) = git_ref.as_deref() {
@@ -1931,9 +2140,14 @@ pub async fn handle_cli_plugins(
                                     }
                                     if !suspicious.is_empty() {
                                         println!("  ⚠ Security warnings: {}", suspicious.len());
-                                        for w in &suspicious { println!("    - {}", w); }
+                                        for w in &suspicious {
+                                            println!("    - {}", w);
+                                        }
                                     }
-                                    println!("  ✓ Plugin '{}' v{} installed.", plugin_name, version);
+                                    println!(
+                                        "  ✓ Plugin '{}' v{} installed.",
+                                        plugin_name, version
+                                    );
                                 } else {
                                     let stderr = String::from_utf8_lossy(&output.stderr);
                                     println!("  ✗ Clone failed: {}", stderr.trim());
@@ -1954,12 +2168,15 @@ pub async fn handle_cli_plugins(
         }
         "remove" | "uninstall" => {
             let plugin_name = name.ok_or_else(|| {
-                hermes_core::AgentError::Config("Missing plugin name. Usage: hermes plugins remove <name>".into())
+                hermes_core::AgentError::Config(
+                    "Missing plugin name. Usage: hermes plugins remove <name>".into(),
+                )
             })?;
             let target = plugins_dir.join(&plugin_name);
             if target.exists() {
-                std::fs::remove_dir_all(&target)
-                    .map_err(|e| hermes_core::AgentError::Io(format!("Failed to remove plugin: {}", e)))?;
+                std::fs::remove_dir_all(&target).map_err(|e| {
+                    hermes_core::AgentError::Io(format!("Failed to remove plugin: {}", e))
+                })?;
                 println!("Plugin '{}' removed.", plugin_name);
             } else {
                 println!("Plugin '{}' not found.", plugin_name);
@@ -1975,10 +2192,18 @@ pub async fn handle_cli_plugins(
             if let Ok(entries) = std::fs::read_dir(&plugins_dir) {
                 for entry in entries.filter_map(|e| e.ok()) {
                     let path = entry.path();
-                    if !path.is_dir() { continue; }
-                    let dir_name = path.file_name().unwrap_or_default().to_string_lossy().into_owned();
+                    if !path.is_dir() {
+                        continue;
+                    }
+                    let dir_name = path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned();
                     if let Some(target) = plugin_name {
-                        if dir_name != target { continue; }
+                        if dir_name != target {
+                            continue;
+                        }
                     }
                     let manifest = path.join("plugin.yaml");
                     if manifest.exists() {
@@ -2000,7 +2225,9 @@ pub async fn handle_cli_plugins(
         }
         "inspect" | "info" => {
             let plugin_name = name.ok_or_else(|| {
-                hermes_core::AgentError::Config("Missing plugin name. Usage: hermes plugins inspect <name>".into())
+                hermes_core::AgentError::Config(
+                    "Missing plugin name. Usage: hermes plugins inspect <name>".into(),
+                )
             })?;
             let target = plugins_dir.join(&plugin_name);
             if !target.exists() {
@@ -2030,16 +2257,12 @@ pub async fn handle_cli_plugins(
 }
 
 /// Handle `hermes memory [action]`.
-pub async fn handle_cli_memory(
-    action: Option<String>,
-) -> Result<(), hermes_core::AgentError> {
+pub async fn handle_cli_memory(action: Option<String>) -> Result<(), hermes_core::AgentError> {
     match action.as_deref().unwrap_or("status") {
         "status" => {
             let memory_db = hermes_config::hermes_home().join("memory.db");
             if memory_db.exists() {
-                let size = std::fs::metadata(&memory_db)
-                    .map(|m| m.len())
-                    .unwrap_or(0);
+                let size = std::fs::metadata(&memory_db).map(|m| m.len()).unwrap_or(0);
                 println!("Memory provider: sqlite (file-based)");
                 println!("  Database: {}", memory_db.display());
                 println!("  Size: {} KB", size / 1024);
@@ -2089,8 +2312,8 @@ pub async fn handle_cli_mcp(
             }
             let content = std::fs::read_to_string(&mcp_config_path)
                 .map_err(|e| hermes_core::AgentError::Io(format!("Read error: {}", e)))?;
-            let servers: serde_json::Value = serde_json::from_str(&content)
-                .unwrap_or(serde_json::json!({}));
+            let servers: serde_json::Value =
+                serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
             if let Some(obj) = servers.as_object() {
                 if obj.is_empty() {
                     println!("No MCP servers configured.");
@@ -2105,7 +2328,9 @@ pub async fn handle_cli_mcp(
         }
         "add" => {
             let srv = server.ok_or_else(|| {
-                hermes_core::AgentError::Config("Missing server. Usage: hermes mcp add --server <name-or-url>".into())
+                hermes_core::AgentError::Config(
+                    "Missing server. Usage: hermes mcp add --server <name-or-url>".into(),
+                )
             })?;
             println!("Adding MCP server: {}", srv);
             let mut servers: serde_json::Value = if mcp_config_path.exists() {
@@ -2116,17 +2341,26 @@ pub async fn handle_cli_mcp(
                 serde_json::json!({})
             };
             if let Some(obj) = servers.as_object_mut() {
-                obj.insert(srv.clone(), serde_json::json!({"url": srv, "enabled": true}));
+                obj.insert(
+                    srv.clone(),
+                    serde_json::json!({"url": srv, "enabled": true}),
+                );
             }
             let json = serde_json::to_string_pretty(&servers)
                 .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
             std::fs::write(&mcp_config_path, json)
                 .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
-            println!("MCP server '{}' added to {}", srv, mcp_config_path.display());
+            println!(
+                "MCP server '{}' added to {}",
+                srv,
+                mcp_config_path.display()
+            );
         }
         "remove" => {
             let srv = server.ok_or_else(|| {
-                hermes_core::AgentError::Config("Missing server name. Usage: hermes mcp remove --server <name>".into())
+                hermes_core::AgentError::Config(
+                    "Missing server name. Usage: hermes mcp remove --server <name>".into(),
+                )
             })?;
             if !mcp_config_path.exists() {
                 println!("No MCP config to modify.");
@@ -2134,7 +2368,8 @@ pub async fn handle_cli_mcp(
             }
             let content = std::fs::read_to_string(&mcp_config_path)
                 .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
-            let mut servers: serde_json::Value = serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
+            let mut servers: serde_json::Value =
+                serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
             if let Some(obj) = servers.as_object_mut() {
                 if obj.remove(&srv).is_some() {
                     let json = serde_json::to_string_pretty(&servers)
@@ -2164,13 +2399,16 @@ pub async fn handle_cli_mcp(
 
             let mcp_server = hermes_mcp::McpServer::new(tool_registry);
             let transport = Box::new(hermes_mcp::ServerStdioTransport::new());
-            mcp_server.start(transport).await.map_err(|e| {
-                hermes_core::AgentError::Io(format!("MCP server error: {}", e))
-            })?;
+            mcp_server
+                .start(transport)
+                .await
+                .map_err(|e| hermes_core::AgentError::Io(format!("MCP server error: {}", e)))?;
         }
         "test" => {
             let srv = server.ok_or_else(|| {
-                hermes_core::AgentError::Config("Missing server name. Usage: hermes mcp test --server <name>".into())
+                hermes_core::AgentError::Config(
+                    "Missing server name. Usage: hermes mcp test --server <name>".into(),
+                )
             })?;
             println!("Testing MCP server: {}...", srv);
             if !mcp_config_path.exists() {
@@ -2179,7 +2417,8 @@ pub async fn handle_cli_mcp(
             }
             let content = std::fs::read_to_string(&mcp_config_path)
                 .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
-            let servers: serde_json::Value = serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
+            let servers: serde_json::Value =
+                serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
             match servers.get(&srv) {
                 Some(cfg) => {
                     let url = cfg.get("url").and_then(|v| v.as_str()).unwrap_or("(stdio)");
@@ -2206,7 +2445,9 @@ pub async fn handle_cli_mcp(
         }
         "configure" => {
             let srv = server.ok_or_else(|| {
-                hermes_core::AgentError::Config("Missing server name. Usage: hermes mcp configure --server <name>".into())
+                hermes_core::AgentError::Config(
+                    "Missing server name. Usage: hermes mcp configure --server <name>".into(),
+                )
             })?;
             if !mcp_config_path.exists() {
                 println!("No MCP config found. Add a server first with `hermes mcp add`.");
@@ -2214,7 +2455,8 @@ pub async fn handle_cli_mcp(
             }
             let content = std::fs::read_to_string(&mcp_config_path)
                 .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
-            let mut servers: serde_json::Value = serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
+            let mut servers: serde_json::Value =
+                serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
             match servers.get(&srv) {
                 Some(cfg) => {
                     println!("Current config for '{}':", srv);
@@ -2251,7 +2493,11 @@ pub async fn handle_cli_sessions(
                 for entry in rd.filter_map(|e| e.ok()) {
                     let path = entry.path();
                     if path.extension().map(|e| e == "json").unwrap_or(false) {
-                        let stem = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+                        let stem = path
+                            .file_stem()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .into_owned();
                         let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
                         entries.push((stem, size));
                     }
@@ -2268,7 +2514,9 @@ pub async fn handle_cli_sessions(
         }
         "export" => {
             let session_id = id.ok_or_else(|| {
-                hermes_core::AgentError::Config("Missing session ID. Usage: hermes sessions export --id <id>".into())
+                hermes_core::AgentError::Config(
+                    "Missing session ID. Usage: hermes sessions export --id <id>".into(),
+                )
             })?;
             let path = sessions_dir.join(format!("{}.json", session_id));
             if !path.exists() {
@@ -2281,7 +2529,9 @@ pub async fn handle_cli_sessions(
         }
         "delete" => {
             let session_id = id.ok_or_else(|| {
-                hermes_core::AgentError::Config("Missing session ID. Usage: hermes sessions delete --id <id>".into())
+                hermes_core::AgentError::Config(
+                    "Missing session ID. Usage: hermes sessions delete --id <id>".into(),
+                )
             })?;
             let path = sessions_dir.join(format!("{}.json", session_id));
             if path.exists() {
@@ -2301,9 +2551,16 @@ pub async fn handle_cli_sessions(
             let mut total_size = 0u64;
             if let Ok(rd) = std::fs::read_dir(&sessions_dir) {
                 for entry in rd.filter_map(|e| e.ok()) {
-                    if entry.path().extension().map(|e| e == "json").unwrap_or(false) {
+                    if entry
+                        .path()
+                        .extension()
+                        .map(|e| e == "json")
+                        .unwrap_or(false)
+                    {
                         total_files += 1;
-                        total_size += std::fs::metadata(entry.path()).map(|m| m.len()).unwrap_or(0);
+                        total_size += std::fs::metadata(entry.path())
+                            .map(|m| m.len())
+                            .unwrap_or(0);
                     }
                 }
             }
@@ -2348,10 +2605,15 @@ pub async fn handle_cli_sessions(
         }
         "rename" => {
             let session_id = id.ok_or_else(|| {
-                hermes_core::AgentError::Config("Missing session ID. Usage: hermes sessions rename --id <id> --name <new>".into())
+                hermes_core::AgentError::Config(
+                    "Missing session ID. Usage: hermes sessions rename --id <id> --name <new>"
+                        .into(),
+                )
             })?;
             let new_name = name.ok_or_else(|| {
-                hermes_core::AgentError::Config("Missing new name. Usage: hermes sessions rename --id <id> --name <new>".into())
+                hermes_core::AgentError::Config(
+                    "Missing new name. Usage: hermes sessions rename --id <id> --name <new>".into(),
+                )
             })?;
             let old_path = sessions_dir.join(format!("{}.json", session_id));
             let new_path = sessions_dir.join(format!("{}.json", new_name));
@@ -2377,16 +2639,26 @@ pub async fn handle_cli_sessions(
                     if !path.extension().map(|e| e == "json").unwrap_or(false) {
                         continue;
                     }
-                    let stem = path.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+                    let stem = path
+                        .file_stem()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned();
                     let meta = std::fs::metadata(&path);
                     let size = meta.as_ref().map(|m| m.len()).unwrap_or(0);
-                    let modified = meta.as_ref().ok()
+                    let modified = meta
+                        .as_ref()
+                        .ok()
                         .and_then(|m| m.modified().ok())
                         .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
                     let msg_count = std::fs::read_to_string(&path)
                         .ok()
                         .and_then(|c| serde_json::from_str::<serde_json::Value>(&c).ok())
-                        .and_then(|v| v.get("messages").and_then(|m| m.as_array()).map(|a| a.len()))
+                        .and_then(|v| {
+                            v.get("messages")
+                                .and_then(|m| m.as_array())
+                                .map(|a| a.len())
+                        })
                         .unwrap_or(0);
                     entries.push((stem, size, modified, msg_count));
                 }
@@ -2395,7 +2667,10 @@ pub async fn handle_cli_sessions(
             if entries.is_empty() {
                 println!("No sessions found.");
             } else {
-                println!("{:3} {:30} {:>8} {:>6}  {}", "#", "Session ID", "Size", "Msgs", "Modified");
+                println!(
+                    "{:3} {:30} {:>8} {:>6}  {}",
+                    "#", "Session ID", "Size", "Msgs", "Modified"
+                );
                 println!("{}", "-".repeat(75));
                 for (idx, (name, size, modified, msgs)) in entries.iter().enumerate() {
                     let age = modified.elapsed().unwrap_or_default();
@@ -2452,7 +2727,8 @@ pub async fn handle_cli_insights(
     let mut total_output_tokens = 0u64;
     let mut total_cost_cents = 0.0f64;
     let mut models_used: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
-    let mut daily_counts: std::collections::BTreeMap<String, u32> = std::collections::BTreeMap::new();
+    let mut daily_counts: std::collections::BTreeMap<String, u32> =
+        std::collections::BTreeMap::new();
 
     if let Ok(rd) = std::fs::read_dir(&sessions_dir) {
         for entry in rd.filter_map(|e| e.ok()) {
@@ -2461,18 +2737,25 @@ pub async fn handle_cli_insights(
                 continue;
             }
             let meta = std::fs::metadata(&path);
-            let modified = meta.as_ref().ok()
+            let modified = meta
+                .as_ref()
+                .ok()
                 .and_then(|m| m.modified().ok())
                 .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-            if modified < cutoff { continue; }
+            if modified < cutoff {
+                continue;
+            }
 
             if let Ok(content) = std::fs::read_to_string(&path) {
                 if let Ok(data) = serde_json::from_str::<serde_json::Value>(&content) {
                     if let Some(src_filter) = &source {
-                        let session_source = data.get("source")
+                        let session_source = data
+                            .get("source")
                             .and_then(|s| s.as_str())
                             .unwrap_or("unknown");
-                        if session_source != src_filter.as_str() { continue; }
+                        if session_source != src_filter.as_str() {
+                            continue;
+                        }
                     }
 
                     total_sessions += 1;
@@ -2482,19 +2765,25 @@ pub async fn handle_cli_insights(
                     }
 
                     if let Some(usage) = data.get("usage") {
-                        total_input_tokens += usage.get("input_tokens")
-                            .and_then(|v| v.as_u64()).unwrap_or(0);
-                        total_output_tokens += usage.get("output_tokens")
-                            .and_then(|v| v.as_u64()).unwrap_or(0);
-                        total_cost_cents += usage.get("cost")
-                            .and_then(|v| v.as_f64()).unwrap_or(0.0);
+                        total_input_tokens += usage
+                            .get("input_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        total_output_tokens += usage
+                            .get("output_tokens")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(0);
+                        total_cost_cents +=
+                            usage.get("cost").and_then(|v| v.as_f64()).unwrap_or(0.0);
                     }
 
                     if let Some(model) = data.get("model").and_then(|m| m.as_str()) {
                         *models_used.entry(model.to_string()).or_insert(0) += 1;
                     }
 
-                    let dur = modified.duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap_or_default();
+                    let dur = modified
+                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                        .unwrap_or_default();
                     let secs = dur.as_secs();
                     let day_secs = secs - (secs % 86400);
                     let day_key = format!("{}", day_secs / 86400);
@@ -2525,21 +2814,24 @@ pub async fn handle_cli_insights(
 
     if total_sessions > 0 {
         println!("\nAverages per session:");
-        println!("  Messages: {:.1}", total_messages as f64 / total_sessions as f64);
-        println!("  Tokens:   {:.0}", total_tokens as f64 / total_sessions as f64);
+        println!(
+            "  Messages: {:.1}",
+            total_messages as f64 / total_sessions as f64
+        );
+        println!(
+            "  Tokens:   {:.0}",
+            total_tokens as f64 / total_sessions as f64
+        );
     }
 
     Ok(())
 }
 
 /// Handle `hermes login [provider]`.
-pub async fn handle_cli_login(
-    provider: Option<String>,
-) -> Result<(), hermes_core::AgentError> {
+pub async fn handle_cli_login(provider: Option<String>) -> Result<(), hermes_core::AgentError> {
     let provider = provider.unwrap_or_else(|| "openai".to_string());
     let creds_dir = hermes_config::hermes_home().join("credentials");
-    std::fs::create_dir_all(&creds_dir)
-        .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+    std::fs::create_dir_all(&creds_dir).map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
 
     println!("Login to: {}", provider);
     println!("----------{}", "-".repeat(provider.len()));
@@ -2549,7 +2841,7 @@ pub async fn handle_cli_login(
             let env_key = std::env::var("OPENAI_API_KEY").ok();
             if let Some(key) = env_key {
                 let masked = if key.len() > 8 {
-                    format!("{}...{}", &key[..4], &key[key.len()-4..])
+                    format!("{}...{}", &key[..4], &key[key.len() - 4..])
                 } else {
                     "****".to_string()
                 };
@@ -2561,8 +2853,11 @@ pub async fn handle_cli_login(
                     "stored_at": chrono::Utc::now().to_rfc3339(),
                     "source": "env",
                 });
-                std::fs::write(&cred_file, serde_json::to_string_pretty(&cred).unwrap_or_default())
-                    .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+                std::fs::write(
+                    &cred_file,
+                    serde_json::to_string_pretty(&cred).unwrap_or_default(),
+                )
+                .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
                 println!("Credential reference stored at {}", cred_file.display());
             } else {
                 println!("No OPENAI_API_KEY found in environment.");
@@ -2574,7 +2869,7 @@ pub async fn handle_cli_login(
             let env_key = std::env::var("ANTHROPIC_API_KEY").ok();
             if let Some(key) = env_key {
                 let masked = if key.len() > 8 {
-                    format!("{}...{}", &key[..4], &key[key.len()-4..])
+                    format!("{}...{}", &key[..4], &key[key.len() - 4..])
                 } else {
                     "****".to_string()
                 };
@@ -2586,8 +2881,11 @@ pub async fn handle_cli_login(
                     "stored_at": chrono::Utc::now().to_rfc3339(),
                     "source": "env",
                 });
-                std::fs::write(&cred_file, serde_json::to_string_pretty(&cred).unwrap_or_default())
-                    .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+                std::fs::write(
+                    &cred_file,
+                    serde_json::to_string_pretty(&cred).unwrap_or_default(),
+                )
+                .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
                 println!("Credential reference stored at {}", cred_file.display());
             } else {
                 println!("No ANTHROPIC_API_KEY found in environment.");
@@ -2599,7 +2897,7 @@ pub async fn handle_cli_login(
             let env_key = std::env::var(&env_var).ok();
             if let Some(key) = env_key {
                 let masked = if key.len() > 8 {
-                    format!("{}...{}", &key[..4], &key[key.len()-4..])
+                    format!("{}...{}", &key[..4], &key[key.len() - 4..])
                 } else {
                     "****".to_string()
                 };
@@ -2611,8 +2909,11 @@ pub async fn handle_cli_login(
                     "stored_at": chrono::Utc::now().to_rfc3339(),
                     "source": "env",
                 });
-                std::fs::write(&cred_file, serde_json::to_string_pretty(&cred).unwrap_or_default())
-                    .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+                std::fs::write(
+                    &cred_file,
+                    serde_json::to_string_pretty(&cred).unwrap_or_default(),
+                )
+                .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
                 println!("Credential reference stored.");
             } else {
                 println!("No {} found in environment.", env_var);
@@ -2624,9 +2925,7 @@ pub async fn handle_cli_login(
 }
 
 /// Handle `hermes logout [provider]`.
-pub async fn handle_cli_logout(
-    provider: Option<String>,
-) -> Result<(), hermes_core::AgentError> {
+pub async fn handle_cli_logout(provider: Option<String>) -> Result<(), hermes_core::AgentError> {
     let creds_dir = hermes_config::hermes_home().join("credentials");
 
     match provider.as_deref() {
@@ -2639,8 +2938,10 @@ pub async fn handle_cli_logout(
             } else {
                 println!("No stored credentials for '{}'.", p);
             }
-            println!("Note: Environment variables (e.g. {}_API_KEY) are not affected.",
-                p.to_uppercase().replace('-', "_"));
+            println!(
+                "Note: Environment variables (e.g. {}_API_KEY) are not affected.",
+                p.to_uppercase().replace('-', "_")
+            );
         }
         None => {
             if creds_dir.exists() {
@@ -2672,9 +2973,7 @@ pub async fn handle_cli_logout(
 }
 
 /// Handle `hermes whatsapp [action]`.
-pub async fn handle_cli_whatsapp(
-    action: Option<String>,
-) -> Result<(), hermes_core::AgentError> {
+pub async fn handle_cli_whatsapp(action: Option<String>) -> Result<(), hermes_core::AgentError> {
     match action.as_deref().unwrap_or("status") {
         "setup" => {
             whatsapp_setup().await?;
@@ -2707,7 +3006,10 @@ async fn whatsapp_setup() -> Result<(), hermes_core::AgentError> {
 
     print!("Phone Number ID: ");
     stdout.flush().ok();
-    let phone_number_id = stdin.lock().lines().next()
+    let phone_number_id = stdin
+        .lock()
+        .lines()
+        .next()
         .and_then(|l| l.ok())
         .unwrap_or_default()
         .trim()
@@ -2720,7 +3022,10 @@ async fn whatsapp_setup() -> Result<(), hermes_core::AgentError> {
 
     print!("Business Account ID: ");
     stdout.flush().ok();
-    let business_account_id = stdin.lock().lines().next()
+    let business_account_id = stdin
+        .lock()
+        .lines()
+        .next()
         .and_then(|l| l.ok())
         .unwrap_or_default()
         .trim()
@@ -2733,7 +3038,10 @@ async fn whatsapp_setup() -> Result<(), hermes_core::AgentError> {
 
     print!("Access Token: ");
     stdout.flush().ok();
-    let access_token = stdin.lock().lines().next()
+    let access_token = stdin
+        .lock()
+        .lines()
+        .next()
         .and_then(|l| l.ok())
         .unwrap_or_default()
         .trim()
@@ -2821,7 +3129,10 @@ async fn whatsapp_setup() -> Result<(), hermes_core::AgentError> {
     std::fs::write(&config_path, &yaml_str)
         .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
 
-    println!("\nWhatsApp configuration saved to {}", config_path.display());
+    println!(
+        "\nWhatsApp configuration saved to {}",
+        config_path.display()
+    );
     println!("Phone Number ID: {}", phone_number_id);
     println!("\nRun `hermes whatsapp status` to verify.");
     Ok(())
@@ -2838,12 +3149,10 @@ async fn whatsapp_status() -> Result<(), hermes_core::AgentError> {
 
     let content = std::fs::read_to_string(&config_path)
         .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
-    let config: serde_yaml::Value = serde_yaml::from_str(&content)
-        .unwrap_or(serde_yaml::Value::Mapping(Default::default()));
+    let config: serde_yaml::Value =
+        serde_yaml::from_str(&content).unwrap_or(serde_yaml::Value::Mapping(Default::default()));
 
-    let wa = config
-        .get("platforms")
-        .and_then(|p| p.get("whatsapp"));
+    let wa = config.get("platforms").and_then(|p| p.get("whatsapp"));
 
     match wa {
         None => {
@@ -2877,10 +3186,7 @@ async fn whatsapp_status() -> Result<(), hermes_core::AgentError> {
 
             if has_token {
                 let token = wa_cfg.get("access_token").unwrap().as_str().unwrap();
-                let url = format!(
-                    "https://graph.facebook.com/v21.0/{}/messages",
-                    phone_id
-                );
+                let url = format!("https://graph.facebook.com/v21.0/{}/messages", phone_id);
                 print!("  API Connectivity: ");
                 match reqwest::Client::new()
                     .get(&url)
@@ -2903,8 +3209,8 @@ async fn whatsapp_qr() -> Result<(), hermes_core::AgentError> {
     let config_path = hermes_config::hermes_home().join("config.yaml");
     let bridge_url = if config_path.exists() {
         let content = std::fs::read_to_string(&config_path).unwrap_or_default();
-        let config: serde_yaml::Value =
-            serde_yaml::from_str(&content).unwrap_or(serde_yaml::Value::Mapping(Default::default()));
+        let config: serde_yaml::Value = serde_yaml::from_str(&content)
+            .unwrap_or(serde_yaml::Value::Mapping(Default::default()));
         config
             .get("platforms")
             .and_then(|p| p.get("whatsapp"))
@@ -3029,10 +3335,7 @@ pub async fn handle_cli_pairing(
             let devices = store.list().map_err(|e| hermes_core::AgentError::Io(e))?;
             if devices.is_empty() {
                 println!("No paired devices.");
-                println!(
-                    "  Store: {}",
-                    PairingStore::default_path().display()
-                );
+                println!("  Store: {}", PairingStore::default_path().display());
             } else {
                 println!("Paired devices ({}):", devices.len());
                 println!(
@@ -3086,21 +3389,16 @@ pub async fn handle_cli_pairing(
                 Err(e) => println!("Failed to revoke device: {}", e),
             }
         }
-        "clear-pending" => {
-            match store.clear_pending() {
-                Ok(count) => {
-                    if count == 0 {
-                        println!("No pending pairing requests to clear.");
-                    } else {
-                        println!(
-                            "Cleared {} pending pairing request(s).",
-                            count
-                        );
-                    }
+        "clear-pending" => match store.clear_pending() {
+            Ok(count) => {
+                if count == 0 {
+                    println!("No pending pairing requests to clear.");
+                } else {
+                    println!("Cleared {} pending pairing request(s).", count);
                 }
-                Err(e) => println!("Failed to clear pending requests: {}", e),
             }
-        }
+            Err(e) => println!("Failed to clear pending requests: {}", e),
+        },
         other => {
             println!("Pairing action '{}' is not recognized.", other);
             println!("Available actions: list, approve, revoke, clear-pending");
@@ -3110,9 +3408,7 @@ pub async fn handle_cli_pairing(
 }
 
 /// Handle `hermes claw [action]`.
-pub async fn handle_cli_claw(
-    action: Option<String>,
-) -> Result<(), hermes_core::AgentError> {
+pub async fn handle_cli_claw(action: Option<String>) -> Result<(), hermes_core::AgentError> {
     match action.as_deref().unwrap_or("status") {
         "migrate" => {
             claw_migrate_cmd()?;
@@ -3149,9 +3445,30 @@ fn claw_status_cmd() {
             let env_file = dir.join(".env");
             let skills_dir = dir.join("skills");
 
-            println!("  config.yaml:       {}", if config_yaml.exists() { "present" } else { "not found" });
-            println!("  .env:              {}", if env_file.exists() { "present" } else { "not found" });
-            println!("  skills/:           {}", if skills_dir.is_dir() { "present" } else { "not found" });
+            println!(
+                "  config.yaml:       {}",
+                if config_yaml.exists() {
+                    "present"
+                } else {
+                    "not found"
+                }
+            );
+            println!(
+                "  .env:              {}",
+                if env_file.exists() {
+                    "present"
+                } else {
+                    "not found"
+                }
+            );
+            println!(
+                "  skills/:           {}",
+                if skills_dir.is_dir() {
+                    "present"
+                } else {
+                    "not found"
+                }
+            );
 
             if sessions_dir.is_dir() {
                 let count = std::fs::read_dir(&sessions_dir)
@@ -3168,7 +3485,10 @@ fn claw_status_cmd() {
         None => {
             println!("  No OpenClaw directory found.");
             if let Some(h) = &home {
-                println!("  Checked: ~/.openclaw, ~/.clawdbot, ~/.moldbot under {}", h.display());
+                println!(
+                    "  Checked: ~/.openclaw, ~/.clawdbot, ~/.moldbot under {}",
+                    h.display()
+                );
             }
             println!("\n  Nothing to migrate.");
         }
@@ -3197,7 +3517,7 @@ fn claw_status_cmd() {
 
 /// Run the full migration using `claw_migrate::run_migration`.
 fn claw_migrate_cmd() -> Result<(), hermes_core::AgentError> {
-    use crate::claw_migrate::{MigrateOptions, MigrationStatus, find_openclaw_dir, run_migration};
+    use crate::claw_migrate::{find_openclaw_dir, run_migration, MigrateOptions, MigrationStatus};
 
     println!("OpenClaw → Hermes Migration");
     println!("===========================\n");
@@ -3217,8 +3537,9 @@ fn claw_migrate_cmd() -> Result<(), hermes_core::AgentError> {
     let mut session_count = 0usize;
 
     if src_sessions.is_dir() {
-        std::fs::create_dir_all(&dst_sessions)
-            .map_err(|e| hermes_core::AgentError::Io(format!("Failed to create sessions dir: {}", e)))?;
+        std::fs::create_dir_all(&dst_sessions).map_err(|e| {
+            hermes_core::AgentError::Io(format!("Failed to create sessions dir: {}", e))
+        })?;
         if let Ok(entries) = std::fs::read_dir(&src_sessions) {
             for entry in entries.flatten() {
                 let src = entry.path();
@@ -3244,8 +3565,16 @@ fn claw_migrate_cmd() -> Result<(), hermes_core::AgentError> {
     if !result.migrated.is_empty() {
         println!("Migrated:");
         for item in &result.migrated {
-            let src = item.source.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
-            let dst = item.destination.as_ref().map(|p| p.display().to_string()).unwrap_or_default();
+            let src = item
+                .source
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
+            let dst = item
+                .destination
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default();
             let extra = item.reason.as_deref().unwrap_or("");
             println!("  ✓ {} → {} {}", src, dst, extra);
         }
@@ -3321,7 +3650,10 @@ fn claw_cleanup_cmd() -> Result<(), hermes_core::AgentError> {
 
     print!("\nProceed with cleanup? [y/N]: ");
     io::stdout().flush().ok();
-    let answer = io::stdin().lock().lines().next()
+    let answer = io::stdin()
+        .lock()
+        .lines()
+        .next()
         .and_then(|l| l.ok())
         .unwrap_or_default();
 
@@ -3378,18 +3710,13 @@ fn count_files_recursive(dir: &std::path::Path) -> usize {
 }
 
 /// Handle `hermes acp [action]`.
-pub async fn handle_cli_acp(
-    action: Option<String>,
-) -> Result<(), hermes_core::AgentError> {
+pub async fn handle_cli_acp(action: Option<String>) -> Result<(), hermes_core::AgentError> {
     match action.as_deref().unwrap_or("status") {
         "start" => {
             let config = hermes_config::load_config(None)
                 .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
 
-            let model = config
-                .model
-                .clone()
-                .unwrap_or_else(|| "gpt-4o".to_string());
+            let model = config.model.clone().unwrap_or_else(|| "gpt-4o".to_string());
 
             let acp_config = hermes_acp::AcpConfig {
                 model,
@@ -3398,12 +3725,14 @@ pub async fn handle_cli_acp(
                 max_turns: config.max_turns as usize,
             };
 
-            println!("Starting ACP server (model={}, max_turns={})...",
-                acp_config.model, acp_config.max_turns);
+            println!(
+                "Starting ACP server (model={}, max_turns={})...",
+                acp_config.model, acp_config.max_turns
+            );
 
-            hermes_acp::start_acp_server(acp_config).await.map_err(|e| {
-                hermes_core::AgentError::Io(format!("ACP server error: {}", e))
-            })?;
+            hermes_acp::start_acp_server(acp_config)
+                .await
+                .map_err(|e| hermes_core::AgentError::Io(format!("ACP server error: {}", e)))?;
         }
         "status" => {
             println!("ACP server: not running");
@@ -3418,16 +3747,20 @@ pub async fn handle_cli_acp(
 }
 
 /// Handle `hermes backup [output]`.
-pub async fn handle_cli_backup(
-    output: Option<String>,
-) -> Result<(), hermes_core::AgentError> {
+pub async fn handle_cli_backup(output: Option<String>) -> Result<(), hermes_core::AgentError> {
     let hermes_dir = hermes_config::hermes_home();
     if !hermes_dir.exists() {
-        println!("Hermes home directory not found at {}", hermes_dir.display());
+        println!(
+            "Hermes home directory not found at {}",
+            hermes_dir.display()
+        );
         return Ok(());
     }
     let out = output.unwrap_or_else(|| {
-        format!("hermes-backup-{}.tar.gz", chrono::Utc::now().format("%Y%m%d-%H%M%S"))
+        format!(
+            "hermes-backup-{}.tar.gz",
+            chrono::Utc::now().format("%Y%m%d-%H%M%S")
+        )
     });
     println!("Backing up {} -> {}", hermes_dir.display(), out);
 
@@ -3446,27 +3779,31 @@ pub async fn handle_cli_backup(
 }
 
 /// Handle `hermes import <path>`.
-pub async fn handle_cli_import(
-    path: String,
-) -> Result<(), hermes_core::AgentError> {
+pub async fn handle_cli_import(path: String) -> Result<(), hermes_core::AgentError> {
     let src = std::path::Path::new(&path);
     if !src.exists() {
-        return Err(hermes_core::AgentError::Io(format!("Backup archive not found: {}", path)));
+        return Err(hermes_core::AgentError::Io(format!(
+            "Backup archive not found: {}",
+            path
+        )));
     }
     println!("Importing configuration from: {}", path);
 
     let hermes_dir = hermes_config::hermes_home();
-    std::fs::create_dir_all(&hermes_dir)
-        .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+    std::fs::create_dir_all(&hermes_dir).map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
 
     let file = std::fs::File::open(src)
         .map_err(|e| hermes_core::AgentError::Io(format!("Cannot open {}: {}", path, e)))?;
     let dec = flate2::read::GzDecoder::new(file);
     let mut archive = tar::Archive::new(dec);
-    archive.unpack(&hermes_dir)
+    archive
+        .unpack(&hermes_dir)
         .map_err(|e| hermes_core::AgentError::Io(format!("Extract error: {}", e)))?;
 
-    println!("Import complete. Files restored to {}", hermes_dir.display());
+    println!(
+        "Import complete. Files restored to {}",
+        hermes_dir.display()
+    );
     Ok(())
 }
 

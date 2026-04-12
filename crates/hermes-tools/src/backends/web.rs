@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::{json, Value};
 
+use crate::tools::web::{WebExtractBackend, WebSearchBackend};
 use hermes_core::ToolError;
-use crate::tools::web::{WebSearchBackend, WebExtractBackend};
 
 // ---------------------------------------------------------------------------
 // FallbackSearchBackend (no API key needed)
@@ -28,7 +28,12 @@ impl Default for FallbackSearchBackend {
 
 #[async_trait]
 impl WebSearchBackend for FallbackSearchBackend {
-    async fn search(&self, query: &str, _num_results: usize, _category: Option<&str>) -> Result<String, ToolError> {
+    async fn search(
+        &self,
+        query: &str,
+        _num_results: usize,
+        _category: Option<&str>,
+    ) -> Result<String, ToolError> {
         Ok(json!({
             "error": "no_api_key",
             "message": format!(
@@ -75,27 +80,29 @@ impl Default for SimpleExtractBackend {
 #[async_trait]
 impl WebExtractBackend for SimpleExtractBackend {
     async fn extract(&self, url: &str, _include_links: bool) -> Result<String, ToolError> {
-        let resp = self.client
-            .get(url)
-            .send()
-            .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to fetch '{}': {}", url, e)))?;
+        let resp =
+            self.client.get(url).send().await.map_err(|e| {
+                ToolError::ExecutionFailed(format!("Failed to fetch '{}': {}", url, e))
+            })?;
 
         let status = resp.status();
         if !status.is_success() {
             return Err(ToolError::ExecutionFailed(format!(
-                "HTTP {} when fetching '{}'", status, url
+                "HTTP {} when fetching '{}'",
+                status, url
             )));
         }
 
-        let content_type = resp.headers()
+        let content_type = resp
+            .headers()
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
             .unwrap_or("")
             .to_string();
 
-        let bytes = resp.bytes().await
-            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to read response body: {}", e)))?;
+        let bytes = resp.bytes().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to read response body: {}", e))
+        })?;
 
         if bytes.len() > MAX_EXTRACT_BYTES {
             let text = String::from_utf8_lossy(&bytes[..MAX_EXTRACT_BYTES]);
@@ -206,15 +213,21 @@ impl ExaSearchBackend {
 
     /// Create from environment variable `EXA_API_KEY`.
     pub fn from_env() -> Result<Self, ToolError> {
-        let api_key = std::env::var("EXA_API_KEY")
-            .map_err(|_| ToolError::ExecutionFailed("EXA_API_KEY environment variable not set".into()))?;
+        let api_key = std::env::var("EXA_API_KEY").map_err(|_| {
+            ToolError::ExecutionFailed("EXA_API_KEY environment variable not set".into())
+        })?;
         Ok(Self::new(api_key))
     }
 }
 
 #[async_trait]
 impl WebSearchBackend for ExaSearchBackend {
-    async fn search(&self, query: &str, num_results: usize, category: Option<&str>) -> Result<String, ToolError> {
+    async fn search(
+        &self,
+        query: &str,
+        num_results: usize,
+        category: Option<&str>,
+    ) -> Result<String, ToolError> {
         let mut body = json!({
             "query": query,
             "numResults": num_results,
@@ -228,7 +241,8 @@ impl WebSearchBackend for ExaSearchBackend {
             body["category"] = json!(cat);
         }
 
-        let resp = self.client
+        let resp = self
+            .client
             .post("https://api.exa.ai/search")
             .header("x-api-key", &self.api_key)
             .header("Content-Type", "application/json")
@@ -238,28 +252,35 @@ impl WebSearchBackend for ExaSearchBackend {
             .map_err(|e| ToolError::ExecutionFailed(format!("Exa API request failed: {}", e)))?;
 
         let status = resp.status();
-        let text = resp.text().await
-            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to read Exa response: {}", e)))?;
+        let text = resp.text().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to read Exa response: {}", e))
+        })?;
 
         if !status.is_success() {
-            return Err(ToolError::ExecutionFailed(format!("Exa API error ({}): {}", status, text)));
+            return Err(ToolError::ExecutionFailed(format!(
+                "Exa API error ({}): {}",
+                status, text
+            )));
         }
 
         // Parse and reformat the response
-        let data: Value = serde_json::from_str(&text)
-            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to parse Exa response: {}", e)))?;
+        let data: Value = serde_json::from_str(&text).map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to parse Exa response: {}", e))
+        })?;
 
         let results = data.get("results").and_then(|r| r.as_array());
         let formatted: Vec<Value> = results
             .map(|arr| {
-                arr.iter().map(|r| {
-                    json!({
-                        "title": r.get("title").and_then(|v| v.as_str()).unwrap_or(""),
-                        "url": r.get("url").and_then(|v| v.as_str()).unwrap_or(""),
-                        "text": r.get("text").and_then(|v| v.as_str()).unwrap_or(""),
-                        "score": r.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                arr.iter()
+                    .map(|r| {
+                        json!({
+                            "title": r.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                            "url": r.get("url").and_then(|v| v.as_str()).unwrap_or(""),
+                            "text": r.get("text").and_then(|v| v.as_str()).unwrap_or(""),
+                            "score": r.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        })
                     })
-                }).collect()
+                    .collect()
             })
             .unwrap_or_default();
 
@@ -288,8 +309,9 @@ impl FirecrawlExtractBackend {
 
     /// Create from environment variable `FIRECRAWL_API_KEY`.
     pub fn from_env() -> Result<Self, ToolError> {
-        let api_key = std::env::var("FIRECRAWL_API_KEY")
-            .map_err(|_| ToolError::ExecutionFailed("FIRECRAWL_API_KEY environment variable not set".into()))?;
+        let api_key = std::env::var("FIRECRAWL_API_KEY").map_err(|_| {
+            ToolError::ExecutionFailed("FIRECRAWL_API_KEY environment variable not set".into())
+        })?;
         Ok(Self::new(api_key))
     }
 }
@@ -304,25 +326,33 @@ impl WebExtractBackend for FirecrawlExtractBackend {
             "includeLinks": include_links,
         });
 
-        let resp = self.client
+        let resp = self
+            .client
             .post("https://api.firecrawl.dev/v1/scrape")
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
             .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("Firecrawl API request failed: {}", e)))?;
+            .map_err(|e| {
+                ToolError::ExecutionFailed(format!("Firecrawl API request failed: {}", e))
+            })?;
 
         let status = resp.status();
-        let text = resp.text().await
-            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to read Firecrawl response: {}", e)))?;
+        let text = resp.text().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to read Firecrawl response: {}", e))
+        })?;
 
         if !status.is_success() {
-            return Err(ToolError::ExecutionFailed(format!("Firecrawl API error ({}): {}", status, text)));
+            return Err(ToolError::ExecutionFailed(format!(
+                "Firecrawl API error ({}): {}",
+                status, text
+            )));
         }
 
-        let data: Value = serde_json::from_str(&text)
-            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to parse Firecrawl response: {}", e)))?;
+        let data: Value = serde_json::from_str(&text).map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to parse Firecrawl response: {}", e))
+        })?;
 
         let markdown = data
             .get("data")

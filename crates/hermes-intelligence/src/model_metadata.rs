@@ -333,12 +333,16 @@ pub fn get_model_info(model_name: &str) -> Option<ModelInfo> {
 
 /// Check if a model supports vision.
 pub fn supports_vision(model: &str) -> bool {
-    get_model_info(model).map(|m| m.supports_vision).unwrap_or(false)
+    get_model_info(model)
+        .map(|m| m.supports_vision)
+        .unwrap_or(false)
 }
 
 /// Check if a model supports tool/function calling.
 pub fn supports_tools(model: &str) -> bool {
-    get_model_info(model).map(|m| m.supports_tools).unwrap_or(true)
+    get_model_info(model)
+        .map(|m| m.supports_tools)
+        .unwrap_or(true)
 }
 
 /// Get the maximum output tokens for a model.
@@ -369,7 +373,10 @@ pub fn get_model_context_length(model: &str) -> u64 {
 
 /// Get the next lower probe tier for context length probing.
 pub fn get_next_probe_tier(current: u64) -> Option<u64> {
-    CONTEXT_PROBE_TIERS.iter().copied().find(|&tier| tier < current)
+    CONTEXT_PROBE_TIERS
+        .iter()
+        .copied()
+        .find(|&tier| tier < current)
 }
 
 // ---------------------------------------------------------------------------
@@ -517,7 +524,10 @@ mod tests {
         assert_eq!(get_model_context_length("gpt-4o"), 128_000);
         assert_eq!(get_model_context_length("claude-opus-4-6"), 1_000_000);
         assert_eq!(get_model_context_length("gemini-2.0-flash"), 1_048_576);
-        assert_eq!(get_model_context_length("unknown-model"), DEFAULT_FALLBACK_CONTEXT);
+        assert_eq!(
+            get_model_context_length("unknown-model"),
+            DEFAULT_FALLBACK_CONTEXT
+        );
     }
 
     #[test]
@@ -550,8 +560,14 @@ mod tests {
 
     #[test]
     fn test_infer_provider() {
-        assert_eq!(infer_provider_from_url("https://api.openai.com/v1"), Some("openai"));
-        assert_eq!(infer_provider_from_url("https://api.anthropic.com"), Some("anthropic"));
+        assert_eq!(
+            infer_provider_from_url("https://api.openai.com/v1"),
+            Some("openai")
+        );
+        assert_eq!(
+            infer_provider_from_url("https://api.anthropic.com"),
+            Some("anthropic")
+        );
         assert_eq!(infer_provider_from_url("http://localhost:8080"), None);
     }
 

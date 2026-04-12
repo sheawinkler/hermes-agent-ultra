@@ -229,8 +229,7 @@ pub struct FeishuAdapter {
 
 impl FeishuAdapter {
     pub fn new(config: FeishuConfig) -> Result<Self, GatewayError> {
-        let base =
-            BasePlatformAdapter::new(&config.app_id).with_proxy(config.proxy.clone());
+        let base = BasePlatformAdapter::new(&config.app_id).with_proxy(config.proxy.clone());
         base.validate_token()?;
         let client = base.build_client()?;
         Ok(Self {
@@ -295,9 +294,7 @@ impl FeishuAdapter {
         let token = result
             .get("tenant_access_token")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                GatewayError::Auth("No tenant_access_token in response".into())
-            })?
+            .ok_or_else(|| GatewayError::Auth("No tenant_access_token in response".into()))?
             .to_string();
 
         info!("Feishu tenant token refreshed successfully");
@@ -322,10 +319,7 @@ impl FeishuAdapter {
     /// For v2 schema events the token lives in `header.token`; for v1 / URL
     /// verification callbacks it may be a top-level `token` field.
     pub fn verify_event(event: &FeishuEvent, verification_token: &str) -> bool {
-        let token_from_header = event
-            .header
-            .as_ref()
-            .and_then(|h| h.token.as_deref());
+        let token_from_header = event.header.as_ref().and_then(|h| h.token.as_deref());
         let token_from_top = event.token.as_deref();
 
         let actual = token_from_header.or(token_from_top);
@@ -340,18 +334,13 @@ impl FeishuAdapter {
     // -----------------------------------------------------------------------
 
     /// Parse a `im.message.receive_v1` event payload into an `IncomingFeishuMessage`.
-    pub fn parse_message_event(
-        event: &serde_json::Value,
-    ) -> Option<IncomingFeishuMessage> {
+    pub fn parse_message_event(event: &serde_json::Value) -> Option<IncomingFeishuMessage> {
         let message = event.get("message")?;
         let message_id = message
             .get("message_id")
             .and_then(|v| v.as_str())?
             .to_string();
-        let chat_id = message
-            .get("chat_id")
-            .and_then(|v| v.as_str())?
-            .to_string();
+        let chat_id = message.get("chat_id").and_then(|v| v.as_str())?.to_string();
         let chat_type = message
             .get("chat_type")
             .and_then(|v| v.as_str())
@@ -370,9 +359,7 @@ impl FeishuAdapter {
             .and_then(|v| v.as_str())
             .map(String::from);
 
-        let mentions = message
-            .get("mentions")
-            .and_then(|v| v.as_array());
+        let mentions = message.get("mentions").and_then(|v| v.as_array());
         let is_mention = mentions.map(|arr| !arr.is_empty()).unwrap_or(false);
 
         let raw_text = Self::extract_text_content(message, &message_type);
@@ -422,9 +409,7 @@ impl FeishuAdapter {
             }
         }
 
-        let body = content
-            .get("content")
-            .and_then(|v| v.as_array());
+        let body = content.get("content").and_then(|v| v.as_array());
 
         if let Some(lines) = body {
             for line in lines {
@@ -434,13 +419,8 @@ impl FeishuAdapter {
                         .filter_map(|el| {
                             let tag = el.get("tag").and_then(|v| v.as_str())?;
                             match tag {
-                                "text" => {
-                                    el.get("text").and_then(|v| v.as_str()).map(String::from)
-                                }
-                                "a" => el
-                                    .get("text")
-                                    .and_then(|v| v.as_str())
-                                    .map(String::from),
+                                "text" => el.get("text").and_then(|v| v.as_str()).map(String::from),
+                                "a" => el.get("text").and_then(|v| v.as_str()).map(String::from),
                                 "at" => el
                                     .get("user_name")
                                     .and_then(|v| v.as_str())
@@ -470,16 +450,9 @@ impl FeishuAdapter {
     // -----------------------------------------------------------------------
 
     /// Send a text message via Feishu Bot API.
-    pub async fn send_text(
-        &self,
-        chat_id: &str,
-        text: &str,
-    ) -> Result<String, GatewayError> {
+    pub async fn send_text(&self, chat_id: &str, text: &str) -> Result<String, GatewayError> {
         let token = self.get_tenant_token().await?;
-        let url = format!(
-            "{}/im/v1/messages?receive_id_type=chat_id",
-            FEISHU_API_BASE
-        );
+        let url = format!("{}/im/v1/messages?receive_id_type=chat_id", FEISHU_API_BASE);
 
         let body = serde_json::json!({
             "receive_id": chat_id,
@@ -504,11 +477,7 @@ impl FeishuAdapter {
     // -----------------------------------------------------------------------
 
     /// Edit a message via Feishu Bot API.
-    pub async fn edit_text(
-        &self,
-        message_id: &str,
-        text: &str,
-    ) -> Result<(), GatewayError> {
+    pub async fn edit_text(&self, message_id: &str, text: &str) -> Result<(), GatewayError> {
         let token = self.get_tenant_token().await?;
         let url = format!("{}/im/v1/messages/{}", FEISHU_API_BASE, message_id);
 
@@ -524,9 +493,7 @@ impl FeishuAdapter {
             .json(&body)
             .send()
             .await
-            .map_err(|e| {
-                GatewayError::SendFailed(format!("Feishu edit failed: {e}"))
-            })?;
+            .map_err(|e| GatewayError::SendFailed(format!("Feishu edit failed: {e}")))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -551,10 +518,7 @@ impl FeishuAdapter {
         content: Vec<Vec<PostElement>>,
     ) -> Result<String, GatewayError> {
         let token = self.get_tenant_token().await?;
-        let url = format!(
-            "{}/im/v1/messages?receive_id_type=chat_id",
-            FEISHU_API_BASE
-        );
+        let url = format!("{}/im/v1/messages?receive_id_type=chat_id", FEISHU_API_BASE);
 
         let content_json = serde_json::json!({
             "zh_cn": {
@@ -576,9 +540,7 @@ impl FeishuAdapter {
             .json(&body)
             .send()
             .await
-            .map_err(|e| {
-                GatewayError::SendFailed(format!("Feishu send_post failed: {e}"))
-            })?;
+            .map_err(|e| GatewayError::SendFailed(format!("Feishu send_post failed: {e}")))?;
 
         Self::check_api_response("send_post", resp).await
     }
@@ -594,10 +556,7 @@ impl FeishuAdapter {
         card: &FeishuCard,
     ) -> Result<String, GatewayError> {
         let token = self.get_tenant_token().await?;
-        let url = format!(
-            "{}/im/v1/messages?receive_id_type=chat_id",
-            FEISHU_API_BASE
-        );
+        let url = format!("{}/im/v1/messages?receive_id_type=chat_id", FEISHU_API_BASE);
 
         let card_json = serde_json::json!({
             "config": { "wide_screen_mode": true },
@@ -618,9 +577,7 @@ impl FeishuAdapter {
             .json(&body)
             .send()
             .await
-            .map_err(|e| {
-                GatewayError::SendFailed(format!("Feishu send_card failed: {e}"))
-            })?;
+            .map_err(|e| GatewayError::SendFailed(format!("Feishu send_card failed: {e}")))?;
 
         Self::check_api_response("send_card", resp).await
     }
@@ -652,9 +609,7 @@ impl FeishuAdapter {
             .json(&body)
             .send()
             .await
-            .map_err(|e| {
-                GatewayError::SendFailed(format!("Feishu update_card failed: {e}"))
-            })?;
+            .map_err(|e| GatewayError::SendFailed(format!("Feishu update_card failed: {e}")))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -689,9 +644,7 @@ impl FeishuAdapter {
         let part = reqwest::multipart::Part::bytes(image_bytes)
             .file_name(file_name.to_string())
             .mime_str(mime)
-            .map_err(|e| {
-                GatewayError::SendFailed(format!("MIME error: {e}"))
-            })?;
+            .map_err(|e| GatewayError::SendFailed(format!("MIME error: {e}")))?;
 
         let form = reqwest::multipart::Form::new()
             .text("image_type", "message")
@@ -704,9 +657,7 @@ impl FeishuAdapter {
             .multipart(form)
             .send()
             .await
-            .map_err(|e| {
-                GatewayError::SendFailed(format!("Feishu image upload failed: {e}"))
-            })?;
+            .map_err(|e| GatewayError::SendFailed(format!("Feishu image upload failed: {e}")))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -723,9 +674,7 @@ impl FeishuAdapter {
             .pointer("/data/image_key")
             .and_then(|v| v.as_str())
             .map(String::from)
-            .ok_or_else(|| {
-                GatewayError::SendFailed("No image_key in upload response".into())
-            })
+            .ok_or_else(|| GatewayError::SendFailed("No image_key in upload response".into()))
     }
 
     /// Upload an image from a file path and send it in a chat.
@@ -739,9 +688,9 @@ impl FeishuAdapter {
             .and_then(|n| n.to_str())
             .unwrap_or("image.png");
 
-        let image_bytes = tokio::fs::read(image_path).await.map_err(|e| {
-            GatewayError::SendFailed(format!("Failed to read image: {e}"))
-        })?;
+        let image_bytes = tokio::fs::read(image_path)
+            .await
+            .map_err(|e| GatewayError::SendFailed(format!("Failed to read image: {e}")))?;
 
         let image_key = self.upload_image(image_bytes, file_name).await?;
         self.send_image_by_key(chat_id, &image_key).await
@@ -754,10 +703,7 @@ impl FeishuAdapter {
         image_key: &str,
     ) -> Result<String, GatewayError> {
         let token = self.get_tenant_token().await?;
-        let url = format!(
-            "{}/im/v1/messages?receive_id_type=chat_id",
-            FEISHU_API_BASE
-        );
+        let url = format!("{}/im/v1/messages?receive_id_type=chat_id", FEISHU_API_BASE);
 
         let body = serde_json::json!({
             "receive_id": chat_id,
@@ -772,9 +718,7 @@ impl FeishuAdapter {
             .json(&body)
             .send()
             .await
-            .map_err(|e| {
-                GatewayError::SendFailed(format!("Feishu send_image failed: {e}"))
-            })?;
+            .map_err(|e| GatewayError::SendFailed(format!("Feishu send_image failed: {e}")))?;
 
         Self::check_api_response("send_image", resp).await
     }
@@ -800,9 +744,9 @@ impl FeishuAdapter {
             .and_then(|n| n.to_str())
             .unwrap_or("audio.opus");
 
-        let audio_bytes = tokio::fs::read(audio_path).await.map_err(|e| {
-            GatewayError::SendFailed(format!("Failed to read audio file: {e}"))
-        })?;
+        let audio_bytes = tokio::fs::read(audio_path)
+            .await
+            .map_err(|e| GatewayError::SendFailed(format!("Failed to read audio file: {e}")))?;
 
         let upload_url = format!("{}/im/v1/files", FEISHU_API_BASE);
         let part = reqwest::multipart::Part::bytes(audio_bytes)
@@ -826,9 +770,7 @@ impl FeishuAdapter {
             .multipart(form)
             .send()
             .await
-            .map_err(|e| {
-                GatewayError::SendFailed(format!("Feishu audio upload failed: {e}"))
-            })?;
+            .map_err(|e| GatewayError::SendFailed(format!("Feishu audio upload failed: {e}")))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -848,10 +790,7 @@ impl FeishuAdapter {
                 GatewayError::SendFailed("No file_key in audio upload response".into())
             })?;
 
-        let msg_url = format!(
-            "{}/im/v1/messages?receive_id_type=chat_id",
-            FEISHU_API_BASE
-        );
+        let msg_url = format!("{}/im/v1/messages?receive_id_type=chat_id", FEISHU_API_BASE);
         let body = serde_json::json!({
             "receive_id": chat_id,
             "msg_type": "audio",
@@ -865,9 +804,7 @@ impl FeishuAdapter {
             .json(&body)
             .send()
             .await
-            .map_err(|e| {
-                GatewayError::SendFailed(format!("Feishu send_audio failed: {e}"))
-            })?;
+            .map_err(|e| GatewayError::SendFailed(format!("Feishu send_audio failed: {e}")))?;
 
         Self::check_api_response("send_audio", resp).await
     }
@@ -877,10 +814,7 @@ impl FeishuAdapter {
     // -----------------------------------------------------------------------
 
     /// Retrieve chat metadata via `/im/v1/chats/{chat_id}`.
-    pub async fn get_chat_info(
-        &self,
-        chat_id: &str,
-    ) -> Result<ChatInfo, GatewayError> {
+    pub async fn get_chat_info(&self, chat_id: &str) -> Result<ChatInfo, GatewayError> {
         let token = self.get_tenant_token().await?;
         let url = format!("{}/im/v1/chats/{}", FEISHU_API_BASE, chat_id);
 
@@ -890,9 +824,7 @@ impl FeishuAdapter {
             .header("Authorization", bearer(&token))
             .send()
             .await
-            .map_err(|e| {
-                GatewayError::Platform(format!("Feishu get_chat_info failed: {e}"))
-            })?;
+            .map_err(|e| GatewayError::Platform(format!("Feishu get_chat_info failed: {e}")))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -909,10 +841,7 @@ impl FeishuAdapter {
 
         Ok(ChatInfo {
             chat_id: chat_id.to_string(),
-            name: data
-                .get("name")
-                .and_then(|v| v.as_str())
-                .map(String::from),
+            name: data.get("name").and_then(|v| v.as_str()).map(String::from),
             description: data
                 .get("description")
                 .and_then(|v| v.as_str())
@@ -944,10 +873,7 @@ impl FeishuAdapter {
         text: &str,
     ) -> Result<String, GatewayError> {
         let token = self.get_tenant_token().await?;
-        let url = format!(
-            "{}/im/v1/messages/{}/reply",
-            FEISHU_API_BASE, message_id
-        );
+        let url = format!("{}/im/v1/messages/{}/reply", FEISHU_API_BASE, message_id);
 
         let body = serde_json::json!({
             "msg_type": "text",
@@ -961,9 +887,7 @@ impl FeishuAdapter {
             .json(&body)
             .send()
             .await
-            .map_err(|e| {
-                GatewayError::SendFailed(format!("Feishu reply failed: {e}"))
-            })?;
+            .map_err(|e| GatewayError::SendFailed(format!("Feishu reply failed: {e}")))?;
 
         Self::check_api_response("reply_message", resp).await
     }
@@ -976,10 +900,7 @@ impl FeishuAdapter {
         content: Vec<Vec<PostElement>>,
     ) -> Result<String, GatewayError> {
         let token = self.get_tenant_token().await?;
-        let url = format!(
-            "{}/im/v1/messages/{}/reply",
-            FEISHU_API_BASE, message_id
-        );
+        let url = format!("{}/im/v1/messages/{}/reply", FEISHU_API_BASE, message_id);
 
         let content_json = serde_json::json!({
             "zh_cn": {
@@ -1000,9 +921,7 @@ impl FeishuAdapter {
             .json(&body)
             .send()
             .await
-            .map_err(|e| {
-                GatewayError::SendFailed(format!("Feishu reply_post failed: {e}"))
-            })?;
+            .map_err(|e| GatewayError::SendFailed(format!("Feishu reply_post failed: {e}")))?;
 
         Self::check_api_response("reply_post", resp).await
     }
@@ -1014,10 +933,7 @@ impl FeishuAdapter {
         card: &FeishuCard,
     ) -> Result<String, GatewayError> {
         let token = self.get_tenant_token().await?;
-        let url = format!(
-            "{}/im/v1/messages/{}/reply",
-            FEISHU_API_BASE, message_id
-        );
+        let url = format!("{}/im/v1/messages/{}/reply", FEISHU_API_BASE, message_id);
 
         let card_json = serde_json::json!({
             "config": { "wide_screen_mode": true },
@@ -1037,9 +953,7 @@ impl FeishuAdapter {
             .json(&body)
             .send()
             .await
-            .map_err(|e| {
-                GatewayError::SendFailed(format!("Feishu reply_card failed: {e}"))
-            })?;
+            .map_err(|e| GatewayError::SendFailed(format!("Feishu reply_card failed: {e}")))?;
 
         Self::check_api_response("reply_card", resp).await
     }
@@ -1071,9 +985,7 @@ impl FeishuAdapter {
             .json(&body)
             .send()
             .await
-            .map_err(|e| {
-                GatewayError::SendFailed(format!("Feishu add_reaction failed: {e}"))
-            })?;
+            .map_err(|e| GatewayError::SendFailed(format!("Feishu add_reaction failed: {e}")))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -1087,10 +999,7 @@ impl FeishuAdapter {
     // -----------------------------------------------------------------------
 
     /// Delete a message by its ID.
-    pub async fn delete_message(
-        &self,
-        message_id: &str,
-    ) -> Result<(), GatewayError> {
+    pub async fn delete_message(&self, message_id: &str) -> Result<(), GatewayError> {
         let token = self.get_tenant_token().await?;
         let url = format!("{}/im/v1/messages/{}", FEISHU_API_BASE, message_id);
 
@@ -1100,9 +1009,7 @@ impl FeishuAdapter {
             .header("Authorization", bearer(&token))
             .send()
             .await
-            .map_err(|e| {
-                GatewayError::SendFailed(format!("Feishu delete_message failed: {e}"))
-            })?;
+            .map_err(|e| GatewayError::SendFailed(format!("Feishu delete_message failed: {e}")))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -1118,10 +1025,7 @@ impl FeishuAdapter {
     // -----------------------------------------------------------------------
 
     /// Retrieve a message's details by ID.
-    pub async fn get_message(
-        &self,
-        message_id: &str,
-    ) -> Result<serde_json::Value, GatewayError> {
+    pub async fn get_message(&self, message_id: &str) -> Result<serde_json::Value, GatewayError> {
         let token = self.get_tenant_token().await?;
         let url = format!("{}/im/v1/messages/{}", FEISHU_API_BASE, message_id);
 
@@ -1131,9 +1035,7 @@ impl FeishuAdapter {
             .header("Authorization", bearer(&token))
             .send()
             .await
-            .map_err(|e| {
-                GatewayError::Platform(format!("Feishu get_message failed: {e}"))
-            })?;
+            .map_err(|e| GatewayError::Platform(format!("Feishu get_message failed: {e}")))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -1142,9 +1044,9 @@ impl FeishuAdapter {
             )));
         }
 
-        resp.json().await.map_err(|e| {
-            GatewayError::Platform(format!("Feishu get_message parse failed: {e}"))
-        })
+        resp.json()
+            .await
+            .map_err(|e| GatewayError::Platform(format!("Feishu get_message parse failed: {e}")))
     }
 
     // -----------------------------------------------------------------------
@@ -1163,9 +1065,10 @@ impl FeishuAdapter {
             )));
         }
 
-        let result: serde_json::Value = resp.json().await.map_err(|e| {
-            GatewayError::SendFailed(format!("Feishu {method} parse failed: {e}"))
-        })?;
+        let result: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| GatewayError::SendFailed(format!("Feishu {method} parse failed: {e}")))?;
 
         let code = result.get("code").and_then(|v| v.as_i64()).unwrap_or(0);
         if code != 0 {
@@ -1246,9 +1149,7 @@ impl FeishuCard {
             value,
             url: None,
         };
-        if let Some(CardElement::Action { ref mut actions }) =
-            self.elements.last_mut()
-        {
+        if let Some(CardElement::Action { ref mut actions }) = self.elements.last_mut() {
             actions.push(action);
         } else {
             self.elements.push(CardElement::Action {
@@ -1350,19 +1251,17 @@ impl PlatformAdapter for FeishuAdapter {
         let path = std::path::Path::new(file_path);
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let mime = mime_from_extension(ext);
-        let file_name =
-            path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-        let file_bytes = tokio::fs::read(file_path).await.map_err(|e| {
-            GatewayError::SendFailed(format!("Failed to read file: {e}"))
-        })?;
+        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+        let file_bytes = tokio::fs::read(file_path)
+            .await
+            .map_err(|e| GatewayError::SendFailed(format!("Failed to read file: {e}")))?;
 
         let token = self.get_tenant_token().await?;
         let category = media_category(ext);
 
         match category {
             "image" => {
-                let image_key =
-                    self.upload_image(file_bytes, file_name).await?;
+                let image_key = self.upload_image(file_bytes, file_name).await?;
                 self.send_image_by_key(chat_id, &image_key).await?;
             }
             "audio" => {
@@ -1374,9 +1273,7 @@ impl PlatformAdapter for FeishuAdapter {
                 let part = reqwest::multipart::Part::bytes(file_bytes)
                     .file_name(file_name.to_string())
                     .mime_str(mime)
-                    .map_err(|e| {
-                        GatewayError::SendFailed(format!("MIME error: {e}"))
-                    })?;
+                    .map_err(|e| GatewayError::SendFailed(format!("MIME error: {e}")))?;
                 let form = reqwest::multipart::Form::new()
                     .text("file_type", file_type.to_string())
                     .text("file_name", file_name.to_string())
@@ -1390,9 +1287,7 @@ impl PlatformAdapter for FeishuAdapter {
                     .send()
                     .await
                     .map_err(|e| {
-                        GatewayError::SendFailed(format!(
-                            "Feishu file upload failed: {e}"
-                        ))
+                        GatewayError::SendFailed(format!("Feishu file upload failed: {e}"))
                     })?;
 
                 if !resp.status().is_success() {
@@ -1402,21 +1297,15 @@ impl PlatformAdapter for FeishuAdapter {
                     )));
                 }
 
-                let result: serde_json::Value =
-                    resp.json().await.map_err(|e| {
-                        GatewayError::SendFailed(format!(
-                            "Feishu upload parse failed: {e}"
-                        ))
-                    })?;
+                let result: serde_json::Value = resp.json().await.map_err(|e| {
+                    GatewayError::SendFailed(format!("Feishu upload parse failed: {e}"))
+                })?;
                 let file_key = result
                     .pointer("/data/file_key")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
 
-                let msg_url = format!(
-                    "{}/im/v1/messages?receive_id_type=chat_id",
-                    FEISHU_API_BASE
-                );
+                let msg_url = format!("{}/im/v1/messages?receive_id_type=chat_id", FEISHU_API_BASE);
                 let body = serde_json::json!({
                     "receive_id": chat_id,
                     "msg_type": "file",
@@ -1431,9 +1320,7 @@ impl PlatformAdapter for FeishuAdapter {
                     .send()
                     .await
                     .map_err(|e| {
-                        GatewayError::SendFailed(format!(
-                            "Feishu file send failed: {e}"
-                        ))
+                        GatewayError::SendFailed(format!("Feishu file send failed: {e}"))
                     })?;
 
                 if !resp.status().is_success() {
@@ -1531,9 +1418,8 @@ mod tests {
     #[test]
     fn parse_message_event_basic() {
         let event = sample_event_v2();
-        let msg =
-            FeishuAdapter::parse_message_event(event.event.as_ref().unwrap())
-                .expect("should parse");
+        let msg = FeishuAdapter::parse_message_event(event.event.as_ref().unwrap())
+            .expect("should parse");
         assert_eq!(msg.message_id, "om_msg1");
         assert_eq!(msg.chat_id, "oc_chat1");
         assert_eq!(msg.chat_type, "group");
@@ -1554,8 +1440,7 @@ mod tests {
                 "content": "{\"text\":\"direct message\"}"
             }
         });
-        let msg = FeishuAdapter::parse_message_event(&event_val)
-            .expect("should parse");
+        let msg = FeishuAdapter::parse_message_event(&event_val).expect("should parse");
         assert_eq!(msg.text, "direct message");
         assert!(!msg.is_mention);
         assert!(!FeishuAdapter::is_group_chat(&msg));
@@ -1564,9 +1449,7 @@ mod tests {
     #[test]
     fn is_group_chat_true() {
         let event = sample_event_v2();
-        let msg =
-            FeishuAdapter::parse_message_event(event.event.as_ref().unwrap())
-                .unwrap();
+        let msg = FeishuAdapter::parse_message_event(event.event.as_ref().unwrap()).unwrap();
         assert!(FeishuAdapter::is_group_chat(&msg));
     }
 
@@ -1628,8 +1511,7 @@ mod tests {
             "token": "verify_tok",
             "type": "url_verification"
         }"#;
-        let event: FeishuEvent =
-            serde_json::from_str(json).expect("deserialize");
+        let event: FeishuEvent = serde_json::from_str(json).expect("deserialize");
         assert_eq!(event.challenge.as_deref(), Some("abc123"));
         assert_eq!(event.token.as_deref(), Some("verify_tok"));
         assert_eq!(event.event_type.as_deref(), Some("url_verification"));
@@ -1646,8 +1528,7 @@ mod tests {
             },
             "event": { "message": {} }
         }"#;
-        let event: FeishuEvent =
-            serde_json::from_str(json).expect("deserialize");
+        let event: FeishuEvent = serde_json::from_str(json).expect("deserialize");
         assert_eq!(event.schema.as_deref(), Some("2.0"));
         assert!(event.header.is_some());
         let h = event.header.unwrap();

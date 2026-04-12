@@ -6,7 +6,7 @@ use indexmap::IndexMap;
 use serde_json::{json, Value};
 use tokio::sync::Mutex;
 
-use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 use hermes_rl::{
     BatchRunner, BatchRunnerConfig, RlEnvironment, RunManager, TrainingConfig, TrainingMetrics,
     TrainingStatus,
@@ -173,7 +173,10 @@ impl ToolHandler for RlEditConfigHandler {
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("algo".into(), json!({"type": "string", "description": "Training algorithm (ppo, dpo, grpo)"}));
+        props.insert(
+            "algo".into(),
+            json!({"type": "string", "description": "Training algorithm (ppo, dpo, grpo)"}),
+        );
         props.insert("learning_rate".into(), json!({"type": "number"}));
         props.insert("batch_size".into(), json!({"type": "integer"}));
         props.insert("max_steps".into(), json!({"type": "integer"}));
@@ -290,7 +293,10 @@ impl ToolHandler for RlStopTrainingHandler {
             .ok_or_else(|| ToolError::InvalidParams("Missing 'run_id'".into()))?;
 
         let mut inner = self.state.inner.lock().await;
-        if !inner.run_manager.set_status(run_id, TrainingStatus::Stopped) {
+        if !inner
+            .run_manager
+            .set_status(run_id, TrainingStatus::Stopped)
+        {
             return Err(ToolError::InvalidParams(format!(
                 "Unknown run '{}'",
                 run_id

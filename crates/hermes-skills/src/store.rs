@@ -101,12 +101,10 @@ impl FileSkillStore {
         }
 
         let rest = &raw[3..]; // skip first "---"
-        // Find the closing "---"
+                              // Find the closing "---"
         let end = rest
             .find("\n---")
-            .ok_or_else(|| {
-                SkillError::Parse("Missing closing --- in frontmatter".to_string())
-            })?;
+            .ok_or_else(|| SkillError::Parse("Missing closing --- in frontmatter".to_string()))?;
 
         let yaml_str = &rest[..end];
         let body_start = end + 4; // skip "\n---"
@@ -124,7 +122,9 @@ impl SkillStore for FileSkillStore {
     #[instrument(skip(self, skill), fields(name = %skill.name))]
     async fn save(&self, skill: &Skill) -> Result<(), SkillError> {
         let dir = self.skill_dir(&skill.name, skill.category.as_deref());
-        fs::create_dir_all(&dir).await.map_err(|e| SkillError::Io(e.to_string()))?;
+        fs::create_dir_all(&dir)
+            .await
+            .map_err(|e| SkillError::Io(e.to_string()))?;
 
         let fm = SkillFrontmatter {
             name: skill.name.clone(),
@@ -236,7 +236,8 @@ impl FileSkillStore {
         &'a self,
         dir: &'a Path,
         metas: &'a mut Vec<SkillMeta>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), SkillError>> + Send + 'a>> {
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), SkillError>> + Send + 'a>>
+    {
         Box::pin(async move {
             if !dir.exists() {
                 return Ok(());

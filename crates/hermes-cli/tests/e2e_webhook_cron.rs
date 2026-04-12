@@ -49,7 +49,8 @@ async fn cron_completion_delivers_json_to_registered_webhook_url() {
 
     let reqs = mock.received_requests().await.expect("requests");
     assert_eq!(reqs.len(), 1);
-    let body: serde_json::Value = serde_json::from_slice(reqs[0].body.as_slice()).expect("json body");
+    let body: serde_json::Value =
+        serde_json::from_slice(reqs[0].body.as_slice()).expect("json body");
     assert_eq!(body["event"], "cron_job_finished");
     assert_eq!(body["job_id"], job.id);
     assert_eq!(body["trigger"], "schedule");

@@ -116,25 +116,22 @@ impl TerminalBackend for SshBackend {
             ssh_args.insert(0, "-t".to_string());
         }
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(timeout_secs),
-            async {
-                let output = TokioCommand::new("ssh")
-                    .args(&ssh_args)
-                    .output()
-                    .await
-                    .map_err(|e| AgentError::Io(format!("Failed to execute SSH command: {}", e)))?;
+        let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
+            let output = TokioCommand::new("ssh")
+                .args(&ssh_args)
+                .output()
+                .await
+                .map_err(|e| AgentError::Io(format!("Failed to execute SSH command: {}", e)))?;
 
-                let stdout = self.truncate_output(String::from_utf8_lossy(&output.stdout).to_string());
-                let stderr = self.truncate_output(String::from_utf8_lossy(&output.stderr).to_string());
+            let stdout = self.truncate_output(String::from_utf8_lossy(&output.stdout).to_string());
+            let stderr = self.truncate_output(String::from_utf8_lossy(&output.stderr).to_string());
 
-                Ok(CommandOutput {
-                    exit_code: output.status.code().unwrap_or(-1),
-                    stdout,
-                    stderr,
-                })
-            },
-        )
+            Ok(CommandOutput {
+                exit_code: output.status.code().unwrap_or(-1),
+                stdout,
+                stderr,
+            })
+        })
         .await;
 
         match result {
@@ -159,7 +156,12 @@ impl TerminalBackend for SshBackend {
         if offset.is_some() || limit.is_some() {
             let start = offset.unwrap_or(0) + 1; // sed is 1-indexed
             if let Some(lim) = limit {
-                remote_cmd = format!("sed -n '{},{}p' {}", start, start + lim - 1, shlex_quote_local(path));
+                remote_cmd = format!(
+                    "sed -n '{},{}p' {}",
+                    start,
+                    start + lim - 1,
+                    shlex_quote_local(path)
+                );
             } else {
                 remote_cmd = format!("sed -n '{},\\$p' {}", start, shlex_quote_local(path));
             }
@@ -171,26 +173,23 @@ impl TerminalBackend for SshBackend {
         ssh_args.push(remote_cmd);
 
         let timeout_secs = self.default_timeout;
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(timeout_secs),
-            async {
-                let output = TokioCommand::new("ssh")
-                    .args(&ssh_args)
-                    .output()
-                    .await
-                    .map_err(|e| AgentError::Io(format!("Failed to read file via SSH: {}", e)))?;
+        let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
+            let output = TokioCommand::new("ssh")
+                .args(&ssh_args)
+                .output()
+                .await
+                .map_err(|e| AgentError::Io(format!("Failed to read file via SSH: {}", e)))?;
 
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    return Err(AgentError::Io(format!(
-                        "Failed to read file '{}': {}",
-                        path, stderr
-                    )));
-                }
+            if !output.status.success() {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                return Err(AgentError::Io(format!(
+                    "Failed to read file '{}': {}",
+                    path, stderr
+                )));
+            }
 
-                Ok(String::from_utf8_lossy(&output.stdout).to_string())
-            },
-        )
+            Ok(String::from_utf8_lossy(&output.stdout).to_string())
+        })
         .await;
 
         match result {
@@ -219,7 +218,9 @@ impl TerminalBackend for SshBackend {
                 .args(&ssh_args)
                 .output()
                 .await
-                .map_err(|e| AgentError::Io(format!("Failed to create parent dir via SSH: {}", e)))?;
+                .map_err(|e| {
+                    AgentError::Io(format!("Failed to create parent dir via SSH: {}", e))
+                })?;
 
             if !mkdir_output.status.success() {
                 let stderr = String::from_utf8_lossy(&mkdir_output.stderr);
@@ -277,7 +278,10 @@ impl TerminalBackend for SshBackend {
 fn shlex_quote_local(s: &str) -> String {
     if s.is_empty() {
         "''".to_string()
-    } else if !s.chars().any(|c| c.is_whitespace() || c == '\'' || c == '"' || c == '\\' || c == '$' || c == '`') {
+    } else if !s
+        .chars()
+        .any(|c| c.is_whitespace() || c == '\'' || c == '"' || c == '\\' || c == '$' || c == '`')
+    {
         s.to_string()
     } else {
         format!("'{}'", s.replace('\'', "'\\''"))
@@ -307,14 +311,7 @@ mod tests {
 
     #[test]
     fn test_ssh_args_custom_port() {
-        let backend = SshBackend::new(
-            "example.com".to_string(),
-            2222,
-            None,
-            None,
-            120,
-            1_048_576,
-        );
+        let backend = SshBackend::new("example.com".to_string(), 2222, None, None, 120, 1_048_576);
 
         let args = backend.build_ssh_args();
         assert!(args.contains(&"-p".to_string()));
@@ -326,6 +323,9 @@ mod tests {
     fn test_shlex_quote_local() {
         assert_eq!(shlex_quote_local("simple"), "simple");
         assert_eq!(shlex_quote_local(""), "''");
-        assert_eq!(shlex_quote_local("/path/with spaces"), "'/path/with spaces'");
+        assert_eq!(
+            shlex_quote_local("/path/with spaces"),
+            "'/path/with spaces'"
+        );
     }
 }

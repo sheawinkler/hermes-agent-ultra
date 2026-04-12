@@ -101,20 +101,22 @@ impl BasePlatformAdapter {
         let mut builder = Client::builder();
 
         if let Some(ref http_proxy) = self.proxy.http_proxy {
-            let proxy = reqwest::Proxy::all(http_proxy)
-                .map_err(|e| GatewayError::ConnectionFailed(format!("Invalid HTTP proxy: {}", e)))?;
+            let proxy = reqwest::Proxy::all(http_proxy).map_err(|e| {
+                GatewayError::ConnectionFailed(format!("Invalid HTTP proxy: {}", e))
+            })?;
             builder = builder.proxy(proxy);
         }
 
         if let Some(ref socks_proxy) = self.proxy.socks_proxy {
-            let proxy = reqwest::Proxy::all(socks_proxy)
-                .map_err(|e| GatewayError::ConnectionFailed(format!("Invalid SOCKS proxy: {}", e)))?;
+            let proxy = reqwest::Proxy::all(socks_proxy).map_err(|e| {
+                GatewayError::ConnectionFailed(format!("Invalid SOCKS proxy: {}", e))
+            })?;
             builder = builder.proxy(proxy);
         }
 
-        builder
-            .build()
-            .map_err(|e| GatewayError::ConnectionFailed(format!("Failed to build HTTP client: {}", e)))
+        builder.build().map_err(|e| {
+            GatewayError::ConnectionFailed(format!("Failed to build HTTP client: {}", e))
+        })
     }
 
     /// Mark the adapter as running.

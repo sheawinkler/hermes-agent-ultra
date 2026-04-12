@@ -72,11 +72,7 @@ pub struct StdioTransport {
 
 impl StdioTransport {
     /// Create a new stdio transport for the given command.
-    pub fn new(
-        command: impl Into<String>,
-        args: &[String],
-        env: &HashMap<String, String>,
-    ) -> Self {
+    pub fn new(command: impl Into<String>, args: &[String], env: &HashMap<String, String>) -> Self {
         Self {
             command: command.into(),
             args: args.to_vec(),
@@ -91,10 +87,15 @@ impl StdioTransport {
 impl McpTransport for StdioTransport {
     async fn start(&mut self) -> Result<(), McpError> {
         if self.started {
-            return Err(McpError::ConnectionError("Transport already started".to_string()));
+            return Err(McpError::ConnectionError(
+                "Transport already started".to_string(),
+            ));
         }
 
-        info!("Starting MCP stdio transport: {} {:?}", self.command, self.args);
+        info!(
+            "Starting MCP stdio transport: {} {:?}",
+            self.command, self.args
+        );
 
         let mut cmd = Command::new(&self.command);
         cmd.args(&self.args)
@@ -128,8 +129,8 @@ impl McpTransport for StdioTransport {
             .as_mut()
             .ok_or(McpError::ConnectionError("stdin not available".to_string()))?;
 
-        let body = serde_json::to_string(&message)
-            .map_err(|e| McpError::Serialization(e.to_string()))?;
+        let body =
+            serde_json::to_string(&message).map_err(|e| McpError::Serialization(e.to_string()))?;
         let header = format!("Content-Length: {}\r\n\r\n", body.len());
 
         trace!("Sending MCP message: {} bytes", body.len());
@@ -156,10 +157,9 @@ impl McpTransport for StdioTransport {
             .as_mut()
             .ok_or(McpError::ConnectionError("Process not started".to_string()))?;
 
-        let stdout = child
-            .stdout
-            .as_mut()
-            .ok_or(McpError::ConnectionError("stdout not available".to_string()))?;
+        let stdout = child.stdout.as_mut().ok_or(McpError::ConnectionError(
+            "stdout not available".to_string(),
+        ))?;
 
         // Read Content-Length header
         let mut reader = tokio::io::BufReader::new(stdout);
@@ -184,13 +184,14 @@ impl McpTransport for StdioTransport {
             }
 
             if let Some(len_str) = trimmed.strip_prefix("Content-Length:") {
-                content_length = len_str
-                    .trim()
-                    .parse::<usize>()
-                    .map_err(|e| McpError::Protocol {
-                        code: -32700,
-                        message: format!("Invalid Content-Length: {}", e),
-                    })?;
+                content_length =
+                    len_str
+                        .trim()
+                        .parse::<usize>()
+                        .map_err(|e| McpError::Protocol {
+                            code: -32700,
+                            message: format!("Invalid Content-Length: {}", e),
+                        })?;
             }
         }
 
@@ -215,11 +216,10 @@ impl McpTransport for StdioTransport {
 
         trace!("Received MCP message: {} bytes", body_str.len());
 
-        let value: Value =
-            serde_json::from_str(&body_str).map_err(|e| McpError::Protocol {
-                code: -32700,
-                message: format!("JSON parse error: {}", e),
-            })?;
+        let value: Value = serde_json::from_str(&body_str).map_err(|e| McpError::Protocol {
+            code: -32700,
+            message: format!("JSON parse error: {}", e),
+        })?;
 
         Ok(value)
     }
@@ -264,15 +264,17 @@ impl ServerStdioTransport {
 impl McpTransport for ServerStdioTransport {
     async fn start(&mut self) -> Result<(), McpError> {
         if self.started {
-            return Err(McpError::ConnectionError("Transport already started".to_string()));
+            return Err(McpError::ConnectionError(
+                "Transport already started".to_string(),
+            ));
         }
         self.started = true;
         Ok(())
     }
 
     async fn send(&mut self, message: Value) -> Result<(), McpError> {
-        let body = serde_json::to_string(&message)
-            .map_err(|e| McpError::Serialization(e.to_string()))?;
+        let body =
+            serde_json::to_string(&message).map_err(|e| McpError::Serialization(e.to_string()))?;
         let header = format!("Content-Length: {}\r\n\r\n", body.len());
 
         let mut stdout = tokio::io::stdout();
@@ -310,13 +312,14 @@ impl McpTransport for ServerStdioTransport {
                 break;
             }
             if let Some(len_str) = trimmed.strip_prefix("Content-Length:") {
-                content_length = len_str
-                    .trim()
-                    .parse::<usize>()
-                    .map_err(|e| McpError::Protocol {
-                        code: -32700,
-                        message: format!("Invalid Content-Length: {}", e),
-                    })?;
+                content_length =
+                    len_str
+                        .trim()
+                        .parse::<usize>()
+                        .map_err(|e| McpError::Protocol {
+                            code: -32700,
+                            message: format!("Invalid Content-Length: {}", e),
+                        })?;
             }
         }
 
@@ -386,7 +389,11 @@ impl HttpTransport {
 
     /// Build the full URL for an MCP endpoint.
     fn endpoint_url(&self, path: &str) -> String {
-        format!("{}/{}", self.url.trim_end_matches('/'), path.trim_start_matches('/'))
+        format!(
+            "{}/{}",
+            self.url.trim_end_matches('/'),
+            path.trim_start_matches('/')
+        )
     }
 
     /// Build a request with optional authentication.
@@ -405,7 +412,9 @@ impl McpTransport for HttpTransport {
     async fn start(&mut self) -> Result<(), McpError> {
         // For HTTP transport, "starting" means verifying the server is reachable
         if self.started {
-            return Err(McpError::ConnectionError("Transport already started".to_string()));
+            return Err(McpError::ConnectionError(
+                "Transport already started".to_string(),
+            ));
         }
 
         // Verify the server is reachable
@@ -602,10 +611,7 @@ impl McpTransport for HttpSseTransport {
                         self.url, e
                     ))
                 })?;
-                info!(
-                    "MCP HTTP+SSE transport connected (no SSE) to: {}",
-                    self.url
-                );
+                info!("MCP HTTP+SSE transport connected (no SSE) to: {}", self.url);
             }
         }
 
@@ -651,11 +657,10 @@ impl McpTransport for HttpSseTransport {
             body
         };
 
-        let value: Value =
-            serde_json::from_str(&json_body).map_err(|e| McpError::Protocol {
-                code: -32700,
-                message: format!("Invalid JSON response: {}", e),
-            })?;
+        let value: Value = serde_json::from_str(&json_body).map_err(|e| McpError::Protocol {
+            code: -32700,
+            message: format!("Invalid JSON response: {}", e),
+        })?;
 
         self.pending_response = Some(value);
         Ok(())
@@ -706,14 +711,23 @@ mod tests {
 
     #[test]
     fn test_http_transport_with_auth() {
-        let transport = HttpTransport::new("http://localhost:8080/mcp", Some("secret-token".to_string()));
+        let transport = HttpTransport::new(
+            "http://localhost:8080/mcp",
+            Some("secret-token".to_string()),
+        );
         assert_eq!(transport.auth_token, Some("secret-token".to_string()));
     }
 
     #[test]
     fn test_endpoint_url() {
         let transport = HttpTransport::new("http://localhost:8080/mcp/", None);
-        assert_eq!(transport.endpoint_url("/message"), "http://localhost:8080/mcp/message");
-        assert_eq!(transport.endpoint_url("message"), "http://localhost:8080/mcp/message");
+        assert_eq!(
+            transport.endpoint_url("/message"),
+            "http://localhost:8080/mcp/message"
+        );
+        assert_eq!(
+            transport.endpoint_url("message"),
+            "http://localhost:8080/mcp/message"
+        );
     }
 }

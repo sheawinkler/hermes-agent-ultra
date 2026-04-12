@@ -75,7 +75,11 @@ impl CredentialPool {
             Ok(i) => i,
             Err(e) => {
                 let guard = e.into_inner();
-                return guard.keys.first().map(|k| k.key.clone()).unwrap_or_default();
+                return guard
+                    .keys
+                    .first()
+                    .map(|k| k.key.clone())
+                    .unwrap_or_default();
             }
         };
 
@@ -227,10 +231,7 @@ impl CredentialPool {
 
     /// Get the number of currently failed (cooling-down) keys.
     pub fn failed_count(&self) -> usize {
-        self.inner
-            .lock()
-            .map(|i| i.failed_keys.len())
-            .unwrap_or(0)
+        self.inner.lock().map(|i| i.failed_keys.len()).unwrap_or(0)
     }
 }
 
@@ -291,10 +292,7 @@ mod tests {
 
     #[test]
     fn test_all_rate_limited_picks_soonest() {
-        let pool = CredentialPool::new(vec![
-            "key-a".to_string(),
-            "key-b".to_string(),
-        ]);
+        let pool = CredentialPool::new(vec!["key-a".to_string(), "key-b".to_string()]);
 
         pool.mark_rate_limited("key-a", Duration::from_secs(60));
         pool.mark_rate_limited("key-b", Duration::from_secs(10));
@@ -306,10 +304,7 @@ mod tests {
 
     #[test]
     fn test_clear_rate_limit() {
-        let pool = CredentialPool::new(vec![
-            "key-a".to_string(),
-            "key-b".to_string(),
-        ]);
+        let pool = CredentialPool::new(vec!["key-a".to_string(), "key-b".to_string()]);
 
         pool.mark_rate_limited("key-a", Duration::from_secs(60));
         pool.clear_rate_limit("key-a");
@@ -321,10 +316,7 @@ mod tests {
 
     #[test]
     fn test_usage_counts() {
-        let pool = CredentialPool::new(vec![
-            "key-a".to_string(),
-            "key-b".to_string(),
-        ]);
+        let pool = CredentialPool::new(vec!["key-a".to_string(), "key-b".to_string()]);
 
         pool.get_key(); // key-a
         pool.get_key(); // key-b

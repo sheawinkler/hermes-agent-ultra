@@ -122,7 +122,6 @@ pub struct ProviderStatus {
     pub has_config_schema: bool,
 }
 
-
 // ---------------------------------------------------------------------------
 // Context fencing helpers
 // ---------------------------------------------------------------------------
@@ -605,9 +604,7 @@ mod tests {
     #[test]
     fn test_tool_routing() {
         let mut mm = MemoryManager::new();
-        mm.add_provider(Arc::new(
-            TestProvider::new("builtin").with_tool("memory"),
-        ));
+        mm.add_provider(Arc::new(TestProvider::new("builtin").with_tool("memory")));
         assert!(mm.has_tool("memory"));
         assert!(!mm.has_tool("nonexistent"));
 

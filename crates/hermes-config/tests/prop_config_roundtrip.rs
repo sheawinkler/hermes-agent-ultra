@@ -9,10 +9,9 @@ use proptest::prelude::*;
 use std::collections::HashMap;
 
 use hermes_config::{
-    GatewayConfig, PlatformConfig, SessionResetPolicy, StreamingConfig,
-    UnauthorizedDmBehavior, SessionConfig, DailyReset, IdleReset, SessionType,
-    ApprovalConfig, ProxyConfig, TerminalConfig, TerminalBackendType, LlmProviderConfig,
-    ProfileConfig, SkillsSettings, ToolsSettings,
+    ApprovalConfig, DailyReset, GatewayConfig, IdleReset, LlmProviderConfig, PlatformConfig,
+    ProfileConfig, ProxyConfig, SessionConfig, SessionResetPolicy, SessionType, SkillsSettings,
+    StreamingConfig, TerminalBackendType, TerminalConfig, ToolsSettings, UnauthorizedDmBehavior,
 };
 use hermes_core::BudgetConfig;
 
@@ -27,14 +26,14 @@ fn arb_streaming_config() -> impl Strategy<Value = StreamingConfig> {
         1usize..500,
         256usize..16_384,
     )
-        .prop_map(|(enabled, edit_interval_ms, buffer_threshold, max_message_length)| {
-            StreamingConfig {
+        .prop_map(
+            |(enabled, edit_interval_ms, buffer_threshold, max_message_length)| StreamingConfig {
                 enabled,
                 edit_interval_ms,
                 buffer_threshold,
                 max_message_length,
-            }
-        })
+            },
+        )
 }
 
 fn arb_session_reset_policy() -> impl Strategy<Value = SessionResetPolicy> {
@@ -107,8 +106,8 @@ fn arb_gateway_config() -> impl Strategy<Value = GatewayConfig> {
         arb_session_config(),
         arb_streaming_config(),
     )
-        .prop_map(|(model, personality, max_turns, session, streaming)| {
-            GatewayConfig {
+        .prop_map(
+            |(model, personality, max_turns, session, streaming)| GatewayConfig {
                 model,
                 personality,
                 max_turns,
@@ -127,8 +126,8 @@ fn arb_gateway_config() -> impl Strategy<Value = GatewayConfig> {
                 mcp_servers: Vec::new(),
                 profile: ProfileConfig::default(),
                 home_dir: None,
-            }
-        })
+            },
+        )
 }
 
 // ---------------------------------------------------------------------------

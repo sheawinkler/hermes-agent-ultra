@@ -119,9 +119,10 @@ impl SmartModelRouter {
             .models
             .values()
             .filter(|m| {
-                requirements.capabilities.iter().all(|cap| {
-                    m.capabilities.contains(cap)
-                })
+                requirements
+                    .capabilities
+                    .iter()
+                    .all(|cap| m.capabilities.contains(cap))
             })
             .collect();
 
@@ -148,9 +149,7 @@ impl SmartModelRouter {
             .into_iter()
             .filter(|m| {
                 let estimated = m.cost_per_input_token * prompt_tokens as f64;
-                requirements
-                    .max_cost
-                    .map_or(true, |mc| estimated <= mc)
+                requirements.max_cost.map_or(true, |mc| estimated <= mc)
             })
             .collect();
 
@@ -161,26 +160,22 @@ impl SmartModelRouter {
         // 4. Rank — lowest cost wins; if prefer_fast, break ties by provider
         //    heuristics (prefer "gpt" over "claude" as a proxy for speed).
         let best = if requirements.prefer_fast {
-            candidates
-                .into_iter()
-                .min_by(|a, b| {
-                    let cost_a = a.cost_per_input_token * prompt_tokens as f64;
-                    let cost_b = b.cost_per_input_token * prompt_tokens as f64;
-                    cost_a
-                        .partial_cmp(&cost_b)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                        .then(fastness_score(a).cmp(&fastness_score(b)))
-                })
+            candidates.into_iter().min_by(|a, b| {
+                let cost_a = a.cost_per_input_token * prompt_tokens as f64;
+                let cost_b = b.cost_per_input_token * prompt_tokens as f64;
+                cost_a
+                    .partial_cmp(&cost_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then(fastness_score(a).cmp(&fastness_score(b)))
+            })
         } else {
-            candidates
-                .into_iter()
-                .min_by(|a, b| {
-                    let cost_a = a.cost_per_input_token * prompt_tokens as f64;
-                    let cost_b = b.cost_per_input_token * prompt_tokens as f64;
-                    cost_a
-                        .partial_cmp(&cost_b)
-                        .unwrap_or(std::cmp::Ordering::Equal)
-                })
+            candidates.into_iter().min_by(|a, b| {
+                let cost_a = a.cost_per_input_token * prompt_tokens as f64;
+                let cost_b = b.cost_per_input_token * prompt_tokens as f64;
+                cost_a
+                    .partial_cmp(&cost_b)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
         };
 
         Ok(best

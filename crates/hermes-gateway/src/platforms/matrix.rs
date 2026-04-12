@@ -6,8 +6,8 @@
 //!
 //! All HTTP calls target the Matrix Client-Server API v3 endpoints.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use regex::Regex;
@@ -220,8 +220,7 @@ pub struct MatrixAdapter {
 
 impl MatrixAdapter {
     pub fn new(config: MatrixConfig) -> Result<Self, GatewayError> {
-        let base =
-            BasePlatformAdapter::new(&config.access_token).with_proxy(config.proxy.clone());
+        let base = BasePlatformAdapter::new(&config.access_token).with_proxy(config.proxy.clone());
         base.validate_token()?;
         let client = base.build_client()?;
         Ok(Self {
@@ -475,9 +474,7 @@ impl MatrixAdapter {
             .json(&serde_json::json!({}))
             .send()
             .await
-            .map_err(|e| {
-                GatewayError::SendFailed(format!("Matrix read receipt failed: {e}"))
-            })?;
+            .map_err(|e| GatewayError::SendFailed(format!("Matrix read receipt failed: {e}")))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -551,9 +548,7 @@ impl MatrixAdapter {
             .json(&serde_json::json!({}))
             .send()
             .await
-            .map_err(|e| {
-                GatewayError::ConnectionFailed(format!("Matrix join room failed: {e}"))
-            })?;
+            .map_err(|e| GatewayError::ConnectionFailed(format!("Matrix join room failed: {e}")))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
@@ -606,10 +601,7 @@ impl MatrixAdapter {
     }
 
     /// Get the list of members in a room.
-    pub async fn get_room_members(
-        &self,
-        room_id: &str,
-    ) -> Result<Vec<RoomMember>, GatewayError> {
+    pub async fn get_room_members(&self, room_id: &str) -> Result<Vec<RoomMember>, GatewayError> {
         let url = format!(
             "{}/_matrix/client/v3/rooms/{}/members",
             self.config.homeserver_url, room_id
@@ -632,9 +624,10 @@ impl MatrixAdapter {
             )));
         }
 
-        let body: serde_json::Value = resp.json().await.map_err(|e| {
-            GatewayError::ConnectionFailed(format!("Matrix members parse: {e}"))
-        })?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| GatewayError::ConnectionFailed(format!("Matrix members parse: {e}")))?;
 
         let mut members = Vec::new();
         if let Some(chunks) = body.get("chunk").and_then(|v| v.as_array()) {
@@ -702,10 +695,7 @@ impl MatrixAdapter {
     }
 
     /// Get the display name of a room.
-    pub async fn get_room_name(
-        &self,
-        room_id: &str,
-    ) -> Result<Option<String>, GatewayError> {
+    pub async fn get_room_name(&self, room_id: &str) -> Result<Option<String>, GatewayError> {
         let url = format!(
             "{}/_matrix/client/v3/rooms/{}/state/m.room.name/",
             self.config.homeserver_url, room_id
@@ -717,9 +707,7 @@ impl MatrixAdapter {
             .header("Authorization", self.auth_header())
             .send()
             .await
-            .map_err(|e| {
-                GatewayError::ConnectionFailed(format!("Matrix room name failed: {e}"))
-            })?;
+            .map_err(|e| GatewayError::ConnectionFailed(format!("Matrix room name failed: {e}")))?;
 
         if resp.status().as_u16() == 404 {
             return Ok(None);
@@ -731,9 +719,10 @@ impl MatrixAdapter {
             )));
         }
 
-        let body: serde_json::Value = resp.json().await.map_err(|e| {
-            GatewayError::ConnectionFailed(format!("Matrix room name parse: {e}"))
-        })?;
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| GatewayError::ConnectionFailed(format!("Matrix room name parse: {e}")))?;
 
         Ok(body.get("name").and_then(|v| v.as_str()).map(String::from))
     }
@@ -781,9 +770,7 @@ impl MatrixAdapter {
             .get("content_uri")
             .and_then(|v| v.as_str())
             .map(String::from)
-            .ok_or_else(|| {
-                GatewayError::SendFailed("No content_uri in upload response".into())
-            })
+            .ok_or_else(|| GatewayError::SendFailed("No content_uri in upload response".into()))
     }
 
     /// Send a media message (image/audio/video/file) to a room.
@@ -876,9 +863,7 @@ impl MatrixAdapter {
             .header("Authorization", self.auth_header())
             .send()
             .await
-            .map_err(|e| {
-                GatewayError::ConnectionFailed(format!("Matrix sync failed: {e}"))
-            })?;
+            .map_err(|e| GatewayError::ConnectionFailed(format!("Matrix sync failed: {e}")))?;
 
         let status = resp.status();
         if status.as_u16() == 401 || status.as_u16() == 403 {
@@ -926,10 +911,7 @@ impl MatrixAdapter {
     ///
     /// The `callback` receives each batch of messages. The loop runs until
     /// `stop()` is called.
-    pub async fn sync_loop<F>(
-        &self,
-        mut callback: F,
-    ) -> Result<(), GatewayError>
+    pub async fn sync_loop<F>(&self, mut callback: F) -> Result<(), GatewayError>
     where
         F: FnMut(Vec<IncomingMatrixMessage>) + Send,
     {
@@ -961,8 +943,7 @@ impl MatrixAdapter {
                     return Err(GatewayError::Auth(msg.clone()));
                 }
                 Err(e) => {
-                    let delay_secs =
-                        BACKOFF_STEPS[backoff_idx.min(BACKOFF_STEPS.len() - 1)];
+                    let delay_secs = BACKOFF_STEPS[backoff_idx.min(BACKOFF_STEPS.len() - 1)];
                     warn!(
                         error = %e,
                         retry_in_secs = delay_secs,
@@ -1018,10 +999,7 @@ impl MatrixAdapter {
             };
 
             for event in events {
-                let event_type = event
-                    .get("type")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let event_type = event.get("type").and_then(|v| v.as_str()).unwrap_or("");
                 let event_id = event
                     .get("event_id")
                     .and_then(|v| v.as_str())
@@ -1042,17 +1020,14 @@ impl MatrixAdapter {
                         }
                     }
                     "m.reaction" => {
-                        if let Some(msg) =
-                            self.parse_reaction(room_id, &event_id, &sender, event)
-                        {
+                        if let Some(msg) = self.parse_reaction(room_id, &event_id, &sender, event) {
                             messages.push(msg);
                         }
                     }
                     "m.room.encrypted" => {
                         warn!(
                             event_id,
-                            room_id,
-                            "Received encrypted event — E2EE not implemented, skipping"
+                            room_id, "Received encrypted event — E2EE not implemented, skipping"
                         );
                         messages.push(IncomingMatrixMessage {
                             room_id: room_id.clone(),
@@ -1229,10 +1204,7 @@ impl PlatformAdapter for MatrixAdapter {
         let path = std::path::Path::new(file_path);
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let mime = mime_from_extension(ext);
-        let file_name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("file");
+        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
         let file_bytes = tokio::fs::read(file_path)
             .await
             .map_err(|e| GatewayError::SendFailed(format!("Failed to read file: {e}")))?;

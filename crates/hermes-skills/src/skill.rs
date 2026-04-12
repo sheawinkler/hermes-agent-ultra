@@ -65,10 +65,31 @@ pub struct SkillManager {
 impl SkillManager {
     /// Built-in skill names aligned with Python bundle footprint.
     pub const BUILTIN_SKILLS: [&'static str; 26] = [
-        "planning", "debugging", "refactoring", "testing", "docs", "git", "review",
-        "web-research", "terminal", "file-edit", "security", "performance", "api-design",
-        "db-migrations", "incident-response", "release", "prompting", "agent-orchestration",
-        "mcp", "gateway", "voice-mode", "cron", "memory", "session-search", "tool-authoring",
+        "planning",
+        "debugging",
+        "refactoring",
+        "testing",
+        "docs",
+        "git",
+        "review",
+        "web-research",
+        "terminal",
+        "file-edit",
+        "security",
+        "performance",
+        "api-design",
+        "db-migrations",
+        "incident-response",
+        "release",
+        "prompting",
+        "agent-orchestration",
+        "mcp",
+        "gateway",
+        "voice-mode",
+        "cron",
+        "memory",
+        "session-search",
+        "tool-authoring",
         "skill-authoring",
     ];
 
@@ -103,11 +124,15 @@ impl SkillManager {
         task_summary: &str,
         steps: &[String],
     ) -> Result<Skill, AgentError> {
-        let mut content = format!("# {}\n\n## Task summary\n{}\n\n## Steps\n", name, task_summary);
+        let mut content = format!(
+            "# {}\n\n## Task summary\n{}\n\n## Steps\n",
+            name, task_summary
+        );
         for (idx, step) in steps.iter().enumerate() {
             content.push_str(&format!("{}. {}\n", idx + 1, step));
         }
-        self.create_skill(name, &content, Some("auto-generated")).await
+        self.create_skill(name, &content, Some("auto-generated"))
+            .await
     }
 
     /// Self-improve an existing skill by appending feedback and corrections.
@@ -140,7 +165,12 @@ impl SkillManager {
         let list = self.store.list().await.map_err(AgentError::from)?;
         let mut synced = 0usize;
         for meta in list {
-            if let Some(skill) = self.store.load(&meta.name).await.map_err(AgentError::from)? {
+            if let Some(skill) = self
+                .store
+                .load(&meta.name)
+                .await
+                .map_err(AgentError::from)?
+            {
                 if hub.upload_skill(&skill).await.is_ok() {
                     synced += 1;
                 }
@@ -206,10 +236,7 @@ impl SkillProvider for SkillManager {
     #[instrument(skip(self), fields(name = %name))]
     async fn get_skill(&self, name: &str) -> Result<Option<Skill>, AgentError> {
         debug!("Getting skill: {}", name);
-        self.store
-            .load(name)
-            .await
-            .map_err(AgentError::from)
+        self.store.load(name).await.map_err(AgentError::from)
     }
 
     #[instrument(skip(self))]
@@ -219,11 +246,7 @@ impl SkillProvider for SkillManager {
     }
 
     #[instrument(skip(self, content), fields(name = %name))]
-    async fn update_skill(
-        &self,
-        name: &str,
-        content: &str,
-    ) -> Result<Skill, AgentError> {
+    async fn update_skill(&self, name: &str, content: &str) -> Result<Skill, AgentError> {
         info!("Updating skill: {}", name);
 
         // Load existing skill to preserve category / description.
@@ -302,9 +325,13 @@ mod tests {
         let dir = tempdir().unwrap();
         let mgr = make_manager(&dir.path().to_path_buf());
 
-        mgr.create_skill("skill-a", "# Skill A\n1. Step one\n2. Step two", Some("cat1"))
-            .await
-            .unwrap();
+        mgr.create_skill(
+            "skill-a",
+            "# Skill A\n1. Step one\n2. Step two",
+            Some("cat1"),
+        )
+        .await
+        .unwrap();
         mgr.create_skill("skill-b", "# Skill B\n- Step one\n- Step two", None)
             .await
             .unwrap();
@@ -318,11 +345,18 @@ mod tests {
         let dir = tempdir().unwrap();
         let mgr = make_manager(&dir.path().to_path_buf());
 
-        mgr.create_skill("up-skill", "# Original\n1. Do something\n2. Do another thing", None)
+        mgr.create_skill(
+            "up-skill",
+            "# Original\n1. Do something\n2. Do another thing",
+            None,
+        )
+        .await
+        .unwrap();
+
+        let updated = mgr
+            .update_skill("up-skill", "# Updated\n1. New step")
             .await
             .unwrap();
-
-        let updated = mgr.update_skill("up-skill", "# Updated\n1. New step").await.unwrap();
         assert!(updated.content.contains("# Updated"));
 
         let loaded = mgr.get_skill("up-skill").await.unwrap().unwrap();
@@ -334,7 +368,9 @@ mod tests {
         let dir = tempdir().unwrap();
         let mgr = make_manager(&dir.path().to_path_buf());
 
-        mgr.create_skill("del-skill", "# Bye\n- Step one\n- Step two", None).await.unwrap();
+        mgr.create_skill("del-skill", "# Bye\n- Step one\n- Step two", None)
+            .await
+            .unwrap();
         mgr.delete_skill("del-skill").await.unwrap();
 
         let result = mgr.get_skill("del-skill").await.unwrap();

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
 use std::sync::Arc;
 
@@ -43,7 +43,8 @@ impl DelegateTaskHandler {
 #[async_trait]
 impl ToolHandler for DelegateTaskHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
-        let task = params.get("task")
+        let task = params
+            .get("task")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'task' parameter".into()))?;
 
@@ -56,22 +57,34 @@ impl ToolHandler for DelegateTaskHandler {
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("task".into(), json!({
-            "type": "string",
-            "description": "The task description for the sub-agent"
-        }));
-        props.insert("context".into(), json!({
-            "type": "string",
-            "description": "Additional context or instructions for the sub-agent"
-        }));
-        props.insert("toolset".into(), json!({
-            "type": "string",
-            "description": "Toolset name to assign to the sub-agent (e.g. 'web', 'terminal')"
-        }));
-        props.insert("model".into(), json!({
-            "type": "string",
-            "description": "Model to use for the sub-agent (default: same as parent)"
-        }));
+        props.insert(
+            "task".into(),
+            json!({
+                "type": "string",
+                "description": "The task description for the sub-agent"
+            }),
+        );
+        props.insert(
+            "context".into(),
+            json!({
+                "type": "string",
+                "description": "Additional context or instructions for the sub-agent"
+            }),
+        );
+        props.insert(
+            "toolset".into(),
+            json!({
+                "type": "string",
+                "description": "Toolset name to assign to the sub-agent (e.g. 'web', 'terminal')"
+            }),
+        );
+        props.insert(
+            "model".into(),
+            json!({
+                "type": "string",
+                "description": "Model to use for the sub-agent (default: same as parent)"
+            }),
+        );
 
         tool_schema(
             "delegate_task",
@@ -88,7 +101,13 @@ mod tests {
     struct MockDelegationBackend;
     #[async_trait]
     impl DelegationBackend for MockDelegationBackend {
-        async fn delegate(&self, task: &str, _context: Option<&str>, _toolset: Option<&str>, _model: Option<&str>) -> Result<String, ToolError> {
+        async fn delegate(
+            &self,
+            task: &str,
+            _context: Option<&str>,
+            _toolset: Option<&str>,
+            _model: Option<&str>,
+        ) -> Result<String, ToolError> {
             Ok(format!("Delegated task: {}", task))
         }
     }
@@ -102,7 +121,10 @@ mod tests {
     #[tokio::test]
     async fn test_delegate_task_execute() {
         let handler = DelegateTaskHandler::new(Arc::new(MockDelegationBackend));
-        let result = handler.execute(json!({"task": "Research AI trends"})).await.unwrap();
+        let result = handler
+            .execute(json!({"task": "Research AI trends"}))
+            .await
+            .unwrap();
         assert!(result.contains("Research AI trends"));
     }
 }

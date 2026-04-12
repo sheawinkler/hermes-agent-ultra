@@ -13,8 +13,8 @@
 
 pub mod adapter;
 pub mod background;
-pub mod commands;
 pub mod channel_directory;
+pub mod commands;
 pub mod delivery;
 pub mod dm;
 pub mod format;
@@ -24,12 +24,12 @@ pub mod markdown_split;
 pub mod media;
 pub mod mirror;
 pub mod pairing;
+pub mod platforms;
 pub mod session;
-pub mod sticker_cache;
 pub mod ssrf;
+pub mod sticker_cache;
 pub mod stream;
 pub mod voice;
-pub mod platforms;
 
 // Re-export core types from hermes-core
 pub use hermes_core::errors::GatewayError;
@@ -52,12 +52,12 @@ pub use media::MediaCache;
 pub use ssrf::{is_safe_url, validate_url};
 
 // Re-export DM management
-pub use dm::{DmDecision, DmManager};
-pub use pairing::{PairingManager, PairingState};
-pub use mirror::MirrorManager;
-pub use sticker_cache::{StickerCache, StickerMeta};
-pub use delivery::{DeliveryItem, DeliveryQueue, DeliveryRouter, DeliveryTarget, parse_target};
 pub use channel_directory::{ChannelDirectory, ChannelEntry};
+pub use delivery::{parse_target, DeliveryItem, DeliveryQueue, DeliveryRouter, DeliveryTarget};
+pub use dm::{DmDecision, DmManager};
+pub use mirror::MirrorManager;
+pub use pairing::{PairingManager, PairingState};
+pub use sticker_cache::{StickerCache, StickerMeta};
 
 // Re-export adapter base
 pub use adapter::BasePlatformAdapter;

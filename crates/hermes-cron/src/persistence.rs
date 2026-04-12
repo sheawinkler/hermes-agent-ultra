@@ -72,7 +72,9 @@ impl FileJobPersistence {
     /// - Linux: `~/.local/share/hermes/cron/`
     /// - Windows: `C:\Users\{User}\AppData\Roaming\hermes\cron\`
     pub fn new() -> Self {
-        Self { data_dir: default_data_dir() }
+        Self {
+            data_dir: default_data_dir(),
+        }
     }
 
     /// Create a file persistence instance with a custom data directory.
@@ -124,11 +126,7 @@ impl JobPersistence for FileJobPersistence {
                 match serde_json::from_str::<CronJob>(&contents) {
                     Ok(job) => jobs.push(job),
                     Err(e) => {
-                        tracing::warn!(
-                            "Failed to parse job file {}: {}",
-                            path.display(),
-                            e
-                        );
+                        tracing::warn!("Failed to parse job file {}: {}", path.display(), e);
                     }
                 }
             }
@@ -197,8 +195,7 @@ impl SqliteJobPersistence {
     fn open_connection(&self) -> Result<rusqlite::Connection, CronPersistenceError> {
         // Ensure parent directory exists
         if let Some(parent) = self.db_path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| CronPersistenceError::Io(e))?;
+            std::fs::create_dir_all(parent).map_err(|e| CronPersistenceError::Io(e))?;
         }
 
         let conn = rusqlite::Connection::open(&self.db_path)
@@ -208,7 +205,7 @@ impl SqliteJobPersistence {
             "CREATE TABLE IF NOT EXISTS cron_jobs (
                 id TEXT PRIMARY KEY,
                 data TEXT NOT NULL
-            );"
+            );",
         )
         .map_err(|e| CronPersistenceError::Sqlite(e.to_string()))?;
 
@@ -227,7 +224,8 @@ impl JobPersistence for SqliteJobPersistence {
     async fn save_jobs(&self, jobs: &[CronJob]) -> Result<(), CronPersistenceError> {
         let conn = self.open_connection()?;
 
-        let tx = conn.unchecked_transaction()
+        let tx = conn
+            .unchecked_transaction()
             .map_err(|e| CronPersistenceError::Sqlite(e.to_string()))?;
 
         // Clear existing and re-insert all
@@ -262,19 +260,17 @@ impl JobPersistence for SqliteJobPersistence {
                 Ok(data)
             })
             .map_err(|e| CronPersistenceError::Sqlite(e.to_string()))?
-            .filter_map(|row| {
-                match row {
-                    Ok(data) => match serde_json::from_str::<CronJob>(&data) {
-                        Ok(job) => Some(job),
-                        Err(e) => {
-                            tracing::warn!("Failed to parse job from SQLite: {}", e);
-                            None
-                        }
-                    },
+            .filter_map(|row| match row {
+                Ok(data) => match serde_json::from_str::<CronJob>(&data) {
+                    Ok(job) => Some(job),
                     Err(e) => {
-                        tracing::warn!("Failed to read row from SQLite: {}", e);
+                        tracing::warn!("Failed to parse job from SQLite: {}", e);
                         None
                     }
+                },
+                Err(e) => {
+                    tracing::warn!("Failed to read row from SQLite: {}", e);
+                    None
                 }
             })
             .collect();
@@ -344,7 +340,10 @@ mod tests {
 
         let job1 = crate::job::CronJob::new("0 9 * * *", "Job 1");
         let job2 = crate::job::CronJob::new("0 10 * * *", "Job 2");
-        persistence.save_jobs(&[job1.clone(), job2.clone()]).await.unwrap();
+        persistence
+            .save_jobs(&[job1.clone(), job2.clone()])
+            .await
+            .unwrap();
 
         let loaded = persistence.load_jobs().await.unwrap();
         assert_eq!(loaded.len(), 2);

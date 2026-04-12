@@ -123,7 +123,10 @@ impl FileSync {
             }
 
             if !changed.is_empty() {
-                tracing::info!("watch_and_sync: {} files changed, syncing...", changed.len());
+                tracing::info!(
+                    "watch_and_sync: {} files changed, syncing...",
+                    changed.len()
+                );
                 self.sync_to_remote(&changed).await?;
             }
 
@@ -144,15 +147,14 @@ impl FileSync {
                 ))
             })?;
 
-            while let Some(entry) = entries.next_entry().await.map_err(|e| {
-                AgentError::Io(format!("Failed to read dir entry: {}", e))
-            })? {
+            while let Some(entry) = entries
+                .next_entry()
+                .await
+                .map_err(|e| AgentError::Io(format!("Failed to read dir entry: {}", e)))?
+            {
                 let path = entry.path();
                 if path.is_dir() {
-                    let name = path
-                        .file_name()
-                        .unwrap_or_default()
-                        .to_string_lossy();
+                    let name = path.file_name().unwrap_or_default().to_string_lossy();
                     if !name.starts_with('.') && name != "target" && name != "node_modules" {
                         stack.push(path);
                     }

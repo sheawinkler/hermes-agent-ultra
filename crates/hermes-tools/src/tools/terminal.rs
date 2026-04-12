@@ -4,7 +4,10 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{AgentError, CommandOutput, JsonSchema, TerminalBackend, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{
+    tool_schema, AgentError, CommandOutput, JsonSchema, TerminalBackend, ToolError, ToolHandler,
+    ToolSchema,
+};
 
 // ---------------------------------------------------------------------------
 // TerminalHandler
@@ -24,25 +27,27 @@ impl TerminalHandler {
 #[async_trait]
 impl ToolHandler for TerminalHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
-        let command = params.get("command")
+        let command = params
+            .get("command")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'command' parameter".into()))?;
 
-        let timeout = params.get("timeout")
-            .and_then(|v| v.as_u64());
+        let timeout = params.get("timeout").and_then(|v| v.as_u64());
 
-        let workdir = params.get("workdir")
-            .and_then(|v| v.as_str());
+        let workdir = params.get("workdir").and_then(|v| v.as_str());
 
-        let background = params.get("background")
+        let background = params
+            .get("background")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
 
-        let pty = params.get("pty")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
+        let pty = params.get("pty").and_then(|v| v.as_bool()).unwrap_or(false);
 
-        match self.backend.execute_command(command, timeout, workdir, background, pty).await {
+        match self
+            .backend
+            .execute_command(command, timeout, workdir, background, pty)
+            .await
+        {
             Ok(output) => Ok(format_command_output(&output)),
             Err(e) => Err(ToolError::ExecutionFailed(e.to_string())),
         }
@@ -50,28 +55,43 @@ impl ToolHandler for TerminalHandler {
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("command".into(), json!({
-            "type": "string",
-            "description": "The command to execute"
-        }));
-        props.insert("timeout".into(), json!({
-            "type": "integer",
-            "description": "Timeout in milliseconds (default: 30000)"
-        }));
-        props.insert("workdir".into(), json!({
-            "type": "string",
-            "description": "Working directory for the command"
-        }));
-        props.insert("background".into(), json!({
-            "type": "boolean",
-            "description": "Run command in background (default: false)",
-            "default": false
-        }));
-        props.insert("pty".into(), json!({
-            "type": "boolean",
-            "description": "Run command in PTY mode for interactive programs (default: false)",
-            "default": false
-        }));
+        props.insert(
+            "command".into(),
+            json!({
+                "type": "string",
+                "description": "The command to execute"
+            }),
+        );
+        props.insert(
+            "timeout".into(),
+            json!({
+                "type": "integer",
+                "description": "Timeout in milliseconds (default: 30000)"
+            }),
+        );
+        props.insert(
+            "workdir".into(),
+            json!({
+                "type": "string",
+                "description": "Working directory for the command"
+            }),
+        );
+        props.insert(
+            "background".into(),
+            json!({
+                "type": "boolean",
+                "description": "Run command in background (default: false)",
+                "default": false
+            }),
+        );
+        props.insert(
+            "pty".into(),
+            json!({
+                "type": "boolean",
+                "description": "Run command in PTY mode for interactive programs (default: false)",
+                "default": false
+            }),
+        );
 
         tool_schema(
             "terminal",
@@ -139,82 +159,109 @@ impl ProcessHandler {
 #[async_trait]
 impl ToolHandler for ProcessHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
-        let action = params.get("action")
+        let action = params
+            .get("action")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'action' parameter".into()))?;
 
         match action {
             "list" => self.backend.list_processes().await,
             "poll" => {
-                let pid = params.get("pid")
+                let pid = params
+                    .get("pid")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'pid' parameter".into()))?;
                 self.backend.poll_process(pid).await
             }
             "wait" => {
-                let pid = params.get("pid")
+                let pid = params
+                    .get("pid")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'pid' parameter".into()))?;
                 let timeout = params.get("timeout").and_then(|v| v.as_u64());
                 self.backend.wait_process(pid, timeout).await
             }
             "kill" => {
-                let pid = params.get("pid")
+                let pid = params
+                    .get("pid")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'pid' parameter".into()))?;
                 self.backend.kill_process(pid).await
             }
             "write" => {
-                let pid = params.get("pid")
+                let pid = params
+                    .get("pid")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'pid' parameter".into()))?;
-                let data = params.get("data")
+                let data = params
+                    .get("data")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'data' parameter".into()))?;
                 self.backend.write_stdin(pid, data).await
             }
             "submit" => {
-                let pid = params.get("pid")
+                let pid = params
+                    .get("pid")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'pid' parameter".into()))?;
-                let input = params.get("input")
+                let input = params
+                    .get("input")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'input' parameter".into()))?;
                 self.backend.submit_process(pid, input).await
             }
             "close" => {
-                let pid = params.get("pid")
+                let pid = params
+                    .get("pid")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'pid' parameter".into()))?;
                 self.backend.close_process(pid).await
             }
-            other => Err(ToolError::InvalidParams(format!("Unknown action: {}", other))),
+            other => Err(ToolError::InvalidParams(format!(
+                "Unknown action: {}",
+                other
+            ))),
         }
     }
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("action".into(), json!({
-            "type": "string",
-            "description": "Action to perform: list, poll, wait, kill, write, submit, close",
-            "enum": ["list", "poll", "wait", "kill", "write", "submit", "close"]
-        }));
-        props.insert("pid".into(), json!({
-            "type": "string",
-            "description": "Process ID (required for all actions except 'list')"
-        }));
-        props.insert("timeout".into(), json!({
-            "type": "integer",
-            "description": "Timeout in milliseconds for 'wait' action"
-        }));
-        props.insert("data".into(), json!({
-            "type": "string",
-            "description": "Data to write to process stdin (for 'write' action)"
-        }));
-        props.insert("input".into(), json!({
-            "type": "string",
-            "description": "Input to submit to the process (for 'submit' action)"
-        }));
+        props.insert(
+            "action".into(),
+            json!({
+                "type": "string",
+                "description": "Action to perform: list, poll, wait, kill, write, submit, close",
+                "enum": ["list", "poll", "wait", "kill", "write", "submit", "close"]
+            }),
+        );
+        props.insert(
+            "pid".into(),
+            json!({
+                "type": "string",
+                "description": "Process ID (required for all actions except 'list')"
+            }),
+        );
+        props.insert(
+            "timeout".into(),
+            json!({
+                "type": "integer",
+                "description": "Timeout in milliseconds for 'wait' action"
+            }),
+        );
+        props.insert(
+            "data".into(),
+            json!({
+                "type": "string",
+                "description": "Data to write to process stdin (for 'write' action)"
+            }),
+        );
+        props.insert(
+            "input".into(),
+            json!({
+                "type": "string",
+                "description": "Input to submit to the process (for 'submit' action)"
+            }),
+        );
 
         tool_schema(
             "process",
@@ -231,14 +278,26 @@ mod tests {
     struct MockBackend;
     #[async_trait]
     impl TerminalBackend for MockBackend {
-        async fn execute_command(&self, cmd: &str, _timeout: Option<u64>, _workdir: Option<&str>, _bg: bool, _pty: bool) -> Result<CommandOutput, AgentError> {
+        async fn execute_command(
+            &self,
+            cmd: &str,
+            _timeout: Option<u64>,
+            _workdir: Option<&str>,
+            _bg: bool,
+            _pty: bool,
+        ) -> Result<CommandOutput, AgentError> {
             Ok(CommandOutput {
                 exit_code: 0,
                 stdout: format!("output of: {}", cmd),
                 stderr: String::new(),
             })
         }
-        async fn read_file(&self, _path: &str, _offset: Option<u64>, _limit: Option<u64>) -> Result<String, AgentError> {
+        async fn read_file(
+            &self,
+            _path: &str,
+            _offset: Option<u64>,
+            _limit: Option<u64>,
+        ) -> Result<String, AgentError> {
             Ok(String::new())
         }
         async fn write_file(&self, _path: &str, _content: &str) -> Result<(), AgentError> {
@@ -259,7 +318,10 @@ mod tests {
     #[tokio::test]
     async fn test_terminal_handler_execute() {
         let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
-        let result = handler.execute(json!({"command": "echo hello"})).await.unwrap();
+        let result = handler
+            .execute(json!({"command": "echo hello"}))
+            .await
+            .unwrap();
         assert!(result.contains("echo hello"));
     }
 

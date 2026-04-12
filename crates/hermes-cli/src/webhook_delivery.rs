@@ -27,17 +27,18 @@ pub fn load_webhook_store(path: &Path) -> Result<WebhookStore, AgentError> {
     }
     let raw = std::fs::read_to_string(path)
         .map_err(|e| AgentError::Io(format!("read {}: {}", path.display(), e)))?;
-    serde_json::from_str(&raw).map_err(|e| AgentError::Io(format!("parse {}: {}", path.display(), e)))
+    serde_json::from_str(&raw)
+        .map_err(|e| AgentError::Io(format!("parse {}: {}", path.display(), e)))
 }
 
 pub fn save_webhook_store(path: &Path, store: &WebhookStore) -> Result<(), AgentError> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| AgentError::Io(format!("mkdir: {}", e)))?;
+        std::fs::create_dir_all(parent).map_err(|e| AgentError::Io(format!("mkdir: {}", e)))?;
     }
     let raw = serde_json::to_string_pretty(store)
         .map_err(|e| AgentError::Io(format!("serialize webhooks: {}", e)))?;
-    std::fs::write(path, raw).map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))
+    std::fs::write(path, raw)
+        .map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))
 }
 
 /// POST `event` as JSON to every URL in `webhooks.json` (best-effort; logs like the gateway loop).
@@ -46,18 +47,21 @@ pub async fn deliver_cron_completion_to_webhooks(
     event: &CronCompletionEvent,
     client: &reqwest::Client,
 ) -> Result<(), AgentError> {
-    let body = serde_json::to_value(event).map_err(|e| AgentError::Io(format!("webhook json: {e}")))?;
+    let body =
+        serde_json::to_value(event).map_err(|e| AgentError::Io(format!("webhook json: {e}")))?;
 
     let raw = tokio::fs::read_to_string(webhooks_json)
         .await
         .map_err(|e| AgentError::Io(format!("read {}: {}", webhooks_json.display(), e)))?;
 
-    let store: WebhookStore = serde_json::from_str(&raw).map_err(|e| {
-        AgentError::Io(format!("parse {}: {}", webhooks_json.display(), e))
-    })?;
+    let store: WebhookStore = serde_json::from_str(&raw)
+        .map_err(|e| AgentError::Io(format!("parse {}: {}", webhooks_json.display(), e)))?;
 
     if store.webhooks.is_empty() {
-        tracing::debug!("no webhooks in {}; skip HTTP delivery", webhooks_json.display());
+        tracing::debug!(
+            "no webhooks in {}; skip HTTP delivery",
+            webhooks_json.display()
+        );
         return Ok(());
     }
 

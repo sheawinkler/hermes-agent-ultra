@@ -200,7 +200,12 @@ mod tests {
 
     #[test]
     fn test_track_change() {
-        let change = track_change("my-skill", "old content", "new content", Some("updated steps"));
+        let change = track_change(
+            "my-skill",
+            "old content",
+            "new content",
+            Some("updated steps"),
+        );
         assert_eq!(change.skill_name, "my-skill");
         assert_eq!(change.from_version, compute_version("old content"));
         assert_eq!(change.to_version, compute_version("new content"));

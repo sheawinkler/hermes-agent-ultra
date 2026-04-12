@@ -114,11 +114,7 @@ impl McpServer {
     ///
     /// This is the main request dispatch method. It routes requests to
     /// the appropriate handler based on the method name.
-    pub async fn handle_request(
-        &self,
-        method: &str,
-        params: Value,
-    ) -> Result<Value, McpError> {
+    pub async fn handle_request(&self, method: &str, params: Value) -> Result<Value, McpError> {
         debug!("Handling MCP request: {}", method);
 
         match method {
@@ -157,10 +153,8 @@ impl McpServer {
     /// Returns all available tools from the registry in MCP format.
     async fn handle_tools_list(&self, _params: Value) -> Result<Value, McpError> {
         let definitions = self.tool_registry.get_definitions();
-        let mcp_tools: Vec<McpToolInfo> = definitions
-            .iter()
-            .map(Self::tool_schema_to_mcp)
-            .collect();
+        let mcp_tools: Vec<McpToolInfo> =
+            definitions.iter().map(Self::tool_schema_to_mcp).collect();
 
         Ok(serde_json::json!({
             "tools": mcp_tools,
@@ -176,14 +170,18 @@ impl McpServer {
             .and_then(|v| v.as_str())
             .ok_or_else(|| McpError::InvalidParams("missing tool name".to_string()))?;
 
-        let arguments = params.get("arguments").cloned().unwrap_or(Value::Object(
-            serde_json::Map::new(),
-        ));
+        let arguments = params
+            .get("arguments")
+            .cloned()
+            .unwrap_or(Value::Object(serde_json::Map::new()));
 
         debug!("MCP tools/call: {} with args: {}", tool_name, arguments);
 
         // Dispatch through the tool registry
-        let result = self.tool_registry.dispatch_async(tool_name, arguments).await;
+        let result = self
+            .tool_registry
+            .dispatch_async(tool_name, arguments)
+            .await;
 
         // Parse the result back to check for errors
         let is_error = result.starts_with("{\"error\"");
@@ -244,10 +242,7 @@ impl McpServer {
     ///
     /// The server will listen for incoming JSON-RPC messages and dispatch
     /// them to the appropriate handler.
-    pub async fn start(
-        &self,
-        mut transport: Box<dyn McpTransport>,
-    ) -> Result<(), McpError> {
+    pub async fn start(&self, mut transport: Box<dyn McpTransport>) -> Result<(), McpError> {
         info!("Starting MCP server");
 
         // Start the transport
@@ -281,13 +276,11 @@ impl McpServer {
             };
 
             // Extract method, params, and id
-            let method = message
-                .get("method")
-                .and_then(|m| m.as_str())
-                .unwrap_or("");
-            let params = message.get("params").cloned().unwrap_or(Value::Object(
-                serde_json::Map::new(),
-            ));
+            let method = message.get("method").and_then(|m| m.as_str()).unwrap_or("");
+            let params = message
+                .get("params")
+                .cloned()
+                .unwrap_or(Value::Object(serde_json::Map::new()));
             let id = message.get("id").cloned();
 
             // Handle the request

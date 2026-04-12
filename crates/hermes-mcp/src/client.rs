@@ -69,9 +69,7 @@ impl Default for SamplingConfig {
 
 /// Callback type for LLM invocations triggered by MCP sampling.
 pub type LlmCallback = Box<
-    dyn Fn(Value) -> Pin<Box<dyn Future<Output = Result<Value, McpError>> + Send>>
-        + Send
-        + Sync,
+    dyn Fn(Value) -> Pin<Box<dyn Future<Output = Result<Value, McpError>> + Send>> + Send + Sync,
 >;
 
 // ---------------------------------------------------------------------------
@@ -178,7 +176,10 @@ impl std::fmt::Debug for McpServerConfig {
             .field("args", &self.args)
             .field("env", &self.env)
             .field("url", &self.url)
-            .field("auth_provider", &self.auth_provider.as_ref().map(|_| "<McpAuthProvider>"))
+            .field(
+                "auth_provider",
+                &self.auth_provider.as_ref().map(|_| "<McpAuthProvider>"),
+            )
             .finish()
     }
 }
@@ -329,9 +330,7 @@ impl McpClient {
     /// handshake, and discover available tools.
     pub async fn connect(&mut self) -> Result<(), McpError> {
         if self.connected {
-            return Err(McpError::ConnectionError(
-                "Already connected".to_string(),
-            ));
+            return Err(McpError::ConnectionError("Already connected".to_string()));
         }
 
         let mut transport = self.create_transport().await?;
@@ -372,8 +371,8 @@ impl McpClient {
             .send_request("tools/list", serde_json::json!({}))
             .await?;
 
-        let tools_response: ToolsListResponse = serde_json::from_value(result)
-            .map_err(|e| McpError::Serialization(e.to_string()))?;
+        let tools_response: ToolsListResponse =
+            serde_json::from_value(result).map_err(|e| McpError::Serialization(e.to_string()))?;
 
         let tools: Vec<ToolSchema> = tools_response
             .tools
@@ -394,11 +393,7 @@ impl McpClient {
     /// Sends a `tools/call` JSON-RPC request and returns the result. Text
     /// content items are joined into a single string value; other content
     /// types are returned as raw JSON.
-    pub async fn call_tool(
-        &mut self,
-        name: &str,
-        arguments: Value,
-    ) -> Result<Value, McpError> {
+    pub async fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value, McpError> {
         let params = serde_json::json!({
             "name": name,
             "arguments": arguments,
@@ -411,7 +406,9 @@ impl McpClient {
                 .iter()
                 .filter_map(|item| {
                     if item.get("type").and_then(|t| t.as_str()) == Some("text") {
-                        item.get("text").and_then(|t| t.as_str()).map(|s| s.to_string())
+                        item.get("text")
+                            .and_then(|t| t.as_str())
+                            .map(|s| s.to_string())
                     } else {
                         None
                     }
@@ -431,8 +428,8 @@ impl McpClient {
             .send_request("resources/list", serde_json::json!({}))
             .await?;
 
-        let resources_response: ResourcesListResponse = serde_json::from_value(result)
-            .map_err(|e| McpError::Serialization(e.to_string()))?;
+        let resources_response: ResourcesListResponse =
+            serde_json::from_value(result).map_err(|e| McpError::Serialization(e.to_string()))?;
 
         self.resources = resources_response.resources.clone();
         Ok(resources_response.resources)
@@ -474,8 +471,8 @@ impl McpClient {
             .send_request("prompts/list", serde_json::json!({}))
             .await?;
 
-        let response: PromptsListResponse = serde_json::from_value(result)
-            .map_err(|e| McpError::Serialization(e.to_string()))?;
+        let response: PromptsListResponse =
+            serde_json::from_value(result).map_err(|e| McpError::Serialization(e.to_string()))?;
 
         Ok(response.prompts)
     }
@@ -492,8 +489,8 @@ impl McpClient {
         });
 
         let result = self.send_request("prompts/get", params).await?;
-        let prompt_result: PromptResult = serde_json::from_value(result)
-            .map_err(|e| McpError::Serialization(e.to_string()))?;
+        let prompt_result: PromptResult =
+            serde_json::from_value(result).map_err(|e| McpError::Serialization(e.to_string()))?;
 
         Ok(prompt_result)
     }
@@ -520,9 +517,7 @@ impl McpClient {
             .and_then(|m| m.as_str())
             .unwrap_or("default");
 
-        if !config.allowed_models.is_empty()
-            && !config.allowed_models.iter().any(|m| m == model)
-        {
+        if !config.allowed_models.is_empty() && !config.allowed_models.iter().any(|m| m == model) {
             return Err(McpError::InvalidParams(format!(
                 "Model '{}' is not in the allowed list",
                 model
@@ -535,7 +530,10 @@ impl McpClient {
             .unwrap_or(config.max_tokens_cap as u64)
             .min(config.max_tokens_cap as u64);
 
-        let messages = params.get("messages").cloned().unwrap_or(serde_json::json!([]));
+        let messages = params
+            .get("messages")
+            .cloned()
+            .unwrap_or(serde_json::json!([]));
         let openai_messages = Self::convert_mcp_messages_to_openai(&messages);
 
         let llm_request = serde_json::json!({
@@ -547,8 +545,7 @@ impl McpClient {
         let timeout = std::time::Duration::from_secs(config.timeout_secs);
         let result = tokio::time::timeout(timeout, llm_callback(llm_request))
             .await
-            .map_err(|_| McpError::ConnectionError("Sampling LLM callback timed out".into()))?
-            ?;
+            .map_err(|_| McpError::ConnectionError("Sampling LLM callback timed out".into()))??;
 
         let content = result
             .get("choices")
@@ -609,18 +606,22 @@ impl McpClient {
     /// Build the transport from the stored config.
     async fn create_transport(&self) -> Result<Box<dyn McpTransport>, McpError> {
         if self.config.is_stdio() {
-            let command = self.config.command.as_ref().ok_or_else(|| {
-                McpError::Config("stdio config missing command".to_string())
-            })?;
+            let command = self
+                .config
+                .command
+                .as_ref()
+                .ok_or_else(|| McpError::Config("stdio config missing command".to_string()))?;
             Ok(Box::new(StdioTransport::new(
                 command,
                 &self.config.args,
                 &self.config.env,
             )))
         } else if self.config.is_http() {
-            let url = self.config.url.as_ref().ok_or_else(|| {
-                McpError::Config("http config missing url".to_string())
-            })?;
+            let url = self
+                .config
+                .url
+                .as_ref()
+                .ok_or_else(|| McpError::Config("http config missing url".to_string()))?;
             let auth_token = if let Some(ref provider) = self.config.auth_provider {
                 Some(provider.get_token().await?)
             } else {
@@ -646,9 +647,10 @@ impl McpClient {
             "params": params,
         });
 
-        let transport = self.transport.as_mut().ok_or_else(|| {
-            McpError::ConnectionError("Not connected".to_string())
-        })?;
+        let transport = self
+            .transport
+            .as_mut()
+            .ok_or_else(|| McpError::ConnectionError("Not connected".to_string()))?;
 
         transport.send(request).await?;
         let response = transport.receive().await?;
@@ -665,13 +667,10 @@ impl McpClient {
             });
         }
 
-        response
-            .get("result")
-            .cloned()
-            .ok_or(McpError::Protocol {
-                code: -1,
-                message: "Missing result in response".to_string(),
-            })
+        response.get("result").cloned().ok_or(McpError::Protocol {
+            code: -1,
+            message: "Missing result in response".to_string(),
+        })
     }
 
     /// Send a JSON-RPC notification (no id, no response expected).
@@ -682,9 +681,10 @@ impl McpClient {
             "params": params,
         });
 
-        let transport = self.transport.as_mut().ok_or_else(|| {
-            McpError::ConnectionError("Not connected".to_string())
-        })?;
+        let transport = self
+            .transport
+            .as_mut()
+            .ok_or_else(|| McpError::ConnectionError("Not connected".to_string()))?;
 
         transport.send(notification).await?;
         Ok(())
@@ -794,9 +794,7 @@ impl McpManager {
 
     /// Check if a server is connected.
     pub fn is_connected(&self, name: &str) -> bool {
-        self.clients
-            .get(name)
-            .map_or(false, |c| c.is_connected())
+        self.clients.get(name).map_or(false, |c| c.is_connected())
     }
 
     /// Get the list of connected server names.
@@ -840,11 +838,7 @@ impl McpManager {
     }
 
     /// Read a resource from a connected server.
-    pub async fn read_resource(
-        &mut self,
-        server_name: &str,
-        uri: &str,
-    ) -> Result<Value, McpError> {
+    pub async fn read_resource(&mut self, server_name: &str, uri: &str) -> Result<Value, McpError> {
         let client = self
             .clients
             .get_mut(server_name)
@@ -902,10 +896,7 @@ impl McpManager {
     // -----------------------------------------------------------------------
 
     /// List prompts available on a connected server.
-    pub async fn list_prompts(
-        &mut self,
-        server_name: &str,
-    ) -> Result<Vec<PromptInfo>, McpError> {
+    pub async fn list_prompts(&mut self, server_name: &str) -> Result<Vec<PromptInfo>, McpError> {
         let client = self
             .clients
             .get_mut(server_name)
@@ -969,10 +960,7 @@ impl McpManager {
 
         match tools_result {
             Ok(tools) => {
-                let resources = client
-                    .list_resources()
-                    .await
-                    .unwrap_or_default();
+                let resources = client.list_resources().await.unwrap_or_default();
 
                 Ok(McpProbeResult {
                     reachable: true,

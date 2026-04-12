@@ -84,8 +84,7 @@ pub fn parse_reasoning(response: &Value) -> Option<String> {
                     }
                 }
 
-                if let Some(details) = message.get("reasoning_details").and_then(|v| v.as_array())
-                {
+                if let Some(details) = message.get("reasoning_details").and_then(|v| v.as_array()) {
                     let text = extract_reasoning_details(details);
                     if !text.is_empty() {
                         return Some(text);

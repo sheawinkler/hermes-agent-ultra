@@ -136,7 +136,7 @@ impl SkillsHubClient {
 
     /// Generate a JWT token for authenticated requests.
     fn generate_token(&self) -> Result<String, SkillError> {
-        use jsonwebtoken::{EncodingKey, Header, encode};
+        use jsonwebtoken::{encode, EncodingKey, Header};
         use std::time::SystemTime;
 
         let now = SystemTime::now()
@@ -227,10 +227,9 @@ impl SkillsHubClient {
             )));
         }
 
-        let dl_resp: DownloadResponse = resp
-            .json()
-            .await
-            .map_err(|e| SkillError::HubError(format!("Failed to parse download response: {}", e)))?;
+        let dl_resp: DownloadResponse = resp.json().await.map_err(|e| {
+            SkillError::HubError(format!("Failed to parse download response: {}", e))
+        })?;
 
         // Verify source integrity if a signature is present.
         if let Some(ref sig) = dl_resp.source_signature {
@@ -288,15 +287,9 @@ impl SkillsHubClient {
             )));
         }
 
-        let check_resp: CheckUpdatesResponse = resp
-            .json()
-            .await
-            .map_err(|e| {
-                SkillError::HubError(format!(
-                    "Failed to parse check-updates response: {}",
-                    e
-                ))
-            })?;
+        let check_resp: CheckUpdatesResponse = resp.json().await.map_err(|e| {
+            SkillError::HubError(format!("Failed to parse check-updates response: {}", e))
+        })?;
 
         Ok(check_resp.updates)
     }
@@ -372,7 +365,8 @@ fn verify_skill_signature(skill: &Skill, signature: &str) -> Result<(), SkillErr
     // Log the verification (we don't enforce equality in this simplified version).
     debug!(
         "Skill {} signature verification: computed={}, sig={}",
-        skill.name, &hash[..16],
+        skill.name,
+        &hash[..16],
         &signature[..16]
     );
 

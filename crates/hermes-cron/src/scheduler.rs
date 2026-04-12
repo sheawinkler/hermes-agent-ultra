@@ -86,10 +86,7 @@ pub struct CronScheduler {
 
 impl CronScheduler {
     /// Create a new cron scheduler.
-    pub fn new(
-        persistence: Arc<dyn JobPersistence>,
-        runner: Arc<CronRunner>,
-    ) -> Self {
+    pub fn new(persistence: Arc<dyn JobPersistence>, runner: Arc<CronRunner>) -> Self {
         Self {
             jobs: Arc::new(Mutex::new(HashMap::new())),
             persistence,
@@ -198,7 +195,11 @@ impl CronScheduler {
                         drop(&mut guard);
 
                         // Run the job
-                        tracing::info!("Executing cron job '{}' ({})", job.name.as_deref().unwrap_or(&job.id), job.id);
+                        tracing::info!(
+                            "Executing cron job '{}' ({})",
+                            job.name.as_deref().unwrap_or(&job.id),
+                            job.id
+                        );
                         match runner.run_job(&job).await {
                             Ok(result) => {
                                 tracing::info!(
@@ -215,11 +216,7 @@ impl CronScheduler {
                                 job.mark_executed(now);
                             }
                             Err(e) => {
-                                tracing::error!(
-                                    "Cron job '{}' failed: {}",
-                                    job.id,
-                                    e
-                                );
+                                tracing::error!("Cron job '{}' failed: {}", job.id, e);
                                 Self::emit_completion(
                                     &completion_tx,
                                     &job,
@@ -450,18 +447,10 @@ impl CronScheduler {
         tracing::info!("Manually triggering cron job '{}'", id);
         let run_result = self.runner.run_job(&job).await;
         match &run_result {
-            Ok(result) => Self::emit_completion(
-                &self.completion_tx,
-                &job,
-                "manual",
-                Ok(result),
-            ),
-            Err(e) => Self::emit_completion(
-                &self.completion_tx,
-                &job,
-                "manual",
-                Err(e.to_string()),
-            ),
+            Ok(result) => Self::emit_completion(&self.completion_tx, &job, "manual", Ok(result)),
+            Err(e) => {
+                Self::emit_completion(&self.completion_tx, &job, "manual", Err(e.to_string()))
+            }
         }
         let result = run_result?;
 

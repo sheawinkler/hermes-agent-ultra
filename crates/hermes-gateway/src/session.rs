@@ -11,9 +11,9 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use hermes_core::types::Message;
-use hermes_config::session::{SessionResetPolicy, SessionType};
 use chrono::Timelike;
+use hermes_config::session::{SessionResetPolicy, SessionType};
+use hermes_core::types::Message;
 
 // ---------------------------------------------------------------------------
 // Re-export session types from hermes-config for convenience
@@ -159,7 +159,10 @@ impl SessionContext {
     pub fn build_session_context_prompt(&self) -> String {
         let mut prompt = String::new();
 
-        prompt.push_str(&format!("[Platform: {} | User: {}]\n\n", self.platform, self.user_id));
+        prompt.push_str(&format!(
+            "[Platform: {} | User: {}]\n\n",
+            self.platform, self.user_id
+        ));
 
         for (i, part) in self.system_prompt_parts.iter().enumerate() {
             if i > 0 {
@@ -192,7 +195,11 @@ pub struct RedactionRule {
 }
 
 impl RedactionRule {
-    pub fn new(name: impl Into<String>, pattern: impl Into<String>, replacement: impl Into<String>) -> Self {
+    pub fn new(
+        name: impl Into<String>,
+        pattern: impl Into<String>,
+        replacement: impl Into<String>,
+    ) -> Self {
         Self {
             name: name.into(),
             pattern: pattern.into(),
@@ -205,10 +212,22 @@ impl RedactionRule {
 pub fn default_redaction_rules() -> Vec<RedactionRule> {
     // Order matters: more specific patterns first to avoid partial matches
     vec![
-        RedactionRule::new("email", r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", "[EMAIL]"),
-        RedactionRule::new("credit_card", r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b", "[CREDIT_CARD]"),
+        RedactionRule::new(
+            "email",
+            r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}",
+            "[EMAIL]",
+        ),
+        RedactionRule::new(
+            "credit_card",
+            r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b",
+            "[CREDIT_CARD]",
+        ),
         RedactionRule::new("ssn", r"\b\d{3}-\d{2}-\d{4}\b", "[SSN]"),
-        RedactionRule::new("ip_address", r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", "[IP_ADDR]"),
+        RedactionRule::new(
+            "ip_address",
+            r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b",
+            "[IP_ADDR]",
+        ),
         RedactionRule::new("phone", r"\+\d[\d\s\-()]{7,}\d", "[PHONE]"),
     ]
 }
@@ -218,7 +237,9 @@ pub fn redact_pii(text: &str, rules: &[RedactionRule]) -> String {
     let mut result = text.to_string();
     for rule in rules {
         if let Ok(re) = regex::Regex::new(&rule.pattern) {
-            result = re.replace_all(&result, rule.replacement.as_str()).to_string();
+            result = re
+                .replace_all(&result, rule.replacement.as_str())
+                .to_string();
         }
     }
     result
@@ -567,9 +588,7 @@ mod tests {
         // SessionManager uses "platform:chat_id" as the map key, not the UUID id
         let sid = format!("{}:{}", session.platform, session.chat_id);
 
-        manager
-            .add_message(&sid, Message::user("hello"))
-            .await;
+        manager.add_message(&sid, Message::user("hello")).await;
         manager
             .add_message(&sid, Message::assistant("hi there"))
             .await;
@@ -581,8 +600,11 @@ mod tests {
     #[test]
     fn test_session_context_build_prompt() {
         let session = Session::new(
-            "telegram", "chat1", "user1",
-            SessionType::Dm, SessionResetPolicy::default(),
+            "telegram",
+            "chat1",
+            "user1",
+            SessionType::Dm,
+            SessionResetPolicy::default(),
         );
         let mut ctx = SessionContext::new(&session);
         ctx.add_prompt_part("You are a helpful assistant.");
@@ -620,8 +642,12 @@ mod tests {
     async fn test_flush_memories() {
         let config = SessionConfig::default();
         let manager = SessionManager::new(config);
-        manager.get_or_create_session("telegram", "chat1", "user1").await;
-        manager.get_or_create_session("discord", "chat2", "user2").await;
+        manager
+            .get_or_create_session("telegram", "chat1", "user1")
+            .await;
+        manager
+            .get_or_create_session("discord", "chat2", "user2")
+            .await;
 
         assert_eq!(manager.session_count().await, 2);
         let flushed = manager.flush_memories().await;
@@ -633,7 +659,9 @@ mod tests {
     async fn test_build_session_context() {
         let config = SessionConfig::default();
         let manager = SessionManager::new(config);
-        let session = manager.get_or_create_session("telegram", "chat1", "user1").await;
+        let session = manager
+            .get_or_create_session("telegram", "chat1", "user1")
+            .await;
         let sid = format!("{}:{}", session.platform, session.chat_id);
 
         let ctx = manager.build_session_context(&sid).await;
@@ -652,9 +680,7 @@ mod tests {
             .await;
         let sid = format!("{}:{}", session.platform, session.chat_id);
 
-        manager
-            .add_message(&sid, Message::user("hello"))
-            .await;
+        manager.add_message(&sid, Message::user("hello")).await;
         assert_eq!(manager.get_messages(&sid).await.len(), 1);
 
         manager.reset_session(&sid).await;

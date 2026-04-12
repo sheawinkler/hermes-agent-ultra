@@ -35,8 +35,10 @@ impl HttpSecurity {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .map(|s| Arc::from(s.into_boxed_str()));
-        let metrics_require_auth =
-            std::env::var("HERMES_HTTP_METRICS_REQUIRE_AUTH").ok().as_deref() == Some("1");
+        let metrics_require_auth = std::env::var("HERMES_HTTP_METRICS_REQUIRE_AUTH")
+            .ok()
+            .as_deref()
+            == Some("1");
         let rate_limit_per_minute = std::env::var("HERMES_HTTP_RATE_LIMIT_PER_MINUTE")
             .ok()
             .and_then(|s| s.parse().ok())

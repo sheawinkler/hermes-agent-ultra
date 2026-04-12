@@ -151,9 +151,8 @@ impl TerminalBackend for ModalBackend {
             timeout: Some(timeout_secs),
         };
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(timeout_secs + 10),
-            async {
+        let result =
+            tokio::time::timeout(std::time::Duration::from_secs(timeout_secs + 10), async {
                 let resp = self
                     .request(reqwest::Method::POST, &url)
                     .json(&body)
@@ -170,19 +169,17 @@ impl TerminalBackend for ModalBackend {
                     )));
                 }
 
-                let data: ModalExecuteResponse = resp
-                    .json()
-                    .await
-                    .map_err(|e| AgentError::Io(format!("Failed to parse Modal response: {}", e)))?;
+                let data: ModalExecuteResponse = resp.json().await.map_err(|e| {
+                    AgentError::Io(format!("Failed to parse Modal response: {}", e))
+                })?;
 
                 Ok(CommandOutput {
                     exit_code: data.exit_code,
                     stdout: self.truncate_output(data.stdout),
                     stderr: self.truncate_output(data.stderr),
                 })
-            },
-        )
-        .await;
+            })
+            .await;
 
         match result {
             Ok(Ok(output)) => Ok(output),

@@ -533,7 +533,12 @@ impl DiscordEmbed {
         self
     }
 
-    pub fn add_field(mut self, name: impl Into<String>, value: impl Into<String>, inline: bool) -> Self {
+    pub fn add_field(
+        mut self,
+        name: impl Into<String>,
+        value: impl Into<String>,
+        inline: bool,
+    ) -> Self {
         self.fields.push(EmbedField {
             name: name.into(),
             value: value.into(),
@@ -612,8 +617,7 @@ pub struct DiscordAdapter {
 impl DiscordAdapter {
     /// Create a new Discord adapter with the given configuration.
     pub fn new(config: DiscordConfig) -> Result<Self, GatewayError> {
-        let base = BasePlatformAdapter::new(&config.token)
-            .with_proxy(config.proxy.clone());
+        let base = BasePlatformAdapter::new(&config.token).with_proxy(config.proxy.clone());
 
         base.validate_token()?;
 
@@ -654,7 +658,8 @@ impl DiscordAdapter {
             let url = format!("{}/channels/{}/messages", DISCORD_API_BASE, channel_id);
             let body = serde_json::json!({ "content": chunk });
 
-            let resp = self.client
+            let resp = self
+                .client
                 .post(&url)
                 .header("Authorization", self.auth_header())
                 .header("Content-Type", "application/json")
@@ -666,14 +671,14 @@ impl DiscordAdapter {
             if !resp.status().is_success() {
                 let text = resp.text().await.unwrap_or_default();
                 return Err(GatewayError::SendFailed(format!(
-                    "Discord API error: {}", text
+                    "Discord API error: {}",
+                    text
                 )));
             }
 
-            let msg: DiscordMessage = resp
-                .json()
-                .await
-                .map_err(|e| GatewayError::SendFailed(format!("Failed to parse Discord response: {}", e)))?;
+            let msg: DiscordMessage = resp.json().await.map_err(|e| {
+                GatewayError::SendFailed(format!("Failed to parse Discord response: {}", e))
+            })?;
 
             message_ids.push(msg.id);
         }
@@ -697,7 +702,8 @@ impl DiscordAdapter {
             "content": &content[..content.len().min(MAX_MESSAGE_LENGTH)],
         });
 
-        let resp = self.client
+        let resp = self
+            .client
             .patch(&url)
             .header("Authorization", self.auth_header())
             .header("Content-Type", "application/json")
@@ -709,7 +715,8 @@ impl DiscordAdapter {
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
             return Err(GatewayError::SendFailed(format!(
-                "Discord edit API error: {}", text
+                "Discord edit API error: {}",
+                text
             )));
         }
 
@@ -734,7 +741,8 @@ impl DiscordAdapter {
             body["content"] = serde_json::Value::String(text.to_string());
         }
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(&url)
             .header("Authorization", self.auth_header())
             .header("Content-Type", "application/json")
@@ -746,14 +754,14 @@ impl DiscordAdapter {
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
             return Err(GatewayError::SendFailed(format!(
-                "Discord embed API error: {}", text
+                "Discord embed API error: {}",
+                text
             )));
         }
 
-        let msg: DiscordMessage = resp
-            .json()
-            .await
-            .map_err(|e| GatewayError::SendFailed(format!("Failed to parse Discord response: {}", e)))?;
+        let msg: DiscordMessage = resp.json().await.map_err(|e| {
+            GatewayError::SendFailed(format!("Failed to parse Discord response: {}", e))
+        })?;
 
         Ok(msg.id)
     }
@@ -771,9 +779,9 @@ impl DiscordAdapter {
     ) -> Result<String, GatewayError> {
         let url = format!("{}/channels/{}/messages", DISCORD_API_BASE, channel_id);
 
-        let file_bytes = tokio::fs::read(file_path)
-            .await
-            .map_err(|e| GatewayError::SendFailed(format!("Failed to read file {}: {}", file_path, e)))?;
+        let file_bytes = tokio::fs::read(file_path).await.map_err(|e| {
+            GatewayError::SendFailed(format!("Failed to read file {}: {}", file_path, e))
+        })?;
 
         let file_name = std::path::Path::new(file_path)
             .file_name()
@@ -781,18 +789,17 @@ impl DiscordAdapter {
             .unwrap_or("file")
             .to_string();
 
-        let part = reqwest::multipart::Part::bytes(file_bytes)
-            .file_name(file_name);
+        let part = reqwest::multipart::Part::bytes(file_bytes).file_name(file_name);
 
-        let mut form = reqwest::multipart::Form::new()
-            .part("files[0]", part);
+        let mut form = reqwest::multipart::Form::new().part("files[0]", part);
 
         if let Some(cap) = caption {
             let payload = serde_json::json!({ "content": cap });
             form = form.text("payload_json", payload.to_string());
         }
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(&url)
             .header("Authorization", self.auth_header())
             .multipart(form)
@@ -803,14 +810,14 @@ impl DiscordAdapter {
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
             return Err(GatewayError::SendFailed(format!(
-                "Discord file upload API error: {}", text
+                "Discord file upload API error: {}",
+                text
             )));
         }
 
-        let msg: DiscordMessage = resp
-            .json()
-            .await
-            .map_err(|e| GatewayError::SendFailed(format!("Failed to parse Discord response: {}", e)))?;
+        let msg: DiscordMessage = resp.json().await.map_err(|e| {
+            GatewayError::SendFailed(format!("Failed to parse Discord response: {}", e))
+        })?;
 
         Ok(msg.id)
     }
@@ -834,7 +841,8 @@ impl DiscordAdapter {
             DISCORD_API_BASE, channel_id, message_id, emoji
         );
 
-        let resp = self.client
+        let resp = self
+            .client
             .put(&url)
             .header("Authorization", self.auth_header())
             .header("Content-Length", "0")
@@ -845,7 +853,8 @@ impl DiscordAdapter {
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
             return Err(GatewayError::SendFailed(format!(
-                "Discord add_reaction API error: {}", text
+                "Discord add_reaction API error: {}",
+                text
             )));
         }
 
@@ -864,17 +873,21 @@ impl DiscordAdapter {
             DISCORD_API_BASE, channel_id, message_id, emoji
         );
 
-        let resp = self.client
+        let resp = self
+            .client
             .delete(&url)
             .header("Authorization", self.auth_header())
             .send()
             .await
-            .map_err(|e| GatewayError::SendFailed(format!("Discord remove_reaction failed: {}", e)))?;
+            .map_err(|e| {
+                GatewayError::SendFailed(format!("Discord remove_reaction failed: {}", e))
+            })?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
             return Err(GatewayError::SendFailed(format!(
-                "Discord remove_reaction API error: {}", text
+                "Discord remove_reaction API error: {}",
+                text
             )));
         }
 
@@ -903,26 +916,29 @@ impl DiscordAdapter {
             body["auto_archive_duration"] = serde_json::Value::Number(dur.into());
         }
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(&url)
             .header("Authorization", self.auth_header())
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
             .await
-            .map_err(|e| GatewayError::SendFailed(format!("Discord create_thread failed: {}", e)))?;
+            .map_err(|e| {
+                GatewayError::SendFailed(format!("Discord create_thread failed: {}", e))
+            })?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
             return Err(GatewayError::SendFailed(format!(
-                "Discord create_thread API error: {}", text
+                "Discord create_thread API error: {}",
+                text
             )));
         }
 
-        let thread: DiscordThread = resp
-            .json()
-            .await
-            .map_err(|e| GatewayError::SendFailed(format!("Failed to parse thread response: {}", e)))?;
+        let thread: DiscordThread = resp.json().await.map_err(|e| {
+            GatewayError::SendFailed(format!("Failed to parse thread response: {}", e))
+        })?;
 
         Ok(thread)
     }
@@ -939,30 +955,29 @@ impl DiscordAdapter {
         &self,
         commands: &[SlashCommand],
     ) -> Result<(), GatewayError> {
-        let app_id = self
-            .config
-            .application_id
-            .as_deref()
-            .ok_or_else(|| GatewayError::ConfigError("application_id required for slash commands".into()))?;
+        let app_id = self.config.application_id.as_deref().ok_or_else(|| {
+            GatewayError::ConfigError("application_id required for slash commands".into())
+        })?;
 
-        let url = format!(
-            "{}/applications/{}/commands",
-            DISCORD_API_BASE, app_id
-        );
+        let url = format!("{}/applications/{}/commands", DISCORD_API_BASE, app_id);
 
-        let resp = self.client
+        let resp = self
+            .client
             .put(&url)
             .header("Authorization", self.auth_header())
             .header("Content-Type", "application/json")
             .json(commands)
             .send()
             .await
-            .map_err(|e| GatewayError::SendFailed(format!("Discord register_commands failed: {}", e)))?;
+            .map_err(|e| {
+                GatewayError::SendFailed(format!("Discord register_commands failed: {}", e))
+            })?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
             return Err(GatewayError::SendFailed(format!(
-                "Discord register_commands API error: {}", text
+                "Discord register_commands API error: {}",
+                text
             )));
         }
 
@@ -977,34 +992,40 @@ impl DiscordAdapter {
         guild_id: &str,
         commands: &[SlashCommand],
     ) -> Result<(), GatewayError> {
-        let app_id = self
-            .config
-            .application_id
-            .as_deref()
-            .ok_or_else(|| GatewayError::ConfigError("application_id required for slash commands".into()))?;
+        let app_id = self.config.application_id.as_deref().ok_or_else(|| {
+            GatewayError::ConfigError("application_id required for slash commands".into())
+        })?;
 
         let url = format!(
             "{}/applications/{}/guilds/{}/commands",
             DISCORD_API_BASE, app_id, guild_id
         );
 
-        let resp = self.client
+        let resp = self
+            .client
             .put(&url)
             .header("Authorization", self.auth_header())
             .header("Content-Type", "application/json")
             .json(commands)
             .send()
             .await
-            .map_err(|e| GatewayError::SendFailed(format!("Discord register_guild_commands failed: {}", e)))?;
+            .map_err(|e| {
+                GatewayError::SendFailed(format!("Discord register_guild_commands failed: {}", e))
+            })?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
             return Err(GatewayError::SendFailed(format!(
-                "Discord register_guild_commands API error: {}", text
+                "Discord register_guild_commands API error: {}",
+                text
             )));
         }
 
-        info!("registered {} guild slash commands for {}", commands.len(), guild_id);
+        info!(
+            "registered {} guild slash commands for {}",
+            commands.len(),
+            guild_id
+        );
         Ok(())
     }
 
@@ -1029,19 +1050,23 @@ impl DiscordAdapter {
             "data": { "content": content }
         });
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(&url)
             .header("Authorization", self.auth_header())
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
             .await
-            .map_err(|e| GatewayError::SendFailed(format!("Discord interaction response failed: {}", e)))?;
+            .map_err(|e| {
+                GatewayError::SendFailed(format!("Discord interaction response failed: {}", e))
+            })?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
             return Err(GatewayError::SendFailed(format!(
-                "Discord interaction response API error: {}", text
+                "Discord interaction response API error: {}",
+                text
             )));
         }
 
@@ -1063,19 +1088,23 @@ impl DiscordAdapter {
             "type": 5, // DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE
         });
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(&url)
             .header("Authorization", self.auth_header())
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
             .await
-            .map_err(|e| GatewayError::SendFailed(format!("Discord defer interaction failed: {}", e)))?;
+            .map_err(|e| {
+                GatewayError::SendFailed(format!("Discord defer interaction failed: {}", e))
+            })?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
             return Err(GatewayError::SendFailed(format!(
-                "Discord defer interaction API error: {}", text
+                "Discord defer interaction API error: {}",
+                text
             )));
         }
 
@@ -1090,15 +1119,18 @@ impl DiscordAdapter {
     pub fn build_identify_payload(&self) -> GatewayPayload {
         GatewayPayload {
             op: opcodes::IDENTIFY,
-            d: Some(serde_json::to_value(IdentifyData {
-                token: self.config.token.clone(),
-                intents: self.config.intents,
-                properties: IdentifyProperties {
-                    os: "linux".into(),
-                    browser: "hermes-agent".into(),
-                    device: "hermes-agent".into(),
-                },
-            }).unwrap()),
+            d: Some(
+                serde_json::to_value(IdentifyData {
+                    token: self.config.token.clone(),
+                    intents: self.config.intents,
+                    properties: IdentifyProperties {
+                        os: "linux".into(),
+                        browser: "hermes-agent".into(),
+                        device: "hermes-agent".into(),
+                    },
+                })
+                .unwrap(),
+            ),
             s: None,
             t: None,
         }
@@ -1118,11 +1150,14 @@ impl DiscordAdapter {
     pub fn build_resume_payload(&self, session_id: &str, seq: u64) -> GatewayPayload {
         GatewayPayload {
             op: opcodes::RESUME,
-            d: Some(serde_json::to_value(ResumeData {
-                token: self.config.token.clone(),
-                session_id: session_id.to_string(),
-                seq,
-            }).unwrap()),
+            d: Some(
+                serde_json::to_value(ResumeData {
+                    token: self.config.token.clone(),
+                    session_id: session_id.to_string(),
+                    seq,
+                })
+                .unwrap(),
+            ),
             s: None,
             t: None,
         }
@@ -1136,14 +1171,21 @@ impl DiscordAdapter {
     pub fn parse_message_create(data: &serde_json::Value) -> Option<IncomingDiscordMessage> {
         let channel_id = data.get("channel_id")?.as_str()?.to_string();
         let message_id = data.get("id")?.as_str()?.to_string();
-        let content = data.get("content")
+        let content = data
+            .get("content")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
 
         let author = data.get("author");
-        let user_id = author.and_then(|a| a.get("id")).and_then(|v| v.as_str()).map(String::from);
-        let username = author.and_then(|a| a.get("username")).and_then(|v| v.as_str()).map(String::from);
+        let user_id = author
+            .and_then(|a| a.get("id"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let username = author
+            .and_then(|a| a.get("username"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
         let is_bot = author
             .and_then(|a| a.get("bot"))
             .and_then(|v| v.as_bool())
@@ -1164,13 +1206,19 @@ impl DiscordAdapter {
         let channel_id = data.get("channel_id")?.as_str()?.to_string();
         let message_id = data.get("id")?.as_str()?.to_string();
 
-        let content = data.get("content").and_then(|v| v.as_str()).map(String::from);
+        let content = data
+            .get("content")
+            .and_then(|v| v.as_str())
+            .map(String::from);
         let author_id = data
             .get("author")
             .and_then(|a| a.get("id"))
             .and_then(|v| v.as_str())
             .map(String::from);
-        let guild_id = data.get("guild_id").and_then(|v| v.as_str()).map(String::from);
+        let guild_id = data
+            .get("guild_id")
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
         Some(MessageUpdateEvent {
             channel_id,
@@ -1188,8 +1236,14 @@ impl DiscordAdapter {
         let interaction_type = data.get("type")?.as_u64()? as u8;
         let token = data.get("token")?.as_str()?.to_string();
 
-        let channel_id = data.get("channel_id").and_then(|v| v.as_str()).map(String::from);
-        let guild_id = data.get("guild_id").and_then(|v| v.as_str()).map(String::from);
+        let channel_id = data
+            .get("channel_id")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let guild_id = data
+            .get("guild_id")
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
         // User ID can be in `member.user.id` (guild) or `user.id` (DM).
         let user_id = data
@@ -1198,7 +1252,9 @@ impl DiscordAdapter {
             .and_then(|u| u.get("id"))
             .and_then(|v| v.as_str())
             .or_else(|| {
-                data.get("user").and_then(|u| u.get("id")).and_then(|v| v.as_str())
+                data.get("user")
+                    .and_then(|u| u.get("id"))
+                    .and_then(|v| v.as_str())
             })
             .map(String::from);
 
@@ -1241,11 +1297,20 @@ impl DiscordAdapter {
         let channel_id = data.get("channel_id")?.as_str()?.to_string();
         let message_id = data.get("message_id")?.as_str()?.to_string();
 
-        let guild_id = data.get("guild_id").and_then(|v| v.as_str()).map(String::from);
+        let guild_id = data
+            .get("guild_id")
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
         let emoji = data.get("emoji");
-        let emoji_name = emoji.and_then(|e| e.get("name")).and_then(|v| v.as_str()).map(String::from);
-        let emoji_id = emoji.and_then(|e| e.get("id")).and_then(|v| v.as_str()).map(String::from);
+        let emoji_name = emoji
+            .and_then(|e| e.get("name"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let emoji_id = emoji
+            .and_then(|e| e.get("id"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
         Some(ReactionEvent {
             user_id,
@@ -1262,14 +1327,29 @@ impl DiscordAdapter {
         let user_id = data.get("user_id")?.as_str()?.to_string();
         let session_id = data.get("session_id")?.as_str()?.to_string();
 
-        let guild_id = data.get("guild_id").and_then(|v| v.as_str()).map(String::from);
-        let channel_id = data.get("channel_id").and_then(|v| v.as_str()).map(String::from);
+        let guild_id = data
+            .get("guild_id")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let channel_id = data
+            .get("channel_id")
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
         let deaf = data.get("deaf").and_then(|v| v.as_bool()).unwrap_or(false);
         let mute = data.get("mute").and_then(|v| v.as_bool()).unwrap_or(false);
-        let self_deaf = data.get("self_deaf").and_then(|v| v.as_bool()).unwrap_or(false);
-        let self_mute = data.get("self_mute").and_then(|v| v.as_bool()).unwrap_or(false);
-        let suppress = data.get("suppress").and_then(|v| v.as_bool()).unwrap_or(false);
+        let self_deaf = data
+            .get("self_deaf")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let self_mute = data
+            .get("self_mute")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let suppress = data
+            .get("suppress")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         Some(VoiceState {
             guild_id,
@@ -1289,12 +1369,8 @@ impl DiscordAdapter {
     /// Returns a [`DispatchEvent`] for known event types, or `None`.
     pub fn parse_dispatch(event_name: &str, data: &serde_json::Value) -> Option<DispatchEvent> {
         match event_name {
-            "MESSAGE_CREATE" => {
-                Self::parse_message_create(data).map(DispatchEvent::MessageCreate)
-            }
-            "MESSAGE_UPDATE" => {
-                Self::parse_message_update(data).map(DispatchEvent::MessageUpdate)
-            }
+            "MESSAGE_CREATE" => Self::parse_message_create(data).map(DispatchEvent::MessageCreate),
+            "MESSAGE_UPDATE" => Self::parse_message_update(data).map(DispatchEvent::MessageUpdate),
             "INTERACTION_CREATE" => {
                 Self::parse_interaction_create(data).map(DispatchEvent::InteractionCreate)
             }
@@ -1638,7 +1714,10 @@ mod tests {
 
         let actions = session.handle_gateway_event(&payload);
         assert_eq!(session.session_id, Some("abc123".into()));
-        assert_eq!(session.resume_gateway_url, Some("wss://resume.discord.gg".into()));
+        assert_eq!(
+            session.resume_gateway_url,
+            Some("wss://resume.discord.gg".into())
+        );
         assert_eq!(session.sequence, Some(1));
         assert!(session.identified);
 
@@ -1764,7 +1843,10 @@ mod tests {
         assert_eq!(interaction.user_id, Some("u1".into()));
         assert_eq!(interaction.command_options.len(), 2);
         assert_eq!(interaction.command_options[0].name, "target");
-        assert_eq!(interaction.command_options[0].value, serde_json::json!("world"));
+        assert_eq!(
+            interaction.command_options[0].value,
+            serde_json::json!("world")
+        );
         assert_eq!(interaction.command_options[1].name, "count");
         assert_eq!(interaction.command_options[1].value, serde_json::json!(3));
     }
@@ -1975,9 +2057,7 @@ mod tests {
 
     #[test]
     fn embed_serialization() {
-        let embed = DiscordEmbed::new()
-            .with_title("Hello")
-            .with_color(0x00FF00);
+        let embed = DiscordEmbed::new().with_title("Hello").with_color(0x00FF00);
 
         let json = serde_json::to_value(&embed).unwrap();
         assert_eq!(json["title"], "Hello");

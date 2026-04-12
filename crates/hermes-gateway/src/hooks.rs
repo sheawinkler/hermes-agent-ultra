@@ -7,19 +7,40 @@
 //! - on_session_start/end: Session lifecycle
 //! - on_tool_call: Before/after tool execution
 
-use std::sync::Arc;
 use hermes_core::Message;
+use std::sync::Arc;
 
 /// Hook event types.
 #[derive(Debug, Clone)]
 pub enum HookEvent {
-    PreMessage { message: Message, session_id: String },
-    PostMessage { response: Message, session_id: String },
-    OnError { error: String, session_id: String },
-    SessionStart { session_id: String },
-    SessionEnd { session_id: String },
-    PreToolCall { tool_name: String, arguments: String, session_id: String },
-    PostToolCall { tool_name: String, result: String, session_id: String },
+    PreMessage {
+        message: Message,
+        session_id: String,
+    },
+    PostMessage {
+        response: Message,
+        session_id: String,
+    },
+    OnError {
+        error: String,
+        session_id: String,
+    },
+    SessionStart {
+        session_id: String,
+    },
+    SessionEnd {
+        session_id: String,
+    },
+    PreToolCall {
+        tool_name: String,
+        arguments: String,
+        session_id: String,
+    },
+    PostToolCall {
+        tool_name: String,
+        result: String,
+        session_id: String,
+    },
 }
 
 /// Trait for gateway hook handlers.
@@ -36,7 +57,9 @@ pub struct HooksManager {
 
 impl HooksManager {
     pub fn new() -> Self {
-        Self { handlers: Vec::new() }
+        Self {
+            handlers: Vec::new(),
+        }
     }
 
     pub fn register(&mut self, handler: Arc<dyn HookHandler>) {

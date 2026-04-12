@@ -8,8 +8,8 @@
 use async_trait::async_trait;
 use serde_json::json;
 
-use hermes_core::ToolError;
 use crate::tools::delegation::DelegationBackend;
+use hermes_core::ToolError;
 
 /// Delegation backend that returns a signal for the agent loop to spawn a sub-agent.
 /// The actual spawning is handled by the orchestration layer (hermes-agent).
@@ -44,7 +44,8 @@ impl DelegationBackend for SignalDelegationBackend {
             "toolset": toolset,
             "model": model,
             "status": "pending",
-        }).to_string())
+        })
+        .to_string())
     }
 }
 
@@ -85,10 +86,9 @@ impl DelegationBackend for RpcDelegationBackend {
             .send()
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("RPC delegation failed: {}", e)))?;
-        let text = resp
-            .text()
-            .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("Failed reading RPC response: {}", e)))?;
+        let text = resp.text().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed reading RPC response: {}", e))
+        })?;
         Ok(text)
     }
 }

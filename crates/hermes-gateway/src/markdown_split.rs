@@ -182,7 +182,9 @@ fn close_and_reopen_formatting(text: &str) -> (String, String) {
 
 /// Escape special characters for Telegram MarkdownV2 format.
 pub fn to_telegram_markdown_v2(text: &str) -> String {
-    let special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!'];
+    let special_chars = [
+        '_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!',
+    ];
     let mut result = String::with_capacity(text.len() * 2);
 
     let mut in_code_block = false;
@@ -282,15 +284,19 @@ pub fn strip_markdown(text: &str) -> String {
     let mut result = text.to_string();
 
     // Remove code blocks
-    let code_block_re = regex::Regex::new(r"```[\s\S]*?```").unwrap_or_else(|_| {
-        regex::Regex::new(r"$^").unwrap()
-    });
-    result = code_block_re.replace_all(&result, |caps: &regex::Captures| {
-        let block = caps[0].trim_start_matches("```").trim_end_matches("```");
-        // Remove language identifier from first line
-        let content = block.split_once('\n').map(|(_, rest)| rest).unwrap_or(block);
-        content.to_string()
-    }).to_string();
+    let code_block_re =
+        regex::Regex::new(r"```[\s\S]*?```").unwrap_or_else(|_| regex::Regex::new(r"$^").unwrap());
+    result = code_block_re
+        .replace_all(&result, |caps: &regex::Captures| {
+            let block = caps[0].trim_start_matches("```").trim_end_matches("```");
+            // Remove language identifier from first line
+            let content = block
+                .split_once('\n')
+                .map(|(_, rest)| rest)
+                .unwrap_or(block);
+            content.to_string()
+        })
+        .to_string();
 
     // Remove inline code backticks
     result = result.replace('`', "");
@@ -301,21 +307,18 @@ pub fn strip_markdown(text: &str) -> String {
     result = result.replace("~~", "");
 
     // Convert links: [text](url) → text (url)
-    let link_re = regex::Regex::new(r"\[([^\]]+)\]\(([^)]+)\)").unwrap_or_else(|_| {
-        regex::Regex::new(r"$^").unwrap()
-    });
+    let link_re = regex::Regex::new(r"\[([^\]]+)\]\(([^)]+)\)")
+        .unwrap_or_else(|_| regex::Regex::new(r"$^").unwrap());
     result = link_re.replace_all(&result, "$1 ($2)").to_string();
 
     // Remove heading markers
-    let heading_re = regex::Regex::new(r"(?m)^#{1,6}\s+").unwrap_or_else(|_| {
-        regex::Regex::new(r"$^").unwrap()
-    });
+    let heading_re =
+        regex::Regex::new(r"(?m)^#{1,6}\s+").unwrap_or_else(|_| regex::Regex::new(r"$^").unwrap());
     result = heading_re.replace_all(&result, "").to_string();
 
     // Remove image markers: ![alt](url) → alt
-    let img_re = regex::Regex::new(r"!\[([^\]]*)\]\([^)]+\)").unwrap_or_else(|_| {
-        regex::Regex::new(r"$^").unwrap()
-    });
+    let img_re = regex::Regex::new(r"!\[([^\]]*)\]\([^)]+\)")
+        .unwrap_or_else(|_| regex::Regex::new(r"$^").unwrap());
     result = img_re.replace_all(&result, "$1").to_string();
 
     result

@@ -207,10 +207,20 @@ pub struct InitializeResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContentBlock {
-    Text { text: String },
-    Image { url: String, #[serde(default)] alt: Option<String> },
-    Audio { url: String },
-    Resource { uri: String },
+    Text {
+        text: String,
+    },
+    Image {
+        url: String,
+        #[serde(default)]
+        alt: Option<String>,
+    },
+    Audio {
+        url: String,
+    },
+    Resource {
+        uri: String,
+    },
 }
 
 impl ContentBlock {
@@ -263,9 +273,7 @@ pub enum SessionUpdate {
         result: Option<String>,
     },
     /// Available slash commands updated.
-    AvailableCommandsUpdate {
-        commands: Vec<AvailableCommand>,
-    },
+    AvailableCommandsUpdate { commands: Vec<AvailableCommand> },
 }
 
 /// A slash command available in the session.

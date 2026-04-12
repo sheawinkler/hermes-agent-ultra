@@ -14,9 +14,9 @@ pub mod runner;
 pub mod scheduler;
 
 // Re-export primary types
+pub use cli_support::{cron_scheduler_for_data_dir, MinimalCronLlm};
+pub use completion::CronCompletionEvent;
 pub use job::{CronJob, DeliverConfig, DeliverTarget, JobStatus, ModelConfig};
 pub use persistence::{FileJobPersistence, JobPersistence, SqliteJobPersistence};
 pub use runner::CronRunner;
-pub use cli_support::{cron_scheduler_for_data_dir, MinimalCronLlm};
-pub use completion::CronCompletionEvent;
 pub use scheduler::{CronError, CronScheduler};

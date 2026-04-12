@@ -101,12 +101,21 @@ fn curses_checklist_inner(
 
         // Header
         execute!(stdout, cursor::MoveTo(0, 0))?;
-        write!(stdout, "\x1b[1;33m{}\x1b[0m", &title[..title.len().min(max_x)])?;
+        write!(
+            stdout,
+            "\x1b[1;33m{}\x1b[0m",
+            &title[..title.len().min(max_x)]
+        )?;
         execute!(stdout, cursor::MoveTo(0, 1))?;
-        write!(stdout, "\x1b[2m  ↑↓ navigate  SPACE toggle  ENTER confirm  ESC cancel\x1b[0m")?;
+        write!(
+            stdout,
+            "\x1b[2m  ↑↓ navigate  SPACE toggle  ENTER confirm  ESC cancel\x1b[0m"
+        )?;
 
         // Items
-        for (draw_i, i) in (scroll_offset..items.len().min(scroll_offset + visible_rows)).enumerate() {
+        for (draw_i, i) in
+            (scroll_offset..items.len().min(scroll_offset + visible_rows)).enumerate()
+        {
             let y = draw_i + 3;
             if y >= max_y.saturating_sub(footer_rows) {
                 break;
@@ -130,7 +139,11 @@ fn curses_checklist_inner(
             if !status_text.is_empty() {
                 let sx = max_x.saturating_sub(status_text.len() + 1);
                 execute!(stdout, cursor::MoveTo(sx as u16, (max_y - 1) as u16))?;
-                write!(stdout, "\x1b[2m{}\x1b[0m", &status_text[..status_text.len().min(max_x)])?;
+                write!(
+                    stdout,
+                    "\x1b[2m{}\x1b[0m",
+                    &status_text[..status_text.len().min(max_x)]
+                )?;
             }
         }
 
@@ -140,7 +153,11 @@ fn curses_checklist_inner(
         if let Ok(Event::Key(KeyEvent { code, .. })) = event::read() {
             match code {
                 KeyCode::Up | KeyCode::Char('k') => {
-                    cursor_pos = if cursor_pos == 0 { items.len() - 1 } else { cursor_pos - 1 };
+                    cursor_pos = if cursor_pos == 0 {
+                        items.len() - 1
+                    } else {
+                        cursor_pos - 1
+                    };
                 }
                 KeyCode::Down | KeyCode::Char('j') => {
                     cursor_pos = (cursor_pos + 1) % items.len();

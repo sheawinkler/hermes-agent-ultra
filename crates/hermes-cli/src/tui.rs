@@ -208,7 +208,10 @@ impl ToolOutputSection {
             let total_lines = self.output.lines().count();
             let mut text = lines.join("\n");
             if total_lines > self.preview_lines {
-                text.push_str(&format!("\n  ... ({} more lines, press Enter to expand)", total_lines - self.preview_lines));
+                text.push_str(&format!(
+                    "\n  ... ({} more lines, press Enter to expand)",
+                    total_lines - self.preview_lines
+                ));
             }
             text
         }
@@ -271,7 +274,9 @@ impl TuiState {
         let mods = key.modifiers;
         match key.code {
             // Ctrl+Enter or Alt+Enter → submit
-            KeyCode::Enter if mods.contains(KeyModifiers::CONTROL) || mods.contains(KeyModifiers::ALT) => {
+            KeyCode::Enter
+                if mods.contains(KeyModifiers::CONTROL) || mods.contains(KeyModifiers::ALT) =>
+            {
                 // Submit is handled by the caller checking for this combo
                 false
             }
@@ -323,7 +328,12 @@ impl TuiState {
                 if self.history_search_active {
                     self.history_search_query.push(c);
                     // Search through history
-                    if let Some(found) = app.input_history.iter().rev().find(|h| h.contains(&self.history_search_query)) {
+                    if let Some(found) = app
+                        .input_history
+                        .iter()
+                        .rev()
+                        .find(|h| h.contains(&self.history_search_query))
+                    {
                         self.input = found.clone();
                         self.cursor_position = self.input.len();
                     }
@@ -487,7 +497,10 @@ impl TuiState {
     /// Update auto-completion suggestions based on current input.
     fn update_completions(&mut self) {
         if self.input.starts_with('/') {
-            self.completions = commands::autocomplete(&self.input).into_iter().map(String::from).collect();
+            self.completions = commands::autocomplete(&self.input)
+                .into_iter()
+                .map(String::from)
+                .collect();
             self.completion_index = None;
         } else {
             self.completions.clear();
@@ -579,16 +592,20 @@ pub fn render(frame: &mut Frame, app: &App, state: &TuiState) {
 
     // Layout: messages (top), input (middle), completions (optional), status bar (bottom)
     let input_height = 3;
-    let completion_height = if state.completions.is_empty() { 0 } else { state.completions.len() as u16 + 2 };
+    let completion_height = if state.completions.is_empty() {
+        0
+    } else {
+        state.completions.len() as u16 + 2
+    };
     let status_height = 1;
 
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(5),                                    // messages
-            Constraint::Length(completion_height),                // completions
-            Constraint::Length(input_height),                     // input
-            Constraint::Length(status_height),                    // status
+            Constraint::Min(5),                    // messages
+            Constraint::Length(completion_height), // completions
+            Constraint::Length(input_height),      // input
+            Constraint::Length(status_height),     // status
         ])
         .split(size);
 
@@ -602,7 +619,12 @@ pub fn render(frame: &mut Frame, app: &App, state: &TuiState) {
 
     // --- Render completions ---
     if !state.completions.is_empty() {
-        render_completions(frame, &state.completions, state.completion_index, completions_area);
+        render_completions(
+            frame,
+            &state.completions,
+            state.completion_index,
+            completions_area,
+        );
     }
 
     // --- Render input area ---
@@ -716,8 +738,8 @@ fn render_completions(
         })
         .collect();
 
-    let paragraph = Paragraph::new(Text::from(items))
-        .block(Block::default().borders(Borders::NONE));
+    let paragraph =
+        Paragraph::new(Text::from(items)).block(Block::default().borders(Borders::NONE));
     frame.render_widget(paragraph, area);
 }
 
@@ -747,7 +769,10 @@ fn render_input(
             "Type a message (Enter=newline, Ctrl+Enter=send)...".to_string()
         }
     } else if state.history_search_active {
-        format!("(reverse-i-search)`{}': {}", state.history_search_query, state.input)
+        format!(
+            "(reverse-i-search)`{}': {}",
+            state.history_search_query, state.input
+        )
     } else {
         state.input.clone()
     };
@@ -760,14 +785,12 @@ fn render_input(
         String::new()
     };
 
-    let paragraph = Paragraph::new(Text::from(vec![
-        Line::from(vec![
-            Span::styled(mode_indicator, mode_style),
-            Span::styled(line_indicator, Style::default().fg(Color::DarkGray)),
-            Span::raw(" "),
-            Span::raw(input_text),
-        ]),
-    ]))
+    let paragraph = Paragraph::new(Text::from(vec![Line::from(vec![
+        Span::styled(mode_indicator, mode_style),
+        Span::styled(line_indicator, Style::default().fg(Color::DarkGray)),
+        Span::raw(" "),
+        Span::raw(input_text),
+    ])]))
     .block(Block::default().borders(Borders::BOTTOM))
     .wrap(Wrap { trim: false });
 
@@ -793,12 +816,7 @@ fn render_status(
 
     let status_text = format!(
         " {} {} │ Model: {} │ Session: {} │ Messages: {} │ {}",
-        processing_indicator,
-        state.mode,
-        model,
-        session,
-        msg_count,
-        state.status_message,
+        processing_indicator, state.mode, model, session, msg_count, state.status_message,
     );
 
     let status_bar = Paragraph::new(Line::from(Span::styled(
@@ -937,7 +955,8 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
     }
 
     // Restore terminal
-    tui.restore().map_err(|e| AgentError::Config(e.to_string()))?;
+    tui.restore()
+        .map_err(|e| AgentError::Config(e.to_string()))?;
 
     Ok(())
 }

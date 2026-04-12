@@ -99,11 +99,7 @@ impl Toolset {
     }
 
     /// Create a toolset with both tools and includes.
-    pub fn new_mixed(
-        name: impl Into<String>,
-        tools: Vec<String>,
-        includes: Vec<String>,
-    ) -> Self {
+    pub fn new_mixed(name: impl Into<String>, tools: Vec<String>, includes: Vec<String>) -> Self {
         Self {
             name: name.into(),
             tools,
@@ -137,31 +133,117 @@ impl ToolsetManager {
 
     /// Register all predefined toolsets.
     fn register_defaults(&mut self) {
-        self.register(Toolset::new("web", TOOLSET_WEB.iter().map(|s| s.to_string()).collect()));
-        self.register(Toolset::new("terminal", TOOLSET_TERMINAL.iter().map(|s| s.to_string()).collect()));
-        self.register(Toolset::new("file", TOOLSET_FILE.iter().map(|s| s.to_string()).collect()));
-        self.register(Toolset::new("browser", TOOLSET_BROWSER.iter().map(|s| s.to_string()).collect()));
-        self.register(Toolset::new("vision", TOOLSET_VISION.iter().map(|s| s.to_string()).collect()));
-        self.register(Toolset::new("image_gen", TOOLSET_IMAGE_GEN.iter().map(|s| s.to_string()).collect()));
-        self.register(Toolset::new("skills", TOOLSET_SKILLS.iter().map(|s| s.to_string()).collect()));
-        self.register(Toolset::new("memory", TOOLSET_MEMORY.iter().map(|s| s.to_string()).collect()));
-        self.register(Toolset::new("session_search", TOOLSET_SESSION_SEARCH.iter().map(|s| s.to_string()).collect()));
-        self.register(Toolset::new("todo", TOOLSET_TODO.iter().map(|s| s.to_string()).collect()));
-        self.register(Toolset::new("clarify", TOOLSET_CLARIFY.iter().map(|s| s.to_string()).collect()));
-        self.register(Toolset::new("code_execution", TOOLSET_CODE_EXECUTION.iter().map(|s| s.to_string()).collect()));
-        self.register(Toolset::new("delegation", TOOLSET_DELEGATION.iter().map(|s| s.to_string()).collect()));
-        self.register(Toolset::new("cronjob", TOOLSET_CRONJOB.iter().map(|s| s.to_string()).collect()));
-        self.register(Toolset::new("messaging", TOOLSET_MESSAGING.iter().map(|s| s.to_string()).collect()));
-        self.register(Toolset::new("homeassistant", TOOLSET_HOMEASSISTANT.iter().map(|s| s.to_string()).collect()));
+        self.register(Toolset::new(
+            "web",
+            TOOLSET_WEB.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "terminal",
+            TOOLSET_TERMINAL.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "file",
+            TOOLSET_FILE.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "browser",
+            TOOLSET_BROWSER.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "vision",
+            TOOLSET_VISION.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "image_gen",
+            TOOLSET_IMAGE_GEN.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "skills",
+            TOOLSET_SKILLS.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "memory",
+            TOOLSET_MEMORY.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "session_search",
+            TOOLSET_SESSION_SEARCH
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        ));
+        self.register(Toolset::new(
+            "todo",
+            TOOLSET_TODO.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "clarify",
+            TOOLSET_CLARIFY.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "code_execution",
+            TOOLSET_CODE_EXECUTION
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        ));
+        self.register(Toolset::new(
+            "delegation",
+            TOOLSET_DELEGATION.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "cronjob",
+            TOOLSET_CRONJOB.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "messaging",
+            TOOLSET_MESSAGING.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "homeassistant",
+            TOOLSET_HOMEASSISTANT
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        ));
 
         // Platform composite toolsets
         self.register(Toolset::with_includes(
             "hermes-cli",
-            vec!["web", "terminal", "file", "browser", "vision", "skills", "memory", "todo", "clarify", "code_execution", "delegation"].into_iter().map(String::from).collect(),
+            vec![
+                "web",
+                "terminal",
+                "file",
+                "browser",
+                "vision",
+                "skills",
+                "memory",
+                "todo",
+                "clarify",
+                "code_execution",
+                "delegation",
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect(),
         ));
         self.register(Toolset::with_includes(
             "hermes-telegram",
-            vec!["web", "terminal", "file", "browser", "vision", "skills", "memory", "todo", "clarify", "messaging"].into_iter().map(String::from).collect(),
+            vec![
+                "web",
+                "terminal",
+                "file",
+                "browser",
+                "vision",
+                "skills",
+                "memory",
+                "todo",
+                "clarify",
+                "messaging",
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect(),
         ));
     }
 
@@ -213,9 +295,10 @@ impl ToolsetManager {
         }
         visited.insert(name.to_string());
 
-        let toolset = self.toolsets.get(name).ok_or_else(|| {
-            ToolsetError::NotFound(name.to_string())
-        })?;
+        let toolset = self
+            .toolsets
+            .get(name)
+            .ok_or_else(|| ToolsetError::NotFound(name.to_string()))?;
 
         let mut resolved = HashSet::new();
 
@@ -273,9 +356,10 @@ impl ToolsetManager {
         }
         visited.insert(name.to_string());
 
-        let toolset = self.toolsets.get(name).ok_or_else(|| {
-            ToolsetError::NotFound(name.to_string())
-        })?;
+        let toolset = self
+            .toolsets
+            .get(name)
+            .ok_or_else(|| ToolsetError::NotFound(name.to_string()))?;
 
         let mut resolved = HashSet::new();
         for tool in &toolset.tools {
@@ -366,8 +450,14 @@ mod tests {
         let registry = empty_registry();
         let mut manager = ToolsetManager::new(registry.clone());
         // Create a cycle: a -> b -> a
-        manager.register(Toolset::with_includes("a_cycle", vec!["b_cycle".to_string()]));
-        manager.register(Toolset::with_includes("b_cycle", vec!["a_cycle".to_string()]));
+        manager.register(Toolset::with_includes(
+            "a_cycle",
+            vec!["b_cycle".to_string()],
+        ));
+        manager.register(Toolset::with_includes(
+            "b_cycle",
+            vec!["a_cycle".to_string()],
+        ));
         let result = manager.resolve_toolset("a_cycle");
         assert!(result.is_err());
     }
@@ -382,7 +472,10 @@ mod tests {
     #[test]
     fn test_custom_toolset() {
         let mut manager = ToolsetManager::new(empty_registry());
-        manager.create_custom_toolset("my_custom", vec!["tool_a".to_string(), "tool_b".to_string()]);
+        manager.create_custom_toolset(
+            "my_custom",
+            vec!["tool_a".to_string(), "tool_b".to_string()],
+        );
         let tools = manager.resolve_toolset_unfiltered("my_custom").unwrap();
         assert_eq!(tools.len(), 2);
     }

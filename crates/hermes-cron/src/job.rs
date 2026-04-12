@@ -196,7 +196,8 @@ impl CronJob {
         }
 
         // Validate prompt or script
-        if self.prompt.trim().is_empty() && self.script.as_ref().map_or(true, |s| s.trim().is_empty())
+        if self.prompt.trim().is_empty()
+            && self.script.as_ref().map_or(true, |s| s.trim().is_empty())
         {
             return Err("Either prompt or script must be non-empty".to_string());
         }
@@ -224,10 +225,7 @@ impl CronJob {
     fn parse_next_run(schedule: &str, after: DateTime<Utc>) -> Option<DateTime<Utc>> {
         let normalized = Self::normalize_cron_expr(schedule);
         match normalized.parse::<Schedule>() {
-            Ok(sched) => sched
-                .after(&after)
-                .next()
-                .map(|dt: DateTime<Utc>| dt),
+            Ok(sched) => sched.after(&after).next().map(|dt: DateTime<Utc>| dt),
             Err(e) => {
                 tracing::warn!("Failed to parse cron expression '{}': {}", normalized, e);
                 None
@@ -338,8 +336,11 @@ mod tests {
         let next = job.next_run.unwrap();
         // next_run should be within the next 2 minutes
         let diff = next - Utc::now();
-        assert!(diff.num_seconds() >= 0 && diff.num_seconds() <= 120,
-            "next_run should be within the next 2 minutes, got {}s", diff.num_seconds());
+        assert!(
+            diff.num_seconds() >= 0 && diff.num_seconds() <= 120,
+            "next_run should be within the next 2 minutes, got {}s",
+            diff.num_seconds()
+        );
     }
 
     #[test]

@@ -59,46 +59,63 @@ pub struct SlackConfig {
 #[derive(Debug, Deserialize)]
 pub struct SlackResponse {
     pub ok: bool,
-    #[serde(default)] pub error: Option<String>,
-    #[serde(default)] pub ts: Option<String>,
-    #[serde(default)] pub channel: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub ts: Option<String>,
+    #[serde(default)]
+    pub channel: Option<String>,
 }
 
 /// Response for `users.info`.
 #[derive(Debug, Deserialize)]
 pub struct UserInfoResponse {
     pub ok: bool,
-    #[serde(default)] pub error: Option<String>,
-    #[serde(default)] pub user: Option<SlackUser>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub user: Option<SlackUser>,
 }
 
 /// Slack user profile data.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SlackUser {
     pub id: String,
-    #[serde(default)] pub name: Option<String>,
-    #[serde(default)] pub real_name: Option<String>,
-    #[serde(default)] pub is_bot: bool,
-    #[serde(default)] pub is_admin: bool,
-    #[serde(default)] pub tz: Option<String>,
-    #[serde(default)] pub profile: Option<SlackUserProfile>,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub real_name: Option<String>,
+    #[serde(default)]
+    pub is_bot: bool,
+    #[serde(default)]
+    pub is_admin: bool,
+    #[serde(default)]
+    pub tz: Option<String>,
+    #[serde(default)]
+    pub profile: Option<SlackUserProfile>,
 }
 
 /// Subset of `users.info` profile fields.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct SlackUserProfile {
-    #[serde(default)] pub display_name: Option<String>,
-    #[serde(default)] pub email: Option<String>,
-    #[serde(default)] pub image_72: Option<String>,
+    #[serde(default)]
+    pub display_name: Option<String>,
+    #[serde(default)]
+    pub email: Option<String>,
+    #[serde(default)]
+    pub image_72: Option<String>,
 }
 
 /// Response for `chat.getPermalink`.
 #[derive(Debug, Deserialize)]
 pub struct PermalinkResponse {
     pub ok: bool,
-    #[serde(default)] pub error: Option<String>,
-    #[serde(default)] pub permalink: Option<String>,
-    #[serde(default)] pub channel: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+    #[serde(default)]
+    pub permalink: Option<String>,
+    #[serde(default)]
+    pub channel: Option<String>,
 }
 
 /// Slack Socket Mode hello event.
@@ -111,28 +128,40 @@ pub struct SocketModeHello {
 /// Slack Socket Mode envelope.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SocketModeEnvelope {
-    #[serde(rename = "type")] pub envelope_type: String,
-    #[serde(default)] pub envelope_id: Option<String>,
-    #[serde(default)] pub payload: Option<serde_json::Value>,
+    #[serde(rename = "type")]
+    pub envelope_type: String,
+    #[serde(default)]
+    pub envelope_id: Option<String>,
+    #[serde(default)]
+    pub payload: Option<serde_json::Value>,
 }
 
 /// Slack event payload (from Events API / Socket Mode).
 #[derive(Debug, Clone, Deserialize)]
 pub struct SlackEvent {
-    #[serde(rename = "type")] pub event_type: String,
-    #[serde(default)] pub text: Option<String>,
-    #[serde(default)] pub channel: Option<String>,
-    #[serde(default)] pub user: Option<String>,
-    #[serde(default)] pub ts: Option<String>,
-    #[serde(default)] pub thread_ts: Option<String>,
-    #[serde(default)] pub bot_id: Option<String>,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub channel: Option<String>,
+    #[serde(default)]
+    pub user: Option<String>,
+    #[serde(default)]
+    pub ts: Option<String>,
+    #[serde(default)]
+    pub thread_ts: Option<String>,
+    #[serde(default)]
+    pub bot_id: Option<String>,
 }
 
 /// Incoming message parsed from a Slack event.
 #[derive(Debug, Clone)]
 pub struct IncomingSlackMessage {
-    pub channel: String,  pub user_id: Option<String>,
-    pub text: String,     pub ts: String,
+    pub channel: String,
+    pub user_id: Option<String>,
+    pub text: String,
+    pub ts: String,
     pub thread_ts: Option<String>,
     pub is_bot: bool,
 }
@@ -170,20 +199,31 @@ pub struct SocketModeSession {
 
 impl SocketModeSession {
     pub fn new() -> Self {
-        Self { state: SocketModeConnectionState::Disconnected, envelopes_acked: 0 }
+        Self {
+            state: SocketModeConnectionState::Disconnected,
+            envelopes_acked: 0,
+        }
     }
 
-    pub fn state(&self) -> SocketModeConnectionState { self.state }
-    pub fn envelopes_acked(&self) -> u64 { self.envelopes_acked }
+    pub fn state(&self) -> SocketModeConnectionState {
+        self.state
+    }
+    pub fn envelopes_acked(&self) -> u64 {
+        self.envelopes_acked
+    }
 
-    pub fn mark_connecting(&mut self) { self.state = SocketModeConnectionState::Connecting; }
+    pub fn mark_connecting(&mut self) {
+        self.state = SocketModeConnectionState::Connecting;
+    }
 
     pub fn mark_connected(&mut self) {
         self.state = SocketModeConnectionState::Connected;
         debug!("Socket Mode session connected");
     }
 
-    pub fn mark_closing(&mut self) { self.state = SocketModeConnectionState::Closing; }
+    pub fn mark_closing(&mut self) {
+        self.state = SocketModeConnectionState::Closing;
+    }
 
     /// Build the JSON ack payload for a Socket Mode envelope.
     pub fn build_ack_payload(envelope_id: &str) -> String {
@@ -232,7 +272,9 @@ impl SocketModeSession {
 }
 
 impl Default for SocketModeSession {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -242,34 +284,48 @@ impl Default for SocketModeSession {
 /// Parsed interactive payload from `block_actions`, `view_submission`, etc.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InteractivePayload {
-    #[serde(rename = "type")] pub payload_type: String,
-    #[serde(default)] pub trigger_id: Option<String>,
-    #[serde(default)] pub actions: Vec<InteractiveAction>,
-    #[serde(default)] pub user: Option<InteractiveUser>,
-    #[serde(default)] pub channel: Option<InteractiveChannel>,
-    #[serde(default)] pub message: Option<serde_json::Value>,
+    #[serde(rename = "type")]
+    pub payload_type: String,
+    #[serde(default)]
+    pub trigger_id: Option<String>,
+    #[serde(default)]
+    pub actions: Vec<InteractiveAction>,
+    #[serde(default)]
+    pub user: Option<InteractiveUser>,
+    #[serde(default)]
+    pub channel: Option<InteractiveChannel>,
+    #[serde(default)]
+    pub message: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InteractiveAction {
-    #[serde(default)] pub action_id: Option<String>,
-    #[serde(default)] pub block_id: Option<String>,
-    #[serde(rename = "type", default)] pub action_type: Option<String>,
-    #[serde(default)] pub value: Option<String>,
-    #[serde(default)] pub selected_option: Option<serde_json::Value>,
+    #[serde(default)]
+    pub action_id: Option<String>,
+    #[serde(default)]
+    pub block_id: Option<String>,
+    #[serde(rename = "type", default)]
+    pub action_type: Option<String>,
+    #[serde(default)]
+    pub value: Option<String>,
+    #[serde(default)]
+    pub selected_option: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InteractiveUser {
     pub id: String,
-    #[serde(default)] pub username: Option<String>,
-    #[serde(default)] pub name: Option<String>,
+    #[serde(default)]
+    pub username: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InteractiveChannel {
     pub id: String,
-    #[serde(default)] pub name: Option<String>,
+    #[serde(default)]
+    pub name: Option<String>,
 }
 
 impl InteractivePayload {
@@ -282,11 +338,16 @@ impl InteractivePayload {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SlashCommandPayload {
     pub command: String,
-    #[serde(default)] pub text: Option<String>,
-    #[serde(default)] pub channel_id: Option<String>,
-    #[serde(default)] pub user_id: Option<String>,
-    #[serde(default)] pub trigger_id: Option<String>,
-    #[serde(default)] pub response_url: Option<String>,
+    #[serde(default)]
+    pub text: Option<String>,
+    #[serde(default)]
+    pub channel_id: Option<String>,
+    #[serde(default)]
+    pub user_id: Option<String>,
+    #[serde(default)]
+    pub trigger_id: Option<String>,
+    #[serde(default)]
+    pub response_url: Option<String>,
 }
 
 impl SlashCommandPayload {
@@ -309,10 +370,16 @@ pub struct TextObject {
 
 impl TextObject {
     pub fn plain(text: impl Into<String>) -> Self {
-        Self { text_type: "plain_text".into(), text: text.into() }
+        Self {
+            text_type: "plain_text".into(),
+            text: text.into(),
+        }
     }
     pub fn mrkdwn(text: impl Into<String>) -> Self {
-        Self { text_type: "mrkdwn".into(), text: text.into() }
+        Self {
+            text_type: "mrkdwn".into(),
+            text: text.into(),
+        }
     }
 }
 
@@ -383,10 +450,17 @@ pub struct ContextBlock {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ContextElement {
     #[serde(rename = "mrkdwn")]
-    Mrkdwn { text: String },
+    Mrkdwn {
+        text: String,
+    },
     #[serde(rename = "plain_text")]
-    PlainText { text: String },
-    Image { image_url: String, alt_text: String },
+    PlainText {
+        text: String,
+    },
+    Image {
+        image_url: String,
+        alt_text: String,
+    },
 }
 
 /// A Block Kit layout block.
@@ -402,25 +476,41 @@ pub enum Block {
 
 impl Block {
     pub fn section(text: TextObject) -> Self {
-        Block::Section(SectionBlock { text, accessory: None, fields: None })
+        Block::Section(SectionBlock {
+            text,
+            accessory: None,
+            fields: None,
+        })
     }
 
     pub fn section_with_accessory(text: TextObject, accessory: BlockElement) -> Self {
-        Block::Section(SectionBlock { text, accessory: Some(accessory), fields: None })
+        Block::Section(SectionBlock {
+            text,
+            accessory: Some(accessory),
+            fields: None,
+        })
     }
 
     pub fn section_with_fields(text: TextObject, fields: Vec<TextObject>) -> Self {
-        Block::Section(SectionBlock { text, accessory: None, fields: Some(fields) })
+        Block::Section(SectionBlock {
+            text,
+            accessory: None,
+            fields: Some(fields),
+        })
     }
 
-    pub fn divider() -> Self { Block::Divider {} }
+    pub fn divider() -> Self {
+        Block::Divider {}
+    }
 
     pub fn actions(elements: Vec<BlockElement>) -> Self {
         Block::Actions(ActionsBlock { elements })
     }
 
     pub fn header(text: impl Into<String>) -> Self {
-        Block::Header(HeaderBlock { text: TextObject::plain(text) })
+        Block::Header(HeaderBlock {
+            text: TextObject::plain(text),
+        })
     }
 
     pub fn context(elements: Vec<ContextElement>) -> Self {
@@ -435,17 +525,36 @@ pub struct BlockKitMessage {
 }
 
 impl BlockKitMessage {
-    pub fn new() -> Self { Self { blocks: Vec::new() } }
+    pub fn new() -> Self {
+        Self { blocks: Vec::new() }
+    }
 
-    pub fn add_block(mut self, block: Block) -> Self { self.blocks.push(block); self }
-    pub fn add_section(self, text: TextObject) -> Self { self.add_block(Block::section(text)) }
-    pub fn add_divider(self) -> Self { self.add_block(Block::divider()) }
-    pub fn add_header(self, text: impl Into<String>) -> Self { self.add_block(Block::header(text)) }
-    pub fn add_actions(self, elems: Vec<BlockElement>) -> Self { self.add_block(Block::actions(elems)) }
-    pub fn add_context(self, elems: Vec<ContextElement>) -> Self { self.add_block(Block::context(elems)) }
+    pub fn add_block(mut self, block: Block) -> Self {
+        self.blocks.push(block);
+        self
+    }
+    pub fn add_section(self, text: TextObject) -> Self {
+        self.add_block(Block::section(text))
+    }
+    pub fn add_divider(self) -> Self {
+        self.add_block(Block::divider())
+    }
+    pub fn add_header(self, text: impl Into<String>) -> Self {
+        self.add_block(Block::header(text))
+    }
+    pub fn add_actions(self, elems: Vec<BlockElement>) -> Self {
+        self.add_block(Block::actions(elems))
+    }
+    pub fn add_context(self, elems: Vec<ContextElement>) -> Self {
+        self.add_block(Block::context(elems))
+    }
 
-    pub fn blocks(&self) -> &[Block] { &self.blocks }
-    pub fn is_empty(&self) -> bool { self.blocks.is_empty() }
+    pub fn blocks(&self) -> &[Block] {
+        &self.blocks
+    }
+    pub fn is_empty(&self) -> bool {
+        self.blocks.is_empty()
+    }
 
     /// Serialize the blocks array to a `serde_json::Value`.
     pub fn to_json(&self) -> serde_json::Value {
@@ -467,7 +576,10 @@ pub struct HomeView {
 
 impl HomeView {
     pub fn new(blocks: Vec<Block>) -> Self {
-        Self { view_type: "home".into(), blocks }
+        Self {
+            view_type: "home".into(),
+            blocks,
+        }
     }
 
     pub fn from_block_kit(message: &BlockKitMessage) -> Self {
@@ -511,15 +623,18 @@ impl ModalView {
     }
 
     pub fn with_submit(mut self, label: impl Into<String>) -> Self {
-        self.submit = Some(TextObject::plain(label)); self
+        self.submit = Some(TextObject::plain(label));
+        self
     }
 
     pub fn with_close(mut self, label: impl Into<String>) -> Self {
-        self.close = Some(TextObject::plain(label)); self
+        self.close = Some(TextObject::plain(label));
+        self
     }
 
     pub fn with_callback_id(mut self, id: impl Into<String>) -> Self {
-        self.callback_id = Some(id.into()); self
+        self.callback_id = Some(id.into());
+        self
     }
 
     pub fn to_json(&self) -> serde_json::Value {
@@ -542,17 +657,23 @@ pub struct SlackAdapter {
 impl SlackAdapter {
     /// Create a new Slack adapter with the given configuration.
     pub fn new(config: SlackConfig) -> Result<Self, GatewayError> {
-        let base = BasePlatformAdapter::new(&config.token)
-            .with_proxy(config.proxy.clone());
+        let base = BasePlatformAdapter::new(&config.token).with_proxy(config.proxy.clone());
 
         base.validate_token()?;
         let client = base.build_client()?;
 
-        Ok(Self { base, config, client, stop_signal: Arc::new(Notify::new()) })
+        Ok(Self {
+            base,
+            config,
+            client,
+            stop_signal: Arc::new(Notify::new()),
+        })
     }
 
     /// Get a reference to the configuration.
-    pub fn config(&self) -> &SlackConfig { &self.config }
+    pub fn config(&self) -> &SlackConfig {
+        &self.config
+    }
 
     // -----------------------------------------------------------------------
     // Web API: Sending messages
@@ -613,7 +734,8 @@ impl SlackAdapter {
         }
 
         let resp = self.slack_post("chat.postMessage", &body).await?;
-        resp.ts.ok_or_else(|| GatewayError::SendFailed("No ts in response".into()))
+        resp.ts
+            .ok_or_else(|| GatewayError::SendFailed("No ts in response".into()))
     }
 
     /// Post a `BlockKitMessage` (type-safe builder variant).
@@ -624,7 +746,8 @@ impl SlackAdapter {
         fallback_text: &str,
         thread_ts: Option<&str>,
     ) -> Result<String, GatewayError> {
-        self.post_blocks(channel, &message.to_json(), fallback_text, thread_ts).await
+        self.post_blocks(channel, &message.to_json(), fallback_text, thread_ts)
+            .await
     }
 
     /// Update an existing message using `chat.update`.
@@ -656,9 +779,9 @@ impl SlackAdapter {
         title: Option<&str>,
         thread_ts: Option<&str>,
     ) -> Result<(), GatewayError> {
-        let file_bytes = tokio::fs::read(file_path)
-            .await
-            .map_err(|e| GatewayError::SendFailed(format!("Failed to read file {}: {}", file_path, e)))?;
+        let file_bytes = tokio::fs::read(file_path).await.map_err(|e| {
+            GatewayError::SendFailed(format!("Failed to read file {}: {}", file_path, e))
+        })?;
 
         let file_name = std::path::Path::new(file_path)
             .file_name()
@@ -666,8 +789,7 @@ impl SlackAdapter {
             .unwrap_or("file")
             .to_string();
 
-        let part = reqwest::multipart::Part::bytes(file_bytes)
-            .file_name(file_name.clone());
+        let part = reqwest::multipart::Part::bytes(file_bytes).file_name(file_name.clone());
 
         let mut form = reqwest::multipart::Form::new()
             .text("channels", channel.to_string())
@@ -682,7 +804,8 @@ impl SlackAdapter {
         }
 
         let url = format!("{}/files.upload", SLACK_API_BASE);
-        let resp = self.client
+        let resp = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.config.token))
             .multipart(form)
@@ -690,10 +813,9 @@ impl SlackAdapter {
             .await
             .map_err(|e| GatewayError::SendFailed(format!("Slack file upload failed: {}", e)))?;
 
-        let result: SlackResponse = resp
-            .json()
-            .await
-            .map_err(|e| GatewayError::SendFailed(format!("Failed to parse Slack response: {}", e)))?;
+        let result: SlackResponse = resp.json().await.map_err(|e| {
+            GatewayError::SendFailed(format!("Failed to parse Slack response: {}", e))
+        })?;
 
         if !result.ok {
             return Err(GatewayError::SendFailed(format!(
@@ -715,27 +837,32 @@ impl SlackAdapter {
             GatewayError::Auth("Socket Mode requires an app-level token (xapp-...)".into())
         })?;
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(&format!("{}/apps.connections.open", SLACK_API_BASE))
             .header("Authorization", format!("Bearer {}", app_token))
             .header("Content-Type", "application/x-www-form-urlencoded")
             .send()
             .await
-            .map_err(|e| GatewayError::ConnectionFailed(format!(
-                "Failed to open Socket Mode connection: {}", e
-            )))?;
+            .map_err(|e| {
+                GatewayError::ConnectionFailed(format!(
+                    "Failed to open Socket Mode connection: {}",
+                    e
+                ))
+            })?;
 
-        let body: serde_json::Value = resp
-            .json()
-            .await
-            .map_err(|e| GatewayError::ConnectionFailed(format!(
-                "Failed to parse Socket Mode response: {}", e
-            )))?;
+        let body: serde_json::Value = resp.json().await.map_err(|e| {
+            GatewayError::ConnectionFailed(format!("Failed to parse Socket Mode response: {}", e))
+        })?;
 
         if body.get("ok").and_then(|v| v.as_bool()) != Some(true) {
-            let err = body.get("error").and_then(|v| v.as_str()).unwrap_or("unknown");
+            let err = body
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
             return Err(GatewayError::ConnectionFailed(format!(
-                "Socket Mode connection failed: {}", err
+                "Socket Mode connection failed: {}",
+                err
             )));
         }
 
@@ -761,10 +888,17 @@ impl SlackAdapter {
         }
 
         let channel = event.get("channel")?.as_str()?.to_string();
-        let text = event.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+        let text = event
+            .get("text")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
         let user_id = event.get("user").and_then(|v| v.as_str()).map(String::from);
         let ts = event.get("ts")?.as_str()?.to_string();
-        let thread_ts = event.get("thread_ts").and_then(|v| v.as_str()).map(String::from);
+        let thread_ts = event
+            .get("thread_ts")
+            .and_then(|v| v.as_str())
+            .map(String::from);
 
         Some(IncomingSlackMessage {
             channel,
@@ -800,11 +934,7 @@ impl SlackAdapter {
 
     /// Open a modal view using `views.open`. Requires a `trigger_id` obtained
     /// from an interactive event or slash command.
-    pub async fn open_modal(
-        &self,
-        trigger_id: &str,
-        view: &ModalView,
-    ) -> Result<(), GatewayError> {
+    pub async fn open_modal(&self, trigger_id: &str, view: &ModalView) -> Result<(), GatewayError> {
         let body = serde_json::json!({
             "trigger_id": trigger_id,
             "view": view.to_json(),
@@ -821,19 +951,17 @@ impl SlackAdapter {
     pub async fn get_user_info(&self, user_id: &str) -> Result<SlackUser, GatewayError> {
         let url = format!("{}/users.info?user={}", SLACK_API_BASE, user_id);
 
-        let resp = self.client
+        let resp = self
+            .client
             .get(&url)
             .header("Authorization", format!("Bearer {}", self.config.token))
             .send()
             .await
             .map_err(|e| GatewayError::SendFailed(format!("Slack users.info failed: {}", e)))?;
 
-        let result: UserInfoResponse = resp
-            .json()
-            .await
-            .map_err(|e| GatewayError::SendFailed(format!(
-                "Failed to parse users.info response: {}", e
-            )))?;
+        let result: UserInfoResponse = resp.json().await.map_err(|e| {
+            GatewayError::SendFailed(format!("Failed to parse users.info response: {}", e))
+        })?;
 
         if !result.ok {
             return Err(GatewayError::SendFailed(format!(
@@ -872,11 +1000,7 @@ impl SlackAdapter {
     // -----------------------------------------------------------------------
 
     /// Set the topic for a channel using `conversations.setTopic`.
-    pub async fn set_topic(
-        &self,
-        channel: &str,
-        topic: &str,
-    ) -> Result<(), GatewayError> {
+    pub async fn set_topic(&self, channel: &str, topic: &str) -> Result<(), GatewayError> {
         let body = serde_json::json!({
             "channel": channel,
             "topic": topic,
@@ -900,21 +1024,19 @@ impl SlackAdapter {
             SLACK_API_BASE, channel, message_ts
         );
 
-        let resp = self.client
+        let resp = self
+            .client
             .get(&url)
             .header("Authorization", format!("Bearer {}", self.config.token))
             .send()
             .await
-            .map_err(|e| GatewayError::SendFailed(format!(
-                "Slack chat.getPermalink failed: {}", e
-            )))?;
+            .map_err(|e| {
+                GatewayError::SendFailed(format!("Slack chat.getPermalink failed: {}", e))
+            })?;
 
-        let result: PermalinkResponse = resp
-            .json()
-            .await
-            .map_err(|e| GatewayError::SendFailed(format!(
-                "Failed to parse getPermalink response: {}", e
-            )))?;
+        let result: PermalinkResponse = resp.json().await.map_err(|e| {
+            GatewayError::SendFailed(format!("Failed to parse getPermalink response: {}", e))
+        })?;
 
         if !result.ok {
             return Err(GatewayError::SendFailed(format!(
@@ -940,7 +1062,8 @@ impl SlackAdapter {
     ) -> Result<SlackResponse, GatewayError> {
         let url = format!("{}/{}", SLACK_API_BASE, method);
 
-        let resp = self.client
+        let resp = self
+            .client
             .post(&url)
             .header("Authorization", format!("Bearer {}", self.config.token))
             .header("Content-Type", "application/json; charset=utf-8")
@@ -949,12 +1072,9 @@ impl SlackAdapter {
             .await
             .map_err(|e| GatewayError::SendFailed(format!("Slack {} failed: {}", method, e)))?;
 
-        let result: SlackResponse = resp
-            .json()
-            .await
-            .map_err(|e| GatewayError::SendFailed(format!(
-                "Failed to parse Slack {} response: {}", method, e
-            )))?;
+        let result: SlackResponse = resp.json().await.map_err(|e| {
+            GatewayError::SendFailed(format!("Failed to parse Slack {} response: {}", method, e))
+        })?;
 
         if !result.ok {
             return Err(GatewayError::SendFailed(format!(
@@ -1081,7 +1201,8 @@ mod tests {
     #[test]
     fn parse_event_message() {
         let env = SocketModeEnvelope {
-            envelope_type: "events_api".into(), envelope_id: Some("env123".into()),
+            envelope_type: "events_api".into(),
+            envelope_id: Some("env123".into()),
             payload: Some(serde_json::json!({
                 "event": { "type": "message", "text": "hello bot", "channel": "C123", "user": "U456", "ts": "1.0" }
             })),
@@ -1096,7 +1217,8 @@ mod tests {
     #[test]
     fn parse_event_bot_message_skipped() {
         let env = SocketModeEnvelope {
-            envelope_type: "events_api".into(), envelope_id: Some("env123".into()),
+            envelope_type: "events_api".into(),
+            envelope_id: Some("env123".into()),
             payload: Some(serde_json::json!({
                 "event": { "type": "message", "text": "bot msg", "channel": "C123", "bot_id": "B789", "ts": "1.0" }
             })),
@@ -1107,19 +1229,24 @@ mod tests {
     #[test]
     fn parse_event_thread_reply() {
         let env = SocketModeEnvelope {
-            envelope_type: "events_api".into(), envelope_id: Some("env123".into()),
+            envelope_type: "events_api".into(),
+            envelope_id: Some("env123".into()),
             payload: Some(serde_json::json!({
                 "event": { "type": "message", "text": "reply", "channel": "C1", "user": "U4",
                            "ts": "2.0", "thread_ts": "1.0" }
             })),
         };
-        assert_eq!(SlackAdapter::parse_event(&env).unwrap().thread_ts, Some("1.0".into()));
+        assert_eq!(
+            SlackAdapter::parse_event(&env).unwrap().thread_ts,
+            Some("1.0".into())
+        );
     }
 
     #[test]
     fn parse_event_non_message_skipped() {
         let env = SocketModeEnvelope {
-            envelope_type: "events_api".into(), envelope_id: Some("env123".into()),
+            envelope_type: "events_api".into(),
+            envelope_id: Some("env123".into()),
             payload: Some(serde_json::json!({
                 "event": { "type": "reaction_added", "reaction": "thumbsup", "user": "U456" }
             })),
@@ -1142,7 +1269,10 @@ mod tests {
         session.mark_closing();
         assert_eq!(session.state(), SocketModeConnectionState::Closing);
 
-        assert_eq!(SocketModeSession::default().state(), SocketModeConnectionState::Disconnected);
+        assert_eq!(
+            SocketModeSession::default().state(),
+            SocketModeConnectionState::Disconnected
+        );
     }
 
     #[test]
@@ -1156,11 +1286,19 @@ mod tests {
     #[test]
     fn handle_envelope_hello_and_disconnect() {
         let mut session = SocketModeSession::new();
-        let hello = SocketModeEnvelope { envelope_type: "hello".into(), envelope_id: None, payload: None };
+        let hello = SocketModeEnvelope {
+            envelope_type: "hello".into(),
+            envelope_id: None,
+            payload: None,
+        };
         assert_eq!(session.handle_envelope(&hello), SocketModeAction::Ignore);
         assert_eq!(session.state(), SocketModeConnectionState::Connected);
 
-        let disc = SocketModeEnvelope { envelope_type: "disconnect".into(), envelope_id: None, payload: None };
+        let disc = SocketModeEnvelope {
+            envelope_type: "disconnect".into(),
+            envelope_id: None,
+            payload: None,
+        };
         assert_eq!(session.handle_envelope(&disc), SocketModeAction::Ignore);
         assert_eq!(session.state(), SocketModeConnectionState::Closing);
     }
@@ -1170,17 +1308,22 @@ mod tests {
         let mut session = SocketModeSession::new();
         session.mark_connected();
         let msg_env = SocketModeEnvelope {
-            envelope_type: "events_api".into(), envelope_id: Some("e1".into()),
+            envelope_type: "events_api".into(),
+            envelope_id: Some("e1".into()),
             payload: Some(serde_json::json!({
                 "event": { "type": "message", "text": "hi", "channel": "C9", "user": "UA", "ts": "1.2" }
             })),
         };
         match session.handle_envelope(&msg_env) {
-            SocketModeAction::MessageEvent(m) => { assert_eq!(m.channel, "C9"); assert_eq!(m.text, "hi"); }
+            SocketModeAction::MessageEvent(m) => {
+                assert_eq!(m.channel, "C9");
+                assert_eq!(m.text, "hi");
+            }
             other => panic!("Expected MessageEvent, got {:?}", other),
         }
         let non_msg = SocketModeEnvelope {
-            envelope_type: "events_api".into(), envelope_id: Some("e2".into()),
+            envelope_type: "events_api".into(),
+            envelope_id: Some("e2".into()),
             payload: Some(serde_json::json!({
                 "event": { "type": "app_mention", "channel": "C1", "user": "U1", "ts": "1.0" }
             })),
@@ -1193,7 +1336,8 @@ mod tests {
     fn handle_envelope_interactive() {
         let mut session = SocketModeSession::new();
         let envelope = SocketModeEnvelope {
-            envelope_type: "interactive".into(), envelope_id: Some("e3".into()),
+            envelope_type: "interactive".into(),
+            envelope_id: Some("e3".into()),
             payload: Some(serde_json::json!({
                 "type": "block_actions", "trigger_id": "t1",
                 "actions": [{ "action_id": "btn", "type": "button", "value": "ok" }],
@@ -1213,7 +1357,8 @@ mod tests {
     fn handle_envelope_slash_command() {
         let mut session = SocketModeSession::new();
         let envelope = SocketModeEnvelope {
-            envelope_type: "slash_commands".into(), envelope_id: Some("e4".into()),
+            envelope_type: "slash_commands".into(),
+            envelope_id: Some("e4".into()),
             payload: Some(serde_json::json!({
                 "command": "/deploy", "text": "prod", "channel_id": "C5", "user_id": "U7"
             })),
@@ -1230,7 +1375,11 @@ mod tests {
     #[test]
     fn handle_envelope_unknown_ignored() {
         let mut s = SocketModeSession::new();
-        let e = SocketModeEnvelope { envelope_type: "future".into(), envelope_id: None, payload: None };
+        let e = SocketModeEnvelope {
+            envelope_type: "future".into(),
+            envelope_id: None,
+            payload: None,
+        };
         assert_eq!(s.handle_envelope(&e), SocketModeAction::Ignore);
         assert_eq!(s.envelopes_acked(), 0);
     }
@@ -1240,7 +1389,8 @@ mod tests {
     #[test]
     fn interactive_payload_parsing() {
         let env = SocketModeEnvelope {
-            envelope_type: "interactive".into(), envelope_id: Some("ei".into()),
+            envelope_type: "interactive".into(),
+            envelope_id: Some("ei".into()),
             payload: Some(serde_json::json!({
                 "type": "block_actions", "trigger_id": "t9",
                 "actions": [{ "action_id": "a1", "type": "button" }, { "action_id": "a2" }],
@@ -1250,14 +1400,19 @@ mod tests {
         let p = InteractivePayload::from_envelope(&env).unwrap();
         assert_eq!(p.actions.len(), 2);
         assert_eq!(p.channel.as_ref().unwrap().id, "C1");
-        let empty = SocketModeEnvelope { envelope_type: "interactive".into(), envelope_id: None, payload: None };
+        let empty = SocketModeEnvelope {
+            envelope_type: "interactive".into(),
+            envelope_id: None,
+            payload: None,
+        };
         assert!(InteractivePayload::from_envelope(&empty).is_none());
     }
 
     #[test]
     fn slash_command_parsing() {
         let env = SocketModeEnvelope {
-            envelope_type: "slash_commands".into(), envelope_id: Some("es".into()),
+            envelope_type: "slash_commands".into(),
+            envelope_id: Some("es".into()),
             payload: Some(serde_json::json!({
                 "command": "/status", "text": "all", "channel_id": "C2",
                 "user_id": "U2", "response_url": "https://hooks.slack.com/xxx"
@@ -1265,7 +1420,10 @@ mod tests {
         };
         let cmd = SlashCommandPayload::from_envelope(&env).unwrap();
         assert_eq!(cmd.command, "/status");
-        assert_eq!(cmd.response_url.as_deref(), Some("https://hooks.slack.com/xxx"));
+        assert_eq!(
+            cmd.response_url.as_deref(),
+            Some("https://hooks.slack.com/xxx")
+        );
     }
 
     // --- Block Kit builder ---
@@ -1281,10 +1439,14 @@ mod tests {
             .add_divider()
             .add_section(TextObject::mrkdwn("Info"))
             .add_actions(vec![BlockElement::Button {
-                text: TextObject::plain("Click"), action_id: "b".into(),
-                value: Some("go".into()), style: Some("primary".into()),
+                text: TextObject::plain("Click"),
+                action_id: "b".into(),
+                value: Some("go".into()),
+                style: Some("primary".into()),
             }])
-            .add_context(vec![ContextElement::Mrkdwn { text: "footer".into() }]);
+            .add_context(vec![ContextElement::Mrkdwn {
+                text: "footer".into(),
+            }]);
 
         let arr = msg.to_json();
         let arr = arr.as_array().unwrap();
@@ -1300,24 +1462,52 @@ mod tests {
     fn block_variants_serialize() {
         let sec = Block::section_with_accessory(
             TextObject::mrkdwn("Pick"),
-            BlockElement::Button { text: TextObject::plain("Go"), action_id: "g".into(), value: None, style: None },
+            BlockElement::Button {
+                text: TextObject::plain("Go"),
+                action_id: "g".into(),
+                value: None,
+                style: None,
+            },
         );
-        assert_eq!(serde_json::to_value(&sec).unwrap()["accessory"]["type"], "button");
+        assert_eq!(
+            serde_json::to_value(&sec).unwrap()["accessory"]["type"],
+            "button"
+        );
 
-        let fld = Block::section_with_fields(TextObject::mrkdwn("S"), vec![TextObject::mrkdwn("A"), TextObject::mrkdwn("B")]);
-        assert_eq!(serde_json::to_value(&fld).unwrap()["fields"].as_array().unwrap().len(), 2);
+        let fld = Block::section_with_fields(
+            TextObject::mrkdwn("S"),
+            vec![TextObject::mrkdwn("A"), TextObject::mrkdwn("B")],
+        );
+        assert_eq!(
+            serde_json::to_value(&fld).unwrap()["fields"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
 
         let sel = BlockElement::StaticSelect {
-            placeholder: TextObject::plain("Choose"), action_id: "s".into(),
-            options: vec![SelectOption { text: TextObject::plain("X"), value: "x".into() }],
+            placeholder: TextObject::plain("Choose"),
+            action_id: "s".into(),
+            options: vec![SelectOption {
+                text: TextObject::plain("X"),
+                value: "x".into(),
+            }],
         };
         assert_eq!(serde_json::to_value(&sel).unwrap()["type"], "static_select");
     }
 
     #[test]
     fn block_kit_round_trip() {
-        let msg = BlockKitMessage::new().add_header("T").add_section(TextObject::plain("b"));
-        assert_eq!(serde_json::from_value::<Vec<Block>>(msg.to_json()).unwrap().len(), 2);
+        let msg = BlockKitMessage::new()
+            .add_header("T")
+            .add_section(TextObject::plain("b"));
+        assert_eq!(
+            serde_json::from_value::<Vec<Block>>(msg.to_json())
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     // --- Home tab & modal views ---
@@ -1329,7 +1519,9 @@ mod tests {
         assert_eq!(j["type"], "home");
         assert_eq!(j["blocks"].as_array().unwrap().len(), 2);
 
-        let msg = BlockKitMessage::new().add_header("H").add_section(TextObject::plain("S"));
+        let msg = BlockKitMessage::new()
+            .add_header("H")
+            .add_section(TextObject::plain("S"));
         let view2 = HomeView::from_block_kit(&msg);
         assert_eq!(view2.to_json()["blocks"].as_array().unwrap().len(), 2);
     }
@@ -1343,7 +1535,9 @@ mod tests {
         assert!(j.get("submit").is_none());
 
         let m2 = ModalView::new("Confirm", vec![])
-            .with_submit("Yes").with_close("No").with_callback_id("cb");
+            .with_submit("Yes")
+            .with_close("No")
+            .with_callback_id("cb");
         let j2 = m2.to_json();
         assert_eq!(j2["submit"]["text"], "Yes");
         assert_eq!(j2["close"]["text"], "No");
@@ -1357,7 +1551,8 @@ mod tests {
         let u: SlackUser = serde_json::from_value(serde_json::json!({
             "id": "U1", "name": "alice", "real_name": "Alice", "is_bot": false, "is_admin": true,
             "profile": { "email": "a@ex.com" }
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(u.is_admin);
         assert_eq!(u.profile.unwrap().email.as_deref(), Some("a@ex.com"));
     }
@@ -1365,12 +1560,13 @@ mod tests {
     #[test]
     fn user_info_response_variants() {
         let ok: UserInfoResponse = serde_json::from_value(
-            serde_json::json!({ "ok": true, "user": { "id": "U1", "is_bot": true } })
-        ).unwrap();
+            serde_json::json!({ "ok": true, "user": { "id": "U1", "is_bot": true } }),
+        )
+        .unwrap();
         assert!(ok.user.unwrap().is_bot);
-        let err: UserInfoResponse = serde_json::from_value(
-            serde_json::json!({ "ok": false, "error": "user_not_found" })
-        ).unwrap();
+        let err: UserInfoResponse =
+            serde_json::from_value(serde_json::json!({ "ok": false, "error": "user_not_found" }))
+                .unwrap();
         assert_eq!(err.error.as_deref(), Some("user_not_found"));
     }
 
@@ -1378,18 +1574,27 @@ mod tests {
     fn permalink_response_deserializes() {
         let r: PermalinkResponse = serde_json::from_value(serde_json::json!({
             "ok": true, "permalink": "https://ws.slack.com/archives/C1/p1", "channel": "C1"
-        })).unwrap();
+        }))
+        .unwrap();
         assert!(r.permalink.unwrap().contains("archives"));
     }
 
     #[test]
     fn context_elements_serialize() {
         let block = Block::context(vec![
-            ContextElement::Mrkdwn { text: "by *bot*".into() },
+            ContextElement::Mrkdwn {
+                text: "by *bot*".into(),
+            },
             ContextElement::PlainText { text: "now".into() },
-            ContextElement::Image { image_url: "https://x.com/i.png".into(), alt_text: "i".into() },
+            ContextElement::Image {
+                image_url: "https://x.com/i.png".into(),
+                alt_text: "i".into(),
+            },
         ]);
-        let elems = serde_json::to_value(&block).unwrap()["elements"].as_array().unwrap().clone();
+        let elems = serde_json::to_value(&block).unwrap()["elements"]
+            .as_array()
+            .unwrap()
+            .clone();
         assert_eq!(elems.len(), 3);
         assert_eq!(elems[0]["type"], "mrkdwn");
     }

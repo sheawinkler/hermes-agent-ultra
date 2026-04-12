@@ -11,12 +11,12 @@ use serde_json::Value;
 use std::sync::Arc;
 
 use hermes_core::{
-    AgentError, FunctionCall, LlmProvider, LlmResponse, Message, MessageRole, StreamChunk,
-    StreamDelta, ToolCall, ToolCallDelta, FunctionCallDelta, ToolSchema, UsageStats,
+    AgentError, FunctionCall, FunctionCallDelta, LlmProvider, LlmResponse, Message, MessageRole,
+    StreamChunk, StreamDelta, ToolCall, ToolCallDelta, ToolSchema, UsageStats,
 };
 
-use crate::rate_limit::RateLimitTracker;
 use crate::credential_pool::CredentialPool;
+use crate::rate_limit::RateLimitTracker;
 
 // ---------------------------------------------------------------------------
 // GenericProvider — a flexible, config-driven provider
@@ -46,7 +46,11 @@ pub struct GenericProvider {
 
 impl GenericProvider {
     /// Create a new generic provider.
-    pub fn new(base_url: impl Into<String>, api_key: impl Into<String>, model: impl Into<String>) -> Self {
+    pub fn new(
+        base_url: impl Into<String>,
+        api_key: impl Into<String>,
+        model: impl Into<String>,
+    ) -> Self {
         Self {
             base_url: base_url.into(),
             api_key: api_key.into(),
@@ -119,14 +123,25 @@ impl GenericProvider {
 
     /// Inject optional runtime hints: reasoning effort, vision preprocessing,
     /// and service tier.
-    fn apply_runtime_hints(&self, body: &mut Value, messages: &[Message], extra_body: Option<&Value>) {
+    fn apply_runtime_hints(
+        &self,
+        body: &mut Value,
+        messages: &[Message],
+        extra_body: Option<&Value>,
+    ) {
         // Reasoning effort passthrough (`low|medium|high`) using extra_body.reasoning_effort.
-        if let Some(eb) = extra_body.and_then(|v| v.get("reasoning_effort")).and_then(|v| v.as_str()) {
+        if let Some(eb) = extra_body
+            .and_then(|v| v.get("reasoning_effort"))
+            .and_then(|v| v.as_str())
+        {
             body["reasoning_effort"] = serde_json::json!(eb);
         }
 
         // OpenAI service tier passthrough.
-        if let Some(st) = extra_body.and_then(|v| v.get("service_tier")).and_then(|v| v.as_str()) {
+        if let Some(st) = extra_body
+            .and_then(|v| v.get("service_tier"))
+            .and_then(|v| v.as_str())
+        {
             body["service_tier"] = serde_json::json!(st);
         }
 
@@ -211,8 +226,13 @@ impl LlmProvider for GenericProvider {
 
         if !resp.status().is_success() {
             let status = resp.status();
-            let body_text = resp.text().await.unwrap_or_else(|_| "<no body>".to_string());
-            return Err(AgentError::LlmApi(format!("API error {status}: {body_text}")));
+            let body_text = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "<no body>".to_string());
+            return Err(AgentError::LlmApi(format!(
+                "API error {status}: {body_text}"
+            )));
         }
 
         let resp_json: Value = resp
@@ -368,7 +388,6 @@ impl LlmProvider for GenericProvider {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // OpenAiProvider
 // ---------------------------------------------------------------------------
@@ -383,11 +402,7 @@ impl OpenAiProvider {
     /// Create a new OpenAI provider with the given API key.
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
-            inner: GenericProvider::new(
-                "https://api.openai.com/v1",
-                api_key,
-                "gpt-4o",
-            ),
+            inner: GenericProvider::new("https://api.openai.com/v1", api_key, "gpt-4o"),
         }
     }
 
@@ -431,8 +446,14 @@ impl LlmProvider for OpenAiProvider {
         model: Option<&str>,
         extra_body: Option<&Value>,
     ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-        self.inner
-            .chat_completion_stream(messages, tools, max_tokens, temperature, model, extra_body)
+        self.inner.chat_completion_stream(
+            messages,
+            tools,
+            max_tokens,
+            temperature,
+            model,
+            extra_body,
+        )
     }
 }
 
@@ -632,10 +653,19 @@ impl AnthropicProvider {
                         }
                     }
                     "tool_use" => {
-                        let id = block.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
-                        let name = block.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+                        let id = block
+                            .get("id")
+                            .and_then(|i| i.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let name = block
+                            .get("name")
+                            .and_then(|n| n.as_str())
+                            .unwrap_or("")
+                            .to_string();
                         let input = block.get("input").cloned().unwrap_or(serde_json::json!({}));
-                        let arguments = serde_json::to_string(&input).unwrap_or_else(|_| "{}".to_string());
+                        let arguments =
+                            serde_json::to_string(&input).unwrap_or_else(|_| "{}".to_string());
                         tool_calls.push(ToolCall {
                             id,
                             function: FunctionCall { name, arguments },
@@ -675,7 +705,11 @@ impl AnthropicProvider {
         let message = Message {
             role: MessageRole::Assistant,
             content: Some(content_text),
-            tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+            tool_calls: if tool_calls.is_empty() {
+                None
+            } else {
+                Some(tool_calls)
+            },
             tool_call_id: None,
             name: None,
             reasoning_content: None,
@@ -750,8 +784,13 @@ impl LlmProvider for AnthropicProvider {
 
         if !resp.status().is_success() {
             let status = resp.status();
-            let body_text = resp.text().await.unwrap_or_else(|_| "<no body>".to_string());
-            return Err(AgentError::LlmApi(format!("API error {status}: {body_text}")));
+            let body_text = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "<no body>".to_string());
+            return Err(AgentError::LlmApi(format!(
+                "API error {status}: {body_text}"
+            )));
         }
 
         let resp_json: Value = resp
@@ -998,7 +1037,6 @@ impl LlmProvider for AnthropicProvider {
     }
 }
 
-
 // ---------------------------------------------------------------------------
 // OpenRouterProvider
 // ---------------------------------------------------------------------------
@@ -1023,11 +1061,7 @@ impl OpenRouterProvider {
     /// Create a new OpenRouter provider with the given API key.
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
-            inner: GenericProvider::new(
-                "https://openrouter.ai/api/v1",
-                api_key,
-                "openai/gpt-4o",
-            ),
+            inner: GenericProvider::new("https://openrouter.ai/api/v1", api_key, "openai/gpt-4o"),
             http_referer: None,
             x_title: None,
         }
@@ -1130,7 +1164,10 @@ impl LlmProvider for OpenRouterProvider {
             }
         }
 
-        let url = format!("{}/chat/completions", provider.base_url.trim_end_matches('/'));
+        let url = format!(
+            "{}/chat/completions",
+            provider.base_url.trim_end_matches('/')
+        );
 
         let mut req = provider
             .client
@@ -1152,8 +1189,13 @@ impl LlmProvider for OpenRouterProvider {
 
         if !resp.status().is_success() {
             let status = resp.status();
-            let body_text = resp.text().await.unwrap_or_else(|_| "<no body>".to_string());
-            return Err(AgentError::LlmApi(format!("API error {status}: {body_text}")));
+            let body_text = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "<no body>".to_string());
+            return Err(AgentError::LlmApi(format!(
+                "API error {status}: {body_text}"
+            )));
         }
 
         let resp_json: Value = resp
@@ -1214,10 +1256,20 @@ fn parse_sse_chunk(json: &Value) -> Option<StreamChunk> {
                     let index = tc.get("index").and_then(|i| i.as_u64())? as u32;
                     let id = tc.get("id").and_then(|i| i.as_str()).map(|s| s.to_string());
                     let function = tc.get("function").map(|f| FunctionCallDelta {
-                        name: f.get("name").and_then(|n| n.as_str()).map(|s| s.to_string()),
-                        arguments: f.get("arguments").and_then(|a| a.as_str()).map(|s| s.to_string()),
+                        name: f
+                            .get("name")
+                            .and_then(|n| n.as_str())
+                            .map(|s| s.to_string()),
+                        arguments: f
+                            .get("arguments")
+                            .and_then(|a| a.as_str())
+                            .map(|s| s.to_string()),
                     });
-                    Some(ToolCallDelta { index, id, function })
+                    Some(ToolCallDelta {
+                        index,
+                        id,
+                        function,
+                    })
                 })
                 .collect::<Vec<_>>()
         });
@@ -1241,7 +1293,10 @@ fn parse_sse_chunk(json: &Value) -> Option<StreamChunk> {
     let usage = json.get("usage").and_then(|u| {
         Some(UsageStats {
             prompt_tokens: u.get("prompt_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
-            completion_tokens: u.get("completion_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
+            completion_tokens: u
+                .get("completion_tokens")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
             total_tokens: u.get("total_tokens").and_then(|v| v.as_u64()).unwrap_or(0),
             estimated_cost: None,
         })
@@ -1423,7 +1478,10 @@ mod tests {
             }]
         });
         let chunk = parse_sse_chunk(&json).unwrap();
-        assert_eq!(chunk.delta.as_ref().unwrap().content.as_deref(), Some("Hello"));
+        assert_eq!(
+            chunk.delta.as_ref().unwrap().content.as_deref(),
+            Some("Hello")
+        );
         assert!(chunk.finish_reason.is_none());
     }
 
@@ -1507,7 +1565,7 @@ mod tests {
         let (system, msgs) = AnthropicProvider::convert_messages(&messages);
         assert_eq!(system.as_deref(), Some("System"));
         assert_eq!(msgs.len(), 3); // user, assistant with tool_use, user with tool_result
-        // Assistant message should have tool_use block
+                                   // Assistant message should have tool_use block
         let assistant_content = msgs[1]["content"].as_array().unwrap();
         assert_eq!(assistant_content[0]["type"], "tool_use");
         assert_eq!(assistant_content[0]["name"], "read_file");
@@ -1618,7 +1676,9 @@ mod tests {
             .with_http_referer("https://example.com")
             .with_x_title("My App");
         let headers = provider.build_headers();
-        assert!(headers.iter().any(|(k, v)| k == "HTTP-Referer" && v == "https://example.com"));
+        assert!(headers
+            .iter()
+            .any(|(k, v)| k == "HTTP-Referer" && v == "https://example.com"));
         assert!(headers.iter().any(|(k, v)| k == "X-Title" && v == "My App"));
     }
 

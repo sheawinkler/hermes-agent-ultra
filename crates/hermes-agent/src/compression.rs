@@ -22,14 +22,7 @@ pub async fn summarize_messages_with_llm(
     prompt_messages.extend_from_slice(messages);
 
     let resp = provider
-        .chat_completion(
-            &prompt_messages,
-            &[],
-            Some(700),
-            Some(0.1),
-            model,
-            None,
-        )
+        .chat_completion(&prompt_messages, &[], Some(700), Some(0.1), model, None)
         .await?;
 
     Ok(resp

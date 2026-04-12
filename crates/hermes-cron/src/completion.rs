@@ -45,19 +45,13 @@ impl CronCompletionEvent {
         let finished_at = Utc::now().to_rfc3339();
         let (ok, error, total_turns, assistant_snippet) = match outcome {
             Ok(r) => {
-                let snippet = r
-                    .messages
-                    .iter()
-                    .rev()
-                    .find_map(|m| {
-                        if m.role == MessageRole::Assistant {
-                            m.content
-                                .as_ref()
-                                .map(|c| truncate_chars(c, 2000))
-                        } else {
-                            None
-                        }
-                    });
+                let snippet = r.messages.iter().rev().find_map(|m| {
+                    if m.role == MessageRole::Assistant {
+                        m.content.as_ref().map(|c| truncate_chars(c, 2000))
+                    } else {
+                        None
+                    }
+                });
                 (true, None, Some(r.total_turns), snippet)
             }
             Err(msg) => (false, Some(msg), None, None),

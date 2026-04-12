@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{JsonSchema, Skill, SkillMeta, SkillProvider, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{
+    tool_schema, JsonSchema, Skill, SkillMeta, SkillProvider, ToolError, ToolHandler, ToolSchema,
+};
 
 use std::sync::Arc;
 
@@ -26,20 +28,24 @@ impl SkillsListHandler {
 #[async_trait]
 impl ToolHandler for SkillsListHandler {
     async fn execute(&self, _params: Value) -> Result<String, ToolError> {
-        let skills = self.provider.list_skills()
+        let skills = self
+            .provider
+            .list_skills()
             .await
             .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
 
-        let result: Vec<Value> = skills.iter().map(|s| {
-            json!({
-                "name": s.name,
-                "category": s.category,
-                "description": s.description,
+        let result: Vec<Value> = skills
+            .iter()
+            .map(|s| {
+                json!({
+                    "name": s.name,
+                    "category": s.category,
+                    "description": s.description,
+                })
             })
-        }).collect();
+            .collect();
 
-        Ok(serde_json::to_string_pretty(&result)
-            .unwrap_or_else(|_| "[]".to_string()))
+        Ok(serde_json::to_string_pretty(&result).unwrap_or_else(|_| "[]".to_string()))
     }
 
     fn schema(&self) -> ToolSchema {
@@ -69,7 +75,8 @@ impl SkillViewHandler {
 #[async_trait]
 impl ToolHandler for SkillViewHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
-        let name = params.get("name")
+        let name = params
+            .get("name")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'name' parameter".into()))?;
 
@@ -82,10 +89,13 @@ impl ToolHandler for SkillViewHandler {
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("name".into(), json!({
-            "type": "string",
-            "description": "Name of the skill to view"
-        }));
+        props.insert(
+            "name".into(),
+            json!({
+                "type": "string",
+                "description": "Name of the skill to view"
+            }),
+        );
 
         tool_schema(
             "skill_view",
@@ -113,7 +123,8 @@ impl SkillManageHandler {
 #[async_trait]
 impl ToolHandler for SkillManageHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
-        let action = params.get("action")
+        let action = params
+            .get("action")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'action' parameter".into()))?;
 
@@ -231,31 +242,49 @@ impl ToolHandler for SkillManageHandler {
             "description": "Action to perform",
             "enum": ["create", "update", "delete", "auto_create", "self_improve", "sync", "install_builtins"]
         }));
-        props.insert("name".into(), json!({
-            "type": "string",
-            "description": "Name of the skill"
-        }));
-        props.insert("content".into(), json!({
-            "type": "string",
-            "description": "Skill content (for create/update)"
-        }));
-        props.insert("category".into(), json!({
-            "type": "string",
-            "description": "Skill category (for create)"
-        }));
-        props.insert("summary".into(), json!({
-            "type": "string",
-            "description": "Task summary used by auto_create"
-        }));
-        props.insert("steps".into(), json!({
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "Step list for auto_create"
-        }));
-        props.insert("feedback".into(), json!({
-            "type": "string",
-            "description": "Feedback used by self_improve"
-        }));
+        props.insert(
+            "name".into(),
+            json!({
+                "type": "string",
+                "description": "Name of the skill"
+            }),
+        );
+        props.insert(
+            "content".into(),
+            json!({
+                "type": "string",
+                "description": "Skill content (for create/update)"
+            }),
+        );
+        props.insert(
+            "category".into(),
+            json!({
+                "type": "string",
+                "description": "Skill category (for create)"
+            }),
+        );
+        props.insert(
+            "summary".into(),
+            json!({
+                "type": "string",
+                "description": "Task summary used by auto_create"
+            }),
+        );
+        props.insert(
+            "steps".into(),
+            json!({
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Step list for auto_create"
+            }),
+        );
+        props.insert(
+            "feedback".into(),
+            json!({
+                "type": "string",
+                "description": "Feedback used by self_improve"
+            }),
+        );
 
         tool_schema(
             "skill_manage",
@@ -273,17 +302,41 @@ mod tests {
     struct MockSkillProvider;
     #[async_trait]
     impl SkillProvider for MockSkillProvider {
-        async fn create_skill(&self, name: &str, content: &str, category: Option<&str>) -> Result<Skill, AgentError> {
-            Ok(Skill { name: name.into(), content: content.into(), category: category.map(String::from), description: None })
+        async fn create_skill(
+            &self,
+            name: &str,
+            content: &str,
+            category: Option<&str>,
+        ) -> Result<Skill, AgentError> {
+            Ok(Skill {
+                name: name.into(),
+                content: content.into(),
+                category: category.map(String::from),
+                description: None,
+            })
         }
         async fn get_skill(&self, name: &str) -> Result<Option<Skill>, AgentError> {
-            Ok(Some(Skill { name: name.into(), content: "skill content".into(), category: None, description: None }))
+            Ok(Some(Skill {
+                name: name.into(),
+                content: "skill content".into(),
+                category: None,
+                description: None,
+            }))
         }
         async fn list_skills(&self) -> Result<Vec<SkillMeta>, AgentError> {
-            Ok(vec![SkillMeta { name: "test".into(), category: None, description: None }])
+            Ok(vec![SkillMeta {
+                name: "test".into(),
+                category: None,
+                description: None,
+            }])
         }
         async fn update_skill(&self, name: &str, content: &str) -> Result<Skill, AgentError> {
-            Ok(Skill { name: name.into(), content: content.into(), category: None, description: None })
+            Ok(Skill {
+                name: name.into(),
+                content: content.into(),
+                category: None,
+                description: None,
+            })
         }
         async fn delete_skill(&self, _name: &str) -> Result<(), AgentError> {
             Ok(())
@@ -307,7 +360,10 @@ mod tests {
     #[tokio::test]
     async fn test_skill_manage_create() {
         let handler = SkillManageHandler::new(Arc::new(MockSkillProvider));
-        let result = handler.execute(json!({"action": "create", "name": "new_skill", "content": "hello"})).await.unwrap();
+        let result = handler
+            .execute(json!({"action": "create", "name": "new_skill", "content": "hello"}))
+            .await
+            .unwrap();
         assert!(result.contains("created"));
     }
 }

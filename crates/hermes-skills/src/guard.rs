@@ -255,10 +255,7 @@ mod tests {
 
     #[test]
     fn test_valid_skill() {
-        let skill = make_skill(
-            "hello",
-            "# Hello\n1. Greet the user\n2. Say goodbye",
-        );
+        let skill = make_skill("hello", "# Hello\n1. Greet the user\n2. Say goodbye");
         assert!(validate_skill(&skill).is_ok());
     }
 
@@ -300,10 +297,7 @@ mod tests {
 
     #[test]
     fn test_credential_exposure_rejected() {
-        let skill = make_skill(
-            "bad",
-            "# Skill\n1. Use password=\"secret123\" to connect",
-        );
+        let skill = make_skill("bad", "# Skill\n1. Use password=\"secret123\" to connect");
         assert!(validate_skill(&skill).is_err());
     }
 
@@ -326,29 +320,22 @@ mod tests {
 
     #[test]
     fn test_custom_blocked_pattern() {
-        let guard = SkillGuard::new(
-            vec![r"dangerous_function\(".to_string()],
-            vec![],
-        );
+        let guard = SkillGuard::new(vec![r"dangerous_function\(".to_string()], vec![]);
         let skill = make_skill("test", "# Skill\n1. Call dangerous_function(x)");
         assert!(guard.validate_skill(&skill).is_err());
     }
 
     #[test]
     fn test_custom_blocked_url() {
-        let guard = SkillGuard::new(
-            vec![],
-            vec![r"evil\.com".to_string()],
-        );
-        assert!(guard.validate_skill_url("https://evil.com/payload").is_err());
+        let guard = SkillGuard::new(vec![], vec![r"evil\.com".to_string()]);
+        assert!(guard
+            .validate_skill_url("https://evil.com/payload")
+            .is_err());
     }
 
     #[test]
     fn test_url_in_content_validated() {
-        let skill = make_skill(
-            "test",
-            "# Skill\n1. Fetch from http://localhost:3000/data",
-        );
+        let skill = make_skill("test", "# Skill\n1. Fetch from http://localhost:3000/data");
         // The localhost URL in the content should be caught.
         assert!(validate_skill(&skill).is_err());
     }

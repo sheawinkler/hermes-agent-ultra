@@ -55,17 +55,19 @@ pub fn init_telemetry(config: &TelemetryConfig) {
     #[cfg(feature = "otlp")]
     let reg = {
         use tracing_subscriber::layer::Identity;
-        let otel: Box<dyn tracing_subscriber::layer::Layer<Registry> + Send + Sync> =
-            match config.otlp_endpoint.as_deref() {
-                Some(ep) if !ep.is_empty() => match otlp::build_otel_layer(&config.service_name, ep) {
-                    Ok(layer) => Box::new(layer),
-                    Err(e) => {
-                        eprintln!("hermes-telemetry: OTLP init failed: {}", e);
-                        Box::new(Identity::default())
-                    }
-                },
-                _ => Box::new(Identity::default()),
-            };
+        let otel: Box<dyn tracing_subscriber::layer::Layer<Registry> + Send + Sync> = match config
+            .otlp_endpoint
+            .as_deref()
+        {
+            Some(ep) if !ep.is_empty() => match otlp::build_otel_layer(&config.service_name, ep) {
+                Ok(layer) => Box::new(layer),
+                Err(e) => {
+                    eprintln!("hermes-telemetry: OTLP init failed: {}", e);
+                    Box::new(Identity::default())
+                }
+            },
+            _ => Box::new(Identity::default()),
+        };
         Registry::default().with(otel)
     };
 
@@ -153,7 +155,11 @@ pub fn prometheus_text() -> String {
         "# HELP hermes_llm_requests_total Completed LLM round-trips observed by Hermes."
     );
     let _ = writeln!(&mut out, "# TYPE hermes_llm_requests_total counter");
-    let _ = writeln!(&mut out, "hermes_llm_requests_total {}", s.llm_requests_total);
+    let _ = writeln!(
+        &mut out,
+        "hermes_llm_requests_total {}",
+        s.llm_requests_total
+    );
     let _ = writeln!(
         &mut out,
         "# HELP hermes_tool_calls_total Tool invocations observed by Hermes."
@@ -165,7 +171,11 @@ pub fn prometheus_text() -> String {
         "# HELP hermes_tool_time_ms_total Wall time spent in tools (milliseconds)."
     );
     let _ = writeln!(&mut out, "# TYPE hermes_tool_time_ms_total counter");
-    let _ = writeln!(&mut out, "hermes_tool_time_ms_total {}", s.tool_time_ms_total);
+    let _ = writeln!(
+        &mut out,
+        "hermes_tool_time_ms_total {}",
+        s.tool_time_ms_total
+    );
     let _ = writeln!(
         &mut out,
         "# HELP hermes_errors_total Errors recorded by Hermes telemetry."

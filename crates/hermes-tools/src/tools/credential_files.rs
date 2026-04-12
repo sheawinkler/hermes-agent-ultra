@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
 pub struct CredentialFilesHandler;
 
@@ -20,6 +20,10 @@ impl ToolHandler for CredentialFilesHandler {
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
         props.insert("path".into(), json!({"type":"string"}));
-        tool_schema("credential_files", "Check credential file existence/metadata.", JsonSchema::object(props, vec!["path".into()]))
+        tool_schema(
+            "credential_files",
+            "Check credential file existence/metadata.",
+            JsonSchema::object(props, vec!["path".into()]),
+        )
     }
 }

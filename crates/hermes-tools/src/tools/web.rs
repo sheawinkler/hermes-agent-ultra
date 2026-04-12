@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
 // ---------------------------------------------------------------------------
 // Backend traits (injectable by the caller)
@@ -14,7 +14,12 @@ use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema, tool_schema};
 #[async_trait]
 pub trait WebSearchBackend: Send + Sync {
     /// Search the web and return results as JSON string.
-    async fn search(&self, query: &str, num_results: usize, category: Option<&str>) -> Result<String, ToolError>;
+    async fn search(
+        &self,
+        query: &str,
+        num_results: usize,
+        category: Option<&str>,
+    ) -> Result<String, ToolError>;
 }
 
 /// Backend for web extraction operations (e.g. Firecrawl API).
@@ -42,31 +47,38 @@ impl WebSearchHandler {
 #[async_trait]
 impl ToolHandler for WebSearchHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
-        let query = params.get("query")
+        let query = params
+            .get("query")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'query' parameter".into()))?;
 
-        let num_results = params.get("num_results")
+        let num_results = params
+            .get("num_results")
             .and_then(|v| v.as_u64())
             .unwrap_or(10) as usize;
 
-        let category = params.get("category")
-            .and_then(|v| v.as_str());
+        let category = params.get("category").and_then(|v| v.as_str());
 
         self.backend.search(query, num_results, category).await
     }
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("query".into(), json!({
-            "type": "string",
-            "description": "The search query"
-        }));
-        props.insert("num_results".into(), json!({
-            "type": "integer",
-            "description": "Number of results to return (default: 10)",
-            "default": 10
-        }));
+        props.insert(
+            "query".into(),
+            json!({
+                "type": "string",
+                "description": "The search query"
+            }),
+        );
+        props.insert(
+            "num_results".into(),
+            json!({
+                "type": "integer",
+                "description": "Number of results to return (default: 10)",
+                "default": 10
+            }),
+        );
         props.insert("category".into(), json!({
             "type": "string",
             "description": "Optional category filter (e.g. 'research paper', 'news', 'github')",
@@ -99,11 +111,13 @@ impl WebExtractHandler {
 #[async_trait]
 impl ToolHandler for WebExtractHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
-        let url = params.get("url")
+        let url = params
+            .get("url")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'url' parameter".into()))?;
 
-        let include_links = params.get("include_links")
+        let include_links = params
+            .get("include_links")
             .and_then(|v| v.as_bool())
             .unwrap_or(true);
 
@@ -112,15 +126,21 @@ impl ToolHandler for WebExtractHandler {
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("url".into(), json!({
-            "type": "string",
-            "description": "The URL to extract content from"
-        }));
-        props.insert("include_links".into(), json!({
-            "type": "boolean",
-            "description": "Whether to include links found on the page (default: true)",
-            "default": true
-        }));
+        props.insert(
+            "url".into(),
+            json!({
+                "type": "string",
+                "description": "The URL to extract content from"
+            }),
+        );
+        props.insert(
+            "include_links".into(),
+            json!({
+                "type": "boolean",
+                "description": "Whether to include links found on the page (default: true)",
+                "default": true
+            }),
+        );
 
         tool_schema(
             "web_extract",
@@ -137,7 +157,12 @@ mod tests {
     struct MockSearchBackend;
     #[async_trait]
     impl WebSearchBackend for MockSearchBackend {
-        async fn search(&self, query: &str, num_results: usize, _category: Option<&str>) -> Result<String, ToolError> {
+        async fn search(
+            &self,
+            query: &str,
+            num_results: usize,
+            _category: Option<&str>,
+        ) -> Result<String, ToolError> {
             Ok(format!("Results for '{}' (count: {})", query, num_results))
         }
     }
@@ -161,7 +186,10 @@ mod tests {
     #[tokio::test]
     async fn test_web_search_execute() {
         let handler = WebSearchHandler::new(Box::new(MockSearchBackend));
-        let result = handler.execute(json!({"query": "rust async"})).await.unwrap();
+        let result = handler
+            .execute(json!({"query": "rust async"}))
+            .await
+            .unwrap();
         assert!(result.contains("rust async"));
     }
 
@@ -175,7 +203,10 @@ mod tests {
     #[tokio::test]
     async fn test_web_extract_execute() {
         let handler = WebExtractHandler::new(Box::new(MockExtractBackend));
-        let result = handler.execute(json!({"url": "https://example.com"})).await.unwrap();
+        let result = handler
+            .execute(json!({"url": "https://example.com"}))
+            .await
+            .unwrap();
         assert!(result.contains("example.com"));
     }
 

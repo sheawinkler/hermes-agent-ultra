@@ -71,10 +71,11 @@ pub fn parse_frontmatter(content: &str) -> (HashMap<String, Value>, String) {
 
     let yaml_block = &after_first[..end_idx];
     let body_start = end_idx + 4; // skip "\n---"
-    let body = after_first[body_start..].trim_start_matches('\n').to_string();
+    let body = after_first[body_start..]
+        .trim_start_matches('\n')
+        .to_string();
 
-    let frontmatter: HashMap<String, Value> = serde_yaml::from_str(yaml_block)
-        .unwrap_or_default();
+    let frontmatter: HashMap<String, Value> = serde_yaml::from_str(yaml_block).unwrap_or_default();
 
     (frontmatter, body)
 }
@@ -163,10 +164,7 @@ pub fn extract_skill_conditions(skill: &SkillInfo) -> Vec<SkillCondition> {
     if let Some(Value::Array(arr)) = skill.frontmatter.get("conditions") {
         for item in arr {
             if let Some(obj) = item.as_object() {
-                let kind = obj
-                    .get("type")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("custom");
+                let kind = obj.get("type").and_then(|v| v.as_str()).unwrap_or("custom");
                 let value = obj
                     .get("value")
                     .and_then(|v| v.as_str())
@@ -398,10 +396,7 @@ mod tests {
     #[test]
     fn test_match_platform_array() {
         let mut fm = HashMap::new();
-        fm.insert(
-            "platform".into(),
-            serde_json::json!(["darwin", "linux"]),
-        );
+        fm.insert("platform".into(), serde_json::json!(["darwin", "linux"]));
         let skill = SkillInfo {
             name: "unix".into(),
             path: PathBuf::from("/tmp"),

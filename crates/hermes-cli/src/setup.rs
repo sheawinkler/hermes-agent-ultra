@@ -6,8 +6,11 @@ pub fn write_default_profile(config_dir: &std::path::Path, model: &str) -> Resul
         .map_err(|e| AgentError::Io(format!("Failed to create profiles dir: {}", e)))?;
     let default_profile = profiles_dir.join("default.yaml");
     if !default_profile.exists() {
-        std::fs::write(&default_profile, format!("name: default\nmodel: {}\n", model))
-            .map_err(|e| AgentError::Io(format!("Failed to write default profile: {}", e)))?;
+        std::fs::write(
+            &default_profile,
+            format!("name: default\nmodel: {}\n", model),
+        )
+        .map_err(|e| AgentError::Io(format!("Failed to write default profile: {}", e)))?;
     }
     Ok(())
 }

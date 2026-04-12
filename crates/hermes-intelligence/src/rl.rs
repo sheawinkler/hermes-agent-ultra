@@ -74,10 +74,7 @@ impl TrajectoryCompressor {
         for (i, msg) in trajectory.messages.iter().enumerate() {
             let is_first = i == 0;
             let is_last = i == last_idx;
-            let has_tool_calls = msg
-                .tool_calls
-                .as_ref()
-                .map_or(false, |tc| !tc.is_empty());
+            let has_tool_calls = msg.tool_calls.as_ref().map_or(false, |tc| !tc.is_empty());
 
             if is_first || is_last || has_tool_calls {
                 compressed_messages.push(msg.clone());
@@ -205,11 +202,7 @@ impl RlToolset {
     /// Configure a training environment.
     ///
     /// Returns a placeholder confirmation string.
-    pub fn configure_environment(
-        &self,
-        _environment: &str,
-        _config: &serde_json::Value,
-    ) -> String {
+    pub fn configure_environment(&self, _environment: &str, _config: &serde_json::Value) -> String {
         "configured".to_string()
     }
 
@@ -379,7 +372,10 @@ mod tests {
     fn test_rl_toolset_stubs() {
         let ts = RlToolset::new();
         assert!(!ts.list_environments().is_empty());
-        assert_eq!(ts.configure_environment("test", &serde_json::Value::Null), "configured");
+        assert_eq!(
+            ts.configure_environment("test", &serde_json::Value::Null),
+            "configured"
+        );
         assert!(ts.start_training("test").starts_with("rl-session-"));
         assert_eq!(ts.stop_training("id"), "stopped");
         let results = ts.get_results("id");

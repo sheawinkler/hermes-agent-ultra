@@ -69,7 +69,11 @@ fn normalize_model_block(map: &mut Mapping) {
             map.insert(model_key, Value::String(s));
         }
         Value::Mapping(m) => {
-            let default = m.get(&key("default")).and_then(as_str).map(str::trim).filter(|s| !s.is_empty());
+            let default = m
+                .get(&key("default"))
+                .and_then(as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
             let provider = m
                 .get(&key("provider"))
                 .and_then(as_str)
@@ -150,10 +154,7 @@ fn normalize_session_reset(map: &mut Mapping) {
     let Some(Value::Mapping(sr)) = map.get(&key("session_reset")).cloned() else {
         return;
     };
-    let mode = sr
-        .get(&key("mode"))
-        .and_then(as_str)
-        .map(str::to_lowercase);
+    let mode = sr.get(&key("mode")).and_then(as_str).map(str::to_lowercase);
     let idle_minutes = sr.get(&key("idle_minutes")).and_then(as_u64);
     let at_hour = sr
         .get(&key("at_hour"))
@@ -291,10 +292,7 @@ max_turns: 99
         assert_eq!(cfg.model.as_deref(), Some("openrouter:z-ai/glm-5.1"));
         assert_eq!(cfg.max_turns, 99);
         let or = cfg.llm_providers.get("openrouter").expect("openrouter");
-        assert_eq!(
-            or.base_url.as_deref(),
-            Some("https://openrouter.ai/api/v1")
-        );
+        assert_eq!(or.base_url.as_deref(), Some("https://openrouter.ai/api/v1"));
     }
 
     #[test]

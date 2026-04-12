@@ -26,7 +26,9 @@ pub use error_classifier::{ErrorCategory, ErrorClassifier, RetryStrategy};
 pub use insights::Insights;
 pub use prompt::PromptBuilder;
 pub use redact::{RedactionPattern, Redactor};
-pub use router::{ModelCapability, ModelInfo as RouterModelInfo, ModelRequirements, RouterError, SmartModelRouter};
+pub use router::{
+    ModelCapability, ModelInfo as RouterModelInfo, ModelRequirements, RouterError, SmartModelRouter,
+};
 pub use title::{TitleError, TitleGenerator};
 pub use usage::{ModelPricing, ModelUsage, UsageRecord, UsageSummary, UsageTracker};
 
@@ -34,7 +36,9 @@ pub use anthropic_adapter::{
     AnthropicContent, AnthropicContentBlock, AnthropicMessage, AnthropicTool,
     NormalizedAssistantMessage, NormalizedToolCall, ReasoningConfig, ReasoningEffort,
 };
-pub use context_engine::{ContextEngine, ContextError, DefaultContextEngine, ImportanceBasedEngine};
+pub use context_engine::{
+    ContextEngine, ContextError, DefaultContextEngine, ImportanceBasedEngine,
+};
 pub use credential_pool::{CredentialPool, PoolManager, PoolStrategy, PooledCredential};
 pub use display::{
     build_tool_preview, format_context_pressure, format_cost, format_duration_compact,
@@ -42,15 +46,15 @@ pub use display::{
     format_tool_result, format_usage_stats, get_cute_tool_message, render_inline_unified_diff,
 };
 pub use model_metadata::{
-    ModelMetadataEntry, estimate_messages_tokens_rough, estimate_request_tokens_rough,
-    estimate_tokens_rough, get_model_context_length, get_model_info, get_next_probe_tier,
-    infer_provider_from_url, is_local_endpoint, known_models, max_output_tokens,
-    supports_tools, supports_vision,
+    estimate_messages_tokens_rough, estimate_request_tokens_rough, estimate_tokens_rough,
+    get_model_context_length, get_model_info, get_next_probe_tier, infer_provider_from_url,
+    is_local_endpoint, known_models, max_output_tokens, supports_tools, supports_vision,
+    ModelMetadataEntry,
 };
 pub use usage_pricing::{
-    BillingMode, BillingRoute, CanonicalUsage, CostResult, CostSource, CostStatus,
-    PricingEntry, calculate_cost, format_token_count_compact, get_pricing, get_pricing_entry,
-    has_known_pricing, normalize_usage, resolve_billing_route,
+    calculate_cost, format_token_count_compact, get_pricing, get_pricing_entry, has_known_pricing,
+    normalize_usage, resolve_billing_route, BillingMode, BillingRoute, CanonicalUsage, CostResult,
+    CostSource, CostStatus, PricingEntry,
 };
 
 #[cfg(feature = "rl")]

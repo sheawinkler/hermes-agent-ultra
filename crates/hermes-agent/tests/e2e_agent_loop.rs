@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use futures::stream::BoxStream;
 use hermes_agent::agent_loop::ToolRegistry;
@@ -42,7 +42,9 @@ impl LlmProvider for MockProvider {
                 finish_reason: Some("tool_calls".to_string()),
             })
         } else {
-            let saw_tool = messages.iter().any(|m| m.tool_call_id.as_deref() == Some("tool-1"));
+            let saw_tool = messages
+                .iter()
+                .any(|m| m.tool_call_id.as_deref() == Some("tool-1"));
             Ok(LlmResponse {
                 message: Message::assistant(if saw_tool {
                     "final-answer"
@@ -103,10 +105,6 @@ async fn e2e_agent_loop_tool_call_then_final_reply() {
         .run(vec![Message::user("hi")], None)
         .await
         .expect("agent loop should succeed");
-    let final_reply = result
-        .messages
-        .iter()
-        .rev()
-        .find_map(|m| m.content.clone());
+    let final_reply = result.messages.iter().rev().find_map(|m| m.content.clone());
     assert_eq!(final_reply.as_deref(), Some("final-answer"));
 }

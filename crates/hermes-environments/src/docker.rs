@@ -123,25 +123,22 @@ impl TerminalBackend for DockerBackend {
             args.insert(1, "-d".to_string());
         }
 
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(timeout_secs),
-            async {
-                let output = TokioCommand::new("docker")
-                    .args(&args)
-                    .output()
-                    .await
-                    .map_err(|e| AgentError::Io(format!("Failed to execute docker command: {}", e)))?;
+        let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
+            let output = TokioCommand::new("docker")
+                .args(&args)
+                .output()
+                .await
+                .map_err(|e| AgentError::Io(format!("Failed to execute docker command: {}", e)))?;
 
-                let stdout = self.truncate_output(String::from_utf8_lossy(&output.stdout).to_string());
-                let stderr = self.truncate_output(String::from_utf8_lossy(&output.stderr).to_string());
+            let stdout = self.truncate_output(String::from_utf8_lossy(&output.stdout).to_string());
+            let stderr = self.truncate_output(String::from_utf8_lossy(&output.stderr).to_string());
 
-                Ok(CommandOutput {
-                    exit_code: output.status.code().unwrap_or(-1),
-                    stdout,
-                    stderr,
-                })
-            },
-        )
+            Ok(CommandOutput {
+                exit_code: output.status.code().unwrap_or(-1),
+                stdout,
+                stderr,
+            })
+        })
         .await;
 
         match result {
@@ -168,7 +165,12 @@ impl TerminalBackend for DockerBackend {
             // Use sed for offset/limit support
             let start = offset.unwrap_or(0) + 1; // sed is 1-indexed
             if let Some(lim) = limit {
-                cat_cmd = format!("sed -n '{},{}p' {}", start, start + lim - 1, shlex_quote(path));
+                cat_cmd = format!(
+                    "sed -n '{},{}p' {}",
+                    start,
+                    start + lim - 1,
+                    shlex_quote(path)
+                );
             } else {
                 cat_cmd = format!("sed -n '{},\\$p' {}", start, shlex_quote(path));
             }
@@ -207,7 +209,9 @@ impl TerminalBackend for DockerBackend {
                 .args(["exec", container_id, "sh", "-c", &mkdir_cmd])
                 .output()
                 .await
-                .map_err(|e| AgentError::Io(format!("Failed to create parent dir via docker: {}", e)))?;
+                .map_err(|e| {
+                    AgentError::Io(format!("Failed to create parent dir via docker: {}", e))
+                })?;
 
             if !mkdir_output.status.success() {
                 let stderr = String::from_utf8_lossy(&mkdir_output.stderr);
@@ -221,7 +225,11 @@ impl TerminalBackend for DockerBackend {
         // Write content using docker exec with heredoc-style input
         // Escape any single quotes in the content
         let escaped_content = content.replace('\'', "'\\''");
-        let write_cmd = format!("cat > {} << 'HERMES_EOF'\n{}\nHERMES_EOF", shlex_quote(path), escaped_content);
+        let write_cmd = format!(
+            "cat > {} << 'HERMES_EOF'\n{}\nHERMES_EOF",
+            shlex_quote(path),
+            escaped_content
+        );
 
         let output = TokioCommand::new("docker")
             .args(["exec", container_id, "sh", "-c", &write_cmd])
@@ -244,13 +252,7 @@ impl TerminalBackend for DockerBackend {
         let container_id = self.container_id()?;
 
         let output = TokioCommand::new("docker")
-            .args([
-                "exec",
-                container_id,
-                "test",
-                "-e",
-                path,
-            ])
+            .args(["exec", container_id, "test", "-e", path])
             .output()
             .await
             .map_err(|e| AgentError::Io(format!("Failed to check file via docker: {}", e)))?;
@@ -264,7 +266,10 @@ impl TerminalBackend for DockerBackend {
 fn shlex_quote(s: &str) -> String {
     if s.is_empty() {
         "''".to_string()
-    } else if !s.chars().any(|c| c.is_whitespace() || c == '\'' || c == '"' || c == '\\' || c == '$' || c == '`') {
+    } else if !s
+        .chars()
+        .any(|c| c.is_whitespace() || c == '\'' || c == '"' || c == '\\' || c == '$' || c == '`')
+    {
         s.to_string()
     } else {
         format!("'{}'", s.replace('\'', "'\\''"))

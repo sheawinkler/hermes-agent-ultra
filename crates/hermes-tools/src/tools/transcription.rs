@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
 pub struct TranscriptionHandler;
 
@@ -29,7 +29,10 @@ fn audio_extension_format(path: &str) -> &'static str {
 #[async_trait]
 impl ToolHandler for TranscriptionHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
-        let path = params.get("audio_path").and_then(|v| v.as_str()).unwrap_or("");
+        let path = params
+            .get("audio_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
         if path.is_empty() {
             return Err(ToolError::InvalidParams("Missing 'audio_path'".into()));
         }

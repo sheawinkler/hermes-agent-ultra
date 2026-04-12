@@ -5,9 +5,9 @@
 //! at most ONE of these external providers can be active at a time.
 
 pub mod byterover;
+pub mod hindsight;
 pub mod holographic;
 pub mod honcho;
-pub mod hindsight;
 pub mod mem0;
 pub mod openviking;
 pub mod retaindb;

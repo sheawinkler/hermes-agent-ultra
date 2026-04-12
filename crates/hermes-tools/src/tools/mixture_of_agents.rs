@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
 pub struct MixtureOfAgentsHandler;
 
@@ -19,7 +19,14 @@ impl ToolHandler for MixtureOfAgentsHandler {
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
         props.insert("prompt".into(), json!({"type":"string"}));
-        props.insert("agents".into(), json!({"type":"array","items":{"type":"string"}}));
-        tool_schema("mixture_of_agents", "Run a mixture-of-agents voting workflow.", JsonSchema::object(props, vec!["prompt".into()]))
+        props.insert(
+            "agents".into(),
+            json!({"type":"array","items":{"type":"string"}}),
+        );
+        tool_schema(
+            "mixture_of_agents",
+            "Run a mixture-of-agents voting workflow.",
+            JsonSchema::object(props, vec!["prompt".into()]),
+        )
     }
 }

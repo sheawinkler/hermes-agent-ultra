@@ -8,9 +8,9 @@ use base64::Engine;
 use chrono::{DateTime, Duration, Utc};
 use hermes_core::AgentError;
 use serde::{Deserialize, Serialize};
-use url::Url;
 use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
+use url::Url;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthCredential {
@@ -41,7 +41,10 @@ pub fn generate_pkce_pair() -> PkcePair {
     let verifier = uuid::Uuid::new_v4().to_string().replace('-', "");
     let digest = Sha256::digest(verifier.as_bytes());
     let challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(digest);
-    PkcePair { verifier, challenge }
+    PkcePair {
+        verifier,
+        challenge,
+    }
 }
 
 #[derive(Clone)]
@@ -102,7 +105,10 @@ impl FileTokenStore {
 }
 
 pub type RefreshHandler = Arc<
-    dyn Fn(String, String) -> futures::future::BoxFuture<'static, Result<OAuthCredential, AgentError>>
+    dyn Fn(
+            String,
+            String,
+        ) -> futures::future::BoxFuture<'static, Result<OAuthCredential, AgentError>>
         + Send
         + Sync,
 >;
@@ -147,7 +153,9 @@ impl AuthManager {
                 .await
                 .get(provider)
                 .cloned()
-                .ok_or_else(|| AgentError::AuthFailed(format!("no refresh handler for {}", provider)))?;
+                .ok_or_else(|| {
+                    AgentError::AuthFailed(format!("no refresh handler for {}", provider))
+                })?;
             credential = handler(provider.to_string(), refresh_token).await?;
             self.store.upsert(credential.clone()).await?;
         }
@@ -230,10 +238,11 @@ pub async fn exchange_authorization_code(
         )));
     }
 
-    let body: TokenEndpointJson = resp.json().await.map_err(|e| AgentError::Io(e.to_string()))?;
-    let expires_at = body
-        .expires_in
-        .map(|s| Utc::now() + Duration::seconds(s));
+    let body: TokenEndpointJson = resp
+        .json()
+        .await
+        .map_err(|e| AgentError::Io(e.to_string()))?;
+    let expires_at = body.expires_in.map(|s| Utc::now() + Duration::seconds(s));
     Ok(OAuthCredential {
         provider: provider_id.to_string(),
         access_token: body.access_token,
@@ -272,10 +281,11 @@ pub async fn exchange_refresh_token(
         )));
     }
 
-    let body: TokenEndpointJson = resp.json().await.map_err(|e| AgentError::Io(e.to_string()))?;
-    let expires_at = body
-        .expires_in
-        .map(|s| Utc::now() + Duration::seconds(s));
+    let body: TokenEndpointJson = resp
+        .json()
+        .await
+        .map_err(|e| AgentError::Io(e.to_string()))?;
+    let expires_at = body.expires_in.map(|s| Utc::now() + Duration::seconds(s));
     Ok(OAuthCredential {
         provider: provider_id.to_string(),
         access_token: body.access_token,

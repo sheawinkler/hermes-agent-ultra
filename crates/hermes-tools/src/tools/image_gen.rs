@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
 use std::sync::Arc;
 
@@ -43,7 +43,8 @@ impl ImageGenerateHandler {
 #[async_trait]
 impl ToolHandler for ImageGenerateHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
-        let prompt = params.get("prompt")
+        let prompt = params
+            .get("prompt")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'prompt' parameter".into()))?;
 
@@ -56,24 +57,33 @@ impl ToolHandler for ImageGenerateHandler {
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("prompt".into(), json!({
-            "type": "string",
-            "description": "Text description of the image to generate"
-        }));
+        props.insert(
+            "prompt".into(),
+            json!({
+                "type": "string",
+                "description": "Text description of the image to generate"
+            }),
+        );
         props.insert("size".into(), json!({
             "type": "string",
             "description": "Image size: '256x256', '512x512', '1024x1024' (default: '1024x1024')",
             "enum": ["256x256", "512x512", "1024x1024"]
         }));
-        props.insert("style".into(), json!({
-            "type": "string",
-            "description": "Image style: 'natural' or 'vivid'"
-        }));
-        props.insert("n".into(), json!({
-            "type": "integer",
-            "description": "Number of images to generate (default: 1)",
-            "default": 1
-        }));
+        props.insert(
+            "style".into(),
+            json!({
+                "type": "string",
+                "description": "Image style: 'natural' or 'vivid'"
+            }),
+        );
+        props.insert(
+            "n".into(),
+            json!({
+                "type": "integer",
+                "description": "Number of images to generate (default: 1)",
+                "default": 1
+            }),
+        );
 
         tool_schema(
             "image_generate",
@@ -90,7 +100,13 @@ mod tests {
     struct MockImageGenBackend;
     #[async_trait]
     impl ImageGenBackend for MockImageGenBackend {
-        async fn generate(&self, prompt: &str, _size: Option<&str>, _style: Option<&str>, _n: Option<u32>) -> Result<String, ToolError> {
+        async fn generate(
+            &self,
+            prompt: &str,
+            _size: Option<&str>,
+            _style: Option<&str>,
+            _n: Option<u32>,
+        ) -> Result<String, ToolError> {
             Ok(format!("Generated image for: {}", prompt))
         }
     }
@@ -104,7 +120,10 @@ mod tests {
     #[tokio::test]
     async fn test_image_generate_execute() {
         let handler = ImageGenerateHandler::new(Arc::new(MockImageGenBackend));
-        let result = handler.execute(json!({"prompt": "a sunset"})).await.unwrap();
+        let result = handler
+            .execute(json!({"prompt": "a sunset"}))
+            .await
+            .unwrap();
         assert!(result.contains("sunset"));
     }
 }

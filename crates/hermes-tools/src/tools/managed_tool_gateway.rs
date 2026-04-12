@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
 const GATEWAY_URL_ENV: &str = "HERMES_MANAGED_TOOL_GATEWAY_URL";
 const GATEWAY_TOKEN_ENV: &str = "HERMES_MANAGED_TOOL_GATEWAY_TOKEN";
@@ -35,10 +35,7 @@ impl ToolHandler for ManagedToolGatewayHandler {
         };
 
         let url = format!("{}/invoke", base);
-        let args = params
-            .get("args")
-            .cloned()
-            .unwrap_or_else(|| json!({}));
+        let args = params.get("args").cloned().unwrap_or_else(|| json!({}));
         let body = json!({ "tool": target_tool, "args": args });
 
         let client = reqwest::Client::builder()
@@ -54,10 +51,9 @@ impl ToolHandler for ManagedToolGatewayHandler {
             }
         }
 
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("managed_tool_gateway request: {e}")))?;
+        let resp = req.send().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("managed_tool_gateway request: {e}"))
+        })?;
 
         let status = resp.status();
         let text = resp

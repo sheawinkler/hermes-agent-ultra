@@ -3,8 +3,8 @@
 use async_trait::async_trait;
 use serde_json::json;
 
-use hermes_core::ToolError;
 use crate::tools::memory::MemoryBackend;
+use hermes_core::ToolError;
 
 /// Real memory backend that stores entries in ~/.hermes/MEMORY.md and USER.md.
 pub struct FileMemoryBackend {
@@ -41,15 +41,19 @@ impl FileMemoryBackend {
         match tokio::fs::read_to_string(path).await {
             Ok(content) => Ok(content),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
-            Err(e) => Err(ToolError::ExecutionFailed(format!("Failed to read '{}': {}", path.display(), e))),
+            Err(e) => Err(ToolError::ExecutionFailed(format!(
+                "Failed to read '{}': {}",
+                path.display(),
+                e
+            ))),
         }
     }
 
     async fn write_file(&self, path: &std::path::Path, content: &str) -> Result<(), ToolError> {
         self.ensure_dir().await?;
-        tokio::fs::write(path, content)
-            .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to write '{}': {}", path.display(), e)))
+        tokio::fs::write(path, content).await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to write '{}': {}", path.display(), e))
+        })
     }
 
     fn parse_entries(content: &str) -> Vec<(String, String)> {
@@ -103,7 +107,8 @@ impl MemoryBackend for FileMemoryBackend {
         let content = self.read_file(&path).await?;
         let mut entries = Self::parse_entries(&content);
         entries.push((key.to_string(), value.to_string()));
-        self.write_file(&path, &Self::format_entries(&entries)).await?;
+        self.write_file(&path, &Self::format_entries(&entries))
+            .await?;
         Ok(json!({"status": "ok", "action": "added", "key": key}).to_string())
     }
 
@@ -122,7 +127,8 @@ impl MemoryBackend for FileMemoryBackend {
         if !found {
             entries.push((key.to_string(), value.to_string()));
         }
-        self.write_file(&path, &Self::format_entries(&entries)).await?;
+        self.write_file(&path, &Self::format_entries(&entries))
+            .await?;
         Ok(json!({"status": "ok", "action": "replaced", "key": key}).to_string())
     }
 
@@ -133,7 +139,8 @@ impl MemoryBackend for FileMemoryBackend {
             .into_iter()
             .filter(|(k, _)| k != key)
             .collect();
-        self.write_file(&path, &Self::format_entries(&entries)).await?;
+        self.write_file(&path, &Self::format_entries(&entries))
+            .await?;
         Ok(json!({"status": "ok", "action": "removed", "key": key}).to_string())
     }
 

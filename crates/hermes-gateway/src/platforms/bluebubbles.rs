@@ -30,14 +30,20 @@ pub struct BlueBubblesAdapter {
 
 impl BlueBubblesAdapter {
     pub fn new(config: BlueBubblesConfig) -> Result<Self, GatewayError> {
-        let base = BasePlatformAdapter::new(&config.password)
-            .with_proxy(config.proxy.clone());
+        let base = BasePlatformAdapter::new(&config.password).with_proxy(config.proxy.clone());
         base.validate_token()?;
         let client = base.build_client()?;
-        Ok(Self { base, config, client, stop_signal: Arc::new(Notify::new()) })
+        Ok(Self {
+            base,
+            config,
+            client,
+            stop_signal: Arc::new(Notify::new()),
+        })
     }
 
-    pub fn config(&self) -> &BlueBubblesConfig { &self.config }
+    pub fn config(&self) -> &BlueBubblesConfig {
+        &self.config
+    }
 
     /// Send a text message via BlueBubbles REST API.
     pub async fn send_text(&self, chat_guid: &str, text: &str) -> Result<(), GatewayError> {
@@ -48,15 +54,21 @@ impl BlueBubblesAdapter {
             "method": "private-api"
         });
 
-        let resp = self.client.post(&url)
+        let resp = self
+            .client
+            .post(&url)
             .query(&[("password", &self.config.password)])
             .json(&body)
-            .send().await
+            .send()
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("BlueBubbles send failed: {}", e)))?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("BlueBubbles API error: {}", text)));
+            return Err(GatewayError::SendFailed(format!(
+                "BlueBubbles API error: {}",
+                text
+            )));
         }
         Ok(())
     }
@@ -65,7 +77,10 @@ impl BlueBubblesAdapter {
 #[async_trait]
 impl PlatformAdapter for BlueBubblesAdapter {
     async fn start(&self) -> Result<(), GatewayError> {
-        info!("BlueBubbles adapter starting (server: {})", self.config.server_url);
+        info!(
+            "BlueBubbles adapter starting (server: {})",
+            self.config.server_url
+        );
         self.base.mark_running();
         Ok(())
     }
@@ -77,23 +92,39 @@ impl PlatformAdapter for BlueBubblesAdapter {
         Ok(())
     }
 
-    async fn send_message(&self, chat_id: &str, text: &str, _parse_mode: Option<ParseMode>) -> Result<(), GatewayError> {
+    async fn send_message(
+        &self,
+        chat_id: &str,
+        text: &str,
+        _parse_mode: Option<ParseMode>,
+    ) -> Result<(), GatewayError> {
         self.send_text(chat_id, text).await
     }
 
-    async fn edit_message(&self, _chat_id: &str, _message_id: &str, _text: &str) -> Result<(), GatewayError> {
+    async fn edit_message(
+        &self,
+        _chat_id: &str,
+        _message_id: &str,
+        _text: &str,
+    ) -> Result<(), GatewayError> {
         debug!("BlueBubbles does not support message editing");
         Ok(())
     }
 
-    async fn send_file(&self, chat_id: &str, file_path: &str, caption: Option<&str>) -> Result<(), GatewayError> {
+    async fn send_file(
+        &self,
+        chat_id: &str,
+        file_path: &str,
+        caption: Option<&str>,
+    ) -> Result<(), GatewayError> {
         use crate::platforms::helpers::mime_from_extension;
 
         let path = std::path::Path::new(file_path);
         let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let mime = mime_from_extension(ext);
         let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
-        let file_bytes = tokio::fs::read(file_path).await
+        let file_bytes = tokio::fs::read(file_path)
+            .await
             .map_err(|e| GatewayError::SendFailed(format!("Failed to read file: {e}")))?;
 
         // BlueBubbles supports attachment sending via multipart upload
@@ -107,15 +138,22 @@ impl PlatformAdapter for BlueBubblesAdapter {
             .text("name", file_name.to_string())
             .part("attachment", part);
 
-        let resp = self.client.post(&url)
+        let resp = self
+            .client
+            .post(&url)
             .query(&[("password", &self.config.password)])
             .multipart(form)
-            .send().await
-            .map_err(|e| GatewayError::SendFailed(format!("BlueBubbles attachment send failed: {e}")))?;
+            .send()
+            .await
+            .map_err(|e| {
+                GatewayError::SendFailed(format!("BlueBubbles attachment send failed: {e}"))
+            })?;
 
         if !resp.status().is_success() {
             let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("BlueBubbles attachment error: {text}")));
+            return Err(GatewayError::SendFailed(format!(
+                "BlueBubbles attachment error: {text}"
+            )));
         }
 
         // Send caption as a follow-up text if provided
@@ -125,6 +163,10 @@ impl PlatformAdapter for BlueBubblesAdapter {
         Ok(())
     }
 
-    fn is_running(&self) -> bool { self.base.is_running() }
-    fn platform_name(&self) -> &str { "bluebubbles" }
+    fn is_running(&self) -> bool {
+        self.base.is_running()
+    }
+    fn platform_name(&self) -> &str {
+        "bluebubbles"
+    }
 }

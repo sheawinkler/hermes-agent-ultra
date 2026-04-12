@@ -46,5 +46,8 @@ fn e2e_cli_config_set_dotted_llm_and_get_masks_key() {
     get.args(["config", "get", "llm.openai.api_key"]);
     let out = get.assert().success().get_output().stdout.clone();
     let text = std::str::from_utf8(&out).expect("utf8");
-    assert!(text.contains("***"), "expected masked api key, got: {text:?}");
+    assert!(
+        text.contains("***"),
+        "expected masked api key, got: {text:?}"
+    );
 }

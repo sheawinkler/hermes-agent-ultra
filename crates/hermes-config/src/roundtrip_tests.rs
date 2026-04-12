@@ -88,9 +88,7 @@ mod tests {
             SessionResetPolicy::None,
             SessionResetPolicy::Daily { at_hour: 0 },
             SessionResetPolicy::Daily { at_hour: 23 },
-            SessionResetPolicy::Idle {
-                timeout_minutes: 1,
-            },
+            SessionResetPolicy::Idle { timeout_minutes: 1 },
             SessionResetPolicy::Idle {
                 timeout_minutes: 1440,
             },

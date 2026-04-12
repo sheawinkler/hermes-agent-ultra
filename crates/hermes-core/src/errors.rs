@@ -153,7 +153,9 @@ mod tests {
         let err = AgentError::LlmApi("timeout".into());
         assert_eq!(err.to_string(), "LLM API error: timeout");
 
-        let err = AgentError::RateLimited { retry_after_secs: Some(30) };
+        let err = AgentError::RateLimited {
+            retry_after_secs: Some(30),
+        };
         assert!(err.to_string().contains("30"));
 
         let err = AgentError::MaxTurnsExceeded;

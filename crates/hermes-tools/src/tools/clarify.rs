@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
 use std::sync::Arc;
 
@@ -37,13 +37,13 @@ impl ClarifyHandler {
 #[async_trait]
 impl ToolHandler for ClarifyHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
-        let question = params.get("question")
+        let question = params
+            .get("question")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'question' parameter".into()))?;
 
-        let choices: Option<Vec<String>> = params.get("choices")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
+        let choices: Option<Vec<String>> =
+            params.get("choices").and_then(|v| v.as_array()).map(|arr| {
                 arr.iter()
                     .filter_map(|v| v.as_str().map(String::from))
                     .collect()
@@ -57,15 +57,21 @@ impl ToolHandler for ClarifyHandler {
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("question".into(), json!({
-            "type": "string",
-            "description": "The question to ask the user"
-        }));
-        props.insert("choices".into(), json!({
-            "type": "array",
-            "description": "Optional list of choices for the user to select from",
-            "items": { "type": "string" }
-        }));
+        props.insert(
+            "question".into(),
+            json!({
+                "type": "string",
+                "description": "The question to ask the user"
+            }),
+        );
+        props.insert(
+            "choices".into(),
+            json!({
+                "type": "array",
+                "description": "Optional list of choices for the user to select from",
+                "items": { "type": "string" }
+            }),
+        );
 
         tool_schema(
             "clarify",
@@ -82,7 +88,11 @@ mod tests {
     struct MockClarifyBackend;
     #[async_trait]
     impl ClarifyBackend for MockClarifyBackend {
-        async fn ask(&self, question: &str, _choices: Option<&[String]>) -> Result<String, ToolError> {
+        async fn ask(
+            &self,
+            question: &str,
+            _choices: Option<&[String]>,
+        ) -> Result<String, ToolError> {
             Ok(format!("User answered: (question was: {})", question))
         }
     }
@@ -96,7 +106,10 @@ mod tests {
     #[tokio::test]
     async fn test_clarify_execute() {
         let handler = ClarifyHandler::new(Arc::new(MockClarifyBackend));
-        let result = handler.execute(json!({"question": "Which option?", "choices": ["A", "B"]})).await.unwrap();
+        let result = handler
+            .execute(json!({"question": "Which option?", "choices": ["A", "B"]}))
+            .await
+            .unwrap();
         assert!(result.contains("Which option?"));
     }
 }

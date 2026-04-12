@@ -18,16 +18,18 @@ pub use errors::{AgentError, ConfigError, GatewayError, ToolError};
 // Re-export all core types
 pub use types::{
     AgentResult, BudgetConfig, CacheControl, CacheType, CommandOutput, FunctionCall,
-    FunctionCallDelta, LlmResponse, Message, MessageRole, ReasoningContent, ReasoningFormat,
-    Skill, SkillMeta, StreamChunk, StreamDelta, ToolCall, ToolCallDelta, ToolErrorRecord,
-    ToolResult, UsageStats,
+    FunctionCallDelta, LlmResponse, Message, MessageRole, ReasoningContent, ReasoningFormat, Skill,
+    SkillMeta, StreamChunk, StreamDelta, ToolCall, ToolCallDelta, ToolErrorRecord, ToolResult,
+    UsageStats,
 };
 
 // Re-export tool schema types
-pub use tool_schema::{JsonSchema, ToolSchema, tool_schema};
+pub use tool_schema::{tool_schema, JsonSchema, ToolSchema};
 
 // Re-export trait definitions
-pub use traits::{LlmProvider, MemoryProvider, PlatformAdapter, SkillProvider, TerminalBackend, ToolHandler};
+pub use traits::{
+    LlmProvider, MemoryProvider, PlatformAdapter, SkillProvider, TerminalBackend, ToolHandler,
+};
 
 // Re-export tool call parser public API
 pub use tool_call_parser::{

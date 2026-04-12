@@ -153,8 +153,7 @@ impl Mem0MemoryPlugin {
     fn record_failure(&self) {
         let prev = self.consecutive_failures.fetch_add(1, Ordering::Relaxed);
         if prev + 1 >= BREAKER_THRESHOLD {
-            let deadline =
-                Instant::now() + std::time::Duration::from_secs(BREAKER_COOLDOWN_SECS);
+            let deadline = Instant::now() + std::time::Duration::from_secs(BREAKER_COOLDOWN_SECS);
             *self.breaker_open_until.lock().unwrap() = Some(deadline);
             tracing::warn!(
                 "Mem0 circuit breaker tripped after {} failures. Pausing for {}s.",
@@ -246,10 +245,7 @@ impl MemoryProviderPlugin for Mem0MemoryPlugin {
                 json!({"result": "No memories stored yet. (Mem0 API not connected)"}).to_string()
             }
             "mem0_search" => {
-                let query = args
-                    .get("query")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+                let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
                 if query.is_empty() {
                     return json!({"error": "Missing required parameter: query"}).to_string();
                 }

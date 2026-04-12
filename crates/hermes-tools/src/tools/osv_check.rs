@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
 pub struct OsvCheckHandler;
 
@@ -20,6 +20,10 @@ impl ToolHandler for OsvCheckHandler {
         let mut props = IndexMap::new();
         props.insert("package".into(), json!({"type":"string"}));
         props.insert("version".into(), json!({"type":"string"}));
-        tool_schema("osv_check", "Check package vulnerabilities via OSV.", JsonSchema::object(props, vec!["package".into()]))
+        tool_schema(
+            "osv_check",
+            "Check package vulnerabilities via OSV.",
+            JsonSchema::object(props, vec!["package".into()]),
+        )
     }
 }

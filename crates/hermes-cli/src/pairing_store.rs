@@ -69,8 +69,7 @@ impl PairingStore {
     /// Persist the full device list to disk.
     pub fn save(&self, devices: &[PairedDevice]) -> Result<(), String> {
         if let Some(parent) = self.path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("Failed to create dir: {}", e))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create dir: {}", e))?;
         }
         let json = serde_json::to_string_pretty(devices)
             .map_err(|e| format!("Serialization error: {}", e))?;

@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{JsonSchema, ToolError, ToolHandler, ToolSchema, tool_schema};
+use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
 use std::sync::Arc;
 
@@ -37,11 +37,13 @@ impl VisionAnalyzeHandler {
 #[async_trait]
 impl ToolHandler for VisionAnalyzeHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
-        let image_url = params.get("image_url")
+        let image_url = params
+            .get("image_url")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'image_url' parameter".into()))?;
 
-        let question = params.get("question")
+        let question = params
+            .get("question")
             .and_then(|v| v.as_str())
             .unwrap_or("Describe this image.");
 
@@ -50,14 +52,20 @@ impl ToolHandler for VisionAnalyzeHandler {
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("image_url".into(), json!({
-            "type": "string",
-            "description": "URL of the image to analyze"
-        }));
-        props.insert("question".into(), json!({
-            "type": "string",
-            "description": "Question to ask about the image (default: 'Describe this image.')"
-        }));
+        props.insert(
+            "image_url".into(),
+            json!({
+                "type": "string",
+                "description": "URL of the image to analyze"
+            }),
+        );
+        props.insert(
+            "question".into(),
+            json!({
+                "type": "string",
+                "description": "Question to ask about the image (default: 'Describe this image.')"
+            }),
+        );
 
         tool_schema(
             "vision_analyze",
@@ -88,7 +96,12 @@ mod tests {
     #[tokio::test]
     async fn test_vision_analyze_execute() {
         let handler = VisionAnalyzeHandler::new(Arc::new(MockVisionBackend));
-        let result = handler.execute(json!({"image_url": "https://example.com/img.png", "question": "What is this?"})).await.unwrap();
+        let result = handler
+            .execute(
+                json!({"image_url": "https://example.com/img.png", "question": "What is this?"}),
+            )
+            .await
+            .unwrap();
         assert!(result.contains("example.com"));
     }
 }
