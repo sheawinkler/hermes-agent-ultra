@@ -126,7 +126,7 @@ fn is_in_code_block(text: &str) -> bool {
 fn find_code_block_end(text: &str, start_pos: usize) -> Option<usize> {
     // Look for closing ``` after start_pos
     let search = &text[start_pos..];
-    for (i, _) in search.match_indices("```") {
+    if let Some((i, _)) = search.match_indices("```").next() {
         let end = start_pos + i + 3;
         // Include the rest of the line
         let after = &text[end..];
