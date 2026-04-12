@@ -151,6 +151,11 @@ impl DingTalkAdapter {
         *self.inner.inbound_tx.write().await = Some(tx);
     }
 
+    #[cfg(test)]
+    fn test_inner(&self) -> Arc<DingTalkInner> {
+        self.inner.clone()
+    }
+
     async fn open_connection(inner: &DingTalkInner) -> Result<Value, GatewayError> {
         let url = format!(
             "{}/v1.0/gateway/connections/open",
@@ -552,5 +557,141 @@ impl PlatformAdapter for DingTalkAdapter {
 
     fn platform_name(&self) -> &str {
         "dingtalk"
+    }
+}
+
+#[cfg(test)]
+mod dingtalk_ack_tests {
+    use super::*;
+
+    fn sample_cfg() -> DingTalkConfig {
+        DingTalkConfig {
+            client_id: "test_client".into(),
+            client_secret: "test_secret".into(),
+            openapi_endpoint: "https://api.dingtalk.com".into(),
+            proxy: AdapterProxyConfig::default(),
+        }
+    }
+
+    fn callback_frame_json(message_id: &str, msg_id: &str, text: &str) -> String {
+        let data = serde_json::json!({
+            "conversationId": "conv-1",
+            "senderId": "user-1",
+            "conversationType": "1",
+            "msgtype": "text",
+            "text": { "content": text },
+            "msgId": msg_id,
+            "sessionWebhook": "https://api.dingtalk.com/v1.0/robot/oapi/inbound/xxx",
+        });
+        serde_json::json!({
+            "type": "CALLBACK",
+            "headers": {
+                "topic": CHATBOT_TOPIC,
+                "messageId": message_id,
+            },
+            "data": data.to_string(),
+        })
+        .to_string()
+    }
+
+    #[test]
+    fn build_ack_shape_matches_stream_contract() {
+        let v = DingTalkAdapter::build_ack(Some("abc-123"));
+        assert_eq!(v.get("code"), Some(&serde_json::json!(200)));
+        assert_eq!(v.get("message"), Some(&serde_json::json!("OK")));
+        let headers = v.get("headers").unwrap();
+        assert_eq!(headers.get("messageId"), Some(&serde_json::json!("abc-123")));
+        assert_eq!(
+            headers.get("contentType"),
+            Some(&serde_json::json!("application/json"))
+        );
+        let data = v.get("data").and_then(|d| d.as_str()).unwrap();
+        let parsed: Value = serde_json::from_str(data).unwrap();
+        assert_eq!(parsed.get("response"), Some(&serde_json::json!("OK")));
+
+        let v2 = DingTalkAdapter::build_ack(None);
+        assert_eq!(
+            v2.pointer("/headers/messageId").and_then(|x| x.as_str()),
+            Some("")
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_ws_callback_returns_ack_with_message_id() {
+        let adapter = DingTalkAdapter::new(sample_cfg()).unwrap();
+        let inner = adapter.test_inner();
+        let frame = callback_frame_json("ws-mid-9", "ding-1", "hello");
+        let ack_line = DingTalkAdapter::handle_ws_message(&inner, &frame)
+            .await
+            .unwrap()
+            .expect("ack expected");
+        let ack: Value = serde_json::from_str(&ack_line).unwrap();
+        assert_eq!(
+            ack.pointer("/headers/messageId").and_then(|x| x.as_str()),
+            Some("ws-mid-9")
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_ws_callback_empty_text_still_acks() {
+        let adapter = DingTalkAdapter::new(sample_cfg()).unwrap();
+        let inner = adapter.test_inner();
+        let frame = callback_frame_json("mid-empty", "m2", "   ");
+        let ack = DingTalkAdapter::handle_ws_message(&inner, &frame)
+            .await
+            .unwrap()
+            .expect("ack");
+        let v: Value = serde_json::from_str(&ack).unwrap();
+        assert_eq!(
+            v.pointer("/headers/messageId").and_then(|x| x.as_str()),
+            Some("mid-empty")
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_ws_callback_dup_still_acks() {
+        let adapter = DingTalkAdapter::new(sample_cfg()).unwrap();
+        let inner = adapter.test_inner();
+        let frame = callback_frame_json("mid-dup", "same-msg", "x");
+        let a1 = DingTalkAdapter::handle_ws_message(&inner, &frame)
+            .await
+            .unwrap();
+        let a2 = DingTalkAdapter::handle_ws_message(&inner, &frame)
+            .await
+            .unwrap();
+        assert!(a1.is_some());
+        assert!(a2.is_some());
+    }
+
+    #[tokio::test]
+    async fn handle_ws_wrong_topic_no_ack() {
+        let adapter = DingTalkAdapter::new(sample_cfg()).unwrap();
+        let inner = adapter.test_inner();
+        let v = serde_json::json!({
+            "type": "CALLBACK",
+            "headers": { "topic": "/other/topic", "messageId": "x" },
+            "data": "{}",
+        });
+        let out = DingTalkAdapter::handle_ws_message(&inner, &v.to_string())
+            .await
+            .unwrap();
+        assert!(out.is_none());
+    }
+
+    #[tokio::test]
+    async fn handle_ws_system_disconnect_errors() {
+        let adapter = DingTalkAdapter::new(sample_cfg()).unwrap();
+        let inner = adapter.test_inner();
+        let v = serde_json::json!({
+            "type": "SYSTEM",
+            "headers": { "topic": "disconnect" },
+        });
+        let err = DingTalkAdapter::handle_ws_message(&inner, &v.to_string())
+            .await
+            .unwrap_err();
+        match err {
+            GatewayError::ConnectionFailed(s) => assert!(s.contains("disconnect")),
+            e => panic!("unexpected {e:?}"),
+        }
     }
 }

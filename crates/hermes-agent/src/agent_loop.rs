@@ -219,6 +219,39 @@ pub struct AgentConfig {
     /// Provider hint (e.g. "openai", "anthropic", "openrouter").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
+
+    /// Session-level hard spend limit in USD. When reached, the loop trips
+    /// the cost gate and returns early with a summary system message.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_cost_usd: Option<f64>,
+
+    /// Ratio (0.0-1.0) at which to proactively degrade to a cheaper model.
+    #[serde(default = "default_cost_guard_degrade_at_ratio")]
+    pub cost_guard_degrade_at_ratio: f64,
+
+    /// Optional explicit cheaper model to use after crossing the degrade ratio.
+    /// If unset, falls back to `retry.fallback_model` then a built-in cheap default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_guard_degrade_model: Option<String>,
+
+    /// Optional per-million-token prompt price used when provider does not
+    /// return `usage.estimated_cost`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_cost_per_million_usd: Option<f64>,
+
+    /// Optional per-million-token completion price used when provider does not
+    /// return `usage.estimated_cost`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completion_cost_per_million_usd: Option<f64>,
+
+    /// Auto-checkpoint interval in turns. `0` disables automatic checkpoints.
+    #[serde(default = "default_checkpoint_interval_turns")]
+    pub checkpoint_interval_turns: u32,
+
+    /// If a single turn generates at least this many tool errors, rollback
+    /// to the latest checkpoint and continue. `0` disables rollback.
+    #[serde(default = "default_rollback_on_tool_error_threshold")]
+    pub rollback_on_tool_error_threshold: u32,
 }
 
 fn default_max_turns() -> u32 {
@@ -235,6 +268,18 @@ fn default_max_concurrent_delegates() -> u32 {
 
 fn default_memory_flush_interval() -> u32 {
     5
+}
+
+fn default_cost_guard_degrade_at_ratio() -> f64 {
+    0.8
+}
+
+fn default_checkpoint_interval_turns() -> u32 {
+    3
+}
+
+fn default_rollback_on_tool_error_threshold() -> u32 {
+    3
 }
 
 impl Default for AgentConfig {
@@ -257,6 +302,13 @@ impl Default for AgentConfig {
             hermes_home: None,
             skip_memory: false,
             provider: None,
+            max_cost_usd: None,
+            cost_guard_degrade_at_ratio: default_cost_guard_degrade_at_ratio(),
+            cost_guard_degrade_model: None,
+            prompt_cost_per_million_usd: None,
+            completion_cost_per_million_usd: None,
+            checkpoint_interval_turns: default_checkpoint_interval_turns(),
+            rollback_on_tool_error_threshold: default_rollback_on_tool_error_threshold(),
         }
     }
 }
@@ -643,6 +695,10 @@ impl AgentLoop {
         let mut _total_api_time_ms: u64 = 0;
         let mut _total_tool_time_ms: u64 = 0;
         let mut accumulated_usage: Option<UsageStats> = None;
+        let mut session_cost_usd: f64 = 0.0;
+        let mut cost_warned = false;
+        let mut active_model_override: Option<String> = None;
+        let mut last_checkpoint_messages: Option<Vec<Message>> = None;
 
         loop {
             self.interrupt.check_interrupt()?;
@@ -668,6 +724,12 @@ impl AgentLoop {
             total_turns += 1;
             tracing::debug!("Agent turn {}", total_turns);
 
+            if self.config.checkpoint_interval_turns > 0
+                && (total_turns - 1) % self.config.checkpoint_interval_turns == 0
+            {
+                last_checkpoint_messages = Some(ctx.get_messages().to_vec());
+            }
+
             // Notify memory + plugins of new turn
             self.memory_on_turn_start(total_turns, "");
 
@@ -685,13 +747,18 @@ impl AgentLoop {
             }
 
             // --- Pre-LLM hook ---
-            let hook_ctx = serde_json::json!({"turn": total_turns, "model": &self.config.model});
+            let active_model = active_model_override
+                .as_deref()
+                .unwrap_or(self.config.model.as_str());
+            let hook_ctx = serde_json::json!({"turn": total_turns, "model": active_model});
             let pre_results = self.invoke_hook(HookType::PreLlmCall, &hook_ctx);
             self.inject_hook_context(&pre_results, &mut ctx);
 
             // --- LLM API call with retry ---
             let api_start = Instant::now();
-            let response = self.call_llm_with_retry(&ctx, &tool_schemas, None).await?;
+            let response = self
+                .call_llm_with_retry(&ctx, &tool_schemas, active_model_override.as_deref())
+                .await?;
             let api_elapsed = api_start.elapsed().as_millis() as u64;
             _total_api_time_ms += api_elapsed;
 
@@ -707,6 +774,44 @@ impl AgentLoop {
             // Accumulate usage
             if let Some(ref usage) = response.usage {
                 accumulated_usage = Some(merge_usage(accumulated_usage, usage));
+                if let Some(cost) =
+                    estimate_usage_cost_usd(usage, response.model.as_str(), &self.config)
+                {
+                    session_cost_usd += cost;
+                }
+            }
+
+            if let Some(limit) = self.config.max_cost_usd {
+                if !cost_warned && session_cost_usd >= limit * self.config.cost_guard_degrade_at_ratio {
+                    cost_warned = true;
+                    if active_model_override.is_none() {
+                        if let Some(model) = self.resolve_cost_degrade_model() {
+                            active_model_override = Some(model.clone());
+                            ctx.add_message(Message::system(format!(
+                                "Cost guard: session spend is now ${:.4}/${:.4}. Switching to cheaper model `{}`.",
+                                session_cost_usd, limit, model
+                            )));
+                        } else {
+                            ctx.add_message(Message::system(format!(
+                                "Cost guard warning: session spend is now ${:.4}/${:.4}.",
+                                session_cost_usd, limit
+                            )));
+                        }
+                    }
+                }
+                if session_cost_usd >= limit {
+                    ctx.add_message(Message::system(format!(
+                        "Cost guard tripped: session spend ${:.4} exceeded max_cost_usd ${:.4}. Stopping loop.",
+                        session_cost_usd, limit
+                    )));
+                    return Ok(AgentResult {
+                        messages: ctx.get_messages().to_vec(),
+                        finished_naturally: false,
+                        total_turns,
+                        tool_errors,
+                        usage: accumulated_usage,
+                    });
+                }
             }
 
             let assistant_msg = response.message.clone();
@@ -766,6 +871,20 @@ impl AgentLoop {
             let results = self.execute_tool_calls(&tool_calls, total_turns, &mut tool_errors).await;
             let tool_elapsed = tool_start.elapsed().as_millis() as u64;
             _total_tool_time_ms += tool_elapsed;
+
+            let turn_tool_error_count = results.iter().filter(|r| r.is_error).count() as u32;
+            if self.config.rollback_on_tool_error_threshold > 0
+                && turn_tool_error_count >= self.config.rollback_on_tool_error_threshold
+            {
+                if let Some(snapshot) = last_checkpoint_messages.clone() {
+                    *ctx.get_messages_mut() = snapshot;
+                    ctx.add_message(Message::system(format!(
+                        "Auto-rollback: {} tool call(s) failed in one turn. Restored latest checkpoint and continuing.",
+                        turn_tool_error_count
+                    )));
+                    continue;
+                }
+            }
 
             // --- Post-tool hook ---
             for (tc, res) in tool_calls.iter().zip(results.iter()) {
@@ -850,6 +969,10 @@ impl AgentLoop {
 
         let mut total_turns: u32 = 0;
         let mut accumulated_usage: Option<UsageStats> = None;
+        let mut session_cost_usd: f64 = 0.0;
+        let mut cost_warned = false;
+        let mut active_model_override: Option<String> = None;
+        let mut last_checkpoint_messages: Option<Vec<Message>> = None;
 
         loop {
             self.interrupt.check_interrupt()?;
@@ -875,6 +998,12 @@ impl AgentLoop {
             total_turns += 1;
             self.memory_on_turn_start(total_turns, "");
 
+            if self.config.checkpoint_interval_turns > 0
+                && (total_turns - 1) % self.config.checkpoint_interval_turns == 0
+            {
+                last_checkpoint_messages = Some(ctx.get_messages().to_vec());
+            }
+
             if total_turns % self.config.memory_flush_interval == 0 && total_turns > 0 {
                 let (u, a) = extract_last_user_assistant(ctx.get_messages());
                 self.memory_sync(&u, &a, session_id);
@@ -886,7 +1015,10 @@ impl AgentLoop {
             }
 
             // Pre-LLM hook
-            let hook_ctx = serde_json::json!({"turn": total_turns, "model": &self.config.model});
+            let active_model = active_model_override
+                .as_deref()
+                .unwrap_or(self.config.model.as_str());
+            let hook_ctx = serde_json::json!({"turn": total_turns, "model": active_model});
             let pre_results = self.invoke_hook(HookType::PreLlmCall, &hook_ctx);
             self.inject_hook_context(&pre_results, &mut ctx);
 
@@ -896,7 +1028,7 @@ impl AgentLoop {
                 &tool_schemas,
                 self.config.max_tokens,
                 self.config.temperature,
-                Some(self.config.model.as_str()),
+                Some(active_model),
                 self.config.extra_body.as_ref(),
             );
 
@@ -960,6 +1092,42 @@ impl AgentLoop {
 
             if let Some(ref usage) = last_usage {
                 accumulated_usage = Some(merge_usage(accumulated_usage, usage));
+                if let Some(cost) = estimate_usage_cost_usd(usage, active_model, &self.config) {
+                    session_cost_usd += cost;
+                }
+            }
+
+            if let Some(limit) = self.config.max_cost_usd {
+                if !cost_warned && session_cost_usd >= limit * self.config.cost_guard_degrade_at_ratio {
+                    cost_warned = true;
+                    if active_model_override.is_none() {
+                        if let Some(model) = self.resolve_cost_degrade_model() {
+                            active_model_override = Some(model.clone());
+                            ctx.add_message(Message::system(format!(
+                                "Cost guard: session spend is now ${:.4}/${:.4}. Switching to cheaper model `{}`.",
+                                session_cost_usd, limit, model
+                            )));
+                        } else {
+                            ctx.add_message(Message::system(format!(
+                                "Cost guard warning: session spend is now ${:.4}/${:.4}.",
+                                session_cost_usd, limit
+                            )));
+                        }
+                    }
+                }
+                if session_cost_usd >= limit {
+                    ctx.add_message(Message::system(format!(
+                        "Cost guard tripped: session spend ${:.4} exceeded max_cost_usd ${:.4}. Stopping loop.",
+                        session_cost_usd, limit
+                    )));
+                    return Ok(AgentResult {
+                        messages: ctx.get_messages().to_vec(),
+                        finished_naturally: false,
+                        total_turns,
+                        tool_errors,
+                        usage: accumulated_usage,
+                    });
+                }
             }
 
             // Post-LLM hook
@@ -1018,6 +1186,20 @@ impl AgentLoop {
             }
 
             let mut results = self.execute_tool_calls(&tool_calls, total_turns, &mut tool_errors).await;
+
+            let turn_tool_error_count = results.iter().filter(|r| r.is_error).count() as u32;
+            if self.config.rollback_on_tool_error_threshold > 0
+                && turn_tool_error_count >= self.config.rollback_on_tool_error_threshold
+            {
+                if let Some(snapshot) = last_checkpoint_messages.clone() {
+                    *ctx.get_messages_mut() = snapshot;
+                    ctx.add_message(Message::system(format!(
+                        "Auto-rollback: {} tool call(s) failed in one turn. Restored latest checkpoint and continuing.",
+                        turn_tool_error_count
+                    )));
+                    continue;
+                }
+            }
 
             // Post-tool hooks + callbacks
             for (tc, res) in tool_calls.iter().zip(results.iter()) {
@@ -1107,6 +1289,25 @@ impl AgentLoop {
         } else {
             None
         }
+    }
+
+    /// Resolve the model used for automatic degradation when nearing
+    /// `max_cost_usd`.
+    fn resolve_cost_degrade_model(&self) -> Option<String> {
+        if let Some(ref m) = self.config.cost_guard_degrade_model {
+            if !m.trim().is_empty() {
+                return Some(m.trim().to_string());
+            }
+        }
+        if let Some(ref m) = self.config.retry.fallback_model {
+            if !m.trim().is_empty() {
+                return Some(m.trim().to_string());
+            }
+        }
+        if self.config.model.trim() != "openai:gpt-4o-mini" {
+            return Some("openai:gpt-4o-mini".to_string());
+        }
+        None
     }
 
     /// Ask the LLM for a final summary when the turn budget is exhausted.
@@ -1284,6 +1485,40 @@ fn extract_last_user_assistant(messages: &[Message]) -> (String, String) {
     (user, assistant)
 }
 
+fn default_model_cost_per_million(model: &str) -> Option<(f64, f64)> {
+    let m = model.to_lowercase();
+    if m.contains("gpt-4o-mini") || m.contains("4.1-mini") || m.contains("haiku") {
+        return Some((0.15, 0.60));
+    }
+    if m.contains("gpt-4o") || m.contains("4.1") || m.contains("sonnet") {
+        return Some((2.5, 10.0));
+    }
+    if m.contains("o3") {
+        return Some((10.0, 40.0));
+    }
+    None
+}
+
+fn estimate_usage_cost_usd(
+    usage: &UsageStats,
+    model: &str,
+    config: &AgentConfig,
+) -> Option<f64> {
+    if let Some(v) = usage.estimated_cost {
+        return Some(v.max(0.0));
+    }
+    let (in_pm, out_pm) = match (
+        config.prompt_cost_per_million_usd,
+        config.completion_cost_per_million_usd,
+    ) {
+        (Some(i), Some(o)) => (i, o),
+        _ => default_model_cost_per_million(model)?,
+    };
+    let prompt_cost = (usage.prompt_tokens as f64 / 1_000_000.0) * in_pm;
+    let completion_cost = (usage.completion_tokens as f64 / 1_000_000.0) * out_pm;
+    Some(prompt_cost + completion_cost)
+}
+
 /// Merge two UsageStats, summing token counts and keeping the latest cost estimate.
 fn merge_usage(existing: Option<UsageStats>, new: &UsageStats) -> UsageStats {
     match existing {
@@ -1318,6 +1553,11 @@ mod tests {
         assert_eq!(config.retry.max_retries, 3);
         assert!(config.session_id.is_none());
         assert!(!config.skip_memory);
+        assert!(config.max_cost_usd.is_none());
+        assert_eq!(config.cost_guard_degrade_at_ratio, 0.8);
+        assert!(config.cost_guard_degrade_model.is_none());
+        assert_eq!(config.checkpoint_interval_turns, 3);
+        assert_eq!(config.rollback_on_tool_error_threshold, 3);
     }
 
     #[test]
@@ -1438,5 +1678,31 @@ mod tests {
         };
         let merged = merge_usage(None, &b);
         assert_eq!(merged.prompt_tokens, 200);
+    }
+
+    #[test]
+    fn test_estimate_usage_cost_prefers_reported_estimate() {
+        let cfg = AgentConfig::default();
+        let u = UsageStats {
+            prompt_tokens: 1000,
+            completion_tokens: 1000,
+            total_tokens: 2000,
+            estimated_cost: Some(0.42),
+        };
+        let cost = estimate_usage_cost_usd(&u, "openai:gpt-4o", &cfg).unwrap();
+        assert!((cost - 0.42).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_estimate_usage_cost_uses_model_fallback_table() {
+        let cfg = AgentConfig::default();
+        let u = UsageStats {
+            prompt_tokens: 1_000_000,
+            completion_tokens: 1_000_000,
+            total_tokens: 2_000_000,
+            estimated_cost: None,
+        };
+        let cost = estimate_usage_cost_usd(&u, "openai:gpt-4o-mini", &cfg).unwrap();
+        assert!((cost - 0.75).abs() < 1e-9);
     }
 }

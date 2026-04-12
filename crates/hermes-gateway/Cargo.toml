@@ -52,3 +52,4 @@ rand = { version = "0.8", optional = true }
 [dev-dependencies]
 tempfile = "3"
 proptest = { workspace = true }
+wiremock = "0.6"
