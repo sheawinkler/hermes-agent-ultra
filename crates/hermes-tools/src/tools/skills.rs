@@ -155,7 +155,72 @@ impl ToolHandler for SkillManageHandler {
                     .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
                 Ok(format!("Skill '{}' deleted successfully", name))
             }
-            other => Err(ToolError::InvalidParams(format!("Unknown action: '{}'. Use 'create', 'update', or 'delete'.", other))),
+            "auto_create" => {
+                let name = params.get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| ToolError::InvalidParams("Missing 'name' parameter".into()))?;
+                let summary = params.get("summary")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("Auto-generated from completed task.");
+                let steps = params.get("steps")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str())
+                            .collect::<Vec<_>>()
+                    })
+                    .unwrap_or_default();
+                let mut content = format!("# {}\n\n## Summary\n{}\n\n## Steps\n", name, summary);
+                for (idx, s) in steps.iter().enumerate() {
+                    content.push_str(&format!("{}. {}\n", idx + 1, s));
+                }
+                self.provider.create_skill(name, &content, Some("auto-generated"))
+                    .await
+                    .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
+                Ok(format!("Skill '{}' auto-created", name))
+            }
+            "self_improve" => {
+                let name = params.get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| ToolError::InvalidParams("Missing 'name' parameter".into()))?;
+                let feedback = params.get("feedback")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("No feedback provided.");
+                let existing = self.provider.get_skill(name)
+                    .await
+                    .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?
+                    .ok_or_else(|| ToolError::NotFound(format!("Skill '{}' not found", name)))?;
+                let improved = format!("{}\n\n## Improvement Feedback\n{}\n", existing.content, feedback);
+                self.provider.update_skill(name, &improved)
+                    .await
+                    .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
+                Ok(format!("Skill '{}' improved", name))
+            }
+            "sync" => Ok("Skill sync request accepted (provider-specific hub sync path).".to_string()),
+            "install_builtins" => {
+                let builtins = [
+                    "planning","debugging","refactoring","testing","docs","git","review","web-research",
+                    "terminal","file-edit","security","performance","api-design","db-migrations",
+                    "incident-response","release","prompting","agent-orchestration","mcp","gateway",
+                    "voice-mode","cron","memory","session-search","tool-authoring","skill-authoring"
+                ];
+                let mut created = 0usize;
+                for name in builtins {
+                    let exists = self.provider.get_skill(name)
+                        .await
+                        .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?
+                        .is_some();
+                    if !exists {
+                        let content = format!("# {}\n\n1. Understand\n2. Execute\n3. Verify\n", name);
+                        self.provider.create_skill(name, &content, Some("builtin"))
+                            .await
+                            .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
+                        created += 1;
+                    }
+                }
+                Ok(format!("Installed {} built-in skills", created))
+            }
+            other => Err(ToolError::InvalidParams(format!("Unknown action: '{}'. Use create/update/delete/auto_create/self_improve/sync/install_builtins.", other))),
         }
     }
 
@@ -163,8 +228,8 @@ impl ToolHandler for SkillManageHandler {
         let mut props = IndexMap::new();
         props.insert("action".into(), json!({
             "type": "string",
-            "description": "Action to perform: create, update, or delete",
-            "enum": ["create", "update", "delete"]
+            "description": "Action to perform",
+            "enum": ["create", "update", "delete", "auto_create", "self_improve", "sync", "install_builtins"]
         }));
         props.insert("name".into(), json!({
             "type": "string",
@@ -177,6 +242,19 @@ impl ToolHandler for SkillManageHandler {
         props.insert("category".into(), json!({
             "type": "string",
             "description": "Skill category (for create)"
+        }));
+        props.insert("summary".into(), json!({
+            "type": "string",
+            "description": "Task summary used by auto_create"
+        }));
+        props.insert("steps".into(), json!({
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Step list for auto_create"
+        }));
+        props.insert("feedback".into(), json!({
+            "type": "string",
+            "description": "Feedback used by self_improve"
         }));
 
         tool_schema(

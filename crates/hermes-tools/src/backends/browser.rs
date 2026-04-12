@@ -17,6 +17,32 @@ pub struct CdpBrowserBackend {
     client: reqwest::Client,
 }
 
+/// CamoFox anti-detection browser backend (compat layer).
+///
+/// Currently routes through CDP endpoint while exposing a dedicated type so
+/// higher layers can opt into anti-detection profile selection.
+pub struct CamoFoxBrowserBackend {
+    inner: CdpBrowserBackend,
+    profile: String,
+}
+
+impl CamoFoxBrowserBackend {
+    pub fn new(endpoint: String, profile: String) -> Self {
+        Self {
+            inner: CdpBrowserBackend::new(endpoint),
+            profile,
+        }
+    }
+
+    pub fn from_env() -> Self {
+        let endpoint = std::env::var("CAMOFOX_CDP_URL")
+            .or_else(|_| std::env::var("CHROME_CDP_URL"))
+            .unwrap_or_else(|_| "http://localhost:9222".to_string());
+        let profile = std::env::var("CAMOFOX_PROFILE").unwrap_or_else(|_| "default".to_string());
+        Self::new(endpoint, profile)
+    }
+}
+
 impl CdpBrowserBackend {
     pub fn new(endpoint: String) -> Self {
         Self {
@@ -158,4 +184,23 @@ impl BrowserBackend for CdpBrowserBackend {
             other => Err(ToolError::InvalidParams(format!("Unknown console action: {}", other))),
         }
     }
+}
+
+#[async_trait]
+impl BrowserBackend for CamoFoxBrowserBackend {
+    async fn navigate(&self, url: &str) -> Result<String, ToolError> {
+        let mut result = self.inner.navigate(url).await?;
+        result.push_str(&format!("\n{{\"camofox_profile\":\"{}\"}}", self.profile));
+        Ok(result)
+    }
+
+    async fn snapshot(&self) -> Result<String, ToolError> { self.inner.snapshot().await }
+    async fn click(&self, selector: &str) -> Result<String, ToolError> { self.inner.click(selector).await }
+    async fn r#type(&self, selector: &str, text: &str) -> Result<String, ToolError> { self.inner.r#type(selector, text).await }
+    async fn scroll(&self, direction: &str, amount: Option<u32>) -> Result<String, ToolError> { self.inner.scroll(direction, amount).await }
+    async fn go_back(&self) -> Result<String, ToolError> { self.inner.go_back().await }
+    async fn press(&self, key: &str) -> Result<String, ToolError> { self.inner.press(key).await }
+    async fn get_images(&self, selector: Option<&str>) -> Result<String, ToolError> { self.inner.get_images(selector).await }
+    async fn vision(&self, instruction: &str) -> Result<String, ToolError> { self.inner.vision(instruction).await }
+    async fn console(&self, action: &str) -> Result<String, ToolError> { self.inner.console(action).await }
 }

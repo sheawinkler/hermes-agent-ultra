@@ -63,6 +63,15 @@ pub struct SkillManager {
 }
 
 impl SkillManager {
+    /// Built-in skill names aligned with Python bundle footprint.
+    pub const BUILTIN_SKILLS: [&'static str; 26] = [
+        "planning", "debugging", "refactoring", "testing", "docs", "git", "review",
+        "web-research", "terminal", "file-edit", "security", "performance", "api-design",
+        "db-migrations", "incident-response", "release", "prompting", "agent-orchestration",
+        "mcp", "gateway", "voice-mode", "cron", "memory", "session-search", "tool-authoring",
+        "skill-authoring",
+    ];
+
     /// Create a new `SkillManager` with the given local store.
     pub fn new(store: Arc<dyn SkillStore>) -> Self {
         Self {
@@ -85,6 +94,75 @@ impl SkillManager {
     pub fn with_guard(mut self, guard: SkillGuard) -> Self {
         self.guard = guard;
         self
+    }
+
+    /// Auto-create a skill from task summary and execution notes.
+    pub async fn auto_create_from_task(
+        &self,
+        name: &str,
+        task_summary: &str,
+        steps: &[String],
+    ) -> Result<Skill, AgentError> {
+        let mut content = format!("# {}\n\n## Task summary\n{}\n\n## Steps\n", name, task_summary);
+        for (idx, step) in steps.iter().enumerate() {
+            content.push_str(&format!("{}. {}\n", idx + 1, step));
+        }
+        self.create_skill(name, &content, Some("auto-generated")).await
+    }
+
+    /// Self-improve an existing skill by appending feedback and corrections.
+    pub async fn self_improve(
+        &self,
+        name: &str,
+        feedback: &str,
+        corrections: &[String],
+    ) -> Result<Skill, AgentError> {
+        let mut current = self
+            .get_skill(name)
+            .await?
+            .ok_or_else(|| SkillError::NotFound(name.to_string()))?;
+        current.content.push_str("\n\n## Feedback\n");
+        current.content.push_str(feedback);
+        if !corrections.is_empty() {
+            current.content.push_str("\n\n## Corrections\n");
+            for c in corrections {
+                current.content.push_str(&format!("- {}\n", c));
+            }
+        }
+        self.update_skill(name, &current.content).await
+    }
+
+    /// Sync local skills to hub and return synced count.
+    pub async fn sync_with_hub(&self) -> Result<usize, AgentError> {
+        let Some(hub) = self.hub_client.as_ref() else {
+            return Ok(0);
+        };
+        let list = self.store.list().await.map_err(AgentError::from)?;
+        let mut synced = 0usize;
+        for meta in list {
+            if let Some(skill) = self.store.load(&meta.name).await.map_err(AgentError::from)? {
+                if hub.upload_skill(&skill).await.is_ok() {
+                    synced += 1;
+                }
+            }
+        }
+        Ok(synced)
+    }
+
+    /// Install baseline built-in skills into local store if absent.
+    pub async fn install_builtin_skills(&self) -> Result<usize, AgentError> {
+        let mut installed = 0usize;
+        for name in Self::BUILTIN_SKILLS {
+            if self.get_skill(name).await?.is_none() {
+                let template = format!(
+                    "# {}\n\n1. Understand user goal\n2. Plan concise steps\n3. Execute safely\n4. Report outcomes\n",
+                    name
+                );
+                self.create_skill(name, &template, Some("builtin")).await?;
+                installed += 1;
+            }
+        }
+        Ok(installed)
     }
 }
 
