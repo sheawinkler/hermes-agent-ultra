@@ -615,13 +615,12 @@ impl AgentLoop {
         let model = model_override.unwrap_or(self.config.model.as_str());
         let retry = &self.config.retry;
         let is_long_task = ctx.total_chars() > 8_000 || ctx.get_messages().len() > 28;
-        let (effective_max_retries, effective_base_delay_ms) = if let Ok(engine) =
-            self.evolution_engine.lock()
-        {
-            engine.recommend_retry(retry.max_retries, retry.base_delay_ms, is_long_task)
-        } else {
-            (retry.max_retries, retry.base_delay_ms)
-        };
+        let (effective_max_retries, effective_base_delay_ms) =
+            if let Ok(engine) = self.evolution_engine.lock() {
+                engine.recommend_retry(retry.max_retries, retry.base_delay_ms, is_long_task)
+            } else {
+                (retry.max_retries, retry.base_delay_ms)
+            };
 
         for attempt in 0..=effective_max_retries {
             let result = self
@@ -671,8 +670,11 @@ impl AgentLoop {
                                 }
                                 return Err(AgentError::LlmApi(err_str));
                             }
-                            let delay =
-                                jittered_backoff(attempt, effective_base_delay_ms, retry.max_delay_ms);
+                            let delay = jittered_backoff(
+                                attempt,
+                                effective_base_delay_ms,
+                                retry.max_delay_ms,
+                            );
                             tracing::info!(
                                 "Retrying in {}ms (attempt {}/{})",
                                 delay.as_millis(),

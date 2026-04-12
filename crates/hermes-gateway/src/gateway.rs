@@ -14,7 +14,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
-use hermes_intelligence::{AdaptivePolicyEngine, OutcomeSignals};
+use hermes_intelligence::{AdaptivePolicyEngine, OutcomeSignals, PolicyStore};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
@@ -232,8 +232,8 @@ pub struct Gateway {
     usage_stats: RwLock<HashMap<String, UsageStats>>,
     /// Tracks async `/background` and `/btw` tasks.
     background_tasks: Arc<BackgroundTaskManager>,
-    /// Adaptive policy engine for L1/L2/L3 self-evolution.
-    evolution_engine: std::sync::Mutex<AdaptivePolicyEngine>,
+    /// Adaptive policy store (active/stable/history + hard gate rollback).
+    evolution_policies: std::sync::Mutex<PolicyStore>,
     /// MCP reload generation number.
     mcp_reload_generation: RwLock<u64>,
 }
@@ -260,7 +260,9 @@ impl Gateway {
             runtime_state: RwLock::new(HashMap::new()),
             usage_stats: RwLock::new(HashMap::new()),
             background_tasks: Arc::new(BackgroundTaskManager::new(8)),
-            evolution_engine: std::sync::Mutex::new(AdaptivePolicyEngine::default()),
+            evolution_policies: std::sync::Mutex::new(PolicyStore::new(
+                AdaptivePolicyEngine::default(),
+            )),
             mcp_reload_generation: RwLock::new(0),
         }
     }
@@ -1230,10 +1232,10 @@ impl Gateway {
     ) -> Result<bool, GatewayError> {
         let trimmed = prompt.trim();
         let plan = self
-            .evolution_engine
+            .evolution_policies
             .lock()
             .ok()
-            .map(|engine| engine.recommend_long_task_plan(trimmed))
+            .map(|store| store.active_engine().recommend_long_task_plan(trimmed))
             .unwrap_or_default();
         if trimmed.eq_ignore_ascii_case("list") {
             let tasks = self.background_tasks.list_tasks();
@@ -1512,10 +1514,33 @@ impl Gateway {
             .filter(|s| !s.is_empty())
     }
 
+    /// Persist adaptive policy store to disk for audit/rollback.
+    pub fn save_policy_store(&self, path: &std::path::Path) -> Result<(), GatewayError> {
+        let store = self
+            .evolution_policies
+            .lock()
+            .map_err(|_| GatewayError::Platform("Policy store lock poisoned".into()))?;
+        store
+            .save_to_path(path)
+            .map_err(|e| GatewayError::Platform(format!("Failed to save policy store: {}", e)))
+    }
+
+    /// Hot-reload adaptive policy store from disk.
+    pub fn load_policy_store(&self, path: &std::path::Path) -> Result<(), GatewayError> {
+        let loaded = PolicyStore::load_from_path(path)
+            .map_err(|e| GatewayError::Platform(format!("Failed to load policy store: {}", e)))?;
+        let mut store = self
+            .evolution_policies
+            .lock()
+            .map_err(|_| GatewayError::Platform("Policy store lock poisoned".into()))?;
+        *store = loaded;
+        Ok(())
+    }
+
     /// Resolve model routing candidate for a message.
     pub fn load_smart_model_routing(&self, text: &str) -> Option<String> {
-        if let Ok(engine) = self.evolution_engine.lock() {
-            if let Some(model) = engine.recommend_model_for_text(text) {
+        if let Ok(store) = self.evolution_policies.lock() {
+            if let Some(model) = store.active_engine().recommend_model_for_text(text) {
                 return Some(model);
             }
         }
@@ -1578,10 +1603,32 @@ impl Gateway {
         if has_model {
             return;
         }
-        if let Some(model) = self.load_smart_model_routing(text) {
+        let adaptive_model = self.evolution_policies.lock().ok().and_then(|store| {
+            if self.session_in_rollout(session_key, store.active.rollout_ratio) {
+                store.active_engine().recommend_model_for_text(text)
+            } else {
+                None
+            }
+        });
+        let selected = adaptive_model.or_else(|| self.load_smart_model_routing(text));
+        if let Some(model) = selected {
             let mut states = self.runtime_state.write().await;
             states.entry(session_key.to_string()).or_default().model = Some(model);
         }
+    }
+
+    fn session_in_rollout(&self, session_key: &str, ratio: f64) -> bool {
+        if ratio <= 0.0 {
+            return false;
+        }
+        if ratio >= 1.0 {
+            return true;
+        }
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        session_key.hash(&mut hasher);
+        let bucket = (hasher.finish() % 10_000) as f64 / 10_000.0;
+        bucket < ratio
     }
 
     fn record_route_feedback(
@@ -1601,8 +1648,13 @@ impl Gateway {
             cost_usd: estimated_cost,
             errors: if success { 0 } else { 1 },
         };
-        if let Ok(mut engine) = self.evolution_engine.lock() {
-            engine.record_model_outcome(model_name, &outcome);
+        if let Ok(mut store) = self.evolution_policies.lock() {
+            store
+                .active_engine_mut()
+                .record_model_outcome(model_name, &outcome);
+            if let Some(rollback_reason) = store.rollback_if_needed() {
+                warn!("Adaptive policy rollback: {}", rollback_reason);
+            }
         }
     }
 }
