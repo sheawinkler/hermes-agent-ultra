@@ -101,6 +101,55 @@ pub enum CliCommand {
         /// Profile name (used with "create" and "switch" actions).
         name: Option<String>,
     },
+
+    /// Authentication management.
+    Auth {
+        /// Action: "login", "logout", "status".
+        action: Option<String>,
+        /// Provider name: openai/anthropic/openrouter/copilot/...
+        provider: Option<String>,
+    },
+
+    /// Cron management commands.
+    Cron {
+        /// Action: list/create/delete/pause/resume/run/history
+        action: Option<String>,
+        /// Job id for job-specific actions.
+        id: Option<String>,
+        /// Cron schedule (for create), e.g. "0 9 * * *".
+        schedule: Option<String>,
+        /// Prompt (for create).
+        prompt: Option<String>,
+    },
+
+    /// Webhook management commands.
+    Webhook {
+        /// Action: list/add/remove.
+        action: Option<String>,
+        /// Webhook URL (for add/remove).
+        url: Option<String>,
+    },
+
+    /// Export conversation/session dump.
+    Dump {
+        /// Session id or file stem.
+        session: Option<String>,
+        /// Output path.
+        output: Option<String>,
+    },
+
+    /// Generate shell completion scripts.
+    Completion {
+        /// Shell type: bash/zsh/fish/powershell/elvish.
+        shell: Option<String>,
+    },
+
+    /// Uninstall helper (removes ~/.hermes by default).
+    Uninstall {
+        /// Confirm destructive cleanup.
+        #[arg(long)]
+        yes: bool,
+    },
 }
 
 // ---------------------------------------------------------------------------

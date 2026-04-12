@@ -4,6 +4,8 @@
 //! appropriate subcommand handler.
 
 use clap::Parser;
+use clap::CommandFactory;
+use clap_complete::{generate, Shell as CompletionShell};
 use tracing_subscriber::EnvFilter;
 
 use hermes_cli::cli::{Cli, CliCommand};
@@ -32,6 +34,17 @@ async fn main() {
         CliCommand::Status => run_status(cli).await,
         CliCommand::Logs { lines, follow } => run_logs(cli, lines, follow).await,
         CliCommand::Profile { action, name } => run_profile(cli, action, name).await,
+        CliCommand::Auth { action, provider } => run_auth(action, provider).await,
+        CliCommand::Cron {
+            action,
+            id,
+            schedule,
+            prompt,
+        } => run_cron(action, id, schedule, prompt).await,
+        CliCommand::Webhook { action, url } => run_webhook(action, url).await,
+        CliCommand::Dump { session, output } => run_dump(cli, session, output).await,
+        CliCommand::Completion { shell } => run_completion(shell),
+        CliCommand::Uninstall { yes } => run_uninstall(yes).await,
     };
 
     if let Err(e) = result {
@@ -164,6 +177,12 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
         .map_err(|e| AgentError::Config(e.to_string()))?;
 
     match action.as_deref() {
+        Some("setup") => {
+            println!("Gateway setup wizard");
+            println!("--------------------");
+            println!("Edit config.yaml and enable platforms under `platforms:`");
+            println!("Then run `hermes gateway start`.");
+        }
         None | Some("start") => {
             println!("Starting Hermes Gateway...");
 
@@ -201,6 +220,106 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
         Some(other) => {
             println!("Unknown gateway action: {}. Use 'start', 'stop', or 'status'.", other);
         }
+    }
+    Ok(())
+}
+
+async fn run_auth(action: Option<String>, provider: Option<String>) -> Result<(), AgentError> {
+    let provider = provider.unwrap_or_else(|| "openai".to_string());
+    match action.as_deref().unwrap_or("status") {
+        "login" => {
+            let msg = hermes_cli::auth::login(&provider).await?;
+            println!("{}", msg);
+        }
+        "logout" => {
+            let msg = hermes_cli::auth::logout(&provider).await?;
+            println!("{}", msg);
+        }
+        _ => {
+            println!("Auth status: provider='{}' (basic flow enabled)", provider);
+        }
+    }
+    Ok(())
+}
+
+async fn run_cron(
+    action: Option<String>,
+    id: Option<String>,
+    schedule: Option<String>,
+    prompt: Option<String>,
+) -> Result<(), AgentError> {
+    match action.as_deref().unwrap_or("list") {
+        "list" => println!("Cron list: use runtime scheduler integration in gateway/agent process."),
+        "create" => {
+            let schedule = schedule.unwrap_or_else(|| "* * * * *".to_string());
+            let prompt = prompt.unwrap_or_else(|| "No prompt provided".to_string());
+            println!("Cron created (stub): schedule='{}', prompt='{}'", schedule, prompt);
+        }
+        "delete" => println!("Cron delete (stub): id={}", id.unwrap_or_default()),
+        "pause" => println!("Cron pause (stub): id={}", id.unwrap_or_default()),
+        "resume" => println!("Cron resume (stub): id={}", id.unwrap_or_default()),
+        "run" => println!("Cron run now (stub): id={}", id.unwrap_or_default()),
+        "history" => println!("Cron history (stub): id={}", id.unwrap_or_default()),
+        other => println!("Unknown cron action: {}", other),
+    }
+    Ok(())
+}
+
+async fn run_webhook(action: Option<String>, url: Option<String>) -> Result<(), AgentError> {
+    match action.as_deref().unwrap_or("list") {
+        "list" => println!("Webhook list (stub)"),
+        "add" => println!("Webhook added (stub): {}", url.unwrap_or_default()),
+        "remove" => println!("Webhook removed (stub): {}", url.unwrap_or_default()),
+        other => println!("Unknown webhook action: {}", other),
+    }
+    Ok(())
+}
+
+async fn run_dump(cli: Cli, session: Option<String>, output: Option<String>) -> Result<(), AgentError> {
+    let home = cli
+        .config_dir
+        .as_deref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(hermes_config::hermes_home);
+    let sessions_dir = home.join("sessions");
+    let session = session.unwrap_or_else(|| "latest".to_string());
+    let out = output.unwrap_or_else(|| format!("{}.dump.json", session));
+    let payload = serde_json::json!({
+        "session": session,
+        "source_dir": sessions_dir,
+        "note": "Session export scaffold"
+    });
+    std::fs::write(&out, serde_json::to_string_pretty(&payload).unwrap_or_default())
+        .map_err(|e| AgentError::Io(format!("Failed to write dump: {}", e)))?;
+    println!("Wrote dump to {}", out);
+    Ok(())
+}
+
+fn run_completion(shell: Option<String>) -> Result<(), AgentError> {
+    let mut cmd = Cli::command();
+    let sh = match shell.as_deref().unwrap_or("zsh") {
+        "bash" => CompletionShell::Bash,
+        "fish" => CompletionShell::Fish,
+        "powershell" => CompletionShell::PowerShell,
+        "elvish" => CompletionShell::Elvish,
+        _ => CompletionShell::Zsh,
+    };
+    generate(sh, &mut cmd, "hermes", &mut std::io::stdout());
+    Ok(())
+}
+
+async fn run_uninstall(yes: bool) -> Result<(), AgentError> {
+    let home = hermes_config::hermes_home();
+    if !yes {
+        println!("Uninstall is destructive. Re-run with `hermes uninstall --yes`.");
+        return Ok(());
+    }
+    if home.exists() {
+        std::fs::remove_dir_all(&home)
+            .map_err(|e| AgentError::Io(format!("Failed to remove {}: {}", home.display(), e)))?;
+        println!("Removed {}", home.display());
+    } else {
+        println!("Nothing to uninstall.");
     }
     Ok(())
 }

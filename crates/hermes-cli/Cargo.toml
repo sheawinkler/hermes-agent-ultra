@@ -22,6 +22,7 @@ hermes-mcp = { workspace = true }
 hermes-skills = { workspace = true }
 hermes-intelligence = { workspace = true }
 clap = { workspace = true }
+clap_complete = "4"
 ratatui = { workspace = true }
 crossterm = { workspace = true }
 tokio = { workspace = true }

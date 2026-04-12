@@ -11,12 +11,27 @@
 //! - Theme/skin engine (9.8)
 
 pub mod app;
+pub mod auth;
+pub mod banner;
 pub mod checklist;
 pub mod claw_migrate;
 pub mod cli;
 pub mod commands;
+pub mod copilot_auth;
+pub mod doctor;
+pub mod env_loader;
+pub mod gateway_cmd;
+pub mod mcp_config;
+pub mod model_switch;
+pub mod profiles;
+pub mod providers;
+pub mod setup;
+pub mod skin_engine;
+pub mod skills_config;
 pub mod theme;
+pub mod tools_config;
 pub mod tui;
+pub mod update;
 
 // Re-export primary types
 pub use app::App;
