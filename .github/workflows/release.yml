@@ -11,11 +11,6 @@ permissions:
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            artifact_name: hermes-linux-x86_64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -23,24 +18,17 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
-      - name: Install cross
-        run: cargo install cross --git https://github.com/cross-rs/cross
       - name: Build release binary
-        run: cross build --release --target ${{ matrix.target }} -p hermes-cli
+        run: cargo build --release -p hermes-cli
       - name: Package artifact
         run: |
           mkdir -p dist
-          if [ -f target/${{ matrix.target }}/release/hermes ]; then
-            cp target/${{ matrix.target }}/release/hermes dist/hermes
-          else
-            cp target/${{ matrix.target }}/release/hermes.exe dist/hermes.exe
-            mv dist/hermes.exe dist/hermes
-          fi
-          tar -C dist -czf ${{ matrix.artifact_name }}.tar.gz hermes
+          cp target/release/hermes dist/hermes
+          tar -C dist -czf hermes-linux-x86_64.tar.gz hermes
       - name: Upload release asset
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ matrix.artifact_name }}.tar.gz
+          files: hermes-linux-x86_64.tar.gz
 
   publish-installers:
     runs-on: ubuntu-latest
