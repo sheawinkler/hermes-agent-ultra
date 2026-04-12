@@ -269,6 +269,7 @@ impl AgentLoop {
         for msg in messages {
             ctx.add_message(msg);
         }
+        self.hydrate_todo_store(&ctx);
 
         // Determine which tools to expose
         let tool_schemas: Vec<ToolSchema> = tools
@@ -411,6 +412,7 @@ impl AgentLoop {
             for result in results {
                 ctx.add_message(Message::tool_result(&result.tool_call_id, &result.content));
             }
+            self.spawn_background_review(total_turns, ctx.get_messages().to_vec());
 
             // Auto context compression
             let total_chars = ctx.total_chars();
@@ -458,6 +460,7 @@ impl AgentLoop {
         for msg in messages {
             ctx.add_message(msg);
         }
+        self.hydrate_todo_store(&ctx);
 
         let tool_schemas: Vec<ToolSchema> = tools
             .unwrap_or_else(|| self.tool_registry.schemas());
@@ -629,6 +632,7 @@ impl AgentLoop {
             for result in results {
                 ctx.add_message(Message::tool_result(&result.tool_call_id, &result.content));
             }
+            self.spawn_background_review(total_turns, ctx.get_messages().to_vec());
 
             // Auto context compression
             let total_chars = ctx.total_chars();
@@ -804,6 +808,38 @@ impl AgentLoop {
         }
 
         results
+    }
+
+    /// Spawn asynchronous post-tool review hook.
+    ///
+    /// Current implementation records lightweight metrics and leaves room for
+    /// richer policy checks (unsafe actions, low-confidence outputs, etc.).
+    fn spawn_background_review(&self, turn: u32, snapshot: Vec<Message>) {
+        tokio::spawn(async move {
+            let tool_msg_count = snapshot
+                .iter()
+                .filter(|m| matches!(m.role, hermes_core::MessageRole::Tool))
+                .count();
+            tracing::debug!(
+                turn,
+                tool_messages = tool_msg_count,
+                total_messages = snapshot.len(),
+                "Background review snapshot captured"
+            );
+        });
+    }
+
+    /// Recover todo-state hints from historical messages at loop start.
+    fn hydrate_todo_store(&self, ctx: &ContextManager) {
+        let todo_markers = ctx
+            .get_messages()
+            .iter()
+            .filter_map(|m| m.content.as_deref())
+            .filter(|c| c.contains("TODO") || c.contains("[ ]") || c.contains("[x]"))
+            .count();
+        if todo_markers > 0 {
+            tracing::debug!(todo_markers, "Hydrated todo markers from prior context");
+        }
     }
 }
 

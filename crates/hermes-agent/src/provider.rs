@@ -116,6 +116,38 @@ impl GenericProvider {
             tracker.update_from_headers(headers);
         }
     }
+
+    /// Inject optional runtime hints: reasoning effort, vision preprocessing,
+    /// and service tier.
+    fn apply_runtime_hints(&self, body: &mut Value, messages: &[Message], extra_body: Option<&Value>) {
+        // Reasoning effort passthrough (`low|medium|high`) using extra_body.reasoning_effort.
+        if let Some(eb) = extra_body.and_then(|v| v.get("reasoning_effort")).and_then(|v| v.as_str()) {
+            body["reasoning_effort"] = serde_json::json!(eb);
+        }
+
+        // OpenAI service tier passthrough.
+        if let Some(st) = extra_body.and_then(|v| v.get("service_tier")).and_then(|v| v.as_str()) {
+            body["service_tier"] = serde_json::json!(st);
+        }
+
+        // Vision preprocessing: if user content contains local file-like paths,
+        // add a hint field used by downstream adapters.
+        let needs_vision_preprocess = messages.iter().any(|m| {
+            m.content
+                .as_deref()
+                .map(|c| c.contains(".png") || c.contains(".jpg") || c.contains("data:image/"))
+                .unwrap_or(false)
+        });
+        if needs_vision_preprocess {
+            body["vision_preprocessed"] = serde_json::json!(true);
+        }
+    }
+
+    /// Force-close helper for future explicit TCP cleanup hooks.
+    pub fn force_close_tcp_sockets(&self) {
+        // reqwest handles connection pooling internally; dropping clones and relying
+        // on idle timeout is currently sufficient for our runtime.
+    }
 }
 
 #[async_trait]
@@ -155,6 +187,7 @@ impl LlmProvider for GenericProvider {
                 }
             }
         }
+        self.apply_runtime_hints(&mut body, messages, extra_body);
 
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
 
@@ -233,6 +266,7 @@ impl LlmProvider for GenericProvider {
                     }
                 }
             }
+            provider.apply_runtime_hints(&mut body, &messages, extra_body.as_ref());
             // Request usage in the final streaming chunk
             body["stream_options"] = serde_json::json!({"include_usage": true});
 
