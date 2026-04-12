@@ -42,3 +42,22 @@ jobs:
         run: cargo install cross --git https://github.com/cross-rs/cross
       - name: Cross build hermes
         run: cross build --release --target ${{ matrix.target }} -p hermes-cli
+
+  macos-build:
+    strategy:
+      matrix:
+        include:
+          - runner: macos-latest
+            target: aarch64-apple-darwin
+          - runner: macos-13
+            target: x86_64-apple-darwin
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Build hermes
+        run: cargo build --release -p hermes-cli

@@ -1,9 +1,9 @@
 [package]
 name = "hermes-gateway"
-version.workspace = true
-edition.workspace = true
-license.workspace = true
-repository.workspace = true
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
 description = "Message gateway and platform adapters for Hermes Agent"
 
 [features]
