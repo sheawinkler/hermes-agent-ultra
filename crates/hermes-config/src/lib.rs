@@ -12,6 +12,7 @@ pub mod merge;
 pub mod paths;
 pub mod platform;
 mod python_yaml_compat;
+mod python_platform_env;
 pub mod roundtrip_tests;
 pub mod session;
 pub mod streaming;

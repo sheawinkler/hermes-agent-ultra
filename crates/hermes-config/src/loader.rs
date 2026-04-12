@@ -416,6 +416,9 @@ pub fn load_from_json(path: &Path) -> Result<GatewayConfig, ConfigError> {
 ///   NOUS_API_KEY               -> llm_providers["nous"].api_key
 ///   GITHUB_COPILOT_TOKEN       -> llm_providers["copilot"].api_key
 ///   HERMES_BASE_URL            -> all llm_providers[*].base_url
+///
+/// 另见 [`crate::python_platform_env::apply_python_named_platform_env`]：
+/// `WEIXIN_*`、`DINGTALK_*` 等与 Python `gateway/platforms/*.py` 一致的键写入 `platforms`。
 pub fn apply_env_overrides(config: &mut GatewayConfig) {
     if let Ok(v) = std::env::var("HERMES_MODEL") {
         config.model = Some(v);
@@ -485,6 +488,8 @@ pub fn apply_env_overrides(config: &mut GatewayConfig) {
             provider.base_url = Some(v.clone());
         }
     }
+
+    crate::python_platform_env::apply_python_named_platform_env(config);
 }
 
 // ---------------------------------------------------------------------------

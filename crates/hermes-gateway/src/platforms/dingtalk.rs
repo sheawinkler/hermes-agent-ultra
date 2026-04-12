@@ -1,188 +1,480 @@
-//! DingTalk Robot webhook adapter.
+//! DingTalk chatbot adapter — **Stream mode** (Open DingTalk).
+//!
+//! Matches Python `gateway/platforms/dingtalk.py` + `dingtalk-stream-sdk-python`:
+//! - `POST {DINGTALK_OPENAPI_ENDPOINT}/v1.0/gateway/connections/open`
+//! - WebSocket to `endpoint?ticket=...`
+//! - Callback topic `/v1.0/im/bot/messages/get`
+//! - Outbound replies via **`sessionWebhook`** (markdown), keyed by `conversation_id`.
 
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
+use futures::{SinkExt, StreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use tokio::sync::Notify;
-use tracing::{debug, info};
+use serde_json::Value;
+use tokio::sync::{mpsc, Notify, RwLock};
+use tokio_tungstenite::tungstenite::Message as WsMessage;
+use tracing::{debug, error, info, warn};
+use url::Url;
 
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
 
 use crate::adapter::{AdapterProxyConfig, BasePlatformAdapter};
+use crate::gateway::IncomingMessage;
 
-// ---------------------------------------------------------------------------
-// Incoming message types
-// ---------------------------------------------------------------------------
+const CHATBOT_TOPIC: &str = "/v1.0/im/bot/messages/get";
+const SESSION_WEBHOOK_RE: &str = r"^https://api\.dingtalk\.com/";
+const MAX_MARKDOWN: usize = 20_000;
+const DEDUP_WINDOW: Duration = Duration::from_secs(300);
+const DEDUP_MAX: usize = 1000;
+const RECONNECT_SECS: &[u64] = &[2, 5, 10, 30, 60];
+const SESSION_WEBHOOKS_MAX: usize = 500;
 
-/// Raw webhook callback event from DingTalk robot.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DingTalkWebhookEvent {
-    #[serde(default)]
-    pub msg_type: Option<String>,
-    #[serde(default)]
-    pub text: Option<serde_json::Value>,
-    #[serde(default)]
-    pub conversation_id: Option<String>,
-    #[serde(default)]
-    pub conversation_type: Option<String>,
-    #[serde(default)]
-    pub sender_id: Option<String>,
-    #[serde(default)]
-    pub sender_nick: Option<String>,
-    #[serde(default)]
-    pub at_users: Option<Vec<serde_json::Value>>,
+fn default_openapi() -> String {
+    std::env::var("DINGTALK_OPENAPI_ENDPOINT")
+        .unwrap_or_else(|_| "https://api.dingtalk.com".to_string())
 }
 
-/// Parsed incoming DingTalk message.
+fn guess_local_ip() -> String {
+    std::net::UdpSocket::bind("0.0.0.0:0")
+        .ok()
+        .and_then(|s| {
+            s.connect("8.8.8.8:80").ok()?;
+            s.local_addr().ok().map(|a| a.ip().to_string())
+        })
+        .unwrap_or_else(|| "127.0.0.1".into())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DingTalkConfig {
+    /// App key / client id (`DINGTALK_CLIENT_ID` in Python).
+    pub client_id: String,
+    /// App secret (`DINGTALK_CLIENT_SECRET` in Python).
+    pub client_secret: String,
+    #[serde(default = "default_openapi")]
+    pub openapi_endpoint: String,
+    #[serde(default)]
+    pub proxy: AdapterProxyConfig,
+}
+
+impl DingTalkConfig {
+    /// 从 [`hermes_config::PlatformConfig`] 构建（`extra` 键名与 Python `DingTalkAdapter` 一致）。
+    pub fn from_platform_config(p: &hermes_config::PlatformConfig) -> Self {
+        let ex = &p.extra;
+        let gv = |k: &str| -> String {
+            ex.get(k)
+                .and_then(|v| v.as_str())
+                .map(|s| s.trim())
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .unwrap_or_default()
+        };
+        let openapi = {
+            let v = gv("openapi_endpoint");
+            if v.is_empty() {
+                default_openapi()
+            } else {
+                v
+            }
+        };
+        Self {
+            client_id: gv("client_id"),
+            client_secret: gv("client_secret"),
+            openapi_endpoint: openapi,
+            proxy: AdapterProxyConfig::default(),
+        }
+    }
+}
+
+/// Parsed inbound chatbot payload (subset of `ChatbotMessage`).
 #[derive(Debug, Clone)]
 pub struct IncomingDingTalkMessage {
     pub conversation_id: String,
     pub sender_id: String,
     pub text: String,
     pub is_group: bool,
-    pub at_users: Vec<String>,
+    pub message_id: String,
+    pub session_webhook: Option<String>,
 }
 
-// ---------------------------------------------------------------------------
-// DingTalkConfig
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DingTalkConfig {
-    pub webhook_url: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub secret: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub client_id: Option<String>,
-    #[serde(default)]
-    pub proxy: AdapterProxyConfig,
+struct DingTalkInner {
+    config: DingTalkConfig,
+    client: Client,
+    session_webhooks: RwLock<HashMap<String, String>>,
+    seen: RwLock<HashMap<String, Instant>>,
+    inbound_tx: RwLock<Option<mpsc::Sender<IncomingMessage>>>,
+    stop: Notify,
+    base: BasePlatformAdapter,
 }
 
 pub struct DingTalkAdapter {
-    base: BasePlatformAdapter,
-    config: DingTalkConfig,
-    client: Client,
+    inner: Arc<DingTalkInner>,
     stop_signal: Arc<Notify>,
+    run_task: RwLock<Option<tokio::task::JoinHandle<()>>>,
 }
 
 impl DingTalkAdapter {
     pub fn new(config: DingTalkConfig) -> Result<Self, GatewayError> {
-        let base = BasePlatformAdapter::new(&config.webhook_url)
-            .with_proxy(config.proxy.clone());
+        if config.client_id.is_empty() || config.client_secret.is_empty() {
+            return Err(GatewayError::Platform(
+                "DingTalk Stream requires client_id and client_secret".into(),
+            ));
+        }
+        let base = BasePlatformAdapter::new(&config.client_id).with_proxy(config.proxy.clone());
         base.validate_token()?;
         let client = base.build_client()?;
-        Ok(Self { base, config, client, stop_signal: Arc::new(Notify::new()) })
-    }
-
-    pub fn config(&self) -> &DingTalkConfig { &self.config }
-
-    /// Send a text message via DingTalk robot webhook.
-    pub async fn send_text(&self, text: &str) -> Result<(), GatewayError> {
-        let body = serde_json::json!({
-            "msgtype": "text",
-            "text": { "content": text }
+        let inner = Arc::new(DingTalkInner {
+            config,
+            client,
+            session_webhooks: RwLock::new(HashMap::new()),
+            seen: RwLock::new(HashMap::new()),
+            inbound_tx: RwLock::new(None),
+            stop: Notify::new(),
+            base,
         });
-
-        let resp = self.client.post(&self.config.webhook_url)
-            .json(&body)
-            .send().await
-            .map_err(|e| GatewayError::SendFailed(format!("DingTalk send failed: {}", e)))?;
-
-        if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("DingTalk API error: {}", text)));
-        }
-        Ok(())
+        Ok(Self {
+            inner,
+            stop_signal: Arc::new(Notify::new()),
+            run_task: RwLock::new(None),
+        })
     }
 
-    /// Parse a DingTalk webhook callback body into an incoming message.
-    pub fn parse_webhook_event(body: &serde_json::Value) -> Option<IncomingDingTalkMessage> {
-        let conversation_id = body.get("conversationId")
-            .and_then(|v| v.as_str())?
-            .to_string();
-        let sender_id = body.get("senderId")
-            .and_then(|v| v.as_str())?
-            .to_string();
+    pub fn config(&self) -> &DingTalkConfig {
+        &self.inner.config
+    }
 
-        let text = body.get("text")
-            .and_then(|t| t.get("content"))
+    pub async fn set_inbound_sender(&self, tx: mpsc::Sender<IncomingMessage>) {
+        *self.inner.inbound_tx.write().await = Some(tx);
+    }
+
+    async fn open_connection(inner: &DingTalkInner) -> Result<Value, GatewayError> {
+        let url = format!(
+            "{}/v1.0/gateway/connections/open",
+            inner.config.openapi_endpoint.trim_end_matches('/')
+        );
+        let ua = format!(
+            "DingTalkStream/1.0 SDK/rust-hermes (+https://github.com/nousresearch/hermes-agent-rust)"
+        );
+        let body = serde_json::json!({
+            "clientId": inner.config.client_id,
+            "clientSecret": inner.config.client_secret,
+            "subscriptions": [{"type": "CALLBACK", "topic": CHATBOT_TOPIC}],
+            "ua": ua,
+            "localIp": guess_local_ip(),
+        });
+        let resp = inner
+            .client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("Accept", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| GatewayError::ConnectionFailed(format!("DingTalk open_connection: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let t = resp.text().await.unwrap_or_default();
+            return Err(GatewayError::ConnectionFailed(format!(
+                "DingTalk open_connection HTTP {status}: {t}"
+            )));
+        }
+        resp.json().await.map_err(|e| {
+            GatewayError::ConnectionFailed(format!("DingTalk open_connection json: {e}"))
+        })
+    }
+
+    fn ws_uri(endpoint: &str, ticket: &str) -> Result<String, GatewayError> {
+        let mut u = Url::parse(endpoint)
+            .map_err(|e| GatewayError::ConnectionFailed(format!("Bad WS endpoint: {e}")))?;
+        u.query_pairs_mut().append_pair("ticket", ticket);
+        Ok(u.into())
+    }
+
+    fn parse_callback_data(data: &Value) -> Option<IncomingDingTalkMessage> {
+        let conversation_id = data
+            .get("conversationId")
+            .and_then(|v| v.as_str())?
+            .to_string();
+        let sender_id = data
+            .get("senderId")
             .and_then(|v| v.as_str())
             .unwrap_or("")
-            .trim()
             .to_string();
-
-        let is_group = body.get("conversationType")
+        let conv_type = data
+            .get("conversationType")
             .and_then(|v| v.as_str())
-            .map(|v| v == "2")
-            .unwrap_or(false);
-
-        let at_users = body.get("atUsers")
-            .and_then(|v| v.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|u| u.get("dingtalkId").and_then(|v| v.as_str()).map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default();
-
+            .unwrap_or("1");
+        let is_group = conv_type == "2";
+        let message_id = data
+            .get("msgId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let session_webhook = data
+            .get("sessionWebhook")
+            .and_then(|v| v.as_str())
+            .map(String::from);
+        let text = if data.get("msgtype").and_then(|v| v.as_str()) == Some("text") {
+            data.get("text")
+                .and_then(|t| t.get("content"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string()
+        } else if data.get("msgtype").and_then(|v| v.as_str()) == Some("richText") {
+            let mut parts = Vec::new();
+            if let Some(arr) = data.get("content").and_then(|c| c.get("richText")).and_then(|r| r.as_array()) {
+                for item in arr {
+                    if let Some(t) = item.get("text").and_then(|v| v.as_str()) {
+                        parts.push(t);
+                    }
+                }
+            }
+            parts.join(" ").trim().to_string()
+        } else {
+            String::new()
+        };
         Some(IncomingDingTalkMessage {
             conversation_id,
             sender_id,
             text,
             is_group,
-            at_users,
+            message_id,
+            session_webhook,
         })
     }
 
-    /// Send an ActionCard message via DingTalk robot webhook.
-    pub async fn send_action_card(
-        &self,
-        title: &str,
-        text: &str,
-        btn_title: &str,
-        btn_url: &str,
-    ) -> Result<(), GatewayError> {
-        let body = serde_json::json!({
-            "msgtype": "actionCard",
-            "actionCard": {
-                "title": title,
-                "text": text,
-                "singleTitle": btn_title,
-                "singleURL": btn_url
-            }
-        });
-
-        let resp = self.client.post(&self.config.webhook_url)
-            .json(&body)
-            .send().await
-            .map_err(|e| GatewayError::SendFailed(format!("DingTalk actionCard send failed: {}", e)))?;
-
-        if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("DingTalk actionCard error: {}", text)));
-        }
-        Ok(())
+    fn build_ack(message_id: Option<&str>) -> Value {
+        serde_json::json!({
+            "code": 200,
+            "headers": {
+                "messageId": message_id.unwrap_or(""),
+                "contentType": "application/json",
+            },
+            "message": "OK",
+            "data": serde_json::json!({"response": "OK"}).to_string(),
+        })
     }
 
-    /// Send a markdown message via DingTalk robot webhook.
-    pub async fn send_markdown(&self, title: &str, text: &str) -> Result<(), GatewayError> {
+    async fn is_dup(inner: &DingTalkInner, msg_id: &str) -> bool {
+        if msg_id.is_empty() {
+            return false;
+        }
+        let now = Instant::now();
+        let mut map = inner.seen.write().await;
+        if map.len() > DEDUP_MAX {
+            let cutoff = now - DEDUP_WINDOW;
+            map.retain(|_, t| *t > cutoff);
+        }
+        if map.contains_key(msg_id) {
+            return true;
+        }
+        map.insert(msg_id.to_string(), now);
+        false
+    }
+
+    /// 处理一条 WS 文本帧。对聊天机器人 CALLBACK 返回待发送的 ACK JSON 字符串（与 Python Stream SDK 一致，应尽快回 ACK）。
+    async fn handle_ws_message(inner: &DingTalkInner, txt: &str) -> Result<Option<String>, GatewayError> {
+        let v: Value = serde_json::from_str(txt)
+            .map_err(|e| GatewayError::Platform(format!("DingTalk WS JSON: {e}")))?;
+        let msg_type = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        let headers = v.get("headers").cloned().unwrap_or(Value::Null);
+        let topic = headers.get("topic").and_then(|t| t.as_str()).unwrap_or("");
+        if msg_type == "SYSTEM" {
+            if topic == "disconnect" {
+                return Err(GatewayError::ConnectionFailed(
+                    "DingTalk stream disconnect".into(),
+                ));
+            }
+            return Ok(None);
+        }
+
+        if msg_type != "CALLBACK" || topic != CHATBOT_TOPIC {
+            return Ok(None);
+        }
+
+        let mid = headers
+            .get("messageId")
+            .and_then(|x| x.as_str())
+            .map(str::to_owned);
+        let ack_line = || -> String { Self::build_ack(mid.as_deref()).to_string() };
+
+        let data_raw = v.get("data").cloned().unwrap_or(Value::Null);
+        let data: Value = if let Some(s) = data_raw.as_str() {
+            serde_json::from_str(s).unwrap_or(Value::Null)
+        } else {
+            data_raw
+        };
+
+        let Some(parsed) = Self::parse_callback_data(&data) else {
+            return Ok(Some(ack_line()));
+        };
+        if parsed.text.is_empty() {
+            return Ok(Some(ack_line()));
+        }
+        if Self::is_dup(inner, &parsed.message_id).await {
+            return Ok(Some(ack_line()));
+        }
+
+        if let Some(ref wh) = parsed.session_webhook {
+            let re = regex::Regex::new(SESSION_WEBHOOK_RE).expect("valid regex");
+            if re.is_match(wh) && !parsed.conversation_id.is_empty() {
+                let mut m = inner.session_webhooks.write().await;
+                if m.len() >= SESSION_WEBHOOKS_MAX {
+                    if let Some(k) = m.keys().next().cloned() {
+                        m.remove(&k);
+                    }
+                }
+                m.insert(parsed.conversation_id.clone(), wh.clone());
+            }
+        }
+
+        let chat_id = if parsed.conversation_id.is_empty() {
+            parsed.sender_id.clone()
+        } else {
+            parsed.conversation_id.clone()
+        };
+        let incoming = IncomingMessage {
+            platform: "dingtalk".into(),
+            chat_id: chat_id.clone(),
+            user_id: parsed.sender_id.clone(),
+            text: parsed.text.clone(),
+            message_id: if parsed.message_id.is_empty() {
+                None
+            } else {
+                Some(parsed.message_id.clone())
+            },
+            is_dm: !parsed.is_group,
+        };
+        if let Some(tx) = inner.inbound_tx.read().await.clone() {
+            tokio::spawn(async move {
+                let _ = tx.send(incoming).await;
+            });
+        }
+
+        Ok(Some(ack_line()))
+    }
+
+    async fn stream_loop(inner: Arc<DingTalkInner>) {
+        let mut backoff = 0usize;
+        while inner.base.is_running() {
+            match Self::open_connection(&inner).await {
+                Ok(conn) => {
+                    let endpoint = conn
+                        .get("endpoint")
+                        .and_then(|e| e.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let ticket = conn.get("ticket").and_then(|t| t.as_str()).unwrap_or("");
+                    if endpoint.is_empty() || ticket.is_empty() {
+                        error!("DingTalk open_connection missing endpoint/ticket: {conn}");
+                    } else {
+                        match Self::ws_uri(&endpoint, ticket) {
+                            Ok(uri) => {
+                                info!("DingTalk stream connecting…");
+                                match tokio_tungstenite::connect_async(&uri).await {
+                                    Ok((mut ws, _)) => {
+                                        backoff = 0;
+                                        while inner.base.is_running() {
+                                            tokio::select! {
+                                                _ = inner.stop.notified() => {
+                                                    let _ = ws.close(None).await;
+                                                    return;
+                                                }
+                                                msg = ws.next() => {
+                                                    match msg {
+                                                        Some(Ok(WsMessage::Text(t))) => {
+                                                            let (disconnect, ack) =
+                                                                match Self::handle_ws_message(&inner, &t).await {
+                                                                    Ok(ack) => (false, ack),
+                                                                    Err(GatewayError::ConnectionFailed(ref s))
+                                                                        if s.contains("disconnect") =>
+                                                                    {
+                                                                        (true, None)
+                                                                    }
+                                                                    Err(e) => {
+                                                                        debug!(error = %e, "DingTalk callback handling");
+                                                                        (false, None)
+                                                                    }
+                                                                };
+                                                            if disconnect {
+                                                                let _ = ws.close(None).await;
+                                                                break;
+                                                            }
+                                                            if let Some(line) = ack {
+                                                                let _ = ws.send(WsMessage::Text(line)).await;
+                                                            }
+                                                        }
+                                                        Some(Ok(WsMessage::Ping(p))) => {
+                                                            let _ = ws.send(WsMessage::Pong(p)).await;
+                                                        }
+                                                        Some(Ok(WsMessage::Close(_))) | None => break,
+                                                        Some(Err(e)) => {
+                                                            warn!("DingTalk WS error: {e}");
+                                                            break;
+                                                        }
+                                                        _ => {}
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(e) => warn!("DingTalk WS connect failed: {e}"),
+                                }
+                            }
+                            Err(e) => warn!("DingTalk WS URI: {e}"),
+                        }
+                    }
+                }
+                Err(e) => warn!("DingTalk open_connection: {e}"),
+            }
+            let delay = RECONNECT_SECS[backoff.min(RECONNECT_SECS.len() - 1)];
+            backoff = (backoff + 1).min(RECONNECT_SECS.len() - 1);
+            tokio::time::sleep(Duration::from_secs(delay)).await;
+        }
+    }
+
+    /// POST markdown to the session webhook for `chat_id` (conversation id).
+    pub async fn send_markdown_session(
+        &self,
+        chat_id: &str,
+        title: &str,
+        text: &str,
+    ) -> Result<(), GatewayError> {
+        let wh = {
+            let m = self.inner.session_webhooks.read().await;
+            m.get(chat_id).cloned()
+        };
+        let Some(url) = wh else {
+            return Err(GatewayError::SendFailed(
+                "No session_webhook for chat_id; inbound message required first".into(),
+            ));
+        };
         let body = serde_json::json!({
             "msgtype": "markdown",
-            "markdown": { "title": title, "text": text }
+            "markdown": {
+                "title": title,
+                "text": text.chars().take(MAX_MARKDOWN).collect::<String>(),
+            }
         });
-
-        let resp = self.client.post(&self.config.webhook_url)
+        let resp = self
+            .inner
+            .client
+            .post(&url)
             .json(&body)
-            .send().await
-            .map_err(|e| GatewayError::SendFailed(format!("DingTalk markdown send failed: {}", e)))?;
-
-        if !resp.status().is_success() {
-            let text = resp.text().await.unwrap_or_default();
-            return Err(GatewayError::SendFailed(format!("DingTalk API error: {}", text)));
+            .send()
+            .await
+            .map_err(|e| GatewayError::SendFailed(format!("DingTalk session webhook: {e}")))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let t = resp.text().await.unwrap_or_default();
+            return Err(GatewayError::SendFailed(format!(
+                "DingTalk session webhook HTTP {status}: {t}"
+            )));
         }
         Ok(())
     }
@@ -191,86 +483,74 @@ impl DingTalkAdapter {
 #[async_trait]
 impl PlatformAdapter for DingTalkAdapter {
     async fn start(&self) -> Result<(), GatewayError> {
-        info!("DingTalk adapter starting");
-        self.base.mark_running();
+        info!(
+            "DingTalk Stream adapter starting (client_id={}, endpoint={})",
+            self.inner.config.client_id,
+            self.inner.config.openapi_endpoint
+        );
+        self.inner.base.mark_running();
+        let inner = self.inner.clone();
+        let h = tokio::spawn(async move {
+            DingTalkAdapter::stream_loop(inner).await;
+        });
+        *self.run_task.write().await = Some(h);
         Ok(())
     }
 
     async fn stop(&self) -> Result<(), GatewayError> {
-        info!("DingTalk adapter stopping");
-        self.base.mark_stopped();
+        info!("DingTalk Stream adapter stopping");
+        self.inner.base.mark_stopped();
+        self.inner.stop.notify_waiters();
         self.stop_signal.notify_one();
-        Ok(())
-    }
-
-    async fn send_message(&self, _chat_id: &str, text: &str, parse_mode: Option<ParseMode>) -> Result<(), GatewayError> {
-        match parse_mode {
-            Some(ParseMode::Markdown) => self.send_markdown("Message", text).await,
-            _ => self.send_text(text).await,
+        if let Some(t) = self.run_task.write().await.take() {
+            t.abort();
         }
-    }
-
-    async fn edit_message(&self, _chat_id: &str, _message_id: &str, _text: &str) -> Result<(), GatewayError> {
-        debug!("DingTalk webhook does not support message editing");
         Ok(())
     }
 
-    async fn send_file(&self, _chat_id: &str, file_path: &str, caption: Option<&str>) -> Result<(), GatewayError> {
-        use crate::platforms::helpers::media_category;
+    async fn send_message(
+        &self,
+        chat_id: &str,
+        text: &str,
+        parse_mode: Option<ParseMode>,
+    ) -> Result<(), GatewayError> {
+        let title = match parse_mode {
+            Some(ParseMode::Markdown) => "Hermes",
+            _ => "Hermes",
+        };
+        self.send_markdown_session(chat_id, title, text).await
+    }
 
-        let path = std::path::Path::new(file_path);
-        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
-        let category = media_category(ext);
-        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    async fn edit_message(
+        &self,
+        _chat_id: &str,
+        _message_id: &str,
+        _text: &str,
+    ) -> Result<(), GatewayError> {
+        debug!("DingTalk Stream does not support message editing");
+        Ok(())
+    }
 
-        // DingTalk robot webhooks only support text/markdown/link/actionCard.
-        // For files, send a link-type message pointing to the file if it's a URL,
-        // otherwise send a markdown message with the file info.
-        if category == "image" && (file_path.starts_with("http://") || file_path.starts_with("https://")) {
-            let body = serde_json::json!({
-                "msgtype": "markdown",
-                "markdown": {
-                    "title": caption.unwrap_or("Image"),
-                    "text": format!("![{}]({})\n\n{}", file_name, file_path, caption.unwrap_or(""))
-                }
-            });
-            let resp = self.client.post(&self.config.webhook_url)
-                .json(&body)
-                .send().await
-                .map_err(|e| GatewayError::SendFailed(format!("DingTalk file send failed: {e}")))?;
-            if !resp.status().is_success() {
-                let text = resp.text().await.unwrap_or_default();
-                return Err(GatewayError::SendFailed(format!("DingTalk file send error: {text}")));
-            }
-        } else if let Some(ref client_id) = self.config.client_id {
-            // If client_id is available, use the internal API for file upload
-            let file_bytes = tokio::fs::read(file_path).await
-                .map_err(|e| GatewayError::SendFailed(format!("Failed to read file: {e}")))?;
-            let mime = crate::platforms::helpers::mime_from_extension(ext);
-            let upload_url = format!("https://oapi.dingtalk.com/media/upload?access_token={}&type=file", client_id);
-
-            let part = reqwest::multipart::Part::bytes(file_bytes)
-                .file_name(file_name.to_string())
-                .mime_str(mime)
-                .map_err(|e| GatewayError::SendFailed(format!("MIME error: {e}")))?;
-            let form = reqwest::multipart::Form::new().part("media", part);
-
-            let resp = self.client.post(&upload_url)
-                .multipart(form)
-                .send().await
-                .map_err(|e| GatewayError::SendFailed(format!("DingTalk upload failed: {e}")))?;
-
-            if !resp.status().is_success() {
-                let text = resp.text().await.unwrap_or_default();
-                return Err(GatewayError::SendFailed(format!("DingTalk upload error: {text}")));
-            }
+    async fn send_file(
+        &self,
+        chat_id: &str,
+        file_path: &str,
+        caption: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        let cap = caption.unwrap_or("");
+        let msg = if file_path.starts_with("http://") || file_path.starts_with("https://") {
+            format!("{cap}\n\n[file]({file_path})")
         } else {
-            let msg = format!("[File: {}]{}", file_name, caption.map(|c| format!(" - {c}")).unwrap_or_default());
-            self.send_text(&msg).await?;
-        }
-        Ok(())
+            format!("{cap}\n\n[local file: {file_path}]")
+        };
+        self.send_markdown_session(chat_id, "Attachment", &msg).await
     }
 
-    fn is_running(&self) -> bool { self.base.is_running() }
-    fn platform_name(&self) -> &str { "dingtalk" }
+    fn is_running(&self) -> bool {
+        self.inner.base.is_running()
+    }
+
+    fn platform_name(&self) -> &str {
+        "dingtalk"
+    }
 }

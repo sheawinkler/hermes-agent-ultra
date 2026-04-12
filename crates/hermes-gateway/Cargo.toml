@@ -18,7 +18,7 @@ mattermost = []
 dingtalk = []
 feishu = []
 wecom = []
-weixin = []
+weixin = ["dep:aes", "dep:rand"]
 bluebubbles = []
 email = []
 sms = []
@@ -46,6 +46,8 @@ native-tls = "0.2"
 hmac = "0.12"
 sha1 = "0.10"
 base64 = { workspace = true }
+aes = { version = "0.8", optional = true }
+rand = { version = "0.8", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
