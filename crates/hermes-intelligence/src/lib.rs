@@ -15,6 +15,7 @@ pub mod model_metadata;
 pub mod prompt;
 pub mod redact;
 pub mod router;
+pub mod self_evolution;
 pub mod title;
 pub mod usage;
 pub mod usage_pricing;
@@ -29,6 +30,7 @@ pub use redact::{RedactionPattern, Redactor};
 pub use router::{
     ModelCapability, ModelInfo as RouterModelInfo, ModelRequirements, RouterError, SmartModelRouter,
 };
+pub use self_evolution::{AdaptivePolicyEngine, EvolutionConfig, LongTaskPlan, OutcomeSignals};
 pub use title::{TitleError, TitleGenerator};
 pub use usage::{ModelPricing, ModelUsage, UsageRecord, UsageSummary, UsageTracker};
 
