@@ -531,6 +531,8 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         max_turns: config.max_turns,
         budget: config.budget.clone(),
         model: model.to_string(),
+        api_mode: Default::default(),
+        retry: Default::default(),
         system_prompt: config.system_prompt.clone(),
         personality: config.personality.clone(),
         extra_body: None,
@@ -539,6 +541,10 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         max_tokens: None,
         max_concurrent_delegates: 1,
         memory_flush_interval: 5,
+        session_id: None,
+        hermes_home: None,
+        skip_memory: false,
+        provider: None,
     }
 }
 

@@ -47,3 +47,11 @@ pub mod sms;
 
 #[cfg(feature = "homeassistant")]
 pub mod homeassistant;
+
+#[cfg(feature = "api-server")]
+pub mod api_server;
+
+#[cfg(feature = "webhook")]
+pub mod webhook;
+
+pub mod helpers;

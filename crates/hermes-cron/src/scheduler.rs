@@ -2,8 +2,8 @@
 //!
 //! The `CronScheduler` manages the lifecycle of cron jobs: creation, listing,
 //! updating, pausing, resuming, removal, and execution. It runs a background
-//! loop that checks every minute for due jobs and dispatches them to the
-//! `CronRunner`.
+//! loop that polls for due jobs (default every 60s, overridable via
+//! `HERMES_CRON_TICK_SECS`) and dispatches them to the `CronRunner`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,6 +17,19 @@ use crate::completion::CronCompletionEvent;
 use crate::job::{CronJob, JobStatus};
 use crate::persistence::JobPersistence;
 use crate::runner::CronRunner;
+
+/// Background poll interval for due jobs. Default **60** seconds.
+///
+/// Override with **`HERMES_CRON_TICK_SECS`** (integer **1–300**) for integration tests
+/// or local debugging; values outside the range are clamped.
+fn cron_poll_interval() -> Duration {
+    let secs = std::env::var("HERMES_CRON_TICK_SECS")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(60)
+        .clamp(1, 300);
+    Duration::from_secs(secs)
+}
 
 // ---------------------------------------------------------------------------
 // CronError
@@ -133,7 +146,7 @@ impl CronScheduler {
 
     /// Start the scheduler loop in the background.
     ///
-    /// The loop checks every minute for jobs that are due and dispatches them.
+    /// The loop sleeps (see [`cron_poll_interval`]) then dispatches due jobs.
     /// Returns immediately; the loop runs as a spawned tokio task.
     pub async fn start(&self) {
         let mut running = self.running.lock().await;
@@ -160,9 +173,9 @@ impl CronScheduler {
                     break;
                 }
 
-                // Wait for next minute tick or stop signal
+                // Wait for next poll tick or stop signal
                 tokio::select! {
-                    _ = time::sleep(Duration::from_secs(60)) => {
+                    _ = time::sleep(cron_poll_interval()) => {
                         // Tick: check for due jobs
                     }
                     _ = stop_notify.notified() => {

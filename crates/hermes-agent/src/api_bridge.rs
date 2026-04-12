@@ -437,6 +437,7 @@ impl LlmProvider for CodexProvider {
                                     delta: Some(StreamDelta {
                                         content: Some(delta.to_string()),
                                         tool_calls: None,
+                                        extra: None,
                                     }),
                                     finish_reason: None,
                                     usage: None,
@@ -458,6 +459,7 @@ impl LlmProvider for CodexProvider {
                                             arguments: args_delta,
                                         }),
                                     }]),
+                                    extra: None,
                                 }),
                                 finish_reason: None,
                                 usage: None,

@@ -21,12 +21,13 @@ pub mod oauth;
 pub mod rate_limit;
 pub mod reasoning;
 pub mod session_persistence;
+pub mod memory_plugins;
 pub mod plugins;
 pub mod skill_orchestrator;
 pub mod subdirectory_hints;
 
 // Re-export primary agent types
-pub use agent_loop::{AgentConfig, AgentLoop, TurnMetrics};
+pub use agent_loop::{AgentCallbacks, AgentConfig, AgentLoop, ApiMode, ErrorClass, RetryConfig, TurnMetrics};
 
 // Re-export context management
 pub use context::{ContextManager, SystemPromptBuilder, load_soul_md, load_soul_md_from, switch_personality, load_context_files};

@@ -56,7 +56,7 @@ pub use dm::{DmDecision, DmManager};
 pub use pairing::{PairingManager, PairingState};
 pub use mirror::MirrorManager;
 pub use sticker_cache::{StickerCache, StickerMeta};
-pub use delivery::{DeliveryItem, DeliveryQueue};
+pub use delivery::{DeliveryItem, DeliveryQueue, DeliveryRouter, DeliveryTarget, parse_target};
 pub use channel_directory::{ChannelDirectory, ChannelEntry};
 
 // Re-export adapter base
@@ -108,3 +108,9 @@ pub use platforms::sms::SmsAdapter;
 
 #[cfg(feature = "homeassistant")]
 pub use platforms::homeassistant::HomeAssistantAdapter;
+
+#[cfg(feature = "api-server")]
+pub use platforms::api_server::ApiServerAdapter;
+
+#[cfg(feature = "webhook")]
+pub use platforms::webhook::WebhookAdapter;

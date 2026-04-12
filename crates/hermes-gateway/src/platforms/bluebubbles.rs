@@ -86,8 +86,42 @@ impl PlatformAdapter for BlueBubblesAdapter {
         Ok(())
     }
 
-    async fn send_file(&self, chat_id: &str, file_path: &str, _caption: Option<&str>) -> Result<(), GatewayError> {
-        debug!(chat_id = chat_id, file_path = file_path, "BlueBubbles send_file");
+    async fn send_file(&self, chat_id: &str, file_path: &str, caption: Option<&str>) -> Result<(), GatewayError> {
+        use crate::platforms::helpers::mime_from_extension;
+
+        let path = std::path::Path::new(file_path);
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let mime = mime_from_extension(ext);
+        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+        let file_bytes = tokio::fs::read(file_path).await
+            .map_err(|e| GatewayError::SendFailed(format!("Failed to read file: {e}")))?;
+
+        // BlueBubbles supports attachment sending via multipart upload
+        let url = format!("{}/api/v1/message/attachment", self.config.server_url);
+        let part = reqwest::multipart::Part::bytes(file_bytes)
+            .file_name(file_name.to_string())
+            .mime_str(mime)
+            .map_err(|e| GatewayError::SendFailed(format!("MIME error: {e}")))?;
+        let form = reqwest::multipart::Form::new()
+            .text("chatGuid", chat_id.to_string())
+            .text("name", file_name.to_string())
+            .part("attachment", part);
+
+        let resp = self.client.post(&url)
+            .query(&[("password", &self.config.password)])
+            .multipart(form)
+            .send().await
+            .map_err(|e| GatewayError::SendFailed(format!("BlueBubbles attachment send failed: {e}")))?;
+
+        if !resp.status().is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GatewayError::SendFailed(format!("BlueBubbles attachment error: {text}")));
+        }
+
+        // Send caption as a follow-up text if provided
+        if let Some(cap) = caption {
+            let _ = self.send_text(chat_id, cap).await;
+        }
         Ok(())
     }
 

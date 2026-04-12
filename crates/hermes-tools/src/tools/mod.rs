@@ -25,6 +25,8 @@ pub mod url_safety;
 pub mod env_passthrough;
 pub mod credential_files;
 pub mod session_search;
+pub mod skill_commands;
+pub mod skill_utils;
 pub mod skills;
 pub mod terminal;
 pub mod todo;

@@ -138,6 +138,135 @@ pub enum CliCommand {
         id: Option<String>,
     },
 
+    /// Start an interactive chat session.
+    Chat {
+        /// Single-shot query (non-interactive).
+        #[arg(short, long)]
+        query: Option<String>,
+        /// Preload a skill before chatting.
+        #[arg(long)]
+        preload_skill: Option<String>,
+        /// Skip confirmation for dangerous tools.
+        #[arg(long)]
+        yolo: bool,
+    },
+
+    /// Skills management.
+    Skills {
+        /// Action: browse/search/install/inspect/list/check/update/audit/uninstall/publish/snapshot/tap/config
+        action: Option<String>,
+        /// Skill name or search query.
+        name: Option<String>,
+        /// Additional argument (e.g. tap URL, snapshot path).
+        #[arg(long)]
+        extra: Option<String>,
+    },
+
+    /// Plugin management.
+    Plugins {
+        /// Action: install/update/remove/list/enable/disable
+        action: Option<String>,
+        /// Plugin name.
+        name: Option<String>,
+        /// Git branch, tag, or commit to checkout after clone (remote installs only).
+        #[arg(long = "ref")]
+        git_ref: Option<String>,
+        /// Allow clone from hosts outside the default allowlist (high risk).
+        #[arg(long)]
+        allow_untrusted_git_host: bool,
+    },
+
+    /// Memory provider management.
+    Memory {
+        /// Action: setup/status/off
+        action: Option<String>,
+    },
+
+    /// MCP server management.
+    Mcp {
+        /// Action: serve/add/remove/list/test/configure
+        action: Option<String>,
+        /// Server name or URL.
+        #[arg(long)]
+        server: Option<String>,
+    },
+
+    /// Session management.
+    Sessions {
+        /// Action: list/export/delete/prune/stats/rename/browse
+        action: Option<String>,
+        /// Session ID.
+        #[arg(long)]
+        id: Option<String>,
+        /// New name (for rename).
+        #[arg(long)]
+        name: Option<String>,
+    },
+
+    /// Usage analytics and insights.
+    Insights {
+        /// Number of days to analyze.
+        #[arg(long, default_value = "30")]
+        days: u32,
+        /// Filter by source.
+        #[arg(long)]
+        source: Option<String>,
+    },
+
+    /// Login to a provider.
+    Login {
+        /// Provider name (openai/anthropic/nous/copilot).
+        provider: Option<String>,
+    },
+
+    /// Logout from a provider.
+    Logout {
+        /// Provider name.
+        provider: Option<String>,
+    },
+
+    /// WhatsApp-specific configuration.
+    Whatsapp {
+        /// Action: setup/status/qr
+        action: Option<String>,
+    },
+
+    /// Device pairing management.
+    Pairing {
+        /// Action: list/approve/revoke/clear-pending
+        action: Option<String>,
+        /// Device ID.
+        #[arg(long)]
+        device_id: Option<String>,
+    },
+
+    /// OpenClaw migration utilities.
+    Claw {
+        /// Action: migrate/cleanup
+        action: Option<String>,
+    },
+
+    /// ACP (Agent Communication Protocol) server.
+    Acp {
+        /// Action: start/status
+        action: Option<String>,
+    },
+
+    /// Backup configuration and sessions.
+    Backup {
+        /// Output path for backup archive.
+        output: Option<String>,
+    },
+
+    /// Import configuration from backup.
+    Import {
+        /// Path to backup archive.
+        path: String,
+    },
+
+    /// Show version information.
+    Version,
+
     /// Export conversation/session dump.
     Dump {
         /// Session id or file stem.

@@ -12,8 +12,10 @@
 pub mod approval;
 pub mod backends;
 pub mod dispatch;
+pub mod register_builtins;
 pub mod registry;
 pub mod toolset;
+pub mod toolset_distributions;
 pub mod tools;
 pub mod v4a_patch;
 
@@ -62,7 +64,6 @@ pub use tools::voice_mode::VoiceModeHandler;
 pub use tools::transcription::TranscriptionHandler;
 pub use tools::tts_premium::TtsPremiumHandler;
 pub use tools::mixture_of_agents::MixtureOfAgentsHandler;
-pub use tools::rl_training::RlTrainingHandler;
 pub use tools::osv_check::OsvCheckHandler;
 pub use tools::url_safety::UrlSafetyHandler;
 pub use tools::process_registry::ProcessRegistryHandler;
@@ -70,6 +71,8 @@ pub use tools::env_passthrough::EnvPassthroughHandler;
 pub use tools::credential_files::CredentialFilesHandler;
 pub use tools::managed_tool_gateway::ManagedToolGatewayHandler;
 pub use tools::tool_result_storage::ToolResultStorageHandler;
+pub use tools::skill_utils;
+pub use tools::skill_commands;
 
 // Re-export real backend implementations
 pub use backends::web::{ExaSearchBackend, FallbackSearchBackend, FirecrawlExtractBackend, SimpleExtractBackend};
@@ -87,6 +90,9 @@ pub use backends::messaging::SignalMessagingBackend;
 pub use backends::homeassistant::HaRestBackend;
 pub use backends::tts::MultiTtsBackend;
 pub use backends::browser::{CamoFoxBrowserBackend, CdpBrowserBackend};
+
+// Re-export builtin registration helper
+pub use register_builtins::register_builtin_tools;
 
 // Re-export core types needed by consumers
 pub use hermes_core::{BudgetConfig, ToolCall, ToolError, ToolHandler, ToolResult, ToolSchema};

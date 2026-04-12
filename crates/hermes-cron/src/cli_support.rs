@@ -56,6 +56,7 @@ impl LlmProvider for MinimalCronLlm {
                 delta: Some(StreamDelta {
                     content: Some("ok".into()),
                     tool_calls: None,
+                    extra: None,
                 }),
                 finish_reason: None,
                 usage: None,

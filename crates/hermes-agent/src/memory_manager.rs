@@ -88,6 +88,38 @@ pub trait MemoryProviderPlugin: Send + Sync {
     fn on_memory_write(&self, action: &str, target: &str, content: &str) {
         let _ = (action, target, content);
     }
+
+    // -- Extended lifecycle (Python-equivalent) --
+
+    /// Check if the provider is available and configured.
+    fn is_available(&self) -> bool {
+        true
+    }
+
+    /// Return a JSON schema describing configuration options.
+    fn get_config_schema(&self) -> Option<Value> {
+        None
+    }
+
+    /// Save provider configuration.
+    fn save_config(&self, config: &Value) -> Result<(), String> {
+        let _ = config;
+        Ok(())
+    }
+
+    /// Called when the agent delegates a task to a sub-agent.
+    fn on_delegation(&self, task: &str, sub_agent_id: &str) {
+        let _ = (task, sub_agent_id);
+    }
+}
+
+/// Status of a single memory provider.
+#[derive(Debug, Clone)]
+pub struct ProviderStatus {
+    pub name: String,
+    pub available: bool,
+    pub tool_count: usize,
+    pub has_config_schema: bool,
 }
 
 
@@ -405,6 +437,54 @@ impl MemoryManager {
     pub fn shutdown_all(&self) {
         for provider in self.providers.iter().rev() {
             provider.shutdown();
+        }
+    }
+
+    // -- Extended features (Python equivalents) -----------------------------
+
+    /// Get status of all registered providers.
+    pub fn get_provider_status(&self) -> Vec<ProviderStatus> {
+        self.providers
+            .iter()
+            .map(|p| ProviderStatus {
+                name: p.name().to_string(),
+                available: p.is_available(),
+                tool_count: p.get_tool_schemas().len(),
+                has_config_schema: p.get_config_schema().is_some(),
+            })
+            .collect()
+    }
+
+    /// Interactive setup flow: check availability, print config schema, etc.
+    ///
+    /// Returns Ok if at least one provider is available, Err otherwise.
+    pub fn setup_interactive(&self) -> Result<(), String> {
+        let statuses = self.get_provider_status();
+        if statuses.is_empty() {
+            return Err("No memory providers registered.".to_string());
+        }
+
+        let available_count = statuses.iter().filter(|s| s.available).count();
+        if available_count == 0 {
+            return Err("No memory providers are currently available.".to_string());
+        }
+
+        for status in &statuses {
+            tracing::info!(
+                "Memory provider '{}': available={}, tools={}",
+                status.name,
+                status.available,
+                status.tool_count,
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Notify all providers of a delegation event.
+    pub fn on_delegation(&self, task: &str, sub_agent_id: &str) {
+        for provider in &self.providers {
+            provider.on_delegation(task, sub_agent_id);
         }
     }
 }

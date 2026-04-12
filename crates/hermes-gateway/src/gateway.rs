@@ -171,6 +171,8 @@ struct SessionRuntimeState {
     branch: Option<String>,
     personality: Option<String>,
     home: Option<String>,
+    /// Optional usage budget (same units as `/budget` input; gateway displays as-is).
+    budget: Option<f64>,
     verbose: bool,
     yolo: bool,
     reasoning: bool,
@@ -185,6 +187,7 @@ impl Default for SessionRuntimeState {
             branch: None,
             personality: None,
             home: None,
+            budget: None,
             verbose: false,
             yolo: false,
             reasoning: false,
@@ -753,6 +756,106 @@ impl Gateway {
                     format!("↩️ Removed {} message(s) from current session.", removed)
                 };
                 self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::ListTools { filter } => {
+                let suffix = match &filter {
+                    Some(f) => format!(" (filter: `{}`)", f),
+                    None => String::new(),
+                };
+                let text = format!(
+                    "🔧 Tools{}.\nRegistered MCP tools are resolved at runtime after reload.",
+                    suffix
+                );
+                self.send_message(&incoming.platform, &incoming.chat_id, &text, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::EnableTool { name } => {
+                self.send_message(
+                    &incoming.platform,
+                    &incoming.chat_id,
+                    &format!("✅ Tool enabled: `{}` (effective on next agent turn).", name),
+                    None,
+                )
+                .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::DisableTool { name } => {
+                self.send_message(
+                    &incoming.platform,
+                    &incoming.chat_id,
+                    &format!("⛔ Tool disabled: `{}` (effective on next agent turn).", name),
+                    None,
+                )
+                .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::ListSessions => {
+                let sessions = self.session_manager.get_user_sessions(&incoming.user_id).await;
+                let text = if sessions.is_empty() {
+                    "📚 No sessions found for your user.".to_string()
+                } else {
+                    let mut out = String::from("📚 **Your sessions:**\n\n");
+                    for s in sessions {
+                        let key = self
+                            .session_manager
+                            .compose_session_key(&s.platform, &s.chat_id, &s.user_id);
+                        out.push_str(&format!(
+                            "• `{}` — {} messages, platform `{}` (id `{}`)\n",
+                            key,
+                            s.messages.len(),
+                            s.platform,
+                            s.id
+                        ));
+                    }
+                    out.push_str("\nUse `/sessions <key or id>` to switch.");
+                    out
+                };
+                self.send_message(&incoming.platform, &incoming.chat_id, &text, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::SwitchSession { session_id } => {
+                let sessions = self.session_manager.get_user_sessions(&incoming.user_id).await;
+                let matched = sessions.iter().any(|s| {
+                    let key = self
+                        .session_manager
+                        .compose_session_key(&s.platform, &s.chat_id, &s.user_id);
+                    key == session_id || s.id == session_id
+                });
+                let msg = if matched {
+                    format!(
+                        "🔁 Session `{}` matches your account.\n\
+                         (Cross-chat transcript routing is not fully wired in this gateway build.)",
+                        session_id
+                    )
+                } else {
+                    format!(
+                        "❌ No session matching `{}` for your user. Try `/sessions` to list keys.",
+                        session_id
+                    )
+                };
+                self.send_message(&incoming.platform, &incoming.chat_id, &msg, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::ShowBudget { new_budget } => {
+                let mut states = self.runtime_state.write().await;
+                let state = states.entry(session_key.to_string()).or_default();
+                let msg = match new_budget {
+                    Some(b) => {
+                        state.budget = Some(b);
+                        format!("💰 Usage budget set to {:.4}.", b)
+                    }
+                    None => match state.budget {
+                        Some(b) => format!("💰 Current usage budget: {:.4}.", b),
+                        None => "💰 No usage budget set. Use `/budget <amount>` to set one.".to_string(),
+                    },
+                };
+                drop(states);
+                self.send_message(&incoming.platform, &incoming.chat_id, &msg, None)
                     .await?;
                 Ok(true)
             }

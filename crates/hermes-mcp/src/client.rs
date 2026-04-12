@@ -6,11 +6,14 @@
 //! rediscovers tools and updates the registry.
 
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use hermes_core::{JsonSchema, ToolSchema};
 use hermes_tools::ToolRegistry;
@@ -36,6 +39,108 @@ pub struct ResourceInfo {
     /// MIME type of the resource content (e.g. "text/plain", "application/json").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mime_type: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Sampling types
+// ---------------------------------------------------------------------------
+
+/// Configuration for MCP sampling (server-initiated LLM requests).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SamplingConfig {
+    pub max_rpm: u32,
+    pub max_tokens_cap: u32,
+    pub timeout_secs: u64,
+    pub allowed_models: Vec<String>,
+    pub max_tool_rounds: u32,
+}
+
+impl Default for SamplingConfig {
+    fn default() -> Self {
+        Self {
+            max_rpm: 10,
+            max_tokens_cap: 4096,
+            timeout_secs: 60,
+            allowed_models: vec![],
+            max_tool_rounds: 3,
+        }
+    }
+}
+
+/// Callback type for LLM invocations triggered by MCP sampling.
+pub type LlmCallback = Box<
+    dyn Fn(Value) -> Pin<Box<dyn Future<Output = Result<Value, McpError>> + Send>>
+        + Send
+        + Sync,
+>;
+
+// ---------------------------------------------------------------------------
+// Prompt types
+// ---------------------------------------------------------------------------
+
+/// Information about a prompt exposed by an MCP server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptInfo {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub arguments: Vec<PromptArgument>,
+}
+
+/// A single argument descriptor for an MCP prompt.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptArgument {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub required: bool,
+}
+
+/// Result of getting a prompt from an MCP server.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub messages: Vec<PromptMessage>,
+}
+
+/// A single message in a prompt result.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptMessage {
+    pub role: String,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PromptsListResponse {
+    pub prompts: Vec<PromptInfo>,
+}
+
+// ---------------------------------------------------------------------------
+// Status / probe types
+// ---------------------------------------------------------------------------
+
+/// Status of a single MCP server connection.
+#[derive(Debug, Clone, Serialize)]
+pub struct McpServerStatus {
+    pub name: String,
+    pub connected: bool,
+    pub tool_count: usize,
+    pub resource_count: usize,
+    pub transport_type: String,
+    pub uptime_secs: Option<u64>,
+}
+
+/// Result from probing an MCP server.
+#[derive(Debug, Clone, Serialize)]
+pub struct McpProbeResult {
+    pub reachable: bool,
+    pub latency_ms: u64,
+    pub tools: Vec<String>,
+    pub resources: Vec<String>,
+    pub server_info: Option<Value>,
 }
 
 // ---------------------------------------------------------------------------
@@ -199,6 +304,10 @@ pub struct McpClient {
     next_id: u64,
     /// Whether the connection has been initialized.
     connected: bool,
+    /// Sampling configuration for server-initiated LLM requests.
+    sampling_config: Option<SamplingConfig>,
+    /// Timestamp when the client connected (for uptime tracking).
+    connected_at: Option<Instant>,
 }
 
 impl McpClient {
@@ -211,6 +320,8 @@ impl McpClient {
             resources: Vec::new(),
             next_id: 1,
             connected: false,
+            sampling_config: None,
+            connected_at: None,
         }
     }
 
@@ -230,6 +341,7 @@ impl McpClient {
         self.initialize().await?;
         self.discover_tools().await?;
         self.connected = true;
+        self.connected_at = Some(Instant::now());
 
         Ok(())
     }
@@ -240,6 +352,7 @@ impl McpClient {
             transport.close().await?;
         }
         self.connected = false;
+        self.connected_at = None;
         self.tools.clear();
         self.resources.clear();
         Ok(())
@@ -339,6 +452,154 @@ impl McpClient {
     /// Return the cached resource list from the last `list_resources` call.
     pub fn cached_resources(&self) -> &[ResourceInfo] {
         &self.resources
+    }
+
+    /// Return the uptime of this connection, if connected.
+    pub fn uptime(&self) -> Option<std::time::Duration> {
+        self.connected_at.map(|t| t.elapsed())
+    }
+
+    /// Set the sampling configuration for server-initiated LLM requests.
+    pub fn set_sampling_config(&mut self, config: SamplingConfig) {
+        self.sampling_config = Some(config);
+    }
+
+    // -----------------------------------------------------------------------
+    // Prompt support
+    // -----------------------------------------------------------------------
+
+    /// List prompts available on this server.
+    pub async fn list_prompts(&mut self) -> Result<Vec<PromptInfo>, McpError> {
+        let result = self
+            .send_request("prompts/list", serde_json::json!({}))
+            .await?;
+
+        let response: PromptsListResponse = serde_json::from_value(result)
+            .map_err(|e| McpError::Serialization(e.to_string()))?;
+
+        Ok(response.prompts)
+    }
+
+    /// Get a prompt by name with the given arguments.
+    pub async fn get_prompt(
+        &mut self,
+        name: &str,
+        args: HashMap<String, String>,
+    ) -> Result<PromptResult, McpError> {
+        let params = serde_json::json!({
+            "name": name,
+            "arguments": args,
+        });
+
+        let result = self.send_request("prompts/get", params).await?;
+        let prompt_result: PromptResult = serde_json::from_value(result)
+            .map_err(|e| McpError::Serialization(e.to_string()))?;
+
+        Ok(prompt_result)
+    }
+
+    // -----------------------------------------------------------------------
+    // Sampling support (server-initiated LLM requests)
+    // -----------------------------------------------------------------------
+
+    /// Handle a sampling request from the MCP server.
+    ///
+    /// The server can ask the client to invoke an LLM on its behalf.
+    /// The `llm_callback` performs the actual LLM call.
+    pub async fn handle_sampling_request(
+        &self,
+        params: Value,
+        llm_callback: &LlmCallback,
+    ) -> Result<Value, McpError> {
+        let config = self.sampling_config.as_ref().ok_or_else(|| {
+            McpError::Config("Sampling not configured on this client".to_string())
+        })?;
+
+        let model = params
+            .get("model")
+            .and_then(|m| m.as_str())
+            .unwrap_or("default");
+
+        if !config.allowed_models.is_empty()
+            && !config.allowed_models.iter().any(|m| m == model)
+        {
+            return Err(McpError::InvalidParams(format!(
+                "Model '{}' is not in the allowed list",
+                model
+            )));
+        }
+
+        let max_tokens = params
+            .get("maxTokens")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(config.max_tokens_cap as u64)
+            .min(config.max_tokens_cap as u64);
+
+        let messages = params.get("messages").cloned().unwrap_or(serde_json::json!([]));
+        let openai_messages = Self::convert_mcp_messages_to_openai(&messages);
+
+        let llm_request = serde_json::json!({
+            "model": model,
+            "messages": openai_messages,
+            "max_tokens": max_tokens,
+        });
+
+        let timeout = std::time::Duration::from_secs(config.timeout_secs);
+        let result = tokio::time::timeout(timeout, llm_callback(llm_request))
+            .await
+            .map_err(|_| McpError::ConnectionError("Sampling LLM callback timed out".into()))?
+            ?;
+
+        let content = result
+            .get("choices")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("message"))
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .unwrap_or("");
+
+        let role = result
+            .get("choices")
+            .and_then(|c| c.get(0))
+            .and_then(|c| c.get("message"))
+            .and_then(|m| m.get("role"))
+            .and_then(|r| r.as_str())
+            .unwrap_or("assistant");
+
+        Ok(serde_json::json!({
+            "role": role,
+            "content": {
+                "type": "text",
+                "text": content,
+            },
+            "model": model,
+        }))
+    }
+
+    fn convert_mcp_messages_to_openai(messages: &Value) -> Value {
+        let arr = match messages.as_array() {
+            Some(a) => a,
+            None => return serde_json::json!([]),
+        };
+
+        let converted: Vec<Value> = arr
+            .iter()
+            .map(|msg| {
+                let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("user");
+                let content = msg
+                    .get("content")
+                    .and_then(|c| c.get("text"))
+                    .and_then(|t| t.as_str())
+                    .or_else(|| msg.get("content").and_then(|c| c.as_str()))
+                    .unwrap_or("");
+                serde_json::json!({
+                    "role": role,
+                    "content": content,
+                })
+            })
+            .collect();
+
+        Value::Array(converted)
     }
 
     // -----------------------------------------------------------------------
@@ -623,5 +884,114 @@ impl McpManager {
     /// Get a reference to the tool registry.
     pub fn tool_registry(&self) -> &Arc<ToolRegistry> {
         &self.tool_registry
+    }
+
+    // -----------------------------------------------------------------------
+    // Sampling
+    // -----------------------------------------------------------------------
+
+    /// Set the sampling configuration for all connected clients.
+    pub fn set_sampling_config(&mut self, config: SamplingConfig) {
+        for client in self.clients.values_mut() {
+            client.set_sampling_config(config.clone());
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Prompts
+    // -----------------------------------------------------------------------
+
+    /// List prompts available on a connected server.
+    pub async fn list_prompts(
+        &mut self,
+        server_name: &str,
+    ) -> Result<Vec<PromptInfo>, McpError> {
+        let client = self
+            .clients
+            .get_mut(server_name)
+            .ok_or_else(|| McpError::ServerNotFound(server_name.to_string()))?;
+        client.list_prompts().await
+    }
+
+    /// Get a prompt from a connected server.
+    pub async fn get_prompt(
+        &mut self,
+        server_name: &str,
+        name: &str,
+        args: HashMap<String, String>,
+    ) -> Result<PromptResult, McpError> {
+        let client = self
+            .clients
+            .get_mut(server_name)
+            .ok_or_else(|| McpError::ServerNotFound(server_name.to_string()))?;
+        client.get_prompt(name, args).await
+    }
+
+    // -----------------------------------------------------------------------
+    // Status / probe
+    // -----------------------------------------------------------------------
+
+    /// Get the status of all connected MCP servers.
+    pub fn get_status(&self) -> HashMap<String, McpServerStatus> {
+        self.clients
+            .iter()
+            .map(|(name, client)| {
+                let transport_type = if client.config.is_stdio() {
+                    "stdio".to_string()
+                } else if client.config.is_http() {
+                    "http".to_string()
+                } else {
+                    "unknown".to_string()
+                };
+                let status = McpServerStatus {
+                    name: name.clone(),
+                    connected: client.is_connected(),
+                    tool_count: client.cached_tools().len(),
+                    resource_count: client.cached_resources().len(),
+                    transport_type,
+                    uptime_secs: client.uptime().map(|d| d.as_secs()),
+                };
+                (name.clone(), status)
+            })
+            .collect()
+    }
+
+    /// Probe a connected MCP server to check reachability and discover capabilities.
+    pub async fn probe_server(&mut self, name: &str) -> Result<McpProbeResult, McpError> {
+        let client = self
+            .clients
+            .get_mut(name)
+            .ok_or_else(|| McpError::ServerNotFound(name.to_string()))?;
+
+        let start = Instant::now();
+        let tools_result = client.list_tools().await;
+        let latency = start.elapsed();
+
+        match tools_result {
+            Ok(tools) => {
+                let resources = client
+                    .list_resources()
+                    .await
+                    .unwrap_or_default();
+
+                Ok(McpProbeResult {
+                    reachable: true,
+                    latency_ms: latency.as_millis() as u64,
+                    tools: tools.iter().map(|t| t.name.clone()).collect(),
+                    resources: resources.iter().map(|r| r.uri.clone()).collect(),
+                    server_info: None,
+                })
+            }
+            Err(e) => {
+                warn!("Probe failed for server '{}': {}", name, e);
+                Ok(McpProbeResult {
+                    reachable: false,
+                    latency_ms: latency.as_millis() as u64,
+                    tools: vec![],
+                    resources: vec![],
+                    server_info: None,
+                })
+            }
+        }
     }
 }

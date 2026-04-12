@@ -8,7 +8,6 @@ use clap::CommandFactory;
 use clap_complete::{generate, Shell as CompletionShell};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
 use hermes_cli::cli::{Cli, CliCommand};
 use hermes_cli::App;
 use hermes_cli::app::{
@@ -34,9 +33,9 @@ use hermes_gateway::gateway::IncomingMessage as GatewayIncomingMessage;
 use hermes_gateway::gateway::GatewayConfig as RuntimeGatewayConfig;
 use hermes_gateway::platforms::telegram::{TelegramAdapter, TelegramConfig};
 use hermes_telemetry::init_telemetry_from_env;
+use hermes_environments::LocalBackend;
+use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_tools::ToolRegistry;
-use serde::{Deserialize, Serialize};
-
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -48,6 +47,9 @@ async fn main() {
 
     let result = match cli.effective_command() {
         CliCommand::Hermes => run_interactive(cli).await,
+        CliCommand::Chat { query, preload_skill, yolo } => {
+            hermes_cli::commands::handle_cli_chat(query, preload_skill, yolo).await
+        }
         CliCommand::Model { provider_model } => run_model(cli, provider_model).await,
         CliCommand::Tools { action } => run_tools(cli, action).await,
         CliCommand::Config { action, key, value } => run_config(cli, action, key, value).await,
@@ -59,6 +61,60 @@ async fn main() {
         CliCommand::Logs { lines, follow } => run_logs(cli, lines, follow).await,
         CliCommand::Profile { action, name } => run_profile(cli, action, name).await,
         CliCommand::Auth { action, provider } => run_auth(cli, action, provider).await,
+        CliCommand::Skills { action, name, extra } => {
+            hermes_cli::commands::handle_cli_skills(action, name, extra).await
+        }
+        CliCommand::Plugins {
+            action,
+            name,
+            git_ref,
+            allow_untrusted_git_host,
+        } => {
+            hermes_cli::commands::handle_cli_plugins(
+                action,
+                name,
+                git_ref,
+                allow_untrusted_git_host,
+            )
+            .await
+        }
+        CliCommand::Memory { action } => {
+            hermes_cli::commands::handle_cli_memory(action).await
+        }
+        CliCommand::Mcp { action, server } => {
+            hermes_cli::commands::handle_cli_mcp(action, server).await
+        }
+        CliCommand::Sessions { action, id, name } => {
+            hermes_cli::commands::handle_cli_sessions(action, id, name).await
+        }
+        CliCommand::Insights { days, source } => {
+            hermes_cli::commands::handle_cli_insights(days, source).await
+        }
+        CliCommand::Login { provider } => {
+            hermes_cli::commands::handle_cli_login(provider).await
+        }
+        CliCommand::Logout { provider } => {
+            hermes_cli::commands::handle_cli_logout(provider).await
+        }
+        CliCommand::Whatsapp { action } => {
+            hermes_cli::commands::handle_cli_whatsapp(action).await
+        }
+        CliCommand::Pairing { action, device_id } => {
+            hermes_cli::commands::handle_cli_pairing(action, device_id).await
+        }
+        CliCommand::Claw { action } => {
+            hermes_cli::commands::handle_cli_claw(action).await
+        }
+        CliCommand::Acp { action } => {
+            hermes_cli::commands::handle_cli_acp(action).await
+        }
+        CliCommand::Backup { output } => {
+            hermes_cli::commands::handle_cli_backup(output).await
+        }
+        CliCommand::Import { path } => {
+            hermes_cli::commands::handle_cli_import(path).await
+        }
+        CliCommand::Version => hermes_cli::commands::handle_cli_version(),
         CliCommand::Cron {
             action,
             id,
@@ -187,8 +243,93 @@ async fn run_config(
             save_config_yaml(&cfg_path, &disk).map_err(|e| AgentError::Config(e.to_string()))?;
             println!("Saved {} = {} -> {}", key, value, cfg_path.display());
         }
+        Some("show") => {
+            let json = serde_json::to_string_pretty(&config)
+                .map_err(|e| AgentError::Config(e.to_string()))?;
+            println!("{}", json);
+        }
+        Some("path") => {
+            let base: PathBuf = cli
+                .config_dir
+                .as_ref()
+                .map(PathBuf::from)
+                .unwrap_or_else(hermes_home);
+            let cfg_path = base.join("config.yaml");
+            println!("{}", cfg_path.display());
+        }
+        Some("env-path") => {
+            let env_path = hermes_home().join(".env");
+            println!("{}", env_path.display());
+            if env_path.exists() {
+                println!("(exists)");
+            } else {
+                println!("(not found — create it to set environment overrides)");
+            }
+        }
+        Some("check") | Some("validate") => {
+            println!("Validating configuration...");
+            match validate_config(&config) {
+                Ok(()) => println!("Configuration is valid. ✓"),
+                Err(e) => println!("Configuration error: {}", e),
+            }
+        }
+        Some("edit") => {
+            let base: PathBuf = cli
+                .config_dir
+                .as_ref()
+                .map(PathBuf::from)
+                .unwrap_or_else(hermes_home);
+            let cfg_path = base.join("config.yaml");
+            let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vi".into());
+            println!("Opening {} with {}...", cfg_path.display(), editor);
+            let status = std::process::Command::new(&editor)
+                .arg(&cfg_path)
+                .status();
+            match status {
+                Ok(s) if s.success() => println!("Config saved."),
+                Ok(s) => println!("Editor exited with: {}", s),
+                Err(e) => println!("Could not launch editor '{}': {}", editor, e),
+            }
+        }
+        Some("migrate") => {
+            println!("Config Migration");
+            println!("----------------");
+            let base: PathBuf = cli
+                .config_dir
+                .as_ref()
+                .map(PathBuf::from)
+                .unwrap_or_else(hermes_home);
+            let old_json = base.join("config.json");
+            let new_yaml = base.join("config.yaml");
+            if old_json.exists() && !new_yaml.exists() {
+                println!("Found legacy config.json — converting to config.yaml...");
+                match std::fs::read_to_string(&old_json) {
+                    Ok(content) => {
+                        if let Ok(val) = serde_json::from_str::<serde_json::Value>(&content) {
+                            match serde_yaml::to_string(&val) {
+                                Ok(yaml) => {
+                                    std::fs::write(&new_yaml, &yaml)
+                                        .map_err(|e| AgentError::Io(e.to_string()))?;
+                                    println!("Migrated config.json -> config.yaml");
+                                    println!("The old config.json was preserved.");
+                                }
+                                Err(e) => println!("YAML conversion error: {}", e),
+                            }
+                        } else {
+                            println!("Could not parse config.json as JSON.");
+                        }
+                    }
+                    Err(e) => println!("Could not read config.json: {}", e),
+                }
+            } else if new_yaml.exists() {
+                println!("config.yaml already exists. No migration needed.");
+            } else {
+                println!("No legacy config.json found. Nothing to migrate.");
+            }
+        }
         Some(other) => {
-            println!("Unknown config action: {}. Use 'get' or 'set'.", other);
+            println!("Unknown config action: '{}'.", other);
+            println!("Available: show, get, set, path, env-path, check, edit, migrate");
         }
     }
     Ok(())
@@ -298,6 +439,12 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
             ));
 
             let tool_registry = Arc::new(ToolRegistry::new());
+            let terminal_backend: Arc<dyn hermes_core::TerminalBackend> =
+                Arc::new(LocalBackend::default());
+            let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
+            let skill_provider: Arc<dyn hermes_core::SkillProvider> =
+                Arc::new(SkillManager::new(skill_store));
+            hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
             let agent_registry = Arc::new(bridge_tool_registry(&tool_registry));
             let agent_tools_for_msg = agent_registry.clone();
             let agent_tools_for_stream = agent_registry.clone();
@@ -573,6 +720,7 @@ fn build_telegram_config(
         parse_markdown,
         parse_html,
         poll_timeout,
+        bot_username: None,
     }
 }
 
@@ -874,40 +1022,8 @@ async fn run_cron(
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct WebhookStore {
-    webhooks: Vec<WebhookRecord>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct WebhookRecord {
-    id: String,
-    url: String,
-    #[serde(default)]
-    created_at: String,
-}
-
 fn webhook_store_path(cli: &Cli) -> PathBuf {
     hermes_state_root(&cli).join("webhooks.json")
-}
-
-fn load_webhook_store(path: &Path) -> Result<WebhookStore, AgentError> {
-    if !path.exists() {
-        return Ok(WebhookStore::default());
-    }
-    let raw = std::fs::read_to_string(path)
-        .map_err(|e| AgentError::Io(format!("read {}: {}", path.display(), e)))?;
-    serde_json::from_str(&raw).map_err(|e| AgentError::Io(format!("parse {}: {}", path.display(), e)))
-}
-
-fn save_webhook_store(path: &Path, store: &WebhookStore) -> Result<(), AgentError> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| AgentError::Io(format!("mkdir: {}", e)))?;
-    }
-    let raw = serde_json::to_string_pretty(store)
-        .map_err(|e| AgentError::Io(format!("serialize webhooks: {}", e)))?;
-    std::fs::write(path, raw).map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))
 }
 
 async fn prompt_line(prompt: impl Into<String>) -> Result<String, AgentError> {
@@ -963,7 +1079,7 @@ async fn run_webhook(
     id: Option<String>,
 ) -> Result<(), AgentError> {
     let path = webhook_store_path(&cli);
-    let mut store = load_webhook_store(&path)?;
+    let mut store = hermes_cli::webhook_delivery::load_webhook_store(&path)?;
 
     match action.as_deref().unwrap_or("list") {
         "list" => {
@@ -985,13 +1101,13 @@ async fn run_webhook(
                     "webhook URL must start with http:// or https://".into(),
                 ));
             }
-            let rec = WebhookRecord {
+            let rec = hermes_cli::webhook_delivery::WebhookRecord {
                 id: uuid::Uuid::new_v4().to_string(),
                 url: url.clone(),
                 created_at: chrono::Utc::now().to_rfc3339(),
             };
             store.webhooks.push(rec.clone());
-            save_webhook_store(&path, &store)?;
+            hermes_cli::webhook_delivery::save_webhook_store(&path, &store)?;
             println!("Added webhook {} -> {}", rec.id, rec.url);
         }
         "remove" => {
@@ -1008,7 +1124,7 @@ async fn run_webhook(
             if store.webhooks.len() == before {
                 println!("No matching webhook removed.");
             } else {
-                save_webhook_store(&path, &store)?;
+                hermes_cli::webhook_delivery::save_webhook_store(&path, &store)?;
                 println!("Updated {}", path.display());
             }
         }
@@ -1029,10 +1145,7 @@ async fn run_cron_webhook_delivery_loop(
 ) {
     use tokio::sync::broadcast::error::RecvError;
 
-    let client = match reqwest::Client::builder()
-        .timeout(Duration::from_secs(45))
-        .build()
-    {
+    let client = match hermes_cli::webhook_delivery::webhook_http_client() {
         Ok(c) => c,
         Err(e) => {
             tracing::error!("cron webhooks: HTTP client build failed: {e}");
@@ -1050,49 +1163,10 @@ async fn run_cron_webhook_delivery_loop(
             Err(RecvError::Closed) => break,
         };
 
-        let Ok(body) = serde_json::to_value(&ev) else {
-            continue;
-        };
-
-        let raw = match tokio::fs::read_to_string(&webhooks_json).await {
-            Ok(s) => s,
-            Err(_) => continue,
-        };
-
-        let store: WebhookStore = match serde_json::from_str(&raw) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::warn!("invalid webhooks.json ({}): {e}", webhooks_json.display());
-                continue;
-            }
-        };
-
-        if store.webhooks.is_empty() {
-            tracing::debug!("no webhooks in {}; skip HTTP delivery", webhooks_json.display());
-            continue;
-        }
-
-        for w in store.webhooks {
-            match client.post(&w.url).json(&body).send().await {
-                Ok(resp) if resp.status().is_success() => {
-                    tracing::info!(url = %w.url, id = %w.id, "cron completion webhook delivered");
-                }
-                Ok(resp) => {
-                    tracing::warn!(
-                        url = %w.url,
-                        id = %w.id,
-                        status = %resp.status(),
-                        "cron completion webhook non-success response"
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(
-                        url = %w.url,
-                        id = %w.id,
-                        "cron completion webhook request failed: {e}"
-                    );
-                }
-            }
+        if let Err(e) =
+            hermes_cli::webhook_delivery::deliver_cron_completion_to_webhooks(&webhooks_json, &ev, &client).await
+        {
+            tracing::warn!("cron webhook delivery: {e}");
         }
     }
 }

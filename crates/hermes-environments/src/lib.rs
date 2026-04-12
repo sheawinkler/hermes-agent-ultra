@@ -9,6 +9,7 @@
 
 pub mod local;
 pub mod manager;
+pub mod file_sync;
 
 #[cfg(feature = "docker")]
 pub mod docker;
@@ -22,6 +23,9 @@ pub mod daytona;
 #[cfg(feature = "modal")]
 pub mod modal;
 
+#[cfg(feature = "modal")]
+pub mod managed_modal;
+
 #[cfg(feature = "singularity")]
 pub mod singularity;
 
@@ -29,3 +33,4 @@ pub mod singularity;
 pub use hermes_core::TerminalBackend;
 pub use local::LocalBackend;
 pub use manager::BackendManager;
+pub use file_sync::FileSync;

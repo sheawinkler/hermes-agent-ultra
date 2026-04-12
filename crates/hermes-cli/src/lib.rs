@@ -17,6 +17,7 @@ pub mod checklist;
 pub mod claw_migrate;
 pub mod cli;
 pub mod commands;
+pub mod pairing_store;
 pub mod copilot_auth;
 pub mod doctor;
 pub mod env_loader;
@@ -32,6 +33,7 @@ pub mod theme;
 pub mod tools_config;
 pub mod tui;
 pub mod update;
+pub mod webhook_delivery;
 
 // Re-export primary types
 pub use app::App;

@@ -15,6 +15,15 @@ use crate::adapter::{AdapterProxyConfig, BasePlatformAdapter};
 
 const WECOM_API_BASE: &str = "https://qyapi.weixin.qq.com/cgi-bin";
 
+/// Heuristic: WeCom group chat ids often start with `wr` / `ww` / `wm` (length > 8).
+fn looks_like_wecom_group_chat_id(id: &str) -> bool {
+    let id = id.trim();
+    if id.len() < 8 {
+        return false;
+    }
+    id.starts_with("wr") || id.starts_with("ww") || id.starts_with("wm")
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WeComConfig {
     pub corp_id: String,
@@ -70,16 +79,29 @@ impl WeComAdapter {
     }
 
     /// Send a text message via WeCom API.
+    ///
+    /// If `user_id` looks like a group chat id (`wr…` / `ww…` / `wm…`), uses `chatid`
+    /// (group broadcast) instead of `touser` (single-user / pipe-separated user list).
     pub async fn send_text(&self, user_id: &str, text: &str) -> Result<(), GatewayError> {
         let token = self.get_access_token().await?;
         let url = format!("{}/message/send?access_token={}", WECOM_API_BASE, token);
 
-        let body = serde_json::json!({
-            "touser": user_id,
-            "msgtype": "text",
-            "agentid": self.config.agent_id.parse::<i64>().unwrap_or(0),
-            "text": { "content": text }
-        });
+        let agent_id = self.config.agent_id.parse::<i64>().unwrap_or(0);
+        let body = if looks_like_wecom_group_chat_id(user_id) {
+            serde_json::json!({
+                "chatid": user_id,
+                "msgtype": "text",
+                "agentid": agent_id,
+                "text": { "content": text }
+            })
+        } else {
+            serde_json::json!({
+                "touser": user_id,
+                "msgtype": "text",
+                "agentid": agent_id,
+                "text": { "content": text }
+            })
+        };
 
         let resp = self.client.post(&url).json(&body).send().await
             .map_err(|e| GatewayError::SendFailed(format!("WeCom send failed: {}", e)))?;
@@ -116,8 +138,138 @@ impl PlatformAdapter for WeComAdapter {
         Ok(())
     }
 
-    async fn send_file(&self, chat_id: &str, file_path: &str, _caption: Option<&str>) -> Result<(), GatewayError> {
-        debug!(chat_id = chat_id, file_path = file_path, "WeCom send_file");
+    async fn send_file(&self, chat_id: &str, file_path: &str, caption: Option<&str>) -> Result<(), GatewayError> {
+        use crate::platforms::helpers::{media_category, mime_from_extension};
+
+        let path = std::path::Path::new(file_path);
+        let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+        let mime = mime_from_extension(ext);
+        let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+        let file_bytes = tokio::fs::read(file_path).await
+            .map_err(|e| GatewayError::SendFailed(format!("Failed to read file: {e}")))?;
+
+        let token = self.get_access_token().await?;
+
+        let media_type = match media_category(ext) {
+            "image" => "image",
+            "video" => "video",
+            "audio" => "voice",
+            _ => "file",
+        };
+
+        // Step 1: Upload media to WeCom
+        let upload_url = format!(
+            "{}/media/upload?access_token={}&type={}",
+            WECOM_API_BASE, token, media_type
+        );
+
+        let part = reqwest::multipart::Part::bytes(file_bytes)
+            .file_name(file_name.to_string())
+            .mime_str(mime)
+            .map_err(|e| GatewayError::SendFailed(format!("MIME error: {e}")))?;
+        let form = reqwest::multipart::Form::new().part("media", part);
+
+        let resp = self.client.post(&upload_url)
+            .multipart(form)
+            .send().await
+            .map_err(|e| GatewayError::SendFailed(format!("WeCom media upload failed: {e}")))?;
+
+        if !resp.status().is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GatewayError::SendFailed(format!("WeCom upload error: {text}")));
+        }
+
+        let result: serde_json::Value = resp.json().await
+            .map_err(|e| GatewayError::SendFailed(format!("WeCom upload parse failed: {e}")))?;
+        let media_id = result.get("media_id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| GatewayError::SendFailed("No media_id in WeCom response".into()))?;
+
+        // Step 2: Send message with media
+        let send_url = format!("{}/message/send?access_token={}", WECOM_API_BASE, token);
+        let agent_id = self.config.agent_id.parse::<i64>().unwrap_or(0);
+        let group = looks_like_wecom_group_chat_id(chat_id);
+
+        let body = match media_type {
+            "image" => {
+                if group {
+                    serde_json::json!({
+                        "chatid": chat_id,
+                        "msgtype": "image",
+                        "agentid": agent_id,
+                        "image": { "media_id": media_id }
+                    })
+                } else {
+                    serde_json::json!({
+                        "touser": chat_id,
+                        "msgtype": "image",
+                        "agentid": agent_id,
+                        "image": { "media_id": media_id }
+                    })
+                }
+            }
+            "voice" => {
+                if group {
+                    serde_json::json!({
+                        "chatid": chat_id,
+                        "msgtype": "voice",
+                        "agentid": agent_id,
+                        "voice": { "media_id": media_id }
+                    })
+                } else {
+                    serde_json::json!({
+                        "touser": chat_id,
+                        "msgtype": "voice",
+                        "agentid": agent_id,
+                        "voice": { "media_id": media_id }
+                    })
+                }
+            }
+            "video" => {
+                if group {
+                    serde_json::json!({
+                        "chatid": chat_id,
+                        "msgtype": "video",
+                        "agentid": agent_id,
+                        "video": { "media_id": media_id, "title": caption.unwrap_or(file_name) }
+                    })
+                } else {
+                    serde_json::json!({
+                        "touser": chat_id,
+                        "msgtype": "video",
+                        "agentid": agent_id,
+                        "video": { "media_id": media_id, "title": caption.unwrap_or(file_name) }
+                    })
+                }
+            }
+            _ => {
+                if group {
+                    serde_json::json!({
+                        "chatid": chat_id,
+                        "msgtype": "file",
+                        "agentid": agent_id,
+                        "file": { "media_id": media_id }
+                    })
+                } else {
+                    serde_json::json!({
+                        "touser": chat_id,
+                        "msgtype": "file",
+                        "agentid": agent_id,
+                        "file": { "media_id": media_id }
+                    })
+                }
+            }
+        };
+
+        let resp = self.client.post(&send_url)
+            .json(&body)
+            .send().await
+            .map_err(|e| GatewayError::SendFailed(format!("WeCom media send failed: {e}")))?;
+
+        if !resp.status().is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GatewayError::SendFailed(format!("WeCom media send error: {text}")));
+        }
         Ok(())
     }
 

@@ -897,6 +897,7 @@ impl LlmProvider for AnthropicProvider {
                                                 arguments: None,
                                             }),
                                         }]),
+                                        extra: None,
                                     }),
                                     finish_reason: None,
                                     usage: None,
@@ -913,6 +914,7 @@ impl LlmProvider for AnthropicProvider {
                                         delta: Some(StreamDelta {
                                             content: Some(text),
                                             tool_calls: None,
+                                            extra: None,
                                         }),
                                         finish_reason: None,
                                         usage: None,
@@ -931,6 +933,7 @@ impl LlmProvider for AnthropicProvider {
                                                     arguments: Some(partial),
                                                 }),
                                             }]),
+                                            extra: None,
                                         }),
                                         finish_reason: None,
                                         usage: None,
@@ -1223,6 +1226,7 @@ fn parse_sse_chunk(json: &Value) -> Option<StreamChunk> {
         Some(StreamDelta {
             content,
             tool_calls,
+            extra: None,
         })
     } else {
         None

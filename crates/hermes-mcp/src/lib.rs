@@ -10,6 +10,7 @@
 
 pub mod auth;
 pub mod client;
+pub mod serve;
 pub mod server;
 pub mod transport;
 
@@ -82,6 +83,14 @@ impl From<serde_json::Error> for McpError {
 
 // Re-export primary types
 pub use auth::{BearerTokenAuth, McpAuthProvider, OAuthConfig};
-pub use client::{McpClient, McpManager, McpServerConfig, ResourceInfo};
+pub use client::{
+    McpClient, McpManager, McpProbeResult, McpServerConfig, McpServerStatus,
+    PromptArgument, PromptInfo, PromptMessage, PromptResult, ResourceInfo,
+    SamplingConfig,
+};
+pub use serve::{
+    ApprovalStore as McpApprovalStore, BridgeEvent, EventBridge, HermesMcpServe,
+    InMemorySessionStore, PendingApproval, SessionEntry, SessionMessage, SessionStore,
+};
 pub use server::McpServer;
-pub use transport::{HttpSseTransport, HttpTransport, McpTransport, StdioTransport};
+pub use transport::{HttpSseTransport, HttpTransport, McpTransport, ServerStdioTransport, StdioTransport};

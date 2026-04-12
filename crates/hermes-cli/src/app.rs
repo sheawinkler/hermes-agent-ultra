@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
-use hermes_agent::{AgentLoop, AgentConfig};
+use hermes_agent::{AgentLoop, AgentConfig, InterruptController};
 use hermes_agent::agent_loop::ToolRegistry as AgentToolRegistry;
 use hermes_agent::provider::{
     AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider,
@@ -21,6 +21,8 @@ use hermes_agent::providers_extra::{
 };
 use hermes_config::{GatewayConfig, load_config};
 use hermes_core::{AgentError, LlmProvider};
+use hermes_environments::LocalBackend;
+use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_tools::ToolRegistry;
 
 use crate::cli::Cli;
@@ -60,6 +62,9 @@ pub struct App {
 
     /// Index into input_history for up/down arrow navigation.
     pub history_index: usize,
+
+    /// Interrupt controller for stopping agent execution.
+    pub interrupt_controller: InterruptController,
 }
 
 impl std::fmt::Debug for App {
@@ -117,6 +122,12 @@ impl App {
         let current_personality = config.personality.clone();
 
         let tool_registry = Arc::new(ToolRegistry::new());
+        let terminal_backend: Arc<dyn hermes_core::TerminalBackend> =
+            Arc::new(LocalBackend::default());
+        let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
+        let skill_provider: Arc<dyn hermes_core::SkillProvider> =
+            Arc::new(SkillManager::new(skill_store));
+        hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
         let agent_tool_registry = Arc::new(bridge_tool_registry(&tool_registry));
 
         let agent_config = build_agent_config(&config, &current_model);
@@ -139,6 +150,7 @@ impl App {
             current_personality,
             input_history: Vec::new(),
             history_index: 0,
+            interrupt_controller: InterruptController::new(),
         })
     }
 
@@ -298,18 +310,33 @@ impl App {
     /// Run the agent on the current message history.
     ///
     /// Sends all messages to the agent loop and appends the result.
+    /// Checks the interrupt controller before running and clears it after.
     async fn run_agent(&mut self) -> Result<(), AgentError> {
+        self.interrupt_controller.clear_interrupt();
+
         let messages = self.messages.clone();
-        let result = self.agent.run(messages, None).await?;
+        let result = self.agent.run(messages, None).await;
 
-        // Replace messages with the full conversation from the agent result
-        self.messages = result.messages;
-
-        if !result.finished_naturally {
-            tracing::warn!(
-                "Agent stopped after {} turns (did not finish naturally)",
-                result.total_turns
-            );
+        match result {
+            Ok(result) => {
+                self.messages = result.messages;
+                if !result.finished_naturally {
+                    tracing::warn!(
+                        "Agent stopped after {} turns (did not finish naturally)",
+                        result.total_turns
+                    );
+                }
+            }
+            Err(AgentError::Interrupted { message }) => {
+                self.interrupt_controller.clear_interrupt();
+                if let Some(redirect) = message {
+                    tracing::info!("Agent interrupted with redirect: {}", redirect);
+                } else {
+                    tracing::info!("Agent interrupted by user");
+                }
+                println!("[Agent execution interrupted]");
+            }
+            Err(e) => return Err(e),
         }
 
         Ok(())
@@ -380,6 +407,8 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         max_turns: config.max_turns,
         budget: config.budget.clone(),
         model: model.to_string(),
+        api_mode: Default::default(),
+        retry: Default::default(),
         system_prompt: config.system_prompt.clone(),
         personality: config.personality.clone(),
         extra_body: None,
@@ -388,6 +417,10 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         max_tokens: None,
         max_concurrent_delegates: 1,
         memory_flush_interval: 5,
+        session_id: None,
+        hermes_home: None,
+        skip_memory: false,
+        provider: None,
     }
 }
 

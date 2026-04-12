@@ -244,6 +244,113 @@ impl McpTransport for StdioTransport {
 }
 
 // ---------------------------------------------------------------------------
+// ServerStdioTransport — server-side stdio (reads own stdin, writes own stdout)
+// ---------------------------------------------------------------------------
+
+/// Server-side stdio transport that reads from the process's own stdin
+/// and writes to stdout. Used when hermes itself acts as an MCP server
+/// (e.g. `hermes mcp serve`).
+pub struct ServerStdioTransport {
+    started: bool,
+}
+
+impl ServerStdioTransport {
+    pub fn new() -> Self {
+        Self { started: false }
+    }
+}
+
+#[async_trait]
+impl McpTransport for ServerStdioTransport {
+    async fn start(&mut self) -> Result<(), McpError> {
+        if self.started {
+            return Err(McpError::ConnectionError("Transport already started".to_string()));
+        }
+        self.started = true;
+        Ok(())
+    }
+
+    async fn send(&mut self, message: Value) -> Result<(), McpError> {
+        let body = serde_json::to_string(&message)
+            .map_err(|e| McpError::Serialization(e.to_string()))?;
+        let header = format!("Content-Length: {}\r\n\r\n", body.len());
+
+        let mut stdout = tokio::io::stdout();
+        stdout
+            .write_all(header.as_bytes())
+            .await
+            .map_err(|e| McpError::ConnectionError(format!("Write header failed: {}", e)))?;
+        stdout
+            .write_all(body.as_bytes())
+            .await
+            .map_err(|e| McpError::ConnectionError(format!("Write body failed: {}", e)))?;
+        stdout
+            .flush()
+            .await
+            .map_err(|e| McpError::ConnectionError(format!("Flush failed: {}", e)))?;
+        Ok(())
+    }
+
+    async fn receive(&mut self) -> Result<Value, McpError> {
+        let stdin = tokio::io::stdin();
+        let mut reader = tokio::io::BufReader::new(stdin);
+
+        let mut content_length: usize = 0;
+        loop {
+            let mut line = String::new();
+            let n = reader
+                .read_line(&mut line)
+                .await
+                .map_err(|e| McpError::ConnectionError(format!("Read header failed: {}", e)))?;
+            if n == 0 {
+                return Err(McpError::ConnectionClosed);
+            }
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                break;
+            }
+            if let Some(len_str) = trimmed.strip_prefix("Content-Length:") {
+                content_length = len_str
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|e| McpError::Protocol {
+                        code: -32700,
+                        message: format!("Invalid Content-Length: {}", e),
+                    })?;
+            }
+        }
+
+        if content_length == 0 {
+            return Err(McpError::Protocol {
+                code: -32700,
+                message: "Missing Content-Length header".to_string(),
+            });
+        }
+
+        let mut body_buf = vec![0u8; content_length];
+        reader
+            .read_exact(&mut body_buf)
+            .await
+            .map_err(|e| McpError::ConnectionError(format!("Read body failed: {}", e)))?;
+
+        let body_str = String::from_utf8(body_buf).map_err(|e| McpError::Protocol {
+            code: -32700,
+            message: format!("Invalid UTF-8 in body: {}", e),
+        })?;
+
+        serde_json::from_str(&body_str).map_err(|e| McpError::Protocol {
+            code: -32700,
+            message: format!("JSON parse error: {}", e),
+        })
+    }
+
+    async fn close(&mut self) -> Result<(), McpError> {
+        self.started = false;
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // HttpTransport
 // ---------------------------------------------------------------------------
 

@@ -121,6 +121,110 @@ impl Session {
 }
 
 // ---------------------------------------------------------------------------
+// SessionContext (dynamic system prompt building)
+// ---------------------------------------------------------------------------
+
+/// Dynamic context assembled per-session for prompt construction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionContext {
+    pub session_id: String,
+    pub platform: String,
+    pub user_id: String,
+    pub system_prompt_parts: Vec<String>,
+    pub metadata: HashMap<String, String>,
+}
+
+impl SessionContext {
+    pub fn new(session: &Session) -> Self {
+        Self {
+            session_id: session.id.clone(),
+            platform: session.platform.clone(),
+            user_id: session.user_id.clone(),
+            system_prompt_parts: Vec::new(),
+            metadata: HashMap::new(),
+        }
+    }
+
+    /// Add a section to the system prompt.
+    pub fn add_prompt_part(&mut self, part: impl Into<String>) {
+        self.system_prompt_parts.push(part.into());
+    }
+
+    /// Set a metadata value.
+    pub fn set_metadata(&mut self, key: impl Into<String>, value: impl Into<String>) {
+        self.metadata.insert(key.into(), value.into());
+    }
+
+    /// Build the assembled system prompt from all parts.
+    pub fn build_session_context_prompt(&self) -> String {
+        let mut prompt = String::new();
+
+        prompt.push_str(&format!("[Platform: {} | User: {}]\n\n", self.platform, self.user_id));
+
+        for (i, part) in self.system_prompt_parts.iter().enumerate() {
+            if i > 0 {
+                prompt.push_str("\n\n");
+            }
+            prompt.push_str(part);
+        }
+
+        if !self.metadata.is_empty() {
+            prompt.push_str("\n\n[Context metadata]\n");
+            for (key, value) in &self.metadata {
+                prompt.push_str(&format!("- {}: {}\n", key, value));
+            }
+        }
+
+        prompt
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PII Redaction
+// ---------------------------------------------------------------------------
+
+/// A rule for redacting PII from text.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RedactionRule {
+    pub name: String,
+    pub pattern: String,
+    pub replacement: String,
+}
+
+impl RedactionRule {
+    pub fn new(name: impl Into<String>, pattern: impl Into<String>, replacement: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            pattern: pattern.into(),
+            replacement: replacement.into(),
+        }
+    }
+}
+
+/// Common built-in redaction rules.
+pub fn default_redaction_rules() -> Vec<RedactionRule> {
+    // Order matters: more specific patterns first to avoid partial matches
+    vec![
+        RedactionRule::new("email", r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", "[EMAIL]"),
+        RedactionRule::new("credit_card", r"\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b", "[CREDIT_CARD]"),
+        RedactionRule::new("ssn", r"\b\d{3}-\d{2}-\d{4}\b", "[SSN]"),
+        RedactionRule::new("ip_address", r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b", "[IP_ADDR]"),
+        RedactionRule::new("phone", r"\+\d[\d\s\-()]{7,}\d", "[PHONE]"),
+    ]
+}
+
+/// Apply redaction rules to a text, returning the redacted version.
+pub fn redact_pii(text: &str, rules: &[RedactionRule]) -> String {
+    let mut result = text.to_string();
+    for rule in rules {
+        if let Ok(re) = regex::Regex::new(&rule.pattern) {
+            result = re.replace_all(&result, rule.replacement.as_str()).to_string();
+        }
+    }
+    result
+}
+
+// ---------------------------------------------------------------------------
 // SessionManager
 // ---------------------------------------------------------------------------
 
@@ -351,6 +455,33 @@ impl SessionManager {
         false
     }
 
+    /// Build a `SessionContext` for the given session, populating it with
+    /// metadata from the session's state.
+    pub async fn build_session_context(&self, session_id: &str) -> Option<SessionContext> {
+        let sessions = self.sessions.read().await;
+        sessions.get(session_id).map(|session| {
+            let mut ctx = SessionContext::new(session);
+            ctx.set_metadata("session_type", format!("{:?}", session.session_type));
+            ctx.set_metadata("message_count", session.messages.len().to_string());
+            ctx.set_metadata("created_at", session.created_at.to_rfc3339());
+            ctx
+        })
+    }
+
+    /// Flush all in-memory sessions (e.g., before shutdown or persistence).
+    ///
+    /// Returns all sessions that were flushed.
+    pub async fn flush_memories(&self) -> Vec<Session> {
+        let mut sessions = self.sessions.write().await;
+        let all: Vec<Session> = sessions.values().cloned().collect();
+        sessions.clear();
+
+        let mut user_sessions = self.user_sessions.write().await;
+        user_sessions.clear();
+
+        all
+    }
+
     /// Expire idle sessions according to their reset policy.
     ///
     /// Returns the number of removed sessions.
@@ -445,6 +576,71 @@ mod tests {
 
         let msgs = manager.get_messages(&sid).await;
         assert_eq!(msgs.len(), 2);
+    }
+
+    #[test]
+    fn test_session_context_build_prompt() {
+        let session = Session::new(
+            "telegram", "chat1", "user1",
+            SessionType::Dm, SessionResetPolicy::default(),
+        );
+        let mut ctx = SessionContext::new(&session);
+        ctx.add_prompt_part("You are a helpful assistant.");
+        ctx.add_prompt_part("Always be concise.");
+        ctx.set_metadata("language", "en".to_string());
+
+        let prompt = ctx.build_session_context_prompt();
+        assert!(prompt.contains("telegram"));
+        assert!(prompt.contains("user1"));
+        assert!(prompt.contains("helpful assistant"));
+        assert!(prompt.contains("concise"));
+        assert!(prompt.contains("language: en"));
+    }
+
+    #[test]
+    fn test_redact_pii() {
+        let rules = default_redaction_rules();
+        let text = "Contact me at john@example.com or call +1-555-123-4567.";
+        let redacted = redact_pii(text, &rules);
+        assert!(redacted.contains("[EMAIL]"));
+        assert!(redacted.contains("[PHONE]"));
+        assert!(!redacted.contains("john@example.com"));
+    }
+
+    #[test]
+    fn test_redact_pii_ssn() {
+        let rules = default_redaction_rules();
+        let text = "My SSN is 123-45-6789.";
+        let redacted = redact_pii(text, &rules);
+        assert!(redacted.contains("[SSN]"));
+        assert!(!redacted.contains("123-45-6789"));
+    }
+
+    #[tokio::test]
+    async fn test_flush_memories() {
+        let config = SessionConfig::default();
+        let manager = SessionManager::new(config);
+        manager.get_or_create_session("telegram", "chat1", "user1").await;
+        manager.get_or_create_session("discord", "chat2", "user2").await;
+
+        assert_eq!(manager.session_count().await, 2);
+        let flushed = manager.flush_memories().await;
+        assert_eq!(flushed.len(), 2);
+        assert_eq!(manager.session_count().await, 0);
+    }
+
+    #[tokio::test]
+    async fn test_build_session_context() {
+        let config = SessionConfig::default();
+        let manager = SessionManager::new(config);
+        let session = manager.get_or_create_session("telegram", "chat1", "user1").await;
+        let sid = format!("{}:{}", session.platform, session.chat_id);
+
+        let ctx = manager.build_session_context(&sid).await;
+        assert!(ctx.is_some());
+        let ctx = ctx.unwrap();
+        assert_eq!(ctx.platform, "telegram");
+        assert_eq!(ctx.user_id, "user1");
     }
 
     #[tokio::test]

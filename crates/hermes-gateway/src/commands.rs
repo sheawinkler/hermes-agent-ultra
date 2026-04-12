@@ -22,6 +22,18 @@ pub enum GatewayCommandResult {
     CompressContext(String),
     /// Show insights about the conversation.
     ShowInsights(String),
+    /// List, enable, or disable tools.
+    ListTools { filter: Option<String> },
+    /// Enable a specific tool.
+    EnableTool { name: String },
+    /// Disable a specific tool.
+    DisableTool { name: String },
+    /// List or switch sessions.
+    ListSessions,
+    /// Switch to a specific session.
+    SwitchSession { session_id: String },
+    /// Show or set usage budget.
+    ShowBudget { new_budget: Option<f64> },
     /// Toggle verbose mode.
     ToggleVerbose(String),
     /// Toggle YOLO (auto-approve) mode.
@@ -102,6 +114,10 @@ pub fn all_commands() -> Vec<CommandInfo> {
         CommandInfo { name: "/branch", aliases: &[], description: "Show or switch branch context", usage: "/branch [name]" },
         CommandInfo { name: "/rollback", aliases: &[], description: "Rollback N latest messages (default 2)", usage: "/rollback [steps]" },
         CommandInfo { name: "/update", aliases: &[], description: "Check for updates", usage: "/update" },
+        CommandInfo { name: "/tools", aliases: &[], description: "List, enable, or disable tools", usage: "/tools [list|enable|disable] [name]" },
+        CommandInfo { name: "/sessions", aliases: &[], description: "List or switch sessions", usage: "/sessions [id]" },
+        CommandInfo { name: "/budget", aliases: &[], description: "Show or set usage budget", usage: "/budget [amount]" },
+        CommandInfo { name: "/insights", aliases: &[], description: "Show conversation insights", usage: "/insights" },
         CommandInfo { name: "/help", aliases: &["/commands"], description: "Show this help message", usage: "/help" },
     ]
 }
@@ -231,6 +247,60 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
             }
         }
         "/update" => GatewayCommandResult::CheckUpdate,
+        "/tools" => {
+            let tokens: Vec<&str> = args.split_whitespace().collect();
+            match tokens.as_slice() {
+                [] => GatewayCommandResult::ListTools { filter: None },
+                ["list", rest @ ..] => GatewayCommandResult::ListTools {
+                    filter: if rest.is_empty() {
+                        None
+                    } else {
+                        Some(rest.join(" "))
+                    },
+                },
+                ["enable", rest @ ..] if !rest.is_empty() => GatewayCommandResult::EnableTool {
+                    name: rest.join(" "),
+                },
+                ["disable", rest @ ..] if !rest.is_empty() => GatewayCommandResult::DisableTool {
+                    name: rest.join(" "),
+                },
+                ["enable"] | ["disable"] => GatewayCommandResult::Reply(
+                    "Usage: /tools [list] [filter] | /tools enable <name> | /tools disable <name>".to_string(),
+                ),
+                [only] => GatewayCommandResult::ListTools {
+                    filter: Some((*only).to_string()),
+                },
+                _ => GatewayCommandResult::Reply(
+                    "Usage: /tools [list] [filter] | /tools enable <name> | /tools disable <name>".to_string(),
+                ),
+            }
+        }
+        "/sessions" => {
+            if args.is_empty() {
+                GatewayCommandResult::ListSessions
+            } else {
+                GatewayCommandResult::SwitchSession {
+                    session_id: args.to_string(),
+                }
+            }
+        }
+        "/budget" => {
+            if args.is_empty() {
+                GatewayCommandResult::ShowBudget { new_budget: None }
+            } else {
+                match args.trim().parse::<f64>() {
+                    Ok(v) if v.is_finite() && v >= 0.0 => GatewayCommandResult::ShowBudget {
+                        new_budget: Some(v),
+                    },
+                    _ => GatewayCommandResult::Reply(
+                        "Usage: /budget [amount] — amount must be a non-negative number.".to_string(),
+                    ),
+                }
+            }
+        }
+        "/insights" => GatewayCommandResult::ShowInsights(
+            "📌 Conversation insights will be shown here.".to_string(),
+        ),
         "/help" | "/commands" => {
             let mut help = String::from("📖 **Available Commands:**\n\n");
             for cmd_info in all_commands() {
@@ -347,6 +417,74 @@ mod tests {
         match handle_command("/rollback 5") {
             GatewayCommandResult::Rollback { steps } => assert_eq!(steps, 5),
             other => panic!("Expected Rollback, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_tools_list_enable_disable() {
+        match handle_command("/tools") {
+            GatewayCommandResult::ListTools { filter } => assert!(filter.is_none()),
+            other => panic!("Expected ListTools, got {:?}", other),
+        }
+        match handle_command("/tools list") {
+            GatewayCommandResult::ListTools { filter } => assert!(filter.is_none()),
+            other => panic!("Expected ListTools, got {:?}", other),
+        }
+        match handle_command("/tools list grep") {
+            GatewayCommandResult::ListTools { filter } => assert_eq!(filter.as_deref(), Some("grep")),
+            other => panic!("Expected ListTools with filter, got {:?}", other),
+        }
+        match handle_command("/tools enable fs_read") {
+            GatewayCommandResult::EnableTool { name } => assert_eq!(name, "fs_read"),
+            other => panic!("Expected EnableTool, got {:?}", other),
+        }
+        match handle_command("/tools disable shell") {
+            GatewayCommandResult::DisableTool { name } => assert_eq!(name, "shell"),
+            other => panic!("Expected DisableTool, got {:?}", other),
+        }
+        match handle_command("/tools enable") {
+            GatewayCommandResult::Reply(msg) => assert!(msg.contains("Usage")),
+            other => panic!("Expected Reply for bare enable, got {:?}", other),
+        }
+        match handle_command("/tools my_filter") {
+            GatewayCommandResult::ListTools { filter } => assert_eq!(filter.as_deref(), Some("my_filter")),
+            other => panic!("Expected ListTools with shorthand filter, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_sessions_and_budget_and_insights() {
+        match handle_command("/sessions") {
+            GatewayCommandResult::ListSessions => {}
+            other => panic!("Expected ListSessions, got {:?}", other),
+        }
+        match handle_command("/sessions abc-123") {
+            GatewayCommandResult::SwitchSession { session_id } => assert_eq!(session_id, "abc-123"),
+            other => panic!("Expected SwitchSession, got {:?}", other),
+        }
+        match handle_command("/sessions multi word id") {
+            GatewayCommandResult::SwitchSession { session_id } => assert_eq!(session_id, "multi word id"),
+            other => panic!("Expected SwitchSession, got {:?}", other),
+        }
+        match handle_command("/budget") {
+            GatewayCommandResult::ShowBudget { new_budget } => assert!(new_budget.is_none()),
+            other => panic!("Expected ShowBudget (show), got {:?}", other),
+        }
+        match handle_command("/budget 12.5") {
+            GatewayCommandResult::ShowBudget { new_budget } => assert_eq!(new_budget, Some(12.5)),
+            other => panic!("Expected ShowBudget (set), got {:?}", other),
+        }
+        match handle_command("/budget -1") {
+            GatewayCommandResult::Reply(msg) => assert!(msg.contains("Usage")),
+            other => panic!("Expected Reply for invalid budget, got {:?}", other),
+        }
+        match handle_command("/budget nan") {
+            GatewayCommandResult::Reply(msg) => assert!(msg.contains("Usage")),
+            other => panic!("Expected Reply for invalid budget, got {:?}", other),
+        }
+        match handle_command("/insights") {
+            GatewayCommandResult::ShowInsights(s) => assert!(!s.is_empty()),
+            other => panic!("Expected ShowInsights, got {:?}", other),
         }
     }
 }

@@ -14,6 +14,20 @@ use hermes_core::traits::{ParseMode, PlatformAdapter};
 use crate::adapter::{AdapterProxyConfig, BasePlatformAdapter};
 
 // ---------------------------------------------------------------------------
+// Incoming message types
+// ---------------------------------------------------------------------------
+
+/// Parsed incoming Signal message from the signal-cli receive endpoint.
+#[derive(Debug, Clone)]
+pub struct IncomingSignalMessage {
+    pub source: String,
+    pub timestamp: u64,
+    pub text: String,
+    pub group_id: Option<String>,
+    pub attachments: Vec<String>,
+}
+
+// ---------------------------------------------------------------------------
 // SignalConfig
 // ---------------------------------------------------------------------------
 
@@ -71,6 +85,46 @@ impl SignalAdapter {
         Ok(())
     }
 
+    /// Parse a single message from signal-cli's receive endpoint into a typed struct.
+    ///
+    /// Expects the signal-cli JSON envelope format with `envelope.dataMessage`.
+    pub fn parse_received_message(msg: &serde_json::Value) -> Option<IncomingSignalMessage> {
+        let envelope = msg.get("envelope")?;
+        let source = envelope.get("source").and_then(|v| v.as_str())?.to_string();
+        let timestamp = envelope.get("timestamp").and_then(|v| v.as_u64()).unwrap_or(0);
+
+        let data_message = envelope.get("dataMessage")?;
+        let text = data_message
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        let group_id = data_message
+            .get("groupInfo")
+            .and_then(|g| g.get("groupId"))
+            .and_then(|v| v.as_str())
+            .map(String::from);
+
+        let attachments = data_message
+            .get("attachments")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|a| a.get("id").and_then(|v| v.as_str()).map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        Some(IncomingSignalMessage {
+            source,
+            timestamp,
+            text,
+            group_id,
+            attachments,
+        })
+    }
+
     /// Receive messages via signal-cli REST API polling.
     pub async fn receive_messages(&self) -> Result<Vec<serde_json::Value>, GatewayError> {
         let url = format!("{}/v1/receive/{}", self.config.api_url, self.config.phone_number);
@@ -107,11 +161,55 @@ impl PlatformAdapter for SignalAdapter {
         Ok(())
     }
 
-    async fn send_file(&self, chat_id: &str, file_path: &str, _caption: Option<&str>) -> Result<(), GatewayError> {
-        debug!(chat_id = chat_id, file_path = file_path, "Signal send_file");
+    async fn send_file(&self, chat_id: &str, file_path: &str, caption: Option<&str>) -> Result<(), GatewayError> {
+        let file_bytes = tokio::fs::read(file_path).await
+            .map_err(|e| GatewayError::SendFailed(format!("Failed to read file: {e}")))?;
+
+        let b64 = base64_encode(&file_bytes);
+
+        let url = format!("{}/v2/send", self.config.api_url);
+        let body = serde_json::json!({
+            "message": caption.unwrap_or(""),
+            "number": self.config.phone_number,
+            "recipients": [chat_id],
+            "base64_attachments": [b64]
+        });
+
+        let resp = self.client.post(&url).json(&body).send().await
+            .map_err(|e| GatewayError::SendFailed(format!("Signal attachment send failed: {e}")))?;
+
+        if !resp.status().is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GatewayError::SendFailed(format!("Signal attachment error: {text}")));
+        }
         Ok(())
     }
 
     fn is_running(&self) -> bool { self.base.is_running() }
     fn platform_name(&self) -> &str { "signal" }
+}
+
+/// Simple base64 encoding using the `base64` crate convention (standard alphabet).
+fn base64_encode(data: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut result = String::with_capacity((data.len() + 2) / 3 * 4);
+    for chunk in data.chunks(3) {
+        let b0 = chunk[0] as u32;
+        let b1 = chunk.get(1).copied().unwrap_or(0) as u32;
+        let b2 = chunk.get(2).copied().unwrap_or(0) as u32;
+        let triple = (b0 << 16) | (b1 << 8) | b2;
+        result.push(ALPHABET[((triple >> 18) & 0x3F) as usize] as char);
+        result.push(ALPHABET[((triple >> 12) & 0x3F) as usize] as char);
+        if chunk.len() > 1 {
+            result.push(ALPHABET[((triple >> 6) & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+        if chunk.len() > 2 {
+            result.push(ALPHABET[(triple & 0x3F) as usize] as char);
+        } else {
+            result.push('=');
+        }
+    }
+    result
 }

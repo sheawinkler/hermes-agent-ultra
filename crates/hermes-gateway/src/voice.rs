@@ -95,6 +95,107 @@ impl VoiceManager {
         }
     }
 
+    /// Handle voice input: transcribe audio data and return text.
+    ///
+    /// Wraps the STT pipeline with format normalization and optional
+    /// voice activity detection.
+    pub async fn handle_voice_input(
+        &self,
+        audio_data: &[u8],
+        format: &str,
+    ) -> Result<String, AgentError> {
+        if audio_data.is_empty() {
+            return Ok(String::new());
+        }
+
+        // Run voice activity detection if enabled
+        if self.config.auto_detect_voice {
+            if !self.detect_voice_activity(audio_data) {
+                return Ok(String::new());
+            }
+        }
+
+        self.transcribe(audio_data, format).await
+    }
+
+    /// Handle voice output: synthesize text into audio bytes.
+    ///
+    /// Takes a TTS backend override or uses the configured default.
+    pub async fn handle_voice_output(
+        &self,
+        text: &str,
+        tts_backend: Option<&TtsProvider>,
+    ) -> Result<Vec<u8>, AgentError> {
+        if text.trim().is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let provider = tts_backend.unwrap_or(&self.config.tts_provider);
+        match provider {
+            TtsProvider::OpenAi => self.tts_openai(text).await,
+            TtsProvider::ElevenLabs => self.tts_elevenlabs(text).await,
+            TtsProvider::Custom(url) => self.tts_custom(url, text).await,
+        }
+    }
+
+    /// Join a voice channel on a platform (e.g., Discord voice channel).
+    ///
+    /// This is a placeholder that records the join intent. Actual voice channel
+    /// connectivity depends on the platform adapter's capabilities.
+    pub async fn join_voice_channel(
+        &self,
+        platform: &str,
+        channel_id: &str,
+    ) -> Result<(), AgentError> {
+        if self.config.state == VoiceState::Disabled {
+            return Err(AgentError::Config(
+                "Voice mode is disabled; enable it before joining a channel".into(),
+            ));
+        }
+        tracing::info!(
+            platform = platform,
+            channel_id = channel_id,
+            "Joining voice channel"
+        );
+        // Platform-specific join logic would be delegated to the platform adapter.
+        // This serves as the gateway-level coordinator.
+        Ok(())
+    }
+
+    /// Leave a voice channel on a platform.
+    pub async fn leave_voice_channel(
+        &self,
+        platform: &str,
+        channel_id: &str,
+    ) -> Result<(), AgentError> {
+        tracing::info!(
+            platform = platform,
+            channel_id = channel_id,
+            "Leaving voice channel"
+        );
+        Ok(())
+    }
+
+    /// Simple voice activity detection (VAD) placeholder.
+    ///
+    /// Checks if the audio data contains enough energy to be considered speech.
+    /// In production, use a proper VAD library (e.g., webrtc-vad or silero-vad).
+    fn detect_voice_activity(&self, audio_data: &[u8]) -> bool {
+        if audio_data.len() < 320 {
+            return false;
+        }
+
+        // Compute average absolute amplitude from raw PCM-like data
+        let sum: u64 = audio_data.iter().map(|&b| {
+            let signed = b as i8;
+            signed.unsigned_abs() as u64
+        }).sum();
+        let avg = sum / audio_data.len() as u64;
+
+        // Threshold: if average amplitude is above ~10, consider it voice
+        avg > 10
+    }
+
     async fn transcribe_whisper(&self, audio_data: &[u8], format: &str) -> Result<String, AgentError> {
         let api_key = std::env::var("OPENAI_API_KEY")
             .map_err(|_| AgentError::Config("OPENAI_API_KEY not set for Whisper STT".into()))?;

@@ -102,8 +102,33 @@ impl PlatformAdapter for HomeAssistantAdapter {
         Ok(())
     }
 
-    async fn send_file(&self, chat_id: &str, file_path: &str, _caption: Option<&str>) -> Result<(), GatewayError> {
-        debug!(chat_id = chat_id, file_path = file_path, "HomeAssistant send_file");
+    async fn send_file(&self, chat_id: &str, file_path: &str, caption: Option<&str>) -> Result<(), GatewayError> {
+        // Home Assistant notify service supports `data` field with file attachments.
+        // Different notification integrations handle this differently; the most common
+        // pattern is to pass the file path in `data.attachment.url` or `data.file`.
+        let url = format!("{}/api/services/notify/{}", self.config.base_url, chat_id);
+
+        let message = caption.unwrap_or("File attachment");
+        let body = serde_json::json!({
+            "message": message,
+            "data": {
+                "attachment": {
+                    "url": file_path
+                },
+                "file": file_path
+            }
+        });
+
+        let resp = self.client.post(&url)
+            .header("Authorization", format!("Bearer {}", self.config.long_lived_token))
+            .json(&body)
+            .send().await
+            .map_err(|e| GatewayError::SendFailed(format!("HA file notify failed: {e}")))?;
+
+        if !resp.status().is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GatewayError::SendFailed(format!("HA file notify error: {text}")));
+        }
         Ok(())
     }
 

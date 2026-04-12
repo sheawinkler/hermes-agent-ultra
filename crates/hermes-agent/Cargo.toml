@@ -16,13 +16,15 @@ async-trait = { workspace = true }
 futures = { workspace = true }
 regex = { workspace = true }
 chrono = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["blocking", "json", "multipart"] }
+which = "7"
 eventsource-stream = { workspace = true }
 tokio-stream = { workspace = true }
 async-stream = "0.3"
 lazy_static = "1"
 dirs = "6"
 rusqlite = { workspace = true }
+serde_yaml = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
