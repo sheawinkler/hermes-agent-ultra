@@ -42,6 +42,11 @@ pub fn config_path() -> PathBuf {
     hermes_home().join("config.yaml")
 }
 
+/// `$hermes_home/cli-config.yaml`
+pub fn cli_config_path() -> PathBuf {
+    hermes_home().join("cli-config.yaml")
+}
+
 /// `$hermes_home/gateway.json`
 pub fn gateway_json_path() -> PathBuf {
     hermes_home().join("gateway.json")
@@ -97,6 +102,7 @@ mod tests {
     fn derived_paths_are_consistent() {
         let home = hermes_home();
         assert_eq!(config_path(), home.join("config.yaml"));
+        assert_eq!(cli_config_path(), home.join("cli-config.yaml"));
         assert_eq!(gateway_json_path(), home.join("gateway.json"));
         assert_eq!(memory_path(), home.join("MEMORY.md"));
         assert_eq!(user_path(), home.join("USER.md"));

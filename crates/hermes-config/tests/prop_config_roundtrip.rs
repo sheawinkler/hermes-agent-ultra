@@ -12,6 +12,7 @@ use hermes_config::{
     GatewayConfig, PlatformConfig, SessionResetPolicy, StreamingConfig,
     UnauthorizedDmBehavior, SessionConfig, DailyReset, IdleReset, SessionType,
     ApprovalConfig, ProxyConfig, TerminalConfig, TerminalBackendType, LlmProviderConfig,
+    ProfileConfig, SkillsSettings, ToolsSettings,
 };
 use hermes_core::BudgetConfig;
 
@@ -121,6 +122,10 @@ fn arb_gateway_config() -> impl Strategy<Value = GatewayConfig> {
                 llm_providers: HashMap::new(),
                 proxy: None,
                 approval: ApprovalConfig::default(),
+                skills: SkillsSettings::default(),
+                tools_config: ToolsSettings::default(),
+                mcp_servers: Vec::new(),
+                profile: ProfileConfig::default(),
                 home_dir: None,
             }
         })

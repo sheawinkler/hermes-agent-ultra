@@ -17,13 +17,13 @@ pub mod streaming;
 
 // Re-export key types for convenience
 pub use config::{
-    ApprovalConfig, GatewayConfig, LlmProviderConfig, ProxyConfig, TerminalBackendType,
-    TerminalConfig,
+    ApprovalConfig, GatewayConfig, LlmProviderConfig, McpServerEntry, ProfileConfig,
+    ProxyConfig, SkillsSettings, TerminalBackendType, TerminalConfig, ToolsSettings,
 };
 pub use loader::{load_config, validate_config, ConfigError};
 pub use merge::{deep_merge, merge_configs};
 pub use paths::{
-    config_path, cron_dir, env_path, gateway_json_path, hermes_home, memory_path, sessions_dir,
+    cli_config_path, config_path, cron_dir, env_path, gateway_json_path, hermes_home, memory_path, sessions_dir,
     skills_dir, user_path,
 };
 pub use platform::{PlatformConfig, UnauthorizedDmBehavior};

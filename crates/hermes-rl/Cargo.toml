@@ -1,0 +1,13 @@
+[package]
+name = "hermes-rl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "RL training and trajectory utilities for Hermes Agent"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }

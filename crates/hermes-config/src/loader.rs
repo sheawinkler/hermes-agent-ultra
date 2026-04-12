@@ -78,7 +78,7 @@ fn strip_quotes(s: &str) -> &str {
 
 /// Load the full configuration, applying the priority chain:
 ///
-///   env vars  >  .env  >  config.yaml  >  gateway.json  >  defaults
+///   env vars  >  .env  >  cli-config.yaml > config.yaml > gateway.json > defaults
 ///
 /// If `home_dir` is provided it overrides the `HERMES_HOME` env var.
 pub fn load_config(home_dir: Option<&str>) -> Result<GatewayConfig, ConfigError> {
@@ -92,6 +92,7 @@ pub fn load_config(home_dir: Option<&str>) -> Result<GatewayConfig, ConfigError>
         .unwrap_or_else(|| paths::hermes_home().to_string_lossy().to_string());
 
     let config_yaml_path = Path::new(&effective_home).join("config.yaml");
+    let cli_config_yaml_path = Path::new(&effective_home).join("cli-config.yaml");
     let gateway_json_path = Path::new(&effective_home).join("gateway.json");
 
     // Start from defaults
@@ -115,6 +116,18 @@ pub fn load_config(home_dir: Option<&str>) -> Result<GatewayConfig, ConfigError>
             }
             Err(e) => {
                 tracing::warn!("Failed to load {}: {e}", config_yaml_path.display());
+            }
+        }
+    }
+
+    // Layer 2.5: cli-config.yaml (CLI-specific + high-priority overlay)
+    if cli_config_yaml_path.exists() {
+        match load_from_yaml(&cli_config_yaml_path) {
+            Ok(cli_cfg) => {
+                config = merge_configs(&cli_cfg, &config);
+            }
+            Err(e) => {
+                tracing::warn!("Failed to load {}: {e}", cli_config_yaml_path.display());
             }
         }
     }

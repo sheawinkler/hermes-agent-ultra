@@ -69,6 +69,22 @@ pub struct GatewayConfig {
     #[serde(default)]
     pub approval: ApprovalConfig,
 
+    /// Skills enable/disable configuration.
+    #[serde(default)]
+    pub skills: SkillsSettings,
+
+    /// Tools enable/disable and per-tool configuration.
+    #[serde(default)]
+    pub tools_config: ToolsSettings,
+
+    /// MCP server connection configuration.
+    #[serde(default)]
+    pub mcp_servers: Vec<McpServerEntry>,
+
+    /// Profile system: selected profile and named profile files.
+    #[serde(default)]
+    pub profile: ProfileConfig,
+
     /// Override for the hermes home directory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home_dir: Option<String>,
@@ -90,6 +106,10 @@ impl Default for GatewayConfig {
             llm_providers: HashMap::new(),
             proxy: None,
             approval: ApprovalConfig::default(),
+            skills: SkillsSettings::default(),
+            tools_config: ToolsSettings::default(),
+            mcp_servers: Vec::new(),
+            profile: ProfileConfig::default(),
             home_dir: None,
         }
     }
@@ -246,6 +266,10 @@ pub struct ApprovalConfig {
     /// Whether to require explicit approval for all tool calls.
     #[serde(default)]
     pub require_approval: bool,
+
+    /// Commands matching whitelist bypass confirmation.
+    #[serde(default)]
+    pub whitelist_commands: Vec<String>,
 }
 
 impl Default for ApprovalConfig {
@@ -254,8 +278,48 @@ impl Default for ApprovalConfig {
             enabled: false,
             dangerous_commands: Vec::new(),
             require_approval: false,
+            whitelist_commands: Vec::new(),
         }
     }
+}
+
+/// Skills configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct SkillsSettings {
+    #[serde(default)]
+    pub enabled: Vec<String>,
+    #[serde(default)]
+    pub disabled: Vec<String>,
+}
+
+/// Tools configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ToolsSettings {
+    #[serde(default)]
+    pub enabled: Vec<String>,
+    #[serde(default)]
+    pub disabled: Vec<String>,
+    #[serde(default)]
+    pub per_tool: HashMap<String, serde_json::Value>,
+}
+
+/// MCP server entry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct McpServerEntry {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+/// Active profile info.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct ProfileConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current: Option<String>,
+    #[serde(default)]
+    pub available: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------

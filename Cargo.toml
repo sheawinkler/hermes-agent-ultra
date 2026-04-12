@@ -13,6 +13,7 @@ members = [
     "crates/hermes-config",
     "crates/hermes-intelligence",
     "crates/hermes-acp",
+    "crates/hermes-rl",
 ]
 
 [workspace.package]
@@ -35,6 +36,7 @@ hermes-environments = { path = "crates/hermes-environments" }
 hermes-config = { path = "crates/hermes-config" }
 hermes-intelligence = { path = "crates/hermes-intelligence" }
 hermes-acp = { path = "crates/hermes-acp" }
+hermes-rl = { path = "crates/hermes-rl" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }
