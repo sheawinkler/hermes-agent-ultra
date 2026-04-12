@@ -6,6 +6,10 @@ license.workspace = true
 repository.workspace = true
 description = "CLI/TUI interface for Hermes Agent"
 
+[features]
+default = []
+otlp = ["hermes-telemetry/otlp"]
+
 [[bin]]
 name = "hermes"
 path = "src/main.rs"
@@ -15,12 +19,14 @@ hermes-core = { workspace = true }
 hermes-agent = { workspace = true }
 hermes-tools = { workspace = true }
 hermes-config = { workspace = true }
-hermes-gateway = { workspace = true }
+hermes-gateway = { workspace = true, features = ["telegram"] }
 hermes-cron = { workspace = true }
 hermes-environments = { workspace = true }
 hermes-mcp = { workspace = true }
 hermes-skills = { workspace = true }
 hermes-intelligence = { workspace = true }
+hermes-auth = { workspace = true }
+hermes-telemetry = { workspace = true }
 clap = { workspace = true }
 clap_complete = "4"
 ratatui = { workspace = true }
@@ -31,12 +37,16 @@ futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 async-trait = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 thiserror = { workspace = true }
 dirs = "6"
+reqwest = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"
+assert_cmd = "2"

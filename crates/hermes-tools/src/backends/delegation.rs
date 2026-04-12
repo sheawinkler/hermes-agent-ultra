@@ -1,8 +1,9 @@
-//! Real delegation backend: placeholder that signals sub-agent spawning.
+//! Delegation backends: in-process signal vs HTTP RPC.
 //!
-//! The actual sub-agent spawning requires access to the full agent loop,
-//! which lives in hermes-agent. This backend provides the interface;
-//! the real wiring happens at the binary/CLI level.
+//! [`SignalDelegationBackend`] returns a JSON envelope for the agent loop to
+//! interpret (spawn / route locally). [`RpcDelegationBackend`] POSTs JSON to
+//! a user-provided HTTP endpoint and returns the response body as the tool
+//! result — use when a remote worker implements delegation.
 
 use async_trait::async_trait;
 use serde_json::json;

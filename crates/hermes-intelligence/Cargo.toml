@@ -17,11 +17,12 @@ reqwest = { workspace = true }
 minijinja = { workspace = true }
 regex = { workspace = true }
 chrono = { workspace = true }
+uuid = { workspace = true }
 thiserror = { workspace = true }
 futures = { workspace = true }
 
 [features]
-default = []
+default = ["rl"]
 rl = []
 
 [dev-dependencies]

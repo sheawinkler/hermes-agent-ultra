@@ -1,0 +1,38 @@
+[package]
+name = "hermes-http"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "HTTP/WebSocket API server for Hermes Agent"
+
+[features]
+default = []
+otlp = ["hermes-telemetry/otlp"]
+
+[[bin]]
+name = "hermes-http"
+path = "src/main.rs"
+
+[dependencies]
+hermes-core = { workspace = true }
+hermes-agent = { workspace = true }
+hermes-tools = { workspace = true }
+hermes-config = { workspace = true }
+hermes-gateway = { workspace = true }
+hermes-telemetry = { workspace = true }
+async-trait = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+futures = { workspace = true }
+chrono = { workspace = true }
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["trace", "cors", "limit"] }
+
+[dev-dependencies]
+reqwest = { workspace = true }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+tracing-subscriber = { workspace = true }

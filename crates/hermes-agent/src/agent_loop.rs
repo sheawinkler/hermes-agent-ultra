@@ -927,7 +927,12 @@ mod tests {
                 _model: Option<&str>,
                 _extra_body: Option<&serde_json::Value>,
             ) -> Result<hermes_core::LlmResponse, AgentError> {
-                unimplemented!()
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
             }
             fn chat_completion_stream(
                 &self,
@@ -938,7 +943,7 @@ mod tests {
                 _model: Option<&str>,
                 _extra_body: Option<&serde_json::Value>,
             ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
-                unimplemented!()
+                futures::stream::empty().boxed()
             }
         }
 

@@ -8,6 +8,7 @@ description = "Tool registry, toolsets, and tool implementations for Hermes Agen
 
 [dependencies]
 hermes-core = { workspace = true }
+hermes-rl = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

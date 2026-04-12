@@ -10,9 +10,10 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use hermes_core::AgentResult;
-use tokio::sync::{Mutex, Notify};
+use tokio::sync::{broadcast, Mutex, Notify};
 use tokio::time::{self, Duration};
 
+use crate::completion::CronCompletionEvent;
 use crate::job::{CronJob, JobStatus};
 use crate::persistence::JobPersistence;
 use crate::runner::CronRunner;
@@ -62,6 +63,8 @@ pub struct CronScheduler {
     persistence: Arc<dyn JobPersistence>,
     /// Job runner.
     runner: Arc<CronRunner>,
+    /// Optional broadcast of job completion (e.g. gateway HTTP webhooks).
+    completion_tx: Option<broadcast::Sender<CronCompletionEvent>>,
     /// Notification handle to stop the scheduler loop.
     stop_notify: Arc<Notify>,
     /// Whether the scheduler loop is running.
@@ -78,8 +81,29 @@ impl CronScheduler {
             jobs: Arc::new(Mutex::new(HashMap::new())),
             persistence,
             runner,
+            completion_tx: None,
             stop_notify: Arc::new(Notify::new()),
             running: Arc::new(Mutex::new(false)),
+        }
+    }
+
+    /// Receive [`CronCompletionEvent`] on every finished run (scheduled or manual).
+    pub fn set_completion_broadcast(&mut self, tx: broadcast::Sender<CronCompletionEvent>) {
+        self.completion_tx = Some(tx);
+    }
+
+    fn emit_completion(
+        tx: &Option<broadcast::Sender<CronCompletionEvent>>,
+        job: &CronJob,
+        trigger: &'static str,
+        outcome: Result<&AgentResult, String>,
+    ) {
+        let Some(sender) = tx else {
+            return;
+        };
+        let ev = CronCompletionEvent::new(job, trigger, outcome);
+        if let Err(e) = sender.send(ev) {
+            tracing::debug!("cron completion broadcast dropped: {}", e);
         }
     }
 
@@ -125,6 +149,7 @@ impl CronScheduler {
         let jobs = self.jobs.clone();
         let runner = self.runner.clone();
         let persistence = self.persistence.clone();
+        let completion_tx = self.completion_tx.clone();
         let stop_notify = self.stop_notify.clone();
         let running_flag = self.running.clone();
 
@@ -168,6 +193,12 @@ impl CronScheduler {
                                     job.id,
                                     result.total_turns
                                 );
+                                Self::emit_completion(
+                                    &completion_tx,
+                                    &job,
+                                    "schedule",
+                                    Ok(&result),
+                                );
                                 job.mark_executed(now);
                             }
                             Err(e) => {
@@ -175,6 +206,12 @@ impl CronScheduler {
                                     "Cron job '{}' failed: {}",
                                     job.id,
                                     e
+                                );
+                                Self::emit_completion(
+                                    &completion_tx,
+                                    &job,
+                                    "schedule",
+                                    Err(e.to_string()),
                                 );
                                 job.mark_failed();
                             }
@@ -398,7 +435,22 @@ impl CronScheduler {
         }
 
         tracing::info!("Manually triggering cron job '{}'", id);
-        let result = self.runner.run_job(&job).await?;
+        let run_result = self.runner.run_job(&job).await;
+        match &run_result {
+            Ok(result) => Self::emit_completion(
+                &self.completion_tx,
+                &job,
+                "manual",
+                Ok(result),
+            ),
+            Err(e) => Self::emit_completion(
+                &self.completion_tx,
+                &job,
+                "manual",
+                Err(e.to_string()),
+            ),
+        }
+        let result = run_result?;
 
         // Update last_run but don't increment run_count for manual triggers
         {
@@ -427,19 +479,15 @@ impl CronScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use tempfile::tempdir;
+
+    use crate::cli_support::cron_scheduler_for_data_dir;
     use crate::job::CronJob;
-    use crate::persistence::FileJobPersistence;
 
     fn make_test_scheduler() -> CronScheduler {
-        // We can't fully test with a real LLM provider, so these tests
-        // focus on the scheduling logic, not execution.
-        // For runner integration tests, a mock provider would be needed.
-        let persistence = Arc::new(FileJobPersistence::with_dir(
-            std::env::temp_dir().join("hermes-cron-test"),
-        ));
-        // Note: we'd need a real runner for full integration tests.
-        // Here we just test the scheduler's job management logic.
-        unimplemented!("Full test setup requires mock LlmProvider")
+        let dir = tempdir().expect("tempdir");
+        cron_scheduler_for_data_dir(dir.path().to_path_buf())
     }
 
     #[tokio::test]
@@ -454,5 +502,15 @@ mod tests {
     async fn test_job_status_active_by_default() {
         let job = CronJob::new("* * * * *", "test");
         assert_eq!(job.status, JobStatus::Active);
+    }
+
+    #[tokio::test]
+    async fn test_scheduler_create_job_roundtrip() {
+        let sched = make_test_scheduler();
+        let job = CronJob::new("0 * * * *", "hello");
+        let id = sched.create_job(job).await.expect("create");
+        let loaded = sched.get_job(&id).await.expect("get");
+        assert_eq!(loaded.prompt, "hello");
+        assert_eq!(sched.list_jobs().await.len(), 1);
     }
 }

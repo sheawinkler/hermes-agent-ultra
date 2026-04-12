@@ -9,4 +9,4 @@ pub mod handler;
 
 pub use server::AcpServer;
 pub use protocol::{AcpRequest, AcpResponse, AcpMethod};
-pub use handler::AcpHandler;
+pub use handler::{AcpHandler, DefaultAcpHandler};

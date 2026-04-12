@@ -12,14 +12,16 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
-use hermes_core::types::Message;
+use hermes_core::types::{Message, MessageRole};
 
+use crate::background::{BackgroundTaskManager, TaskStatus};
+use crate::commands::{handle_command, GatewayCommandResult};
 use crate::dm::{DmDecision, DmManager};
 use crate::session::SessionManager;
 use crate::stream::{StreamConfig, StreamManager};
@@ -101,6 +103,35 @@ pub type MessageHandler = Arc<
         + Sync,
 >;
 
+/// Structured runtime context passed to V2 handlers.
+#[derive(Debug, Clone, Default)]
+pub struct GatewayRuntimeContext {
+    pub session_key: String,
+    pub platform: String,
+    pub chat_id: String,
+    pub user_id: String,
+    pub model: Option<String>,
+    pub provider: Option<String>,
+    pub profile: Option<String>,
+    pub branch: Option<String>,
+    pub personality: Option<String>,
+    pub home: Option<String>,
+    pub verbose: bool,
+    pub yolo: bool,
+    pub reasoning: bool,
+    pub mcp_reload_generation: u64,
+}
+
+/// Context-aware callback type for processing messages through the agent loop.
+pub type MessageHandlerWithContext = Arc<
+    dyn Fn(
+            Vec<Message>,
+            GatewayRuntimeContext,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, GatewayError>> + Send>>
+        + Send
+        + Sync,
+>;
+
 /// Callback type for streaming message processing.
 /// Takes session messages and a chunk callback, returns the final response.
 pub type StreamingMessageHandler = Arc<
@@ -111,6 +142,55 @@ pub type StreamingMessageHandler = Arc<
         + Send
         + Sync,
 >;
+
+/// Context-aware callback type for streaming message processing.
+pub type StreamingMessageHandlerWithContext = Arc<
+    dyn Fn(
+            Vec<Message>,
+            GatewayRuntimeContext,
+            Arc<dyn Fn(String) + Send + Sync>,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, GatewayError>> + Send>>
+        + Send
+        + Sync,
+>;
+
+#[derive(Debug, Clone, Default)]
+struct UsageStats {
+    user_messages: u64,
+    assistant_messages: u64,
+    input_chars: u64,
+    output_chars: u64,
+    last_updated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone)]
+struct SessionRuntimeState {
+    model: Option<String>,
+    provider: Option<String>,
+    profile: Option<String>,
+    branch: Option<String>,
+    personality: Option<String>,
+    home: Option<String>,
+    verbose: bool,
+    yolo: bool,
+    reasoning: bool,
+}
+
+impl Default for SessionRuntimeState {
+    fn default() -> Self {
+        Self {
+            model: None,
+            provider: None,
+            profile: None,
+            branch: None,
+            personality: None,
+            home: None,
+            verbose: false,
+            yolo: false,
+            reasoning: false,
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Gateway
@@ -129,8 +209,20 @@ pub struct Gateway {
     config: GatewayConfig,
     /// Optional message handler for processing messages through the agent loop.
     message_handler: RwLock<Option<MessageHandler>>,
+    /// Optional context-aware message handler for processing incoming messages.
+    message_handler_with_context: RwLock<Option<MessageHandlerWithContext>>,
     /// Optional streaming message handler.
     streaming_handler: RwLock<Option<StreamingMessageHandler>>,
+    /// Optional context-aware streaming message handler.
+    streaming_handler_with_context: RwLock<Option<StreamingMessageHandlerWithContext>>,
+    /// Runtime command state for each session.
+    runtime_state: RwLock<HashMap<String, SessionRuntimeState>>,
+    /// Basic usage counters for each session.
+    usage_stats: RwLock<HashMap<String, UsageStats>>,
+    /// Tracks async `/background` and `/btw` tasks.
+    background_tasks: Arc<BackgroundTaskManager>,
+    /// MCP reload generation number.
+    mcp_reload_generation: RwLock<u64>,
 }
 
 impl Gateway {
@@ -149,7 +241,13 @@ impl Gateway {
             stream_manager,
             config,
             message_handler: RwLock::new(None),
+            message_handler_with_context: RwLock::new(None),
             streaming_handler: RwLock::new(None),
+            streaming_handler_with_context: RwLock::new(None),
+            runtime_state: RwLock::new(HashMap::new()),
+            usage_stats: RwLock::new(HashMap::new()),
+            background_tasks: Arc::new(BackgroundTaskManager::new(8)),
+            mcp_reload_generation: RwLock::new(0),
         }
     }
 
@@ -158,14 +256,71 @@ impl Gateway {
         Self::new(session_manager, DmManager::with_pair_behavior(), config)
     }
 
+    /// Merge per-request runtime hints (HTTP API, webhooks) for the composed session key.
+    pub async fn merge_request_runtime_overrides(
+        &self,
+        platform: &str,
+        chat_id: &str,
+        user_id: &str,
+        model: Option<String>,
+        provider: Option<String>,
+        personality: Option<String>,
+    ) {
+        let session_key = self
+            .session_manager
+            .compose_session_key(platform, chat_id, user_id);
+        let mut states = self.runtime_state.write().await;
+        let s = states.entry(session_key).or_default();
+        if let Some(m) = model {
+            s.model = Some(m.clone());
+            if m.contains(':') {
+                s.provider = None;
+            }
+        }
+        if let Some(p) = provider {
+            s.provider = Some(p);
+        }
+        if let Some(pers) = personality {
+            s.personality = Some(pers);
+        }
+    }
+
+    /// Number of messages currently stored for the session (platform + chat + user).
+    pub async fn session_transcript_len(
+        &self,
+        platform: &str,
+        chat_id: &str,
+        user_id: &str,
+    ) -> usize {
+        let key = self
+            .session_manager
+            .compose_session_key(platform, chat_id, user_id);
+        self.session_manager.get_messages(&key).await.len()
+    }
+
     /// Set the message handler for processing incoming messages.
     pub async fn set_message_handler(&self, handler: MessageHandler) {
         *self.message_handler.write().await = Some(handler);
+        *self.message_handler_with_context.write().await = None;
+    }
+
+    /// Set a context-aware message handler for processing incoming messages.
+    pub async fn set_message_handler_with_context(&self, handler: MessageHandlerWithContext) {
+        *self.message_handler_with_context.write().await = Some(handler);
     }
 
     /// Set the streaming message handler.
     pub async fn set_streaming_handler(&self, handler: StreamingMessageHandler) {
         *self.streaming_handler.write().await = Some(handler);
+        *self.streaming_handler_with_context.write().await = None;
+    }
+
+    /// Set a context-aware streaming message handler.
+    pub async fn set_streaming_handler_with_context(
+        &self,
+        handler: StreamingMessageHandlerWithContext,
+    ) {
+        *self.streaming_handler_with_context.write().await = Some(handler);
     }
 
     /// Register a platform adapter under the given name.
@@ -242,16 +397,32 @@ impl Gateway {
         }
 
         // 2. Get or create session
-        let session = self.session_manager
+        let _session = self.session_manager
             .get_or_create_session(&incoming.platform, &incoming.chat_id, &incoming.user_id)
             .await;
 
-        let session_key = format!("{}:{}", incoming.platform, incoming.chat_id);
+        let session_key = self
+            .session_manager
+            .compose_session_key(&incoming.platform, &incoming.chat_id, &incoming.user_id);
+
+        // Slash commands are executed directly by the gateway command runtime.
+        if incoming.text.trim_start().starts_with('/') {
+            if self
+                .execute_slash_command(incoming, &session_key)
+                .await?
+            {
+                return Ok(());
+            }
+        }
+
+        let enriched_text = self
+            .enrich_message_with_transcription(&self.enrich_message_with_vision(&incoming.text));
 
         // 3. Add the user message to the session
         self.session_manager
-            .add_message(&session_key, Message::user(&incoming.text))
+            .add_message(&session_key, Message::user(enriched_text))
             .await;
+        self.bump_input_usage(&session_key, incoming.text.chars().count()).await;
 
         // 4. Get all session messages for the agent loop
         let messages = self.session_manager.get_messages(&session_key).await;
@@ -266,6 +437,329 @@ impl Gateway {
         Ok(())
     }
 
+    async fn execute_slash_command(
+        &self,
+        incoming: &IncomingMessage,
+        session_key: &str,
+    ) -> Result<bool, GatewayError> {
+        let result = handle_command(&incoming.text);
+        let handled = self
+            .apply_command_result(incoming, session_key, result)
+            .await?;
+        Ok(handled)
+    }
+
+    async fn apply_command_result(
+        &self,
+        incoming: &IncomingMessage,
+        session_key: &str,
+        result: GatewayCommandResult,
+    ) -> Result<bool, GatewayError> {
+        match result {
+            GatewayCommandResult::Reply(text)
+            | GatewayCommandResult::ShowHelp(text)
+            | GatewayCommandResult::Unknown(text) => {
+                self.send_message(&incoming.platform, &incoming.chat_id, &text, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::ResetSession(reply) => {
+                self.session_manager.reset_session(session_key).await;
+                self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::SwitchModel { model, reply } => {
+                let mut states = self.runtime_state.write().await;
+                states.entry(session_key.to_string()).or_default().model = Some(model);
+                drop(states);
+                self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::SwitchPersonality { name, reply } => {
+                let mut states = self.runtime_state.write().await;
+                states.entry(session_key.to_string()).or_default().personality = Some(name);
+                drop(states);
+                self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::ApproveUser { user_id } => {
+                let mut dm = self.dm_manager.write().await;
+                if !dm.is_admin(&incoming.user_id) {
+                    drop(dm);
+                    self.send_message(
+                        &incoming.platform,
+                        &incoming.chat_id,
+                        "🚫 /approve requires admin privileges.",
+                        None,
+                    )
+                    .await?;
+                    return Ok(true);
+                }
+                dm.authorize_user(user_id.clone());
+                drop(dm);
+                self.send_message(
+                    &incoming.platform,
+                    &incoming.chat_id,
+                    &format!("✅ User '{}' has been approved for DM access.", user_id),
+                    None,
+                )
+                .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::DenyUser { user_id } => {
+                let mut dm = self.dm_manager.write().await;
+                if !dm.is_admin(&incoming.user_id) {
+                    drop(dm);
+                    self.send_message(
+                        &incoming.platform,
+                        &incoming.chat_id,
+                        "🚫 /deny requires admin privileges.",
+                        None,
+                    )
+                    .await?;
+                    return Ok(true);
+                }
+                dm.deauthorize_user(&user_id);
+                drop(dm);
+                self.send_message(
+                    &incoming.platform,
+                    &incoming.chat_id,
+                    &format!("⛔ User '{}' has been removed from DM allowlist.", user_id),
+                    None,
+                )
+                .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::StopAgent(reply) => {
+                for (task_id, status, _) in self.background_tasks.list_tasks() {
+                    if status == TaskStatus::Running {
+                        let _ = self.background_tasks.cancel(&task_id);
+                    }
+                }
+                self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::ShowUsage(_) => {
+                let text = self.build_usage_text(session_key).await;
+                self.send_message(&incoming.platform, &incoming.chat_id, &text, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::CompressContext(_) => {
+                let removed = self.compress_context(session_key, 24).await;
+                let reply = format!("📦 Context compressed. Removed {} old messages.", removed);
+                self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::ShowInsights(text) => {
+                self.send_message(&incoming.platform, &incoming.chat_id, &text, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::ToggleVerbose(_) => {
+                let mut states = self.runtime_state.write().await;
+                let state = states.entry(session_key.to_string()).or_default();
+                state.verbose = !state.verbose;
+                let reply = format!("📝 Verbose mode: {}", if state.verbose { "ON" } else { "OFF" });
+                drop(states);
+                self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::ToggleYolo(_) => {
+                let mut states = self.runtime_state.write().await;
+                let state = states.entry(session_key.to_string()).or_default();
+                state.yolo = !state.yolo;
+                let reply = format!("🤠 YOLO mode: {}", if state.yolo { "ON" } else { "OFF" });
+                drop(states);
+                self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::SetHome { path, reply } => {
+                let target = std::path::Path::new(&path);
+                let response = if target.exists() && target.is_dir() {
+                    let mut states = self.runtime_state.write().await;
+                    states.entry(session_key.to_string()).or_default().home = Some(path);
+                    reply
+                } else {
+                    format!("❌ Path not found or not a directory: {}", path)
+                };
+                self.send_message(&incoming.platform, &incoming.chat_id, &response, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::ShowStatus(_) => {
+                let text = self.build_status_text(session_key).await;
+                self.send_message(&incoming.platform, &incoming.chat_id, &text, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::ReloadMcp => {
+                let mut generation = self.mcp_reload_generation.write().await;
+                *generation += 1;
+                let current = *generation;
+                drop(generation);
+                self.send_message(
+                    &incoming.platform,
+                    &incoming.chat_id,
+                    &format!("🔄 MCP registry reloaded (generation {}).", current),
+                    None,
+                )
+                .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::SwitchProvider { provider, reply } => {
+                let mut states = self.runtime_state.write().await;
+                states.entry(session_key.to_string()).or_default().provider = Some(provider);
+                drop(states);
+                self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::SwitchProfile { profile, reply } => {
+                let mut states = self.runtime_state.write().await;
+                states.entry(session_key.to_string()).or_default().profile = Some(profile);
+                drop(states);
+                self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::SwitchBranch { branch } => {
+                let reply = match branch {
+                    Some(name) => {
+                        let mut states = self.runtime_state.write().await;
+                        states.entry(session_key.to_string()).or_default().branch = Some(name.clone());
+                        format!("🌿 Branch context switched to: {}", name)
+                    }
+                    None => {
+                        let branch = self
+                            .runtime_state
+                            .read()
+                            .await
+                            .get(session_key)
+                            .and_then(|s| s.branch.clone())
+                            .unwrap_or_else(|| "main".to_string());
+                        format!("🌿 Current branch context: {}", branch)
+                    }
+                };
+                self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::Rollback { steps } => {
+                let mut removed = 0usize;
+                for _ in 0..steps {
+                    if self.session_manager.pop_last_message(session_key).await.is_some() {
+                        removed += 1;
+                    } else {
+                        break;
+                    }
+                }
+                self.send_message(
+                    &incoming.platform,
+                    &incoming.chat_id,
+                    &format!("↪️ Rolled back {} message(s).", removed),
+                    None,
+                )
+                .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::CheckUpdate => {
+                let version = std::env::var("HERMES_LATEST_VERSION")
+                    .unwrap_or_else(|_| "latest".to_string());
+                self.send_update_notification(&incoming.platform, &incoming.chat_id, &version)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::BackgroundTask { prompt } => {
+                let handled = self
+                    .handle_background_command(incoming, session_key, &prompt, false)
+                    .await?;
+                Ok(handled)
+            }
+            GatewayCommandResult::BtwTask { prompt } => {
+                let handled = self
+                    .handle_background_command(incoming, session_key, &prompt, true)
+                    .await?;
+                Ok(handled)
+            }
+            GatewayCommandResult::ToggleReasoning(_) => {
+                let mut states = self.runtime_state.write().await;
+                let state = states.entry(session_key.to_string()).or_default();
+                state.reasoning = !state.reasoning;
+                let reply =
+                    format!("🧠 Reasoning visibility: {}", if state.reasoning { "ON" } else { "OFF" });
+                drop(states);
+                self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::SwitchFast(_) => {
+                let mut states = self.runtime_state.write().await;
+                states.entry(session_key.to_string()).or_default().model =
+                    Some("openai:gpt-4o-mini".to_string());
+                drop(states);
+                self.send_message(
+                    &incoming.platform,
+                    &incoming.chat_id,
+                    "⚡ Fast model enabled: openai:gpt-4o-mini",
+                    None,
+                )
+                .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::Retry => {
+                let mut messages = self.session_manager.get_messages(session_key).await;
+                if matches!(messages.last().map(|m| m.role), Some(MessageRole::Assistant)) {
+                    messages.pop();
+                }
+                if messages.is_empty() {
+                    self.send_message(
+                        &incoming.platform,
+                        &incoming.chat_id,
+                        "No previous message to retry.",
+                        None,
+                    )
+                    .await?;
+                    return Ok(true);
+                }
+                self.session_manager
+                    .replace_messages(session_key, messages.clone())
+                    .await;
+                self.route_non_streaming(incoming, messages, session_key).await?;
+                Ok(true)
+            }
+            GatewayCommandResult::Undo => {
+                let mut removed = 0usize;
+                if let Some(last) = self.session_manager.pop_last_message(session_key).await {
+                    removed += 1;
+                    if last.role == MessageRole::Assistant {
+                        if let Some(prev) = self.session_manager.pop_last_message(session_key).await {
+                            if prev.role == MessageRole::User {
+                                removed += 1;
+                            }
+                        }
+                    }
+                }
+                let reply = if removed == 0 {
+                    "Nothing to undo.".to_string()
+                } else {
+                    format!("↩️ Removed {} message(s) from current session.", removed)
+                };
+                self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
+                    .await?;
+                Ok(true)
+            }
+            GatewayCommandResult::Noop => Ok(true),
+        }
+    }
+
     /// Non-streaming message routing: invoke agent, send complete response.
     async fn route_non_streaming(
         &self,
@@ -273,17 +767,24 @@ impl Gateway {
         messages: Vec<Message>,
         session_key: &str,
     ) -> Result<(), GatewayError> {
-        let handler = self.message_handler.read().await;
-        let handler = handler.as_ref().ok_or_else(|| {
-            GatewayError::Platform("No message handler configured".into())
-        })?;
-
-        let response = handler(messages).await?;
+        let runtime_context = self.build_runtime_context(incoming, session_key).await;
+        let context_handler = self.message_handler_with_context.read().await.clone();
+        let response = if let Some(handler) = context_handler {
+            handler(messages, runtime_context).await?
+        } else {
+            let handler = self.message_handler.read().await;
+            let handler = handler.as_ref().ok_or_else(|| {
+                GatewayError::Platform("No message handler configured".into())
+            })?;
+            let messages = self.inject_runtime_hints(session_key, messages).await;
+            handler(messages).await?
+        };
 
         // Add assistant response to session
         self.session_manager
             .add_message(session_key, Message::assistant(&response))
             .await;
+        self.bump_output_usage(session_key, response.chars().count()).await;
 
         // Send response back to the platform
         self.send_message(&incoming.platform, &incoming.chat_id, &response, None).await?;
@@ -298,10 +799,9 @@ impl Gateway {
         messages: Vec<Message>,
         session_key: &str,
     ) -> Result<(), GatewayError> {
-        let handler = self.streaming_handler.read().await;
-        let handler = handler.as_ref().ok_or_else(|| {
-            GatewayError::Platform("No streaming handler configured".into())
-        })?;
+        let runtime_context = self.build_runtime_context(incoming, session_key).await;
+        let context_handler = self.streaming_handler_with_context.read().await.clone();
+        let legacy_messages = self.inject_runtime_hints(session_key, messages.clone()).await;
 
         // Start a stream
         let stream_handle = self.stream_manager
@@ -342,7 +842,15 @@ impl Gateway {
         });
 
         // Invoke the streaming handler
-        let response = handler(messages, on_chunk).await?;
+        let response = if let Some(handler) = context_handler {
+            handler(messages, runtime_context, on_chunk).await?
+        } else {
+            let handler = self.streaming_handler.read().await;
+            let handler = handler.as_ref().ok_or_else(|| {
+                GatewayError::Platform("No streaming handler configured".into())
+            })?;
+            handler(legacy_messages, on_chunk).await?
+        };
 
         // Finish the stream
         self.stream_manager.finish_stream(&stream_id).await;
@@ -351,8 +859,277 @@ impl Gateway {
         self.session_manager
             .add_message(session_key, Message::assistant(&response))
             .await;
+        self.bump_output_usage(session_key, response.chars().count()).await;
 
         Ok(())
+    }
+
+    async fn inject_runtime_hints(&self, session_key: &str, messages: Vec<Message>) -> Vec<Message> {
+        let state = self
+            .runtime_state
+            .read()
+            .await
+            .get(session_key)
+            .cloned()
+            .unwrap_or_default();
+
+        let mut hints = Vec::new();
+        if let Some(model) = state.model {
+            hints.push(format!("model={}", model));
+        }
+        if let Some(provider) = state.provider {
+            hints.push(format!("provider={}", provider));
+        }
+        if let Some(profile) = state.profile {
+            hints.push(format!("profile={}", profile));
+        }
+        if let Some(branch) = state.branch {
+            hints.push(format!("branch={}", branch));
+        }
+        if hints.is_empty() {
+            return messages;
+        }
+
+        let mut out = Vec::with_capacity(messages.len() + 1);
+        out.push(Message::system(format!(
+            "[gateway_runtime]\n{}",
+            hints.join("\n")
+        )));
+        out.extend(messages);
+        out
+    }
+
+    async fn build_runtime_context(
+        &self,
+        incoming: &IncomingMessage,
+        session_key: &str,
+    ) -> GatewayRuntimeContext {
+        let state = self
+            .runtime_state
+            .read()
+            .await
+            .get(session_key)
+            .cloned()
+            .unwrap_or_default();
+        let mcp_reload_generation = *self.mcp_reload_generation.read().await;
+
+        GatewayRuntimeContext {
+            session_key: session_key.to_string(),
+            platform: incoming.platform.clone(),
+            chat_id: incoming.chat_id.clone(),
+            user_id: incoming.user_id.clone(),
+            model: state.model,
+            provider: state.provider,
+            profile: state.profile,
+            branch: state.branch,
+            personality: state.personality,
+            home: state.home,
+            verbose: state.verbose,
+            yolo: state.yolo,
+            reasoning: state.reasoning,
+            mcp_reload_generation,
+        }
+    }
+
+    async fn bump_input_usage(&self, session_key: &str, chars: usize) {
+        let mut usage = self.usage_stats.write().await;
+        let stat = usage.entry(session_key.to_string()).or_default();
+        stat.user_messages += 1;
+        stat.input_chars += chars as u64;
+        stat.last_updated_at = Some(Utc::now());
+    }
+
+    async fn bump_output_usage(&self, session_key: &str, chars: usize) {
+        let mut usage = self.usage_stats.write().await;
+        let stat = usage.entry(session_key.to_string()).or_default();
+        stat.assistant_messages += 1;
+        stat.output_chars += chars as u64;
+        stat.last_updated_at = Some(Utc::now());
+    }
+
+    async fn build_usage_text(&self, session_key: &str) -> String {
+        let usage = self.usage_stats.read().await;
+        let stat = usage.get(session_key).cloned().unwrap_or_default();
+        let approx_input_tokens = stat.input_chars / 4;
+        let approx_output_tokens = stat.output_chars / 4;
+        format!(
+            "📊 Usage\n- user messages: {}\n- assistant messages: {}\n- input chars: {} (~{} tokens)\n- output chars: {} (~{} tokens)",
+            stat.user_messages,
+            stat.assistant_messages,
+            stat.input_chars,
+            approx_input_tokens,
+            stat.output_chars,
+            approx_output_tokens
+        )
+    }
+
+    async fn compress_context(&self, session_key: &str, max_messages: usize) -> usize {
+        let current = self.session_manager.get_messages(session_key).await;
+        if current.len() <= max_messages {
+            return 0;
+        }
+
+        let mut compressed = Vec::new();
+        if let Some(first) = current.first() {
+            if first.role == MessageRole::System {
+                compressed.push(first.clone());
+            }
+        }
+        let keep_tail = max_messages.saturating_sub(compressed.len());
+        let mut tail: Vec<Message> = current.iter().rev().take(keep_tail).cloned().collect();
+        tail.reverse();
+        compressed.extend(tail);
+
+        let removed = current.len().saturating_sub(compressed.len());
+        self.session_manager
+            .replace_messages(session_key, compressed)
+            .await;
+        removed
+    }
+
+    async fn build_status_text(&self, session_key: &str) -> String {
+        let state = self
+            .runtime_state
+            .read()
+            .await
+            .get(session_key)
+            .cloned()
+            .unwrap_or_default();
+        let usage = self
+            .usage_stats
+            .read()
+            .await
+            .get(session_key)
+            .cloned()
+            .unwrap_or_default();
+        let messages = self.session_manager.get_messages(session_key).await;
+        let running_tasks = self
+            .background_tasks
+            .list_tasks()
+            .into_iter()
+            .filter(|(_, status, _)| *status == TaskStatus::Running)
+            .count();
+
+        format!(
+            "🧭 Gateway status\n- model: {}\n- provider: {}\n- profile: {}\n- branch: {}\n- personality: {}\n- reasoning: {}\n- verbose: {}\n- yolo: {}\n- home: {}\n- messages in session: {}\n- running background tasks: {}\n- mcp generation: {}\n- input/output chars: {}/{}",
+            state.model.unwrap_or_else(|| "default".to_string()),
+            state.provider.unwrap_or_else(|| "default".to_string()),
+            state.profile.unwrap_or_else(|| "default".to_string()),
+            state.branch.unwrap_or_else(|| "main".to_string()),
+            state.personality.unwrap_or_else(|| "default".to_string()),
+            if state.reasoning { "ON" } else { "OFF" },
+            if state.verbose { "ON" } else { "OFF" },
+            if state.yolo { "ON" } else { "OFF" },
+            state.home.unwrap_or_else(|| "(not set)".to_string()),
+            messages.len(),
+            running_tasks,
+            *self.mcp_reload_generation.read().await,
+            usage.input_chars,
+            usage.output_chars
+        )
+    }
+
+    async fn handle_background_command(
+        &self,
+        incoming: &IncomingMessage,
+        session_key: &str,
+        prompt: &str,
+        isolated_context: bool,
+    ) -> Result<bool, GatewayError> {
+        let trimmed = prompt.trim();
+        if trimmed.eq_ignore_ascii_case("list") {
+            let tasks = self.background_tasks.list_tasks();
+            let summary = if tasks.is_empty() {
+                "No background tasks.".to_string()
+            } else {
+                let mut out = String::from("🧵 Background tasks:\n");
+                for (id, status, task_prompt) in tasks {
+                    out.push_str(&format!("- {} [{:?}] {}\n", id, status, task_prompt));
+                }
+                out
+            };
+            self.send_message(&incoming.platform, &incoming.chat_id, &summary, None)
+                .await?;
+            return Ok(true);
+        }
+        if let Some(task_id) = trimmed.strip_prefix("cancel ").map(str::trim) {
+            let ok = self.background_tasks.cancel(task_id);
+            let msg = if ok {
+                format!("Cancelled background task {}", task_id)
+            } else {
+                format!("Task {} was not running or not found", task_id)
+            };
+            self.send_message(&incoming.platform, &incoming.chat_id, &msg, None)
+                .await?;
+            return Ok(true);
+        }
+        if let Some(task_id) = trimmed.strip_prefix("status ").map(str::trim) {
+            let msg = match self.background_tasks.get_status(task_id) {
+                Some(TaskStatus::Running) => format!("Task {} is running", task_id),
+                Some(TaskStatus::Completed) => {
+                    let result = self.background_tasks.get_result(task_id).unwrap_or_default();
+                    format!("Task {} completed.\n{}", task_id, result)
+                }
+                Some(TaskStatus::Failed(err)) => format!("Task {} failed: {}", task_id, err),
+                Some(TaskStatus::Cancelled) => format!("Task {} was cancelled", task_id),
+                None => format!("Task {} not found", task_id),
+            };
+            self.send_message(&incoming.platform, &incoming.chat_id, &msg, None)
+                .await?;
+            return Ok(true);
+        }
+
+        let task_id = self
+            .background_tasks
+            .submit(trimmed.to_string())
+            .map_err(GatewayError::Platform)?;
+        let ack = if isolated_context {
+            format!("🛰 BTW task queued: {}\nUse /background status {} to check progress.", task_id, task_id)
+        } else {
+            format!("🧵 Background task queued: {}\nUse /background status {} to check progress.", task_id, task_id)
+        };
+        self.send_message(&incoming.platform, &incoming.chat_id, &ack, None)
+            .await?;
+
+        let legacy_handler = self.message_handler.read().await.as_ref().cloned();
+        let context_handler = self
+            .message_handler_with_context
+            .read()
+            .await
+            .as_ref()
+            .cloned();
+        if context_handler.is_none() && legacy_handler.is_none() {
+            return Err(GatewayError::Platform("No message handler configured".into()));
+        }
+        let manager = self.background_tasks.clone();
+        let task_id_for_task = task_id.clone();
+        let original_messages = if isolated_context {
+            vec![Message::user(trimmed)]
+        } else {
+            let mut m = self.session_manager.get_messages(session_key).await;
+            m.push(Message::user(trimmed));
+            m
+        };
+        let legacy_messages = self
+            .inject_runtime_hints(session_key, original_messages.clone())
+            .await;
+        let runtime_context = self.build_runtime_context(incoming, session_key).await;
+        tokio::spawn(async move {
+            let result = if let Some(handler) = context_handler {
+                handler(original_messages, runtime_context).await
+            } else if let Some(handler) = legacy_handler {
+                handler(legacy_messages).await
+            } else {
+                Err(GatewayError::Platform("No message handler configured".into()))
+            };
+
+            match result {
+                Ok(result) => manager.complete(&task_id_for_task, result),
+                Err(err) => manager.fail(&task_id_for_task, err.to_string()),
+            }
+        });
+
+        Ok(true)
     }
 
     // -----------------------------------------------------------------------
@@ -547,8 +1324,64 @@ impl Gateway {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use crate::session::SessionManager;
     use hermes_config::session::SessionConfig;
+    use std::sync::Mutex;
+
+    struct TestAdapter {
+        messages: Arc<Mutex<Vec<(String, String)>>>,
+    }
+
+    #[async_trait]
+    impl PlatformAdapter for TestAdapter {
+        async fn start(&self) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn stop(&self) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn send_message(
+            &self,
+            chat_id: &str,
+            text: &str,
+            _parse_mode: Option<ParseMode>,
+        ) -> Result<(), GatewayError> {
+            self.messages
+                .lock()
+                .unwrap()
+                .push((chat_id.to_string(), text.to_string()));
+            Ok(())
+        }
+
+        async fn edit_message(
+            &self,
+            _chat_id: &str,
+            _message_id: &str,
+            _text: &str,
+        ) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn send_file(
+            &self,
+            _chat_id: &str,
+            _file_path: &str,
+            _caption: Option<&str>,
+        ) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        fn is_running(&self) -> bool {
+            true
+        }
+
+        fn platform_name(&self) -> &str {
+            "test"
+        }
+    }
 
     #[test]
     fn gateway_config_default() {
@@ -626,5 +1459,399 @@ mod tests {
         // Should fail because no handler, but DM check is skipped
         let result = gw.route_message(&incoming).await;
         assert!(result.is_err()); // No handler configured
+    }
+
+    #[tokio::test]
+    async fn gateway_executes_status_command_without_agent_handler() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("test", adapter).await;
+
+        let incoming = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/status".into(),
+            message_id: None,
+            is_dm: true,
+        };
+
+        let result = gw.route_message(&incoming).await;
+        assert!(result.is_ok());
+
+        let msgs = sent.lock().unwrap();
+        assert!(msgs.iter().any(|(_, text)| text.contains("Gateway status")));
+    }
+
+    #[tokio::test]
+    async fn gateway_background_task_lifecycle_commands_work() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("test", adapter).await;
+        gw.set_message_handler(Arc::new(|messages| {
+            Box::pin(async move {
+                let prompt = messages
+                    .last()
+                    .and_then(|m| m.content.clone())
+                    .unwrap_or_else(|| "none".to_string());
+                Ok(format!("done: {}", prompt))
+            })
+        }))
+        .await;
+
+        let start = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/background ping".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&start).await.is_ok());
+
+        let task_id = {
+            let msgs = sent.lock().unwrap();
+            let queued = msgs
+                .iter()
+                .find(|(_, text)| text.contains("Background task queued"))
+                .expect("queue ack should exist");
+            queued
+                .1
+                .split_whitespace()
+                .find(|part| part.contains('-'))
+                .unwrap()
+                .to_string()
+        };
+
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+        let status = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: format!("/background status {}", task_id),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&status).await.is_ok());
+
+        let msgs = sent.lock().unwrap();
+        assert!(msgs.iter().any(|(_, text)| text.contains("completed")));
+    }
+
+    #[tokio::test]
+    async fn gateway_admin_approve_and_deny_affects_dm_authorization() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_ignore_behavior();
+        dm_manager.add_admin("admin1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("test", adapter).await;
+
+        let approve = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "admin-chat".into(),
+            user_id: "admin1".into(),
+            text: "/approve user2".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&approve).await.is_ok());
+
+        // user2 should now pass DM authorization, then fail because no handler is configured.
+        let authorized_dm = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat-u2".into(),
+            user_id: "user2".into(),
+            text: "hello".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&authorized_dm).await.is_err());
+
+        let deny = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "admin-chat".into(),
+            user_id: "admin1".into(),
+            text: "/deny user2".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&deny).await.is_ok());
+
+        // user2 should be denied again, and route should return Ok (silently denied).
+        let denied_dm = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat-u2".into(),
+            user_id: "user2".into(),
+            text: "hello again".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&denied_dm).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn gateway_reload_mcp_and_status_reflect_runtime_state() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("test", adapter).await;
+
+        let provider = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/provider openrouter".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&provider).await.is_ok());
+
+        let profile = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/profile prod".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&profile).await.is_ok());
+
+        let reload = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/reload_mcp".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&reload).await.is_ok());
+
+        let status = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/status".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&status).await.is_ok());
+
+        let msgs = sent.lock().unwrap();
+        let status_text = msgs
+            .iter()
+            .rev()
+            .find_map(|(_, text)| {
+                if text.contains("Gateway status") {
+                    Some(text.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("status response should exist");
+        assert!(status_text.contains("provider: openrouter"));
+        assert!(status_text.contains("profile: prod"));
+        assert!(status_text.contains("mcp generation: 1"));
+    }
+
+    #[tokio::test]
+    async fn gateway_runtime_state_is_injected_into_agent_messages() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("test", adapter).await;
+        gw.set_message_handler(Arc::new(|messages| {
+            Box::pin(async move {
+                let hint = messages
+                    .iter()
+                    .find(|m| m.role == MessageRole::System && m.content.as_deref().unwrap_or("").contains("[gateway_runtime]"))
+                    .and_then(|m| m.content.clone())
+                    .unwrap_or_else(|| "no-runtime-hints".to_string());
+                Ok(hint)
+            })
+        }))
+        .await;
+
+        let set_provider = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/provider openai".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&set_provider).await.is_ok());
+
+        let set_model = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/model gpt-4o".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&set_model).await.is_ok());
+
+        let set_profile = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/profile prod".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&set_profile).await.is_ok());
+
+        let set_branch = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/branch feature/parity".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&set_branch).await.is_ok());
+
+        let normal = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "hello".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&normal).await.is_ok());
+
+        let msgs = sent.lock().unwrap();
+        let echoed = msgs
+            .iter()
+            .rev()
+            .find_map(|(_, text)| {
+                if text.contains("[gateway_runtime]") {
+                    Some(text.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("runtime hint response should exist");
+
+        assert!(echoed.contains("model=gpt-4o"));
+        assert!(echoed.contains("provider=openai"));
+        assert!(echoed.contains("profile=prod"));
+        assert!(echoed.contains("branch=feature/parity"));
+    }
+
+    #[tokio::test]
+    async fn gateway_context_handler_receives_structured_runtime_context() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("test", adapter).await;
+        gw.set_message_handler_with_context(Arc::new(|messages, ctx| {
+            Box::pin(async move {
+                let payload = format!(
+                    "ctx model={:?} provider={:?} profile={:?} branch={:?} platform={} user={} session={} has_legacy_hint={}",
+                    ctx.model,
+                    ctx.provider,
+                    ctx.profile,
+                    ctx.branch,
+                    ctx.platform,
+                    ctx.user_id,
+                    ctx.session_key,
+                    messages.iter().any(|m| m
+                        .content
+                        .as_deref()
+                        .unwrap_or("")
+                        .contains("[gateway_runtime]"))
+                );
+                Ok(payload)
+            })
+        }))
+        .await;
+
+        let setup_cmds = vec![
+            "/provider openai",
+            "/model gpt-4o-mini",
+            "/profile prod",
+            "/branch feat-123",
+        ];
+        for cmd in setup_cmds {
+            let incoming = IncomingMessage {
+                platform: "test".into(),
+                chat_id: "chat1".into(),
+                user_id: "user1".into(),
+                text: cmd.to_string(),
+                message_id: None,
+                is_dm: true,
+            };
+            assert!(gw.route_message(&incoming).await.is_ok());
+        }
+
+        let normal = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "run".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&normal).await.is_ok());
+
+        let msgs = sent.lock().unwrap();
+        let echoed = msgs
+            .iter()
+            .rev()
+            .find_map(|(_, text)| {
+                if text.starts_with("ctx model=") {
+                    Some(text.clone())
+                } else {
+                    None
+                }
+            })
+            .expect("context response should exist");
+        assert!(echoed.contains("Some(\"gpt-4o-mini\")"));
+        assert!(echoed.contains("Some(\"openai\")"));
+        assert!(echoed.contains("Some(\"prod\")"));
+        assert!(echoed.contains("Some(\"feat-123\")"));
+        assert!(echoed.contains("platform=test"));
+        assert!(echoed.contains("user=user1"));
+        assert!(echoed.contains("has_legacy_hint=false"));
     }
 }

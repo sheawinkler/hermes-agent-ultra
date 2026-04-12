@@ -6,12 +6,36 @@
 use clap::Parser;
 use clap::CommandFactory;
 use clap_complete::{generate, Shell as CompletionShell};
-use tracing_subscriber::EnvFilter;
-
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 use hermes_cli::cli::{Cli, CliCommand};
 use hermes_cli::App;
-use hermes_config::load_config;
+use hermes_cli::app::{
+    bridge_tool_registry, build_agent_config, build_provider, provider_api_key_from_env,
+};
+use tokio::sync::broadcast;
+use hermes_config::{
+    apply_user_config_patch, gateway_pid_path_in, hermes_home, load_config, load_user_config_file,
+    save_config_yaml, state_dir, user_config_field_display, validate_config, ConfigError,
+    PlatformConfig,
+};
 use hermes_core::AgentError;
+use hermes_core::{MessageRole, StreamChunk};
+use hermes_core::PlatformAdapter;
+use hermes_agent::AgentLoop;
+use hermes_auth::{AuthManager, FileTokenStore, OAuthCredential};
+use hermes_cron::{
+    cron_scheduler_for_data_dir, CronCompletionEvent, CronError, CronRunner, CronScheduler,
+    FileJobPersistence,
+};
+use hermes_gateway::{Gateway, GatewayRuntimeContext, SessionManager, DmManager};
+use hermes_gateway::gateway::IncomingMessage as GatewayIncomingMessage;
+use hermes_gateway::gateway::GatewayConfig as RuntimeGatewayConfig;
+use hermes_gateway::platforms::telegram::{TelegramAdapter, TelegramConfig};
+use hermes_telemetry::init_telemetry_from_env;
+use hermes_tools::ToolRegistry;
+use serde::{Deserialize, Serialize};
 
 #[tokio::main]
 async fn main() {
@@ -34,14 +58,14 @@ async fn main() {
         CliCommand::Status => run_status(cli).await,
         CliCommand::Logs { lines, follow } => run_logs(cli, lines, follow).await,
         CliCommand::Profile { action, name } => run_profile(cli, action, name).await,
-        CliCommand::Auth { action, provider } => run_auth(action, provider).await,
+        CliCommand::Auth { action, provider } => run_auth(cli, action, provider).await,
         CliCommand::Cron {
             action,
             id,
             schedule,
             prompt,
-        } => run_cron(action, id, schedule, prompt).await,
-        CliCommand::Webhook { action, url } => run_webhook(action, url).await,
+        } => run_cron(cli, action, id, schedule, prompt).await,
+        CliCommand::Webhook { action, url, id } => run_webhook(cli, action, url, id).await,
         CliCommand::Dump { session, output } => run_dump(cli, session, output).await,
         CliCommand::Completion { shell } => run_completion(shell),
         CliCommand::Uninstall { yes } => run_uninstall(yes).await,
@@ -55,16 +79,8 @@ async fn main() {
 
 /// Initialize the tracing subscriber with env filter.
 fn init_tracing(verbose: bool) {
-    let filter = if verbose {
-        EnvFilter::new("debug")
-    } else {
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"))
-    };
-
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_target(false)
-        .init();
+    let default = if verbose { "debug" } else { "info" };
+    init_telemetry_from_env("hermes-cli", default);
 }
 
 /// Run the interactive REPL (default command).
@@ -150,25 +166,73 @@ async fn run_config(
         }
         Some("get") => {
             let key = key.ok_or_else(|| AgentError::Config("Missing key. Usage: hermes config get <key>".into()))?;
-            match key.as_str() {
-                "model" => println!("{}", config.model.as_deref().unwrap_or("(not set)")),
-                "personality" => println!("{}", config.personality.as_deref().unwrap_or("(not set)")),
-                "max_turns" => println!("{}", config.max_turns),
-                "system_prompt" => println!("{}", config.system_prompt.as_deref().unwrap_or("(not set)")),
-                other => println!("Unknown config key: {}", other),
+            match user_config_field_display(&config, &key) {
+                Ok(s) => println!("{}", s),
+                Err(ConfigError::NotFound(_)) => println!("Unknown config key: {}", key),
+                Err(e) => return Err(AgentError::Config(e.to_string())),
             }
         }
         Some("set") => {
             let key = key.ok_or_else(|| AgentError::Config("Missing key. Usage: hermes config set <key> <value>".into()))?;
             let value = value.ok_or_else(|| AgentError::Config("Missing value. Usage: hermes config set <key> <value>".into()))?;
-            println!("Set {} = {}", key, value);
-            println!("(Config file persistence not yet implemented — use config.yaml directly)");
+            let base: PathBuf = cli
+                .config_dir
+                .as_ref()
+                .map(PathBuf::from)
+                .unwrap_or_else(hermes_home);
+            let cfg_path = base.join("config.yaml");
+            let mut disk = load_user_config_file(&cfg_path).map_err(|e| AgentError::Config(e.to_string()))?;
+            apply_user_config_patch(&mut disk, &key, &value).map_err(|e| AgentError::Config(e.to_string()))?;
+            validate_config(&disk).map_err(|e| AgentError::Config(e.to_string()))?;
+            save_config_yaml(&cfg_path, &disk).map_err(|e| AgentError::Config(e.to_string()))?;
+            println!("Saved {} = {} -> {}", key, value, cfg_path.display());
         }
         Some(other) => {
             println!("Unknown config action: {}. Use 'get' or 'set'.", other);
         }
     }
     Ok(())
+}
+
+/// Config/state root shared by CLI, `hermes gateway`, cron, and `webhooks.json`.
+fn hermes_state_root(cli: &Cli) -> PathBuf {
+    state_dir(cli.config_dir.as_deref().map(Path::new))
+}
+
+fn gateway_pid_path_for_cli(cli: &Cli) -> PathBuf {
+    gateway_pid_path_in(hermes_state_root(cli))
+}
+
+fn read_gateway_pid(path: &Path) -> Option<u32> {
+    std::fs::read_to_string(path).ok()?.trim().parse().ok()
+}
+
+#[cfg(unix)]
+fn gateway_pid_is_alive(pid: u32) -> bool {
+    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+}
+
+#[cfg(not(unix))]
+fn gateway_pid_is_alive(_pid: u32) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn gateway_pid_terminate(pid: u32) -> std::io::Result<()> {
+    let r = unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) };
+    if r == 0 {
+        Ok(())
+    } else {
+        Err(std::io::Error::last_os_error())
+    }
+}
+
+#[cfg(not(unix))]
+fn gateway_pid_terminate(_pid: u32) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "gateway stop is not supported on this platform",
+    ))
 }
 
 /// Handle `hermes gateway [action]`.
@@ -195,27 +259,228 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
                 .collect();
 
             if enabled.is_empty() {
-                println!("No platforms enabled. Configure platforms in config.yaml.");
-                return Ok(());
+                println!(
+                    "Note: no chat platforms enabled in config.yaml — gateway still runs cron + HTTP webhooks."
+                );
             }
 
-            println!("Enabled platforms: {}", enabled.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "));
+            let pid_path = gateway_pid_path_for_cli(&cli);
+            if let Some(pid) = read_gateway_pid(&pid_path) {
+                if gateway_pid_is_alive(pid) {
+                    println!(
+                        "Gateway already appears to be running (PID {}, file {}). Stop it first or remove a stale PID file.",
+                        pid,
+                        pid_path.display()
+                    );
+                    return Ok(());
+                }
+                let _ = std::fs::remove_file(&pid_path);
+            }
 
+            if !enabled.is_empty() {
+                println!(
+                    "Enabled platforms: {}",
+                    enabled.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+                );
+            }
+
+            // Build gateway runtime and context-aware message handler.
+            let runtime_gateway_config = RuntimeGatewayConfig {
+                streaming_enabled: config.streaming.enabled,
+                ..RuntimeGatewayConfig::default()
+            };
+            let session_manager = Arc::new(SessionManager::new(config.session.clone()));
+            let dm_manager = DmManager::with_pair_behavior();
+            let gateway = Arc::new(Gateway::new(
+                session_manager,
+                dm_manager,
+                runtime_gateway_config,
+            ));
+
+            let tool_registry = Arc::new(ToolRegistry::new());
+            let agent_registry = Arc::new(bridge_tool_registry(&tool_registry));
+            let agent_tools_for_msg = agent_registry.clone();
+            let agent_tools_for_stream = agent_registry.clone();
+            let agent_tools_for_cron = agent_registry.clone();
+            let config_arc = Arc::new(config.clone());
+            let config_arc_stream = config_arc.clone();
+            gateway
+                .set_message_handler_with_context(Arc::new(move |messages, ctx| {
+                    let config = config_arc.clone();
+                    let agent_tools = agent_tools_for_msg.clone();
+                    Box::pin(async move {
+                        let agent = build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools);
+                        let result = agent
+                            .run(messages, None)
+                            .await
+                            .map_err(|e| hermes_gateway::GatewayError::Platform(e.to_string()))?;
+                        Ok(extract_last_assistant_reply(&result.messages))
+                    })
+                }))
+                .await;
+            gateway
+                .set_streaming_handler_with_context(Arc::new(move |messages, ctx, on_chunk| {
+                    let config = config_arc_stream.clone();
+                    let agent_tools = agent_tools_for_stream.clone();
+                    Box::pin(async move {
+                        let agent = build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools);
+                        let emit = on_chunk.clone();
+                        let stream_cb: Box<dyn Fn(StreamChunk) + Send + Sync> =
+                            Box::new(move |chunk: StreamChunk| {
+                                if let Some(delta) = chunk.delta {
+                                    if let Some(text) = delta.content {
+                                        emit(text);
+                                    }
+                                }
+                            });
+
+                        let result = agent
+                            .run_stream(messages, None, Some(stream_cb))
+                            .await
+                            .map_err(|e| hermes_gateway::GatewayError::Platform(e.to_string()))?;
+                        Ok(extract_last_assistant_reply(&result.messages))
+                    })
+                }))
+                .await;
+
+            // Cron: same on-disk dir as `hermes cron` + real LLM/tools as the gateway agent.
+            let cron_dir = hermes_state_root(&cli).join("cron");
+            std::fs::create_dir_all(&cron_dir).map_err(|e| {
+                AgentError::Io(format!("cron dir {}: {}", cron_dir.display(), e))
+            })?;
+            let default_model = config
+                .model
+                .clone()
+                .unwrap_or_else(|| "gpt-4o".to_string());
+            let cron_persistence = Arc::new(FileJobPersistence::with_dir(cron_dir.clone()));
+            let cron_llm = build_provider(&config, &default_model);
+            let cron_runner = Arc::new(CronRunner::new(cron_llm, agent_tools_for_cron));
+            let mut cron_scheduler = CronScheduler::new(cron_persistence, cron_runner);
+            let (cron_tx, cron_rx) = broadcast::channel::<CronCompletionEvent>(64);
+            cron_scheduler.set_completion_broadcast(cron_tx);
+            cron_scheduler
+                .load_persisted_jobs()
+                .await
+                .map_err(|e| AgentError::Config(format!("cron load: {e}")))?;
+            cron_scheduler.start().await;
+            let cron_scheduler = Arc::new(cron_scheduler);
+            let webhooks_path = hermes_state_root(&cli).join("webhooks.json");
+            tracing::info!(
+                cron_dir = %cron_dir.display(),
+                webhooks = %webhooks_path.display(),
+                "gateway cron scheduler + HTTP webhook fan-out"
+            );
+            println!(
+                "Cron jobs: {}  |  Webhook registry: {}",
+                cron_dir.display(),
+                webhooks_path.display()
+            );
+
+            let mut sidecar_tasks: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+            let webhooks_path_clone = webhooks_path.clone();
+            sidecar_tasks.push(tokio::spawn(async move {
+                run_cron_webhook_delivery_loop(cron_rx, webhooks_path_clone).await;
+            }));
+
+            if let Some(platform_cfg) = config.platforms.get("telegram") {
+                if platform_cfg.enabled {
+                    if let Some(token) = platform_cfg.token.clone().filter(|t| !t.trim().is_empty()) {
+                        let telegram_config = build_telegram_config(platform_cfg, token);
+                        let telegram_adapter = Arc::new(TelegramAdapter::new(telegram_config)?);
+                        gateway
+                            .register_adapter("telegram", telegram_adapter.clone())
+                            .await;
+                        let gw_clone = gateway.clone();
+                        sidecar_tasks.push(tokio::spawn(async move {
+                            run_telegram_poll_loop(gw_clone, telegram_adapter).await;
+                        }));
+                    } else {
+                        println!("Telegram is enabled but token is missing; skipping telegram adapter.");
+                    }
+                }
+            }
+
+            if gateway.adapter_names().await.is_empty() {
+                println!(
+                    "No chat adapters started (e.g. missing Telegram token). Cron + webhooks still active."
+                );
+            }
+
+            gateway.start_all().await?;
+            let own_pid = std::process::id();
+            std::fs::write(&pid_path, format!("{}\n", own_pid)).map_err(|e| {
+                AgentError::Io(format!("failed to write {}: {}", pid_path.display(), e))
+            })?;
+            println!("Gateway runtime initialized with context-aware model/provider routing.");
             println!("Gateway is ready. Press Ctrl+C to stop.");
-
+            // Keep gateway alive for future adapter/event wiring.
             // Wait for Ctrl+C
             tokio::signal::ctrl_c()
                 .await
                 .map_err(|e| AgentError::Io(format!("Failed to listen for Ctrl+C: {}", e)))?;
 
             println!("\nShutting down gateway...");
+            cron_scheduler.stop().await;
+            gateway.stop_all().await?;
+            let _ = std::fs::remove_file(&pid_path);
+            for task in sidecar_tasks {
+                task.abort();
+            }
             println!("Gateway stopped.");
         }
         Some("status") => {
-            println!("Gateway status: not running (start with `hermes gateway start`)");
+            let pid_path = gateway_pid_path_for_cli(&cli);
+            match std::fs::read_to_string(&pid_path) {
+                Ok(raw) => match raw.trim().parse::<u32>() {
+                    Ok(pid) if gateway_pid_is_alive(pid) => {
+                        println!(
+                            "Gateway status: running (PID {}, file {})",
+                            pid,
+                            pid_path.display()
+                        );
+                    }
+                    Ok(pid) => {
+                        println!(
+                            "Gateway status: not running (stale PID {} in {})",
+                            pid,
+                            pid_path.display()
+                        );
+                    }
+                    Err(_) => {
+                        println!(
+                            "Gateway status: invalid PID file at {}",
+                            pid_path.display()
+                        );
+                    }
+                },
+                Err(_) => {
+                    println!("Gateway status: not running (no PID file; start with `hermes gateway start`)");
+                }
+            }
         }
         Some("stop") => {
-            println!("Gateway stop: no running gateway found.");
+            let pid_path = gateway_pid_path_for_cli(&cli);
+            let Some(pid) = read_gateway_pid(&pid_path) else {
+                println!("Gateway stop: no PID file (nothing to stop).");
+                return Ok(());
+            };
+            if !gateway_pid_is_alive(pid) {
+                let _ = std::fs::remove_file(&pid_path);
+                println!(
+                    "Gateway stop: process {} not running; removed stale PID file {}.",
+                    pid,
+                    pid_path.display()
+                );
+                return Ok(());
+            }
+            match gateway_pid_terminate(pid) {
+                Ok(()) => {
+                    println!("Sent SIGTERM to gateway PID {}.", pid);
+                    let _ = std::fs::remove_file(&pid_path);
+                    println!("Removed {}.", pid_path.display());
+                }
+                Err(e) => println!("Gateway stop: failed to signal PID {}: {}", pid, e),
+            }
         }
         Some(other) => {
             println!("Unknown gateway action: {}. Use 'start', 'stop', or 'status'.", other);
@@ -224,55 +489,612 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
     Ok(())
 }
 
-async fn run_auth(action: Option<String>, provider: Option<String>) -> Result<(), AgentError> {
-    let provider = provider.unwrap_or_else(|| "openai".to_string());
+fn resolve_model_for_gateway(default_model: &str, ctx: &GatewayRuntimeContext) -> String {
+    if let Some(model) = &ctx.model {
+        if model.contains(':') {
+            return model.clone();
+        }
+        if let Some(provider) = &ctx.provider {
+            return format!("{}:{}", provider, model);
+        }
+        return model.clone();
+    }
+
+    if let Some(provider) = &ctx.provider {
+        if default_model.contains(':') {
+            if let Some((_, model_part)) = default_model.split_once(':') {
+                return format!("{}:{}", provider, model_part);
+            }
+        }
+        return format!("{}:{}", provider, default_model);
+    }
+
+    default_model.to_string()
+}
+
+fn build_agent_for_gateway_context(
+    config: &hermes_config::GatewayConfig,
+    ctx: &GatewayRuntimeContext,
+    agent_tools: Arc<hermes_agent::agent_loop::ToolRegistry>,
+) -> AgentLoop {
+    let effective_model = resolve_model_for_gateway(config.model.as_deref().unwrap_or("gpt-4o"), ctx);
+    let provider = build_provider(config, &effective_model);
+    let mut agent_config = build_agent_config(config, &effective_model);
+    if let Some(personality) = ctx.personality.clone() {
+        agent_config.personality = Some(personality);
+    }
+    AgentLoop::new(agent_config, agent_tools, provider)
+}
+
+fn extract_last_assistant_reply(messages: &[hermes_core::Message]) -> String {
+    messages
+        .iter()
+        .rev()
+        .find_map(|m| {
+            if m.role == MessageRole::Assistant {
+                m.content.clone()
+            } else {
+                None
+            }
+        })
+        .unwrap_or_else(|| "(no assistant reply)".to_string())
+}
+
+fn build_telegram_config(
+    platform_cfg: &hermes_config::platform::PlatformConfig,
+    token: String,
+) -> TelegramConfig {
+    let polling = platform_cfg
+        .extra
+        .get("polling")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let parse_markdown = platform_cfg
+        .extra
+        .get("parse_markdown")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let parse_html = platform_cfg
+        .extra
+        .get("parse_html")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let poll_timeout = platform_cfg
+        .extra
+        .get("poll_timeout")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(30);
+
+    TelegramConfig {
+        token,
+        webhook_url: platform_cfg.webhook_url.clone(),
+        polling,
+        proxy: Default::default(),
+        parse_markdown,
+        parse_html,
+        poll_timeout,
+    }
+}
+
+async fn run_telegram_poll_loop(gateway: Arc<Gateway>, adapter: Arc<TelegramAdapter>) {
+    loop {
+        if !adapter.is_running() {
+            break;
+        }
+
+        match adapter.get_updates().await {
+            Ok(updates) => {
+                for update in updates {
+                    let Some(msg) = TelegramAdapter::parse_update(&update) else {
+                        continue;
+                    };
+
+                    let text = msg.text.unwrap_or_else(|| {
+                        if msg.is_voice {
+                            "[voice message]".to_string()
+                        } else if msg.is_photo {
+                            "[photo message]".to_string()
+                        } else {
+                            "[unsupported message]".to_string()
+                        }
+                    });
+                    let user_id = msg
+                        .user_id
+                        .map(|id| id.to_string())
+                        .or(msg.username)
+                        .unwrap_or_else(|| "unknown".to_string());
+                    let incoming = GatewayIncomingMessage {
+                        platform: "telegram".to_string(),
+                        chat_id: msg.chat_id.to_string(),
+                        user_id,
+                        text,
+                        message_id: Some(msg.message_id.to_string()),
+                        is_dm: msg.chat_id > 0,
+                    };
+
+                    if let Err(err) = gateway.route_message(&incoming).await {
+                        tracing::warn!("Failed to route telegram message: {}", err);
+                    }
+                }
+            }
+            Err(err) => {
+                tracing::warn!("Telegram polling error: {}", err);
+                tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+            }
+        }
+    }
+}
+
+/// Default auth provider: CLI arg, then `HERMES_AUTH_DEFAULT_PROVIDER`, then `openai`.
+///
+/// Set `HERMES_AUTH_DEFAULT_PROVIDER=telegram` if you primarily use the Telegram gateway.
+fn resolve_auth_provider(provider: Option<String>) -> String {
+    provider
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| {
+            std::env::var("HERMES_AUTH_DEFAULT_PROVIDER")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+        })
+        .unwrap_or_else(|| "openai".to_string())
+}
+
+async fn telegram_bot_token_from_env_or_prompt() -> Result<String, AgentError> {
+    if let Ok(t) = std::env::var("TELEGRAM_BOT_TOKEN") {
+        let t = t.trim().to_string();
+        if !t.is_empty() {
+            return Ok(t);
+        }
+    }
+    let line = tokio::task::spawn_blocking(|| {
+        use std::io::{self, Write};
+        print!("Enter Telegram bot token (from @BotFather): ");
+        let _ = io::stdout().flush();
+        let mut buf = String::new();
+        io::stdin().read_line(&mut buf).map(|_| buf)
+    })
+    .await
+    .map_err(|e| AgentError::Io(format!("telegram token prompt: {e}")))?
+    .map_err(|e| AgentError::Io(format!("stdin: {e}")))?;
+    let t = line.trim().to_string();
+    if t.is_empty() {
+        return Err(AgentError::Config(
+            "Telegram bot token cannot be empty (set TELEGRAM_BOT_TOKEN or paste token)"
+                .into(),
+        ));
+    }
+    Ok(t)
+}
+
+async fn run_auth(cli: Cli, action: Option<String>, provider: Option<String>) -> Result<(), AgentError> {
+    let provider = resolve_auth_provider(provider);
+    let auth_store_path = hermes_home()
+        .join("auth")
+        .join("tokens.json");
+    let token_store = FileTokenStore::new(auth_store_path).await?;
+    let manager = AuthManager::new(token_store.clone());
     match action.as_deref().unwrap_or("status") {
         "login" => {
+            if provider == "telegram" {
+                let token = telegram_bot_token_from_env_or_prompt().await?;
+                let cfg_path = hermes_state_root(&cli).join("config.yaml");
+                let mut disk = load_user_config_file(&cfg_path)
+                    .map_err(|e| AgentError::Config(e.to_string()))?;
+                let tg = disk
+                    .platforms
+                    .entry("telegram".to_string())
+                    .or_insert_with(PlatformConfig::default);
+                tg.token = Some(token);
+                tg.enabled = true;
+                validate_config(&disk).map_err(|e| AgentError::Config(e.to_string()))?;
+                save_config_yaml(&cfg_path, &disk).map_err(|e| AgentError::Config(e.to_string()))?;
+                println!(
+                    "Telegram: token saved and platform enabled in {}",
+                    cfg_path.display()
+                );
+                return Ok(());
+            }
+            if provider == "copilot" || provider == "github-copilot" {
+                let access_token = hermes_cli::copilot_auth::start_copilot_device_flow().await?;
+                manager
+                    .save_credential(OAuthCredential {
+                        provider: "copilot".to_string(),
+                        access_token,
+                        refresh_token: None,
+                        token_type: "bearer".to_string(),
+                        scope: None,
+                        expires_at: None,
+                    })
+                    .await?;
+                println!("GitHub device login complete; credential saved as provider 'copilot'.");
+                println!("Ensure GITHUB_COPILOT_TOKEN is set for the agent (see printed instructions above).");
+                return Ok(());
+            }
+
+            let access_token = resolve_llm_login_token(&cli, &provider).await?;
+            manager
+                .save_credential(OAuthCredential {
+                    provider: provider.clone(),
+                    access_token,
+                    refresh_token: None,
+                    token_type: "bearer".to_string(),
+                    scope: None,
+                    expires_at: None,
+                })
+                .await?;
             let msg = hermes_cli::auth::login(&provider).await?;
             println!("{}", msg);
         }
         "logout" => {
+            if provider == "telegram" {
+                let cfg_path = hermes_state_root(&cli).join("config.yaml");
+                let mut disk = load_user_config_file(&cfg_path)
+                    .map_err(|e| AgentError::Config(e.to_string()))?;
+                if let Some(tg) = disk.platforms.get_mut("telegram") {
+                    tg.token = None;
+                    tg.enabled = false;
+                }
+                validate_config(&disk).map_err(|e| AgentError::Config(e.to_string()))?;
+                save_config_yaml(&cfg_path, &disk).map_err(|e| AgentError::Config(e.to_string()))?;
+                println!(
+                    "Telegram: token cleared and platform disabled in {}",
+                    cfg_path.display()
+                );
+                return Ok(());
+            }
             let msg = hermes_cli::auth::logout(&provider).await?;
-            println!("{}", msg);
+            token_store.remove(&provider).await?;
+            println!("{} (removed credential for provider: {})", msg, provider);
         }
         _ => {
-            println!("Auth status: provider='{}' (basic flow enabled)", provider);
+            if provider == "telegram" {
+                let cfg_path = hermes_state_root(&cli).join("config.yaml");
+                let disk = load_user_config_file(&cfg_path)
+                    .map_err(|e| AgentError::Config(e.to_string()))?;
+                let (has, en) = disk
+                    .platforms
+                    .get("telegram")
+                    .map(|p| {
+                        (
+                            p.token
+                                .as_deref()
+                                .map(|t| !t.trim().is_empty())
+                                .unwrap_or(false),
+                            p.enabled,
+                        )
+                    })
+                    .unwrap_or((false, false));
+                println!(
+                    "Telegram ({}): token_present={} enabled={}",
+                    cfg_path.display(),
+                    has,
+                    en
+                );
+                return Ok(());
+            }
+            let has_token = manager.get_access_token(&provider).await?.is_some();
+            println!(
+                "Auth status: provider='{}', credential_present={}",
+                provider, has_token
+            );
         }
     }
     Ok(())
 }
 
+fn cron_cli_error(e: CronError) -> AgentError {
+    AgentError::Config(e.to_string())
+}
+
 async fn run_cron(
+    cli: Cli,
     action: Option<String>,
     id: Option<String>,
     schedule: Option<String>,
     prompt: Option<String>,
 ) -> Result<(), AgentError> {
+    let data_dir = hermes_state_root(&cli).join("cron");
+    std::fs::create_dir_all(&data_dir)
+        .map_err(|e| AgentError::Io(format!("cron dir {}: {}", data_dir.display(), e)))?;
+    let sched = cron_scheduler_for_data_dir(data_dir.clone());
+
     match action.as_deref().unwrap_or("list") {
-        "list" => println!("Cron list: use runtime scheduler integration in gateway/agent process."),
-        "create" => {
-            let schedule = schedule.unwrap_or_else(|| "* * * * *".to_string());
-            let prompt = prompt.unwrap_or_else(|| "No prompt provided".to_string());
-            println!("Cron created (stub): schedule='{}', prompt='{}'", schedule, prompt);
+        "list" => {
+            let jobs = sched.list_jobs().await;
+            if jobs.is_empty() {
+                println!("(no cron jobs in {})", data_dir.display());
+                return Ok(());
+            }
+            println!("Cron jobs ({}):", data_dir.display());
+            for j in jobs {
+                let snippet: String = j.prompt.chars().take(48).collect();
+                println!(
+                    "  {}  [{}]  {:?}  next_run={:?}  {}",
+                    j.id, j.schedule, j.status, j.next_run, snippet
+                );
+            }
         }
-        "delete" => println!("Cron delete (stub): id={}", id.unwrap_or_default()),
-        "pause" => println!("Cron pause (stub): id={}", id.unwrap_or_default()),
-        "resume" => println!("Cron resume (stub): id={}", id.unwrap_or_default()),
-        "run" => println!("Cron run now (stub): id={}", id.unwrap_or_default()),
-        "history" => println!("Cron history (stub): id={}", id.unwrap_or_default()),
-        other => println!("Unknown cron action: {}", other),
+        "create" => {
+            let schedule = schedule.unwrap_or_else(|| "0 * * * *".to_string());
+            let prompt = prompt.ok_or_else(|| {
+                AgentError::Config("cron create: use --prompt \"...\"".into())
+            })?;
+            let job = hermes_cron::CronJob::new(schedule, prompt);
+            let jid = sched.create_job(job).await.map_err(cron_cli_error)?;
+            println!("Created cron job id={} (persisted under {})", jid, data_dir.display());
+        }
+        "delete" | "pause" | "resume" | "run" | "history" => {
+            let act = action.as_deref().unwrap_or("cron");
+            let jid = id
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| AgentError::Config(format!("{}: use --id <job-id>", act)))?;
+            match act {
+                "delete" => {
+                    sched.remove_job(&jid).await.map_err(cron_cli_error)?;
+                    println!("Deleted job {}", jid);
+                }
+                "pause" => {
+                    sched.pause_job(&jid).await.map_err(cron_cli_error)?;
+                    println!("Paused job {}", jid);
+                }
+                "resume" => {
+                    sched.resume_job(&jid).await.map_err(cron_cli_error)?;
+                    println!("Resumed job {}", jid);
+                }
+                "run" => {
+                    let result = sched.run_job(&jid).await.map_err(cron_cli_error)?;
+                    let json = serde_json::to_string_pretty(&result)
+                        .unwrap_or_else(|_| format!("{result:#?}"));
+                    println!("{}", json);
+                }
+                "history" => {
+                    let job = sched
+                        .get_job(&jid)
+                        .await
+                        .ok_or_else(|| AgentError::Config(format!("unknown job id: {}", jid)))?;
+                    let json = serde_json::to_string_pretty(&job)
+                        .map_err(|e| AgentError::Config(e.to_string()))?;
+                    println!("{}", json);
+                }
+                _ => {
+                    return Err(AgentError::Config(format!(
+                        "internal: unexpected cron action '{}'",
+                        act
+                    )));
+                }
+            }
+        }
+        other => {
+            return Err(AgentError::Config(format!(
+                "Unknown cron action: {} (use list|create|delete|pause|resume|run|history)",
+                other
+            )));
+        }
     }
     Ok(())
 }
 
-async fn run_webhook(action: Option<String>, url: Option<String>) -> Result<(), AgentError> {
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct WebhookStore {
+    webhooks: Vec<WebhookRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WebhookRecord {
+    id: String,
+    url: String,
+    #[serde(default)]
+    created_at: String,
+}
+
+fn webhook_store_path(cli: &Cli) -> PathBuf {
+    hermes_state_root(&cli).join("webhooks.json")
+}
+
+fn load_webhook_store(path: &Path) -> Result<WebhookStore, AgentError> {
+    if !path.exists() {
+        return Ok(WebhookStore::default());
+    }
+    let raw = std::fs::read_to_string(path)
+        .map_err(|e| AgentError::Io(format!("read {}: {}", path.display(), e)))?;
+    serde_json::from_str(&raw).map_err(|e| AgentError::Io(format!("parse {}: {}", path.display(), e)))
+}
+
+fn save_webhook_store(path: &Path, store: &WebhookStore) -> Result<(), AgentError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AgentError::Io(format!("mkdir: {}", e)))?;
+    }
+    let raw = serde_json::to_string_pretty(store)
+        .map_err(|e| AgentError::Io(format!("serialize webhooks: {}", e)))?;
+    std::fs::write(path, raw).map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))
+}
+
+async fn prompt_line(prompt: impl Into<String>) -> Result<String, AgentError> {
+    let prompt = prompt.into();
+    let line = tokio::task::spawn_blocking(move || {
+        use std::io::{self, Write};
+        print!("{}", prompt);
+        let _ = io::stdout().flush();
+        let mut buf = String::new();
+        io::stdin().read_line(&mut buf).map(|_| buf)
+    })
+    .await
+    .map_err(|e| AgentError::Io(format!("stdin task: {}", e)))?
+    .map_err(|e| AgentError::Io(format!("stdin: {}", e)))?;
+    Ok(line.trim().to_string())
+}
+
+/// Resolve API key for `hermes auth login <provider>`: env → merged config → stdin.
+async fn resolve_llm_login_token(cli: &Cli, provider: &str) -> Result<String, AgentError> {
+    if let Some(k) = provider_api_key_from_env(provider) {
+        return Ok(k);
+    }
+    let cfg = load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;
+    if let Some(k) = cfg
+        .llm_providers
+        .get(provider)
+        .and_then(|c| c.api_key.as_deref())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return Ok(k.to_string());
+    }
+    let fallback_var = format!("{}_API_KEY", provider.to_uppercase().replace('-', "_"));
+    let msg = format!(
+        "No API key in env or config for provider '{}'.\n\
+         Set {} (see `hermes config set llm.{}.api_key ...`) or paste key now: ",
+        provider, fallback_var, provider
+    );
+    let pasted = prompt_line(msg).await?;
+    if pasted.is_empty() {
+        return Err(AgentError::Config(format!(
+            "Missing API key for provider '{}'",
+            provider
+        )));
+    }
+    Ok(pasted)
+}
+
+async fn run_webhook(
+    cli: Cli,
+    action: Option<String>,
+    url: Option<String>,
+    id: Option<String>,
+) -> Result<(), AgentError> {
+    let path = webhook_store_path(&cli);
+    let mut store = load_webhook_store(&path)?;
+
     match action.as_deref().unwrap_or("list") {
-        "list" => println!("Webhook list (stub)"),
-        "add" => println!("Webhook added (stub): {}", url.unwrap_or_default()),
-        "remove" => println!("Webhook removed (stub): {}", url.unwrap_or_default()),
-        other => println!("Unknown webhook action: {}", other),
+        "list" => {
+            if store.webhooks.is_empty() {
+                println!("(no webhooks in {})", path.display());
+                return Ok(());
+            }
+            println!("Webhooks ({}):", path.display());
+            for w in &store.webhooks {
+                println!("  {}  {}  {}", w.id, w.url, w.created_at);
+            }
+        }
+        "add" => {
+            let url = url
+                .filter(|u| !u.is_empty())
+                .ok_or_else(|| AgentError::Config("webhook add: use --url https://...".into()))?;
+            if !url.starts_with("http://") && !url.starts_with("https://") {
+                return Err(AgentError::Config(
+                    "webhook URL must start with http:// or https://".into(),
+                ));
+            }
+            let rec = WebhookRecord {
+                id: uuid::Uuid::new_v4().to_string(),
+                url: url.clone(),
+                created_at: chrono::Utc::now().to_rfc3339(),
+            };
+            store.webhooks.push(rec.clone());
+            save_webhook_store(&path, &store)?;
+            println!("Added webhook {} -> {}", rec.id, rec.url);
+        }
+        "remove" => {
+            let before = store.webhooks.len();
+            if let Some(rid) = id.filter(|s| !s.is_empty()) {
+                store.webhooks.retain(|w| w.id != rid);
+            } else if let Some(u) = url.filter(|s| !s.is_empty()) {
+                store.webhooks.retain(|w| w.url != u);
+            } else {
+                return Err(AgentError::Config(
+                    "webhook remove: use --id <id> or --url <exact-url>".into(),
+                ));
+            }
+            if store.webhooks.len() == before {
+                println!("No matching webhook removed.");
+            } else {
+                save_webhook_store(&path, &store)?;
+                println!("Updated {}", path.display());
+            }
+        }
+        other => {
+            return Err(AgentError::Config(format!(
+                "Unknown webhook action: {} (use list|add|remove)",
+                other
+            )));
+        }
     }
     Ok(())
+}
+
+/// POST each [`CronCompletionEvent`] to every URL in `webhooks.json` (same file as `hermes webhook`).
+async fn run_cron_webhook_delivery_loop(
+    mut rx: broadcast::Receiver<CronCompletionEvent>,
+    webhooks_json: PathBuf,
+) {
+    use tokio::sync::broadcast::error::RecvError;
+
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(45))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!("cron webhooks: HTTP client build failed: {e}");
+            return;
+        }
+    };
+
+    loop {
+        let ev = match rx.recv().await {
+            Ok(ev) => ev,
+            Err(RecvError::Lagged(n)) => {
+                tracing::debug!(n, "cron webhook receiver lagged; skipped messages");
+                continue;
+            }
+            Err(RecvError::Closed) => break,
+        };
+
+        let Ok(body) = serde_json::to_value(&ev) else {
+            continue;
+        };
+
+        let raw = match tokio::fs::read_to_string(&webhooks_json).await {
+            Ok(s) => s,
+            Err(_) => continue,
+        };
+
+        let store: WebhookStore = match serde_json::from_str(&raw) {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::warn!("invalid webhooks.json ({}): {e}", webhooks_json.display());
+                continue;
+            }
+        };
+
+        if store.webhooks.is_empty() {
+            tracing::debug!("no webhooks in {}; skip HTTP delivery", webhooks_json.display());
+            continue;
+        }
+
+        for w in store.webhooks {
+            match client.post(&w.url).json(&body).send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    tracing::info!(url = %w.url, id = %w.id, "cron completion webhook delivered");
+                }
+                Ok(resp) => {
+                    tracing::warn!(
+                        url = %w.url,
+                        id = %w.id,
+                        status = %resp.status(),
+                        "cron completion webhook non-success response"
+                    );
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        url = %w.url,
+                        id = %w.id,
+                        "cron completion webhook request failed: {e}"
+                    );
+                }
+            }
+        }
+    }
 }
 
 async fn run_dump(cli: Cli, session: Option<String>, output: Option<String>) -> Result<(), AgentError> {
@@ -515,8 +1337,7 @@ async fn run_doctor(cli: Cli) -> Result<(), AgentError> {
 /// Handle `hermes update`.
 async fn run_update() -> Result<(), AgentError> {
     println!("Hermes Agent v{}", env!("CARGO_PKG_VERSION"));
-    println!("Update check not yet implemented.");
-    println!("Visit https://github.com/nousresearch/hermes-agent-rust for the latest version.");
+    println!("{}", hermes_cli::update::check_for_updates().await?);
     Ok(())
 }
 

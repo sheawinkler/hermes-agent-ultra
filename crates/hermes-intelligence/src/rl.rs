@@ -7,6 +7,7 @@
 use chrono::{DateTime, Utc};
 use hermes_core::{Message, ToolCall};
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
 // TrajectoryOutcome
@@ -128,8 +129,9 @@ impl Default for BatchConfig {
 
 /// Generates batches of trajectories from a list of prompts.
 ///
-/// This is currently a stub – a live LLM provider is required for actual
-/// generation.
+/// Without a wired LLM, produces **synthetic** single-turn trajectories (user +
+/// placeholder assistant) so pipelines can exercise serde, compression, and
+/// storage. Replace with LLM-backed generation when integrating training.
 #[derive(Debug, Clone, Default)]
 pub struct BatchGenerator;
 
@@ -141,15 +143,32 @@ impl BatchGenerator {
 
     /// Generate a batch of trajectories for the given prompts.
     ///
-    /// Returns an empty vec since a live LLM provider is needed for actual
-    /// trajectory generation.
-    pub fn generate_batch(
-        &self,
-        _prompts: Vec<String>,
-        _config: &BatchConfig,
-    ) -> Vec<Trajectory> {
-        // Stub: requires a live LLM provider
-        Vec::new()
+    /// Caps output at `config.max_trajectories`. Each trajectory is a minimal
+    /// two-message turn unless `prompts` is empty.
+    pub fn generate_batch(&self, prompts: Vec<String>, config: &BatchConfig) -> Vec<Trajectory> {
+        let cap = config.max_trajectories.max(1);
+        prompts
+            .into_iter()
+            .take(cap)
+            .map(|prompt| {
+                let id = format!("traj-{}", Uuid::new_v4());
+                let now = Utc::now();
+                Trajectory {
+                    id,
+                    prompt: prompt.clone(),
+                    messages: vec![
+                        Message::user(prompt),
+                        Message::assistant(
+                            "(synthetic placeholder — wire LLM for live trajectories)".to_string(),
+                        ),
+                    ],
+                    tool_calls: vec![],
+                    outcome: TrajectoryOutcome::Success,
+                    reward: None,
+                    timestamp: now,
+                }
+            })
+            .collect()
     }
 }
 
@@ -157,8 +176,12 @@ impl BatchGenerator {
 // RlToolset
 // ---------------------------------------------------------------------------
 
-/// High-level RL training toolset providing stub methods for environment
-/// management and training lifecycle.
+/// High-level RL training toolset: environment listing and lightweight session
+/// identifiers for orchestration layers to extend.
+///
+/// **Not** a live trainer: no cluster scheduler, no LLM rollout loop, and no
+/// weight checkpoints — only stable IDs and stub responses until a real job API
+/// is integrated.
 #[derive(Debug, Clone, Default)]
 pub struct RlToolset;
 
@@ -192,9 +215,9 @@ impl RlToolset {
 
     /// Start a training run.
     ///
-    /// Returns a placeholder training session ID.
+    /// Returns a unique session id (orchestration should persist and map it).
     pub fn start_training(&self, _environment: &str) -> String {
-        "training-session-stub".to_string()
+        format!("rl-session-{}", Utc::now().timestamp_millis())
     }
 
     /// Stop a running training session.
@@ -207,9 +230,10 @@ impl RlToolset {
     /// Get results from a completed (or running) training session.
     ///
     /// Returns placeholder results.
-    pub fn get_results(&self, _session_id: &str) -> serde_json::Value {
+    pub fn get_results(&self, session_id: &str) -> serde_json::Value {
         serde_json::json!({
-            "status": "stub",
+            "status": "pending_or_synthetic",
+            "session_id": session_id,
             "metrics": {
                 "reward_mean": 0.0,
                 "reward_std": 0.0,
@@ -342,11 +366,13 @@ mod tests {
     }
 
     #[test]
-    fn test_batch_generator_stub_returns_empty() {
+    fn test_batch_generator_synthetic_trajectories() {
         let gen = BatchGenerator::new();
         let config = BatchConfig::default();
         let result = gen.generate_batch(vec!["prompt1".to_string()], &config);
-        assert!(result.is_empty());
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].messages.len(), 2);
+        assert_eq!(result[0].outcome, TrajectoryOutcome::Success);
     }
 
     #[test]
@@ -354,10 +380,10 @@ mod tests {
         let ts = RlToolset::new();
         assert!(!ts.list_environments().is_empty());
         assert_eq!(ts.configure_environment("test", &serde_json::Value::Null), "configured");
-        assert_eq!(ts.start_training("test"), "training-session-stub");
+        assert!(ts.start_training("test").starts_with("rl-session-"));
         assert_eq!(ts.stop_training("id"), "stopped");
         let results = ts.get_results("id");
-        assert_eq!(results["status"], "stub");
+        assert_eq!(results["status"], "pending_or_synthetic");
     }
 
     #[test]

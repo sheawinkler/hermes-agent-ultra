@@ -5,7 +5,6 @@
 //! per-user isolation.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -180,6 +179,16 @@ impl SessionManager {
         self.config.reset_policy.clone()
     }
 
+    /// Compose the canonical session key for platform/chat/user.
+    pub fn compose_session_key(&self, platform: &str, chat_id: &str, user_id: &str) -> String {
+        let session_type = Self::infer_session_type(chat_id);
+        if self.group_sessions_per_user && session_type == SessionType::Group {
+            format!("{}:{}:{}", platform, chat_id, user_id)
+        } else {
+            format!("{}:{}", platform, chat_id)
+        }
+    }
+
     /// Get or create a session for the given platform, chat, and user.
     ///
     /// If a session exists for this (platform, chat_id, user_id) triple,
@@ -194,13 +203,7 @@ impl SessionManager {
         let session_type = Self::infer_session_type(chat_id);
         let reset_policy = self.effective_reset_policy(platform, session_type);
 
-        // Build a composite key. For group sessions with per-user isolation,
-        // include user_id in the key so each user gets their own context.
-        let session_key = if self.group_sessions_per_user && session_type == SessionType::Group {
-            format!("{}:{}:{}", platform, chat_id, user_id)
-        } else {
-            format!("{}:{}", platform, chat_id)
-        };
+        let session_key = self.compose_session_key(platform, chat_id, user_id);
 
         let mut sessions = self.sessions.write().await;
 
@@ -259,6 +262,29 @@ impl SessionManager {
             .get(session_id)
             .map(|s| s.messages.clone())
             .unwrap_or_default()
+    }
+
+    /// Replace all messages for a session.
+    pub async fn replace_messages(&self, session_id: &str, messages: Vec<Message>) -> bool {
+        let mut sessions = self.sessions.write().await;
+        if let Some(session) = sessions.get_mut(session_id) {
+            session.messages = messages;
+            session.last_active_at = Utc::now();
+            return true;
+        }
+        false
+    }
+
+    /// Pop the latest message from a session.
+    pub async fn pop_last_message(&self, session_id: &str) -> Option<Message> {
+        let mut sessions = self.sessions.write().await;
+        sessions.get_mut(session_id).and_then(|s| {
+            let popped = s.messages.pop();
+            if popped.is_some() {
+                s.last_active_at = Utc::now();
+            }
+            popped
+        })
     }
 
     /// Get a session by its ID.

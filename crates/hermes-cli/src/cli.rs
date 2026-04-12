@@ -106,7 +106,8 @@ pub enum CliCommand {
     Auth {
         /// Action: "login", "logout", "status".
         action: Option<String>,
-        /// Provider name: openai/anthropic/openrouter/copilot/...
+        /// Provider: openai/anthropic/... / `telegram` (writes Bot token to config.yaml) / `copilot`.
+        /// If omitted, uses `HERMES_AUTH_DEFAULT_PROVIDER` or `openai`.
         provider: Option<String>,
     },
 
@@ -114,20 +115,27 @@ pub enum CliCommand {
     Cron {
         /// Action: list/create/delete/pause/resume/run/history
         action: Option<String>,
-        /// Job id for job-specific actions.
+        /// Job id (delete/pause/resume/run/history).
+        #[arg(long)]
         id: Option<String>,
-        /// Cron schedule (for create), e.g. "0 9 * * *".
+        /// Cron schedule (create), e.g. "0 9 * * *".
+        #[arg(long)]
         schedule: Option<String>,
-        /// Prompt (for create).
+        /// Prompt text (create).
+        #[arg(long)]
         prompt: Option<String>,
     },
 
-    /// Webhook management commands.
+    /// Webhook management commands (local registry in `webhooks.json`; `hermes gateway start` POSTs cron completion JSON to each URL).
     Webhook {
         /// Action: list/add/remove.
         action: Option<String>,
-        /// Webhook URL (for add/remove).
+        /// Webhook URL (add, or remove by URL).
+        #[arg(long)]
         url: Option<String>,
+        /// Entry id (remove by id).
+        #[arg(long)]
+        id: Option<String>,
     },
 
     /// Export conversation/session dump.

@@ -53,8 +53,13 @@ pub trait MemoryProviderPlugin: Send + Sync {
 
     /// Handle a tool call for one of this provider's tools.
     fn handle_tool_call(&self, tool_name: &str, args: &Value) -> String {
-        let _ = (tool_name, args);
-        serde_json::json!({"error": "not implemented"}).to_string()
+        let _ = args;
+        serde_json::json!({
+            "error": "memory_provider_tool_not_implemented",
+            "tool": tool_name,
+            "hint": "Override handle_tool_call on MemoryProviderPlugin for this provider."
+        })
+        .to_string()
     }
 
     /// Initialize for a session.
