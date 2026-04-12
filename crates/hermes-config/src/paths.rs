@@ -119,9 +119,19 @@ mod tests {
         assert!(!home.as_os_str().is_empty());
     }
 
+    /// Combined test for all path helpers.
+    ///
+    /// Environment-variable mutations are not thread-safe, so we test
+    /// both "derived paths" and "explicit home" in a single test to
+    /// avoid races with parallel test threads.
     #[test]
-    fn derived_paths_are_consistent() {
+    fn derived_paths_and_explicit_home() {
+        let original = std::env::var("HERMES_HOME").ok();
+
+        // -- Part 1: derived paths are consistent --
+        std::env::set_var("HERMES_HOME", "/tmp/hermes-path-test");
         let home = hermes_home();
+        assert_eq!(home, PathBuf::from("/tmp/hermes-path-test"));
         assert_eq!(state_dir(None), home);
         assert_eq!(config_path(), home.join("config.yaml"));
         assert_eq!(cli_config_path(), home.join("cli-config.yaml"));
@@ -133,12 +143,8 @@ mod tests {
         assert_eq!(sessions_dir(), home.join("sessions"));
         assert_eq!(cron_dir(), home.join("cron"));
         assert_eq!(env_path(), home.join(".env"));
-    }
 
-    #[test]
-    fn paths_with_explicit_home() {
-        // Temporarily set HERMES_HOME
-        let original = std::env::var("HERMES_HOME").ok();
+        // -- Part 2: explicit home override --
         std::env::set_var("HERMES_HOME", "/tmp/test-hermes");
         assert_eq!(hermes_home(), PathBuf::from("/tmp/test-hermes"));
         assert_eq!(config_path(), PathBuf::from("/tmp/test-hermes/config.yaml"));
