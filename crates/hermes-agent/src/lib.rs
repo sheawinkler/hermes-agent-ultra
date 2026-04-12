@@ -8,6 +8,7 @@ pub mod agent_loop;
 pub mod api_bridge;
 pub mod budget;
 pub mod context;
+pub mod compression;
 pub mod context_files;
 pub mod credential_pool;
 pub mod fallback;
@@ -16,6 +17,7 @@ pub mod interrupt;
 pub mod memory_manager;
 pub mod provider;
 pub mod providers_extra;
+pub mod oauth;
 pub mod rate_limit;
 pub mod reasoning;
 pub mod session_persistence;
@@ -28,6 +30,7 @@ pub use agent_loop::{AgentConfig, AgentLoop, TurnMetrics};
 
 // Re-export context management
 pub use context::{ContextManager, SystemPromptBuilder, load_soul_md, load_soul_md_from, switch_personality, load_context_files};
+pub use compression::summarize_messages_with_llm;
 
 // Re-export budget enforcement
 pub use budget::{check_aggregate_budget, enforce_budget, truncate_result};
@@ -45,6 +48,7 @@ pub use api_bridge::CodexProvider;
 pub use rate_limit::RateLimitTracker;
 pub use credential_pool::CredentialPool;
 pub use fallback::FallbackChain;
+pub use oauth::{OAuthManager, OAuthToken, TokenFetcher};
 
 // Re-export reasoning parser
 pub use reasoning::parse_reasoning;
