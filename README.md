@@ -175,7 +175,41 @@ What works today:
 - Cron scheduling framework
 - 524 tests passing
 
-## Building
+## Install
+
+Download the latest release binary for your platform:
+
+```bash
+# macOS (Apple Silicon)
+curl -LO https://github.com/Lumio-Research/hermes-agent-rs/releases/latest/download/hermes-macos-aarch64.tar.gz
+tar xzf hermes-macos-aarch64.tar.gz && sudo mv hermes /usr/local/bin/
+
+# macOS (Intel)
+curl -LO https://github.com/Lumio-Research/hermes-agent-rs/releases/latest/download/hermes-macos-x86_64.tar.gz
+tar xzf hermes-macos-x86_64.tar.gz && sudo mv hermes /usr/local/bin/
+
+# Linux (x86_64)
+curl -LO https://github.com/Lumio-Research/hermes-agent-rs/releases/latest/download/hermes-linux-x86_64.tar.gz
+tar xzf hermes-linux-x86_64.tar.gz && sudo mv hermes /usr/local/bin/
+
+# Linux (ARM64)
+curl -LO https://github.com/Lumio-Research/hermes-agent-rs/releases/latest/download/hermes-linux-aarch64.tar.gz
+tar xzf hermes-linux-aarch64.tar.gz && sudo mv hermes /usr/local/bin/
+
+# Linux (musl / Alpine / Docker)
+curl -LO https://github.com/Lumio-Research/hermes-agent-rs/releases/latest/download/hermes-linux-x86_64-musl.tar.gz
+tar xzf hermes-linux-x86_64-musl.tar.gz && sudo mv hermes /usr/local/bin/
+```
+
+Or use the install script (requires GitHub release downloads to be accessible):
+
+```bash
+bash <(curl -fsSL https://github.com/Lumio-Research/hermes-agent-rs/releases/latest/download/install.sh)
+```
+
+All release binaries: https://github.com/Lumio-Research/hermes-agent-rs/releases
+
+## Building from source
 
 ```bash
 cargo build --release

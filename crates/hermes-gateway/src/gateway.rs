@@ -11,8 +11,10 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Instant;
 
 use chrono::{DateTime, Utc};
+use hermes_intelligence::{AdaptivePolicyEngine, OutcomeSignals};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
@@ -230,6 +232,8 @@ pub struct Gateway {
     usage_stats: RwLock<HashMap<String, UsageStats>>,
     /// Tracks async `/background` and `/btw` tasks.
     background_tasks: Arc<BackgroundTaskManager>,
+    /// Adaptive policy engine for L1/L2/L3 self-evolution.
+    evolution_engine: std::sync::Mutex<AdaptivePolicyEngine>,
     /// MCP reload generation number.
     mcp_reload_generation: RwLock<u64>,
 }
@@ -256,6 +260,7 @@ impl Gateway {
             runtime_state: RwLock::new(HashMap::new()),
             usage_stats: RwLock::new(HashMap::new()),
             background_tasks: Arc::new(BackgroundTaskManager::new(8)),
+            evolution_engine: std::sync::Mutex::new(AdaptivePolicyEngine::default()),
             mcp_reload_generation: RwLock::new(0),
         }
     }
@@ -433,6 +438,8 @@ impl Gateway {
 
         let enriched_text = self
             .enrich_message_with_transcription(&self.enrich_message_with_vision(&incoming.text));
+        self.maybe_apply_smart_model_routing(&session_key, &enriched_text)
+            .await;
 
         // 3. Add the user message to the session
         self.session_manager
@@ -923,7 +930,9 @@ impl Gateway {
         messages: Vec<Message>,
         session_key: &str,
     ) -> Result<(), GatewayError> {
+        let started = Instant::now();
         let runtime_context = self.build_runtime_context(incoming, session_key).await;
+        let selected_model = runtime_context.model.clone();
         let context_handler = self.message_handler_with_context.read().await.clone();
         let response = if let Some(handler) = context_handler {
             handler(messages, runtime_context).await?
@@ -947,6 +956,13 @@ impl Gateway {
         self.send_message(&incoming.platform, &incoming.chat_id, &response, None)
             .await?;
 
+        self.record_route_feedback(
+            selected_model.as_deref(),
+            true,
+            started.elapsed().as_millis() as u64,
+            incoming.text.len() + response.len(),
+        );
+
         Ok(())
     }
 
@@ -957,7 +973,9 @@ impl Gateway {
         messages: Vec<Message>,
         session_key: &str,
     ) -> Result<(), GatewayError> {
+        let started = Instant::now();
         let runtime_context = self.build_runtime_context(incoming, session_key).await;
+        let selected_model = runtime_context.model.clone();
         let context_handler = self.streaming_handler_with_context.read().await.clone();
         let legacy_messages = self
             .inject_runtime_hints(session_key, messages.clone())
@@ -1023,6 +1041,13 @@ impl Gateway {
             .await;
         self.bump_output_usage(session_key, response.chars().count())
             .await;
+
+        self.record_route_feedback(
+            selected_model.as_deref(),
+            true,
+            started.elapsed().as_millis() as u64,
+            incoming.text.len() + response.len(),
+        );
 
         Ok(())
     }
@@ -1204,6 +1229,12 @@ impl Gateway {
         isolated_context: bool,
     ) -> Result<bool, GatewayError> {
         let trimmed = prompt.trim();
+        let plan = self
+            .evolution_engine
+            .lock()
+            .ok()
+            .map(|engine| engine.recommend_long_task_plan(trimmed))
+            .unwrap_or_default();
         if trimmed.eq_ignore_ascii_case("list") {
             let tasks = self.background_tasks.list_tasks();
             let summary = if tasks.is_empty() {
@@ -1255,13 +1286,23 @@ impl Gateway {
             .map_err(GatewayError::Platform)?;
         let ack = if isolated_context {
             format!(
-                "🛰 BTW task queued: {}\nUse /background status {} to check progress.",
-                task_id, task_id
+                "🛰 BTW task queued: {}\nPlan: parallel={} split={} checkpoint={} retry_boost={}\nUse /background status {} to check progress.",
+                task_id,
+                plan.parallelism,
+                plan.split_subtasks,
+                plan.checkpoint_interval_turns,
+                plan.retry_boost,
+                task_id
             )
         } else {
             format!(
-                "🧵 Background task queued: {}\nUse /background status {} to check progress.",
-                task_id, task_id
+                "🧵 Background task queued: {}\nPlan: parallel={} split={} checkpoint={} retry_boost={}\nUse /background status {} to check progress.",
+                task_id,
+                plan.parallelism,
+                plan.split_subtasks,
+                plan.checkpoint_interval_turns,
+                plan.retry_boost,
+                task_id
             )
         };
         self.send_message(&incoming.platform, &incoming.chat_id, &ack, None)
@@ -1282,9 +1323,25 @@ impl Gateway {
         let manager = self.background_tasks.clone();
         let task_id_for_task = task_id.clone();
         let original_messages = if isolated_context {
-            vec![Message::user(trimmed)]
+            vec![
+                Message::system(format!(
+                    "[execution_plan]\nparallelism={}\nsplit_subtasks={}\ncheckpoint_interval_turns={}\nretry_boost={}",
+                    plan.parallelism,
+                    plan.split_subtasks,
+                    plan.checkpoint_interval_turns,
+                    plan.retry_boost
+                )),
+                Message::user(trimmed),
+            ]
         } else {
             let mut m = self.session_manager.get_messages(session_key).await;
+            m.push(Message::system(format!(
+                "[execution_plan]\nparallelism={}\nsplit_subtasks={}\ncheckpoint_interval_turns={}\nretry_boost={}",
+                plan.parallelism,
+                plan.split_subtasks,
+                plan.checkpoint_interval_turns,
+                plan.retry_boost
+            )));
             m.push(Message::user(trimmed));
             m
         };
@@ -1457,6 +1514,11 @@ impl Gateway {
 
     /// Resolve model routing candidate for a message.
     pub fn load_smart_model_routing(&self, text: &str) -> Option<String> {
+        if let Ok(engine) = self.evolution_engine.lock() {
+            if let Some(model) = engine.recommend_model_for_text(text) {
+                return Some(model);
+            }
+        }
         if text.len() > 2000 || text.contains("analyze") || text.contains("refactor") {
             Some("openai:gpt-4o".to_string())
         } else if text.contains("quick") || text.contains("summary") {
@@ -1503,6 +1565,45 @@ impl Gateway {
             on_output(line);
         }
         Ok(())
+    }
+
+    async fn maybe_apply_smart_model_routing(&self, session_key: &str, text: &str) {
+        let has_model = self
+            .runtime_state
+            .read()
+            .await
+            .get(session_key)
+            .and_then(|s| s.model.clone())
+            .is_some();
+        if has_model {
+            return;
+        }
+        if let Some(model) = self.load_smart_model_routing(text) {
+            let mut states = self.runtime_state.write().await;
+            states.entry(session_key.to_string()).or_default().model = Some(model);
+        }
+    }
+
+    fn record_route_feedback(
+        &self,
+        model: Option<&str>,
+        success: bool,
+        latency_ms: u64,
+        payload_chars: usize,
+    ) {
+        let Some(model_name) = model else {
+            return;
+        };
+        let estimated_cost = (payload_chars as f64 / 4.0) * 2.0e-6;
+        let outcome = OutcomeSignals {
+            success,
+            latency_ms,
+            cost_usd: estimated_cost,
+            errors: if success { 0 } else { 1 },
+        };
+        if let Ok(mut engine) = self.evolution_engine.lock() {
+            engine.record_model_outcome(model_name, &outcome);
+        }
     }
 }
 

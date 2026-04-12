@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
+use hermes_intelligence::AdaptivePolicyEngine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::task::JoinSet;
@@ -434,6 +435,8 @@ pub struct AgentLoop {
     pub callbacks: Arc<AgentCallbacks>,
     /// Sub-agent delegation depth (0 = root).
     pub delegate_depth: u32,
+    /// Adaptive self-evolution policy engine.
+    pub evolution_engine: std::sync::Mutex<AdaptivePolicyEngine>,
 }
 
 impl AgentLoop {
@@ -452,6 +455,7 @@ impl AgentLoop {
             plugin_manager: None,
             callbacks: Arc::new(AgentCallbacks::default()),
             delegate_depth: 0,
+            evolution_engine: std::sync::Mutex::new(AdaptivePolicyEngine::default()),
         }
     }
 
@@ -471,6 +475,7 @@ impl AgentLoop {
             plugin_manager: None,
             callbacks: Arc::new(AgentCallbacks::default()),
             delegate_depth: 0,
+            evolution_engine: std::sync::Mutex::new(AdaptivePolicyEngine::default()),
         }
     }
 
@@ -563,7 +568,7 @@ impl AgentLoop {
     }
 
     /// Build the full system prompt including personality, memory, and plugin context.
-    fn build_system_prompt(&self) -> Option<String> {
+    fn build_system_prompt(&self, task_hint: &str) -> Option<String> {
         let base = self.config.system_prompt.as_deref()?;
         let mut parts = vec![base.to_string()];
 
@@ -576,7 +581,12 @@ impl AgentLoop {
             parts.push(mem_block);
         }
 
-        Some(parts.join("\n\n"))
+        let merged = parts.join("\n\n");
+        if let Ok(engine) = self.evolution_engine.lock() {
+            Some(engine.optimize_prompt_template(&merged, task_hint))
+        } else {
+            Some(merged)
+        }
     }
 
     // -- Retry-aware LLM call ---------------------------------------------
@@ -604,8 +614,16 @@ impl AgentLoop {
     ) -> Result<hermes_core::LlmResponse, AgentError> {
         let model = model_override.unwrap_or(self.config.model.as_str());
         let retry = &self.config.retry;
+        let is_long_task = ctx.total_chars() > 8_000 || ctx.get_messages().len() > 28;
+        let (effective_max_retries, effective_base_delay_ms) = if let Ok(engine) =
+            self.evolution_engine.lock()
+        {
+            engine.recommend_retry(retry.max_retries, retry.base_delay_ms, is_long_task)
+        } else {
+            (retry.max_retries, retry.base_delay_ms)
+        };
 
-        for attempt in 0..=retry.max_retries {
+        for attempt in 0..=effective_max_retries {
             let result = self
                 .llm_provider
                 .chat_completion(
@@ -638,7 +656,7 @@ impl AgentLoop {
                             return Err(AgentError::LlmApi(err_str));
                         }
                         ErrorClass::RateLimit | ErrorClass::Retryable => {
-                            if attempt >= retry.max_retries {
+                            if attempt >= effective_max_retries {
                                 if let Some(ref fallback) = retry.fallback_model {
                                     if model != fallback.as_str() {
                                         tracing::info!(
@@ -654,12 +672,12 @@ impl AgentLoop {
                                 return Err(AgentError::LlmApi(err_str));
                             }
                             let delay =
-                                jittered_backoff(attempt, retry.base_delay_ms, retry.max_delay_ms);
+                                jittered_backoff(attempt, effective_base_delay_ms, retry.max_delay_ms);
                             tracing::info!(
                                 "Retrying in {}ms (attempt {}/{})",
                                 delay.as_millis(),
                                 attempt + 1,
-                                retry.max_retries
+                                effective_max_retries
                             );
                             sleep(delay).await;
                         }
@@ -684,9 +702,15 @@ impl AgentLoop {
         let mut ctx = ContextManager::default_budget();
         let mut tool_errors: Vec<hermes_core::ToolErrorRecord> = Vec::new();
         let session_id = self.config.session_id.as_deref().unwrap_or("");
+        let task_hint = messages
+            .iter()
+            .rev()
+            .find(|m| matches!(m.role, hermes_core::MessageRole::User))
+            .and_then(|m| m.content.clone())
+            .unwrap_or_default();
 
         // Build and inject system prompt
-        if let Some(system_content) = self.build_system_prompt() {
+        if let Some(system_content) = self.build_system_prompt(&task_hint) {
             ctx.add_message(Message::system(&system_content));
         }
 
@@ -704,7 +728,12 @@ impl AgentLoop {
             .last()
             .and_then(|m| m.content.clone())
             .unwrap_or_default();
-        let mem_ctx = self.memory_prefetch(&first_user, session_id);
+        let mem_ctx_raw = self.memory_prefetch(&first_user, session_id);
+        let mem_ctx = if let Ok(engine) = self.evolution_engine.lock() {
+            engine.optimize_memory_context(&mem_ctx_raw)
+        } else {
+            mem_ctx_raw
+        };
         if !mem_ctx.is_empty() {
             ctx.add_message(Message::system(&mem_ctx));
         }
@@ -913,6 +942,9 @@ impl AgentLoop {
 
             // --- Post-tool hook ---
             for (tc, res) in tool_calls.iter().zip(results.iter()) {
+                if let Ok(mut engine) = self.evolution_engine.lock() {
+                    engine.record_tool_outcome(&tc.function.name, !res.is_error);
+                }
                 let tc_ctx = serde_json::json!({
                     "tool": &tc.function.name,
                     "is_error": res.is_error,
@@ -968,8 +1000,14 @@ impl AgentLoop {
         let mut ctx = ContextManager::default_budget();
         let mut tool_errors: Vec<hermes_core::ToolErrorRecord> = Vec::new();
         let session_id = self.config.session_id.as_deref().unwrap_or("");
+        let task_hint = messages
+            .iter()
+            .rev()
+            .find(|m| matches!(m.role, hermes_core::MessageRole::User))
+            .and_then(|m| m.content.clone())
+            .unwrap_or_default();
 
-        if let Some(system_content) = self.build_system_prompt() {
+        if let Some(system_content) = self.build_system_prompt(&task_hint) {
             ctx.add_message(Message::system(&system_content));
         }
 
@@ -986,7 +1024,12 @@ impl AgentLoop {
             .last()
             .and_then(|m| m.content.clone())
             .unwrap_or_default();
-        let mem_ctx = self.memory_prefetch(&first_user, session_id);
+        let mem_ctx_raw = self.memory_prefetch(&first_user, session_id);
+        let mem_ctx = if let Ok(engine) = self.evolution_engine.lock() {
+            engine.optimize_memory_context(&mem_ctx_raw)
+        } else {
+            mem_ctx_raw
+        };
         if !mem_ctx.is_empty() {
             ctx.add_message(Message::system(&mem_ctx));
         }
@@ -1239,6 +1282,9 @@ impl AgentLoop {
 
             // Post-tool hooks + callbacks
             for (tc, res) in tool_calls.iter().zip(results.iter()) {
+                if let Ok(mut engine) = self.evolution_engine.lock() {
+                    engine.record_tool_outcome(&tc.function.name, !res.is_error);
+                }
                 let tc_ctx = serde_json::json!({"tool": &tc.function.name, "is_error": res.is_error, "turn": total_turns});
                 self.invoke_hook(HookType::PostToolCall, &tc_ctx);
                 if let Some(ref cb) = self.callbacks.on_tool_complete {
