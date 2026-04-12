@@ -20,10 +20,6 @@ jobs:
             artifact_name: hermes-linux-aarch64
           - target: x86_64-unknown-linux-musl
             artifact_name: hermes-linux-musl-x86_64
-          - target: x86_64-apple-darwin
-            artifact_name: hermes-macos-x86_64
-          - target: aarch64-apple-darwin
-            artifact_name: hermes-macos-aarch64
           - target: x86_64-pc-windows-gnu
             artifact_name: hermes-windows-x86_64
     steps:
