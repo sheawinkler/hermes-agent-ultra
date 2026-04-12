@@ -67,8 +67,9 @@ pub struct PlatformConfig {
     #[serde(default)]
     pub admin_users: Vec<String>,
 
-    /// Extra platform-specific configuration.
-    #[serde(default)]
+    /// Keys not declared above (Python Hermes platform blocks often use many
+    /// adapter-specific names); they deserialize here so YAML stays compatible.
+    #[serde(default, flatten)]
     pub extra: HashMap<String, serde_json::Value>,
 }
 

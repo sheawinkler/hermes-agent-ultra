@@ -187,6 +187,182 @@ cargo build --release
 cargo run --release -p hermes-cli
 ```
 
+## Telegram Gateway 最小可用配置
+
+`gateway start` 现在已经支持 Telegram 端到端链路（拉消息 -> `route_message` -> Agent -> 回消息）。
+
+1) 在 `~/.hermes/config.yaml`（或你的 `--config-dir`）加入：
+
+```yaml
+model: "openai:gpt-4o-mini"
+
+platforms:
+  telegram:
+    enabled: true
+    token: "${TELEGRAM_BOT_TOKEN}"
+    unauthorized_dm_behavior: "pair"
+    extra:
+      polling: true
+      poll_timeout: 30
+      parse_markdown: false
+      parse_html: false
+
+llm_providers:
+  openai:
+    api_key: "${OPENAI_API_KEY}"
+```
+
+2) 设置环境变量：
+
+```bash
+export TELEGRAM_BOT_TOKEN="123456:your_bot_token"
+export OPENAI_API_KEY="sk-..."
+```
+
+3) 启动网关：
+
+```bash
+cargo run --release -p hermes-cli -- gateway start
+```
+
+说明：
+- `poll_timeout` 建议 `15-30` 秒，轮询更稳。
+- 如果你在群里用机器人，`chat_id < 0` 会被当作群消息；私聊会按 DM 授权策略处理。
+- 目前 CLI 侧已接好 Telegram 闭环；其他平台可按同样模式继续接入。
+
+### 生产配置模板（推荐）
+
+如果你准备长期跑在 VPS 上，可以用下面这份偏生产的模板：
+
+```yaml
+model: "openrouter:openai/gpt-4o-mini"
+max_turns: 20
+
+session:
+  reset_policy:
+    idle:
+      timeout_minutes: 180
+  group_sessions_per_user: true
+
+streaming:
+  enabled: true
+
+platforms:
+  telegram:
+    enabled: true
+    token: "${TELEGRAM_BOT_TOKEN}"
+    unauthorized_dm_behavior: "ignore"
+    allowed_users:
+      - "123456789"
+      - "987654321"
+    admin_users:
+      - "123456789"
+    extra:
+      polling: true
+      poll_timeout: 20
+      parse_markdown: false
+      parse_html: false
+
+llm_providers:
+  openrouter:
+    api_key: "${OPENROUTER_API_KEY}"
+    base_url: "https://openrouter.ai/api/v1"
+
+approval:
+  mode: "default"
+  whitelist_commands:
+    - "ls"
+    - "pwd"
+    - "git status"
+```
+
+生产实践建议：
+- 先用 `unauthorized_dm_behavior: ignore`，再逐步放开给 `allowed_users`。
+- `group_sessions_per_user: true` 可以避免群聊多人互相污染上下文。
+- `max_turns` 建议控制在 `15-30`，能显著降低失控和成本风险。
+- OpenRouter 模型名建议写全（例如 `openai/gpt-4o-mini`），便于后续路由排障。
+
+### 低成本模板（省 Token）
+
+适用：个人日常问答、轻量自动化、希望控制账单。
+
+```yaml
+model: "openrouter:openai/gpt-4o-mini"
+max_turns: 12
+
+streaming:
+  enabled: false
+
+session:
+  reset_policy:
+    idle:
+      timeout_minutes: 60
+
+platforms:
+  telegram:
+    enabled: true
+    token: "${TELEGRAM_BOT_TOKEN}"
+    unauthorized_dm_behavior: "ignore"
+    allowed_users:
+      - "123456789"
+    admin_users:
+      - "123456789"
+    extra:
+      polling: true
+      poll_timeout: 20
+      parse_markdown: false
+      parse_html: false
+
+llm_providers:
+  openrouter:
+    api_key: "${OPENROUTER_API_KEY}"
+    base_url: "https://openrouter.ai/api/v1"
+```
+
+### 高质量模板（效果优先）
+
+适用：复杂代码任务、长上下文分析、多轮推理场景。
+
+```yaml
+model: "openrouter:openai/gpt-4o"
+max_turns: 30
+system_prompt: "你是一个严谨的工程助手，先理解上下文再执行。"
+
+streaming:
+  enabled: true
+
+session:
+  reset_policy:
+    idle:
+      timeout_minutes: 240
+  group_sessions_per_user: true
+
+platforms:
+  telegram:
+    enabled: true
+    token: "${TELEGRAM_BOT_TOKEN}"
+    unauthorized_dm_behavior: "pair"
+    allowed_users:
+      - "123456789"
+      - "987654321"
+    admin_users:
+      - "123456789"
+    extra:
+      polling: true
+      poll_timeout: 30
+      parse_markdown: false
+      parse_html: false
+
+llm_providers:
+  openrouter:
+    api_key: "${OPENROUTER_API_KEY}"
+    base_url: "https://openrouter.ai/api/v1"
+```
+
+快速选择建议：
+- 成本敏感：先用“低成本模板”，观察 1-2 天后再调高 `max_turns`。
+- 质量优先：用“高质量模板”，并保留 `group_sessions_per_user: true`。
+
 ## 测试
 
 ```bash

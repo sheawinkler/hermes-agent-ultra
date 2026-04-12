@@ -44,6 +44,22 @@ pub enum GatewayCommandResult {
     Retry,
     /// Undo the last exchange.
     Undo,
+    /// Approve a user for DM access.
+    ApproveUser { user_id: String },
+    /// Deny and revoke a user from DM access.
+    DenyUser { user_id: String },
+    /// Reload MCP server registry/state.
+    ReloadMcp,
+    /// Switch active provider.
+    SwitchProvider { provider: String, reply: String },
+    /// Switch active profile.
+    SwitchProfile { profile: String, reply: String },
+    /// Show or switch current branch.
+    SwitchBranch { branch: Option<String> },
+    /// Rollback conversation messages.
+    Rollback { steps: usize },
+    /// Check for updates.
+    CheckUpdate,
     /// Unknown command.
     Unknown(String),
     /// No-op (command handled internally).
@@ -78,6 +94,14 @@ pub fn all_commands() -> Vec<CommandInfo> {
         CommandInfo { name: "/yolo", aliases: &[], description: "Toggle auto-approve mode", usage: "/yolo" },
         CommandInfo { name: "/sethome", aliases: &[], description: "Set the working directory", usage: "/sethome <path>" },
         CommandInfo { name: "/status", aliases: &[], description: "Show current status", usage: "/status" },
+        CommandInfo { name: "/approve", aliases: &[], description: "Authorize a user id for DM access (admin only)", usage: "/approve <user_id>" },
+        CommandInfo { name: "/deny", aliases: &[], description: "Revoke a user id from DM access (admin only)", usage: "/deny <user_id>" },
+        CommandInfo { name: "/reload_mcp", aliases: &["/mcp_reload"], description: "Reload MCP tool/server registrations", usage: "/reload_mcp" },
+        CommandInfo { name: "/provider", aliases: &[], description: "Show or switch provider", usage: "/provider [name]" },
+        CommandInfo { name: "/profile", aliases: &[], description: "Show or switch profile", usage: "/profile [name]" },
+        CommandInfo { name: "/branch", aliases: &[], description: "Show or switch branch context", usage: "/branch [name]" },
+        CommandInfo { name: "/rollback", aliases: &[], description: "Rollback N latest messages (default 2)", usage: "/rollback [steps]" },
+        CommandInfo { name: "/update", aliases: &[], description: "Check for updates", usage: "/update" },
         CommandInfo { name: "/help", aliases: &["/commands"], description: "Show this help message", usage: "/help" },
     ]
 }
@@ -118,6 +142,24 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
         }
         "/retry" => GatewayCommandResult::Retry,
         "/undo" => GatewayCommandResult::Undo,
+        "/approve" => {
+            if args.is_empty() {
+                GatewayCommandResult::Reply("Usage: /approve <user_id>".to_string())
+            } else {
+                GatewayCommandResult::ApproveUser {
+                    user_id: args.to_string(),
+                }
+            }
+        }
+        "/deny" => {
+            if args.is_empty() {
+                GatewayCommandResult::Reply("Usage: /deny <user_id>".to_string())
+            } else {
+                GatewayCommandResult::DenyUser {
+                    user_id: args.to_string(),
+                }
+            }
+        }
         "/compress" => GatewayCommandResult::CompressContext("📦 Context compressed.".to_string()),
         "/usage" | "/cost" => GatewayCommandResult::ShowUsage("Usage statistics will be shown.".to_string()),
         "/stop" | "/cancel" => GatewayCommandResult::StopAgent("⏹ Agent stopped.".to_string()),
@@ -150,6 +192,45 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
             }
         }
         "/status" => GatewayCommandResult::ShowStatus("Status information will be shown.".to_string()),
+        "/reload_mcp" | "/mcp_reload" => GatewayCommandResult::ReloadMcp,
+        "/provider" => {
+            if args.is_empty() {
+                GatewayCommandResult::Reply("Current provider shown in status. Use /provider <name> to switch.".to_string())
+            } else {
+                GatewayCommandResult::SwitchProvider {
+                    provider: args.to_string(),
+                    reply: format!("🔌 Provider switched to: {}", args),
+                }
+            }
+        }
+        "/profile" => {
+            if args.is_empty() {
+                GatewayCommandResult::Reply("Current profile shown in status. Use /profile <name> to switch.".to_string())
+            } else {
+                GatewayCommandResult::SwitchProfile {
+                    profile: args.to_string(),
+                    reply: format!("👤 Profile switched to: {}", args),
+                }
+            }
+        }
+        "/branch" => {
+            if args.is_empty() {
+                GatewayCommandResult::SwitchBranch { branch: None }
+            } else {
+                GatewayCommandResult::SwitchBranch {
+                    branch: Some(args.to_string()),
+                }
+            }
+        }
+        "/rollback" => {
+            if args.is_empty() {
+                GatewayCommandResult::Rollback { steps: 2 }
+            } else {
+                let parsed = args.parse::<usize>().unwrap_or(2).max(1);
+                GatewayCommandResult::Rollback { steps: parsed }
+            }
+        }
+        "/update" => GatewayCommandResult::CheckUpdate,
         "/help" | "/commands" => {
             let mut help = String::from("📖 **Available Commands:**\n\n");
             for cmd_info in all_commands() {
@@ -238,6 +319,34 @@ mod tests {
         match handle_command("/cancel") {
             GatewayCommandResult::StopAgent(_) => {}
             other => panic!("Expected StopAgent for /cancel, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_admin_commands() {
+        match handle_command("/approve alice") {
+            GatewayCommandResult::ApproveUser { user_id } => assert_eq!(user_id, "alice"),
+            other => panic!("Expected ApproveUser, got {:?}", other),
+        }
+        match handle_command("/deny bob") {
+            GatewayCommandResult::DenyUser { user_id } => assert_eq!(user_id, "bob"),
+            other => panic!("Expected DenyUser, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_profile_provider_and_rollback_commands() {
+        match handle_command("/provider openai") {
+            GatewayCommandResult::SwitchProvider { provider, .. } => assert_eq!(provider, "openai"),
+            other => panic!("Expected SwitchProvider, got {:?}", other),
+        }
+        match handle_command("/profile prod") {
+            GatewayCommandResult::SwitchProfile { profile, .. } => assert_eq!(profile, "prod"),
+            other => panic!("Expected SwitchProfile, got {:?}", other),
+        }
+        match handle_command("/rollback 5") {
+            GatewayCommandResult::Rollback { steps } => assert_eq!(steps, 5),
+            other => panic!("Expected Rollback, got {:?}", other),
         }
     }
 }

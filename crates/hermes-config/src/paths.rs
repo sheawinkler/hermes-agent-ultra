@@ -1,6 +1,6 @@
 //! Path management for the hermes home directory and its files.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
 // hermes_home
@@ -33,6 +33,17 @@ fn dirs_home() -> PathBuf {
     }
 }
 
+/// Hermes state root directory (same rule as CLI `--config-dir` / gateway data).
+///
+/// If `config_dir_override` is set, that path is used; otherwise [`hermes_home`].
+/// Use this for `cron/`, `webhooks.json`, and other machine-local state so CLI
+/// and gateway stay aligned.
+pub fn state_dir(config_dir_override: Option<&Path>) -> PathBuf {
+    config_dir_override
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(hermes_home)
+}
+
 // ---------------------------------------------------------------------------
 // Derived paths
 // ---------------------------------------------------------------------------
@@ -50,6 +61,16 @@ pub fn cli_config_path() -> PathBuf {
 /// `$hermes_home/gateway.json`
 pub fn gateway_json_path() -> PathBuf {
     hermes_home().join("gateway.json")
+}
+
+/// PID file written by `hermes gateway start` (same directory as `config.yaml`).
+pub fn gateway_pid_path() -> PathBuf {
+    hermes_home().join("gateway.pid")
+}
+
+/// Gateway PID file under an explicit Hermes home directory (e.g. `HERMES_HOME` or `-C`).
+pub fn gateway_pid_path_in(home: impl AsRef<std::path::Path>) -> PathBuf {
+    home.as_ref().join("gateway.pid")
 }
 
 /// `$hermes_home/MEMORY.md`
@@ -101,9 +122,11 @@ mod tests {
     #[test]
     fn derived_paths_are_consistent() {
         let home = hermes_home();
+        assert_eq!(state_dir(None), home);
         assert_eq!(config_path(), home.join("config.yaml"));
         assert_eq!(cli_config_path(), home.join("cli-config.yaml"));
         assert_eq!(gateway_json_path(), home.join("gateway.json"));
+        assert_eq!(gateway_pid_path(), home.join("gateway.pid"));
         assert_eq!(memory_path(), home.join("MEMORY.md"));
         assert_eq!(user_path(), home.join("USER.md"));
         assert_eq!(skills_dir(), home.join("skills"));

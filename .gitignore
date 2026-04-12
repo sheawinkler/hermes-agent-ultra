@@ -1,4 +1,6 @@
 /target
+# 第三方参考仓库通常放在上级目录 ~/workspace/research/GEO-AI
+GEO-AI/
 **/*.rs.bk
 *.pdb
 .DS_Store

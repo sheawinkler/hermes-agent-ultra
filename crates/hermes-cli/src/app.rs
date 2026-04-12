@@ -375,7 +375,7 @@ mod tests {
 // Helper: build AgentConfig from GatewayConfig
 // ---------------------------------------------------------------------------
 
-fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
+pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
     AgentConfig {
         max_turns: config.max_turns,
         budget: config.budget.clone(),
@@ -395,7 +395,7 @@ fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
 // Helper: bridge hermes_tools::ToolRegistry → agent_loop::ToolRegistry
 // ---------------------------------------------------------------------------
 
-fn bridge_tool_registry(tools: &ToolRegistry) -> AgentToolRegistry {
+pub fn bridge_tool_registry(tools: &ToolRegistry) -> AgentToolRegistry {
     let mut agent_registry = AgentToolRegistry::new();
     for schema in tools.get_definitions() {
         let name = schema.name.clone();
@@ -419,7 +419,8 @@ fn parse_model_string(model: &str) -> (&str, &str) {
     model.split_once(':').unwrap_or(("openai", model))
 }
 
-fn env_api_key(provider: &str) -> Option<String> {
+/// Resolve API key / token for a named LLM provider from well-known environment variables.
+pub fn provider_api_key_from_env(provider: &str) -> Option<String> {
     let var = match provider {
         "openai" => "OPENAI_API_KEY",
         "anthropic" => "ANTHROPIC_API_KEY",
@@ -434,14 +435,14 @@ fn env_api_key(provider: &str) -> Option<String> {
     std::env::var(var).ok().filter(|s| !s.is_empty())
 }
 
-fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvider> {
+pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvider> {
     let (provider_name, model_name) = parse_model_string(model);
 
     let provider_config = config.llm_providers.get(provider_name);
 
     let api_key = provider_config
         .and_then(|c| c.api_key.clone())
-        .or_else(|| env_api_key(provider_name));
+        .or_else(|| provider_api_key_from_env(provider_name));
 
     let api_key = match api_key {
         Some(k) => k,
