@@ -256,8 +256,9 @@ pub struct PolicyVersion {
 impl PolicyVersion {
     pub fn from_engine(engine: AdaptivePolicyEngine, rollout_ratio: f64) -> Self {
         let now = now_epoch_secs();
+        let now_ms = now_epoch_millis();
         Self {
-            version: format!("policy-{}", now),
+            version: format!("policy-{}-{}", now, now_ms),
             created_at_epoch_secs: now,
             rollout_ratio: rollout_ratio.clamp(0.0, 1.0),
             engine,
@@ -269,8 +270,14 @@ impl PolicyVersion {
 pub struct PolicyStore {
     pub active: PolicyVersion,
     pub stable: PolicyVersion,
+    #[serde(default)]
+    pub candidate: Option<PolicyVersion>,
+    #[serde(default)]
     pub history: Vec<PolicyVersion>,
+    #[serde(default)]
     pub hard_gate: HardGateConfig,
+    #[serde(default)]
+    pub audit_log: Vec<PolicyAuditEvent>,
 }
 
 impl PolicyStore {
@@ -279,8 +286,10 @@ impl PolicyStore {
         Self {
             active: initial.clone(),
             stable: initial,
+            candidate: None,
             history: Vec::new(),
             hard_gate: HardGateConfig::default(),
+            audit_log: Vec::new(),
         }
     }
 
@@ -300,11 +309,13 @@ impl PolicyStore {
         let previous = self.active.clone();
         self.history.push(previous);
         self.active = PolicyVersion::from_engine(candidate, rollout_ratio);
+        self.candidate = Some(self.active.clone());
         self.active.version.clone()
     }
 
     pub fn mark_active_stable(&mut self) {
         self.stable = self.active.clone();
+        self.candidate = None;
     }
 
     pub fn evaluate_hard_gate(&self) -> Option<String> {
@@ -355,7 +366,18 @@ impl PolicyStore {
         let reason = self.evaluate_hard_gate()?;
         if self.active.version != self.stable.version {
             self.history.push(self.active.clone());
+            self.audit_log.push(PolicyAuditEvent {
+                at_epoch_secs: now_epoch_secs(),
+                actor: "system".to_string(),
+                action: "rollback".to_string(),
+                reason: reason.clone(),
+                from_version: self.active.version.clone(),
+                to_version: self.stable.version.clone(),
+                rollout_ratio: self.active.rollout_ratio,
+                delta_summary: "hard_gate_violation".to_string(),
+            });
             self.active = self.stable.clone();
+            self.candidate = None;
             return Some(format!(
                 "hard gate triggered ({reason}), rolled back to {}",
                 self.active.version
@@ -376,12 +398,151 @@ impl PolicyStore {
         let raw = fs::read_to_string(path).map_err(|e| e.to_string())?;
         serde_json::from_str(&raw).map_err(|e| e.to_string())
     }
+
+    pub fn save_audit_log(&self, path: &Path) -> Result<(), String> {
+        let json = serde_json::to_string_pretty(&self.audit_log).map_err(|e| e.to_string())?;
+        fs::write(path, json).map_err(|e| e.to_string())
+    }
+
+    pub fn apply_update<U: PolicyUpdater>(
+        &mut self,
+        updater: &U,
+        req: PolicyUpdateRequest,
+    ) -> Result<String, String> {
+        let base = self.active.engine.clone();
+        let next = updater.derive_candidate(&base)?;
+        let from_version = self.active.version.clone();
+        let new_version = self.promote_candidate(next, req.rollout_ratio);
+        self.audit_log.push(PolicyAuditEvent {
+            at_epoch_secs: now_epoch_secs(),
+            actor: req.actor,
+            action: "promote_candidate".to_string(),
+            reason: req.reason,
+            from_version,
+            to_version: new_version.clone(),
+            rollout_ratio: req.rollout_ratio,
+            delta_summary: updater.name().to_string(),
+        });
+        Ok(new_version)
+    }
+
+    pub fn promote_active_to_stable(&mut self, actor: &str, reason: &str) -> Option<String> {
+        if self.active.version == self.stable.version {
+            return None;
+        }
+        let from = self.stable.version.clone();
+        let to = self.active.version.clone();
+        self.mark_active_stable();
+        self.audit_log.push(PolicyAuditEvent {
+            at_epoch_secs: now_epoch_secs(),
+            actor: actor.to_string(),
+            action: "promote_stable".to_string(),
+            reason: reason.to_string(),
+            from_version: from,
+            to_version: to.clone(),
+            rollout_ratio: 1.0,
+            delta_summary: "candidate_graduated".to_string(),
+        });
+        Some(to)
+    }
+
+    pub fn auto_promote_if_healthy(&mut self, min_attempts: u64) -> Option<String> {
+        if self.active.version == self.stable.version {
+            return None;
+        }
+        if self.evaluate_hard_gate().is_some() {
+            return None;
+        }
+        let attempts = self
+            .active
+            .engine
+            .model_stats
+            .values()
+            .map(|s| s.attempts)
+            .sum::<u64>();
+        if attempts < min_attempts {
+            return None;
+        }
+        self.promote_active_to_stable("system", "healthy_canary_threshold_reached")
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PolicyAuditEvent {
+    pub at_epoch_secs: u64,
+    pub actor: String,
+    pub action: String,
+    pub reason: String,
+    pub from_version: String,
+    pub to_version: String,
+    pub rollout_ratio: f64,
+    pub delta_summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PolicyUpdateRequest {
+    pub actor: String,
+    pub reason: String,
+    pub rollout_ratio: f64,
+}
+
+pub trait PolicyUpdater {
+    fn name(&self) -> &'static str;
+    fn derive_candidate(
+        &self,
+        current: &AdaptivePolicyEngine,
+    ) -> Result<AdaptivePolicyEngine, String>;
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OutcomeDrivenUpdater {
+    pub exploration_delta: f64,
+    pub max_prompt_prefix_delta: i32,
+    pub max_memory_chars_delta: i32,
+}
+
+impl Default for OutcomeDrivenUpdater {
+    fn default() -> Self {
+        Self {
+            exploration_delta: 0.02,
+            max_prompt_prefix_delta: 64,
+            max_memory_chars_delta: 256,
+        }
+    }
+}
+
+impl PolicyUpdater for OutcomeDrivenUpdater {
+    fn name(&self) -> &'static str {
+        "outcome_driven_updater"
+    }
+
+    fn derive_candidate(
+        &self,
+        current: &AdaptivePolicyEngine,
+    ) -> Result<AdaptivePolicyEngine, String> {
+        let mut next = current.clone();
+        next.config.exploration_ratio =
+            (next.config.exploration_ratio + self.exploration_delta).clamp(0.01, 0.45);
+        let next_prefix =
+            next.config.max_prompt_prefix_chars as i64 + self.max_prompt_prefix_delta as i64;
+        let next_memory = next.config.max_memory_chars as i64 + self.max_memory_chars_delta as i64;
+        next.config.max_prompt_prefix_chars = next_prefix.clamp(128, 4096) as usize;
+        next.config.max_memory_chars = next_memory.clamp(512, 24_000) as usize;
+        Ok(next)
+    }
 }
 
 fn now_epoch_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn now_epoch_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
         .unwrap_or(0)
 }
 
@@ -463,6 +624,45 @@ mod tests {
         store.promote_candidate(candidate, 0.2);
         let msg = store.rollback_if_needed();
         assert!(msg.is_some());
+        assert_eq!(store.active.version, store.stable.version);
+    }
+
+    #[test]
+    fn test_apply_update_creates_candidate_and_audit_event() {
+        let mut store = PolicyStore::new(AdaptivePolicyEngine::default());
+        let req = PolicyUpdateRequest {
+            actor: "trainer".to_string(),
+            reason: "weekly_online_update".to_string(),
+            rollout_ratio: 0.15,
+        };
+        let version = store
+            .apply_update(&OutcomeDrivenUpdater::default(), req)
+            .expect("update should succeed");
+        assert_eq!(store.active.version, version);
+        assert!(store.candidate.is_some());
+        assert!(!store.audit_log.is_empty());
+        assert_eq!(
+            store.audit_log.last().map(|e| e.action.as_str()),
+            Some("promote_candidate")
+        );
+    }
+
+    #[test]
+    fn test_auto_promote_if_healthy() {
+        let mut store = PolicyStore::new(AdaptivePolicyEngine::default());
+        let mut next = store.active.engine.clone();
+        next.model_stats.insert(
+            "openai:gpt-4o-mini".to_string(),
+            ModelStats {
+                attempts: 80,
+                successes: 79,
+                total_latency_ms: 20_000,
+                total_cost_usd: 0.01,
+            },
+        );
+        store.promote_candidate(next, 0.2);
+        let promoted = store.auto_promote_if_healthy(50);
+        assert!(promoted.is_some());
         assert_eq!(store.active.version, store.stable.version);
     }
 }

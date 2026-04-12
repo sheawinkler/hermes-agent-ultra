@@ -2,162 +2,125 @@
 
 **[English](./README.md)** | **[中文](./README_ZH.md)** | **[日本語](./README_JA.md)** | **[한국어](./README_KO.md)**
 
-[Hermes Agent](https://github.com/NousResearch/hermes-agent) の Rust 書き直し — [Nous Research](https://nousresearch.com) による自己進化型 AI エージェント。
+[Hermes Agent](https://github.com/NousResearch/hermes-agent) のプロダクショングレード Rust 書き直し — [Nous Research](https://nousresearch.com) による自己進化型 AI エージェント。
+
+**84,000+ 行の Rust コード · 16 クレート · 641 テスト · 17 プラットフォームアダプタ · 30 ツールバックエンド · 8 メモリプラグイン · 6 クロスプラットフォームリリースターゲット**
 
 ---
 
-## なぜ Rust なのか？本当の価値
+## ハイライト
 
-### Python AI エージェントの限界
+### シングルバイナリ、依存関係ゼロ
 
-今日の Python AI エージェントには公然の秘密がある：すべて**シングルユーザーのおもちゃ**だということだ。$5 の VPS で動かし、Telegram + Discord + Slack を接続すれば、10 の同時会話で崩壊する。Python の GIL、asyncio の協調スケジューリング、あらゆる場所の `Dict[str, Any]` は以下を意味する：
-
-- **一つの会話が詰まると全部詰まる。** あるセッションの遅いツール呼び出しが、全員のイベントループをフリーズさせる。
-- **メモリ膨張。** 各会話は辞書の辞書を持ち、データの実際の形状を知る方法がない。50 セッションのゲートウェイは簡単に 2GB+ の RAM を消費する。
-- **サイレント破損。** キー名のタイプミス（`"message"` の代わりに `"mesage"`）が全レイヤーを検出されずに通過し、LLM API に到達してゴミを返す。
-- **デプロイの摩擦。** 40+ の依存関係を持つ `pip install`、バージョン競合、プラットフォーム固有の wheel（ARM Linux で `faster-whisper` をインストールしてみてほしい）、500MB の virtualenv。
-
-これらはバグではない。言語の天井だ。
-
-### Rust が実際に変えること
-
-**1. シングルバイナリ、依存関係ゼロ**
+~16MB のバイナリ一つ。Python、pip、virtualenv、Docker 不要。Raspberry Pi、$3/月 VPS、エアギャップサーバー、Docker scratch イメージで動作。
 
 ```bash
-# Python：ターゲットに Python 3.11+、pip、venv、互換 wheel があることを祈る
-curl -fsSL install.sh | bash  # 500MB+ インストール
-
-# Rust：15MB のバイナリ一つ、どこでも動く
 scp hermes user@server:~/
 ./hermes
 ```
 
-これが最大のデプロイ上の利点だ。Raspberry Pi、$3/月の VPS、エアギャップサーバー、他に何もない Docker scratch イメージで動く AI エージェント。ランタイムなし、インタプリタなし、依存関係地獄なし。エッジ AI、IoT、Python をインストールできないエンタープライズ環境では、これが唯一の道だ。
+### 自己進化ポリシーエンジン
 
-**2. 本物の並行性、見せかけの並行性ではない**
+エージェントが自身の実行から学習する。3 層の適応システム：
 
-Python の asyncio は協調的だ — CPU 作業を行う一つの行儀の悪いツール呼び出し（10MB レスポンスの JSON パース、正規表現マッチング、コンテキスト圧縮）がすべてをブロックする。Rust の tokio は以下を提供する：
+- **L1 — モデル＆リトライチューニング。** マルチアームドバンディットが履歴の成功率・レイテンシ・コストに基づきタスクごとに最適モデルを選択。リトライ戦略はタスクの複雑さに応じて動的に調整。
+- **L2 — 長タスク計画。** 複雑なプロンプトに対して並列度、サブタスク分割、チェックポイント間隔を自動決定。
+- **L3 — プロンプト＆メモリシェイピング。** システムプロンプトとメモリコンテキストを蓄積されたフィードバックに基づきリクエストごとに最適化・トリミング。
 
-- **真の並列ツール実行。** `JoinSet` がツール呼び出しを OS スレッドに分散。30 秒のブラウザスクレイプが 50ms のファイル読み取りをブロックしない。
-- **ロックフリーのメッセージルーティング。** ゲートウェイは GIL なしで 16 プラットフォームからの受信メッセージを同時に処理できる。
-- **予測可能なレイテンシ。** GC 一時停止なし。ストリーミング中に Python がガベージコレクションを決定して突然 200ms フリーズすることがない。
+カナリアロールアウト、ハードゲートロールバック、監査ログ付きのポリシーバージョニング。手動チューニングなしでエンジンが時間とともに改善。
 
-100+ の同時会話を処理するマルチユーザーゲートウェイにとって、これは「動く」と「確実に動く」の違いだ。
+### 真の並行性
 
-**3. コンパイラがアーキテクチャの番人**
+Rust の tokio ランタイムが真の並列実行を提供 — Python の協調的 asyncio ではない。`JoinSet` がツール呼び出しを OS スレッドにディスパッチ。30 秒のブラウザスクレイプが 50ms のファイル読み取りをブロックしない。ゲートウェイは GIL なしで 17 プラットフォームのメッセージを同時処理。
 
-Python コードベースには 9,913 行の `run_agent.py` と 7,905 行の `gateway/run.py` がある。Python にはそれを防ぐメカニズムがないため、これらのファイルは有機的に成長した。どのファイルも何でもインポートできる。どの関数もどのグローバルも変更できる。型チェッカーはオプションで、日常的に無視される。
+### 17 プラットフォームアダプタ
 
-Rust の crate システムはこれを物理的に不可能にする：
+Telegram、Discord、Slack、WhatsApp、Signal、Matrix、Mattermost、DingTalk、Feishu、WeCom、Weixin、Email、SMS、BlueBubbles、Home Assistant、Webhook、API Server。
 
-```
-hermes-core          ← trait を定義、誰のものでもない
-hermes-agent         ← core に依存、gateway は見えない
-hermes-gateway       ← core に依存、agent の内部は見えない
-hermes-tools         ← core に依存、provider の詳細は見えない
-```
+### 30 ツールバックエンド
 
-循環依存？コンパイルエラー。エラー処理の忘れ？コンパイルエラー。ツールに間違ったメッセージ型を渡す？コンパイルエラー。これは規律ではない — 物理法則だ。コンパイラが許さないため、アーキテクチャは時間とともに劣化できない。
+ファイル操作、ターミナル、ブラウザ、コード実行、Web 検索、ビジョン、画像生成、TTS、文字起こし、メモリ、メッセージング、委任、cron ジョブ、スキル、セッション検索、Home Assistant、RL トレーニング、URL 安全性チェック、OSV 脆弱性チェックなど。
 
-**4. 最も重要な場所での型安全性**
+### 8 メモリプラグイン
 
-Python 版では、「メッセージ」は `Dict[str, Any]`。「ツール呼び出し」は `Dict[str, Any]`。「設定」は `Dict[str, Any]`。何か問題が起きると、午前 3 時の本番環境で `KeyError` を受け取る。
+Mem0、Honcho、Holographic、Hindsight、ByteRover、OpenViking、RetainDB、Supermemory。
 
-Rust では：
+### 6 ターミナルバックエンド
 
-```rust
-pub struct Message {
-    pub role: MessageRole,        // enum、文字列ではない
-    pub content: Option<String>,
-    pub tool_calls: Option<Vec<ToolCall>>,
-    pub reasoning_content: Option<ReasoningContent>,
-    pub cache_control: Option<CacheControl>,
-}
-```
+Local、Docker、SSH、Daytona、Modal、Singularity。
 
-すべてのフィールドに型がある。すべてのバリアントが列挙される。すべてのエラーパスが処理される。LLM が予期しない JSON を返す？`serde` が境界でキャッチする。ツールハンドラが間違った型を返す？コンパイルが通らない。これは本番環境の Python エージェントを悩ませるバグの一クラス全体を排除する。
+### MCP（Model Context Protocol）サポート
 
-**5. 長期実行エージェントのメモリ効率**
+組み込み MCP クライアントとサーバー。外部ツールプロバイダに接続、または Hermes ツールを他の MCP 互換エージェントに公開。
 
-AI エージェントはリクエスト-レスポンスサーバーではない。数日、数週間、数ヶ月動く。会話履歴、スキルファイル、メモリエントリ、セッション状態を蓄積する。Python の参照カウント GC と dict のオーバーヘッドは、メモリが予測不能に増加することを意味する。
+### ACP（Agent Communication Protocol）
 
-Rust の所有権モデルは以下を意味する：
-- セッション終了の瞬間に会話履歴が解放される。GC 遅延なし。
-- ツール結果はコンテキスト挿入後すぐに切り詰められ、ドロップされる。
-- 100 の同時セッションの全エージェント状態が ~50MB に収まる。2GB ではない。
-
-安い VPS で 24/7 動く個人 AI エージェントにとって、これは $3/月と $20/月の違いだ。
+セッション管理、イベントストリーミング、権限制御付きのエージェント間通信。
 
 ---
 
-## アーキテクチャの決定
+## アーキテクチャ
+
+### 16 クレートのワークスペース
+
+```
+crates/
+├── hermes-core           # 共有型、trait、エラー階層
+├── hermes-agent          # エージェントループ、LLM プロバイダ、コンテキスト、メモリプラグイン
+├── hermes-tools          # ツールレジストリ、ディスパッチ、30 ツールバックエンド
+├── hermes-gateway        # メッセージゲートウェイ、17 プラットフォームアダプタ
+├── hermes-cli            # CLI/TUI バイナリ、スラッシュコマンド
+├── hermes-config         # 設定読み込み、マージ、YAML 互換
+├── hermes-intelligence   # 自己進化エンジン、モデルルーティング、プロンプト構築
+├── hermes-skills         # スキル管理、ストア、セキュリティガード
+├── hermes-environments   # ターミナルバックエンド
+├── hermes-cron           # Cron スケジューリングと永続化
+├── hermes-mcp            # Model Context Protocol クライアント/サーバー
+├── hermes-acp            # Agent Communication Protocol
+├── hermes-rl             # 強化学習ラン
+├── hermes-http           # HTTP/WebSocket API サーバー
+├── hermes-auth           # OAuth トークン交換
+└── hermes-telemetry      # OpenTelemetry 統合
+```
 
 ### Trait ベースの抽象化
-
-すべての統合ポイントが trait：
 
 | Trait | 目的 | 実装 |
 |-------|------|------|
 | `LlmProvider` | LLM API 呼び出し | OpenAI, Anthropic, OpenRouter, Generic |
-| `ToolHandler` | ツール実行 | 18 種類のツール |
-| `PlatformAdapter` | メッセージプラットフォーム | 16 プラットフォーム |
+| `ToolHandler` | ツール実行 | 30 ツールバックエンド |
+| `PlatformAdapter` | メッセージプラットフォーム | 17 プラットフォーム |
 | `TerminalBackend` | コマンド実行 | Local, Docker, SSH, Daytona, Modal, Singularity |
-| `MemoryProvider` | 永続メモリ | ファイル, SQLite |
+| `MemoryProvider` | 永続メモリ | 8 メモリプラグイン + ファイル/SQLite |
 | `SkillProvider` | スキル管理 | ファイルストア + Hub |
 
-### エラー階層
-
-```
-AgentError（トップレベル）
-├── LlmApi(String)
-├── ToolExecution(String)      ← ToolError から自動変換
-├── Gateway(String)            ← GatewayError から自動変換
-├── Config(String)             ← ConfigError から自動変換
-├── RateLimited { retry_after_secs }
-├── Interrupted { message }
-├── ContextTooLong
-├── MaxTurnsExceeded
-└── Io(String)
-```
-
-### ワークスペース構造
-
-```
-crates/
-├── hermes-core           # 共有型、trait、エラー型
-├── hermes-agent          # エージェントループ、プロバイダ、コンテキスト、メモリ
-├── hermes-tools          # ツールレジストリ、ディスパッチ、全ツール実装
-├── hermes-gateway        # メッセージゲートウェイ、プラットフォームアダプタ
-├── hermes-cli            # CLI バイナリ、TUI、コマンド
-├── hermes-config         # 設定の読み込みとマージ
-├── hermes-intelligence   # プロンプト構築、モデルルーティング、使用量追跡
-├── hermes-skills         # スキル管理、ストア、セキュリティガード
-├── hermes-environments   # ターミナルバックエンド
-├── hermes-cron           # Cron スケジューリング
-└── hermes-mcp            # Model Context Protocol
-```
-
 ---
 
-## 競争優位性
+## インストール
 
-AI エージェント分野は同じ天井にぶつかる Python プロジェクトで溢れている。生き残るのは以下ができるものだ：
+プラットフォームに対応する最新リリースバイナリをダウンロード：
 
-1. **どこでも動く** — Python 3.11 と 40 の pip パッケージがある開発者の MacBook だけでなく、エッジデバイス、組み込みシステム、インターネットアクセスのないエンタープライズサーバー、$3 の VPS インスタンス。
+```bash
+# macOS (Apple Silicon)
+curl -LO https://github.com/Lumio-Research/hermes-agent-rs/releases/latest/download/hermes-macos-aarch64.tar.gz
+tar xzf hermes-macos-aarch64.tar.gz && sudo mv hermes /usr/local/bin/
 
-2. **マルチユーザーにスケール** — 一つのプロセスでチーム、家族、コミュニティにサービスし、各会話が他を劣化させない。
+# macOS (Intel)
+curl -LO https://github.com/Lumio-Research/hermes-agent-rs/releases/latest/download/hermes-macos-x86_64.tar.gz
+tar xzf hermes-macos-x86_64.tar.gz && sudo mv hermes /usr/local/bin/
 
-3. **数ヶ月にわたり信頼性を維持** — メモリリークなし、GC 一時停止なし、長期実行セッションで静かに蓄積する型エラーなし。
+# Linux (x86_64)
+curl -LO https://github.com/Lumio-Research/hermes-agent-rs/releases/latest/download/hermes-linux-x86_64.tar.gz
+tar xzf hermes-linux-x86_64.tar.gz && sudo mv hermes /usr/local/bin/
 
-4. **他のシステムに組み込める** — Rust ライブラリは C、C++、Python（PyO3）、Node.js（napi）、Go（CGo）、WASM から呼び出せる。Python エージェントは Python からしか呼び出せない。
+# Linux (ARM64)
+curl -LO https://github.com/Lumio-Research/hermes-agent-rs/releases/latest/download/hermes-linux-aarch64.tar.gz
+tar xzf hermes-linux-aarch64.tar.gz && sudo mv hermes /usr/local/bin/
+```
 
----
+全リリースバイナリ：https://github.com/Lumio-Research/hermes-agent-rs/releases
 
-## 現在の状態
-
-初期段階。アーキテクチャとコア抽象は堅固。Python 版との機能パリティは約 10%。詳細は [GAP_ANALYSIS.md](./GAP_ANALYSIS.md) を参照。
-
-## ビルド
+## ソースからビルド
 
 ```bash
 cargo build --release
@@ -166,17 +129,20 @@ cargo build --release
 ## 実行
 
 ```bash
-cargo run --release -p hermes-cli
+hermes              # インタラクティブチャット
+hermes --help       # 全コマンド
+hermes gateway start  # マルチプラットフォームゲートウェイ起動
+hermes doctor       # 依存関係と設定チェック
 ```
 
 ## テスト
 
 ```bash
-cargo test --workspace
+cargo test --workspace   # 641 テスト
 ```
 
 ## ライセンス
 
-MIT — [LICENSE](LICENSE) を参照。
+MIT — [LICENSE](LICENSE) 参照。
 
 [Nous Research](https://nousresearch.com) の [Hermes Agent](https://github.com/NousResearch/hermes-agent) に基づく。

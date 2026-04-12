@@ -14,7 +14,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
-use hermes_intelligence::{AdaptivePolicyEngine, OutcomeSignals, PolicyStore};
+use hermes_intelligence::{
+    AdaptivePolicyEngine, OutcomeDrivenUpdater, OutcomeSignals, PolicyStore, PolicyUpdateRequest,
+};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
@@ -1537,6 +1539,89 @@ impl Gateway {
         Ok(())
     }
 
+    /// Persist policy audit events for external analysis.
+    pub fn save_policy_audit_log(&self, path: &std::path::Path) -> Result<(), GatewayError> {
+        let store = self
+            .evolution_policies
+            .lock()
+            .map_err(|_| GatewayError::Platform("Policy store lock poisoned".into()))?;
+        store
+            .save_audit_log(path)
+            .map_err(|e| GatewayError::Platform(format!("Failed to save policy audit log: {}", e)))
+    }
+
+    /// Export policy store as pretty JSON string.
+    pub fn export_policy_store_json(&self) -> Result<String, GatewayError> {
+        let store = self
+            .evolution_policies
+            .lock()
+            .map_err(|_| GatewayError::Platform("Policy store lock poisoned".into()))?;
+        serde_json::to_string_pretty(&*store)
+            .map_err(|e| GatewayError::Platform(format!("Failed to serialize policy store: {}", e)))
+    }
+
+    /// Export policy audit log as pretty JSON string.
+    pub fn export_policy_audit_json(&self) -> Result<String, GatewayError> {
+        let store = self
+            .evolution_policies
+            .lock()
+            .map_err(|_| GatewayError::Platform("Policy store lock poisoned".into()))?;
+        serde_json::to_string_pretty(&store.audit_log)
+            .map_err(|e| GatewayError::Platform(format!("Failed to serialize policy audit: {}", e)))
+    }
+
+    /// Apply one online outcome-driven policy update and move active to canary.
+    pub fn apply_outcome_policy_update(
+        &self,
+        actor: &str,
+        reason: &str,
+        rollout_ratio: f64,
+    ) -> Result<String, GatewayError> {
+        let mut store = self
+            .evolution_policies
+            .lock()
+            .map_err(|_| GatewayError::Platform("Policy store lock poisoned".into()))?;
+        let request = PolicyUpdateRequest {
+            actor: actor.to_string(),
+            reason: reason.to_string(),
+            rollout_ratio,
+        };
+        store
+            .apply_update(&OutcomeDrivenUpdater::default(), request)
+            .map_err(|e| GatewayError::Platform(format!("Failed to apply policy update: {}", e)))
+    }
+
+    /// Manually promote active canary policy to stable.
+    pub fn promote_active_policy_stable(&self, actor: &str, reason: &str) -> Option<String> {
+        let mut store = self.evolution_policies.lock().ok()?;
+        store.promote_active_to_stable(actor, reason)
+    }
+
+    /// Force rollback active policy to stable policy.
+    pub fn rollback_active_policy(&self, actor: &str, reason: &str) -> Option<String> {
+        let mut store = self.evolution_policies.lock().ok()?;
+        if store.active.version == store.stable.version {
+            return None;
+        }
+        let from = store.active.version.clone();
+        let to = store.stable.version.clone();
+        let active_snapshot = store.active.clone();
+        store.history.push(active_snapshot);
+        store.audit_log.push(hermes_intelligence::PolicyAuditEvent {
+            at_epoch_secs: chrono::Utc::now().timestamp() as u64,
+            actor: actor.to_string(),
+            action: "manual_rollback".to_string(),
+            reason: reason.to_string(),
+            from_version: from,
+            to_version: to.clone(),
+            rollout_ratio: 0.0,
+            delta_summary: "manual_operator_action".to_string(),
+        });
+        store.active = store.stable.clone();
+        store.candidate = None;
+        Some(to)
+    }
+
     /// Resolve model routing candidate for a message.
     pub fn load_smart_model_routing(&self, text: &str) -> Option<String> {
         if let Ok(store) = self.evolution_policies.lock() {
@@ -1654,6 +1739,8 @@ impl Gateway {
                 .record_model_outcome(model_name, &outcome);
             if let Some(rollback_reason) = store.rollback_if_needed() {
                 warn!("Adaptive policy rollback: {}", rollback_reason);
+            } else if let Some(version) = store.auto_promote_if_healthy(60) {
+                info!("Adaptive policy promoted to stable: {}", version);
             }
         }
     }
