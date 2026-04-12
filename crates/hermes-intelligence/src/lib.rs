@@ -30,7 +30,10 @@ pub use redact::{RedactionPattern, Redactor};
 pub use router::{
     ModelCapability, ModelInfo as RouterModelInfo, ModelRequirements, RouterError, SmartModelRouter,
 };
-pub use self_evolution::{AdaptivePolicyEngine, EvolutionConfig, LongTaskPlan, OutcomeSignals};
+pub use self_evolution::{
+    AdaptivePolicyEngine, EvolutionConfig, HardGateConfig, LongTaskPlan, OutcomeSignals,
+    PolicyStore, PolicyVersion,
+};
 pub use title::{TitleError, TitleGenerator};
 pub use usage::{ModelPricing, ModelUsage, UsageRecord, UsageSummary, UsageTracker};
 
