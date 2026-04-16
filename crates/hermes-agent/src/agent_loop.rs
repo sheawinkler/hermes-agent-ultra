@@ -27,7 +27,8 @@ use hermes_core::{
 use crate::api_bridge::CodexProvider;
 use crate::budget;
 use crate::context::{
-    load_builtin_memory_snapshot, load_soul_md, ContextManager, SystemPromptBuilder,
+    load_builtin_memory_snapshot, load_soul_md, resolve_personality, ContextManager,
+    SystemPromptBuilder,
 };
 use crate::context_files::{load_hermes_context_files, load_workspace_context};
 use crate::credential_pool::CredentialPool;
@@ -1334,7 +1335,46 @@ impl AgentLoop {
         {
             messages.push(Message::system(ephemeral));
         }
+        self.apply_prompt_cache_markers(&mut messages);
         messages
+    }
+
+    fn apply_prompt_cache_markers(&self, messages: &mut Vec<Message>) {
+        use hermes_core::types::{CacheControl, CacheType, MessageRole};
+        if messages.is_empty() {
+            return;
+        }
+        let provider = self
+            .config
+            .provider
+            .as_deref()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        let is_anthropic = provider.contains("anthropic") || provider.contains("claude");
+        if !is_anthropic {
+            return;
+        }
+        for msg in messages.iter_mut() {
+            if msg.role == MessageRole::System {
+                msg.cache_control = Some(CacheControl {
+                    cache_type: CacheType::Persistent,
+                });
+                break;
+            }
+        }
+        let ephemeral_budget = 4;
+        let mut marked = 0;
+        for msg in messages.iter_mut().rev() {
+            if marked >= ephemeral_budget {
+                break;
+            }
+            if msg.role == MessageRole::User || msg.role == MessageRole::Assistant {
+                msg.cache_control = Some(CacheControl {
+                    cache_type: CacheType::Ephemeral,
+                });
+                marked += 1;
+            }
+        }
     }
 
     /// Build the full system prompt including identity, memory, and plugin context.
@@ -1381,7 +1421,26 @@ impl AgentLoop {
         }
 
         if let Some(ref personality) = self.config.personality {
-            builder = builder.with_block(&format!("Personality: {personality}"));
+            let requested = personality.trim();
+            if !requested.is_empty() {
+                if let Some(profile) =
+                    resolve_personality(requested, self.config.hermes_home.as_deref())
+                {
+                    builder = builder
+                        .with_block(&format!("## Active Personality ({requested})\n{profile}"));
+                } else if requested.contains(char::is_whitespace) {
+                    // Compatibility path: historically this field was appended verbatim.
+                    builder = builder.with_block(&format!("Personality: {requested}"));
+                    tracing::warn!(
+                        "personality '{requested}' not found as a named profile; using inline value"
+                    );
+                } else {
+                    tracing::warn!(
+                        "personality '{}' not found; falling back to default identity",
+                        requested
+                    );
+                }
+            }
         }
 
         if !self.config.skip_memory {
@@ -3011,6 +3070,108 @@ mod tests {
         assert_eq!(config.checkpoint_interval_turns, 3);
         assert_eq!(config.rollback_on_tool_error_threshold, 3);
         assert!(!config.smart_model_routing.enabled);
+    }
+
+    #[test]
+    fn test_builtin_personality_injected_into_system_prompt() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let config = AgentConfig {
+            personality: Some("coder".to_string()),
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let prompt = agent.build_system_prompt("", &[], "gpt-4o");
+        assert!(prompt.contains("## Active Personality (coder)"));
+        assert!(prompt.contains("`coder` persona"));
+    }
+
+    #[test]
+    fn test_unknown_personality_name_does_not_add_overlay_block() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let config = AgentConfig {
+            personality: Some("unknown_persona".to_string()),
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let prompt = agent.build_system_prompt("", &[], "gpt-4o");
+        assert!(!prompt.contains("## Active Personality (unknown_persona)"));
+        assert!(prompt.contains("You are Hermes Agent"));
     }
 
     #[test]

@@ -776,13 +776,14 @@ async fn handle_ws(mut socket: WebSocket, state: HttpServerState, session_id: St
     while let Some(Ok(msg)) = socket.next().await {
         match msg {
             WsMessage::Text(text) => {
-                let request = SendMessageRequest {
+                let parsed: Option<SendMessageRequest> = serde_json::from_str(&text).ok();
+                let request = parsed.unwrap_or_else(|| SendMessageRequest {
                     text: text.to_string(),
                     model: None,
                     provider: None,
                     personality: None,
                     user_id: None,
-                };
+                });
                 let result = send_message(
                     Path(session_id.clone()),
                     State(state.clone()),

@@ -486,6 +486,8 @@ impl SearchBackend for LocalSearchBackend {
     }
 }
 
+const MAX_SEARCH_DEPTH: u32 = 12;
+
 impl LocalSearchBackend {
     async fn search_dir_content(
         re: &Regex,
@@ -494,7 +496,18 @@ impl LocalSearchBackend {
         max: usize,
         results: &mut Vec<Value>,
     ) {
-        if results.len() >= max {
+        Self::search_dir_content_depth(re, dir, file_glob, max, results, 0).await;
+    }
+
+    async fn search_dir_content_depth(
+        re: &Regex,
+        dir: &std::path::Path,
+        file_glob: Option<&str>,
+        max: usize,
+        results: &mut Vec<Value>,
+        depth: u32,
+    ) {
+        if results.len() >= max || depth >= MAX_SEARCH_DEPTH {
             return;
         }
 
@@ -512,7 +525,6 @@ impl LocalSearchBackend {
             let path = entry.path();
             let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
 
-            // Skip hidden dirs and common non-text dirs
             if name.starts_with('.')
                 || name == "node_modules"
                 || name == "target"
@@ -522,7 +534,15 @@ impl LocalSearchBackend {
             }
 
             if path.is_dir() {
-                Box::pin(Self::search_dir_content(re, &path, file_glob, max, results)).await;
+                Box::pin(Self::search_dir_content_depth(
+                    re,
+                    &path,
+                    file_glob,
+                    max,
+                    results,
+                    depth + 1,
+                ))
+                .await;
             } else if path.is_file() {
                 // Check glob filter
                 if let Some(glob) = file_glob {
@@ -551,6 +571,19 @@ impl LocalSearchBackend {
     }
 
     async fn search_dir_names(pattern: &str, dir: &std::path::Path, results: &mut Vec<Value>) {
+        Self::search_dir_names_depth(pattern, dir, results, 0).await;
+    }
+
+    async fn search_dir_names_depth(
+        pattern: &str,
+        dir: &std::path::Path,
+        results: &mut Vec<Value>,
+        depth: u32,
+    ) {
+        if depth >= MAX_SEARCH_DEPTH {
+            return;
+        }
+
         let entries = match tokio::fs::read_dir(dir).await {
             Ok(e) => e,
             Err(_) => return,
@@ -574,7 +607,13 @@ impl LocalSearchBackend {
             }
 
             if path.is_dir() {
-                Box::pin(Self::search_dir_names(pattern, &path, results)).await;
+                Box::pin(Self::search_dir_names_depth(
+                    pattern,
+                    &path,
+                    results,
+                    depth + 1,
+                ))
+                .await;
             }
         }
     }

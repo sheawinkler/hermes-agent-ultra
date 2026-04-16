@@ -13,11 +13,30 @@ use hermes_core::ToolError;
 
 /// Delegation backend that returns a signal for the agent loop to spawn a sub-agent.
 /// The actual spawning is handled by the orchestration layer (hermes-agent).
-pub struct SignalDelegationBackend;
+pub struct SignalDelegationBackend {
+    current_depth: u32,
+    max_depth: u32,
+    parent_budget_remaining_usd: Option<f64>,
+}
 
 impl SignalDelegationBackend {
     pub fn new() -> Self {
-        Self
+        Self {
+            current_depth: 0,
+            max_depth: 4,
+            parent_budget_remaining_usd: None,
+        }
+    }
+
+    pub fn with_depth(mut self, current: u32, max: u32) -> Self {
+        self.current_depth = current;
+        self.max_depth = max;
+        self
+    }
+
+    pub fn with_parent_budget(mut self, remaining_usd: f64) -> Self {
+        self.parent_budget_remaining_usd = Some(remaining_usd);
+        self
     }
 }
 
@@ -36,13 +55,21 @@ impl DelegationBackend for SignalDelegationBackend {
         toolset: Option<&str>,
         model: Option<&str>,
     ) -> Result<String, ToolError> {
-        // Return a structured signal for the agent loop to handle
+        if self.current_depth >= self.max_depth {
+            return Err(ToolError::ExecutionFailed(format!(
+                "Delegation depth limit reached ({}/{}); cannot spawn further sub-agents",
+                self.current_depth, self.max_depth
+            )));
+        }
         Ok(json!({
             "type": "delegation_request",
             "task": task,
             "context": context,
             "toolset": toolset,
             "model": model,
+            "child_depth": self.current_depth + 1,
+            "max_depth": self.max_depth,
+            "parent_budget_remaining_usd": self.parent_budget_remaining_usd,
             "status": "pending",
         })
         .to_string())

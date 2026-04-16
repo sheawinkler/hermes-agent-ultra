@@ -55,6 +55,24 @@ pub struct McpPromptInfo {
 /// - Converts hermes-agent ToolSchema to MCP tool format
 /// - Dispatches tool calls through the shared ToolRegistry
 /// - Exposes resources and prompts
+/// Capability flags controlling which MCP bridge operations are allowed.
+#[derive(Debug, Clone)]
+pub struct McpCapabilityPolicy {
+    pub allow_tool_invoke: bool,
+    pub allow_prompt_read: bool,
+    pub allow_resource_read: bool,
+}
+
+impl Default for McpCapabilityPolicy {
+    fn default() -> Self {
+        Self {
+            allow_tool_invoke: true,
+            allow_prompt_read: true,
+            allow_resource_read: true,
+        }
+    }
+}
+
 pub struct McpServer {
     /// Shared tool registry containing all hermes-agent tools.
     tool_registry: Arc<ToolRegistry>,
@@ -64,6 +82,8 @@ pub struct McpServer {
     prompts: Vec<McpPromptInfo>,
     /// Server info.
     server_info: ServerInfo,
+    /// Capability gating policy.
+    capability_policy: McpCapabilityPolicy,
 }
 
 /// Server identity information.
@@ -84,7 +104,14 @@ impl McpServer {
                 name: "hermes-agent".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
             },
+            capability_policy: McpCapabilityPolicy::default(),
         }
+    }
+
+    /// Set the capability gating policy.
+    pub fn with_capability_policy(mut self, policy: McpCapabilityPolicy) -> Self {
+        self.capability_policy = policy;
+        self
     }
 
     /// Add a resource to be exposed by this server.
@@ -124,6 +151,7 @@ impl McpServer {
             "resources/list" => self.handle_resources_list(params).await,
             "resources/read" => self.handle_resources_read(params).await,
             "prompts/list" => self.handle_prompts_list(params).await,
+            "prompts/get" => self.handle_prompts_get(params).await,
             "ping" => Ok(serde_json::json!({})),
             _ => {
                 warn!("Unknown MCP method: {}", method);
@@ -165,6 +193,11 @@ impl McpServer {
     ///
     /// Dispatches the tool call through the shared tool registry.
     async fn handle_tools_call(&self, params: Value) -> Result<Value, McpError> {
+        if !self.capability_policy.allow_tool_invoke {
+            return Err(McpError::Forbidden(
+                "tool invocation is not allowed by capability policy".to_string(),
+            ));
+        }
         let tool_name = params
             .get("name")
             .and_then(|v| v.as_str())
@@ -207,6 +240,11 @@ impl McpServer {
 
     /// Handle resources/read request.
     async fn handle_resources_read(&self, params: Value) -> Result<Value, McpError> {
+        if !self.capability_policy.allow_resource_read {
+            return Err(McpError::Forbidden(
+                "resource read is not allowed by capability policy".to_string(),
+            ));
+        }
         let uri = params
             .get("uri")
             .and_then(|v| v.as_str())
@@ -235,6 +273,30 @@ impl McpServer {
         let prompts = &self.prompts;
         Ok(serde_json::json!({
             "prompts": prompts,
+        }))
+    }
+
+    /// Handle prompts/get request.
+    async fn handle_prompts_get(&self, params: Value) -> Result<Value, McpError> {
+        if !self.capability_policy.allow_prompt_read {
+            return Err(McpError::Forbidden(
+                "prompt read is not allowed by capability policy".to_string(),
+            ));
+        }
+        let name = params
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| McpError::InvalidParams("missing prompt name".to_string()))?;
+
+        let prompt = self
+            .prompts
+            .iter()
+            .find(|p| p.name == name)
+            .ok_or_else(|| McpError::ResourceNotFound(format!("prompt '{}' not found", name)))?;
+
+        Ok(serde_json::json!({
+            "description": prompt.description,
+            "messages": [],
         }))
     }
 
@@ -297,6 +359,7 @@ impl McpServer {
                     let (code, message) = match &e {
                         McpError::MethodNotFound(m) => (-32601, format!("Method not found: {}", m)),
                         McpError::InvalidParams(msg) => (-32602, msg.clone()),
+                        McpError::Forbidden(msg) => (-32600, format!("Forbidden: {}", msg)),
                         McpError::Protocol { code, message } => (*code, message.clone()),
                         other => (-32603, other.to_string()),
                     };

@@ -327,6 +327,21 @@ writing and editing code, analyzing information, creative work, and executing ac
 You communicate clearly, admit uncertainty when appropriate, and prioritize being genuinely useful over being verbose \
 unless otherwise directed below. Be targeted and efficient in your exploration and investigations.";
 
+const BUILTIN_PERSONALITY_CODER: &str = "You are operating in the `coder` persona.\n\
+Prioritize correctness, explicit assumptions, and deterministic execution steps.\n\
+When editing code, prefer small verifiable changes and explain trade-offs briefly.\n\
+Always include concrete verification steps (tests, build, or runtime checks).";
+
+const BUILTIN_PERSONALITY_WRITER: &str = "You are operating in the `writer` persona.\n\
+Prioritize clarity, structure, and audience-aware phrasing.\n\
+Use concise sections, strong topic sentences, and remove unnecessary repetition.\n\
+When asked to revise, preserve meaning while improving readability and flow.";
+
+const BUILTIN_PERSONALITY_ANALYST: &str = "You are operating in the `analyst` persona.\n\
+Prioritize evidence, explicit reasoning, and clear uncertainty bounds.\n\
+Break complex problems into assumptions, observations, and conclusions.\n\
+When data is missing, state what is unknown and propose the next highest-value check.";
+
 /// Load the SOUL.md personality file from `~/.hermes/SOUL.md`.
 ///
 /// Returns `None` if the file doesn't exist or can't be read.
@@ -334,6 +349,43 @@ pub fn load_soul_md() -> Option<String> {
     let home = dirs::home_dir()?;
     let soul_path = home.join(".hermes").join("SOUL.md");
     load_soul_md_from(&soul_path)
+}
+
+fn resolve_hermes_home(hermes_home_override: Option<&str>) -> PathBuf {
+    hermes_home_override
+        .map(PathBuf::from)
+        .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
+        .or_else(|| dirs::home_dir().map(|h| h.join(".hermes")))
+        .unwrap_or_else(|| PathBuf::from(".hermes"))
+}
+
+fn builtin_personality(name: &str) -> Option<&'static str> {
+    match name {
+        "coder" => Some(BUILTIN_PERSONALITY_CODER),
+        "writer" => Some(BUILTIN_PERSONALITY_WRITER),
+        "analyst" => Some(BUILTIN_PERSONALITY_ANALYST),
+        _ => None,
+    }
+}
+
+/// Resolve a named personality by checking user files first, then built-ins.
+///
+/// Resolution order:
+/// 1) `<hermes_home>/personalities/<name>.md` (or `$HERMES_HOME`, then `~/.hermes`)
+/// 2) built-in personas: `coder`, `writer`, `analyst`
+pub fn resolve_personality(name: &str, hermes_home_override: Option<&str>) -> Option<String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let slug = trimmed.to_ascii_lowercase();
+    let personality_path = resolve_hermes_home(hermes_home_override)
+        .join("personalities")
+        .join(format!("{slug}.md"));
+    if let Some(content) = load_soul_md_from(&personality_path) {
+        return Some(content);
+    }
+    builtin_personality(&slug).map(ToString::to_string)
 }
 
 /// Load a SOUL.md file from a specific path.
@@ -346,12 +398,7 @@ pub fn load_soul_md_from(path: &Path) -> Option<String> {
 
 /// Load a named personality from `~/.hermes/personalities/<name>.md`.
 pub fn switch_personality(name: &str) -> Option<String> {
-    let home = dirs::home_dir()?;
-    let personality_path = home
-        .join(".hermes")
-        .join("personalities")
-        .join(format!("{name}.md"));
-    load_soul_md_from(&personality_path)
+    resolve_personality(name, None)
 }
 
 // ---------------------------------------------------------------------------
@@ -802,6 +849,28 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_personality_builtin() {
+        let coder = resolve_personality("coder", None).unwrap_or_default();
+        assert!(coder.contains("`coder` persona"));
+    }
+
+    #[test]
+    fn test_resolve_personality_prefers_user_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let personalities_dir = tmp.path().join("personalities");
+        std::fs::create_dir_all(&personalities_dir).unwrap();
+        std::fs::write(
+            personalities_dir.join("coder.md"),
+            "Custom coder persona from user profile.",
+        )
+        .unwrap();
+
+        let resolved = resolve_personality("coder", Some(tmp.path().to_string_lossy().as_ref()))
+            .unwrap_or_default();
+        assert_eq!(resolved, "Custom coder persona from user profile.");
+    }
+
+    #[test]
     fn test_load_context_files() {
         let tmp = tempfile::tempdir().unwrap();
         let ctx_dir = tmp.path().join("context");
@@ -905,5 +974,49 @@ mod tests {
         assert_eq!(memory_block.matches("Use ripgrep for search").count(), 1);
         assert!(user_block.contains("USER PROFILE (who the user is)"));
         assert!(user_block.contains("Name: Alice"));
+    }
+
+    #[test]
+    fn test_persona_snapshot_coder() {
+        let p = resolve_personality("coder", None).unwrap();
+        assert!(p.contains("`coder` persona"));
+        assert!(p.contains("correctness"));
+    }
+
+    #[test]
+    fn test_persona_snapshot_writer() {
+        let p = resolve_personality("writer", None).unwrap();
+        assert!(p.contains("`writer` persona"));
+        assert!(p.contains("clarity"));
+    }
+
+    #[test]
+    fn test_persona_snapshot_analyst() {
+        let p = resolve_personality("analyst", None).unwrap();
+        assert!(p.contains("`analyst` persona"));
+        assert!(p.contains("evidence"));
+    }
+
+    #[test]
+    fn test_persona_unknown_returns_none() {
+        assert!(resolve_personality("pirate", None).is_none());
+    }
+
+    #[test]
+    fn test_persona_system_prompt_deltas() {
+        let base = {
+            let mut b = SystemPromptBuilder::new().with_personality(None);
+            b.build().to_string()
+        };
+
+        let coder_prompt = {
+            let p = resolve_personality("coder", None).unwrap();
+            let mut b = SystemPromptBuilder::new().with_personality(Some(&p));
+            b.build().to_string()
+        };
+
+        assert!(!base.contains("`coder` persona"));
+        assert!(coder_prompt.contains("`coder` persona"));
+        assert!(coder_prompt.contains("correctness"));
     }
 }

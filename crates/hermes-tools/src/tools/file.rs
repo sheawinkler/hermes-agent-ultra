@@ -9,7 +9,10 @@ use hermes_core::{
     ToolSchema,
 };
 
+use std::path::Path;
 use std::sync::Arc;
+
+use crate::credential_guard::CredentialGuard;
 
 // ---------------------------------------------------------------------------
 // ReadFileHandler
@@ -33,6 +36,8 @@ impl ToolHandler for ReadFileHandler {
             .get("path")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'path' parameter".into()))?;
+
+        CredentialGuard::new().check_read_access(Path::new(path))?;
 
         let offset = params.get("offset").and_then(|v| v.as_u64());
 
@@ -103,6 +108,8 @@ impl ToolHandler for WriteFileHandler {
             .get("content")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'content' parameter".into()))?;
+
+        CredentialGuard::new().check_write_access(Path::new(path), content)?;
 
         self.backend
             .write_file(path, content)

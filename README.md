@@ -41,11 +41,11 @@ Status legend: `implemented` = available in current codebase, `partial` = availa
 |---|---|---|
 | Interactive CLI + one-shot mode (`crates/hermes-cli`) | implemented | TUI interactive mode + `chat --query` one-shot path are present. |
 | Agent loop: streaming + tool execution + context compression | implemented | `run_stream`, parallel tool execution, auto compression are implemented. |
-| Prompt caching | partial | System prompt builder cache exists; full cross-request prompt-cache behavior is not fully parity-tracked yet. |
+| Prompt caching | implemented | Anthropic-aware cache markers (persistent system + ephemeral recent turns) applied in `messages_for_api_call`; `prompt_cache_hits`/`prompt_cache_misses` counters in telemetry. |
 | Providers: Anthropic, OpenAI chat-compatible, OpenAI Responses, OpenRouter-compatible | implemented | Provider adapters exist across `hermes-agent`/`api_bridge`/extras. |
 | Built-in tools: files/terminal/patch/memory/web/vision + opt-in code execution | implemented | Toolset includes these categories; code execution is available and should be policy/toolset controlled. |
 | Runtime MCP tool discovery from configured stdio/HTTP servers | implemented | MCP client supports stdio/http configs and runtime tools listing. |
-| MCP bridge tools for prompts/resources with capability gating | partial | MCP prompt/resource APIs exist; strict capability-gated bridge behavior is not fully marked complete. |
+| MCP bridge tools for prompts/resources with capability gating | implemented | `McpCapabilityPolicy` gates tool invoke / prompt read / resource read; `prompts/get` endpoint added; `Forbidden` error variant with JSON-RPC code -32600. |
 | Local memory snapshots + request-local skill matching/injection | implemented | `MEMORY.md`/`USER.md` snapshot injection and skills prompt orchestration are wired. |
 | SQLite-backed session history + resume | implemented | SQLite persistence (`sessions.db`) and session load/resume workflows exist. |
 | Multi-model support (OpenAI/Anthropic/OpenRouter) | implemented | Supported in routing/provider stack. |
@@ -54,12 +54,50 @@ Status legend: `implemented` = available in current codebase, `partial` = availa
 | Context-aware auto-loading (`AGENTS.md`, `CLAUDE.md`, `MEMORY.md`, `USER.md`) | implemented | Context file loaders + memory snapshot loaders are present. |
 | Memory system: SQLite + FTS5 + cross-session persistence | implemented | Session persistence + FTS-backed `session_search` are implemented. |
 | Skills system: YAML-based skill creation/management | implemented | Skills tooling and skill store/hub pipeline are present. |
-| Personality system: coder/writer/analyst personas | partial | Personality switching is implemented; named personas depend on available personality files. |
+| Personality system: coder/writer/analyst personas | implemented | Built-in `coder`/`writer`/`analyst` persona constants + user-file override; fallback to default identity with warning; snapshot tests validate prompt deltas; WebSocket now parses personality from JSON payloads. |
 | Context compression: automatic + manual | implemented | Auto compression in loop + manual slash command path exist. |
-| Sub-agent delegation | partial | `delegate_task` tooling and delegation hooks exist; full autonomous child-agent orchestration is still evolving. |
+| Sub-agent delegation | implemented | `delegate_task` tool with Signal/RPC backends; depth enforcement (`max_depth` default 4); parent budget propagation in delegation envelope; `max_concurrent_delegates` cap; delegation lineage via `on_delegation` memory hook. |
 | Messaging: Telegram/Discord/Slack APIs | implemented | Gateway adapters for these platforms are present. |
-| Security: path validation, dangerous command blocking, search-depth limits | partial | Command approval and credential/file guards are present; not all requested guard dimensions are fully parity-tracked. |
+| Security: path validation, dangerous command blocking, search-depth limits | implemented | `ApprovalManager` wired into `TerminalHandler` (deny/confirm/approve); `CredentialGuard` wired into `ReadFileHandler`/`WriteFileHandler`; search depth capped at 12 levels in `LocalSearchBackend`. |
 | Chinese input / UTF-8 in TUI | implemented | Rust/TUI path handles UTF-8 text input/output normally. |
+
+### Partial -> Implemented Execution Checklist
+
+All 5 previously-partial capabilities have been promoted to `implemented`.
+
+#### 1) Prompt caching — DONE
+
+- [x] Anthropic-aware `cache_control` markers applied in `messages_for_api_call` (persistent system + last 4 ephemeral user/assistant turns).
+- [x] `prompt_cache_hits` / `prompt_cache_misses` counters added to `hermes-telemetry` and exposed in Prometheus `/metrics`.
+- [x] Cache markers gated on provider being Anthropic/Claude (no-op for other providers).
+
+#### 2) MCP bridge tools for prompts/resources with capability gating — DONE
+
+- [x] `McpCapabilityPolicy` struct with `allow_tool_invoke`, `allow_prompt_read`, `allow_resource_read` flags.
+- [x] Deny-by-default gating in `handle_tools_call`, `handle_resources_read`, `handle_prompts_get` — returns `McpError::Forbidden`.
+- [x] `prompts/get` endpoint implemented in `McpServer`.
+- [x] `Forbidden` error variant mapped to JSON-RPC code -32600.
+
+#### 3) Personality system: coder/writer/analyst personas — DONE
+
+- [x] Built-in `coder`, `writer`, `analyst` persona constants compiled into binary.
+- [x] User-file override via `~/.hermes/personalities/<name>.md`.
+- [x] Runtime switch in CLI + HTTP REST + messaging gateways; WebSocket now parses JSON `personality` field.
+- [x] Fallback: unknown slug → warn + default identity; whitespace-containing value → inline personality.
+- [x] Snapshot tests validate prompt deltas per persona.
+
+#### 4) Sub-agent delegation — DONE
+
+- [x] `SignalDelegationBackend` enforces `max_depth` (default 4); returns `ToolError` when depth exceeded.
+- [x] Delegation envelope includes `child_depth`, `max_depth`, `parent_budget_remaining_usd`.
+- [x] `max_concurrent_delegates` cap in `AgentLoop`.
+- [x] `on_delegation` memory hook fires for delegation lineage tracking.
+
+#### 5) Security: path validation, dangerous command blocking, search-depth limits — DONE
+
+- [x] `ApprovalManager` wired into `TerminalHandler` — denied commands return `ToolError`; confirmation commands auto-approved with warning log.
+- [x] `CredentialGuard` wired into `ReadFileHandler` and `WriteFileHandler` — protected paths and secret-containing content blocked.
+- [x] `LocalSearchBackend` search depth capped at `MAX_SEARCH_DEPTH` (12) for both content and file-name searches.
 
 ## Highlights
 

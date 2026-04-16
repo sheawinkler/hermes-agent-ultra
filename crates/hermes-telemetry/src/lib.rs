@@ -97,6 +97,8 @@ pub struct MetricsRegistry {
     pub errors_total: AtomicU64,
     pub http_requests_total: AtomicU64,
     pub http_rejects_total: AtomicU64,
+    pub prompt_cache_hits: AtomicU64,
+    pub prompt_cache_misses: AtomicU64,
 }
 
 pub static METRICS: Lazy<MetricsRegistry> = Lazy::new(MetricsRegistry::default);
@@ -124,6 +126,14 @@ pub fn record_http_reject() {
     METRICS.http_rejects_total.fetch_add(1, Ordering::Relaxed);
 }
 
+pub fn record_prompt_cache_hit() {
+    METRICS.prompt_cache_hits.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_prompt_cache_miss() {
+    METRICS.prompt_cache_misses.fetch_add(1, Ordering::Relaxed);
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct MetricsSnapshot {
     pub llm_requests_total: u64,
@@ -132,6 +142,8 @@ pub struct MetricsSnapshot {
     pub errors_total: u64,
     pub http_requests_total: u64,
     pub http_rejects_total: u64,
+    pub prompt_cache_hits: u64,
+    pub prompt_cache_misses: u64,
 }
 
 pub fn snapshot() -> MetricsSnapshot {
@@ -142,6 +154,8 @@ pub fn snapshot() -> MetricsSnapshot {
         errors_total: METRICS.errors_total.load(Ordering::Relaxed),
         http_requests_total: METRICS.http_requests_total.load(Ordering::Relaxed),
         http_rejects_total: METRICS.http_rejects_total.load(Ordering::Relaxed),
+        prompt_cache_hits: METRICS.prompt_cache_hits.load(Ordering::Relaxed),
+        prompt_cache_misses: METRICS.prompt_cache_misses.load(Ordering::Relaxed),
     }
 }
 
@@ -201,6 +215,22 @@ pub fn prometheus_text() -> String {
         &mut out,
         "hermes_http_rejects_total {}",
         s.http_rejects_total
+    );
+    let _ = writeln!(
+        &mut out,
+        "# HELP hermes_prompt_cache_hits Prompt cache hits (system prompt unchanged)."
+    );
+    let _ = writeln!(&mut out, "# TYPE hermes_prompt_cache_hits counter");
+    let _ = writeln!(&mut out, "hermes_prompt_cache_hits {}", s.prompt_cache_hits);
+    let _ = writeln!(
+        &mut out,
+        "# HELP hermes_prompt_cache_misses Prompt cache misses (system prompt rebuilt)."
+    );
+    let _ = writeln!(&mut out, "# TYPE hermes_prompt_cache_misses counter");
+    let _ = writeln!(
+        &mut out,
+        "hermes_prompt_cache_misses {}",
+        s.prompt_cache_misses
     );
     out
 }

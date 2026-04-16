@@ -57,6 +57,10 @@ pub enum McpError {
     #[error("Resource not found: {0}")]
     ResourceNotFound(String),
 
+    /// The operation is forbidden by capability policy.
+    #[error("Forbidden: {0}")]
+    Forbidden(String),
+
     /// The connection was closed by the remote end.
     #[error("Connection closed")]
     ConnectionClosed,

@@ -9,6 +9,8 @@ use hermes_core::{
     ToolSchema,
 };
 
+use crate::approval::{ApprovalDecision, ApprovalManager};
+
 // ---------------------------------------------------------------------------
 // TerminalHandler
 // ---------------------------------------------------------------------------
@@ -16,11 +18,15 @@ use hermes_core::{
 /// Tool for executing terminal commands via an injected backend.
 pub struct TerminalHandler {
     backend: std::sync::Arc<dyn TerminalBackend>,
+    approval: ApprovalManager,
 }
 
 impl TerminalHandler {
     pub fn new(backend: std::sync::Arc<dyn TerminalBackend>) -> Self {
-        Self { backend }
+        Self {
+            backend,
+            approval: ApprovalManager::new(),
+        }
     }
 }
 
@@ -31,6 +37,22 @@ impl ToolHandler for TerminalHandler {
             .get("command")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'command' parameter".into()))?;
+
+        match self.approval.check_approval(command) {
+            ApprovalDecision::Denied => {
+                return Err(ToolError::ExecutionFailed(format!(
+                    "Command denied by security policy: {}",
+                    command
+                )));
+            }
+            ApprovalDecision::RequiresConfirmation => {
+                tracing::warn!(
+                    command,
+                    "command requires confirmation — auto-approved in agent mode"
+                );
+            }
+            ApprovalDecision::Approved => {}
+        }
 
         let timeout = params.get("timeout").and_then(|v| v.as_u64());
 
