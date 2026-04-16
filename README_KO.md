@@ -8,6 +8,58 @@
 
 ---
 
+## Python v2026.4.13 정렬 상태
+
+기준 베이스라인: `NousResearch/hermes-agent@v2026.4.13` (`1af2e18d408a9dcc2c61d6fc1eef5c6667f8e254`).
+
+- 진행률: 스코프 내 정렬 항목 **10 / 13** 완료.
+- 완료된 핵심 영역: 프롬프트 레이어/핵심 가이던스 정렬, 스마트 라우팅 기본 런타임 전환 및 폴백, memory 도구 시맨틱과 용량 제한, 내장 `MEMORY.md`/`USER.md` 스냅샷 주입, memory 라이프사이클 훅(`on_memory_write`, `queue_prefetch`, `on_pre_compress`, `on_session_end`, `on_delegation`), `session_search` 이중 모드 + `role_filter`/limit 정렬.
+- 남은 핵심 영역: `resolve_turn_route` 런타임 시그니처 필드 완전 정렬, Python 스타일 skills+memory 기반 자기진화 루프 정렬.
+
+### TODO (패리티 트래커)
+
+- [x] Long Memory: 내장 memory action/target 시맨틱 + 문자 수 제한.
+- [x] Long Memory: 세션 시작 시 memory 스냅샷 프롬프트 주입.
+- [x] Long Memory: 라이프사이클 훅(`on_memory_write`, `on_pre_compress`, `on_session_end`, `on_delegation`).
+- [x] Session Search: recent 모드(빈 query), 키워드 모드, `role_filter`, `limit <= 5`.
+- [x] Session Search: child->parent lineage 정규화 지원(parent session 해석).
+- [x] Session Search: Python 동등의 세션별 LLM 요약 파이프라인.
+- [x] Session Search: hidden/internal source 필터링 규칙 정렬.
+- [x] Session Search: 런타임 컨텍스트 기반 현재 active session lineage 자동 주입/제외.
+- [x] Smart Model Selection: 턴 단위 cheap-route 및 policy recommendation route.
+- [x] Smart Model Selection: 라우팅 provider 생성 실패 시 primary provider 폴백.
+- [ ] Smart Model Selection: Python `resolve_turn_route` 전체 런타임 시그니처 표면(`api_mode`, `command`, `args`, `credential_pool`, `signature`) E2E 정렬.
+- [ ] Self-Evolution: Python 스타일 memory/skills 기반 자동 적응 루프 정렬.
+- [ ] Self-Evolution: Python `v2026.4.13` 동작 기준 parity 검증 테스트.
+
+### 기능 구현 상태 (요청 체크리스트)
+
+상태 범례: `implemented` = 현재 코드베이스에서 사용 가능, `partial` = 구현은 있으나 요청 문구/동작과 완전 동일하진 않음.
+
+| 기능 | 상태 | 메모 |
+|---|---|---|
+| Interactive CLI + one-shot (`crates/hermes-cli`) | implemented | TUI 상호작용 모드 + `chat --query` one-shot 경로 존재. |
+| Agent loop: 스트리밍 + 도구 실행 + 컨텍스트 압축 | implemented | `run_stream`, 병렬 도구 실행, 자동 압축 구현. |
+| Prompt caching | partial | SystemPromptBuilder 캐시는 있으나 완전한 cross-request 캐시 동작은 추가 정렬 필요. |
+| Provider: Anthropic, OpenAI chat-compatible, OpenAI Responses, OpenRouter-compatible | implemented | `hermes-agent`/`api_bridge`/추가 provider 어댑터로 지원. |
+| 내장 도구: 파일/터미널/패치/메모리/웹/비전 + opt-in 코드 실행 | implemented | 해당 카테고리 모두 포함, 코드 실행은 policy/toolset 제어 전제. |
+| 구성된 stdio/HTTP 서버에서 Runtime MCP 도구 발견 | implemented | MCP client가 stdio/http 설정과 runtime tools/list 지원. |
+| prompts/resources용 MCP 브리지 + capability gating | partial | prompts/resources API는 존재, 엄격 capability-gated bridge는 계속 정리 중. |
+| 로컬 메모리 스냅샷 + 요청 단위 스킬 매칭/주입 | implemented | `MEMORY.md`/`USER.md` 스냅샷 주입 + skills prompt 오케스트레이션 적용. |
+| SQLite 세션 히스토리 + resume | implemented | `sessions.db` 영속화 및 세션 복원 플로우 존재. |
+| 멀티 모델 지원(OpenAI/Anthropic/OpenRouter) | implemented | 라우팅/provider 스택에서 지원. |
+| 내장 도구 수(요청 26개) | implemented | Rust 현재 이미 그 이상(30+ 도구 백엔드). |
+| TUI: 대화형 채팅 + 30+ slash 명령 + 도구 진행 표시 + 상태바 | implemented | TUI/상태바/다수 slash 핸들러 구현됨. |
+| 컨텍스트 자동 로드(`AGENTS.md`, `CLAUDE.md`, `MEMORY.md`, `USER.md`) | implemented | 컨텍스트 파일 로더 + memory 스냅샷 로더 존재. |
+| 메모리 시스템: SQLite + FTS5 + 크로스 세션 영속성 | implemented | 세션 영속화 + FTS 기반 `session_search` 구현. |
+| Skills 시스템: YAML 기반 생성/관리 | implemented | skills 툴체인 + skill store/hub 구현. |
+| Personality 시스템: coder/writer/analyst 전환 | partial | 전환 기능 구현, 구체 페르소나는 로컬 personality 파일 의존. |
+| 컨텍스트 압축: 자동 + 수동 | implemented | loop 자동 압축 + 수동 slash 경로 존재. |
+| 서브 에이전트 위임 | partial | `delegate_task` 및 위임 훅 구현, 완전 자율 child-agent 오케스트레이션은 발전 중. |
+| 메시징: Telegram/Discord/Slack API | implemented | gateway 플랫폼 어댑터 구현. |
+| 보안: 경로 검증, 위험 명령 차단, 검색 깊이 제한 | partial | 명령 승인/credential-file 가드는 구현, 일부 보안 축은 추가 정렬 중. |
+| 중국어 입력: TUI UTF-8 완전 지원 | implemented | Rust/TUI 경로에서 UTF-8 입출력 처리 가능. |
+
 ## 하이라이트
 
 ### 단일 바이너리, 의존성 제로
@@ -40,6 +92,10 @@ Telegram, Discord, Slack, WhatsApp, Signal, Matrix, Mattermost, DingTalk, Feishu
 ### 30개 도구 백엔드
 
 파일 작업, 터미널, 브라우저, 코드 실행, 웹 검색, 비전, 이미지 생성, TTS, 음성 전사, 메모리, 메시징, 위임, cron 작업, 스킬, 세션 검색, Home Assistant, RL 훈련, URL 안전성 검사, OSV 취약점 검사 등.
+내장 `memory` 도구는 Python 패리티 시맨틱(`action=add|replace|remove`, `target=memory|user`, replace/remove의 `old_text` 부분 일치)을 따릅니다.
+내장 memory 저장소 제한도 Python 기본값과 정렬되어 있습니다: `memory` ≈ 2200자, `user` ≈ 1375자.
+내장 `session_search`는 Python 스타일 이중 모드를 지원합니다: `query` 생략 시 최근 세션 탐색, `query` 지정 시 키워드 검색. `role_filter` 지원, `limit` 상한 5.
+`session_search`는 보조 LLM 자격 증명이 있으면 세션 단위 LLM 요약을 수행할 수 있습니다(`HERMES_SESSION_SEARCH_SUMMARY_API_KEY` 또는 `OPENAI_API_KEY`, 선택적 base/model override).
 
 ### 8개 메모리 플러그인
 
