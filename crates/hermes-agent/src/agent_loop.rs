@@ -745,6 +745,28 @@ impl AgentLoop {
         String::new()
     }
 
+    fn memory_pre_compress_note(&self, messages: &[Message]) -> Option<String> {
+        if self.config.skip_memory {
+            return None;
+        }
+        let Some(ref mm) = self.memory_manager else {
+            return None;
+        };
+        let Ok(mm) = mm.lock() else {
+            return None;
+        };
+        let as_values: Vec<Value> = messages
+            .iter()
+            .filter_map(|m| serde_json::to_value(m).ok())
+            .collect();
+        let note = mm.on_pre_compress(&as_values);
+        if note.trim().is_empty() {
+            None
+        } else {
+            Some(note)
+        }
+    }
+
     fn should_inject_tool_enforcement(&self, model: &str) -> bool {
         let model_lower = model.to_lowercase();
         ["gpt", "codex", "gemini", "gemma", "grok"]
@@ -1591,6 +1613,9 @@ impl AgentLoop {
                     "Context pressure at {}%, triggering compression",
                     (total_chars * 100) / 200_000
                 );
+                if let Some(note) = self.memory_pre_compress_note(ctx.get_messages()) {
+                    ctx.add_message(Message::system(note));
+                }
                 ctx.compress();
             }
         }
@@ -1972,6 +1997,9 @@ impl AgentLoop {
                     "Context pressure at {}%, triggering compression",
                     (total_chars * 100) / 200_000
                 );
+                if let Some(note) = self.memory_pre_compress_note(ctx.get_messages()) {
+                    ctx.add_message(Message::system(note));
+                }
                 ctx.compress();
             }
         }
