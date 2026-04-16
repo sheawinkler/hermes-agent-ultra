@@ -41,6 +41,7 @@ Telegram, Discord, Slack, WhatsApp, Signal, Matrix, Mattermost, DingTalk, Feishu
 
 File operations, terminal, browser, code execution, web search, vision, image generation, TTS, transcription, memory, messaging, delegation, cron jobs, skills, session search, Home Assistant, RL training, URL safety, OSV vulnerability check, and more.
 The built-in `memory` tool follows Python parity semantics: `action=add|replace|remove`, `target=memory|user`, with `old_text` substring matching for replace/remove updates.
+Built-in store limits also match Python defaults: `memory` ≈ 2200 chars and `user` ≈ 1375 chars.
 
 ### 8 Memory Plugins
 

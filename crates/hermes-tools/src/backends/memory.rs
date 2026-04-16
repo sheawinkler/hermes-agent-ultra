@@ -8,6 +8,8 @@ use crate::tools::memory::MemoryBackend;
 use hermes_core::ToolError;
 
 const ENTRY_DELIMITER: &str = "\n§\n";
+const MEMORY_CHAR_LIMIT: usize = 2200;
+const USER_CHAR_LIMIT: usize = 1375;
 
 /// Real memory backend that stores entries in ~/.hermes/memories/MEMORY.md and USER.md.
 pub struct FileMemoryBackend {
@@ -90,14 +92,34 @@ impl FileMemoryBackend {
     }
 
     fn success_response(target: &str, entries: &[String], message: &str) -> String {
+        let limit = if target == "user" {
+            USER_CHAR_LIMIT
+        } else {
+            MEMORY_CHAR_LIMIT
+        };
+        let current = entries.join(ENTRY_DELIMITER).chars().count();
+        let pct = if limit > 0 {
+            ((current * 100) / limit).min(100)
+        } else {
+            0
+        };
         json!({
             "success": true,
             "target": target,
             "message": message,
             "entries": entries,
-            "entry_count": entries.len()
+            "entry_count": entries.len(),
+            "usage": format!("{pct}% - {current}/{limit} chars")
         })
         .to_string()
+    }
+
+    fn char_limit_for(target: &str) -> usize {
+        if target == "user" {
+            USER_CHAR_LIMIT
+        } else {
+            MEMORY_CHAR_LIMIT
+        }
     }
 }
 
@@ -133,7 +155,19 @@ impl MemoryBackend for FileMemoryBackend {
             ));
         }
 
-        entries.push(trimmed.to_string());
+        let mut new_entries = entries.clone();
+        new_entries.push(trimmed.to_string());
+        let new_total = new_entries.join(ENTRY_DELIMITER).chars().count();
+        let limit = Self::char_limit_for(target);
+        if new_total > limit {
+            let current = entries.join(ENTRY_DELIMITER).chars().count();
+            return Err(ToolError::ExecutionFailed(format!(
+                "Memory at {current}/{limit} chars. Adding this entry ({}) would exceed the limit.",
+                trimmed.chars().count()
+            )));
+        }
+
+        entries = new_entries;
         self.write_file(&path, &Self::format_entries(&entries))
             .await?;
         Ok(Self::success_response(target, &entries, "Entry added."))
@@ -197,7 +231,16 @@ impl MemoryBackend for FileMemoryBackend {
         }
 
         let idx = matches[0];
-        entries[idx] = new_content.to_string();
+        let mut candidate = entries.clone();
+        candidate[idx] = new_content.to_string();
+        let new_total = candidate.join(ENTRY_DELIMITER).chars().count();
+        let limit = Self::char_limit_for(target);
+        if new_total > limit {
+            return Err(ToolError::ExecutionFailed(format!(
+                "Replacement would put memory at {new_total}/{limit} chars."
+            )));
+        }
+        entries = candidate;
         self.write_file(&path, &Self::format_entries(&entries))
             .await?;
         Ok(Self::success_response(target, &entries, "Entry replaced."))
