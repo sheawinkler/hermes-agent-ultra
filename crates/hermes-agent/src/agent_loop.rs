@@ -1553,7 +1553,10 @@ impl AgentLoop {
             }
 
             // --- Post-tool hook ---
-            for (tc, res) in tool_calls.iter().zip(results.iter()) {
+            for res in &results {
+                let Some(tc) = tool_calls.iter().find(|tc| tc.id == res.tool_call_id) else {
+                    continue;
+                };
                 if let Ok(mut engine) = self.evolution_engine.lock() {
                     engine.record_tool_outcome(&tc.function.name, !res.is_error);
                 }
@@ -1939,7 +1942,10 @@ impl AgentLoop {
             }
 
             // Post-tool hooks + callbacks
-            for (tc, res) in tool_calls.iter().zip(results.iter()) {
+            for res in &results {
+                let Some(tc) = tool_calls.iter().find(|tc| tc.id == res.tool_call_id) else {
+                    continue;
+                };
                 if let Ok(mut engine) = self.evolution_engine.lock() {
                     engine.record_tool_outcome(&tc.function.name, !res.is_error);
                 }
