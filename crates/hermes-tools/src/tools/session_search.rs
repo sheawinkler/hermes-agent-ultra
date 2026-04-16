@@ -16,7 +16,12 @@ use std::sync::Arc;
 #[async_trait]
 pub trait SessionSearchBackend: Send + Sync {
     /// Search past conversations using FTS5 full-text search.
-    async fn search(&self, query: &str, limit: usize) -> Result<String, ToolError>;
+    async fn search(
+        &self,
+        query: Option<&str>,
+        role_filter: Option<&str>,
+        limit: usize,
+    ) -> Result<String, ToolError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -37,14 +42,11 @@ impl SessionSearchHandler {
 #[async_trait]
 impl ToolHandler for SessionSearchHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
-        let query = params
-            .get("query")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| ToolError::InvalidParams("Missing 'query' parameter".into()))?;
-
-        let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
-
-        self.backend.search(query, limit).await
+        let query = params.get("query").and_then(|v| v.as_str());
+        let role_filter = params.get("role_filter").and_then(|v| v.as_str());
+        let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
+        let capped_limit = limit.min(5);
+        self.backend.search(query, role_filter, capped_limit).await
     }
 
     fn schema(&self) -> ToolSchema {
@@ -53,22 +55,29 @@ impl ToolHandler for SessionSearchHandler {
             "query".into(),
             json!({
                 "type": "string",
-                "description": "Search query for finding past conversations"
+                "description": "Search query for finding past conversations. Omit to list recent sessions."
+            }),
+        );
+        props.insert(
+            "role_filter".into(),
+            json!({
+                "type": "string",
+                "description": "Optional comma-separated roles to include, e.g. 'user,assistant'."
             }),
         );
         props.insert(
             "limit".into(),
             json!({
                 "type": "integer",
-                "description": "Maximum number of results to return (default: 10)",
-                "default": 10
+                "description": "Max sessions to return/summarize (default: 3, max: 5).",
+                "default": 3
             }),
         );
 
         tool_schema(
             "session_search",
-            "Search past conversation sessions using full-text search. Returns relevant conversation snippets.",
-            JsonSchema::object(props, vec!["query".into()]),
+            "Search long-term memory of past conversations, or browse recent sessions when query is omitted.",
+            JsonSchema::object(props, vec![]),
         )
     }
 }
@@ -80,10 +89,15 @@ mod tests {
     struct MockSessionSearchBackend;
     #[async_trait]
     impl SessionSearchBackend for MockSessionSearchBackend {
-        async fn search(&self, query: &str, limit: usize) -> Result<String, ToolError> {
+        async fn search(
+            &self,
+            query: Option<&str>,
+            role_filter: Option<&str>,
+            limit: usize,
+        ) -> Result<String, ToolError> {
             Ok(format!(
-                "Found {} results for '{}' (limit: {})",
-                0, query, limit
+                "Found {} results for '{:?}' with role_filter={:?} (limit: {})",
+                0, query, role_filter, limit
             ))
         }
     }
