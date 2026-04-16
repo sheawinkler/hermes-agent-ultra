@@ -23,10 +23,16 @@ use hermes_core::{
 };
 
 use crate::budget;
-use crate::context::ContextManager;
+use crate::context::{load_soul_md, ContextManager, SystemPromptBuilder};
+use crate::context_files::{load_hermes_context_files, load_workspace_context};
 use crate::interrupt::InterruptController;
 use crate::memory_manager::MemoryManager;
 use crate::plugins::{HookResult, HookType, PluginManager};
+use crate::provider::{AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider};
+use crate::providers_extra::{
+    CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
+};
+use crate::skill_orchestrator::SkillOrchestrator;
 
 // ---------------------------------------------------------------------------
 // ToolRegistry
@@ -157,6 +163,76 @@ impl Default for RetryConfig {
     }
 }
 
+/// Cheap route target details for smart per-turn routing.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CheapModelRouteConfig {
+    /// Optional provider name. If set and model lacks provider prefix, runtime
+    /// composes `<provider>:<model>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    /// Target model slug.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Optional base URL override for runtime provider endpoint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// Optional env var name used to fetch API key for this route.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key_env: Option<String>,
+}
+
+/// Per-turn smart model routing (cheap-vs-strong).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SmartModelRoutingConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default = "default_max_simple_chars")]
+    pub max_simple_chars: usize,
+    #[serde(default = "default_max_simple_words")]
+    pub max_simple_words: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cheap_model: Option<CheapModelRouteConfig>,
+}
+
+impl Default for SmartModelRoutingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_simple_chars: default_max_simple_chars(),
+            max_simple_words: default_max_simple_words(),
+            cheap_model: None,
+        }
+    }
+}
+
+fn default_max_simple_chars() -> usize {
+    160
+}
+
+fn default_max_simple_words() -> usize {
+    28
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RuntimeProviderConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+}
+
+const MEMORY_GUIDANCE: &str = "You have persistent memory across sessions. Save durable facts using the memory tool: user preferences, environment details, tool quirks, and stable conventions. Memory is injected into every turn, so keep it compact and focused on facts that will still matter later. Prioritize what reduces future user steering. Do NOT save task progress, session outcomes, completed-work logs, or temporary TODO state to memory.";
+
+const SESSION_SEARCH_GUIDANCE: &str = "When the user references something from a past conversation or you suspect relevant cross-session context exists, use session_search to recall it before asking them to repeat themselves.";
+
+const SKILLS_GUIDANCE: &str = "After completing a complex task (5+ tool calls), fixing a tricky error, or discovering a non-trivial workflow, save the approach as a skill with skill_manage so you can reuse it next time. When using a skill and finding it outdated or incomplete, patch it immediately with skill_manage(action='patch').";
+
+const TOOL_USE_ENFORCEMENT_GUIDANCE: &str = "# Tool-use enforcement\nYou MUST use your tools to take action. Do not describe what you would do without actually doing it. When you say you will perform an action, make the corresponding tool call in the same response. Every response should either (a) contain tool calls that make progress, or (b) deliver a final result.";
+
+const OPENAI_MODEL_EXECUTION_GUIDANCE: &str = "# Execution discipline (OpenAI)\nUse tools whenever they improve correctness, completeness, or grounding. Do not stop early when another tool call would materially improve the result. Verify outcomes before declaring completion.";
+
+const GOOGLE_MODEL_OPERATIONAL_GUIDANCE: &str = "# Operational guidance (Google)\nBe concise and execution-first. Prefer absolute paths, parallel tool calls when safe, and verify each substantive change.";
+
 /// Configuration for the agent loop.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
@@ -224,9 +300,30 @@ pub struct AgentConfig {
     #[serde(default)]
     pub skip_memory: bool,
 
+    /// Optional cheap-vs-strong per-turn routing.
+    #[serde(default)]
+    pub smart_model_routing: SmartModelRoutingConfig,
+
     /// Provider hint (e.g. "openai", "anthropic", "openrouter").
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
+
+    /// Optional platform hint key (e.g. "cli", "telegram", "discord").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
+
+    /// Include session_id in system prompt timestamp block.
+    #[serde(default)]
+    pub pass_session_id: bool,
+
+    /// Runtime provider credentials/endpoints keyed by provider name.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub runtime_providers: HashMap<String, RuntimeProviderConfig>,
+
+    /// Ephemeral system prompt appended at API-call time only.
+    /// This is intentionally not persisted in context history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ephemeral_system_prompt: Option<String>,
 
     /// Session-level hard spend limit in USD. When reached, the loop trips
     /// the cost gate and returns early with a summary system message.
@@ -309,7 +406,12 @@ impl Default for AgentConfig {
             session_id: None,
             hermes_home: None,
             skip_memory: false,
+            smart_model_routing: SmartModelRoutingConfig::default(),
             provider: None,
+            platform: None,
+            pass_session_id: false,
+            runtime_providers: HashMap::new(),
+            ephemeral_system_prompt: None,
             max_cost_usd: None,
             cost_guard_degrade_at_ratio: default_cost_guard_degrade_at_ratio(),
             cost_guard_degrade_model: None,
@@ -437,6 +539,15 @@ pub struct AgentLoop {
     pub delegate_depth: u32,
     /// Adaptive self-evolution policy engine.
     pub evolution_engine: std::sync::Mutex<AdaptivePolicyEngine>,
+}
+
+#[derive(Debug, Clone)]
+struct TurnRuntimeRoute {
+    model: String,
+    provider: Option<String>,
+    base_url: Option<String>,
+    api_key_env: Option<String>,
+    routing_reason: Option<String>,
 }
 
 impl AgentLoop {
@@ -567,25 +678,383 @@ impl AgentLoop {
         String::new()
     }
 
-    /// Build the full system prompt including personality, memory, and plugin context.
-    fn build_system_prompt(&self, task_hint: &str) -> Option<String> {
-        let base = self.config.system_prompt.as_deref()?;
-        let mut parts = vec![base.to_string()];
+    fn should_inject_tool_enforcement(&self, model: &str) -> bool {
+        let model_lower = model.to_lowercase();
+        ["gpt", "codex", "gemini", "gemma", "grok"]
+            .iter()
+            .any(|p| model_lower.contains(p))
+    }
+
+    fn platform_hint_text(&self) -> Option<&'static str> {
+        let platform_key = self
+            .config
+            .platform
+            .as_deref()
+            .map(|s| s.trim().to_lowercase())
+            .unwrap_or_default();
+        match platform_key.as_str() {
+            "cli" => Some("You are a CLI AI Agent. Prefer concise plain text output suitable for terminals."),
+            "telegram" | "discord" | "slack" => {
+                Some("You are responding on a chat platform. Keep responses concise and avoid heavy formatting.")
+            }
+            "email" => Some("You are responding over email. Use clear structure and complete sentences."),
+            "sms" => Some("You are responding over SMS. Keep responses short and high-signal."),
+            _ => None,
+        }
+    }
+
+    fn effective_provider_for_prompt(&self, model: &str) -> Option<String> {
+        if let Some(ref p) = self.config.provider {
+            let trimmed = p.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+        model
+            .split_once(':')
+            .map(|(provider, _)| provider.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
+
+    fn skills_system_prompt(&self, tool_names: &HashSet<&str>) -> Option<String> {
+        let has_skills_tools = ["skills_list", "skill_view", "skill_manage"]
+            .iter()
+            .any(|t| tool_names.contains(*t));
+        if !has_skills_tools {
+            return None;
+        }
+        let mut orch = SkillOrchestrator::default_dir();
+        let commands = orch.scan_skill_commands();
+        if commands.is_empty() {
+            return Some(
+                "## Skills (mandatory)\nSkills tools are enabled. Use `skills_list` to discover available skills and `skill_view` before applying one."
+                    .to_string(),
+            );
+        }
+        let mut rows: Vec<_> = commands.iter().collect();
+        rows.sort_by(|a, b| a.0.cmp(b.0));
+        let mut body = String::from(
+            "## Skills (mandatory)\nBefore replying, check whether an existing skill applies. If yes, inspect it with `skill_view` and follow it.\n<available_skills>\n",
+        );
+        for (cmd, info) in rows.into_iter().take(80) {
+            body.push_str(&format!(
+                "- {}: {} ({})\n",
+                cmd,
+                info.name,
+                info.description.trim()
+            ));
+        }
+        body.push_str("</available_skills>");
+        Some(body)
+    }
+
+    fn context_files_prompt(&self) -> Option<String> {
+        let cwd = std::env::var("TERMINAL_CWD")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+            });
+
+        let mut sections = Vec::new();
+        if let Some(workspace) = load_workspace_context(&cwd) {
+            sections.push(format!("## Workspace Context\n{}", workspace));
+        }
+
+        let hermes_home = self
+            .config
+            .hermes_home
+            .as_deref()
+            .map(std::path::PathBuf::from)
+            .or_else(|| {
+                std::env::var("HERMES_HOME")
+                    .ok()
+                    .map(std::path::PathBuf::from)
+            })
+            .or_else(|| dirs::home_dir().map(|h| h.join(".hermes")))
+            .unwrap_or_else(|| std::path::PathBuf::from(".hermes"));
+
+        let personal_ctx = load_hermes_context_files(&hermes_home);
+        if !personal_ctx.trim().is_empty() {
+            sections.push(format!("## Personal Context\n{}", personal_ctx));
+        }
+
+        if sections.is_empty() {
+            None
+        } else {
+            Some(sections.join("\n\n"))
+        }
+    }
+
+    fn extract_provider_and_model<'a>(&self, model: &'a str) -> (String, &'a str) {
+        if let Some((p, m)) = model.split_once(':') {
+            let p = p.trim();
+            let m = m.trim();
+            if !p.is_empty() && !m.is_empty() {
+                return (p.to_string(), m);
+            }
+        }
+        let fallback_provider = self
+            .config
+            .provider
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("openai")
+            .to_string();
+        (fallback_provider, model)
+    }
+
+    fn resolve_runtime_api_key(
+        &self,
+        provider: &str,
+        api_key_env_override: Option<&str>,
+    ) -> Option<String> {
+        if let Some(env_name) = api_key_env_override
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            if let Ok(v) = std::env::var(env_name) {
+                if !v.trim().is_empty() {
+                    return Some(v);
+                }
+            }
+        }
+        if let Some(cfg) = self.config.runtime_providers.get(provider) {
+            if let Some(ref key) = cfg.api_key {
+                let trimmed = key.trim();
+                if let Some(env_ref) = trimmed.strip_prefix("${").and_then(|s| s.strip_suffix('}'))
+                {
+                    if let Ok(v) = std::env::var(env_ref) {
+                        if !v.trim().is_empty() {
+                            return Some(v);
+                        }
+                    }
+                } else if !trimmed.is_empty() {
+                    return Some(trimmed.to_string());
+                }
+            }
+        }
+        let env_var = match provider {
+            "openai" => "OPENAI_API_KEY",
+            "anthropic" => "ANTHROPIC_API_KEY",
+            "openrouter" => "OPENROUTER_API_KEY",
+            "qwen" => "DASHSCOPE_API_KEY",
+            "kimi" | "moonshot" => "MOONSHOT_API_KEY",
+            "minimax" => "MINIMAX_API_KEY",
+            "nous" => "NOUS_API_KEY",
+            "copilot" => "GITHUB_COPILOT_TOKEN",
+            _ => "",
+        };
+        if env_var.is_empty() {
+            None
+        } else {
+            std::env::var(env_var).ok().filter(|v| !v.trim().is_empty())
+        }
+    }
+
+    fn resolve_runtime_base_url(
+        &self,
+        provider: &str,
+        route_base_url: Option<&str>,
+    ) -> Option<String> {
+        if let Some(b) = route_base_url.map(str::trim).filter(|s| !s.is_empty()) {
+            return Some(b.to_string());
+        }
+        self.config
+            .runtime_providers
+            .get(provider)
+            .and_then(|c| c.base_url.as_ref())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    }
+
+    fn build_runtime_provider(
+        &self,
+        provider: &str,
+        model_name: &str,
+        base_url: Option<&str>,
+        api_key_env_override: Option<&str>,
+    ) -> Result<Arc<dyn LlmProvider>, AgentError> {
+        let api_key = self
+            .resolve_runtime_api_key(provider, api_key_env_override)
+            .ok_or_else(|| {
+                AgentError::Config(format!(
+                    "No API key configured for runtime-routed provider '{}'",
+                    provider
+                ))
+            })?;
+        let base_url = self.resolve_runtime_base_url(provider, base_url);
+
+        let provider_obj: Arc<dyn LlmProvider> = match provider {
+            "openai" => {
+                let mut p = OpenAiProvider::new(&api_key).with_model(model_name);
+                if let Some(url) = base_url {
+                    p = p.with_base_url(url);
+                }
+                Arc::new(p)
+            }
+            "anthropic" => {
+                let mut p = AnthropicProvider::new(&api_key).with_model(model_name);
+                if let Some(url) = base_url {
+                    p = p.with_base_url(url);
+                }
+                Arc::new(p)
+            }
+            "openrouter" => Arc::new(OpenRouterProvider::new(&api_key).with_model(model_name)),
+            "qwen" => {
+                let mut p = QwenProvider::new(&api_key).with_model(model_name);
+                if let Some(url) = base_url {
+                    p = p.with_base_url(url);
+                }
+                Arc::new(p)
+            }
+            "kimi" | "moonshot" => {
+                let mut p = KimiProvider::new(&api_key).with_model(model_name);
+                if let Some(url) = base_url {
+                    p = p.with_base_url(url);
+                }
+                Arc::new(p)
+            }
+            "minimax" => {
+                let mut p = MiniMaxProvider::new(&api_key).with_model(model_name);
+                if let Some(url) = base_url {
+                    p = p.with_base_url(url);
+                }
+                Arc::new(p)
+            }
+            "nous" => {
+                let mut p = NousProvider::new(&api_key).with_model(model_name);
+                if let Some(url) = base_url {
+                    p = p.with_base_url(url);
+                }
+                Arc::new(p)
+            }
+            "copilot" => {
+                let p = CopilotProvider::new(
+                    base_url.unwrap_or_else(|| "https://api.github.com/copilot".to_string()),
+                    &api_key,
+                )
+                .with_model(model_name);
+                Arc::new(p)
+            }
+            _ => {
+                let url = base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+                Arc::new(GenericProvider::new(url, &api_key, model_name))
+            }
+        };
+        Ok(provider_obj)
+    }
+
+    fn messages_for_api_call(&self, ctx: &ContextManager) -> Vec<Message> {
+        let mut messages = ctx.get_messages().to_vec();
+        if let Some(ephemeral) = self
+            .config
+            .ephemeral_system_prompt
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            messages.push(Message::system(ephemeral));
+        }
+        messages
+    }
+
+    /// Build the full system prompt including identity, memory, and plugin context.
+    ///
+    /// Aligns with Python behavior:
+    /// - prefer `~/.hermes/SOUL.md` as identity
+    /// - fallback to `DEFAULT_AGENT_IDENTITY`
+    /// - then append optional configured `system_prompt`
+    fn build_system_prompt(
+        &self,
+        task_hint: &str,
+        tool_schemas: &[ToolSchema],
+        model_for_prompt: &str,
+    ) -> String {
+        let soul = load_soul_md();
+        let mut builder = SystemPromptBuilder::new().with_personality(soul.as_deref());
+        if let Some(base) = self.config.system_prompt.as_deref() {
+            builder = builder.with_system_message(base);
+        }
+        let tool_names: HashSet<&str> = tool_schemas.iter().map(|t| t.name.as_str()).collect();
+        let mut tool_guidance = Vec::new();
+        if tool_names.contains("memory") {
+            tool_guidance.push(MEMORY_GUIDANCE);
+        }
+        if tool_names.contains("session_search") {
+            tool_guidance.push(SESSION_SEARCH_GUIDANCE);
+        }
+        if tool_names.contains("skill_manage") {
+            tool_guidance.push(SKILLS_GUIDANCE);
+        }
+        if !tool_guidance.is_empty() {
+            builder = builder.with_tool_guidance(&tool_guidance.join(" "));
+        }
+
+        if !tool_names.is_empty() && self.should_inject_tool_enforcement(model_for_prompt) {
+            builder = builder.with_block(TOOL_USE_ENFORCEMENT_GUIDANCE);
+            let model_lower = model_for_prompt.to_lowercase();
+            if model_lower.contains("gemini") || model_lower.contains("gemma") {
+                builder = builder.with_block(GOOGLE_MODEL_OPERATIONAL_GUIDANCE);
+            }
+            if model_lower.contains("gpt") || model_lower.contains("codex") {
+                builder = builder.with_block(OPENAI_MODEL_EXECUTION_GUIDANCE);
+            }
+        }
 
         if let Some(ref personality) = self.config.personality {
-            parts.push(format!("Personality: {personality}"));
+            builder = builder.with_block(&format!("Personality: {personality}"));
         }
 
         let mem_block = self.memory_system_prompt();
         if !mem_block.is_empty() {
-            parts.push(mem_block);
+            builder = builder.with_memory_context(&mem_block);
         }
 
-        let merged = parts.join("\n\n");
+        if let Some(skills_prompt) = self.skills_system_prompt(&tool_names) {
+            builder = builder.with_skills_prompt(&skills_prompt);
+        }
+
+        if let Some(context_prompt) = self.context_files_prompt() {
+            builder = builder.with_context_files(&context_prompt);
+        }
+
+        let provider = self.effective_provider_for_prompt(model_for_prompt);
+        builder = builder.with_timestamp(Some(model_for_prompt), provider.as_deref());
+
+        let mut timestamp_extras = String::new();
+        if self.config.pass_session_id {
+            if let Some(ref sid) = self.config.session_id {
+                if !sid.trim().is_empty() {
+                    timestamp_extras.push_str(&format!("Session ID: {}\n", sid.trim()));
+                }
+            }
+        }
+        if !timestamp_extras.trim().is_empty() {
+            builder = builder.with_block(timestamp_extras.trim_end());
+        }
+
+        if provider.as_deref() == Some("alibaba") {
+            let model_short = model_for_prompt
+                .split('/')
+                .next_back()
+                .unwrap_or(model_for_prompt);
+            builder = builder.with_block(&format!(
+                "You are powered by the model named {}. The exact model ID is {}. When asked what model you are, always answer based on this information, not on any model name returned by the API.",
+                model_short, model_for_prompt
+            ));
+        }
+
+        if let Some(hint) = self.platform_hint_text() {
+            builder = builder.with_block(hint);
+        }
+
+        let merged = builder.build().to_string();
         if let Ok(engine) = self.evolution_engine.lock() {
-            Some(engine.optimize_prompt_template(&merged, task_hint))
+            engine.optimize_prompt_template(&merged, task_hint)
         } else {
-            Some(merged)
+            merged
         }
     }
 
@@ -595,7 +1064,7 @@ impl AgentLoop {
         &'a self,
         ctx: &'a ContextManager,
         tool_schemas: &'a [ToolSchema],
-        model_override: Option<&'a str>,
+        route: Option<&'a TurnRuntimeRoute>,
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<Output = Result<hermes_core::LlmResponse, AgentError>>
@@ -603,16 +1072,19 @@ impl AgentLoop {
                 + 'a,
         >,
     > {
-        Box::pin(self.call_llm_with_retry_inner(ctx, tool_schemas, model_override))
+        Box::pin(self.call_llm_with_retry_inner(ctx, tool_schemas, route))
     }
 
     async fn call_llm_with_retry_inner(
         &self,
         ctx: &ContextManager,
         tool_schemas: &[ToolSchema],
-        model_override: Option<&str>,
+        route: Option<&TurnRuntimeRoute>,
     ) -> Result<hermes_core::LlmResponse, AgentError> {
-        let model = model_override.unwrap_or(self.config.model.as_str());
+        let model = route
+            .map(|r| r.model.as_str())
+            .unwrap_or(self.config.model.as_str());
+        let api_messages = self.messages_for_api_call(ctx);
         let retry = &self.config.retry;
         let is_long_task = ctx.total_chars() > 8_000 || ctx.get_messages().len() > 28;
         let (effective_max_retries, effective_base_delay_ms) =
@@ -623,17 +1095,57 @@ impl AgentLoop {
             };
 
         for attempt in 0..=effective_max_retries {
-            let result = self
-                .llm_provider
-                .chat_completion(
-                    ctx.get_messages(),
-                    tool_schemas,
-                    self.config.max_tokens,
-                    self.config.temperature,
-                    Some(model),
-                    self.config.extra_body.as_ref(),
-                )
-                .await;
+            let result = if let Some(rt) = route {
+                let (provider_name, model_name) = self.extract_provider_and_model(model);
+                let routed_provider = self.build_runtime_provider(
+                    rt.provider.as_deref().unwrap_or(provider_name.as_str()),
+                    model_name,
+                    rt.base_url.as_deref(),
+                    rt.api_key_env.as_deref(),
+                );
+                match routed_provider {
+                    Ok(provider) => {
+                        provider
+                            .chat_completion(
+                                &api_messages,
+                                tool_schemas,
+                                self.config.max_tokens,
+                                self.config.temperature,
+                                Some(model),
+                                self.config.extra_body.as_ref(),
+                            )
+                            .await
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Runtime route unavailable (reason={:?}), falling back to primary runtime: {}",
+                            rt.routing_reason,
+                            e
+                        );
+                        self.llm_provider
+                            .chat_completion(
+                                &api_messages,
+                                tool_schemas,
+                                self.config.max_tokens,
+                                self.config.temperature,
+                                Some(self.config.model.as_str()),
+                                self.config.extra_body.as_ref(),
+                            )
+                            .await
+                    }
+                }
+            } else {
+                self.llm_provider
+                    .chat_completion(
+                        &api_messages,
+                        tool_schemas,
+                        self.config.max_tokens,
+                        self.config.temperature,
+                        Some(model),
+                        self.config.extra_body.as_ref(),
+                    )
+                    .await
+            };
 
             match result {
                 Ok(response) => return Ok(response),
@@ -663,9 +1175,19 @@ impl AgentLoop {
                                             model,
                                             fallback
                                         );
-                                        return self
-                                            .call_llm_with_retry(ctx, tool_schemas, Some(fallback))
+                                        let fallback_result = self
+                                            .llm_provider
+                                            .chat_completion(
+                                                &api_messages,
+                                                tool_schemas,
+                                                self.config.max_tokens,
+                                                self.config.temperature,
+                                                Some(fallback),
+                                                self.config.extra_body.as_ref(),
+                                            )
                                             .await;
+                                        return fallback_result
+                                            .map_err(|e| AgentError::LlmApi(e.to_string()));
                                     }
                                 }
                                 return Err(AgentError::LlmApi(err_str));
@@ -711,10 +1233,13 @@ impl AgentLoop {
             .and_then(|m| m.content.clone())
             .unwrap_or_default();
 
+        // Determine which tools to expose
+        let tool_schemas: Vec<ToolSchema> = tools.unwrap_or_else(|| self.tool_registry.schemas());
+
         // Build and inject system prompt
-        if let Some(system_content) = self.build_system_prompt(&task_hint) {
-            ctx.add_message(Message::system(&system_content));
-        }
+        let system_content =
+            self.build_system_prompt(&task_hint, &tool_schemas, &self.config.model);
+        ctx.add_message(Message::system(&system_content));
 
         // Add initial messages
         for msg in messages {
@@ -740,16 +1265,13 @@ impl AgentLoop {
             ctx.add_message(Message::system(&mem_ctx));
         }
 
-        // Determine which tools to expose
-        let tool_schemas: Vec<ToolSchema> = tools.unwrap_or_else(|| self.tool_registry.schemas());
-
         let mut total_turns: u32 = 0;
         let mut _total_api_time_ms: u64 = 0;
         let mut _total_tool_time_ms: u64 = 0;
         let mut accumulated_usage: Option<UsageStats> = None;
         let mut session_cost_usd: f64 = 0.0;
         let mut cost_warned = false;
-        let mut active_model_override: Option<String> = None;
+        let mut forced_runtime_route: Option<TurnRuntimeRoute> = None;
         let mut last_checkpoint_messages: Option<Vec<Message>> = None;
 
         loop {
@@ -799,8 +1321,12 @@ impl AgentLoop {
             }
 
             // --- Pre-LLM hook ---
-            let active_model = active_model_override
-                .as_deref()
+            let turn_runtime_route = forced_runtime_route
+                .clone()
+                .or_else(|| self.resolve_smart_runtime_route(ctx.get_messages()));
+            let active_model = turn_runtime_route
+                .as_ref()
+                .map(|r| r.model.as_str())
                 .unwrap_or(self.config.model.as_str());
             let hook_ctx = serde_json::json!({"turn": total_turns, "model": active_model});
             let pre_results = self.invoke_hook(HookType::PreLlmCall, &hook_ctx);
@@ -809,7 +1335,7 @@ impl AgentLoop {
             // --- LLM API call with retry ---
             let api_start = Instant::now();
             let response = self
-                .call_llm_with_retry(&ctx, &tool_schemas, active_model_override.as_deref())
+                .call_llm_with_retry(&ctx, &tool_schemas, turn_runtime_route.as_ref())
                 .await?;
             let api_elapsed = api_start.elapsed().as_millis() as u64;
             _total_api_time_ms += api_elapsed;
@@ -838,9 +1364,15 @@ impl AgentLoop {
                     && session_cost_usd >= limit * self.config.cost_guard_degrade_at_ratio
                 {
                     cost_warned = true;
-                    if active_model_override.is_none() {
+                    if forced_runtime_route.is_none() {
                         if let Some(model) = self.resolve_cost_degrade_model() {
-                            active_model_override = Some(model.clone());
+                            forced_runtime_route = Some(TurnRuntimeRoute {
+                                model: model.clone(),
+                                provider: None,
+                                base_url: None,
+                                api_key_env: None,
+                                routing_reason: Some("cost_guard".to_string()),
+                            });
                             ctx.add_message(Message::system(format!(
                                 "Cost guard: session spend is now ${:.4}/${:.4}. Switching to cheaper model `{}`.",
                                 session_cost_usd, limit, model
@@ -1009,9 +1541,10 @@ impl AgentLoop {
             .and_then(|m| m.content.clone())
             .unwrap_or_default();
 
-        if let Some(system_content) = self.build_system_prompt(&task_hint) {
-            ctx.add_message(Message::system(&system_content));
-        }
+        let tool_schemas: Vec<ToolSchema> = tools.unwrap_or_else(|| self.tool_registry.schemas());
+        let system_content =
+            self.build_system_prompt(&task_hint, &tool_schemas, &self.config.model);
+        ctx.add_message(Message::system(&system_content));
 
         for msg in messages {
             ctx.add_message(msg);
@@ -1036,13 +1569,11 @@ impl AgentLoop {
             ctx.add_message(Message::system(&mem_ctx));
         }
 
-        let tool_schemas: Vec<ToolSchema> = tools.unwrap_or_else(|| self.tool_registry.schemas());
-
         let mut total_turns: u32 = 0;
         let mut accumulated_usage: Option<UsageStats> = None;
         let mut session_cost_usd: f64 = 0.0;
         let mut cost_warned = false;
-        let mut active_model_override: Option<String> = None;
+        let mut forced_runtime_route: Option<TurnRuntimeRoute> = None;
         let mut last_checkpoint_messages: Option<Vec<Message>> = None;
 
         loop {
@@ -1086,22 +1617,61 @@ impl AgentLoop {
             }
 
             // Pre-LLM hook
-            let active_model = active_model_override
-                .as_deref()
+            let turn_runtime_route = forced_runtime_route
+                .clone()
+                .or_else(|| self.resolve_smart_runtime_route(ctx.get_messages()));
+            let active_model = turn_runtime_route
+                .as_ref()
+                .map(|r| r.model.as_str())
                 .unwrap_or(self.config.model.as_str());
             let hook_ctx = serde_json::json!({"turn": total_turns, "model": active_model});
             let pre_results = self.invoke_hook(HookType::PreLlmCall, &hook_ctx);
             self.inject_hook_context(&pre_results, &mut ctx);
+            let api_messages = self.messages_for_api_call(&ctx);
 
             // --- Streaming LLM call ---
-            let mut stream = self.llm_provider.chat_completion_stream(
-                ctx.get_messages(),
-                &tool_schemas,
-                self.config.max_tokens,
-                self.config.temperature,
-                Some(active_model),
-                self.config.extra_body.as_ref(),
-            );
+            let mut stream = if let Some(ref rt) = turn_runtime_route {
+                let (provider_name, model_name) = self.extract_provider_and_model(active_model);
+                match self.build_runtime_provider(
+                    rt.provider.as_deref().unwrap_or(provider_name.as_str()),
+                    model_name,
+                    rt.base_url.as_deref(),
+                    rt.api_key_env.as_deref(),
+                ) {
+                    Ok(provider) => provider.chat_completion_stream(
+                        &api_messages,
+                        &tool_schemas,
+                        self.config.max_tokens,
+                        self.config.temperature,
+                        Some(active_model),
+                        self.config.extra_body.as_ref(),
+                    ),
+                    Err(e) => {
+                        tracing::warn!(
+                            "Runtime route unavailable (reason={:?}) for stream, falling back to primary runtime: {}",
+                            rt.routing_reason,
+                            e
+                        );
+                        self.llm_provider.chat_completion_stream(
+                            &api_messages,
+                            &tool_schemas,
+                            self.config.max_tokens,
+                            self.config.temperature,
+                            Some(self.config.model.as_str()),
+                            self.config.extra_body.as_ref(),
+                        )
+                    }
+                }
+            } else {
+                self.llm_provider.chat_completion_stream(
+                    &api_messages,
+                    &tool_schemas,
+                    self.config.max_tokens,
+                    self.config.temperature,
+                    Some(active_model),
+                    self.config.extra_body.as_ref(),
+                )
+            };
 
             let mut content = String::new();
             let mut reasoning_content = String::new();
@@ -1173,9 +1743,15 @@ impl AgentLoop {
                     && session_cost_usd >= limit * self.config.cost_guard_degrade_at_ratio
                 {
                     cost_warned = true;
-                    if active_model_override.is_none() {
+                    if forced_runtime_route.is_none() {
                         if let Some(model) = self.resolve_cost_degrade_model() {
-                            active_model_override = Some(model.clone());
+                            forced_runtime_route = Some(TurnRuntimeRoute {
+                                model: model.clone(),
+                                provider: None,
+                                base_url: None,
+                                api_key_env: None,
+                                routing_reason: Some("cost_guard".to_string()),
+                            });
                             ctx.add_message(Message::system(format!(
                                 "Cost guard: session spend is now ${:.4}/${:.4}. Switching to cheaper model `{}`.",
                                 session_cost_usd, limit, model
@@ -1374,6 +1950,132 @@ impl AgentLoop {
         } else {
             None
         }
+    }
+
+    fn latest_user_text<'a>(&self, messages: &'a [Message]) -> Option<&'a str> {
+        messages
+            .iter()
+            .rev()
+            .find(|m| matches!(m.role, hermes_core::MessageRole::User))
+            .and_then(|m| m.content.as_deref())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+    }
+
+    fn is_simple_turn(&self, text: &str) -> bool {
+        let cfg = &self.config.smart_model_routing;
+        if text.len() > cfg.max_simple_chars {
+            return false;
+        }
+        if text.split_whitespace().count() > cfg.max_simple_words {
+            return false;
+        }
+        if text.matches('\n').count() > 1 {
+            return false;
+        }
+        if text.contains('`') {
+            return false;
+        }
+        let lower = text.to_lowercase();
+        if lower.contains("http://") || lower.contains("https://") || lower.contains("www.") {
+            return false;
+        }
+        let complex_keywords = [
+            "debug",
+            "debugging",
+            "implement",
+            "implementation",
+            "refactor",
+            "patch",
+            "traceback",
+            "stacktrace",
+            "exception",
+            "error",
+            "analyze",
+            "analysis",
+            "investigate",
+            "architecture",
+            "design",
+            "compare",
+            "benchmark",
+            "optimize",
+            "optimise",
+            "review",
+            "terminal",
+            "shell",
+            "tool",
+            "tools",
+            "pytest",
+            "test",
+            "tests",
+            "plan",
+            "planning",
+            "delegate",
+            "subagent",
+            "cron",
+            "docker",
+            "kubernetes",
+        ];
+        let words: HashSet<String> = lower
+            .split_whitespace()
+            .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_string())
+            .filter(|w| !w.is_empty())
+            .collect();
+        !complex_keywords.iter().any(|k| words.contains(*k))
+    }
+
+    fn resolve_smart_runtime_route(&self, messages: &[Message]) -> Option<TurnRuntimeRoute> {
+        let cfg = &self.config.smart_model_routing;
+        if !cfg.enabled {
+            return None;
+        }
+        let text = self.latest_user_text(messages)?;
+
+        if self.is_simple_turn(text) {
+            if let Some(ref cheap) = cfg.cheap_model {
+                let model = cheap.model.as_deref().map(str::trim).unwrap_or("");
+                if !model.is_empty() {
+                    return Some(TurnRuntimeRoute {
+                        model: model.to_string(),
+                        provider: cheap
+                            .provider
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.to_lowercase()),
+                        base_url: cheap
+                            .base_url
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(ToString::to_string),
+                        api_key_env: cheap
+                            .api_key_env
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty())
+                            .map(ToString::to_string),
+                        routing_reason: Some("simple_turn".to_string()),
+                    });
+                }
+            }
+        }
+
+        if let Ok(engine) = self.evolution_engine.lock() {
+            if let Some(model) = engine.recommend_model_for_text(text) {
+                let candidate = model.trim();
+                if !candidate.is_empty() && candidate != self.config.model {
+                    return Some(TurnRuntimeRoute {
+                        model: candidate.to_string(),
+                        provider: None,
+                        base_url: None,
+                        api_key_env: None,
+                        routing_reason: Some("policy_recommendation".to_string()),
+                    });
+                }
+            }
+        }
+        None
     }
 
     /// Resolve the model used for automatic degradation when nearing
@@ -1638,11 +2340,141 @@ mod tests {
         assert_eq!(config.retry.max_retries, 3);
         assert!(config.session_id.is_none());
         assert!(!config.skip_memory);
+        assert!(config.platform.is_none());
+        assert!(!config.pass_session_id);
         assert!(config.max_cost_usd.is_none());
         assert_eq!(config.cost_guard_degrade_at_ratio, 0.8);
         assert!(config.cost_guard_degrade_model.is_none());
         assert_eq!(config.checkpoint_interval_turns, 3);
         assert_eq!(config.rollback_on_tool_error_threshold, 3);
+        assert!(!config.smart_model_routing.enabled);
+    }
+
+    #[test]
+    fn test_smart_model_routing_cheap_route_for_simple_turn() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let config = AgentConfig {
+            model: "openai:gpt-4o".to_string(),
+            smart_model_routing: SmartModelRoutingConfig {
+                enabled: true,
+                max_simple_chars: 160,
+                max_simple_words: 28,
+                cheap_model: Some(CheapModelRouteConfig {
+                    provider: Some("openai".to_string()),
+                    model: Some("gpt-4o-mini".to_string()),
+                    base_url: None,
+                    api_key_env: None,
+                }),
+            },
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let messages = vec![Message::user("帮我总结一下今天要做什么")];
+        let selected = agent.resolve_smart_runtime_route(&messages);
+        assert_eq!(
+            selected.as_ref().map(|r| r.model.as_str()),
+            Some("gpt-4o-mini")
+        );
+    }
+
+    #[test]
+    fn test_smart_model_routing_skips_complex_turn() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let config = AgentConfig {
+            model: "openai:gpt-4o".to_string(),
+            smart_model_routing: SmartModelRoutingConfig {
+                enabled: true,
+                max_simple_chars: 160,
+                max_simple_words: 28,
+                cheap_model: Some(CheapModelRouteConfig {
+                    provider: Some("openai".to_string()),
+                    model: Some("gpt-4o-mini".to_string()),
+                    base_url: None,
+                    api_key_env: None,
+                }),
+            },
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let messages = vec![Message::user("请帮我 debug 这段 traceback 并修复错误")];
+        let selected = agent.resolve_smart_runtime_route(&messages);
+        assert!(selected.is_none());
     }
 
     #[test]
