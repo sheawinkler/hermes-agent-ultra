@@ -12,9 +12,9 @@
 
 基线目标：`NousResearch/hermes-agent@v2026.4.13`（`1af2e18d408a9dcc2c61d6fc1eef5c6667f8e254`）。
 
-- 进度：**12 / 13** 个范围内对齐项已完成。
-- 已完成重点：提示词分层/核心 guidance 对齐、与 Python 同构的 `resolve_turn_route`/cheap-route 流水线及 HTTP 运行时快照（`api_mode`、主配置 `acp_command`/`acp_args`、凭证池、`TurnRouteSignature`）、智能路由运行时切换与回退、memory 工具语义与容量限制、内置 `MEMORY.md`/`USER.md` 快照注入、memory 生命周期钩子（`on_memory_write`、`queue_prefetch`、`on_pre_compress`、`on_session_end`、`on_delegation`）、`session_search` 双模式与 `role_filter`/limit 对齐、memory/skill 节拍计数与可选后台回顾（与 Python `v2026.4.13` 相同回顾提示词；默认关闭，由 `background_review_enabled` 控制）。
-- 剩余重点：子进程/外部进程推理栈（若需要与 Python 注册表完全一致），以及基于 Python 行为基线的 parity 测试。
+- 进度：**13 / 13** 个范围内对齐项已完成。
+- 已完成重点：提示词分层/核心 guidance 对齐、与 Python 同构的 `resolve_turn_route`/cheap-route 流水线及运行时快照（`api_mode`、主配置 `acp_command`/`acp_args`、凭证池、`TurnRouteSignature`）并覆盖 HTTP 与外部进程提供商、智能路由运行时切换与回退、memory 工具语义与容量限制、内置 `MEMORY.md`/`USER.md` 快照注入、memory 生命周期钩子（`on_memory_write`、`queue_prefetch`、`on_pre_compress`、`on_session_end`、`on_delegation`）、`session_search` 双模式与 `role_filter`/limit 对齐、memory/skill 节拍计数与可选后台回顾（与 Python `v2026.4.13` 相同回顾提示词；默认关闭，由 `background_review_enabled` 控制），以及自进化节拍的 fixture 风格 parity 测试。
+- 剩余重点：超出这 13 项 parity tracker 的能力增强项。
 
 ### TODO（对齐追踪）
 
@@ -29,9 +29,9 @@
 - [x] Smart Model Selection：逐轮 cheap-route 与 policy recommendation 路由。
 - [x] Smart Model Selection：路由 provider 构建失败时回退主 provider。
 - [x] Smart Model Selection：面向 HTTP 提供商的 Python 形 `resolve_turn_route` + 运行时快照字段（`api_mode`、`command`/`args`、`credential_pool`、`signature`）。
-- [ ] Smart Model Selection：子进程/外部进程推理运行时（Python `resolve_runtime_provider` 中尚未映射到 Rust 的部分）。
+- [x] Smart Model Selection：子进程/外部进程推理运行时（已映射 `openai-codex` / `qwen-oauth` / `copilot-acp` 的 auth-store 与运行时元数据路径）。
 - [x] Self-Evolution：Python 风格 memory/skill 节拍与可选后台回顾轮次（与 Python `v2026.4.13` 相同提示词；默认关闭）。
-- [ ] Self-Evolution：基于 Python `v2026.4.13` 行为基线的 parity 验证测试。
+- [x] Self-Evolution：基于 Python `v2026.4.13` 行为基线的 parity 验证测试。
 
 ### 能力实现状态（你要求的检查清单）
 

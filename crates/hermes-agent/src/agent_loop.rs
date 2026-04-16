@@ -7,9 +7,11 @@
 //! 4. Repeat until the model finishes naturally or the turn budget is exceeded
 
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use hermes_intelligence::AdaptivePolicyEngine;
 use serde::{Deserialize, Serialize};
@@ -169,6 +171,13 @@ pub struct RuntimeProviderConfig {
     /// Optional argv tail for external process runtimes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct OAuthStoreCredential {
+    access_token: String,
+    #[serde(default)]
+    expires_at: Option<DateTime<Utc>>,
 }
 
 const MEMORY_GUIDANCE: &str = "You have persistent memory across sessions. Save durable facts using the memory tool: user preferences, environment details, tool quirks, and stable conventions. Memory is injected into every turn, so keep it compact and focused on facts that will still matter later. Prioritize what reduces future user steering. Do NOT save task progress, session outcomes, completed-work logs, or temporary TODO state to memory.";
@@ -1014,6 +1023,9 @@ impl AgentLoop {
         if provider == "copilot-acp" {
             return Some("copilot-acp".to_string());
         }
+        if let Some(token) = self.resolve_oauth_store_api_key(provider) {
+            return Some(token);
+        }
         if let Some(key) = explicit_api_key.map(str::trim).filter(|s| !s.is_empty()) {
             return Some(key.to_string());
         }
@@ -1081,10 +1093,49 @@ impl AgentLoop {
                         .map(|s| s.trim().to_string())
                         .filter(|s| !s.is_empty())
                         .or_else(|| Some("acp://copilot".to_string()))
+                } else if provider == "openai-codex" || provider == "codex" {
+                    Some("https://api.openai.com/v1".to_string())
+                } else if provider == "qwen-oauth" {
+                    Some("https://dashscope.aliyuncs.com/compatible-mode/v1".to_string())
                 } else {
                     None
                 }
             })
+    }
+
+    fn resolve_oauth_store_api_key(&self, provider: &str) -> Option<String> {
+        let provider_key = match provider {
+            "openai-codex" | "codex" => "openai-codex",
+            "qwen-oauth" => "qwen-oauth",
+            _ => return None,
+        };
+        let path = self.auth_tokens_path();
+        let raw = std::fs::read_to_string(path).ok()?;
+        let entries: HashMap<String, OAuthStoreCredential> = serde_json::from_str(&raw).ok()?;
+        let cred = entries.get(provider_key)?;
+        if cred.access_token.trim().is_empty() {
+            return None;
+        }
+        if cred
+            .expires_at
+            .map(|exp| exp <= Utc::now())
+            .unwrap_or(false)
+        {
+            return None;
+        }
+        Some(cred.access_token.clone())
+    }
+
+    fn auth_tokens_path(&self) -> PathBuf {
+        let hermes_home = self
+            .config
+            .hermes_home
+            .as_deref()
+            .map(PathBuf::from)
+            .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
+            .or_else(|| dirs::home_dir().map(|h| h.join(".hermes")))
+            .unwrap_or_else(|| PathBuf::from(".hermes"));
+        hermes_home.join("auth").join("tokens.json")
     }
 
     fn resolve_runtime_command_args(
@@ -3278,6 +3329,109 @@ mod tests {
             selected.as_ref().and_then(|r| r.provider.as_deref()),
             Some("qwen-oauth")
         );
+    }
+
+    #[test]
+    fn test_smart_model_routing_openai_codex_reads_auth_store_token() {
+        use futures::stream::BoxStream;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let home = std::env::temp_dir().join(format!("hermes-auth-fixture-{}", nonce));
+        let auth_dir = home.join("auth");
+        std::fs::create_dir_all(&auth_dir).expect("create auth dir");
+        std::fs::write(
+            auth_dir.join("tokens.json"),
+            r#"{
+  "openai-codex": {
+    "provider": "openai-codex",
+    "access_token": "codex-oauth-token",
+    "token_type": "bearer",
+    "refresh_token": null,
+    "scope": null,
+    "expires_at": "2099-01-01T00:00:00Z"
+  }
+}"#,
+        )
+        .expect("write token store");
+
+        let mut runtime_providers = HashMap::new();
+        runtime_providers.insert(
+            "openai-codex".to_string(),
+            RuntimeProviderConfig {
+                api_key: None,
+                base_url: None,
+                command: None,
+                args: Vec::new(),
+            },
+        );
+
+        let config = AgentConfig {
+            model: "openai:gpt-4o".to_string(),
+            hermes_home: Some(home.to_string_lossy().to_string()),
+            runtime_providers,
+            smart_model_routing: SmartModelRoutingConfig {
+                enabled: true,
+                max_simple_chars: 160,
+                max_simple_words: 28,
+                cheap_model: Some(CheapModelRouteConfig {
+                    provider: Some("openai-codex".to_string()),
+                    model: Some("gpt-5-codex".to_string()),
+                    base_url: None,
+                    api_key_env: None,
+                }),
+                evolution_model_hints: false,
+            },
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let selected = agent.resolve_smart_runtime_route(&[Message::user("帮我总结这段话")]);
+        assert_eq!(
+            selected.as_ref().and_then(|r| r.provider.as_deref()),
+            Some("openai-codex")
+        );
+        // Best effort cleanup.
+        let _ = std::fs::remove_dir_all(home);
     }
 
     #[test]
