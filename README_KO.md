@@ -12,9 +12,9 @@
 
 기준 베이스라인: `NousResearch/hermes-agent@v2026.4.13` (`1af2e18d408a9dcc2c61d6fc1eef5c6667f8e254`).
 
-- 진행률: 스코프 내 정렬 항목 **12 / 13** 완료.
-- 완료된 핵심 영역: 프롬프트 레이어/핵심 가이던스 정렬, Python과 동형의 `resolve_turn_route`/cheap-route 파이프라인 및 HTTP 런타임 스냅샷(`api_mode`, 기본 `acp_command`/`acp_args`, 자격 증명 풀, `TurnRouteSignature`), 스마트 라우팅 런타임 전환 및 폴백, memory 도구 시맨틱과 용량 제한, 내장 `MEMORY.md`/`USER.md` 스냅샷 주입, memory 라이프사이클 훅(`on_memory_write`, `queue_prefetch`, `on_pre_compress`, `on_session_end`, `on_delegation`), `session_search` 이중 모드 + `role_filter`/limit 정렬, memory/skill 낫지 카운터 및 선택적 백그라운드 리뷰(Python `v2026.4.13`과 동일한 리뷰 프롬프트, `background_review_enabled`로 제어, 기본값 꺼짐).
-- 남은 핵심 영역: 서브프로세스/외부 프로세스 추론 스택(필요 시), Python 픽스처 기반 parity 테스트.
+- 진행률: 스코프 내 정렬 항목 **13 / 13** 완료.
+- 완료된 핵심 영역: 프롬프트 레이어/핵심 가이던스 정렬, Python과 동형의 `resolve_turn_route`/cheap-route 파이프라인 및 런타임 스냅샷(`api_mode`, 기본 `acp_command`/`acp_args`, 자격 증명 풀, `TurnRouteSignature`)을 HTTP/외부 프로세스 공급자까지 확장, 스마트 라우팅 런타임 전환 및 폴백, memory 도구 시맨틱과 용량 제한, 내장 `MEMORY.md`/`USER.md` 스냅샷 주입, memory 라이프사이클 훅(`on_memory_write`, `queue_prefetch`, `on_pre_compress`, `on_session_end`, `on_delegation`), `session_search` 이중 모드 + `role_filter`/limit 정렬, memory/skill 낫지 카운터 및 선택적 백그라운드 리뷰(Python `v2026.4.13`과 동일한 리뷰 프롬프트, `background_review_enabled`로 제어, 기본값 꺼짐), 그리고 self-evolution 주기의 픽스처형 parity 검증.
+- 남은 핵심 영역: 이 13개 parity 트래커 범위를 넘는 기능 확장.
 
 ### TODO (패리티 트래커)
 
@@ -29,9 +29,9 @@
 - [x] Smart Model Selection: 턴 단위 cheap-route 및 policy recommendation route.
 - [x] Smart Model Selection: 라우팅 provider 생성 실패 시 primary provider 폴백.
 - [x] Smart Model Selection: HTTP 공급자용 Python 형 `resolve_turn_route` + 런타임 스냅샷(`api_mode`, `command`/`args`, `credential_pool`, `signature`).
-- [ ] Smart Model Selection: 서브프로세스/외부 프로세스 추론 런타임(Python `resolve_runtime_provider`의 미매핑 부분).
+- [x] Smart Model Selection: 서브프로세스/외부 프로세스 추론 런타임(`openai-codex` / `qwen-oauth` / `copilot-acp`의 auth-store/런타임 경로를 Rust로 매핑).
 - [x] Self-Evolution: Python 스타일 memory/skill 낫지 주기 + 선택적 백그라운드 리뷰(Python `v2026.4.13`과 동일한 프롬프트, 기본 꺼짐).
-- [ ] Self-Evolution: Python `v2026.4.13` 동작 기준 parity 검증 테스트.
+- [x] Self-Evolution: Python `v2026.4.13` 동작 기준 parity 검증 테스트.
 
 ### 기능 구현 상태 (요청 체크리스트)
 

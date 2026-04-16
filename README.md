@@ -12,9 +12,9 @@ A production-grade Rust rewrite of [Hermes Agent](https://github.com/NousResearc
 
 Baseline target: `NousResearch/hermes-agent@v2026.4.13` (`1af2e18d408a9dcc2c61d6fc1eef5c6667f8e254`).
 
-- Progress: **12 / 13 scoped parity items completed**.
-- Completed focus areas: prompt layering/core guidance parity, Python-shaped `resolve_turn_route` / cheap-route pipeline and HTTP runtime snapshots (`api_mode`, primary `acp_command`/`acp_args`, credential pool, `TurnRouteSignature`), smart routing runtime switching and fallback, memory tool semantics and limits, built-in `MEMORY.md`/`USER.md` snapshot injection, memory lifecycle hooks (`on_memory_write`, `queue_prefetch`, `on_pre_compress`, `on_session_end`, `on_delegation`), `session_search` dual mode with `role_filter` and capped limit, memory/skill nudge counters + optional background review (Python review prompts; gated by `background_review_enabled`).
-- Remaining focus areas: subprocess / external-process inference parity (if needed), and Python fixture-based parity tests.
+- Progress: **13 / 13 scoped parity items completed**.
+- Completed focus areas: prompt layering/core guidance parity, Python-shaped `resolve_turn_route` / cheap-route pipeline and runtime snapshots (`api_mode`, primary `acp_command`/`acp_args`, credential pool, `TurnRouteSignature`) across HTTP and subprocess-backed providers, smart routing runtime switching and fallback, memory tool semantics and limits, built-in `MEMORY.md`/`USER.md` snapshot injection, memory lifecycle hooks (`on_memory_write`, `queue_prefetch`, `on_pre_compress`, `on_session_end`, `on_delegation`), `session_search` dual mode with `role_filter` and capped limit, memory/skill nudge counters + optional background review (Python review prompts; gated by `background_review_enabled`), and fixture-style parity tests for self-evolution cadence.
+- Remaining focus areas: capability-level enhancements outside this 13-item parity tracker.
 
 ### TODO (Parity Tracker)
 
@@ -29,9 +29,9 @@ Baseline target: `NousResearch/hermes-agent@v2026.4.13` (`1af2e18d408a9dcc2c61d6
 - [x] Smart Model Selection: per-turn cheap-route and policy recommendation route.
 - [x] Smart Model Selection: routed-provider build failure fallback to primary provider.
 - [x] Smart Model Selection: Python-shaped `resolve_turn_route` + runtime snapshot fields (`api_mode`, `command`/`args`, `credential_pool`, `signature`) for HTTP-based providers.
-- [ ] Smart Model Selection: subprocess / external-process inference runtimes (Python `resolve_runtime_provider` extras not mapped to Rust yet).
+- [x] Smart Model Selection: subprocess / external-process inference runtimes (Python `resolve_runtime_provider` extras mapped for `openai-codex` / `qwen-oauth` / `copilot-acp`, including auth-store/runtime metadata parity).
 - [x] Self-Evolution: Python-style memory/skill nudge cadence + optional background review pass (same review prompts as Python `v2026.4.13`; off by default).
-- [ ] Self-Evolution: parity validation tests vs Python `v2026.4.13` behavior fixtures.
+- [x] Self-Evolution: parity validation tests vs Python `v2026.4.13` behavior fixtures.
 
 ### Capability Status (Requested Checklist)
 
