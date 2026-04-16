@@ -171,7 +171,7 @@ pub fn load_user_config_file(path: &Path) -> Result<GatewayConfig, ConfigError> 
     }
 }
 
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, llm.<provider>.api_key|base_url|model";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, llm.<provider>.api_key|base_url|model|command|args, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
 
 fn mask_secret(s: &str) -> String {
     if s.is_empty() {
@@ -190,6 +190,7 @@ fn mask_secret(s: &str) -> String {
 /// - `budget.max_result_size_chars`, `budget.max_aggregate_chars`
 /// - `proxy.http` / `proxy.http_proxy`, `proxy.socks` / `proxy.socks_proxy`
 /// - `llm.<provider>.api_key`, `llm.<provider>.base_url`, `llm.<provider>.model`
+/// - `llm.<provider>.command`, `llm.<provider>.args`
 pub fn apply_user_config_patch(
     config: &mut GatewayConfig,
     key: &str,
@@ -274,13 +275,65 @@ fn apply_user_config_patch_dotted(
                 "api_key" => entry.api_key = Some(value.to_string()),
                 "base_url" => entry.base_url = Some(value.to_string()),
                 "model" => entry.model = Some(value.to_string()),
+                "command" => entry.command = Some(value.to_string()),
+                "args" => {
+                    entry.args = value
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                }
                 other => {
                     return Err(ConfigError::NotFound(format!(
-                        "unknown llm field: llm.{}.{} (supported: api_key, base_url, model)",
+                        "unknown llm field: llm.{}.{} (supported: api_key, base_url, model, command, args)",
                         provider, other
                     )));
                 }
             }
+        }
+        ["smart_model_routing", "enabled"] => {
+            let normalized = value.trim().to_ascii_lowercase();
+            let parsed = match normalized.as_str() {
+                "1" | "true" | "yes" | "on" => true,
+                "0" | "false" | "no" | "off" => false,
+                _ => {
+                    return Err(ConfigError::ValidationError(format!(
+                        "smart_model_routing.enabled must be a boolean: {}",
+                        value
+                    )));
+                }
+            };
+            config.smart_model_routing.enabled = parsed;
+        }
+        ["smart_model_routing", "max_simple_chars"] => {
+            config.smart_model_routing.max_simple_chars = value.parse().map_err(|_| {
+                ConfigError::ValidationError(format!(
+                    "smart_model_routing.max_simple_chars must be a usize: {}",
+                    value
+                ))
+            })?;
+        }
+        ["smart_model_routing", "max_simple_words"] => {
+            config.smart_model_routing.max_simple_words = value.parse().map_err(|_| {
+                ConfigError::ValidationError(format!(
+                    "smart_model_routing.max_simple_words must be a usize: {}",
+                    value
+                ))
+            })?;
+        }
+        ["smart_model_routing", "cheap_model", "model"] => {
+            let cheap = config
+                .smart_model_routing
+                .cheap_model
+                .get_or_insert_with(crate::CheapModelRouteConfig::default);
+            cheap.model = Some(value.to_string());
+        }
+        ["smart_model_routing", "cheap_model", "provider"] => {
+            let cheap = config
+                .smart_model_routing
+                .cheap_model
+                .get_or_insert_with(crate::CheapModelRouteConfig::default);
+            cheap.provider = Some(value.to_string());
         }
         _ => {
             return Err(ConfigError::NotFound(format!(
@@ -364,6 +417,42 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             .llm_providers
             .get(*provider)
             .and_then(|c| c.model.as_deref())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "(not set)".to_string())),
+        ["llm", provider, "command"] => Ok(config
+            .llm_providers
+            .get(*provider)
+            .and_then(|c| c.command.as_deref())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "(not set)".to_string())),
+        ["llm", provider, "args"] => Ok(config
+            .llm_providers
+            .get(*provider)
+            .map(|c| c.args.join(","))
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "(not set)".to_string())),
+        ["smart_model_routing", "enabled"] => Ok(config.smart_model_routing.enabled.to_string()),
+        ["smart_model_routing", "max_simple_chars"] => {
+            Ok(config.smart_model_routing.max_simple_chars.to_string())
+        }
+        ["smart_model_routing", "max_simple_words"] => {
+            Ok(config.smart_model_routing.max_simple_words.to_string())
+        }
+        ["smart_model_routing", "cheap_model", "model"] => Ok(config
+            .smart_model_routing
+            .cheap_model
+            .as_ref()
+            .and_then(|c| c.model.as_deref())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "(not set)".to_string())),
+        ["smart_model_routing", "cheap_model", "provider"] => Ok(config
+            .smart_model_routing
+            .cheap_model
+            .as_ref()
+            .and_then(|c| c.provider.as_deref())
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .unwrap_or_else(|| "(not set)".to_string())),
@@ -616,6 +705,8 @@ mod tests {
         apply_user_config_patch(&mut c, "llm.openai.api_key", "sk-test").unwrap();
         apply_user_config_patch(&mut c, "llm.openai.base_url", "https://api.openai.com/v1")
             .unwrap();
+        apply_user_config_patch(&mut c, "llm.openai.command", "copilot-language-server").unwrap();
+        apply_user_config_patch(&mut c, "llm.openai.args", "--stdio,--model,gpt-4o-mini").unwrap();
         apply_user_config_patch(&mut c, "proxy.http", "http://127.0.0.1:8080").unwrap();
         apply_user_config_patch(&mut c, "budget.max_result_size_chars", "500").unwrap();
         assert_eq!(
@@ -627,6 +718,18 @@ mod tests {
             Some("https://api.openai.com/v1")
         );
         assert_eq!(
+            c.llm_providers.get("openai").unwrap().command.as_deref(),
+            Some("copilot-language-server")
+        );
+        assert_eq!(
+            c.llm_providers.get("openai").unwrap().args,
+            vec![
+                "--stdio".to_string(),
+                "--model".to_string(),
+                "gpt-4o-mini".to_string()
+            ]
+        );
+        assert_eq!(
             c.proxy.as_ref().unwrap().http_proxy.as_deref(),
             Some("http://127.0.0.1:8080")
         );
@@ -634,5 +737,13 @@ mod tests {
         assert!(user_config_field_display(&c, "llm.openai.api_key")
             .unwrap()
             .starts_with("***"));
+        assert_eq!(
+            user_config_field_display(&c, "llm.openai.command").unwrap(),
+            "copilot-language-server"
+        );
+        assert_eq!(
+            user_config_field_display(&c, "llm.openai.args").unwrap(),
+            "--stdio,--model,gpt-4o-mini"
+        );
     }
 }

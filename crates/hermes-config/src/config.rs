@@ -61,6 +61,10 @@ pub struct GatewayConfig {
     #[serde(default)]
     pub llm_providers: HashMap<String, LlmProviderConfig>,
 
+    /// Optional per-turn smart model routing (cheap-vs-strong).
+    #[serde(default)]
+    pub smart_model_routing: SmartModelRoutingConfig,
+
     /// Optional HTTP/SOCKS proxy settings.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub proxy: Option<ProxyConfig>,
@@ -104,6 +108,7 @@ impl Default for GatewayConfig {
             streaming: StreamingConfig::default(),
             terminal: TerminalConfig::default(),
             llm_providers: HashMap::new(),
+            smart_model_routing: SmartModelRoutingConfig::default(),
             proxy: None,
             approval: ApprovalConfig::default(),
             skills: SkillsSettings::default(),
@@ -147,6 +152,14 @@ pub struct LlmProviderConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
 
+    /// Optional external-process command used by runtime-provider resolvers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+
+    /// Optional external-process argv tail.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
+
     /// Default model to use for this provider.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -177,6 +190,8 @@ impl Default for LlmProviderConfig {
         Self {
             api_key: None,
             base_url: None,
+            command: None,
+            args: Vec::new(),
             model: None,
             max_tokens: None,
             temperature: None,
@@ -185,6 +200,69 @@ impl Default for LlmProviderConfig {
             credential_pool: Vec::new(),
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// SmartModelRoutingConfig
+// ---------------------------------------------------------------------------
+
+/// Route short/simple turns to a cheaper model while preserving the primary model
+/// for complex prompts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SmartModelRoutingConfig {
+    /// Master switch.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Max chars for a message to be considered "simple".
+    #[serde(default = "default_max_simple_chars")]
+    pub max_simple_chars: usize,
+    /// Max words for a message to be considered "simple".
+    #[serde(default = "default_max_simple_words")]
+    pub max_simple_words: usize,
+    /// Optional cheap route target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cheap_model: Option<CheapModelRouteConfig>,
+    /// When true, allow adaptive policy model hints on non-cheap turns (Rust extension).
+    #[serde(default)]
+    pub evolution_model_hints: bool,
+}
+
+impl Default for SmartModelRoutingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            max_simple_chars: default_max_simple_chars(),
+            max_simple_words: default_max_simple_words(),
+            cheap_model: None,
+            evolution_model_hints: false,
+        }
+    }
+}
+
+/// Cheap route target details.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct CheapModelRouteConfig {
+    /// Optional provider; when set and `model` lacks provider prefix, runtime
+    /// can compose `<provider>:<model>`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    /// Model slug (required for routing to activate).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// Optional endpoint override (reserved for parity with Python config shape).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
+    /// Optional env var name for api key (reserved for parity).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key_env: Option<String>,
+}
+
+fn default_max_simple_chars() -> usize {
+    160
+}
+
+fn default_max_simple_words() -> usize {
+    28
 }
 
 // ---------------------------------------------------------------------------

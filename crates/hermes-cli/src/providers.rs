@@ -9,5 +9,6 @@ pub fn known_providers() -> Vec<&'static str> {
         "minimax",
         "nous",
         "copilot",
+        "copilot-acp",
     ]
 }

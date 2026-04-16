@@ -836,13 +836,47 @@ impl IntoResponse for HttpError {
 }
 
 pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
+    let provider_from_model = model.split_once(':').map(|(p, _)| p.to_string());
     AgentConfig {
         max_turns: config.max_turns,
         budget: config.budget.clone(),
         model: model.to_string(),
         system_prompt: config.system_prompt.clone(),
         personality: config.personality.clone(),
+        hermes_home: config.home_dir.clone(),
+        provider: provider_from_model,
         stream: config.streaming.enabled,
+        platform: Some("http".to_string()),
+        pass_session_id: true,
+        runtime_providers: config
+            .llm_providers
+            .iter()
+            .map(|(name, cfg)| {
+                (
+                    name.clone(),
+                    hermes_agent::agent_loop::RuntimeProviderConfig {
+                        api_key: cfg.api_key.clone(),
+                        base_url: cfg.base_url.clone(),
+                        command: cfg.command.clone(),
+                        args: cfg.args.clone(),
+                    },
+                )
+            })
+            .collect(),
+        smart_model_routing: hermes_agent::agent_loop::SmartModelRoutingConfig {
+            enabled: config.smart_model_routing.enabled,
+            max_simple_chars: config.smart_model_routing.max_simple_chars,
+            max_simple_words: config.smart_model_routing.max_simple_words,
+            cheap_model: config.smart_model_routing.cheap_model.as_ref().map(|m| {
+                hermes_agent::agent_loop::CheapModelRouteConfig {
+                    provider: m.provider.clone(),
+                    model: m.model.clone(),
+                    base_url: m.base_url.clone(),
+                    api_key_env: m.api_key_env.clone(),
+                }
+            }),
+            evolution_model_hints: config.smart_model_routing.evolution_model_hints,
+        },
         ..AgentConfig::default()
     }
 }

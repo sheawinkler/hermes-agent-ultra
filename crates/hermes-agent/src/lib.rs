@@ -24,11 +24,13 @@ pub mod rate_limit;
 pub mod reasoning;
 pub mod session_persistence;
 pub mod skill_orchestrator;
+pub mod smart_model_routing;
 pub mod subdirectory_hints;
 
 // Re-export primary agent types
 pub use agent_loop::{
-    AgentCallbacks, AgentConfig, AgentLoop, ApiMode, ErrorClass, RetryConfig, TurnMetrics,
+    AgentCallbacks, AgentConfig, AgentLoop, ApiMode, CheapModelRouteConfig, ErrorClass,
+    RetryConfig, SmartModelRoutingConfig, TurnMetrics,
 };
 
 // Re-export context management

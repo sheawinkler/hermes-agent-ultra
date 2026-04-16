@@ -419,6 +419,13 @@ impl OpenAiProvider {
             inner: self.inner.with_model(model),
         }
     }
+
+    /// Attach a credential pool for API key rotation.
+    pub fn with_credential_pool(self, pool: Arc<CredentialPool>) -> Self {
+        Self {
+            inner: self.inner.with_credential_pool(pool),
+        }
+    }
 }
 
 #[async_trait]
@@ -1085,6 +1092,14 @@ impl OpenRouterProvider {
     pub fn with_x_title(mut self, title: impl Into<String>) -> Self {
         self.x_title = Some(title.into());
         self
+    }
+
+    /// Attach a credential pool for API key rotation.
+    pub fn with_credential_pool(self, pool: Arc<CredentialPool>) -> Self {
+        Self {
+            inner: self.inner.with_credential_pool(pool),
+            ..self
+        }
     }
 
     /// Build the extra headers including OpenRouter-specific ones.

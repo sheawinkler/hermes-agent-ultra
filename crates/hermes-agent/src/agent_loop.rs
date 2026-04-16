@@ -7,7 +7,7 @@
 //! 4. Repeat until the model finishes naturally or the turn budget is exceeded
 
 use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use futures::StreamExt;
@@ -22,11 +22,13 @@ use hermes_core::{
     ToolResult, ToolSchema, UsageStats,
 };
 
+use crate::api_bridge::CodexProvider;
 use crate::budget;
 use crate::context::{
     load_builtin_memory_snapshot, load_soul_md, ContextManager, SystemPromptBuilder,
 };
 use crate::context_files::{load_hermes_context_files, load_workspace_context};
+use crate::credential_pool::CredentialPool;
 use crate::interrupt::InterruptController;
 use crate::memory_manager::MemoryManager;
 use crate::plugins::{HookResult, HookType, PluginManager};
@@ -35,6 +37,11 @@ use crate::providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
 };
 use crate::skill_orchestrator::SkillOrchestrator;
+use crate::smart_model_routing::{
+    detect_api_mode_for_url, resolve_turn_route, PrimaryRuntime, ResolveTurnOutcome,
+    ResolvedCheapRuntime, TurnRouteSignature,
+};
+pub use crate::smart_model_routing::{ApiMode, CheapModelRouteConfig, SmartModelRoutingConfig};
 
 // ---------------------------------------------------------------------------
 // ToolRegistry
@@ -112,21 +119,6 @@ impl Default for ToolRegistry {
 // AgentConfig
 // ---------------------------------------------------------------------------
 
-/// API mode — determines how requests are formatted for the LLM backend.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ApiMode {
-    ChatCompletions,
-    AnthropicMessages,
-    CodexResponses,
-}
-
-impl Default for ApiMode {
-    fn default() -> Self {
-        Self::ChatCompletions
-    }
-}
-
 /// Retry / failover configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetryConfig {
@@ -165,62 +157,18 @@ impl Default for RetryConfig {
     }
 }
 
-/// Cheap route target details for smart per-turn routing.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CheapModelRouteConfig {
-    /// Optional provider name. If set and model lacks provider prefix, runtime
-    /// composes `<provider>:<model>`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-    /// Target model slug.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
-    /// Optional base URL override for runtime provider endpoint.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub base_url: Option<String>,
-    /// Optional env var name used to fetch API key for this route.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub api_key_env: Option<String>,
-}
-
-/// Per-turn smart model routing (cheap-vs-strong).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SmartModelRoutingConfig {
-    #[serde(default)]
-    pub enabled: bool,
-    #[serde(default = "default_max_simple_chars")]
-    pub max_simple_chars: usize,
-    #[serde(default = "default_max_simple_words")]
-    pub max_simple_words: usize,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cheap_model: Option<CheapModelRouteConfig>,
-}
-
-impl Default for SmartModelRoutingConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            max_simple_chars: default_max_simple_chars(),
-            max_simple_words: default_max_simple_words(),
-            cheap_model: None,
-        }
-    }
-}
-
-fn default_max_simple_chars() -> usize {
-    160
-}
-
-fn default_max_simple_words() -> usize {
-    28
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RuntimeProviderConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
+    /// Optional external process command for provider runtimes (Python parity metadata).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// Optional argv tail for external process runtimes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub args: Vec<String>,
 }
 
 const MEMORY_GUIDANCE: &str = "You have persistent memory across sessions. Save durable facts using the memory tool: user preferences, environment details, tool quirks, and stable conventions. Memory is injected into every turn, so keep it compact and focused on facts that will still matter later. Prioritize what reduces future user steering. Do NOT save task progress, session outcomes, completed-work logs, or temporary TODO state to memory.";
@@ -228,6 +176,35 @@ const MEMORY_GUIDANCE: &str = "You have persistent memory across sessions. Save 
 const SESSION_SEARCH_GUIDANCE: &str = "When the user references something from a past conversation or you suspect relevant cross-session context exists, use session_search to recall it before asking them to repeat themselves.";
 
 const SKILLS_GUIDANCE: &str = "After completing a complex task (5+ tool calls), fixing a tricky error, or discovering a non-trivial workflow, save the approach as a skill with skill_manage so you can reuse it next time. When using a skill and finding it outdated or incomplete, patch it immediately with skill_manage(action='patch').";
+
+// Python `AIAgent._MEMORY_REVIEW_PROMPT` / `_SKILL_REVIEW_PROMPT` / `_COMBINED_REVIEW_PROMPT` (v2026.4.13)
+const MEMORY_REVIEW_PROMPT: &str = "Review the conversation above and consider saving to memory if appropriate.\n\n\
+Focus on:\n\
+1. Has the user revealed things about themselves — their persona, desires, preferences, or personal details worth remembering?\n\
+2. Has the user expressed expectations about how you should behave, their work style, or ways they want you to operate?\n\n\
+If something stands out, save it using the memory tool. \
+If nothing is worth saving, just say 'Nothing to save.' and stop.";
+
+const SKILL_REVIEW_PROMPT: &str =
+    "Review the conversation above and consider saving or updating a skill if appropriate.\n\n\
+Focus on: was a non-trivial approach used to complete a task that required trial \
+and error, or changing course due to experiential findings along the way, or did \
+the user expect or desire a different method or outcome?\n\n\
+If a relevant skill already exists, update it with what you learned. \
+Otherwise, create a new skill if the approach is reusable.\n\
+If nothing is worth saving, just say 'Nothing to save.' and stop.";
+
+const COMBINED_REVIEW_PROMPT: &str = "Review the conversation above and consider two things:\n\n\
+**Memory**: Has the user revealed things about themselves — their persona, \
+desires, preferences, or personal details? Has the user expressed expectations \
+about how you should behave, their work style, or ways they want you to operate? \
+If so, save using the memory tool.\n\n\
+**Skills**: Was a non-trivial approach used to complete a task that required trial \
+and error, or changing course due to experiential findings along the way, or did \
+the user expect or desire a different method or outcome? If a relevant skill \
+already exists, update it. Otherwise, create a new one if the approach is reusable.\n\n\
+Only act if there's something genuinely worth saving. \
+If nothing stands out, just say 'Nothing to save.' and stop.";
 
 const TOOL_USE_ENFORCEMENT_GUIDANCE: &str = "# Tool-use enforcement\nYou MUST use your tools to take action. Do not describe what you would do without actually doing it. When you say you will perform an action, make the corresponding tool call in the same response. Every response should either (a) contain tool calls that make progress, or (b) deliver a final result.";
 
@@ -359,6 +336,26 @@ pub struct AgentConfig {
     /// to the latest checkpoint and continue. `0` disables rollback.
     #[serde(default = "default_rollback_on_tool_error_threshold")]
     pub rollback_on_tool_error_threshold: u32,
+
+    /// External process / ACP command (Python primary `command` in `resolve_turn_route` signature).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub acp_command: Option<String>,
+
+    /// External process / ACP argv tail (Python primary `args`).
+    #[serde(default)]
+    pub acp_args: Vec<String>,
+
+    /// User-turn cadence for memory background review ticks (`0` disables interval).
+    #[serde(default = "default_memory_nudge_interval")]
+    pub memory_nudge_interval: u32,
+
+    /// Tool-loop iterations without `skill_manage` before skill background review (`0` disables).
+    #[serde(default = "default_skill_creation_nudge_interval")]
+    pub skill_creation_nudge_interval: u32,
+
+    /// Run Python-style background memory/skill review after a session (extra LLM calls).
+    #[serde(default)]
+    pub background_review_enabled: bool,
 }
 
 fn default_max_turns() -> u32 {
@@ -387,6 +384,14 @@ fn default_checkpoint_interval_turns() -> u32 {
 
 fn default_rollback_on_tool_error_threshold() -> u32 {
     3
+}
+
+fn default_memory_nudge_interval() -> u32 {
+    10
+}
+
+fn default_skill_creation_nudge_interval() -> u32 {
+    10
 }
 
 impl Default for AgentConfig {
@@ -421,6 +426,11 @@ impl Default for AgentConfig {
             completion_cost_per_million_usd: None,
             checkpoint_interval_turns: default_checkpoint_interval_turns(),
             rollback_on_tool_error_threshold: default_rollback_on_tool_error_threshold(),
+            acp_command: None,
+            acp_args: Vec::new(),
+            memory_nudge_interval: default_memory_nudge_interval(),
+            skill_creation_nudge_interval: default_skill_creation_nudge_interval(),
+            background_review_enabled: false,
         }
     }
 }
@@ -439,6 +449,17 @@ pub struct TurnMetrics {
     /// Token usage for this turn (if reported by the provider).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<UsageStats>,
+}
+
+// ---------------------------------------------------------------------------
+// Evolution counters (Python `_turns_since_memory` / `_iters_since_skill`)
+// ---------------------------------------------------------------------------
+
+/// Session-scoped counters for memory / skill nudges (mirrors Python `AIAgent` fields).
+#[derive(Debug, Default)]
+pub struct EvolutionCounters {
+    pub turns_since_memory: u32,
+    pub iters_since_skill: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -541,6 +562,10 @@ pub struct AgentLoop {
     pub delegate_depth: u32,
     /// Adaptive self-evolution policy engine.
     pub evolution_engine: std::sync::Mutex<AdaptivePolicyEngine>,
+    /// Primary LLM credential pool (Python `primary["credential_pool"]` / runtime pool).
+    pub primary_credential_pool: Option<Arc<CredentialPool>>,
+    /// Memory/skill nudge counters (persist for the lifetime of this `AgentLoop`).
+    pub evolution_counters: Arc<Mutex<EvolutionCounters>>,
 }
 
 #[derive(Debug, Clone)]
@@ -549,7 +574,15 @@ struct TurnRuntimeRoute {
     provider: Option<String>,
     base_url: Option<String>,
     api_key_env: Option<String>,
+    api_mode: Option<ApiMode>,
+    command: Option<String>,
+    args: Vec<String>,
+    credential_pool: Option<Arc<CredentialPool>>,
+    /// When true (default), merge with [`AgentLoop::primary_credential_pool`] if route pool is unset.
+    credential_pool_fallback: bool,
+    route_label: Option<String>,
     routing_reason: Option<String>,
+    signature: TurnRouteSignature,
 }
 
 impl AgentLoop {
@@ -569,6 +602,8 @@ impl AgentLoop {
             callbacks: Arc::new(AgentCallbacks::default()),
             delegate_depth: 0,
             evolution_engine: std::sync::Mutex::new(AdaptivePolicyEngine::default()),
+            primary_credential_pool: None,
+            evolution_counters: Arc::new(Mutex::new(EvolutionCounters::default())),
         }
     }
 
@@ -589,7 +624,15 @@ impl AgentLoop {
             callbacks: Arc::new(AgentCallbacks::default()),
             delegate_depth: 0,
             evolution_engine: std::sync::Mutex::new(AdaptivePolicyEngine::default()),
+            primary_credential_pool: None,
+            evolution_counters: Arc::new(Mutex::new(EvolutionCounters::default())),
         }
+    }
+
+    /// Attach the primary runtime credential pool (API key rotation).
+    pub fn with_primary_credential_pool(mut self, pool: Arc<CredentialPool>) -> Self {
+        self.primary_credential_pool = Some(pool);
+        self
     }
 
     /// Set the memory manager.
@@ -966,7 +1009,11 @@ impl AgentLoop {
         &self,
         provider: &str,
         api_key_env_override: Option<&str>,
+        explicit_api_key: Option<&str>,
     ) -> Option<String> {
+        if let Some(key) = explicit_api_key.map(str::trim).filter(|s| !s.is_empty()) {
+            return Some(key.to_string());
+        }
         if let Some(env_name) = api_key_env_override
             .map(str::trim)
             .filter(|s| !s.is_empty())
@@ -993,14 +1040,14 @@ impl AgentLoop {
             }
         }
         let env_var = match provider {
-            "openai" => "OPENAI_API_KEY",
+            "openai" | "codex" | "openai-codex" => "OPENAI_API_KEY",
             "anthropic" => "ANTHROPIC_API_KEY",
             "openrouter" => "OPENROUTER_API_KEY",
             "qwen" => "DASHSCOPE_API_KEY",
             "kimi" | "moonshot" => "MOONSHOT_API_KEY",
             "minimax" => "MINIMAX_API_KEY",
             "nous" => "NOUS_API_KEY",
-            "copilot" => "GITHUB_COPILOT_TOKEN",
+            "copilot" | "copilot-acp" => "GITHUB_COPILOT_TOKEN",
             _ => "",
         };
         if env_var.is_empty() {
@@ -1026,39 +1073,108 @@ impl AgentLoop {
             .filter(|s| !s.is_empty())
     }
 
+    fn resolve_runtime_command_args(
+        &self,
+        provider: Option<&str>,
+    ) -> (Option<String>, Vec<String>) {
+        let mut command = self
+            .config
+            .acp_command
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let mut args: Vec<String> = self
+            .config
+            .acp_args
+            .iter()
+            .map(|a| a.trim().to_string())
+            .filter(|a| !a.is_empty())
+            .collect();
+
+        if let Some(provider) = provider {
+            if let Some(cfg) = self.config.runtime_providers.get(provider) {
+                if let Some(cmd) = cfg
+                    .command
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                {
+                    command = Some(cmd.to_string());
+                }
+                if !cfg.args.is_empty() {
+                    args = cfg
+                        .args
+                        .iter()
+                        .map(|a| a.trim().to_string())
+                        .filter(|a| !a.is_empty())
+                        .collect();
+                }
+            }
+        }
+        (command, args)
+    }
+
     fn build_runtime_provider(
         &self,
         provider: &str,
         model_name: &str,
-        base_url: Option<&str>,
+        route_base_url: Option<&str>,
         api_key_env_override: Option<&str>,
+        explicit_api_key: Option<&str>,
+        api_mode: Option<&ApiMode>,
+        credential_pool: Option<&Arc<CredentialPool>>,
     ) -> Result<Arc<dyn LlmProvider>, AgentError> {
         let api_key = self
-            .resolve_runtime_api_key(provider, api_key_env_override)
+            .resolve_runtime_api_key(provider, api_key_env_override, explicit_api_key)
             .ok_or_else(|| {
                 AgentError::Config(format!(
                     "No API key configured for runtime-routed provider '{}'",
                     provider
                 ))
             })?;
-        let base_url = self.resolve_runtime_base_url(provider, base_url);
+        let base_url = self.resolve_runtime_base_url(provider, route_base_url);
+        let mode = api_mode.unwrap_or(&self.config.api_mode);
 
         let provider_obj: Arc<dyn LlmProvider> = match provider {
-            "openai" => {
-                let mut p = OpenAiProvider::new(&api_key).with_model(model_name);
-                if let Some(url) = base_url {
-                    p = p.with_base_url(url);
+            "openai" | "codex" | "openai-codex" => {
+                if matches!(mode, ApiMode::CodexResponses) {
+                    let mut p = CodexProvider::new(&api_key).with_model(model_name);
+                    if let Some(ref url) = base_url {
+                        p = p.with_base_url(url.clone());
+                    }
+                    if let Some(pool) = credential_pool {
+                        p = p.with_credential_pool(pool.clone());
+                    }
+                    Arc::new(p)
+                } else {
+                    let mut p = OpenAiProvider::new(&api_key).with_model(model_name);
+                    if let Some(url) = base_url {
+                        p = p.with_base_url(url);
+                    }
+                    if let Some(pool) = credential_pool {
+                        p = p.with_credential_pool(pool.clone());
+                    }
+                    Arc::new(p)
                 }
-                Arc::new(p)
             }
             "anthropic" => {
                 let mut p = AnthropicProvider::new(&api_key).with_model(model_name);
                 if let Some(url) = base_url {
                     p = p.with_base_url(url);
                 }
+                if let Some(pool) = credential_pool {
+                    p = p.with_credential_pool(pool.clone());
+                }
                 Arc::new(p)
             }
-            "openrouter" => Arc::new(OpenRouterProvider::new(&api_key).with_model(model_name)),
+            "openrouter" => {
+                let mut p = OpenRouterProvider::new(&api_key).with_model(model_name);
+                if let Some(pool) = credential_pool {
+                    p = p.with_credential_pool(pool.clone());
+                }
+                Arc::new(p)
+            }
             "qwen" => {
                 let mut p = QwenProvider::new(&api_key).with_model(model_name);
                 if let Some(url) = base_url {
@@ -1087,7 +1203,7 @@ impl AgentLoop {
                 }
                 Arc::new(p)
             }
-            "copilot" => {
+            "copilot" | "copilot-acp" => {
                 let p = CopilotProvider::new(
                     base_url.unwrap_or_else(|| "https://api.github.com/copilot".to_string()),
                     &api_key,
@@ -1097,10 +1213,27 @@ impl AgentLoop {
             }
             _ => {
                 let url = base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-                Arc::new(GenericProvider::new(url, &api_key, model_name))
+                let mut g = GenericProvider::new(url, &api_key, model_name);
+                if let Some(pool) = credential_pool {
+                    g = g.with_credential_pool(pool.clone());
+                }
+                Arc::new(g)
             }
         };
         Ok(provider_obj)
+    }
+
+    fn credential_pool_for_route<'a>(
+        &'a self,
+        rt: &'a TurnRuntimeRoute,
+    ) -> Option<&'a Arc<CredentialPool>> {
+        if rt.credential_pool_fallback {
+            rt.credential_pool
+                .as_ref()
+                .or(self.primary_credential_pool.as_ref())
+        } else {
+            rt.credential_pool.as_ref()
+        }
     }
 
     fn messages_for_api_call(&self, ctx: &ContextManager) -> Vec<Message> {
@@ -1252,6 +1385,14 @@ impl AgentLoop {
         let model = route
             .map(|r| r.model.as_str())
             .unwrap_or(self.config.model.as_str());
+        if let Some(rt) = route {
+            if let Some(ref label) = rt.route_label {
+                tracing::debug!(%label, model = %rt.model, ?rt.signature, "smart model route");
+            }
+            if rt.command.is_some() || !rt.args.is_empty() {
+                tracing::debug!(command = ?rt.command, args = ?rt.args, "smart route process metadata");
+            }
+        }
         let api_messages = self.messages_for_api_call(ctx);
         let retry = &self.config.retry;
         let is_long_task = ctx.total_chars() > 8_000 || ctx.get_messages().len() > 28;
@@ -1265,11 +1406,16 @@ impl AgentLoop {
         for attempt in 0..=effective_max_retries {
             let result = if let Some(rt) = route {
                 let (provider_name, model_name) = self.extract_provider_and_model(model);
+                let mode = rt.api_mode.as_ref().unwrap_or(&self.config.api_mode);
+                let pool = self.credential_pool_for_route(rt);
                 let routed_provider = self.build_runtime_provider(
                     rt.provider.as_deref().unwrap_or(provider_name.as_str()),
                     model_name,
                     rt.base_url.as_deref(),
                     rt.api_key_env.as_deref(),
+                    None,
+                    Some(mode),
+                    pool,
                 );
                 match routed_provider {
                     Ok(provider) => {
@@ -1415,6 +1561,19 @@ impl AgentLoop {
         }
         self.hydrate_todo_store(&ctx);
 
+        let mut review_memory_at_end = false;
+        if self.config.memory_nudge_interval > 0
+            && self.tool_registry.names().iter().any(|n| n == "memory")
+        {
+            if let Ok(mut c) = self.evolution_counters.lock() {
+                c.turns_since_memory = c.turns_since_memory.saturating_add(1);
+                if c.turns_since_memory >= self.config.memory_nudge_interval {
+                    review_memory_at_end = true;
+                    c.turns_since_memory = 0;
+                }
+            }
+        }
+
         // Memory prefetch for first user message
         let first_user = ctx
             .get_messages()
@@ -1466,6 +1625,19 @@ impl AgentLoop {
 
             total_turns += 1;
             tracing::debug!("Agent turn {}", total_turns);
+
+            // Skill nudge counter — Python `run_agent.py`: increment at the start of each inner API iteration.
+            if self.config.skill_creation_nudge_interval > 0
+                && self
+                    .tool_registry
+                    .names()
+                    .iter()
+                    .any(|n| n == "skill_manage")
+            {
+                if let Ok(mut c) = self.evolution_counters.lock() {
+                    c.iters_since_skill = c.iters_since_skill.saturating_add(1);
+                }
+            }
 
             if self.config.checkpoint_interval_turns > 0
                 && (total_turns - 1) % self.config.checkpoint_interval_turns == 0
@@ -1535,13 +1707,7 @@ impl AgentLoop {
                     cost_warned = true;
                     if forced_runtime_route.is_none() {
                         if let Some(model) = self.resolve_cost_degrade_model() {
-                            forced_runtime_route = Some(TurnRuntimeRoute {
-                                model: model.clone(),
-                                provider: None,
-                                base_url: None,
-                                api_key_env: None,
-                                routing_reason: Some("cost_guard".to_string()),
-                            });
+                            forced_runtime_route = Some(self.turn_route_cost_guard(model.clone()));
                             ctx.add_message(Message::system(format!(
                                 "Cost guard: session spend is now ${:.4}/${:.4}. Switching to cheaper model `{}`.",
                                 session_cost_usd, limit, model
@@ -1587,6 +1753,7 @@ impl AgentLoop {
                     // Final memory sync
                     let (u, a) = extract_last_user_assistant(ctx.get_messages());
                     self.memory_sync(&u, &a, session_id);
+                    self.spawn_background_review(total_turns, &ctx, review_memory_at_end);
                     self.memory_on_session_end(ctx.get_messages());
                     return Ok(AgentResult {
                         messages: ctx.get_messages().to_vec(),
@@ -1603,6 +1770,16 @@ impl AgentLoop {
             for tc in &mut tool_calls {
                 self.repair_tool_call(tc);
                 self.hydrate_session_search_args(tc);
+            }
+
+            for tc in &tool_calls {
+                if let Ok(mut c) = self.evolution_counters.lock() {
+                    match tc.function.name.as_str() {
+                        "memory" => c.turns_since_memory = 0,
+                        "skill_manage" => c.iters_since_skill = 0,
+                        _ => {}
+                    }
+                }
             }
 
             // Cap concurrent delegate_task calls
@@ -1676,7 +1853,7 @@ impl AgentLoop {
             for result in results {
                 ctx.add_message(Message::tool_result(&result.tool_call_id, &result.content));
             }
-            self.spawn_background_review(total_turns, ctx.get_messages().to_vec());
+            self.emit_background_review_metrics(total_turns, &ctx);
 
             // Auto context compression
             let total_chars = ctx.total_chars();
@@ -1732,6 +1909,19 @@ impl AgentLoop {
         }
         self.hydrate_todo_store(&ctx);
 
+        let mut review_memory_at_end = false;
+        if self.config.memory_nudge_interval > 0
+            && self.tool_registry.names().iter().any(|n| n == "memory")
+        {
+            if let Ok(mut c) = self.evolution_counters.lock() {
+                c.turns_since_memory = c.turns_since_memory.saturating_add(1);
+                if c.turns_since_memory >= self.config.memory_nudge_interval {
+                    review_memory_at_end = true;
+                    c.turns_since_memory = 0;
+                }
+            }
+        }
+
         // Memory prefetch
         let first_user = ctx
             .get_messages()
@@ -1779,6 +1969,19 @@ impl AgentLoop {
             }
 
             total_turns += 1;
+
+            if self.config.skill_creation_nudge_interval > 0
+                && self
+                    .tool_registry
+                    .names()
+                    .iter()
+                    .any(|n| n == "skill_manage")
+            {
+                if let Ok(mut c) = self.evolution_counters.lock() {
+                    c.iters_since_skill = c.iters_since_skill.saturating_add(1);
+                }
+            }
+
             self.memory_on_turn_start(total_turns, "");
 
             if self.config.checkpoint_interval_turns > 0
@@ -1813,11 +2016,16 @@ impl AgentLoop {
             // --- Streaming LLM call ---
             let mut stream = if let Some(ref rt) = turn_runtime_route {
                 let (provider_name, model_name) = self.extract_provider_and_model(active_model);
+                let mode = rt.api_mode.as_ref().unwrap_or(&self.config.api_mode);
+                let pool = self.credential_pool_for_route(rt);
                 match self.build_runtime_provider(
                     rt.provider.as_deref().unwrap_or(provider_name.as_str()),
                     model_name,
                     rt.base_url.as_deref(),
                     rt.api_key_env.as_deref(),
+                    None,
+                    Some(mode),
+                    pool,
                 ) {
                     Ok(provider) => provider.chat_completion_stream(
                         &api_messages,
@@ -1926,13 +2134,7 @@ impl AgentLoop {
                     cost_warned = true;
                     if forced_runtime_route.is_none() {
                         if let Some(model) = self.resolve_cost_degrade_model() {
-                            forced_runtime_route = Some(TurnRuntimeRoute {
-                                model: model.clone(),
-                                provider: None,
-                                base_url: None,
-                                api_key_env: None,
-                                routing_reason: Some("cost_guard".to_string()),
-                            });
+                            forced_runtime_route = Some(self.turn_route_cost_guard(model.clone()));
                             ctx.add_message(Message::system(format!(
                                 "Cost guard: session spend is now ${:.4}/${:.4}. Switching to cheaper model `{}`.",
                                 session_cost_usd, limit, model
@@ -1996,6 +2198,7 @@ impl AgentLoop {
             if tool_calls.is_empty() {
                 let (u, a) = extract_last_user_assistant(ctx.get_messages());
                 self.memory_sync(&u, &a, session_id);
+                self.spawn_background_review(total_turns, &ctx, review_memory_at_end);
                 self.memory_on_session_end(ctx.get_messages());
                 return Ok(AgentResult {
                     messages: ctx.get_messages().to_vec(),
@@ -2010,6 +2213,15 @@ impl AgentLoop {
             for tc in &mut tool_calls {
                 self.repair_tool_call(tc);
                 self.hydrate_session_search_args(tc);
+            }
+            for tc in &tool_calls {
+                if let Ok(mut c) = self.evolution_counters.lock() {
+                    match tc.function.name.as_str() {
+                        "memory" => c.turns_since_memory = 0,
+                        "skill_manage" => c.iters_since_skill = 0,
+                        _ => {}
+                    }
+                }
             }
             self.cap_delegates(&mut tool_calls);
 
@@ -2065,7 +2277,7 @@ impl AgentLoop {
             for result in results {
                 ctx.add_message(Message::tool_result(&result.tool_call_id, &result.content));
             }
-            self.spawn_background_review(total_turns, ctx.get_messages().to_vec());
+            self.emit_background_review_metrics(total_turns, &ctx);
 
             let total_chars = ctx.total_chars();
             let threshold = (200_000_f64 * 0.8) as usize;
@@ -2191,120 +2403,187 @@ impl AgentLoop {
             .filter(|s| !s.is_empty())
     }
 
-    fn is_simple_turn(&self, text: &str) -> bool {
-        let cfg = &self.config.smart_model_routing;
-        if text.len() > cfg.max_simple_chars {
-            return false;
+    fn primary_runtime_snapshot(&self) -> PrimaryRuntime {
+        let provider = self
+            .config
+            .provider
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let base_url = provider
+            .as_ref()
+            .and_then(|p| self.config.runtime_providers.get(p))
+            .and_then(|c| {
+                c.base_url
+                    .as_ref()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+            });
+        let (command, args) = self.resolve_runtime_command_args(provider.as_deref());
+        PrimaryRuntime {
+            model: self.config.model.clone(),
+            provider,
+            base_url,
+            api_mode: self.config.api_mode.clone(),
+            command,
+            args,
+            credential_pool: self.primary_credential_pool.clone(),
         }
-        if text.split_whitespace().count() > cfg.max_simple_words {
-            return false;
+    }
+
+    fn turn_route_cost_guard(&self, model: String) -> TurnRuntimeRoute {
+        let pri = self.primary_runtime_snapshot();
+        let mut sig = pri.to_signature();
+        sig.model = model.clone();
+        TurnRuntimeRoute {
+            model,
+            provider: None,
+            base_url: None,
+            api_key_env: None,
+            api_mode: None,
+            command: None,
+            args: Vec::new(),
+            credential_pool: self.primary_credential_pool.clone(),
+            credential_pool_fallback: true,
+            route_label: None,
+            routing_reason: Some("cost_guard".to_string()),
+            signature: sig,
         }
-        if text.matches('\n').count() > 1 {
-            return false;
+    }
+
+    fn try_build_cheap_runtime(
+        &self,
+        cheap: &CheapModelRouteConfig,
+        explicit_api_key: Option<String>,
+    ) -> Result<ResolvedCheapRuntime, ()> {
+        let provider_raw = cheap.provider.as_deref().map(str::trim).unwrap_or("");
+        if provider_raw.is_empty() {
+            return Err(());
         }
-        if text.contains('`') {
-            return false;
+        let provider_lc = provider_raw.to_lowercase();
+        let model_full = cheap.model.as_deref().map(str::trim).unwrap_or("");
+        if model_full.is_empty() {
+            return Err(());
         }
-        let lower = text.to_lowercase();
-        if lower.contains("http://") || lower.contains("https://") || lower.contains("www.") {
-            return false;
-        }
-        let complex_keywords = [
-            "debug",
-            "debugging",
-            "implement",
-            "implementation",
-            "refactor",
-            "patch",
-            "traceback",
-            "stacktrace",
-            "exception",
-            "error",
-            "analyze",
-            "analysis",
-            "investigate",
-            "architecture",
-            "design",
-            "compare",
-            "benchmark",
-            "optimize",
-            "optimise",
-            "review",
-            "terminal",
-            "shell",
-            "tool",
-            "tools",
-            "pytest",
-            "test",
-            "tests",
-            "plan",
-            "planning",
-            "delegate",
-            "subagent",
-            "cron",
-            "docker",
-            "kubernetes",
-        ];
-        let words: HashSet<String> = lower
-            .split_whitespace()
-            .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_string())
-            .filter(|w| !w.is_empty())
-            .collect();
-        !complex_keywords.iter().any(|k| words.contains(*k))
+        let (_, model_name) = self.extract_provider_and_model(model_full);
+        let base_url = self.resolve_runtime_base_url(&provider_lc, cheap.base_url.as_deref());
+        let api_mode = base_url
+            .as_deref()
+            .and_then(detect_api_mode_for_url)
+            .unwrap_or(ApiMode::ChatCompletions);
+
+        let has_runtime_override = explicit_api_key
+            .as_ref()
+            .map(|s| !s.trim().is_empty())
+            .is_some()
+            || cheap
+                .base_url
+                .as_ref()
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
+        let pool_ref = if has_runtime_override {
+            None
+        } else {
+            self.primary_credential_pool.as_ref()
+        };
+
+        self.build_runtime_provider(
+            &provider_lc,
+            model_name,
+            cheap.base_url.as_deref(),
+            cheap.api_key_env.as_deref(),
+            explicit_api_key.as_deref(),
+            Some(&api_mode),
+            pool_ref,
+        )
+        .map_err(|_| ())?;
+
+        let (command, args) = self.resolve_runtime_command_args(Some(&provider_lc));
+        Ok(ResolvedCheapRuntime {
+            model: model_full.to_string(),
+            provider: provider_lc,
+            base_url,
+            api_mode,
+            command,
+            args,
+            credential_pool: if has_runtime_override {
+                None
+            } else {
+                self.primary_credential_pool.clone()
+            },
+            skip_primary_credential_pool_fallback: has_runtime_override,
+        })
     }
 
     fn resolve_smart_runtime_route(&self, messages: &[Message]) -> Option<TurnRuntimeRoute> {
-        let cfg = &self.config.smart_model_routing;
-        if !cfg.enabled {
-            return None;
-        }
         let text = self.latest_user_text(messages)?;
+        let primary = self.primary_runtime_snapshot();
+        let outcome = resolve_turn_route(
+            text,
+            &self.config.smart_model_routing,
+            &primary,
+            |cheap, explicit_key| self.try_build_cheap_runtime(cheap, explicit_key),
+        );
 
-        if self.is_simple_turn(text) {
-            if let Some(ref cheap) = cfg.cheap_model {
-                let model = cheap.model.as_deref().map(str::trim).unwrap_or("");
-                if !model.is_empty() {
-                    return Some(TurnRuntimeRoute {
-                        model: model.to_string(),
-                        provider: cheap
-                            .provider
-                            .as_deref()
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty())
-                            .map(|s| s.to_lowercase()),
-                        base_url: cheap
-                            .base_url
-                            .as_deref()
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty())
-                            .map(ToString::to_string),
-                        api_key_env: cheap
-                            .api_key_env
-                            .as_deref()
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty())
-                            .map(ToString::to_string),
-                        routing_reason: Some("simple_turn".to_string()),
-                    });
+        match outcome {
+            ResolveTurnOutcome::CheapRouted {
+                model,
+                label,
+                runtime,
+                signature,
+            } => {
+                let cheap = self.config.smart_model_routing.cheap_model.as_ref()?;
+                Some(TurnRuntimeRoute {
+                    model,
+                    provider: Some(runtime.provider.clone()),
+                    base_url: runtime.base_url.clone(),
+                    api_key_env: cheap
+                        .api_key_env
+                        .as_ref()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty()),
+                    api_mode: Some(runtime.api_mode.clone()),
+                    command: runtime.command.clone(),
+                    args: runtime.args.clone(),
+                    credential_pool: runtime.credential_pool.clone(),
+                    credential_pool_fallback: !runtime.skip_primary_credential_pool_fallback,
+                    route_label: Some(label),
+                    routing_reason: Some("simple_turn".to_string()),
+                    signature,
+                })
+            }
+            ResolveTurnOutcome::Primary { .. } => {
+                if !self.config.smart_model_routing.evolution_model_hints {
+                    return None;
                 }
+                if let Ok(engine) = self.evolution_engine.lock() {
+                    if let Some(model) = engine.recommend_model_for_text(text) {
+                        let candidate = model.trim();
+                        if candidate.is_empty() || candidate == self.config.model {
+                            return None;
+                        }
+                        let mut sig = self.primary_runtime_snapshot().to_signature();
+                        sig.model = candidate.to_string();
+                        return Some(TurnRuntimeRoute {
+                            model: candidate.to_string(),
+                            provider: None,
+                            base_url: None,
+                            api_key_env: None,
+                            api_mode: None,
+                            command: None,
+                            args: Vec::new(),
+                            credential_pool: self.primary_credential_pool.clone(),
+                            credential_pool_fallback: true,
+                            route_label: None,
+                            routing_reason: Some("policy_recommendation".to_string()),
+                            signature: sig,
+                        });
+                    }
+                }
+                None
             }
         }
-
-        if let Ok(engine) = self.evolution_engine.lock() {
-            if let Some(model) = engine.recommend_model_for_text(text) {
-                let candidate = model.trim();
-                if !candidate.is_empty() && candidate != self.config.model {
-                    return Some(TurnRuntimeRoute {
-                        model: candidate.to_string(),
-                        provider: None,
-                        base_url: None,
-                        api_key_env: None,
-                        routing_reason: Some("policy_recommendation".to_string()),
-                    });
-                }
-            }
-        }
-        None
     }
 
     /// Resolve the model used for automatic degradation when nearing
@@ -2455,11 +2734,8 @@ impl AgentLoop {
         }
     }
 
-    /// Spawn asynchronous post-tool review hook.
-    ///
-    /// Current implementation records lightweight metrics and leaves room for
-    /// richer policy checks (unsafe actions, low-confidence outputs, etc.).
-    fn spawn_background_review(&self, turn: u32, snapshot: Vec<Message>) {
+    fn emit_background_review_metrics(&self, turn: u32, ctx: &ContextManager) {
+        let snapshot = ctx.get_messages().to_vec();
         tokio::spawn(async move {
             let tool_msg_count = snapshot
                 .iter()
@@ -2471,6 +2747,52 @@ impl AgentLoop {
                 total_messages = snapshot.len(),
                 "Background review snapshot captured"
             );
+        });
+    }
+
+    /// Metrics (always) + optional Python-style memory/skill review LLM pass on session end.
+    fn spawn_background_review(&self, turn: u32, ctx: &ContextManager, review_memory_at_end: bool) {
+        self.emit_background_review_metrics(turn, ctx);
+        if !self.config.background_review_enabled {
+            return;
+        }
+        let mut review_skills = false;
+        if self.config.skill_creation_nudge_interval > 0
+            && self
+                .tool_registry
+                .names()
+                .iter()
+                .any(|n| n == "skill_manage")
+        {
+            if let Ok(mut c) = self.evolution_counters.lock() {
+                if c.iters_since_skill >= self.config.skill_creation_nudge_interval {
+                    review_skills = true;
+                    c.iters_since_skill = 0;
+                }
+            }
+        }
+        let review_memory = review_memory_at_end;
+        if !review_memory && !review_skills {
+            return;
+        }
+        let prompt: &'static str = match (review_memory, review_skills) {
+            (true, true) => COMBINED_REVIEW_PROMPT,
+            (true, false) => MEMORY_REVIEW_PROMPT,
+            (false, true) => SKILL_REVIEW_PROMPT,
+            _ => return,
+        };
+        let mut hist = ctx.get_messages().to_vec();
+        hist.push(Message::user(prompt));
+        let mut cfg = self.config.clone();
+        cfg.background_review_enabled = false;
+        cfg.max_turns = cfg.max_turns.min(8);
+        let tools = self.tool_registry.clone();
+        let provider = self.llm_provider.clone();
+        tokio::spawn(async move {
+            let agent = AgentLoop::new(cfg, tools, provider);
+            if let Err(e) = agent.run(hist, None).await {
+                tracing::debug!(error = %e, "background memory/skill review failed");
+            }
         });
     }
 
@@ -2616,8 +2938,20 @@ mod tests {
             }
         }
 
+        let mut runtime_providers = HashMap::new();
+        runtime_providers.insert(
+            "openai".to_string(),
+            RuntimeProviderConfig {
+                api_key: Some("sk-test-key".to_string()),
+                base_url: None,
+                command: None,
+                args: Vec::new(),
+            },
+        );
+
         let config = AgentConfig {
             model: "openai:gpt-4o".to_string(),
+            runtime_providers,
             smart_model_routing: SmartModelRoutingConfig {
                 enabled: true,
                 max_simple_chars: 160,
@@ -2628,6 +2962,7 @@ mod tests {
                     base_url: None,
                     api_key_env: None,
                 }),
+                evolution_model_hints: false,
             },
             ..AgentConfig::default()
         };
@@ -2642,6 +2977,228 @@ mod tests {
             selected.as_ref().map(|r| r.model.as_str()),
             Some("gpt-4o-mini")
         );
+    }
+
+    #[test]
+    fn test_runtime_provider_command_args_override_primary_acp_metadata() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let mut runtime_providers = HashMap::new();
+        runtime_providers.insert(
+            "openai".to_string(),
+            RuntimeProviderConfig {
+                api_key: Some("sk-test-key".to_string()),
+                base_url: Some("https://api.openai.com/v1".to_string()),
+                command: Some("copilot-language-server".to_string()),
+                args: vec![
+                    "--stdio".to_string(),
+                    "--model".to_string(),
+                    "gpt-4o-mini".to_string(),
+                ],
+            },
+        );
+
+        let config = AgentConfig {
+            model: "openai:gpt-4o".to_string(),
+            provider: Some("openai".to_string()),
+            runtime_providers,
+            acp_command: Some("global-acp".to_string()),
+            acp_args: vec!["--global".to_string()],
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let primary = agent.primary_runtime_snapshot();
+        assert_eq!(primary.command.as_deref(), Some("copilot-language-server"));
+        assert_eq!(
+            primary.args,
+            vec![
+                "--stdio".to_string(),
+                "--model".to_string(),
+                "gpt-4o-mini".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_smart_model_routing_codex_provider_alias_builds_runtime() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let mut runtime_providers = HashMap::new();
+        runtime_providers.insert(
+            "codex".to_string(),
+            RuntimeProviderConfig {
+                api_key: Some("sk-test-key".to_string()),
+                base_url: Some("https://api.openai.com/v1".to_string()),
+                command: None,
+                args: Vec::new(),
+            },
+        );
+
+        let config = AgentConfig {
+            model: "openai:gpt-4o".to_string(),
+            runtime_providers,
+            smart_model_routing: SmartModelRoutingConfig {
+                enabled: true,
+                max_simple_chars: 160,
+                max_simple_words: 28,
+                cheap_model: Some(CheapModelRouteConfig {
+                    provider: Some("codex".to_string()),
+                    model: Some("gpt-5-mini".to_string()),
+                    base_url: Some("https://api.openai.com/v1".to_string()),
+                    api_key_env: None,
+                }),
+                evolution_model_hints: false,
+            },
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let messages = vec![Message::user("总结一下这个需求")];
+        let selected = agent.resolve_smart_runtime_route(&messages);
+        assert_eq!(
+            selected.as_ref().map(|r| r.model.as_str()),
+            Some("gpt-5-mini")
+        );
+        assert_eq!(
+            selected.as_ref().and_then(|r| r.provider.as_deref()),
+            Some("codex")
+        );
+        assert_eq!(
+            selected.as_ref().and_then(|r| r.api_mode.as_ref()),
+            Some(&ApiMode::CodexResponses)
+        );
+    }
+
+    #[test]
+    fn test_self_evolution_skill_counter_ticks_each_iteration() {
+        use futures::stream::BoxStream;
+        use hermes_core::JsonSchema;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("done"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let mut registry = ToolRegistry::new();
+        registry.register(
+            "skill_manage",
+            ToolSchema::new("skill_manage", "Manage skills", JsonSchema::new("object")),
+            Arc::new(|_args| Ok("{\"success\":true}".to_string())),
+        );
+
+        let config = AgentConfig {
+            skill_creation_nudge_interval: 10,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(config, Arc::new(registry), Arc::new(DummyProvider));
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let _ = rt
+            .block_on(agent.run(vec![Message::user("hello")], None))
+            .expect("agent run should succeed");
+
+        let counters = agent.evolution_counters.lock().expect("counter lock");
+        assert_eq!(counters.iters_since_skill, 1);
     }
 
     #[test]
@@ -2693,6 +3250,7 @@ mod tests {
                     base_url: None,
                     api_key_env: None,
                 }),
+                evolution_model_hints: false,
             },
             ..AgentConfig::default()
         };

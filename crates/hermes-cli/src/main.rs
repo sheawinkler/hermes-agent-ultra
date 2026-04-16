@@ -683,6 +683,17 @@ fn build_agent_for_gateway_context(
     if let Some(personality) = ctx.personality.clone() {
         agent_config.personality = Some(personality);
     }
+    if !ctx.platform.trim().is_empty() {
+        agent_config.platform = Some(ctx.platform.clone());
+    }
+    if let Some(provider) = ctx.provider.clone() {
+        if !provider.trim().is_empty() {
+            agent_config.provider = Some(provider);
+        }
+    }
+    if !ctx.session_key.trim().is_empty() {
+        agent_config.session_id = Some(ctx.session_key.clone());
+    }
     AgentLoop::new(agent_config, agent_tools, provider)
 }
 
