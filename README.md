@@ -12,9 +12,9 @@ A production-grade Rust rewrite of [Hermes Agent](https://github.com/NousResearc
 
 Baseline target: `NousResearch/hermes-agent@v2026.4.13` (`1af2e18d408a9dcc2c61d6fc1eef5c6667f8e254`).
 
-- Progress: **7 / 13 scoped parity items completed**.
+- Progress: **9 / 13 scoped parity items completed**.
 - Completed focus areas: prompt layering/core guidance parity, smart routing basic runtime switching and fallback, memory tool semantics and limits, built-in `MEMORY.md`/`USER.md` snapshot injection, memory lifecycle hooks (`on_memory_write`, `queue_prefetch`, `on_pre_compress`, `on_session_end`, `on_delegation`), `session_search` dual mode with `role_filter` and capped limit.
-- Remaining focus areas: full Python-equivalent `session_search` LLM summarization pipeline and hidden-source filtering, automatic current-session lineage exclusion without tool args, full `resolve_turn_route` runtime signature parity fields, and Python-style skill-driven behavior self-improvement loop parity.
+- Remaining focus areas: automatic current-session lineage exclusion without tool args, full `resolve_turn_route` runtime signature parity fields, and Python-style skill-driven behavior self-improvement loop parity.
 
 ### TODO (Parity Tracker)
 
@@ -23,8 +23,8 @@ Baseline target: `NousResearch/hermes-agent@v2026.4.13` (`1af2e18d408a9dcc2c61d6
 - [x] Long Memory: lifecycle hooks (`on_memory_write`, `on_pre_compress`, `on_session_end`, `on_delegation`).
 - [x] Session Search: recent mode (empty query), keyword mode, `role_filter`, `limit <= 5`.
 - [x] Session Search: child->parent lineage normalization support (parent session column + resolution).
-- [ ] Session Search: Python-equivalent per-session LLM summary generation.
-- [ ] Session Search: hidden/internal source filtering parity.
+- [x] Session Search: Python-equivalent per-session LLM summary generation.
+- [x] Session Search: hidden/internal source filtering parity.
 - [ ] Session Search: auto inject and exclude active session lineage by runtime context.
 - [x] Smart Model Selection: per-turn cheap-route and policy recommendation route.
 - [x] Smart Model Selection: routed-provider build failure fallback to primary provider.
@@ -67,6 +67,7 @@ File operations, terminal, browser, code execution, web search, vision, image ge
 The built-in `memory` tool follows Python parity semantics: `action=add|replace|remove`, `target=memory|user`, with `old_text` substring matching for replace/remove updates.
 Built-in store limits also match Python defaults: `memory` ≈ 2200 chars and `user` ≈ 1375 chars.
 The built-in `session_search` now supports Python-style dual mode: recent-session browse when `query` is omitted, and keyword search with optional `role_filter` plus `limit` capped at 5.
+`session_search` can run per-session LLM summaries when auxiliary credentials are available (`HERMES_SESSION_SEARCH_SUMMARY_API_KEY` or `OPENAI_API_KEY`; optional base/model overrides).
 
 ### 8 Memory Plugins
 
