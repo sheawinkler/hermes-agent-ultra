@@ -1602,6 +1602,7 @@ impl AgentLoop {
             let mut tool_calls = Self::deduplicate_tool_calls(&tool_calls);
             for tc in &mut tool_calls {
                 self.repair_tool_call(tc);
+                self.hydrate_session_search_args(tc);
             }
 
             // Cap concurrent delegate_task calls
@@ -2008,6 +2009,7 @@ impl AgentLoop {
             let mut tool_calls = Self::deduplicate_tool_calls(&tool_calls);
             for tc in &mut tool_calls {
                 self.repair_tool_call(tc);
+                self.hydrate_session_search_args(tc);
             }
             self.cap_delegates(&mut tool_calls);
 
@@ -2127,6 +2129,42 @@ impl AgentLoop {
             return true;
         }
         false
+    }
+
+    /// Inject current session id into `session_search` calls when absent.
+    fn hydrate_session_search_args(&self, tc: &mut ToolCall) {
+        if tc.function.name != "session_search" {
+            return;
+        }
+        let Some(session_id) = self.config.session_id.as_deref() else {
+            return;
+        };
+        let session_id = session_id.trim();
+        if session_id.is_empty() {
+            return;
+        }
+
+        let mut args: Value =
+            serde_json::from_str(&tc.function.arguments).unwrap_or_else(|_| serde_json::json!({}));
+        let Some(obj) = args.as_object_mut() else {
+            return;
+        };
+        let has_current = obj
+            .get("current_session_id")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .is_some();
+        if has_current {
+            return;
+        }
+        obj.insert(
+            "current_session_id".to_string(),
+            Value::String(session_id.to_string()),
+        );
+        if let Ok(updated) = serde_json::to_string(&args) {
+            tc.function.arguments = updated;
+        }
     }
 
     /// Return a budget warning message when the agent is close to the turn limit.
@@ -2729,6 +2767,124 @@ mod tests {
         assert_eq!(event.0, "remove");
         assert_eq!(event.1, "memory");
         assert_eq!(event.2, "obsolete fact");
+    }
+
+    #[test]
+    fn test_hydrate_session_search_args_injects_current_session_id() {
+        use futures::stream::BoxStream;
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<hermes_core::StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let config = AgentConfig {
+            session_id: Some("sess-auto-1".into()),
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let mut tc = ToolCall {
+            id: "s1".into(),
+            function: hermes_core::FunctionCall {
+                name: "session_search".into(),
+                arguments: r#"{"query":"previous issue","limit":3}"#.into(),
+            },
+        };
+        agent.hydrate_session_search_args(&mut tc);
+        let args: Value = serde_json::from_str(&tc.function.arguments).unwrap();
+        assert_eq!(
+            args.get("current_session_id").and_then(|v| v.as_str()),
+            Some("sess-auto-1")
+        );
+    }
+
+    #[test]
+    fn test_hydrate_session_search_args_keeps_existing_current_session_id() {
+        use futures::stream::BoxStream;
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<hermes_core::StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let config = AgentConfig {
+            session_id: Some("sess-outer".into()),
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let mut tc = ToolCall {
+            id: "s2".into(),
+            function: hermes_core::FunctionCall {
+                name: "session_search".into(),
+                arguments: r#"{"query":"abc","current_session_id":"sess-explicit"}"#.into(),
+            },
+        };
+        agent.hydrate_session_search_args(&mut tc);
+        let args: Value = serde_json::from_str(&tc.function.arguments).unwrap();
+        assert_eq!(
+            args.get("current_session_id").and_then(|v| v.as_str()),
+            Some("sess-explicit")
+        );
     }
 
     #[test]
