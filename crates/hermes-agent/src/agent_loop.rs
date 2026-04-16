@@ -725,6 +725,57 @@ impl AgentLoop {
         }
     }
 
+    fn delegation_event_from_tool_result(
+        tc: &ToolCall,
+        result: &ToolResult,
+    ) -> Option<(String, String)> {
+        if tc.function.name != "delegate_task" || result.is_error {
+            return None;
+        }
+        let args: Value = serde_json::from_str(&tc.function.arguments).ok()?;
+        let task = args
+            .get("task")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())?
+            .to_string();
+
+        let sub_agent_id = serde_json::from_str::<Value>(&result.content)
+            .ok()
+            .and_then(|v| {
+                v.get("sub_agent_id")
+                    .and_then(|id| id.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(ToString::to_string)
+            })
+            .unwrap_or_default();
+
+        Some((task, sub_agent_id))
+    }
+
+    fn notify_delegations(&self, tool_calls: &[ToolCall], results: &[ToolResult]) {
+        if self.config.skip_memory {
+            return;
+        }
+        let Some(ref mm) = self.memory_manager else {
+            return;
+        };
+        let Ok(mm) = mm.lock() else {
+            return;
+        };
+        for result in results {
+            let Some(tc) = tool_calls.iter().find(|tc| tc.id == result.tool_call_id) else {
+                continue;
+            };
+            let Some((task, sub_agent_id)) = Self::delegation_event_from_tool_result(tc, result)
+            else {
+                continue;
+            };
+            mm.on_delegation(&task, &sub_agent_id);
+        }
+    }
+
     fn memory_on_turn_start(&self, turn: u32, message: &str) {
         if let Some(ref mm) = self.memory_manager {
             if let Ok(mut mm) = mm.lock() {
@@ -1615,6 +1666,7 @@ impl AgentLoop {
             }
 
             self.notify_memory_writes(&tool_calls, &results);
+            self.notify_delegations(&tool_calls, &results);
 
             // Enforce budget on tool results
             let mut results = results;
@@ -2004,6 +2056,7 @@ impl AgentLoop {
             }
 
             self.notify_memory_writes(&tool_calls, &results);
+            self.notify_delegations(&tool_calls, &results);
 
             budget::enforce_budget(&mut results, &self.config.budget);
 
