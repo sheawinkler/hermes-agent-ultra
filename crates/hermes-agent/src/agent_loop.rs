@@ -656,7 +656,72 @@ impl AgentLoop {
         if let Some(ref mm) = self.memory_manager {
             if let Ok(mm) = mm.lock() {
                 mm.sync_all(user, assistant, session_id);
+                if !user.trim().is_empty() {
+                    mm.queue_prefetch_all(user, session_id);
+                }
             }
+        }
+    }
+
+    fn memory_write_event_from_tool_call(tc: &ToolCall) -> Option<(String, String, String)> {
+        if tc.function.name != "memory" {
+            return None;
+        }
+        let args: Value = serde_json::from_str(&tc.function.arguments).ok()?;
+        let action = args
+            .get("action")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .unwrap_or("")
+            .to_lowercase();
+        if action != "add" && action != "replace" && action != "remove" {
+            return None;
+        }
+        let target = args
+            .get("target")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("memory")
+            .to_string();
+        let content = if action == "remove" {
+            args.get("old_text")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .unwrap_or("")
+                .to_string()
+        } else {
+            args.get("content")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .unwrap_or("")
+                .to_string()
+        };
+        Some((action, target, content))
+    }
+
+    fn notify_memory_writes(&self, tool_calls: &[ToolCall], results: &[ToolResult]) {
+        if self.config.skip_memory {
+            return;
+        }
+        let Some(ref mm) = self.memory_manager else {
+            return;
+        };
+        let Ok(mut mm) = mm.lock() else {
+            return;
+        };
+        for result in results {
+            if result.is_error {
+                continue;
+            }
+            let Some(tc) = tool_calls.iter().find(|tc| tc.id == result.tool_call_id) else {
+                continue;
+            };
+            let Some((action, target, content)) = Self::memory_write_event_from_tool_call(tc)
+            else {
+                continue;
+            };
+            mm.on_memory_write(&action, &target, &content);
         }
     }
 
@@ -1504,6 +1569,8 @@ impl AgentLoop {
                 }
             }
 
+            self.notify_memory_writes(&tool_calls, &results);
+
             // Enforce budget on tool results
             let mut results = results;
             budget::enforce_budget(&mut results, &self.config.budget);
@@ -1882,6 +1949,8 @@ impl AgentLoop {
                     cb(&tc.function.name, &res.content);
                 }
             }
+
+            self.notify_memory_writes(&tool_calls, &results);
 
             budget::enforce_budget(&mut results, &self.config.budget);
 
@@ -2519,6 +2588,38 @@ mod tests {
         assert_eq!(deduped.len(), 2);
         assert_eq!(deduped[0].id, "1");
         assert_eq!(deduped[1].id, "3");
+    }
+
+    #[test]
+    fn test_memory_write_event_from_tool_call_add() {
+        let tc = ToolCall {
+            id: "c1".into(),
+            function: hermes_core::FunctionCall {
+                name: "memory".into(),
+                arguments:
+                    r#"{"action":"add","target":"user","content":"Prefers concise answers"}"#.into(),
+            },
+        };
+        let event = AgentLoop::memory_write_event_from_tool_call(&tc).unwrap();
+        assert_eq!(event.0, "add");
+        assert_eq!(event.1, "user");
+        assert_eq!(event.2, "Prefers concise answers");
+    }
+
+    #[test]
+    fn test_memory_write_event_from_tool_call_remove_uses_old_text() {
+        let tc = ToolCall {
+            id: "c2".into(),
+            function: hermes_core::FunctionCall {
+                name: "memory".into(),
+                arguments: r#"{"action":"remove","target":"memory","old_text":"obsolete fact"}"#
+                    .into(),
+            },
+        };
+        let event = AgentLoop::memory_write_event_from_tool_call(&tc).unwrap();
+        assert_eq!(event.0, "remove");
+        assert_eq!(event.1, "memory");
+        assert_eq!(event.2, "obsolete fact");
     }
 
     #[test]
