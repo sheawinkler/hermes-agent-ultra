@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use rusqlite::Connection;
 use serde_json::json;
+use std::collections::HashSet;
 use std::sync::Mutex;
 
 use crate::tools::session_search::SessionSearchBackend;
@@ -14,6 +15,62 @@ pub struct SqliteSessionSearchBackend {
 }
 
 impl SqliteSessionSearchBackend {
+    fn ensure_parent_session_column(conn: &Connection) -> Result<(), ToolError> {
+        match conn.execute(
+            "ALTER TABLE sessions ADD COLUMN parent_session_id TEXT",
+            rusqlite::params![],
+        ) {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                let msg = e.to_string();
+                if msg.contains("duplicate column name") {
+                    Ok(())
+                } else {
+                    Err(ToolError::ExecutionFailed(format!(
+                        "Failed to ensure parent_session_id column: {}",
+                        e
+                    )))
+                }
+            }
+        }
+    }
+
+    fn latest_session_content(conn: &Connection, session_id: &str) -> Option<String> {
+        conn.query_row(
+            "SELECT content FROM messages
+             WHERE session_id = ?1 AND content IS NOT NULL AND content != ''
+             ORDER BY id DESC LIMIT 1",
+            rusqlite::params![session_id],
+            |r| r.get::<_, String>(0),
+        )
+        .ok()
+    }
+
+    fn resolve_to_parent(conn: &Connection, session_id: &str) -> String {
+        let mut visited = HashSet::new();
+        let mut sid = session_id.to_string();
+        loop {
+            if sid.is_empty() || !visited.insert(sid.clone()) {
+                break;
+            }
+            let parent = conn
+                .query_row(
+                    "SELECT parent_session_id FROM sessions WHERE id = ?1",
+                    rusqlite::params![sid.clone()],
+                    |r| r.get::<_, Option<String>>(0),
+                )
+                .ok()
+                .flatten()
+                .map(|p| p.trim().to_string())
+                .filter(|p| !p.is_empty());
+            match parent {
+                Some(next) => sid = next,
+                None => break,
+            }
+        }
+        sid
+    }
+
     /// Open or create the sessions database at the given path.
     pub fn new(db_path: &str) -> Result<Self, ToolError> {
         if let Some(parent) = std::path::Path::new(db_path).parent() {
@@ -34,7 +91,8 @@ impl SqliteSessionSearchBackend {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 title TEXT,
-                message_count INTEGER DEFAULT 0
+                message_count INTEGER DEFAULT 0,
+                parent_session_id TEXT
             );
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -53,11 +111,17 @@ impl SqliteSessionSearchBackend {
                 role UNINDEXED,
                 content='messages',
                 content_rowid='id'
-            );",
+            );
+            CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+                INSERT INTO messages_fts(rowid, content, session_id, role)
+                VALUES (new.id, new.content, new.session_id, new.role);
+            END;",
         )
         .map_err(|e| {
             ToolError::ExecutionFailed(format!("Failed to ensure session schema: {}", e))
         })?;
+
+        Self::ensure_parent_session_column(&conn)?;
 
         Ok(Self {
             conn: Mutex::new(conn),
@@ -88,9 +152,10 @@ impl SqliteSessionSearchBackend {
             .lock()
             .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
         conn.execute(
-            "INSERT INTO session_messages (session_id, role, content, timestamp) VALUES (?1, ?2, ?3, ?4)",
+            "INSERT INTO messages (session_id, role, content, created_at) VALUES (?1, ?2, ?3, ?4)",
             rusqlite::params![session_id, role, content, timestamp],
-        ).map_err(|e| ToolError::ExecutionFailed(format!("Failed to index message: {}", e)))?;
+        )
+        .map_err(|e| ToolError::ExecutionFailed(format!("Failed to index message: {}", e)))?;
         Ok(())
     }
 }
@@ -102,6 +167,7 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
         query: Option<&str>,
         role_filter: Option<&str>,
         limit: usize,
+        current_session_id: Option<&str>,
     ) -> Result<String, ToolError> {
         let conn = self
             .conn
@@ -117,6 +183,7 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                 .prepare(
                     "SELECT id, title, platform, created_at, updated_at, message_count
                      FROM sessions
+                     WHERE parent_session_id IS NULL OR parent_session_id = ''
                      ORDER BY updated_at DESC
                      LIMIT ?1",
                 )
@@ -235,19 +302,30 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
             })?;
 
         let mut seen = std::collections::HashSet::new();
+        let current_lineage_root =
+            current_session_id.map(|sid| Self::resolve_to_parent(&conn, sid.trim()));
         let mut summaries = Vec::new();
         for row in rows.flatten() {
-            let (session_id, content, started_at, source, model) = row;
-            if !seen.insert(session_id.clone()) {
+            let (raw_session_id, content, started_at, source, model) = row;
+            let resolved_session_id = Self::resolve_to_parent(&conn, &raw_session_id);
+            if let Some(ref current_root) = current_lineage_root {
+                if &resolved_session_id == current_root {
+                    continue;
+                }
+            }
+            if !seen.insert(resolved_session_id.clone()) {
                 continue;
             }
-            let preview = if content.chars().count() > 500 {
-                format!("{}…", content.chars().take(500).collect::<String>())
+            let preview_source = Self::latest_session_content(&conn, &resolved_session_id)
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(content);
+            let preview = if preview_source.chars().count() > 500 {
+                format!("{}…", preview_source.chars().take(500).collect::<String>())
             } else {
-                content
+                preview_source
             };
             summaries.push(json!({
-                "session_id": session_id,
+                "session_id": resolved_session_id,
                 "when": started_at,
                 "source": source,
                 "model": model,

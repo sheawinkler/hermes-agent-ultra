@@ -21,6 +21,7 @@ pub trait SessionSearchBackend: Send + Sync {
         query: Option<&str>,
         role_filter: Option<&str>,
         limit: usize,
+        current_session_id: Option<&str>,
     ) -> Result<String, ToolError>;
 }
 
@@ -44,9 +45,12 @@ impl ToolHandler for SessionSearchHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
         let query = params.get("query").and_then(|v| v.as_str());
         let role_filter = params.get("role_filter").and_then(|v| v.as_str());
+        let current_session_id = params.get("current_session_id").and_then(|v| v.as_str());
         let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
         let capped_limit = limit.min(5);
-        self.backend.search(query, role_filter, capped_limit).await
+        self.backend
+            .search(query, role_filter, capped_limit, current_session_id)
+            .await
     }
 
     fn schema(&self) -> ToolSchema {
@@ -73,6 +77,13 @@ impl ToolHandler for SessionSearchHandler {
                 "default": 3
             }),
         );
+        props.insert(
+            "current_session_id".into(),
+            json!({
+                "type": "string",
+                "description": "Optional active session id used to exclude current lineage from search results."
+            }),
+        );
 
         tool_schema(
             "session_search",
@@ -94,10 +105,11 @@ mod tests {
             query: Option<&str>,
             role_filter: Option<&str>,
             limit: usize,
+            current_session_id: Option<&str>,
         ) -> Result<String, ToolError> {
             Ok(format!(
-                "Found {} results for '{:?}' with role_filter={:?} (limit: {})",
-                0, query, role_filter, limit
+                "Found {} results for '{:?}' with role_filter={:?}, current_session_id={:?} (limit: {})",
+                0, query, role_filter, current_session_id, limit
             ))
         }
     }

@@ -8,6 +8,30 @@ A production-grade Rust rewrite of [Hermes Agent](https://github.com/NousResearc
 
 ---
 
+## Python v2026.4.13 Alignment Status
+
+Baseline target: `NousResearch/hermes-agent@v2026.4.13` (`1af2e18d408a9dcc2c61d6fc1eef5c6667f8e254`).
+
+- Progress: **7 / 13 scoped parity items completed**.
+- Completed focus areas: prompt layering/core guidance parity, smart routing basic runtime switching and fallback, memory tool semantics and limits, built-in `MEMORY.md`/`USER.md` snapshot injection, memory lifecycle hooks (`on_memory_write`, `queue_prefetch`, `on_pre_compress`, `on_session_end`, `on_delegation`), `session_search` dual mode with `role_filter` and capped limit.
+- Remaining focus areas: full Python-equivalent `session_search` LLM summarization pipeline and hidden-source filtering, automatic current-session lineage exclusion without tool args, full `resolve_turn_route` runtime signature parity fields, and Python-style skill-driven behavior self-improvement loop parity.
+
+### TODO (Parity Tracker)
+
+- [x] Long Memory: built-in memory action/target semantics + char limits.
+- [x] Long Memory: memory snapshot prompt injection at session start.
+- [x] Long Memory: lifecycle hooks (`on_memory_write`, `on_pre_compress`, `on_session_end`, `on_delegation`).
+- [x] Session Search: recent mode (empty query), keyword mode, `role_filter`, `limit <= 5`.
+- [x] Session Search: child->parent lineage normalization support (parent session column + resolution).
+- [ ] Session Search: Python-equivalent per-session LLM summary generation.
+- [ ] Session Search: hidden/internal source filtering parity.
+- [ ] Session Search: auto inject and exclude active session lineage by runtime context.
+- [x] Smart Model Selection: per-turn cheap-route and policy recommendation route.
+- [x] Smart Model Selection: routed-provider build failure fallback to primary provider.
+- [ ] Smart Model Selection: full Python `resolve_turn_route` runtime signature surface (`api_mode`, `command`, `args`, `credential_pool`, `signature`) end-to-end.
+- [ ] Self-Evolution: Python-style memory/skills-driven automatic adaptation loop parity.
+- [ ] Self-Evolution: parity validation tests vs Python `v2026.4.13` behavior fixtures.
+
 ## Highlights
 
 ### Single Binary, Zero Dependencies
