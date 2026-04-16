@@ -1011,6 +1011,9 @@ impl AgentLoop {
         api_key_env_override: Option<&str>,
         explicit_api_key: Option<&str>,
     ) -> Option<String> {
+        if provider == "copilot-acp" {
+            return Some("copilot-acp".to_string());
+        }
         if let Some(key) = explicit_api_key.map(str::trim).filter(|s| !s.is_empty()) {
             return Some(key.to_string());
         }
@@ -1043,7 +1046,7 @@ impl AgentLoop {
             "openai" | "codex" | "openai-codex" => "OPENAI_API_KEY",
             "anthropic" => "ANTHROPIC_API_KEY",
             "openrouter" => "OPENROUTER_API_KEY",
-            "qwen" => "DASHSCOPE_API_KEY",
+            "qwen" | "qwen-oauth" => "DASHSCOPE_API_KEY",
             "kimi" | "moonshot" => "MOONSHOT_API_KEY",
             "minimax" => "MINIMAX_API_KEY",
             "nous" => "NOUS_API_KEY",
@@ -1071,6 +1074,17 @@ impl AgentLoop {
             .and_then(|c| c.base_url.as_ref())
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
+            .or_else(|| {
+                if provider == "copilot-acp" {
+                    std::env::var("COPILOT_ACP_BASE_URL")
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .or_else(|| Some("acp://copilot".to_string()))
+                } else {
+                    None
+                }
+            })
     }
 
     fn resolve_runtime_command_args(
@@ -1109,6 +1123,28 @@ impl AgentLoop {
                         .map(|a| a.trim().to_string())
                         .filter(|a| !a.is_empty())
                         .collect();
+                }
+            }
+            if provider == "copilot-acp" {
+                if command.is_none() {
+                    command = std::env::var("HERMES_COPILOT_ACP_COMMAND")
+                        .ok()
+                        .or_else(|| std::env::var("COPILOT_CLI_PATH").ok())
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .or_else(|| Some("copilot".to_string()));
+                }
+                if args.is_empty() {
+                    args = std::env::var("HERMES_COPILOT_ACP_ARGS")
+                        .ok()
+                        .and_then(|raw| shlex::split(raw.trim()))
+                        .filter(|v| !v.is_empty())
+                        .unwrap_or_else(|| vec!["--acp".to_string(), "--stdio".to_string()]);
+                }
+                if let Some(cmd) = command.as_deref() {
+                    if let Ok(resolved) = which::which(cmd) {
+                        command = Some(resolved.to_string_lossy().to_string());
+                    }
                 }
             }
         }
@@ -1175,7 +1211,7 @@ impl AgentLoop {
                 }
                 Arc::new(p)
             }
-            "qwen" => {
+            "qwen" | "qwen-oauth" => {
                 let mut p = QwenProvider::new(&api_key).with_model(model_name);
                 if let Some(url) = base_url {
                     p = p.with_base_url(url);
@@ -2500,6 +2536,31 @@ impl AgentLoop {
         .map_err(|_| ())?;
 
         let (command, args) = self.resolve_runtime_command_args(Some(&provider_lc));
+        if provider_lc == "copilot-acp"
+            && command
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .is_none()
+            && !base_url
+                .as_deref()
+                .map(|u| u.starts_with("acp+tcp://"))
+                .unwrap_or(false)
+        {
+            return Err(());
+        }
+        if provider_lc == "copilot-acp"
+            && !base_url
+                .as_deref()
+                .map(|u| u.starts_with("acp+tcp://"))
+                .unwrap_or(false)
+        {
+            if let Some(cmd) = command.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                if which::which(cmd).is_err() {
+                    return Err(());
+                }
+            }
+        }
         Ok(ResolvedCheapRuntime {
             model: model_full.to_string(),
             provider: provider_lc,
@@ -3143,6 +3204,83 @@ mod tests {
     }
 
     #[test]
+    fn test_smart_model_routing_qwen_oauth_alias_builds_runtime() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let mut runtime_providers = HashMap::new();
+        runtime_providers.insert(
+            "qwen-oauth".to_string(),
+            RuntimeProviderConfig {
+                api_key: Some("sk-qwen-oauth".to_string()),
+                base_url: Some("https://dashscope.aliyuncs.com/compatible-mode/v1".to_string()),
+                command: None,
+                args: Vec::new(),
+            },
+        );
+
+        let config = AgentConfig {
+            model: "openai:gpt-4o".to_string(),
+            runtime_providers,
+            smart_model_routing: SmartModelRoutingConfig {
+                enabled: true,
+                max_simple_chars: 160,
+                max_simple_words: 28,
+                cheap_model: Some(CheapModelRouteConfig {
+                    provider: Some("qwen-oauth".to_string()),
+                    model: Some("qwen3-coder-plus".to_string()),
+                    base_url: None,
+                    api_key_env: None,
+                }),
+                evolution_model_hints: false,
+            },
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let selected = agent.resolve_smart_runtime_route(&[Message::user("给我一段简短总结")]);
+        assert_eq!(
+            selected.as_ref().and_then(|r| r.provider.as_deref()),
+            Some("qwen-oauth")
+        );
+    }
+
+    #[test]
     fn test_self_evolution_skill_counter_ticks_each_iteration() {
         use futures::stream::BoxStream;
         use hermes_core::JsonSchema;
@@ -3199,6 +3337,245 @@ mod tests {
 
         let counters = agent.evolution_counters.lock().expect("counter lock");
         assert_eq!(counters.iters_since_skill, 1);
+    }
+
+    #[test]
+    fn test_self_evolution_parity_fixtures_v2026_4_13_memory_nudge() {
+        use futures::stream::BoxStream;
+        use hermes_core::JsonSchema;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("done"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        // Fixture-style cases distilled from Python v2026.4.13:
+        // - counter persists across runs
+        // - resets to 0 when hitting interval threshold
+        #[derive(Clone, Copy)]
+        struct Case {
+            runs: u32,
+            expected_turns_since_memory: u32,
+        }
+        let cases = vec![
+            Case {
+                runs: 1,
+                expected_turns_since_memory: 1,
+            },
+            Case {
+                runs: 2,
+                expected_turns_since_memory: 0,
+            },
+        ];
+
+        for case in cases {
+            let mut registry = ToolRegistry::new();
+            registry.register(
+                "memory",
+                ToolSchema::new("memory", "Memory tool", JsonSchema::new("object")),
+                Arc::new(|_args| Ok("{\"success\":true}".to_string())),
+            );
+
+            let config = AgentConfig {
+                memory_nudge_interval: 2,
+                ..AgentConfig::default()
+            };
+            let agent = AgentLoop::new(config, Arc::new(registry), Arc::new(DummyProvider));
+            let rt = tokio::runtime::Runtime::new().expect("runtime");
+            for _ in 0..case.runs {
+                let _ = rt
+                    .block_on(agent.run(vec![Message::user("hello")], None))
+                    .expect("agent run should succeed");
+            }
+            let counters = agent.evolution_counters.lock().expect("counter lock");
+            assert_eq!(
+                counters.turns_since_memory, case.expected_turns_since_memory,
+                "fixture runs={} mismatch",
+                case.runs
+            );
+        }
+    }
+
+    #[test]
+    fn test_smart_model_routing_copilot_acp_missing_cli_falls_back() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let mut runtime_providers = HashMap::new();
+        runtime_providers.insert(
+            "copilot-acp".to_string(),
+            RuntimeProviderConfig {
+                api_key: None,
+                base_url: Some("acp://copilot".to_string()),
+                command: Some("definitely-not-installed-copilot-cli".to_string()),
+                args: vec!["--acp".to_string(), "--stdio".to_string()],
+            },
+        );
+
+        let config = AgentConfig {
+            model: "openai:gpt-4o".to_string(),
+            runtime_providers,
+            smart_model_routing: SmartModelRoutingConfig {
+                enabled: true,
+                max_simple_chars: 160,
+                max_simple_words: 28,
+                cheap_model: Some(CheapModelRouteConfig {
+                    provider: Some("copilot-acp".to_string()),
+                    model: Some("gpt-4o-mini".to_string()),
+                    base_url: Some("acp://copilot".to_string()),
+                    api_key_env: None,
+                }),
+                evolution_model_hints: false,
+            },
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let selected = agent.resolve_smart_runtime_route(&[Message::user("帮我总结这段话")]);
+        assert!(
+            selected.is_none(),
+            "missing ACP CLI should fail cheap-route and fall back"
+        );
+    }
+
+    #[test]
+    fn test_smart_model_routing_copilot_acp_tcp_mode_skips_cli_check() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let mut runtime_providers = HashMap::new();
+        runtime_providers.insert(
+            "copilot-acp".to_string(),
+            RuntimeProviderConfig {
+                api_key: None,
+                base_url: Some("acp+tcp://127.0.0.1:8765".to_string()),
+                command: Some("definitely-not-installed-copilot-cli".to_string()),
+                args: vec!["--acp".to_string(), "--stdio".to_string()],
+            },
+        );
+
+        let config = AgentConfig {
+            model: "openai:gpt-4o".to_string(),
+            runtime_providers,
+            smart_model_routing: SmartModelRoutingConfig {
+                enabled: true,
+                max_simple_chars: 160,
+                max_simple_words: 28,
+                cheap_model: Some(CheapModelRouteConfig {
+                    provider: Some("copilot-acp".to_string()),
+                    model: Some("gpt-4o-mini".to_string()),
+                    base_url: Some("acp+tcp://127.0.0.1:8765".to_string()),
+                    api_key_env: None,
+                }),
+                evolution_model_hints: false,
+            },
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let selected = agent.resolve_smart_runtime_route(&[Message::user("帮我总结这段话")]);
+        assert_eq!(
+            selected.as_ref().and_then(|r| r.provider.as_deref()),
+            Some("copilot-acp")
+        );
     }
 
     #[test]
