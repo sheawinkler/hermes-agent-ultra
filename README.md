@@ -32,6 +32,34 @@ Baseline target: `NousResearch/hermes-agent@v2026.4.13` (`1af2e18d408a9dcc2c61d6
 - [ ] Self-Evolution: Python-style memory/skills-driven automatic adaptation loop parity.
 - [ ] Self-Evolution: parity validation tests vs Python `v2026.4.13` behavior fixtures.
 
+### Capability Status (Requested Checklist)
+
+Status legend: `implemented` = available in current codebase, `partial` = available but not fully equivalent to the requested wording/behavior.
+
+| Capability | Status | Notes |
+|---|---|---|
+| Interactive CLI + one-shot mode (`crates/hermes-cli`) | implemented | TUI interactive mode + `chat --query` one-shot path are present. |
+| Agent loop: streaming + tool execution + context compression | implemented | `run_stream`, parallel tool execution, auto compression are implemented. |
+| Prompt caching | partial | System prompt builder cache exists; full cross-request prompt-cache behavior is not fully parity-tracked yet. |
+| Providers: Anthropic, OpenAI chat-compatible, OpenAI Responses, OpenRouter-compatible | implemented | Provider adapters exist across `hermes-agent`/`api_bridge`/extras. |
+| Built-in tools: files/terminal/patch/memory/web/vision + opt-in code execution | implemented | Toolset includes these categories; code execution is available and should be policy/toolset controlled. |
+| Runtime MCP tool discovery from configured stdio/HTTP servers | implemented | MCP client supports stdio/http configs and runtime tools listing. |
+| MCP bridge tools for prompts/resources with capability gating | partial | MCP prompt/resource APIs exist; strict capability-gated bridge behavior is not fully marked complete. |
+| Local memory snapshots + request-local skill matching/injection | implemented | `MEMORY.md`/`USER.md` snapshot injection and skills prompt orchestration are wired. |
+| SQLite-backed session history + resume | implemented | SQLite persistence (`sessions.db`) and session load/resume workflows exist. |
+| Multi-model support (OpenAI/Anthropic/OpenRouter) | implemented | Supported in routing/provider stack. |
+| Built-in tools count (your list says 26) | implemented | Current Rust repo is already above this (30+ tool backends). |
+| TUI: interactive chat, slash commands, tool progress, status bar | implemented | TUI + status bar + extensive slash command handlers are present. |
+| Context-aware auto-loading (`AGENTS.md`, `CLAUDE.md`, `MEMORY.md`, `USER.md`) | implemented | Context file loaders + memory snapshot loaders are present. |
+| Memory system: SQLite + FTS5 + cross-session persistence | implemented | Session persistence + FTS-backed `session_search` are implemented. |
+| Skills system: YAML-based skill creation/management | implemented | Skills tooling and skill store/hub pipeline are present. |
+| Personality system: coder/writer/analyst personas | partial | Personality switching is implemented; named personas depend on available personality files. |
+| Context compression: automatic + manual | implemented | Auto compression in loop + manual slash command path exist. |
+| Sub-agent delegation | partial | `delegate_task` tooling and delegation hooks exist; full autonomous child-agent orchestration is still evolving. |
+| Messaging: Telegram/Discord/Slack APIs | implemented | Gateway adapters for these platforms are present. |
+| Security: path validation, dangerous command blocking, search-depth limits | partial | Command approval and credential/file guards are present; not all requested guard dimensions are fully parity-tracked. |
+| Chinese input / UTF-8 in TUI | implemented | Rust/TUI path handles UTF-8 text input/output normally. |
+
 ## Highlights
 
 ### Single Binary, Zero Dependencies
