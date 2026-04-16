@@ -22,6 +22,18 @@ use tracing::{error, info, trace};
 
 use crate::McpError;
 
+fn classify_http_status_error(status: reqwest::StatusCode, body: &str) -> McpError {
+    let msg = format!("HTTP error {}: {}", status, body);
+    match status.as_u16() {
+        401 => McpError::Auth(msg),
+        403 => McpError::Forbidden(msg),
+        404 => McpError::ResourceNotFound(msg),
+        400 | 422 => McpError::InvalidParams(msg),
+        501 | 503 => McpError::NotConfigured(msg),
+        _ => McpError::ConnectionError(msg),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // McpTransport trait
 // ---------------------------------------------------------------------------
@@ -458,10 +470,7 @@ impl McpTransport for HttpTransport {
                 .text()
                 .await
                 .unwrap_or_else(|_| "unknown error".to_string());
-            return Err(McpError::ConnectionError(format!(
-                "HTTP error {}: {}",
-                status, body
-            )));
+            return Err(classify_http_status_error(status, &body));
         }
 
         // Store the response for receive()
@@ -634,10 +643,7 @@ impl McpTransport for HttpSseTransport {
                 .text()
                 .await
                 .unwrap_or_else(|_| "unknown error".to_string());
-            return Err(McpError::ConnectionError(format!(
-                "HTTP error {}: {}",
-                status, body
-            )));
+            return Err(classify_http_status_error(status, &body));
         }
 
         let body = response
@@ -729,5 +735,18 @@ mod tests {
             transport.endpoint_url("message"),
             "http://localhost:8080/mcp/message"
         );
+    }
+
+    #[test]
+    fn test_classify_http_status_error_forbidden() {
+        let e = classify_http_status_error(reqwest::StatusCode::FORBIDDEN, "no capability");
+        assert!(matches!(e, McpError::Forbidden(_)));
+    }
+
+    #[test]
+    fn test_classify_http_status_error_not_configured() {
+        let e =
+            classify_http_status_error(reqwest::StatusCode::SERVICE_UNAVAILABLE, "not configured");
+        assert!(matches!(e, McpError::NotConfigured(_)));
     }
 }

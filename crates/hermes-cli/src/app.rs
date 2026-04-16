@@ -424,6 +424,8 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
                         base_url: cfg.base_url.clone(),
                         command: cfg.command.clone(),
                         args: cfg.args.clone(),
+                        oauth_token_url: cfg.oauth_token_url.clone(),
+                        oauth_client_id: cfg.oauth_client_id.clone(),
                     },
                 )
             })

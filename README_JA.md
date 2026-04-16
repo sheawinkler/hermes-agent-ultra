@@ -32,6 +32,8 @@
 - [x] Smart Model Selection：サブプロセス/外部プロセス推論ランタイム（`openai-codex` / `qwen-oauth` / `copilot-acp` の auth-store/ランタイム経路を Rust 側へマップ）。
 - [x] Self-Evolution：Python 方式の memory/skill ナッジ周期 + 任意のバックグラウンドレビュー（Python `v2026.4.13` と同じプロンプト、既定オフ）。
 - [x] Self-Evolution：Python `v2026.4.13` 振る舞いフィクスチャとのパリティ検証テスト。
+- [x] サブエージェント実行ライフサイクル：プロセス内 `SubAgentOrchestrator`（`crates/hermes-agent/src/sub_agent_orchestrator.rs`）で `spawn / timeout / cancel / lineage` を実際に実行。子 `AgentLoop` は `tokio::spawn` で独立タスク化（async 再帰を回避）、`InterruptController` 経由の親→子キャンセル、壁時計タイムアウト、`SubAgentLineage` JSON を `$HERMES_HOME/subagents/<id>.json` に永続化。
+- [x] OAuth provider メタデータの集約：統一された provider 構成センター（`llm.<provider>.oauth_token_url` / `oauth_client_id`、`LlmProviderConfig` と `RuntimeProviderConfig` の両方）。`oauth_refresh_config` は構成センターを優先し、`HERMES_<PROVIDER>_OAUTH_TOKEN_URL` / `_OAUTH_CLIENT_ID` は後方互換のフォールバックとしてのみ使用。
 
 ### 機能実装ステータス（要求チェックリスト）
 
@@ -56,7 +58,7 @@
 | Skills システム：YAML ベース作成/管理 | implemented | skills ツールチェーン + store/hub を実装。 |
 | Personality：coder/writer/analyst 切替 | partial | 切替機能は実装済み。具体ペルソナはローカル personality ファイル依存。 |
 | コンテキスト圧縮：自動 + 手動 | implemented | loop 自動圧縮 + 手動 slash 経路あり。 |
-| サブエージェント委任 | partial | `delegate_task` と委任フックは実装。完全自律オーケストレーションは発展中。 |
+| サブエージェント委任 | implemented | `delegate_task` + Signal/RPC バックエンド、**さらにプロセス内 `SubAgentOrchestrator`**（子 `AgentLoop` の実起動 / 壁時計タイムアウト / 協調的キャンセル / `$HERMES_HOME/subagents/` への lineage 永続化）。`max_depth`（既定 4）と `max_concurrent_delegates` 上限も有効。 |
 | Messaging：Telegram/Discord/Slack API | implemented | gateway プラットフォームアダプタあり。 |
 | セキュリティ：パス検証、危険コマンド遮断、検索深さ制限 | partial | コマンド承認と credential/file ガードあり。全要求軸の完全整合は継続中。 |
 | 中国語入力：TUI UTF-8 フル対応 | implemented | Rust/TUI 経路で UTF-8 入出力を処理可能。 |

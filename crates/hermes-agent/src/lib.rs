@@ -25,6 +25,7 @@ pub mod reasoning;
 pub mod session_persistence;
 pub mod skill_orchestrator;
 pub mod smart_model_routing;
+pub mod sub_agent_orchestrator;
 pub mod subdirectory_hints;
 
 // Re-export primary agent types
@@ -81,6 +82,12 @@ pub use context_files::{load_hermes_context_files, load_workspace_context, scan_
 
 // Re-export subdirectory hints
 pub use subdirectory_hints::{generate_project_hints, SubdirectoryHintTracker};
+
+// Re-export sub-agent orchestrator
+pub use sub_agent_orchestrator::{
+    SubAgentLineage, SubAgentOrchestrator, SubAgentOrchestratorConfig, SubAgentRequest,
+    SubAgentStatus,
+};
 
 // Re-export honcho provider
 pub use honcho_provider::HonchoProvider;

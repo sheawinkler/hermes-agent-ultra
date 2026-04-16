@@ -22,6 +22,9 @@ pub trait DelegationBackend: Send + Sync {
         context: Option<&str>,
         toolset: Option<&str>,
         model: Option<&str>,
+        child_depth: Option<u32>,
+        max_depth: Option<u32>,
+        parent_budget_remaining_usd: Option<f64>,
     ) -> Result<String, ToolError>;
 }
 
@@ -51,8 +54,29 @@ impl ToolHandler for DelegateTaskHandler {
         let context = params.get("context").and_then(|v| v.as_str());
         let toolset = params.get("toolset").and_then(|v| v.as_str());
         let model = params.get("model").and_then(|v| v.as_str());
+        let child_depth = params
+            .get("child_depth")
+            .and_then(|v| v.as_u64())
+            .and_then(|v| u32::try_from(v).ok());
+        let max_depth = params
+            .get("max_depth")
+            .and_then(|v| v.as_u64())
+            .and_then(|v| u32::try_from(v).ok());
+        let parent_budget_remaining_usd = params
+            .get("parent_budget_remaining_usd")
+            .and_then(|v| v.as_f64());
 
-        self.backend.delegate(task, context, toolset, model).await
+        self.backend
+            .delegate(
+                task,
+                context,
+                toolset,
+                model,
+                child_depth,
+                max_depth,
+                parent_budget_remaining_usd,
+            )
+            .await
     }
 
     fn schema(&self) -> ToolSchema {
@@ -85,6 +109,27 @@ impl ToolHandler for DelegateTaskHandler {
                 "description": "Model to use for the sub-agent (default: same as parent)"
             }),
         );
+        props.insert(
+            "child_depth".into(),
+            json!({
+                "type": "integer",
+                "description": "Current child-agent depth (injected by orchestration layer)"
+            }),
+        );
+        props.insert(
+            "max_depth".into(),
+            json!({
+                "type": "integer",
+                "description": "Maximum delegation depth allowed for this request"
+            }),
+        );
+        props.insert(
+            "parent_budget_remaining_usd".into(),
+            json!({
+                "type": "number",
+                "description": "Remaining parent budget in USD to propagate to child orchestration"
+            }),
+        );
 
         tool_schema(
             "delegate_task",
@@ -107,6 +152,9 @@ mod tests {
             _context: Option<&str>,
             _toolset: Option<&str>,
             _model: Option<&str>,
+            _child_depth: Option<u32>,
+            _max_depth: Option<u32>,
+            _parent_budget_remaining_usd: Option<f64>,
         ) -> Result<String, ToolError> {
             Ok(format!("Delegated task: {}", task))
         }

@@ -54,22 +54,29 @@ impl DelegationBackend for SignalDelegationBackend {
         context: Option<&str>,
         toolset: Option<&str>,
         model: Option<&str>,
+        child_depth: Option<u32>,
+        max_depth: Option<u32>,
+        parent_budget_remaining_usd: Option<f64>,
     ) -> Result<String, ToolError> {
-        if self.current_depth >= self.max_depth {
+        let effective_child_depth = child_depth.unwrap_or(self.current_depth + 1);
+        let effective_max_depth = max_depth.unwrap_or(self.max_depth);
+        if effective_child_depth > effective_max_depth {
             return Err(ToolError::ExecutionFailed(format!(
                 "Delegation depth limit reached ({}/{}); cannot spawn further sub-agents",
-                self.current_depth, self.max_depth
+                effective_child_depth, effective_max_depth
             )));
         }
+        let sub_agent_id = format!("subagent-{}", uuid::Uuid::new_v4());
         Ok(json!({
             "type": "delegation_request",
+            "sub_agent_id": sub_agent_id,
             "task": task,
             "context": context,
             "toolset": toolset,
             "model": model,
-            "child_depth": self.current_depth + 1,
-            "max_depth": self.max_depth,
-            "parent_budget_remaining_usd": self.parent_budget_remaining_usd,
+            "child_depth": effective_child_depth,
+            "max_depth": effective_max_depth,
+            "parent_budget_remaining_usd": parent_budget_remaining_usd.or(self.parent_budget_remaining_usd),
             "status": "pending",
         })
         .to_string())
@@ -99,12 +106,18 @@ impl DelegationBackend for RpcDelegationBackend {
         context: Option<&str>,
         toolset: Option<&str>,
         model: Option<&str>,
+        child_depth: Option<u32>,
+        max_depth: Option<u32>,
+        parent_budget_remaining_usd: Option<f64>,
     ) -> Result<String, ToolError> {
         let payload = json!({
             "task": task,
             "context": context,
             "toolset": toolset,
             "model": model,
+            "child_depth": child_depth,
+            "max_depth": max_depth,
+            "parent_budget_remaining_usd": parent_budget_remaining_usd,
         });
         let resp = self
             .client

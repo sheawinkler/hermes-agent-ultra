@@ -171,7 +171,7 @@ pub fn load_user_config_file(path: &Path) -> Result<GatewayConfig, ConfigError> 
     }
 }
 
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, llm.<provider>.api_key|base_url|model|command|args, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, llm.<provider>.api_key|base_url|model|command|args|oauth_token_url|oauth_client_id, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
 
 fn mask_secret(s: &str) -> String {
     if s.is_empty() {
@@ -283,9 +283,11 @@ fn apply_user_config_patch_dotted(
                         .filter(|s| !s.is_empty())
                         .collect();
                 }
+                "oauth_token_url" => entry.oauth_token_url = Some(value.to_string()),
+                "oauth_client_id" => entry.oauth_client_id = Some(value.to_string()),
                 other => {
                     return Err(ConfigError::NotFound(format!(
-                        "unknown llm field: llm.{}.{} (supported: api_key, base_url, model, command, args)",
+                        "unknown llm field: llm.{}.{} (supported: api_key, base_url, model, command, args, oauth_token_url, oauth_client_id)",
                         provider, other
                     )));
                 }
@@ -432,6 +434,20 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             .get(*provider)
             .map(|c| c.args.join(","))
             .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "(not set)".to_string())),
+        ["llm", provider, "oauth_token_url"] => Ok(config
+            .llm_providers
+            .get(*provider)
+            .and_then(|c| c.oauth_token_url.as_deref())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "(not set)".to_string())),
+        ["llm", provider, "oauth_client_id"] => Ok(config
+            .llm_providers
+            .get(*provider)
+            .and_then(|c| c.oauth_client_id.as_deref())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
             .unwrap_or_else(|| "(not set)".to_string())),
         ["smart_model_routing", "enabled"] => Ok(config.smart_model_routing.enabled.to_string()),
         ["smart_model_routing", "max_simple_chars"] => {

@@ -37,6 +37,10 @@ pub enum McpError {
     #[error("Configuration error: {0}")]
     Config(String),
 
+    /// Operation is not configured on this MCP endpoint.
+    #[error("Not configured: {0}")]
+    NotConfigured(String),
+
     /// Authentication error.
     #[error("Authentication error: {0}")]
     Auth(String),

@@ -32,6 +32,8 @@
 - [x] Smart Model Selection: 서브프로세스/외부 프로세스 추론 런타임(`openai-codex` / `qwen-oauth` / `copilot-acp`의 auth-store/런타임 경로를 Rust로 매핑).
 - [x] Self-Evolution: Python 스타일 memory/skill 낫지 주기 + 선택적 백그라운드 리뷰(Python `v2026.4.13`과 동일한 프롬프트, 기본 꺼짐).
 - [x] Self-Evolution: Python `v2026.4.13` 동작 기준 parity 검증 테스트.
+- [x] 서브에이전트 실제 실행 라이프사이클: 프로세스 내 `SubAgentOrchestrator`(`crates/hermes-agent/src/sub_agent_orchestrator.rs`) 추가 — 신호 전용 계약 대신 실제 `spawn / timeout / cancel / lineage` 수행. 자식 `AgentLoop`를 `tokio::spawn`으로 독립 태스크화하여 async 재귀 차단, `InterruptController`로 부모→자식 취소 전파, 벽시계 타임아웃, `SubAgentLineage` JSON을 `$HERMES_HOME/subagents/<id>.json`로 영속화.
+- [x] OAuth provider 메타데이터 출처 통합: 단일 provider 구성 센터(`llm.<provider>.oauth_token_url` / `oauth_client_id`, `LlmProviderConfig` 및 `RuntimeProviderConfig`). `oauth_refresh_config`는 구성 센터 값을 우선 사용하고 `HERMES_<PROVIDER>_OAUTH_TOKEN_URL` / `_OAUTH_CLIENT_ID`는 하위 호환 환경 변수 폴백으로만 유지.
 
 ### 기능 구현 상태 (요청 체크리스트)
 
@@ -56,7 +58,7 @@
 | Skills 시스템: YAML 기반 생성/관리 | implemented | skills 툴체인 + skill store/hub 구현. |
 | Personality 시스템: coder/writer/analyst 전환 | partial | 전환 기능 구현, 구체 페르소나는 로컬 personality 파일 의존. |
 | 컨텍스트 압축: 자동 + 수동 | implemented | loop 자동 압축 + 수동 slash 경로 존재. |
-| 서브 에이전트 위임 | partial | `delegate_task` 및 위임 훅 구현, 완전 자율 child-agent 오케스트레이션은 발전 중. |
+| 서브 에이전트 위임 | implemented | `delegate_task` + Signal/RPC 백엔드 **및 프로세스 내 `SubAgentOrchestrator`**(자식 `AgentLoop` 실제 spawn / 벽시계 timeout / 협력적 취소 / `$HERMES_HOME/subagents/`에 lineage 영속화). `max_depth`(기본 4) 및 `max_concurrent_delegates` 상한 모두 유효. |
 | 메시징: Telegram/Discord/Slack API | implemented | gateway 플랫폼 어댑터 구현. |
 | 보안: 경로 검증, 위험 명령 차단, 검색 깊이 제한 | partial | 명령 승인/credential-file 가드는 구현, 일부 보안 축은 추가 정렬 중. |
 | 중국어 입력: TUI UTF-8 완전 지원 | implemented | Rust/TUI 경로에서 UTF-8 입출력 처리 가능. |

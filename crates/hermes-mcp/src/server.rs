@@ -360,6 +360,9 @@ impl McpServer {
                         McpError::MethodNotFound(m) => (-32601, format!("Method not found: {}", m)),
                         McpError::InvalidParams(msg) => (-32602, msg.clone()),
                         McpError::Forbidden(msg) => (-32600, format!("Forbidden: {}", msg)),
+                        McpError::NotConfigured(msg) => {
+                            (-32001, format!("Not configured: {}", msg))
+                        }
                         McpError::Protocol { code, message } => (*code, message.clone()),
                         other => (-32603, other.to_string()),
                     };
@@ -386,5 +389,44 @@ impl McpServer {
         // Clean up
         transport.close().await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{McpCapabilityPolicy, McpPromptInfo, McpServer};
+    use hermes_tools::ToolRegistry;
+    use serde_json::json;
+    use std::sync::Arc;
+
+    #[tokio::test]
+    async fn prompts_get_returns_not_found() {
+        let server = McpServer::new(Arc::new(ToolRegistry::new()));
+        let err = server
+            .handle_request("prompts/get", json!({"name":"missing"}))
+            .await
+            .expect_err("missing prompt should fail");
+        assert!(matches!(err, crate::McpError::ResourceNotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn prompts_get_forbidden_when_capability_denied() {
+        let mut server = McpServer::new(Arc::new(ToolRegistry::new())).with_capability_policy(
+            McpCapabilityPolicy {
+                allow_tool_invoke: true,
+                allow_prompt_read: false,
+                allow_resource_read: true,
+            },
+        );
+        server.add_prompt(McpPromptInfo {
+            name: "hello".to_string(),
+            description: Some("d".to_string()),
+            arguments: None,
+        });
+        let err = server
+            .handle_request("prompts/get", json!({"name":"hello"}))
+            .await
+            .expect_err("prompt read should be denied");
+        assert!(matches!(err, crate::McpError::Forbidden(_)));
     }
 }

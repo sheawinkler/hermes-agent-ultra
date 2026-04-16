@@ -183,6 +183,16 @@ pub struct LlmProviderConfig {
     /// Pool of credential identifiers for rotation.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub credential_pool: Vec<String>,
+
+    /// OAuth2 token endpoint used for refresh flows (e.g. openai-codex, qwen-oauth).
+    /// When unset, falls back to provider-specific `HERMES_<PROVIDER>_OAUTH_TOKEN_URL`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_token_url: Option<String>,
+
+    /// OAuth2 client_id used for refresh flows.
+    /// When unset, falls back to provider-specific `HERMES_<PROVIDER>_OAUTH_CLIENT_ID`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_client_id: Option<String>,
 }
 
 impl Default for LlmProviderConfig {
@@ -198,6 +208,8 @@ impl Default for LlmProviderConfig {
             extra_body: None,
             rate_limit: None,
             credential_pool: Vec::new(),
+            oauth_token_url: None,
+            oauth_client_id: None,
         }
     }
 }

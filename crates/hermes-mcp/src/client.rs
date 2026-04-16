@@ -401,6 +401,25 @@ impl McpClient {
 
         let result = self.send_request("tools/call", params).await?;
 
+        if result
+            .get("isError")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            let message = result
+                .get("content")
+                .and_then(|c| c.as_array())
+                .and_then(|items| {
+                    items.iter().find_map(|item| {
+                        item.get("text")
+                            .and_then(|t| t.as_str())
+                            .map(str::to_string)
+                    })
+                })
+                .unwrap_or_else(|| "tool call returned error".to_string());
+            return Err(Self::classify_protocol_error(-1, &message));
+        }
+
         if let Some(content) = result.get("content").and_then(|c| c.as_array()) {
             let texts: Vec<String> = content
                 .iter()
@@ -661,16 +680,43 @@ impl McpClient {
                 .get("message")
                 .and_then(|m| m.as_str())
                 .unwrap_or("Unknown error");
-            return Err(McpError::Protocol {
-                code,
-                message: message.to_string(),
-            });
+            return Err(Self::classify_protocol_error(code, message));
         }
 
         response.get("result").cloned().ok_or(McpError::Protocol {
             code: -1,
             message: "Missing result in response".to_string(),
         })
+    }
+
+    fn classify_protocol_error(code: i64, message: &str) -> McpError {
+        let msg_lc = message.to_ascii_lowercase();
+        if code == -32601 {
+            return McpError::MethodNotFound(message.to_string());
+        }
+        if code == -32602 {
+            return McpError::InvalidParams(message.to_string());
+        }
+        if code == -32600 || msg_lc.contains("forbidden") || msg_lc.contains("permission denied") {
+            return McpError::Forbidden(message.to_string());
+        }
+        if code == -32001 {
+            return McpError::NotConfigured(message.to_string());
+        }
+        if msg_lc.contains("not configured")
+            || msg_lc.contains("missing config")
+            || msg_lc.contains("missing command")
+            || msg_lc.contains("missing url")
+        {
+            return McpError::NotConfigured(message.to_string());
+        }
+        if msg_lc.contains("not found") || msg_lc.contains("unknown method") {
+            return McpError::ResourceNotFound(message.to_string());
+        }
+        McpError::Protocol {
+            code,
+            message: message.to_string(),
+        }
     }
 
     /// Send a JSON-RPC notification (no id, no response expected).
@@ -981,5 +1027,29 @@ impl McpManager {
                 })
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::McpClient;
+    use crate::McpError;
+
+    #[test]
+    fn classify_protocol_error_maps_forbidden() {
+        let err = McpClient::classify_protocol_error(-32600, "Forbidden: capability missing");
+        assert!(matches!(err, McpError::Forbidden(_)));
+    }
+
+    #[test]
+    fn classify_protocol_error_maps_not_configured() {
+        let err = McpClient::classify_protocol_error(-32001, "Not configured: prompts disabled");
+        assert!(matches!(err, McpError::NotConfigured(_)));
+    }
+
+    #[test]
+    fn classify_protocol_error_maps_not_found() {
+        let err = McpClient::classify_protocol_error(-1, "resource not found");
+        assert!(matches!(err, McpError::ResourceNotFound(_)));
     }
 }

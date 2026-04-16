@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
+use hermes_auth::{exchange_refresh_token, OAuth2Endpoints};
 use hermes_intelligence::AdaptivePolicyEngine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -172,11 +173,25 @@ pub struct RuntimeProviderConfig {
     /// Optional argv tail for external process runtimes.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
+    /// OAuth2 token endpoint for refresh flows (provider config centre).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_token_url: Option<String>,
+    /// OAuth2 client_id for refresh flows (provider config centre).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oauth_client_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct OAuthStoreCredential {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    provider: Option<String>,
     access_token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    refresh_token: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    token_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scope: Option<String>,
     #[serde(default)]
     expires_at: Option<DateTime<Utc>>,
 }
@@ -186,6 +201,7 @@ const MEMORY_GUIDANCE: &str = "You have persistent memory across sessions. Save 
 const SESSION_SEARCH_GUIDANCE: &str = "When the user references something from a past conversation or you suspect relevant cross-session context exists, use session_search to recall it before asking them to repeat themselves.";
 
 const SKILLS_GUIDANCE: &str = "After completing a complex task (5+ tool calls), fixing a tricky error, or discovering a non-trivial workflow, save the approach as a skill with skill_manage so you can reuse it next time. When using a skill and finding it outdated or incomplete, patch it immediately with skill_manage(action='patch').";
+const OAUTH_REFRESH_BACKOFF_SECS: u64 = 60;
 
 // Python `AIAgent._MEMORY_REVIEW_PROMPT` / `_SKILL_REVIEW_PROMPT` / `_COMBINED_REVIEW_PROMPT` (v2026.4.13)
 const MEMORY_REVIEW_PROMPT: &str = "Review the conversation above and consider saving to memory if appropriate.\n\n\
@@ -576,6 +592,12 @@ pub struct AgentLoop {
     pub primary_credential_pool: Option<Arc<CredentialPool>>,
     /// Memory/skill nudge counters (persist for the lifetime of this `AgentLoop`).
     pub evolution_counters: Arc<Mutex<EvolutionCounters>>,
+    /// Backoff window for oauth refresh failures (avoid hammering token endpoints every turn).
+    oauth_refresh_backoff: Arc<Mutex<HashMap<String, Instant>>>,
+    /// Optional in-process sub-agent orchestrator. When set, `delegate_task`
+    /// tool calls are executed by the orchestrator (spawn/timeout/cancel/
+    /// lineage) instead of simply returning a signal envelope.
+    sub_agent_orchestrator: Option<Arc<crate::sub_agent_orchestrator::SubAgentOrchestrator>>,
 }
 
 #[derive(Debug, Clone)]
@@ -614,6 +636,8 @@ impl AgentLoop {
             evolution_engine: std::sync::Mutex::new(AdaptivePolicyEngine::default()),
             primary_credential_pool: None,
             evolution_counters: Arc::new(Mutex::new(EvolutionCounters::default())),
+            oauth_refresh_backoff: Arc::new(Mutex::new(HashMap::new())),
+            sub_agent_orchestrator: None,
         }
     }
 
@@ -636,7 +660,21 @@ impl AgentLoop {
             evolution_engine: std::sync::Mutex::new(AdaptivePolicyEngine::default()),
             primary_credential_pool: None,
             evolution_counters: Arc::new(Mutex::new(EvolutionCounters::default())),
+            oauth_refresh_backoff: Arc::new(Mutex::new(HashMap::new())),
+            sub_agent_orchestrator: None,
         }
+    }
+
+    /// Attach an in-process sub-agent orchestrator. When set, `delegate_task`
+    /// tool calls are actually executed by the orchestrator instead of just
+    /// returning a signal envelope. See
+    /// [`crate::sub_agent_orchestrator::SubAgentOrchestrator`].
+    pub fn with_sub_agent_orchestrator(
+        mut self,
+        orchestrator: Arc<crate::sub_agent_orchestrator::SubAgentOrchestrator>,
+    ) -> Self {
+        self.sub_agent_orchestrator = Some(orchestrator);
+        self
     }
 
     /// Attach the primary runtime credential pool (API key rotation).
@@ -1125,6 +1163,166 @@ impl AgentLoop {
             return None;
         }
         Some(cred.access_token.clone())
+    }
+
+    async fn refresh_oauth_store_tokens_if_needed(&self) {
+        // Keep this list explicit so behavior is deterministic and parity-scoped.
+        self.refresh_single_oauth_store_token_if_needed("openai-codex")
+            .await;
+        self.refresh_single_oauth_store_token_if_needed("qwen-oauth")
+            .await;
+    }
+
+    async fn refresh_single_oauth_store_token_if_needed(&self, provider_key: &str) {
+        if !self.can_attempt_oauth_refresh(provider_key) {
+            return;
+        }
+        let path = self.auth_tokens_path();
+        let raw = match tokio::fs::read_to_string(&path).await {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        let mut entries: HashMap<String, OAuthStoreCredential> = match serde_json::from_str(&raw) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        let Some(current) = entries.get(provider_key).cloned() else {
+            return;
+        };
+        let Some(expires_at) = current.expires_at else {
+            return;
+        };
+        if expires_at > Utc::now() {
+            return;
+        }
+        let Some(refresh_token) = current.refresh_token.clone() else {
+            return;
+        };
+        let Some((token_url, client_id)) = self.oauth_refresh_config(provider_key) else {
+            return;
+        };
+        let refreshed = match self
+            .exchange_oauth_refresh_token(
+                provider_key,
+                token_url.as_str(),
+                client_id.as_str(),
+                refresh_token.as_str(),
+            )
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                self.mark_oauth_refresh_failure(provider_key);
+                tracing::warn!(
+                    provider = provider_key,
+                    error = %e,
+                    "oauth token refresh failed for runtime provider"
+                );
+                return;
+            }
+        };
+        entries.insert(provider_key.to_string(), refreshed);
+        let Ok(content) = serde_json::to_string_pretty(&entries) else {
+            self.mark_oauth_refresh_success(provider_key);
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            let _ = tokio::fs::create_dir_all(parent).await;
+        }
+        let _ = tokio::fs::write(path, content).await;
+        self.mark_oauth_refresh_success(provider_key);
+    }
+
+    fn oauth_refresh_config(&self, provider_key: &str) -> Option<(String, String)> {
+        // Preferred source: unified provider config centre (runtime_providers).
+        let cfg_token_url = self
+            .config
+            .runtime_providers
+            .get(provider_key)
+            .and_then(|c| c.oauth_token_url.as_deref())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let cfg_client_id = self
+            .config
+            .runtime_providers
+            .get(provider_key)
+            .and_then(|c| c.oauth_client_id.as_deref())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        // Env fallback — keeps previous behavior working when config centre is empty.
+        let (token_url_env, client_id_env) = match provider_key {
+            "openai-codex" => (
+                "HERMES_OPENAI_CODEX_OAUTH_TOKEN_URL",
+                "HERMES_OPENAI_CODEX_OAUTH_CLIENT_ID",
+            ),
+            "qwen-oauth" => ("HERMES_QWEN_OAUTH_TOKEN_URL", "HERMES_QWEN_OAUTH_CLIENT_ID"),
+            _ => return cfg_token_url.zip(cfg_client_id),
+        };
+        let token_url = cfg_token_url.or_else(|| {
+            std::env::var(token_url_env)
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })?;
+        let client_id = cfg_client_id.or_else(|| {
+            std::env::var(client_id_env)
+                .ok()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })?;
+        Some((token_url, client_id))
+    }
+
+    async fn exchange_oauth_refresh_token(
+        &self,
+        provider_key: &str,
+        token_url: &str,
+        client_id: &str,
+        refresh_token: &str,
+    ) -> Result<OAuthStoreCredential, AgentError> {
+        let endpoints = OAuth2Endpoints {
+            authorize_url: "https://placeholder.invalid/oauth/authorize".to_string(),
+            token_url: token_url.to_string(),
+            client_id: client_id.to_string(),
+            redirect_uri: "http://127.0.0.1/unused".to_string(),
+            scopes: vec![],
+        };
+        let cred = exchange_refresh_token(provider_key, &endpoints, refresh_token)
+            .await
+            .map_err(|e| AgentError::AuthFailed(e.to_string()))?;
+        Ok(OAuthStoreCredential {
+            provider: Some(provider_key.to_string()),
+            access_token: cred.access_token,
+            refresh_token: cred
+                .refresh_token
+                .or_else(|| Some(refresh_token.to_string())),
+            token_type: Some(cred.token_type),
+            scope: cred.scope,
+            expires_at: cred.expires_at,
+        })
+    }
+
+    fn can_attempt_oauth_refresh(&self, provider_key: &str) -> bool {
+        let Ok(guard) = self.oauth_refresh_backoff.lock() else {
+            return true;
+        };
+        let Some(last_fail) = guard.get(provider_key) else {
+            return true;
+        };
+        last_fail.elapsed().as_secs() >= OAUTH_REFRESH_BACKOFF_SECS
+    }
+
+    fn mark_oauth_refresh_failure(&self, provider_key: &str) {
+        if let Ok(mut guard) = self.oauth_refresh_backoff.lock() {
+            guard.insert(provider_key.to_string(), Instant::now());
+        }
+    }
+
+    fn mark_oauth_refresh_success(&self, provider_key: &str) {
+        if let Ok(mut guard) = self.oauth_refresh_backoff.lock() {
+            guard.remove(provider_key);
+        }
     }
 
     fn auth_tokens_path(&self) -> PathBuf {
@@ -1772,6 +1970,9 @@ impl AgentLoop {
             total_turns += 1;
             tracing::debug!("Agent turn {}", total_turns);
 
+            // Refresh oauth-backed runtime credentials before routing/provider selection.
+            self.refresh_oauth_store_tokens_if_needed().await;
+
             // Skill nudge counter — Python `run_agent.py`: increment at the start of each inner API iteration.
             if self.config.skill_creation_nudge_interval > 0
                 && self
@@ -1950,7 +2151,14 @@ impl AgentLoop {
             self.interrupt.check_interrupt()?;
             let tool_start = Instant::now();
             let results = self
-                .execute_tool_calls(&tool_calls, total_turns, &mut tool_errors)
+                .execute_tool_calls(
+                    &tool_calls,
+                    total_turns,
+                    self.config
+                        .max_cost_usd
+                        .map(|limit| (limit - session_cost_usd).max(0.0)),
+                    &mut tool_errors,
+                )
                 .await;
             let tool_elapsed = tool_start.elapsed().as_millis() as u64;
             _total_tool_time_ms += tool_elapsed;
@@ -2115,6 +2323,9 @@ impl AgentLoop {
             }
 
             total_turns += 1;
+
+            // Refresh oauth-backed runtime credentials before routing/provider selection.
+            self.refresh_oauth_store_tokens_if_needed().await;
 
             if self.config.skill_creation_nudge_interval > 0
                 && self
@@ -2383,7 +2594,14 @@ impl AgentLoop {
             }
 
             let mut results = self
-                .execute_tool_calls(&tool_calls, total_turns, &mut tool_errors)
+                .execute_tool_calls(
+                    &tool_calls,
+                    total_turns,
+                    self.config
+                        .max_cost_usd
+                        .map(|limit| (limit - session_cost_usd).max(0.0)),
+                    &mut tool_errors,
+                )
                 .await;
 
             let turn_tool_error_count = results.iter().filter(|r| r.is_error).count() as u32;
@@ -2805,21 +3023,104 @@ impl AgentLoop {
         &self,
         tool_calls: &[ToolCall],
         turn: u32,
+        parent_budget_remaining_usd: Option<f64>,
         tool_errors: &mut Vec<hermes_core::ToolErrorRecord>,
     ) -> Vec<ToolResult> {
         let mut join_set = JoinSet::new();
+        let max_delegate_depth = self.resolve_max_delegate_depth();
+        let current_delegate_depth = self.delegate_depth;
+        let orchestrator = self.sub_agent_orchestrator.clone();
+
+        // Run orchestrated `delegate_task` calls sequentially in the caller's
+        // task — this keeps the inner AgentLoop future out of the Send-bound
+        // JoinSet and preserves the requested concurrency cap which is already
+        // applied upstream via `cap_delegates`.
+        let mut orchestrated: Vec<ToolResult> = Vec::new();
+        if let Some(orch) = orchestrator.as_ref() {
+            for tc in tool_calls {
+                if tc.function.name != "delegate_task" {
+                    continue;
+                }
+                if current_delegate_depth >= max_delegate_depth {
+                    orchestrated.push(ToolResult::err(
+                        &tc.id,
+                        format!(
+                            "Delegation depth limit reached ({}/{}).",
+                            current_delegate_depth, max_delegate_depth
+                        ),
+                    ));
+                    continue;
+                }
+                let parsed: Value = match serde_json::from_str(&tc.function.arguments) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        orchestrated.push(ToolResult::err(
+                            &tc.id,
+                            format!(
+                                "Invalid JSON params for tool 'delegate_task': {}. \
+                                 Please retry with valid JSON.",
+                                e
+                            ),
+                        ));
+                        continue;
+                    }
+                };
+                let task = parsed
+                    .get("task")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                if task.trim().is_empty() {
+                    orchestrated.push(ToolResult::err(
+                        &tc.id,
+                        "delegate_task requires non-empty 'task' string.",
+                    ));
+                    continue;
+                }
+                let req = crate::sub_agent_orchestrator::SubAgentRequest {
+                    task,
+                    context: parsed
+                        .get("context")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                    toolset: parsed
+                        .get("toolset")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                    model: parsed
+                        .get("model")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                    child_depth: current_delegate_depth + 1,
+                    max_depth: max_delegate_depth,
+                    parent_budget_remaining_usd,
+                };
+                // Orchestrator internally runs the child on its own
+                // `tokio::spawn` task, which erases the child future and breaks
+                // async recursion between parent / child `execute_tool_calls`.
+                let output = orch.execute(req).await;
+                orchestrated.push(ToolResult::ok(&tc.id, output));
+            }
+        }
 
         for tc in tool_calls {
+            // Skip `delegate_task` when an orchestrator already handled it.
+            if orchestrator.is_some() && tc.function.name == "delegate_task" {
+                continue;
+            }
             let tool_call_id = tc.id.clone();
             let tool_name = tc.function.name.clone();
             let raw_args = tc.function.arguments.clone();
             let registry = self.tool_registry.clone();
+            let max_delegate_depth = max_delegate_depth;
+            let current_delegate_depth = current_delegate_depth;
+            let parent_budget_remaining_usd = parent_budget_remaining_usd;
 
             join_set.spawn(async move {
                 match registry.get(&tool_name) {
                     Some(entry) => {
                         // Parse arguments
-                        let params: Value = match serde_json::from_str(&raw_args) {
+                        let mut params: Value = match serde_json::from_str(&raw_args) {
                             Ok(v) => v,
                             Err(e) => {
                                 let error_msg = format!(
@@ -2830,6 +3131,34 @@ impl AgentLoop {
                                 return ToolResult::err(&tool_call_id, error_msg);
                             }
                         };
+
+                        if tool_name == "delegate_task" {
+                            if current_delegate_depth >= max_delegate_depth {
+                                return ToolResult::err(
+                                    &tool_call_id,
+                                    format!(
+                                        "Delegation depth limit reached ({}/{}).",
+                                        current_delegate_depth, max_delegate_depth
+                                    ),
+                                );
+                            }
+                            if let Some(obj) = params.as_object_mut() {
+                                obj.insert(
+                                    "child_depth".to_string(),
+                                    Value::from(current_delegate_depth + 1),
+                                );
+                                obj.insert(
+                                    "max_depth".to_string(),
+                                    Value::from(max_delegate_depth),
+                                );
+                                if let Some(remaining) = parent_budget_remaining_usd {
+                                    obj.insert(
+                                        "parent_budget_remaining_usd".to_string(),
+                                        Value::from(remaining),
+                                    );
+                                }
+                            }
+                        }
 
                         // Execute the handler
                         match (entry.handler)(params) {
@@ -2850,6 +3179,21 @@ impl AgentLoop {
         }
 
         let mut results = Vec::with_capacity(tool_calls.len());
+        for tool_result in orchestrated {
+            if tool_result.is_error {
+                let tc = tool_calls
+                    .iter()
+                    .find(|tc| tc.id == tool_result.tool_call_id);
+                if let Some(tc) = tc {
+                    tool_errors.push(hermes_core::ToolErrorRecord {
+                        tool_name: tc.function.name.clone(),
+                        error: tool_result.content.clone(),
+                        turn,
+                    });
+                }
+            }
+            results.push(tool_result);
+        }
         while let Some(result) = join_set.join_next().await {
             match result {
                 Ok(tool_result) => {
@@ -2875,6 +3219,14 @@ impl AgentLoop {
         }
 
         results
+    }
+
+    fn resolve_max_delegate_depth(&self) -> u32 {
+        std::env::var("HERMES_MAX_DELEGATE_DEPTH")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(4)
     }
 
     /// Cap concurrent delegate_task calls based on config.
@@ -3219,6 +3571,8 @@ mod tests {
                 base_url: None,
                 command: None,
                 args: Vec::new(),
+                oauth_token_url: None,
+                oauth_client_id: None,
             },
         );
 
@@ -3301,6 +3655,8 @@ mod tests {
                     "--model".to_string(),
                     "gpt-4o-mini".to_string(),
                 ],
+                oauth_token_url: None,
+                oauth_client_id: None,
             },
         );
 
@@ -3374,6 +3730,8 @@ mod tests {
                 base_url: Some("https://api.openai.com/v1".to_string()),
                 command: None,
                 args: Vec::new(),
+                oauth_token_url: None,
+                oauth_client_id: None,
             },
         );
 
@@ -3460,6 +3818,8 @@ mod tests {
                 base_url: Some("https://dashscope.aliyuncs.com/compatible-mode/v1".to_string()),
                 command: None,
                 args: Vec::new(),
+                oauth_token_url: None,
+                oauth_client_id: None,
             },
         );
 
@@ -3560,6 +3920,8 @@ mod tests {
                 base_url: None,
                 command: None,
                 args: Vec::new(),
+                oauth_token_url: None,
+                oauth_client_id: None,
             },
         );
 
@@ -3784,6 +4146,8 @@ mod tests {
                 base_url: Some("acp://copilot".to_string()),
                 command: Some("definitely-not-installed-copilot-cli".to_string()),
                 args: vec!["--acp".to_string(), "--stdio".to_string()],
+                oauth_token_url: None,
+                oauth_client_id: None,
             },
         );
 
@@ -3861,6 +4225,8 @@ mod tests {
                 base_url: Some("acp+tcp://127.0.0.1:8765".to_string()),
                 command: Some("definitely-not-installed-copilot-cli".to_string()),
                 args: vec!["--acp".to_string(), "--stdio".to_string()],
+                oauth_token_url: None,
+                oauth_client_id: None,
             },
         );
 
@@ -4250,5 +4616,98 @@ mod tests {
         };
         let cost = estimate_usage_cost_usd(&u, "openai:gpt-4o-mini", &cfg).unwrap();
         assert!((cost - 0.75).abs() < 1e-9);
+    }
+
+    /// Smoke test: config-centre OAuth metadata wins over env fallback, and
+    /// env is used when config is empty. Mirrors the Python behaviour of
+    /// `resolve_runtime_provider_credentials` where provider config takes
+    /// precedence over environment lookup.
+    #[test]
+    fn test_oauth_refresh_config_prefers_provider_config_over_env() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let mut runtime_providers = HashMap::new();
+        runtime_providers.insert(
+            "qwen-oauth".to_string(),
+            RuntimeProviderConfig {
+                api_key: None,
+                base_url: None,
+                command: None,
+                args: Vec::new(),
+                oauth_token_url: Some("https://cfg.example.com/token".to_string()),
+                oauth_client_id: Some("cfg-client".to_string()),
+            },
+        );
+        // An unknown provider reachable only via config (env fallback is gated
+        // on known providers, so this exercises the cfg_token_url.zip path).
+        runtime_providers.insert(
+            "custom-oauth".to_string(),
+            RuntimeProviderConfig {
+                api_key: None,
+                base_url: None,
+                command: None,
+                args: Vec::new(),
+                oauth_token_url: Some("https://cfg.example.com/custom-token".to_string()),
+                oauth_client_id: Some("custom-client".to_string()),
+            },
+        );
+
+        let config = AgentConfig {
+            runtime_providers,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+
+        // Set conflicting env values — config must win.
+        std::env::set_var("HERMES_QWEN_OAUTH_TOKEN_URL", "https://env.example.com/tok");
+        std::env::set_var("HERMES_QWEN_OAUTH_CLIENT_ID", "env-client");
+
+        let (token_url, client_id) = agent.oauth_refresh_config("qwen-oauth").unwrap();
+        assert_eq!(token_url, "https://cfg.example.com/token");
+        assert_eq!(client_id, "cfg-client");
+
+        // Unknown-provider path still resolves when config centre supplies both.
+        let (token_url, client_id) = agent.oauth_refresh_config("custom-oauth").unwrap();
+        assert_eq!(token_url, "https://cfg.example.com/custom-token");
+        assert_eq!(client_id, "custom-client");
+
+        std::env::remove_var("HERMES_QWEN_OAUTH_TOKEN_URL");
+        std::env::remove_var("HERMES_QWEN_OAUTH_CLIENT_ID");
     }
 }

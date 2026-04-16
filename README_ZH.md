@@ -32,6 +32,8 @@
 - [x] Smart Model Selection：子进程/外部进程推理运行时（已映射 `openai-codex` / `qwen-oauth` / `copilot-acp` 的 auth-store 与运行时元数据路径）。
 - [x] Self-Evolution：Python 风格 memory/skill 节拍与可选后台回顾轮次（与 Python `v2026.4.13` 相同提示词；默认关闭）。
 - [x] Self-Evolution：基于 Python `v2026.4.13` 行为基线的 parity 验证测试。
+- [x] 子 Agent 实际执行生命周期：新增进程内 `SubAgentOrchestrator`（`crates/hermes-agent/src/sub_agent_orchestrator.rs`），以真正的 `spawn / timeout / cancel / lineage` 替代原先的"信号化合同"；子代理以独立 `tokio::spawn` 任务运行（从而切断 async 递归）、父 → 子 取消通过 `InterruptController` 传播、强制墙钟 timeout，并把 `SubAgentLineage` JSON 持久化到 `$HERMES_HOME/subagents/<id>.json`（started / completed / failed / timeout / cancelled）。
+- [x] OAuth provider 元数据来源收敛：统一走「provider 配置中心」（`llm.<provider>.oauth_token_url` / `oauth_client_id`，同时存在于 `LlmProviderConfig` 与 `RuntimeProviderConfig`）；`oauth_refresh_config` 优先读取配置中心值，`HERMES_<PROVIDER>_OAUTH_TOKEN_URL` / `_OAUTH_CLIENT_ID` 只作为向后兼容的环境变量兜底。
 
 ### 能力实现状态（你要求的检查清单）
 
@@ -56,7 +58,7 @@
 | Skills 系统：YAML 技能创建与管理 | implemented | skills 工具链与 skill store/hub 已具备。 |
 | 人格系统：coder/writer/analyst 切换 | partial | 人格切换功能已实现；具体预置人格依赖本地人格文件。 |
 | 上下文压缩：自动 + 手动 | implemented | loop 自动压缩 + 手动 slash 命令路径已存在。 |
-| 子 Agent 委托 | partial | `delegate_task` 与委托相关钩子已实现；完整自治子代理编排仍在演进。 |
+| 子 Agent 委托 | implemented | `delegate_task` 工具 + Signal/RPC 后端 **以及进程内 `SubAgentOrchestrator`**（真正的子 `AgentLoop` 拉起 / 墙钟 timeout / 协作式取消 / 血缘 JSON 持久化到 `$HERMES_HOME/subagents/`）；`max_depth`（默认 4）与 `max_concurrent_delegates` 并发上限都已生效；委托血缘通过 `on_delegation` memory hook 记录。 |
 | 消息推送：Telegram/Discord/Slack API | implemented | gateway 平台适配已具备。 |
 | 安全：路径校验、危险命令拦截、搜索深度限制 | partial | 命令审批与凭据/文件防护已具备；部分安全维度仍在持续补齐。 |
 | 中文输入：TUI UTF-8 全支持 | implemented | Rust/TUI 链路可正常处理 UTF-8 输入输出。 |

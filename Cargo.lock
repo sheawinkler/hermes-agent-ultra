@@ -952,6 +952,7 @@ dependencies = [
  "dirs",
  "eventsource-stream",
  "futures",
+ "hermes-auth",
  "hermes-core",
  "hermes-intelligence",
  "lazy_static",
@@ -967,6 +968,7 @@ dependencies = [
  "tokio",
  "tokio-stream",
  "tracing",
+ "uuid",
  "which",
 ]
 

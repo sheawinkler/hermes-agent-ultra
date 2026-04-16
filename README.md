@@ -32,6 +32,8 @@ Baseline target: `NousResearch/hermes-agent@v2026.4.13` (`1af2e18d408a9dcc2c61d6
 - [x] Smart Model Selection: subprocess / external-process inference runtimes (Python `resolve_runtime_provider` extras mapped for `openai-codex` / `qwen-oauth` / `copilot-acp`, including auth-store/runtime metadata parity).
 - [x] Self-Evolution: Python-style memory/skill nudge cadence + optional background review pass (same review prompts as Python `v2026.4.13`; off by default).
 - [x] Self-Evolution: parity validation tests vs Python `v2026.4.13` behavior fixtures.
+- [x] Sub-agent actual execution lifecycle: in-process `SubAgentOrchestrator` (`crates/hermes-agent/src/sub_agent_orchestrator.rs`) handles `spawn / timeout / cancel / resume-via-lineage` instead of signal-only envelope; child runs in its own `tokio::spawn` task (breaking async recursion), parent-to-child cancellation via `InterruptController`, wall-clock timeout, and per-run lineage JSON persisted to `$HERMES_HOME/subagents/<id>.json` at start/complete/fail/timeout/cancel boundaries.
+- [x] OAuth provider metadata source: unified `provider config centre` (`llm.<provider>.oauth_token_url` / `oauth_client_id` on `LlmProviderConfig` and `RuntimeProviderConfig`); `oauth_refresh_config` prefers config-centre values and keeps env vars (`HERMES_<PROVIDER>_OAUTH_TOKEN_URL` / `_OAUTH_CLIENT_ID`) as a strict fallback for backward compatibility.
 
 ### Capability Status (Requested Checklist)
 
@@ -56,7 +58,7 @@ Status legend: `implemented` = available in current codebase, `partial` = availa
 | Skills system: YAML-based skill creation/management | implemented | Skills tooling and skill store/hub pipeline are present. |
 | Personality system: coder/writer/analyst personas | implemented | Built-in `coder`/`writer`/`analyst` persona constants + user-file override; fallback to default identity with warning; snapshot tests validate prompt deltas; WebSocket now parses personality from JSON payloads. |
 | Context compression: automatic + manual | implemented | Auto compression in loop + manual slash command path exist. |
-| Sub-agent delegation | implemented | `delegate_task` tool with Signal/RPC backends; depth enforcement (`max_depth` default 4); parent budget propagation in delegation envelope; `max_concurrent_delegates` cap; delegation lineage via `on_delegation` memory hook. |
+| Sub-agent delegation | implemented | `delegate_task` tool with Signal/RPC backends **and in-process `SubAgentOrchestrator`** (actual child `AgentLoop` spawn / wall-clock timeout / cooperative cancel / lineage persistence under `$HERMES_HOME/subagents/`); depth enforcement (`max_depth` default 4); parent budget propagation in delegation envelope; `max_concurrent_delegates` cap; delegation lineage via `on_delegation` memory hook. |
 | Messaging: Telegram/Discord/Slack APIs | implemented | Gateway adapters for these platforms are present. |
 | Security: path validation, dangerous command blocking, search-depth limits | implemented | `ApprovalManager` wired into `TerminalHandler` (deny/confirm/approve); `CredentialGuard` wired into `ReadFileHandler`/`WriteFileHandler`; search depth capped at 12 levels in `LocalSearchBackend`. |
 | Chinese input / UTF-8 in TUI | implemented | Rust/TUI path handles UTF-8 text input/output normally. |
@@ -92,6 +94,7 @@ All 5 previously-partial capabilities have been promoted to `implemented`.
 - [x] Delegation envelope includes `child_depth`, `max_depth`, `parent_budget_remaining_usd`.
 - [x] `max_concurrent_delegates` cap in `AgentLoop`.
 - [x] `on_delegation` memory hook fires for delegation lineage tracking.
+- [x] **In-process execution lifecycle** via `SubAgentOrchestrator` (attach with `AgentLoop::with_sub_agent_orchestrator`): spawns a child `AgentLoop` on its own `tokio::spawn` task, applies a wall-clock timeout (`DEFAULT_SUB_AGENT_TIMEOUT_SECS`), propagates parent interrupts via `InterruptController`, and persists `SubAgentLineage` JSON (`started / completed / failed / timeout / cancelled`) under `$HERMES_HOME/subagents/<sub_agent_id>.json`. Return value is structured JSON with `sub_agent_id`, `status`, `total_turns`, `usage`, and `depth`/`max_depth`. Unit tests cover timeout path, cancel path, and child-config clamping.
 
 #### 5) Security: path validation, dangerous command blocking, search-depth limits — DONE
 
