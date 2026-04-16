@@ -23,7 +23,9 @@ use hermes_core::{
 };
 
 use crate::budget;
-use crate::context::{load_soul_md, ContextManager, SystemPromptBuilder};
+use crate::context::{
+    load_builtin_memory_snapshot, load_soul_md, ContextManager, SystemPromptBuilder,
+};
 use crate::context_files::{load_hermes_context_files, load_workspace_context};
 use crate::interrupt::InterruptController;
 use crate::memory_manager::MemoryManager;
@@ -1005,6 +1007,17 @@ impl AgentLoop {
 
         if let Some(ref personality) = self.config.personality {
             builder = builder.with_block(&format!("Personality: {personality}"));
+        }
+
+        if !self.config.skip_memory {
+            let (memory_block, user_block) =
+                load_builtin_memory_snapshot(self.config.hermes_home.as_deref());
+            if let Some(block) = memory_block {
+                builder = builder.with_block(&block);
+            }
+            if let Some(block) = user_block {
+                builder = builder.with_block(&block);
+            }
         }
 
         let mem_block = self.memory_system_prompt();

@@ -7,12 +7,16 @@
 //! full system prompt assembly (corresponding to Python `run_agent.py`'s
 //! `_build_system_prompt`).
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use hermes_core::{BudgetConfig, Message, MessageRole};
 
 /// Number of recent messages to preserve during compression.
 const DEFAULT_RECENT_MESSAGES: usize = 4;
+const MEMORY_ENTRY_DELIMITER: &str = "\n§\n";
+const MEMORY_CHAR_LIMIT: usize = 2200;
+const USER_CHAR_LIMIT: usize = 1375;
 
 // ---------------------------------------------------------------------------
 // ContextCompressor
@@ -317,8 +321,11 @@ impl ContextManager {
 // ---------------------------------------------------------------------------
 
 /// Default agent identity used when no SOUL.md is found.
-const DEFAULT_AGENT_IDENTITY: &str = "You are Hermes, a helpful AI assistant. \
-You have access to tools and can help with a wide variety of tasks.";
+pub const DEFAULT_AGENT_IDENTITY: &str = "You are Hermes Agent, an intelligent AI assistant created by Nous Research. \
+You are helpful, knowledgeable, and direct. You assist users with a wide range of tasks including answering questions, \
+writing and editing code, analyzing information, creative work, and executing actions via your tools. \
+You communicate clearly, admit uncertainty when appropriate, and prioritize being genuinely useful over being verbose \
+unless otherwise directed below. Be targeted and efficient in your exploration and investigations.";
 
 /// Load the SOUL.md personality file from `~/.hermes/SOUL.md`.
 ///
@@ -388,6 +395,81 @@ pub fn load_context_files(hermes_home: &Path) -> String {
     }
 
     parts.join("\n\n")
+}
+
+// ---------------------------------------------------------------------------
+// Built-in memory snapshot (MEMORY.md / USER.md)
+// ---------------------------------------------------------------------------
+
+fn parse_memory_entries(raw: &str) -> Vec<String> {
+    raw.split(MEMORY_ENTRY_DELIMITER)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn dedup_entries(entries: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for entry in entries {
+        if seen.insert(entry.clone()) {
+            out.push(entry);
+        }
+    }
+    out
+}
+
+fn render_memory_block(target: &str, entries: &[String]) -> Option<String> {
+    if entries.is_empty() {
+        return None;
+    }
+    let (label, limit) = if target == "user" {
+        ("USER PROFILE (who the user is)", USER_CHAR_LIMIT)
+    } else {
+        ("MEMORY (your personal notes)", MEMORY_CHAR_LIMIT)
+    };
+    let content = entries.join(MEMORY_ENTRY_DELIMITER);
+    let current = content.chars().count();
+    let pct = if limit > 0 {
+        ((current * 100) / limit).min(100)
+    } else {
+        0
+    };
+    Some(format!(
+        "{label} [{pct}% - {current}/{limit} chars]\n{content}"
+    ))
+}
+
+/// Load the built-in memory snapshot used in the system prompt.
+///
+/// This mirrors Python's MemoryStore snapshot semantics at session start:
+/// the returned blocks are read once and treated as a frozen prompt view.
+pub fn load_builtin_memory_snapshot(
+    hermes_home_override: Option<&str>,
+) -> (Option<String>, Option<String>) {
+    let base = hermes_home_override
+        .map(PathBuf::from)
+        .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
+        .or_else(|| dirs::home_dir().map(|h| h.join(".hermes")))
+        .unwrap_or_else(|| PathBuf::from(".hermes"));
+    let memory_dir = base.join("memories");
+    let memory_path = memory_dir.join("MEMORY.md");
+    let user_path = memory_dir.join("USER.md");
+
+    let memory_entries = std::fs::read_to_string(&memory_path)
+        .ok()
+        .map(|s| dedup_entries(parse_memory_entries(&s)))
+        .unwrap_or_default();
+    let user_entries = std::fs::read_to_string(&user_path)
+        .ok()
+        .map(|s| dedup_entries(parse_memory_entries(&s)))
+        .unwrap_or_default();
+
+    (
+        render_memory_block("memory", &memory_entries),
+        render_memory_block("user", &user_entries),
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -794,5 +876,34 @@ mod tests {
 
         let prompt = builder.build();
         assert_eq!(prompt, "Identity");
+    }
+
+    #[test]
+    fn test_load_builtin_memory_snapshot_reads_memories_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let memories = tmp.path().join("memories");
+        std::fs::create_dir_all(&memories).unwrap();
+        std::fs::write(
+            memories.join("MEMORY.md"),
+            "Use ripgrep for search\n§\nUse ripgrep for search\n§\nWorkspace is Rust",
+        )
+        .unwrap();
+        std::fs::write(
+            memories.join("USER.md"),
+            "Name: Alice\n§\nPrefers concise Chinese",
+        )
+        .unwrap();
+
+        let (memory_block, user_block) =
+            load_builtin_memory_snapshot(Some(tmp.path().to_string_lossy().as_ref()));
+
+        let memory_block = memory_block.unwrap_or_default();
+        let user_block = user_block.unwrap_or_default();
+        assert!(memory_block.contains("MEMORY (your personal notes)"));
+        assert!(memory_block.contains("Use ripgrep for search"));
+        assert!(memory_block.contains("Workspace is Rust"));
+        assert_eq!(memory_block.matches("Use ripgrep for search").count(), 1);
+        assert!(user_block.contains("USER PROFILE (who the user is)"));
+        assert!(user_block.contains("Name: Alice"));
     }
 }

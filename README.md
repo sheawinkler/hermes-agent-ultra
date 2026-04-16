@@ -45,6 +45,7 @@ The built-in `memory` tool follows Python parity semantics: `action=add|replace|
 ### 8 Memory Plugins
 
 Mem0, Honcho, Holographic, Hindsight, ByteRover, OpenViking, RetainDB, Supermemory.
+Built-in `~/.hermes/memories/MEMORY.md` and `USER.md` snapshots are also injected at session start for prompt-stable long memory context.
 
 ### 6 Terminal Backends
 
