@@ -767,6 +767,23 @@ impl AgentLoop {
         }
     }
 
+    fn memory_on_session_end(&self, messages: &[Message]) {
+        if self.config.skip_memory {
+            return;
+        }
+        let Some(ref mm) = self.memory_manager else {
+            return;
+        };
+        let Ok(mm) = mm.lock() else {
+            return;
+        };
+        let as_values: Vec<Value> = messages
+            .iter()
+            .filter_map(|m| serde_json::to_value(m).ok())
+            .collect();
+        mm.on_session_end(&as_values);
+    }
+
     fn should_inject_tool_enforcement(&self, model: &str) -> bool {
         let model_lower = model.to_lowercase();
         ["gpt", "codex", "gemini", "gemma", "grok"]
@@ -1386,6 +1403,7 @@ impl AgentLoop {
                 if let Some(msg) = summary_msg {
                     ctx.add_message(msg);
                 }
+                self.memory_on_session_end(ctx.get_messages());
                 return Ok(AgentResult {
                     messages: ctx.get_messages().to_vec(),
                     finished_naturally: false,
@@ -1490,6 +1508,7 @@ impl AgentLoop {
                         "Cost guard tripped: session spend ${:.4} exceeded max_cost_usd ${:.4}. Stopping loop.",
                         session_cost_usd, limit
                     )));
+                    self.memory_on_session_end(ctx.get_messages());
                     return Ok(AgentResult {
                         messages: ctx.get_messages().to_vec(),
                         finished_naturally: false,
@@ -1517,6 +1536,7 @@ impl AgentLoop {
                     // Final memory sync
                     let (u, a) = extract_last_user_assistant(ctx.get_messages());
                     self.memory_sync(&u, &a, session_id);
+                    self.memory_on_session_end(ctx.get_messages());
                     return Ok(AgentResult {
                         messages: ctx.get_messages().to_vec(),
                         finished_naturally: true,
@@ -1877,6 +1897,7 @@ impl AgentLoop {
                         "Cost guard tripped: session spend ${:.4} exceeded max_cost_usd ${:.4}. Stopping loop.",
                         session_cost_usd, limit
                     )));
+                    self.memory_on_session_end(ctx.get_messages());
                     return Ok(AgentResult {
                         messages: ctx.get_messages().to_vec(),
                         finished_naturally: false,
@@ -1922,6 +1943,7 @@ impl AgentLoop {
             if tool_calls.is_empty() {
                 let (u, a) = extract_last_user_assistant(ctx.get_messages());
                 self.memory_sync(&u, &a, session_id);
+                self.memory_on_session_end(ctx.get_messages());
                 return Ok(AgentResult {
                     messages: ctx.get_messages().to_vec(),
                     finished_naturally: true,
