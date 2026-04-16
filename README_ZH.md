@@ -12,9 +12,9 @@
 
 基线目标：`NousResearch/hermes-agent@v2026.4.13`（`1af2e18d408a9dcc2c61d6fc1eef5c6667f8e254`）。
 
-- 进度：**10 / 13** 个范围内对齐项已完成。
-- 已完成重点：提示词分层/核心 guidance 对齐、智能路由基础运行时切换与回退、memory 工具语义与容量限制、内置 `MEMORY.md`/`USER.md` 快照注入、memory 生命周期钩子（`on_memory_write`、`queue_prefetch`、`on_pre_compress`、`on_session_end`、`on_delegation`）、`session_search` 双模式与 `role_filter`/limit 对齐。
-- 剩余重点：`resolve_turn_route` 运行时签名字段的完整对齐，以及 Python 风格 skills+memory 驱动的自进化行为闭环对齐。
+- 进度：**12 / 13** 个范围内对齐项已完成。
+- 已完成重点：提示词分层/核心 guidance 对齐、与 Python 同构的 `resolve_turn_route`/cheap-route 流水线及 HTTP 运行时快照（`api_mode`、主配置 `acp_command`/`acp_args`、凭证池、`TurnRouteSignature`）、智能路由运行时切换与回退、memory 工具语义与容量限制、内置 `MEMORY.md`/`USER.md` 快照注入、memory 生命周期钩子（`on_memory_write`、`queue_prefetch`、`on_pre_compress`、`on_session_end`、`on_delegation`）、`session_search` 双模式与 `role_filter`/limit 对齐、memory/skill 节拍计数与可选后台回顾（与 Python `v2026.4.13` 相同回顾提示词；默认关闭，由 `background_review_enabled` 控制）。
+- 剩余重点：子进程/外部进程推理栈（若需要与 Python 注册表完全一致），以及基于 Python 行为基线的 parity 测试。
 
 ### TODO（对齐追踪）
 
@@ -28,8 +28,9 @@
 - [x] Session Search：按运行时上下文自动注入并排除当前活跃会话 lineage。
 - [x] Smart Model Selection：逐轮 cheap-route 与 policy recommendation 路由。
 - [x] Smart Model Selection：路由 provider 构建失败时回退主 provider。
-- [ ] Smart Model Selection：Python `resolve_turn_route` 完整运行时签名字段（`api_mode`、`command`、`args`、`credential_pool`、`signature`）端到端对齐。
-- [ ] Self-Evolution：Python 风格 memory/skills 驱动自动适应闭环对齐。
+- [x] Smart Model Selection：面向 HTTP 提供商的 Python 形 `resolve_turn_route` + 运行时快照字段（`api_mode`、`command`/`args`、`credential_pool`、`signature`）。
+- [ ] Smart Model Selection：子进程/外部进程推理运行时（Python `resolve_runtime_provider` 中尚未映射到 Rust 的部分）。
+- [x] Self-Evolution：Python 风格 memory/skill 节拍与可选后台回顾轮次（与 Python `v2026.4.13` 相同提示词；默认关闭）。
 - [ ] Self-Evolution：基于 Python `v2026.4.13` 行为基线的 parity 验证测试。
 
 ### 能力实现状态（你要求的检查清单）
@@ -154,7 +155,29 @@ crates/
 
 ## 安装
 
-下载对应平台的最新 release 二进制：
+**一键安装**（自动识别系统与架构，下载最新 release，默认安装到 `~/.local/bin`）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Lumio-Research/hermes-agent-rs/main/scripts/install.sh | bash
+```
+
+安装到系统目录示例：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Lumio-Research/hermes-agent-rs/main/scripts/install.sh | sudo INSTALL_DIR=/usr/local/bin bash
+```
+
+**用 Cargo 从源码安装**（本机已安装 Rust 时）：
+
+```bash
+cargo install --git https://github.com/Lumio-Research/hermes-agent-rs hermes-cli --locked
+```
+
+安装脚本源码见仓库 [`scripts/install.sh`](scripts/install.sh)，可先下载审阅再执行。
+
+---
+
+手动下载对应平台的 release 包并解压（与上面一键脚本等价，只是步骤更多）：
 
 ```bash
 # macOS (Apple Silicon)

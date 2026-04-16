@@ -12,9 +12,9 @@
 
 기준 베이스라인: `NousResearch/hermes-agent@v2026.4.13` (`1af2e18d408a9dcc2c61d6fc1eef5c6667f8e254`).
 
-- 진행률: 스코프 내 정렬 항목 **10 / 13** 완료.
-- 완료된 핵심 영역: 프롬프트 레이어/핵심 가이던스 정렬, 스마트 라우팅 기본 런타임 전환 및 폴백, memory 도구 시맨틱과 용량 제한, 내장 `MEMORY.md`/`USER.md` 스냅샷 주입, memory 라이프사이클 훅(`on_memory_write`, `queue_prefetch`, `on_pre_compress`, `on_session_end`, `on_delegation`), `session_search` 이중 모드 + `role_filter`/limit 정렬.
-- 남은 핵심 영역: `resolve_turn_route` 런타임 시그니처 필드 완전 정렬, Python 스타일 skills+memory 기반 자기진화 루프 정렬.
+- 진행률: 스코프 내 정렬 항목 **12 / 13** 완료.
+- 완료된 핵심 영역: 프롬프트 레이어/핵심 가이던스 정렬, Python과 동형의 `resolve_turn_route`/cheap-route 파이프라인 및 HTTP 런타임 스냅샷(`api_mode`, 기본 `acp_command`/`acp_args`, 자격 증명 풀, `TurnRouteSignature`), 스마트 라우팅 런타임 전환 및 폴백, memory 도구 시맨틱과 용량 제한, 내장 `MEMORY.md`/`USER.md` 스냅샷 주입, memory 라이프사이클 훅(`on_memory_write`, `queue_prefetch`, `on_pre_compress`, `on_session_end`, `on_delegation`), `session_search` 이중 모드 + `role_filter`/limit 정렬, memory/skill 낫지 카운터 및 선택적 백그라운드 리뷰(Python `v2026.4.13`과 동일한 리뷰 프롬프트, `background_review_enabled`로 제어, 기본값 꺼짐).
+- 남은 핵심 영역: 서브프로세스/외부 프로세스 추론 스택(필요 시), Python 픽스처 기반 parity 테스트.
 
 ### TODO (패리티 트래커)
 
@@ -28,8 +28,9 @@
 - [x] Session Search: 런타임 컨텍스트 기반 현재 active session lineage 자동 주입/제외.
 - [x] Smart Model Selection: 턴 단위 cheap-route 및 policy recommendation route.
 - [x] Smart Model Selection: 라우팅 provider 생성 실패 시 primary provider 폴백.
-- [ ] Smart Model Selection: Python `resolve_turn_route` 전체 런타임 시그니처 표면(`api_mode`, `command`, `args`, `credential_pool`, `signature`) E2E 정렬.
-- [ ] Self-Evolution: Python 스타일 memory/skills 기반 자동 적응 루프 정렬.
+- [x] Smart Model Selection: HTTP 공급자용 Python 형 `resolve_turn_route` + 런타임 스냅샷(`api_mode`, `command`/`args`, `credential_pool`, `signature`).
+- [ ] Smart Model Selection: 서브프로세스/외부 프로세스 추론 런타임(Python `resolve_runtime_provider`의 미매핑 부분).
+- [x] Self-Evolution: Python 스타일 memory/skill 낫지 주기 + 선택적 백그라운드 리뷰(Python `v2026.4.13`과 동일한 프롬프트, 기본 꺼짐).
 - [ ] Self-Evolution: Python `v2026.4.13` 동작 기준 parity 검증 테스트.
 
 ### 기능 구현 상태 (요청 체크리스트)
@@ -154,7 +155,23 @@ crates/
 
 ## 설치
 
-플랫폼에 맞는 최신 릴리스 바이너리 다운로드:
+**원라인 설치** (OS/CPU 자동 감지, 최신 릴리스를 `~/.local/bin`에 설치):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Lumio-Research/hermes-agent-rs/main/scripts/install.sh | bash
+```
+
+Cargo로 소스에서 (Rust 설치됨):
+
+```bash
+cargo install --git https://github.com/Lumio-Research/hermes-agent-rs hermes-cli --locked
+```
+
+스크립트: [`scripts/install.sh`](scripts/install.sh)
+
+---
+
+수동 다운로드:
 
 ```bash
 # macOS (Apple Silicon)

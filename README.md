@@ -12,9 +12,9 @@ A production-grade Rust rewrite of [Hermes Agent](https://github.com/NousResearc
 
 Baseline target: `NousResearch/hermes-agent@v2026.4.13` (`1af2e18d408a9dcc2c61d6fc1eef5c6667f8e254`).
 
-- Progress: **10 / 13 scoped parity items completed**.
-- Completed focus areas: prompt layering/core guidance parity, smart routing basic runtime switching and fallback, memory tool semantics and limits, built-in `MEMORY.md`/`USER.md` snapshot injection, memory lifecycle hooks (`on_memory_write`, `queue_prefetch`, `on_pre_compress`, `on_session_end`, `on_delegation`), `session_search` dual mode with `role_filter` and capped limit.
-- Remaining focus areas: full `resolve_turn_route` runtime signature parity fields, and Python-style skill-driven behavior self-improvement loop parity.
+- Progress: **12 / 13 scoped parity items completed**.
+- Completed focus areas: prompt layering/core guidance parity, Python-shaped `resolve_turn_route` / cheap-route pipeline and HTTP runtime snapshots (`api_mode`, primary `acp_command`/`acp_args`, credential pool, `TurnRouteSignature`), smart routing runtime switching and fallback, memory tool semantics and limits, built-in `MEMORY.md`/`USER.md` snapshot injection, memory lifecycle hooks (`on_memory_write`, `queue_prefetch`, `on_pre_compress`, `on_session_end`, `on_delegation`), `session_search` dual mode with `role_filter` and capped limit, memory/skill nudge counters + optional background review (Python review prompts; gated by `background_review_enabled`).
+- Remaining focus areas: subprocess / external-process inference parity (if needed), and Python fixture-based parity tests.
 
 ### TODO (Parity Tracker)
 
@@ -28,8 +28,9 @@ Baseline target: `NousResearch/hermes-agent@v2026.4.13` (`1af2e18d408a9dcc2c61d6
 - [x] Session Search: auto inject and exclude active session lineage by runtime context.
 - [x] Smart Model Selection: per-turn cheap-route and policy recommendation route.
 - [x] Smart Model Selection: routed-provider build failure fallback to primary provider.
-- [ ] Smart Model Selection: full Python `resolve_turn_route` runtime signature surface (`api_mode`, `command`, `args`, `credential_pool`, `signature`) end-to-end.
-- [ ] Self-Evolution: Python-style memory/skills-driven automatic adaptation loop parity.
+- [x] Smart Model Selection: Python-shaped `resolve_turn_route` + runtime snapshot fields (`api_mode`, `command`/`args`, `credential_pool`, `signature`) for HTTP-based providers.
+- [ ] Smart Model Selection: subprocess / external-process inference runtimes (Python `resolve_runtime_provider` extras not mapped to Rust yet).
+- [x] Self-Evolution: Python-style memory/skill nudge cadence + optional background review pass (same review prompts as Python `v2026.4.13`; off by default).
 - [ ] Self-Evolution: parity validation tests vs Python `v2026.4.13` behavior fixtures.
 
 ### Capability Status (Requested Checklist)
@@ -172,7 +173,29 @@ Every error type converts automatically via `From` traits. The compiler ensures 
 
 ## Install
 
-Download the latest release binary for your platform:
+**One-line installer** (auto-detects OS/CPU, downloads the latest release, installs to `~/.local/bin` by default):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Lumio-Research/hermes-agent-rs/main/scripts/install.sh | bash
+```
+
+Use another directory (example: system path):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Lumio-Research/hermes-agent-rs/main/scripts/install.sh | sudo INSTALL_DIR=/usr/local/bin bash
+```
+
+**From source with Cargo** (if you have the Rust toolchain):
+
+```bash
+cargo install --git https://github.com/Lumio-Research/hermes-agent-rs hermes-cli --locked
+```
+
+The script lives at [`scripts/install.sh`](scripts/install.sh) if you prefer to review it before running.
+
+---
+
+Manual download (latest release binary for your platform):
 
 ```bash
 # macOS (Apple Silicon)

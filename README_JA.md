@@ -12,9 +12,9 @@
 
 ベースライン対象：`NousResearch/hermes-agent@v2026.4.13`（`1af2e18d408a9dcc2c61d6fc1eef5c6667f8e254`）。
 
-- 進捗：スコープ内のアラインメント項目 **10 / 13** 完了。
-- 完了済みの重点：プロンプト層/コア guidance の整合、スマートルーティングの基本ランタイム切替とフォールバック、memory ツールの意味論と容量制限、`MEMORY.md`/`USER.md` スナップショット注入、memory ライフサイクルフック（`on_memory_write`、`queue_prefetch`、`on_pre_compress`、`on_session_end`、`on_delegation`）、`session_search` の二重モードと `role_filter`/limit 整合。
-- 残りの重点：`resolve_turn_route` ランタイム署名フィールドの完全整合、Python 方式の skills+memory 駆動自己進化ループの整合。
+- 進捗：スコープ内のアラインメント項目 **12 / 13** 完了。
+- 完了済みの重点：プロンプト層/コア guidance の整合、Python 同型の `resolve_turn_route`/cheap-route パイプラインと HTTP ランタイムスナップショット（`api_mode`、プライマリ `acp_command`/`acp_args`、クレデンシャルプール、`TurnRouteSignature`）、スマートルーティングのランタイム切替とフォールバック、memory ツールの意味論と容量制限、`MEMORY.md`/`USER.md` スナップショット注入、memory ライフサイクルフック（`on_memory_write`、`queue_prefetch`、`on_pre_compress`、`on_session_end`、`on_delegation`）、`session_search` の二重モードと `role_filter`/limit 整合、memory/skill ナッジカウンタと任意のバックグラウンドレビュー（Python `v2026.4.13` と同じレビュープロンプト、`background_review_enabled` で制御、既定はオフ）。
+- 残りの重点：サブプロセス/外部プロセス推論スタック（必要な場合）、Python フィクスチャに基づくパリティ検証テスト。
 
 ### TODO（パリティ追跡）
 
@@ -28,8 +28,9 @@
 - [x] Session Search：実行時コンテキストから現在セッション lineage を自動注入/除外。
 - [x] Smart Model Selection：ターンごとの cheap-route と policy recommendation route。
 - [x] Smart Model Selection：ルート先 provider 構築失敗時に primary provider へフォールバック。
-- [ ] Smart Model Selection：Python `resolve_turn_route` 完全ランタイム署名面（`api_mode`、`command`、`args`、`credential_pool`、`signature`）の E2E 整合。
-- [ ] Self-Evolution：Python 方式 memory/skills 駆動の自動適応ループ整合。
+- [x] Smart Model Selection：HTTP プロバイダ向け Python 形 `resolve_turn_route` + ランタイムスナップショット（`api_mode`、`command`/`args`、`credential_pool`、`signature`）。
+- [ ] Smart Model Selection：サブプロセス/外部プロセス推論ランタイム（Python `resolve_runtime_provider` の未マップ部分）。
+- [x] Self-Evolution：Python 方式の memory/skill ナッジ周期 + 任意のバックグラウンドレビュー（Python `v2026.4.13` と同じプロンプト、既定オフ）。
 - [ ] Self-Evolution：Python `v2026.4.13` 振る舞いフィクスチャとのパリティ検証テスト。
 
 ### 機能実装ステータス（要求チェックリスト）
@@ -154,7 +155,23 @@ crates/
 
 ## インストール
 
-プラットフォームに対応する最新リリースバイナリをダウンロード：
+**ワンライナー**（OS/CPU を自動検出、最新リリースを `~/.local/bin` にインストール）:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Lumio-Research/hermes-agent-rs/main/scripts/install.sh | bash
+```
+
+Cargo でソースから（Rust ツールチェインがある場合）:
+
+```bash
+cargo install --git https://github.com/Lumio-Research/hermes-agent-rs hermes-cli --locked
+```
+
+スクリプト: [`scripts/install.sh`](scripts/install.sh)
+
+---
+
+手動ダウンロード:
 
 ```bash
 # macOS (Apple Silicon)
