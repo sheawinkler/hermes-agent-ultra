@@ -28,14 +28,30 @@ use hermes_cron::{
 use hermes_environments::LocalBackend;
 use hermes_gateway::gateway::GatewayConfig as RuntimeGatewayConfig;
 use hermes_gateway::gateway::IncomingMessage as GatewayIncomingMessage;
+use hermes_gateway::platforms::api_server::{ApiInboundRequest, ApiServerAdapter, ApiServerConfig};
+use hermes_gateway::platforms::bluebubbles::{BlueBubblesAdapter, BlueBubblesConfig};
+use hermes_gateway::platforms::dingtalk::{DingTalkAdapter, DingTalkConfig};
+use hermes_gateway::platforms::discord::{DiscordAdapter, DiscordConfig};
+use hermes_gateway::platforms::email::{EmailAdapter, EmailConfig};
+use hermes_gateway::platforms::feishu::{FeishuAdapter, FeishuConfig};
+use hermes_gateway::platforms::homeassistant::{HomeAssistantAdapter, HomeAssistantConfig};
+use hermes_gateway::platforms::matrix::{MatrixAdapter, MatrixConfig};
+use hermes_gateway::platforms::mattermost::{MattermostAdapter, MattermostConfig};
+use hermes_gateway::platforms::signal::{SignalAdapter, SignalConfig};
+use hermes_gateway::platforms::slack::{SlackAdapter, SlackConfig};
+use hermes_gateway::platforms::sms::{SmsAdapter, SmsConfig};
 use hermes_gateway::platforms::telegram::{TelegramAdapter, TelegramConfig};
+use hermes_gateway::platforms::webhook::{WebhookAdapter, WebhookConfig, WebhookPayload};
+use hermes_gateway::platforms::wecom::{WeComAdapter, WeComConfig};
+use hermes_gateway::platforms::weixin::{WeChatAdapter, WeixinConfig};
+use hermes_gateway::platforms::whatsapp::{WhatsAppAdapter, WhatsAppConfig};
 use hermes_gateway::{DmManager, Gateway, GatewayRuntimeContext, SessionManager};
 use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_telemetry::init_telemetry_from_env;
 use hermes_tools::ToolRegistry;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, mpsc};
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
@@ -559,9 +575,502 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
                 }
             }
 
+            if let Some(platform_cfg) = config.platforms.get("api-server") {
+                if platform_cfg.enabled {
+                    let api_config = build_api_server_config(platform_cfg);
+                    let api_adapter = Arc::new(ApiServerAdapter::new(api_config.clone()));
+                    let (api_tx, api_rx) = mpsc::channel::<ApiInboundRequest>(256);
+                    api_adapter.set_inbound_sender(api_tx).await;
+                    gateway
+                        .register_adapter("api-server", api_adapter.clone())
+                        .await;
+                    let gw_clone = gateway.clone();
+                    sidecar_tasks.push(tokio::spawn(async move {
+                        run_api_server_inbound_loop(gw_clone, api_rx).await;
+                    }));
+                    println!(
+                        "API server adapter enabled on {}:{}",
+                        api_config.host, api_config.port
+                    );
+                }
+            }
+
+            if let Some(platform_cfg) = config.platforms.get("webhook") {
+                if platform_cfg.enabled {
+                    let secret = platform_cfg
+                        .token
+                        .clone()
+                        .filter(|s| !s.trim().is_empty())
+                        .or_else(|| platform_extra_string(platform_cfg, "secret"));
+                    if let Some(secret) = secret {
+                        let webhook_config = build_webhook_config(platform_cfg, secret);
+                        let webhook_adapter = Arc::new(WebhookAdapter::new(webhook_config.clone()));
+                        let (webhook_tx, webhook_rx) = mpsc::channel::<WebhookPayload>(512);
+                        webhook_adapter.set_inbound_sender(webhook_tx).await;
+                        gateway
+                            .register_adapter("webhook", webhook_adapter.clone())
+                            .await;
+                        let gw_clone = gateway.clone();
+                        sidecar_tasks.push(tokio::spawn(async move {
+                            run_webhook_inbound_loop(gw_clone, webhook_rx).await;
+                        }));
+                    } else {
+                        println!(
+                            "Webhook is enabled but secret/token is missing; skipping webhook adapter."
+                        );
+                    }
+                }
+            }
+
+            if let Some(platform_cfg) = config.platforms.get("dingtalk") {
+                if platform_cfg.enabled {
+                    let dingtalk_config = DingTalkConfig::from_platform_config(platform_cfg);
+                    match DingTalkAdapter::new(dingtalk_config.clone()) {
+                        Ok(adapter) => {
+                            let adapter = Arc::new(adapter);
+                            let (tx, rx) = mpsc::channel::<GatewayIncomingMessage>(512);
+                            adapter.set_inbound_sender(tx).await;
+                            gateway.register_adapter("dingtalk", adapter.clone()).await;
+                            let gw_clone = gateway.clone();
+                            sidecar_tasks.push(tokio::spawn(async move {
+                                run_gateway_incoming_loop(gw_clone, rx, "dingtalk").await;
+                            }));
+                        }
+                        Err(err) => {
+                            println!(
+                                "DingTalk is enabled but config is invalid ({err}); skipping."
+                            );
+                        }
+                    }
+                }
+            }
+
+            if let Some(platform_cfg) = config.platforms.get("weixin") {
+                if platform_cfg.enabled {
+                    let weixin_config = WeixinConfig::from_platform_config(platform_cfg);
+                    match WeChatAdapter::new(weixin_config.clone()) {
+                        Ok(adapter) => {
+                            let adapter = Arc::new(adapter);
+                            let (tx, rx) = mpsc::channel::<GatewayIncomingMessage>(512);
+                            adapter.set_inbound_sender(tx).await;
+                            gateway.register_adapter("weixin", adapter.clone()).await;
+                            let gw_clone = gateway.clone();
+                            sidecar_tasks.push(tokio::spawn(async move {
+                                run_gateway_incoming_loop(gw_clone, rx, "weixin").await;
+                            }));
+                        }
+                        Err(err) => {
+                            println!("Weixin is enabled but config is invalid ({err}); skipping.");
+                        }
+                    }
+                }
+            }
+
+            if let Some(platform_cfg) = config.platforms.get("discord") {
+                if platform_cfg.enabled {
+                    if let Some(token) = platform_cfg.token.clone().filter(|t| !t.trim().is_empty())
+                    {
+                        let cfg = DiscordConfig {
+                            token,
+                            application_id: platform_extra_string(platform_cfg, "application_id"),
+                            proxy: Default::default(),
+                            require_mention: platform_cfg.require_mention.unwrap_or(false),
+                            intents: platform_extra_u64(platform_cfg, "intents")
+                                .unwrap_or((1 << 0) | (1 << 9) | (1 << 15)),
+                        };
+                        match DiscordAdapter::new(cfg) {
+                            Ok(adapter) => {
+                                gateway
+                                    .register_adapter("discord", Arc::new(adapter))
+                                    .await;
+                            }
+                            Err(err) => println!(
+                                "Discord is enabled but could not initialize adapter ({err}); skipping."
+                            ),
+                        }
+                    } else {
+                        println!(
+                            "Discord is enabled but token is missing; skipping discord adapter."
+                        );
+                    }
+                }
+            }
+
+            if let Some(platform_cfg) = config.platforms.get("slack") {
+                if platform_cfg.enabled {
+                    if let Some(token) = platform_cfg.token.clone().filter(|t| !t.trim().is_empty())
+                    {
+                        let cfg = SlackConfig {
+                            token,
+                            app_token: platform_extra_string(platform_cfg, "app_token"),
+                            socket_mode: platform_extra_bool(platform_cfg, "socket_mode")
+                                .unwrap_or(false),
+                            proxy: Default::default(),
+                        };
+                        match SlackAdapter::new(cfg) {
+                            Ok(adapter) => {
+                                gateway.register_adapter("slack", Arc::new(adapter)).await;
+                            }
+                            Err(err) => println!(
+                                "Slack is enabled but could not initialize adapter ({err}); skipping."
+                            ),
+                        }
+                    } else {
+                        println!("Slack is enabled but token is missing; skipping slack adapter.");
+                    }
+                }
+            }
+
+            if let Some(platform_cfg) = config.platforms.get("whatsapp") {
+                if platform_cfg.enabled {
+                    if let Some(token) = platform_cfg.token.clone().filter(|t| !t.trim().is_empty())
+                    {
+                        let cfg = WhatsAppConfig {
+                            token,
+                            phone_number_id: platform_extra_string(platform_cfg, "phone_number_id"),
+                            business_account_id: platform_extra_string(
+                                platform_cfg,
+                                "business_account_id",
+                            ),
+                            verify_token: platform_extra_string(platform_cfg, "verify_token"),
+                            proxy: Default::default(),
+                        };
+                        match WhatsAppAdapter::new(cfg) {
+                            Ok(adapter) => {
+                                gateway
+                                    .register_adapter("whatsapp", Arc::new(adapter))
+                                    .await;
+                            }
+                            Err(err) => println!(
+                                "WhatsApp is enabled but could not initialize adapter ({err}); skipping."
+                            ),
+                        }
+                    } else {
+                        println!(
+                            "WhatsApp is enabled but token is missing; skipping whatsapp adapter."
+                        );
+                    }
+                }
+            }
+
+            if let Some(platform_cfg) = config.platforms.get("signal") {
+                if platform_cfg.enabled {
+                    let phone_number = platform_extra_string(platform_cfg, "phone_number")
+                        .or_else(|| platform_cfg.token.clone())
+                        .unwrap_or_default();
+                    if phone_number.trim().is_empty() {
+                        println!(
+                            "Signal is enabled but phone_number/token is missing; skipping signal adapter."
+                        );
+                    } else {
+                        let cfg = SignalConfig {
+                            phone_number,
+                            api_url: platform_extra_string(platform_cfg, "api_url")
+                                .unwrap_or_else(|| "http://localhost:8080".to_string()),
+                            proxy: Default::default(),
+                        };
+                        match SignalAdapter::new(cfg) {
+                            Ok(adapter) => {
+                                gateway.register_adapter("signal", Arc::new(adapter)).await;
+                            }
+                            Err(err) => println!(
+                                "Signal is enabled but could not initialize adapter ({err}); skipping."
+                            ),
+                        }
+                    }
+                }
+            }
+
+            if let Some(platform_cfg) = config.platforms.get("matrix") {
+                if platform_cfg.enabled {
+                    let homeserver_url =
+                        platform_extra_string(platform_cfg, "homeserver_url").unwrap_or_default();
+                    let user_id =
+                        platform_extra_string(platform_cfg, "user_id").unwrap_or_default();
+                    let access_token = platform_cfg.token.clone().unwrap_or_default();
+                    if homeserver_url.trim().is_empty()
+                        || user_id.trim().is_empty()
+                        || access_token.trim().is_empty()
+                    {
+                        println!(
+                            "Matrix is enabled but homeserver_url/user_id/token is missing; skipping matrix adapter."
+                        );
+                    } else {
+                        let cfg = MatrixConfig {
+                            homeserver_url,
+                            user_id,
+                            access_token,
+                            room_id: platform_extra_string(platform_cfg, "room_id"),
+                            proxy: Default::default(),
+                        };
+                        match MatrixAdapter::new(cfg) {
+                            Ok(adapter) => {
+                                gateway.register_adapter("matrix", Arc::new(adapter)).await;
+                            }
+                            Err(err) => println!(
+                                "Matrix is enabled but could not initialize adapter ({err}); skipping."
+                            ),
+                        }
+                    }
+                }
+            }
+
+            if let Some(platform_cfg) = config.platforms.get("mattermost") {
+                if platform_cfg.enabled {
+                    let server_url =
+                        platform_extra_string(platform_cfg, "server_url").unwrap_or_default();
+                    let token = platform_cfg.token.clone().unwrap_or_default();
+                    if server_url.trim().is_empty() || token.trim().is_empty() {
+                        println!(
+                            "Mattermost is enabled but server_url/token is missing; skipping mattermost adapter."
+                        );
+                    } else {
+                        let cfg = MattermostConfig {
+                            server_url,
+                            token,
+                            team_id: platform_extra_string(platform_cfg, "team_id"),
+                            proxy: Default::default(),
+                        };
+                        match MattermostAdapter::new(cfg) {
+                            Ok(adapter) => {
+                                gateway
+                                    .register_adapter("mattermost", Arc::new(adapter))
+                                    .await;
+                            }
+                            Err(err) => println!(
+                                "Mattermost is enabled but could not initialize adapter ({err}); skipping."
+                            ),
+                        }
+                    }
+                }
+            }
+
+            if let Some(platform_cfg) = config.platforms.get("feishu") {
+                if platform_cfg.enabled {
+                    let app_id = platform_extra_string(platform_cfg, "app_id").unwrap_or_default();
+                    let app_secret =
+                        platform_extra_string(platform_cfg, "app_secret").unwrap_or_default();
+                    if app_id.trim().is_empty() || app_secret.trim().is_empty() {
+                        println!(
+                            "Feishu is enabled but app_id/app_secret is missing; skipping feishu adapter."
+                        );
+                    } else {
+                        let cfg = FeishuConfig {
+                            app_id,
+                            app_secret,
+                            verification_token: platform_extra_string(
+                                platform_cfg,
+                                "verification_token",
+                            ),
+                            encrypt_key: platform_extra_string(platform_cfg, "encrypt_key"),
+                            proxy: Default::default(),
+                        };
+                        match FeishuAdapter::new(cfg) {
+                            Ok(adapter) => {
+                                gateway.register_adapter("feishu", Arc::new(adapter)).await;
+                            }
+                            Err(err) => println!(
+                                "Feishu is enabled but could not initialize adapter ({err}); skipping."
+                            ),
+                        }
+                    }
+                }
+            }
+
+            if let Some(platform_cfg) = config.platforms.get("wecom") {
+                if platform_cfg.enabled {
+                    let corp_id =
+                        platform_extra_string(platform_cfg, "corp_id").unwrap_or_default();
+                    let agent_id =
+                        platform_extra_string(platform_cfg, "agent_id").unwrap_or_default();
+                    let secret = platform_extra_string(platform_cfg, "secret").unwrap_or_default();
+                    if corp_id.trim().is_empty()
+                        || agent_id.trim().is_empty()
+                        || secret.trim().is_empty()
+                    {
+                        println!(
+                            "WeCom is enabled but corp_id/agent_id/secret is missing; skipping wecom adapter."
+                        );
+                    } else {
+                        let cfg = WeComConfig {
+                            corp_id,
+                            agent_id,
+                            secret,
+                            proxy: Default::default(),
+                        };
+                        match WeComAdapter::new(cfg) {
+                            Ok(adapter) => {
+                                gateway.register_adapter("wecom", Arc::new(adapter)).await;
+                            }
+                            Err(err) => println!(
+                                "WeCom is enabled but could not initialize adapter ({err}); skipping."
+                            ),
+                        }
+                    }
+                }
+            }
+
+            if let Some(platform_cfg) = config.platforms.get("bluebubbles") {
+                if platform_cfg.enabled {
+                    let server_url =
+                        platform_extra_string(platform_cfg, "server_url").unwrap_or_default();
+                    let password = platform_cfg
+                        .token
+                        .clone()
+                        .filter(|s| !s.trim().is_empty())
+                        .or_else(|| platform_extra_string(platform_cfg, "password"))
+                        .unwrap_or_default();
+                    if server_url.trim().is_empty() || password.trim().is_empty() {
+                        println!(
+                            "BlueBubbles is enabled but server_url/password is missing; skipping bluebubbles adapter."
+                        );
+                    } else {
+                        let cfg = BlueBubblesConfig {
+                            server_url,
+                            password,
+                            proxy: Default::default(),
+                        };
+                        match BlueBubblesAdapter::new(cfg) {
+                            Ok(adapter) => {
+                                gateway
+                                    .register_adapter("bluebubbles", Arc::new(adapter))
+                                    .await;
+                            }
+                            Err(err) => println!(
+                                "BlueBubbles is enabled but could not initialize adapter ({err}); skipping."
+                            ),
+                        }
+                    }
+                }
+            }
+
+            if let Some(platform_cfg) = config.platforms.get("email") {
+                if platform_cfg.enabled {
+                    let imap_host =
+                        platform_extra_string(platform_cfg, "imap_host").unwrap_or_default();
+                    let smtp_host =
+                        platform_extra_string(platform_cfg, "smtp_host").unwrap_or_default();
+                    let username =
+                        platform_extra_string(platform_cfg, "username").unwrap_or_default();
+                    let password = platform_cfg
+                        .token
+                        .clone()
+                        .filter(|s| !s.trim().is_empty())
+                        .or_else(|| platform_extra_string(platform_cfg, "password"))
+                        .unwrap_or_default();
+                    if imap_host.trim().is_empty()
+                        || smtp_host.trim().is_empty()
+                        || username.trim().is_empty()
+                        || password.trim().is_empty()
+                    {
+                        println!(
+                            "Email is enabled but imap_host/smtp_host/username/password is missing; skipping email adapter."
+                        );
+                    } else {
+                        let cfg = EmailConfig {
+                            imap_host,
+                            imap_port: platform_extra_u16(platform_cfg, "imap_port").unwrap_or(993),
+                            smtp_host,
+                            smtp_port: platform_extra_u16(platform_cfg, "smtp_port").unwrap_or(587),
+                            username,
+                            password,
+                            poll_interval_secs: platform_extra_u64(
+                                platform_cfg,
+                                "poll_interval_secs",
+                            )
+                            .unwrap_or(60),
+                            proxy: Default::default(),
+                        };
+                        match EmailAdapter::new(cfg) {
+                            Ok(adapter) => {
+                                gateway.register_adapter("email", Arc::new(adapter)).await;
+                            }
+                            Err(err) => println!(
+                                "Email is enabled but could not initialize adapter ({err}); skipping."
+                            ),
+                        }
+                    }
+                }
+            }
+
+            if let Some(platform_cfg) = config.platforms.get("sms") {
+                if platform_cfg.enabled {
+                    let account_sid =
+                        platform_extra_string(platform_cfg, "account_sid").unwrap_or_default();
+                    let auth_token = platform_cfg
+                        .token
+                        .clone()
+                        .filter(|s| !s.trim().is_empty())
+                        .or_else(|| platform_extra_string(platform_cfg, "auth_token"))
+                        .unwrap_or_default();
+                    let from_number =
+                        platform_extra_string(platform_cfg, "from_number").unwrap_or_default();
+                    if account_sid.trim().is_empty()
+                        || auth_token.trim().is_empty()
+                        || from_number.trim().is_empty()
+                    {
+                        println!(
+                            "SMS is enabled but account_sid/auth_token/from_number is missing; skipping sms adapter."
+                        );
+                    } else {
+                        let cfg = SmsConfig {
+                            provider: platform_extra_string(platform_cfg, "provider")
+                                .unwrap_or_else(|| "twilio".to_string()),
+                            account_sid,
+                            auth_token,
+                            from_number,
+                            proxy: Default::default(),
+                        };
+                        match SmsAdapter::new(cfg) {
+                            Ok(adapter) => {
+                                gateway.register_adapter("sms", Arc::new(adapter)).await;
+                            }
+                            Err(err) => println!(
+                                "SMS is enabled but could not initialize adapter ({err}); skipping."
+                            ),
+                        }
+                    }
+                }
+            }
+
+            if let Some(platform_cfg) = config.platforms.get("homeassistant") {
+                if platform_cfg.enabled {
+                    let base_url =
+                        platform_extra_string(platform_cfg, "base_url").unwrap_or_default();
+                    let long_lived_token = platform_cfg
+                        .token
+                        .clone()
+                        .filter(|s| !s.trim().is_empty())
+                        .or_else(|| platform_extra_string(platform_cfg, "long_lived_token"))
+                        .unwrap_or_default();
+                    if base_url.trim().is_empty() || long_lived_token.trim().is_empty() {
+                        println!(
+                            "HomeAssistant is enabled but base_url/long_lived_token is missing; skipping homeassistant adapter."
+                        );
+                    } else {
+                        let cfg = HomeAssistantConfig {
+                            base_url,
+                            long_lived_token,
+                            webhook_id: platform_extra_string(platform_cfg, "webhook_id"),
+                            proxy: Default::default(),
+                        };
+                        match HomeAssistantAdapter::new(cfg) {
+                            Ok(adapter) => {
+                                gateway
+                                    .register_adapter("homeassistant", Arc::new(adapter))
+                                    .await;
+                            }
+                            Err(err) => println!(
+                                "HomeAssistant is enabled but could not initialize adapter ({err}); skipping."
+                            ),
+                        }
+                    }
+                }
+            }
+
             if gateway.adapter_names().await.is_empty() {
                 println!(
-                    "No chat adapters started (e.g. missing Telegram token). Cron + webhooks still active."
+                    "No platform adapters started (e.g. missing required platform config). Cron + webhook delivery still active."
                 );
             }
 
@@ -745,6 +1254,128 @@ fn build_telegram_config(
         parse_html,
         poll_timeout,
         bot_username: None,
+    }
+}
+
+fn build_api_server_config(
+    platform_cfg: &hermes_config::platform::PlatformConfig,
+) -> ApiServerConfig {
+    ApiServerConfig {
+        host: platform_extra_string(platform_cfg, "host").unwrap_or_else(|| "0.0.0.0".to_string()),
+        port: platform_extra_u16(platform_cfg, "port").unwrap_or(8090),
+        auth_token: platform_cfg
+            .token
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| platform_extra_string(platform_cfg, "auth_token")),
+    }
+}
+
+fn build_webhook_config(
+    platform_cfg: &hermes_config::platform::PlatformConfig,
+    secret: String,
+) -> WebhookConfig {
+    WebhookConfig {
+        port: platform_extra_u16(platform_cfg, "port").unwrap_or(9000),
+        path: platform_extra_string(platform_cfg, "path").unwrap_or_else(|| "/webhook".to_string()),
+        secret,
+    }
+}
+
+fn platform_extra_string(
+    platform_cfg: &hermes_config::platform::PlatformConfig,
+    key: &str,
+) -> Option<String> {
+    platform_cfg
+        .extra
+        .get(key)
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(String::from)
+}
+
+fn platform_extra_u16(
+    platform_cfg: &hermes_config::platform::PlatformConfig,
+    key: &str,
+) -> Option<u16> {
+    platform_cfg
+        .extra
+        .get(key)
+        .and_then(|v| v.as_u64())
+        .and_then(|v| u16::try_from(v).ok())
+}
+
+fn platform_extra_u64(
+    platform_cfg: &hermes_config::platform::PlatformConfig,
+    key: &str,
+) -> Option<u64> {
+    platform_cfg.extra.get(key).and_then(|v| v.as_u64())
+}
+
+fn platform_extra_bool(
+    platform_cfg: &hermes_config::platform::PlatformConfig,
+    key: &str,
+) -> Option<bool> {
+    platform_cfg.extra.get(key).and_then(|v| v.as_bool())
+}
+
+async fn run_api_server_inbound_loop(
+    gateway: Arc<Gateway>,
+    mut rx: mpsc::Receiver<ApiInboundRequest>,
+) {
+    while let Some(req) = rx.recv().await {
+        gateway
+            .merge_request_runtime_overrides(
+                "api-server",
+                &req.session_id,
+                &req.user_id,
+                req.model.clone(),
+                req.provider.clone(),
+                req.personality.clone(),
+            )
+            .await;
+        let incoming = GatewayIncomingMessage {
+            platform: "api-server".to_string(),
+            chat_id: req.session_id.clone(),
+            user_id: req.user_id.clone(),
+            text: req.prompt.clone(),
+            message_id: Some(req.request_id.clone()),
+            is_dm: true,
+        };
+        if let Err(err) = gateway.route_message(&incoming).await {
+            tracing::warn!("Failed to route api-server message: {}", err);
+        }
+    }
+}
+
+async fn run_webhook_inbound_loop(gateway: Arc<Gateway>, mut rx: mpsc::Receiver<WebhookPayload>) {
+    while let Some(payload) = rx.recv().await {
+        let incoming = GatewayIncomingMessage {
+            platform: "webhook".to_string(),
+            chat_id: payload.chat_id,
+            user_id: payload
+                .user_id
+                .unwrap_or_else(|| "webhook-client".to_string()),
+            text: payload.text,
+            message_id: None,
+            is_dm: true,
+        };
+        if let Err(err) = gateway.route_message(&incoming).await {
+            tracing::warn!("Failed to route webhook message: {}", err);
+        }
+    }
+}
+
+async fn run_gateway_incoming_loop(
+    gateway: Arc<Gateway>,
+    mut rx: mpsc::Receiver<GatewayIncomingMessage>,
+    platform: &'static str,
+) {
+    while let Some(incoming) = rx.recv().await {
+        if let Err(err) = gateway.route_message(&incoming).await {
+            tracing::warn!("Failed to route {} message: {}", platform, err);
+        }
     }
 }
 
