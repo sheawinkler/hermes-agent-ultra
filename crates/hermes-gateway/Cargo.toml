@@ -42,6 +42,7 @@ uuid = { workspace = true }
 url = { workspace = true }
 futures = { workspace = true }
 regex = { workspace = true }
+urlencoding = "2"
 md5 = "0.7"
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 webpki-roots = "0.26"

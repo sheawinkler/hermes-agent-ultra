@@ -1135,6 +1135,7 @@ dependencies = [
  "tokio-tungstenite 0.24.0",
  "tracing",
  "url",
+ "urlencoding",
  "uuid",
  "webpki-roots 0.26.11",
  "wiremock",
