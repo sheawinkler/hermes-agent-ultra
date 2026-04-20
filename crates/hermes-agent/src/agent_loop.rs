@@ -1901,6 +1901,38 @@ impl AgentLoop {
         ctx.compress();
     }
 
+    fn should_emit_context_pressure_warning(
+        progress_ratio: f64,
+        tier: f64,
+        warned_tier: &mut f64,
+        last_warn_at: &mut Option<Instant>,
+        last_warn_percent: &mut f64,
+    ) -> bool {
+        if tier <= 0.0 {
+            return false;
+        }
+        let progress_percent = progress_ratio * 100.0;
+        let now = Instant::now();
+        const WARN_COOLDOWN_SECS: u64 = 20;
+        const WARN_PERCENT_STEP: f64 = 5.0;
+
+        let tier_upgraded = tier > *warned_tier;
+        let cooldown_elapsed = last_warn_at
+            .map(|t| now.duration_since(t) >= Duration::from_secs(WARN_COOLDOWN_SECS))
+            .unwrap_or(true);
+        let percent_advanced = (progress_percent - *last_warn_percent) >= WARN_PERCENT_STEP;
+
+        if tier_upgraded || (cooldown_elapsed && percent_advanced) {
+            if tier_upgraded {
+                *warned_tier = tier;
+            }
+            *last_warn_at = Some(now);
+            *last_warn_percent = progress_percent;
+            return true;
+        }
+        false
+    }
+
     fn assistant_visible_text(m: &Message) -> bool {
         m.content
             .as_deref()
@@ -2406,6 +2438,8 @@ impl AgentLoop {
         let mut invalid_json_retries: u32 = 0;
         let mut last_content_with_tools: Option<String> = None;
         let mut context_pressure_warned_at: f64 = 0.0;
+        let mut context_pressure_last_warn_at: Option<Instant> = None;
+        let mut context_pressure_last_warn_percent: f64 = 0.0;
 
         loop {
             if self.interrupt.take_interrupt_graceful().is_some() {
@@ -2899,8 +2933,13 @@ impl AgentLoop {
                 } else {
                     0.0
                 };
-                if tier > context_pressure_warned_at {
-                    context_pressure_warned_at = tier;
+                if Self::should_emit_context_pressure_warning(
+                    progress,
+                    tier,
+                    &mut context_pressure_warned_at,
+                    &mut context_pressure_last_warn_at,
+                    &mut context_pressure_last_warn_percent,
+                ) {
                     tracing::warn!(
                         "Context pressure {:.0}% of compaction threshold ({} / {})",
                         progress * 100.0,
@@ -3069,6 +3108,8 @@ impl AgentLoop {
         let mut truncated_tool_call_retries: u32 = 0;
         let mut last_content_with_tools: Option<String> = None;
         let mut context_pressure_warned_at: f64 = 0.0;
+        let mut context_pressure_last_warn_at: Option<Instant> = None;
+        let mut context_pressure_last_warn_percent: f64 = 0.0;
 
         loop {
             if self.interrupt.take_interrupt_graceful().is_some() {
@@ -3634,8 +3675,13 @@ impl AgentLoop {
                 } else {
                     0.0
                 };
-                if tier > context_pressure_warned_at {
-                    context_pressure_warned_at = tier;
+                if Self::should_emit_context_pressure_warning(
+                    progress,
+                    tier,
+                    &mut context_pressure_warned_at,
+                    &mut context_pressure_last_warn_at,
+                    &mut context_pressure_last_warn_percent,
+                ) {
                     tracing::warn!(
                         "Context pressure {:.0}% of compaction threshold ({} / {})",
                         progress * 100.0,

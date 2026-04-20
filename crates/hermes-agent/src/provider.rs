@@ -185,7 +185,7 @@ impl GenericProvider {
         }
     }
 
-    fn maybe_refresh_stale_client(&self) {
+    async fn maybe_refresh_stale_client(&self, probe_url: &str) {
         const STALE_CLIENT_REFRESH_SECS: u64 = 300;
         let stale_after = Duration::from_secs(STALE_CLIENT_REFRESH_SECS);
         let should_refresh = self
@@ -193,8 +193,28 @@ impl GenericProvider {
             .lock()
             .map(|t| t.elapsed() >= stale_after)
             .unwrap_or(false);
-        if should_refresh {
-            self.refresh_client("proactive stale connection cleanup");
+        if !should_refresh {
+            return;
+        }
+        let probe_client = self.current_client();
+        match probe_client
+            .get(probe_url)
+            .timeout(Duration::from_secs(3))
+            .send()
+            .await
+        {
+            Ok(_) => {
+                if let Ok(mut t) = self.client_refreshed_at.lock() {
+                    *t = Instant::now();
+                }
+            }
+            Err(e) => {
+                if Self::is_connection_recoverable(&e) {
+                    self.refresh_client(&format!("stale connection probe failed: {e}"));
+                } else if let Ok(mut t) = self.client_refreshed_at.lock() {
+                    *t = Instant::now();
+                }
+            }
         }
     }
 
@@ -279,7 +299,7 @@ impl GenericProvider {
         api_key: &str,
         body: &Value,
     ) -> Result<reqwest::Response, AgentError> {
-        self.maybe_refresh_stale_client();
+        self.maybe_refresh_stale_client(url).await;
         let client = self.current_client();
         match self.build_request(&client, url, api_key, body).send().await {
             Ok(resp) => Ok(resp),
@@ -696,7 +716,7 @@ impl AnthropicProvider {
         }
     }
 
-    fn maybe_refresh_stale_client(&self) {
+    async fn maybe_refresh_stale_client(&self, probe_url: &str) {
         const STALE_CLIENT_REFRESH_SECS: u64 = 300;
         let stale_after = Duration::from_secs(STALE_CLIENT_REFRESH_SECS);
         let should_refresh = self
@@ -704,8 +724,28 @@ impl AnthropicProvider {
             .lock()
             .map(|t| t.elapsed() >= stale_after)
             .unwrap_or(false);
-        if should_refresh {
-            self.refresh_client("proactive stale connection cleanup");
+        if !should_refresh {
+            return;
+        }
+        let probe_client = self.current_client();
+        match probe_client
+            .get(probe_url)
+            .timeout(Duration::from_secs(3))
+            .send()
+            .await
+        {
+            Ok(_) => {
+                if let Ok(mut t) = self.client_refreshed_at.lock() {
+                    *t = Instant::now();
+                }
+            }
+            Err(e) => {
+                if GenericProvider::is_connection_recoverable(&e) {
+                    self.refresh_client(&format!("stale connection probe failed: {e}"));
+                } else if let Ok(mut t) = self.client_refreshed_at.lock() {
+                    *t = Instant::now();
+                }
+            }
         }
     }
 
@@ -730,7 +770,7 @@ impl AnthropicProvider {
         api_key: &str,
         body: &Value,
     ) -> Result<reqwest::Response, AgentError> {
-        self.maybe_refresh_stale_client();
+        self.maybe_refresh_stale_client(url).await;
         let client = self.current_client();
         match self.build_request(&client, url, api_key, body).send().await {
             Ok(resp) => Ok(resp),
