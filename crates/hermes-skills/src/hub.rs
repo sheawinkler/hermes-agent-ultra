@@ -369,12 +369,10 @@ fn verify_skill_signature(skill: &Skill, signature: &str) -> Result<(), SkillErr
     let parsed = parse_ed25519_signature(signature)?;
     let trusted_keys = trusted_hub_public_keys_from_env()?;
     if trusted_keys.is_empty() {
-        return Err(SkillError::HubError(
-            format!(
-                "Skills hub signature provided but {} is empty; refusing unsigned trust",
-                HUB_TRUSTED_KEYS_ENV
-            ),
-        ));
+        return Err(SkillError::HubError(format!(
+            "Skills hub signature provided but {} is empty; refusing unsigned trust",
+            HUB_TRUSTED_KEYS_ENV
+        )));
     }
     verify_skill_signature_with_keys(skill, &parsed, &trusted_keys)
 }
@@ -455,10 +453,7 @@ fn trusted_hub_public_keys_from_env() -> Result<Vec<TrustedHubKey>, SkillError> 
             (None, entry)
         };
         let key_bytes = decode_base64_or_hex_32(key_raw).map_err(|e| {
-            SkillError::HubError(format!(
-                "Invalid trusted key entry '{}': {}",
-                entry, e
-            ))
+            SkillError::HubError(format!("Invalid trusted key entry '{}': {}", entry, e))
         })?;
         let key = VerifyingKey::from_bytes(&key_bytes).map_err(|e| {
             SkillError::HubError(format!(
@@ -488,8 +483,12 @@ fn decode_base64_or_hex_32(raw: &str) -> Result<[u8; 32], String> {
         let mut out = [0u8; 32];
         let mut chars = raw.chars();
         for b in &mut out {
-            let hi = chars.next().ok_or_else(|| "missing high nibble".to_string())?;
-            let lo = chars.next().ok_or_else(|| "missing low nibble".to_string())?;
+            let hi = chars
+                .next()
+                .ok_or_else(|| "missing high nibble".to_string())?;
+            let lo = chars
+                .next()
+                .ok_or_else(|| "missing low nibble".to_string())?;
             let h = hi
                 .to_digit(16)
                 .ok_or_else(|| "invalid hex high nibble".to_string())?;
