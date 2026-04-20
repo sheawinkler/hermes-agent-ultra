@@ -9,7 +9,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use tokio::sync::{Notify, RwLock};
 use tracing::{debug, error, info, warn};
 
@@ -104,25 +106,38 @@ impl WebhookAdapter {
 
     /// Verify HMAC-SHA256 signature.
     fn verify_signature(secret: &str, body: &[u8], signature: &str) -> bool {
-        use std::fmt::Write;
-        let key = secret.as_bytes();
-        // Simple HMAC-SHA256 using md5 crate is not suitable; we compute a
-        // basic keyed hash. For production, use `hmac` + `sha2` crates.
-        // Here we do a constant-length comparison of a simplified hash.
-        let mut hasher_input = Vec::with_capacity(key.len() + body.len());
-        hasher_input.extend_from_slice(key);
-        hasher_input.extend_from_slice(body);
-        let digest = md5::compute(&hasher_input);
-        let mut hex = String::with_capacity(32);
-        for byte in digest.iter() {
-            let _ = write!(hex, "{:02x}", byte);
-        }
-        // Compare with the provided signature (prefix-agnostic)
-        let sig_clean = signature.strip_prefix("sha256=").unwrap_or(signature);
-        // In a real implementation, use a proper HMAC-SHA256. For now,
-        // accept if the signature field is present and non-empty.
-        !sig_clean.is_empty()
+        type HmacSha256 = Hmac<Sha256>;
+
+        let sig_clean = signature
+            .trim()
+            .strip_prefix("sha256=")
+            .unwrap_or(signature.trim());
+        let expected_sig = match decode_hex(sig_clean) {
+            Some(bytes) => bytes,
+            None => return false,
+        };
+
+        let mut mac = match HmacSha256::new_from_slice(secret.as_bytes()) {
+            Ok(mac) => mac,
+            Err(_) => return false,
+        };
+        mac.update(body);
+        mac.verify_slice(&expected_sig).is_ok()
     }
+}
+
+fn decode_hex(input: &str) -> Option<Vec<u8>> {
+    if input.is_empty() || input.len() % 2 != 0 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(input.len() / 2);
+    let mut chars = input.chars();
+    while let (Some(hi), Some(lo)) = (chars.next(), chars.next()) {
+        let hi = hi.to_digit(16)?;
+        let lo = lo.to_digit(16)?;
+        out.push(((hi << 4) | lo) as u8);
+    }
+    Some(out)
 }
 
 #[async_trait]
@@ -322,4 +337,50 @@ async fn handle_webhook_request(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sign(secret: &str, body: &[u8]) -> String {
+        type HmacSha256 = Hmac<Sha256>;
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+        mac.update(body);
+        let bytes = mac.finalize().into_bytes();
+        bytes.iter().map(|b| format!("{b:02x}")).collect::<String>()
+    }
+
+    #[test]
+    fn verify_signature_accepts_prefixed_sha256_digest() {
+        let secret = "s3cr3t";
+        let body = br#"{"chat_id":"c1","text":"hello"}"#;
+        let sig = format!("sha256={}", sign(secret, body));
+        assert!(WebhookAdapter::verify_signature(secret, body, &sig));
+    }
+
+    #[test]
+    fn verify_signature_accepts_raw_hex_digest() {
+        let secret = "s3cr3t";
+        let body = br#"{"chat_id":"c1","text":"hello"}"#;
+        let sig = sign(secret, body);
+        assert!(WebhookAdapter::verify_signature(secret, body, &sig));
+    }
+
+    #[test]
+    fn verify_signature_rejects_malformed_signature() {
+        let secret = "s3cr3t";
+        let body = br#"{"chat_id":"c1","text":"hello"}"#;
+        assert!(!WebhookAdapter::verify_signature(secret, body, "sha256=xyz"));
+        assert!(!WebhookAdapter::verify_signature(secret, body, ""));
+    }
+
+    #[test]
+    fn verify_signature_rejects_tampered_payload() {
+        let secret = "s3cr3t";
+        let body = br#"{"chat_id":"c1","text":"hello"}"#;
+        let sig = format!("sha256={}", sign(secret, body));
+        let tampered = br#"{"chat_id":"c1","text":"bye"}"#;
+        assert!(!WebhookAdapter::verify_signature(secret, tampered, &sig));
+    }
 }
