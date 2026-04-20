@@ -58,6 +58,9 @@ async fn main() {
 
     // Initialize tracing
     init_tracing(cli.verbose);
+    if let Err(err) = hydrate_provider_env_from_vault_for_cli(&cli).await {
+        tracing::warn!("Secret-vault hydration skipped: {}", err);
+    }
 
     tracing::debug!("Hermes Agent starting");
 
@@ -79,6 +82,12 @@ async fn main() {
         CliCommand::Logs { lines, follow } => run_logs(cli, lines, follow).await,
         CliCommand::Profile { action, name } => run_profile(cli, action, name).await,
         CliCommand::Auth { action, provider } => run_auth(cli, action, provider).await,
+        CliCommand::Secrets {
+            action,
+            provider,
+            value,
+            show,
+        } => run_secrets(cli, action, provider, value, show).await,
         CliCommand::Skills {
             action,
             name,
@@ -176,7 +185,7 @@ async fn run_model(cli: Cli, provider_model: Option<String>) -> Result<(), Agent
 }
 
 /// Handle `hermes tools [action]`.
-async fn run_tools(cli: Cli, action: Option<String>) -> Result<(), AgentError> {
+async fn run_tools(_cli: Cli, action: Option<String>) -> Result<(), AgentError> {
     let registry = hermes_tools::ToolRegistry::new();
     let tools = registry.list_tools();
 
@@ -1442,6 +1451,100 @@ fn resolve_auth_provider(provider: Option<String>) -> String {
         .unwrap_or_else(|| "openai".to_string())
 }
 
+fn normalize_secret_provider(provider: &str) -> String {
+    let p = provider.trim().to_ascii_lowercase();
+    match p.as_str() {
+        "github-copilot" => "copilot".to_string(),
+        _ => p,
+    }
+}
+
+fn secret_provider_aliases(provider: &str) -> Vec<String> {
+    match normalize_secret_provider(provider).as_str() {
+        "moonshot" => vec!["moonshot".to_string(), "kimi".to_string()],
+        "kimi" => vec!["kimi".to_string(), "moonshot".to_string()],
+        "copilot" => vec!["copilot".to_string(), "github-copilot".to_string()],
+        p => vec![p.to_string()],
+    }
+}
+
+fn provider_env_var(provider: &str) -> Option<&'static str> {
+    match normalize_secret_provider(provider).as_str() {
+        "openai" => Some("OPENAI_API_KEY"),
+        "anthropic" => Some("ANTHROPIC_API_KEY"),
+        "openrouter" => Some("OPENROUTER_API_KEY"),
+        "qwen" => Some("DASHSCOPE_API_KEY"),
+        "moonshot" | "kimi" => Some("MOONSHOT_API_KEY"),
+        "minimax" => Some("MINIMAX_API_KEY"),
+        "nous" => Some("NOUS_API_KEY"),
+        "copilot" => Some("GITHUB_COPILOT_TOKEN"),
+        _ => None,
+    }
+}
+
+fn secret_vault_path_for_cli(cli: &Cli) -> PathBuf {
+    hermes_state_root(cli).join("auth").join("tokens.json")
+}
+
+async fn lookup_secret_from_vault(
+    token_store: &FileTokenStore,
+    provider: &str,
+) -> Option<(String, String)> {
+    for candidate in secret_provider_aliases(provider) {
+        if let Some(cred) = token_store.get(&candidate).await {
+            if !cred.access_token.trim().is_empty() {
+                return Some((candidate, cred.access_token));
+            }
+        }
+    }
+    None
+}
+
+async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentError> {
+    let path = secret_vault_path_for_cli(cli);
+    if !path.exists() {
+        return Ok(());
+    }
+    let store = FileTokenStore::new(path).await?;
+    let env_bindings = [
+        ("OPENAI_API_KEY", "openai"),
+        ("ANTHROPIC_API_KEY", "anthropic"),
+        ("OPENROUTER_API_KEY", "openrouter"),
+        ("DASHSCOPE_API_KEY", "qwen"),
+        ("MOONSHOT_API_KEY", "moonshot"),
+        ("MINIMAX_API_KEY", "minimax"),
+        ("NOUS_API_KEY", "nous"),
+        ("GITHUB_COPILOT_TOKEN", "copilot"),
+    ];
+
+    for (env_var, provider) in env_bindings {
+        if std::env::var(env_var)
+            .ok()
+            .is_some_and(|v| !v.trim().is_empty())
+        {
+            continue;
+        }
+        if let Some((_provider, secret)) = lookup_secret_from_vault(&store, provider).await {
+            std::env::set_var(env_var, secret);
+        }
+    }
+    Ok(())
+}
+
+fn mask_secret(secret: &str) -> String {
+    if secret.is_empty() {
+        return "(empty)".to_string();
+    }
+    if secret.len() <= 8 {
+        return "*".repeat(secret.len());
+    }
+    format!(
+        "{}***{}",
+        &secret[..4],
+        &secret[secret.len().saturating_sub(4)..]
+    )
+}
+
 async fn telegram_bot_token_from_env_or_prompt() -> Result<String, AgentError> {
     if let Ok(t) = std::env::var("TELEGRAM_BOT_TOKEN") {
         let t = t.trim().to_string();
@@ -1474,7 +1577,7 @@ async fn run_auth(
     provider: Option<String>,
 ) -> Result<(), AgentError> {
     let provider = resolve_auth_provider(provider);
-    let auth_store_path = hermes_home().join("auth").join("tokens.json");
+    let auth_store_path = secret_vault_path_for_cli(&cli);
     let token_store = FileTokenStore::new(auth_store_path).await?;
     let manager = AuthManager::new(token_store.clone());
     match action.as_deref().unwrap_or("status") {
@@ -1583,6 +1686,114 @@ async fn run_auth(
                 "Auth status: provider='{}', credential_present={}",
                 provider, has_token
             );
+        }
+    }
+    Ok(())
+}
+
+async fn run_secrets(
+    cli: Cli,
+    action: Option<String>,
+    provider: Option<String>,
+    value: Option<String>,
+    show: bool,
+) -> Result<(), AgentError> {
+    let path = secret_vault_path_for_cli(&cli);
+    let store = FileTokenStore::new(&path).await?;
+    let manager = AuthManager::new(store.clone());
+
+    match action.as_deref().unwrap_or("list") {
+        "list" | "status" => {
+            let providers = store.list_providers().await;
+            println!("Secret vault: {}", path.display());
+            if providers.is_empty() {
+                println!("  (empty)");
+            } else {
+                println!("Stored providers ({}):", providers.len());
+                for p in providers {
+                    if let Some(env_var) = provider_env_var(&p) {
+                        println!("  - {p} (env: {env_var})");
+                    } else {
+                        println!("  - {p}");
+                    }
+                }
+            }
+            println!("Tip: runtime automatically hydrates env vars from this vault.");
+        }
+        "set" => {
+            let provider_input = provider.ok_or_else(|| {
+                AgentError::Config("secrets set: usage `hermes secrets set <provider>`".into())
+            })?;
+            let provider = normalize_secret_provider(&provider_input);
+            let secret = match value {
+                Some(v) => v.trim().to_string(),
+                None => prompt_line(format!("Enter secret for provider '{provider}': ")).await?,
+            };
+            if secret.is_empty() {
+                return Err(AgentError::Config("Secret cannot be empty.".into()));
+            }
+            manager
+                .save_credential(OAuthCredential {
+                    provider: provider.clone(),
+                    access_token: secret,
+                    refresh_token: None,
+                    token_type: "bearer".to_string(),
+                    scope: None,
+                    expires_at: None,
+                })
+                .await?;
+            println!("Saved secret for provider '{provider}' in {}", path.display());
+            if let Some(env_var) = provider_env_var(&provider) {
+                println!("Mapped runtime env: {env_var}");
+            }
+        }
+        "get" => {
+            let provider_input = provider.ok_or_else(|| {
+                AgentError::Config("secrets get: usage `hermes secrets get <provider>`".into())
+            })?;
+            let provider = normalize_secret_provider(&provider_input);
+            if let Some((stored_provider, secret)) = lookup_secret_from_vault(&store, &provider).await {
+                if show {
+                    println!("{secret}");
+                } else {
+                    println!("{}", mask_secret(&secret));
+                }
+                if stored_provider != provider {
+                    println!(
+                        "(resolved via provider alias '{}')",
+                        stored_provider
+                    );
+                }
+            } else {
+                return Err(AgentError::Config(format!(
+                    "No secret stored for provider '{}'",
+                    provider
+                )));
+            }
+        }
+        "remove" | "delete" | "rm" => {
+            let provider_input = provider.ok_or_else(|| {
+                AgentError::Config("secrets remove: usage `hermes secrets remove <provider>`".into())
+            })?;
+            let provider = normalize_secret_provider(&provider_input);
+            let mut removed = false;
+            for candidate in secret_provider_aliases(&provider) {
+                if store.get(&candidate).await.is_some() {
+                    store.remove(&candidate).await?;
+                    removed = true;
+                }
+            }
+            if removed {
+                println!("Removed secret for provider '{}'.", provider);
+            } else {
+                println!("No secret found for provider '{}'.", provider);
+            }
+        }
+        other => {
+            return Err(AgentError::Config(format!(
+                "Unknown secrets action: {} (use list|status|get|set|remove)",
+                other
+            )));
         }
     }
     Ok(())
@@ -1729,6 +1940,13 @@ async fn resolve_llm_login_token(cli: &Cli, provider: &str) -> Result<String, Ag
     if let Some(k) = provider_api_key_from_env(provider) {
         return Ok(k);
     }
+    let vault_path = secret_vault_path_for_cli(cli);
+    if vault_path.exists() {
+        let store = FileTokenStore::new(vault_path).await?;
+        if let Some((_provider, token)) = lookup_secret_from_vault(&store, provider).await {
+            return Ok(token);
+        }
+    }
     let cfg =
         load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;
     if let Some(k) = cfg
@@ -1743,8 +1961,8 @@ async fn resolve_llm_login_token(cli: &Cli, provider: &str) -> Result<String, Ag
     let fallback_var = format!("{}_API_KEY", provider.to_uppercase().replace('-', "_"));
     let msg = format!(
         "No API key in env or config for provider '{}'.\n\
-         Set {} (see `hermes config set llm.{}.api_key ...`) or paste key now: ",
-        provider, fallback_var, provider
+         Set {} (or `hermes secrets set {}`; plaintext fallback: `hermes config set llm.{}.api_key ...`) or paste key now: ",
+        provider, fallback_var, provider, provider
     );
     let pasted = prompt_line(msg).await?;
     if pasted.is_empty() {
@@ -1895,7 +2113,7 @@ fn run_completion(shell: Option<String>) -> Result<(), AgentError> {
         "elvish" => CompletionShell::Elvish,
         _ => CompletionShell::Zsh,
     };
-    generate(sh, &mut cmd, "hermes", &mut std::io::stdout());
+    generate(sh, &mut cmd, "hermes-agent-ultra", &mut std::io::stdout());
     Ok(())
 }
 
@@ -2154,6 +2372,29 @@ async fn run_setup() -> Result<(), AgentError> {
     let mut api_key = String::new();
     reader.read_line(&mut api_key).ok();
     let api_key = api_key.trim().to_string();
+    let mut stored_openai_secret_in_vault = false;
+    if !api_key.is_empty() {
+        print!("Store OpenAI key in encrypted vault (recommended) [Y/n]: ");
+        io::stdout().flush().ok();
+        let mut answer = String::new();
+        reader.read_line(&mut answer).ok();
+        let use_vault = !matches!(answer.trim().to_ascii_lowercase().as_str(), "n" | "no");
+        if use_vault {
+            let store = FileTokenStore::new(config_dir.join("auth").join("tokens.json")).await?;
+            let manager = AuthManager::new(store);
+            manager
+                .save_credential(OAuthCredential {
+                    provider: "openai".to_string(),
+                    access_token: api_key.clone(),
+                    refresh_token: None,
+                    token_type: "bearer".to_string(),
+                    scope: None,
+                    expires_at: None,
+                })
+                .await?;
+            stored_openai_secret_in_vault = true;
+        }
+    }
 
     // 3. Prompt for model
     println!("\nAvailable models:");
@@ -2192,7 +2433,9 @@ async fn run_setup() -> Result<(), AgentError> {
         reader.read_line(&mut answer).ok();
         if !answer.trim().eq_ignore_ascii_case("y") {
             println!("Keeping existing config.yaml.");
-            println!("\nSetup complete! Run `hermes` to start an interactive session.");
+            println!(
+                "\nSetup complete! Run `hermes-agent-ultra` (or `hermes`) to start an interactive session."
+            );
             return Ok(());
         }
     }
@@ -2202,10 +2445,15 @@ async fn run_setup() -> Result<(), AgentError> {
     config_content.push_str(&format!("personality: {}\n", personality));
     config_content.push_str("max_turns: 50\n\n");
 
-    if !api_key.is_empty() {
+    if !api_key.is_empty() && !stored_openai_secret_in_vault {
         config_content.push_str("llm_providers:\n");
         config_content.push_str("  openai:\n");
         config_content.push_str(&format!("    api_key: {}\n", api_key));
+    } else if stored_openai_secret_in_vault {
+        println!(
+            "  ✓ Stored OPENAI_API_KEY in encrypted vault: {}",
+            config_dir.join("auth").join("tokens.json").display()
+        );
     } else if has_env_openai_key {
         println!(
             "  ✓ Keeping OPENAI_API_KEY from {} for runtime auth",
@@ -2229,8 +2477,8 @@ async fn run_setup() -> Result<(), AgentError> {
         println!("  ✓ Created default profile");
     }
 
-    println!("\nSetup complete! Run `hermes` to start an interactive session.");
-    println!("Run `hermes doctor` to check system requirements.");
+    println!("\nSetup complete! Run `hermes-agent-ultra` (or `hermes`) to start an interactive session.");
+    println!("Run `hermes-agent-ultra doctor` (or `hermes doctor`) to check system requirements.");
     Ok(())
 }
 

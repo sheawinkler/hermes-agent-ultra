@@ -2,15 +2,15 @@
 set -euo pipefail
 
 VERSION="${1:-v0.1.0}"
-REPO="https://github.com/nousresearch/hermes-agent-rust"
+REPO="https://github.com/sheawinkler/hermes-agent-ultra"
 FORMULA_DIR="Formula"
-FORMULA_FILE="${FORMULA_DIR}/hermes.rb"
+FORMULA_FILE="${FORMULA_DIR}/hermes-agent-ultra.rb"
 
 mkdir -p "${FORMULA_DIR}"
 
 cat > "${FORMULA_FILE}" <<EOF
-class Hermes < Formula
-  desc "Hermes autonomous AI agent"
+class HermesAgentUltra < Formula
+  desc "Hermes Agent Ultra autonomous AI agent"
   homepage "${REPO}"
   version "${VERSION#v}"
   license "MIT"
@@ -36,11 +36,12 @@ class Hermes < Formula
   end
 
   def install
-    bin.install "hermes"
+    bin.install "hermes" => "hermes-agent-ultra"
+    bin.install_symlink "hermes-agent-ultra" => "hermes"
   end
 
   test do
-    system "#{bin}/hermes", "--version"
+    system "#{bin}/hermes-agent-ultra", "--version"
   end
 end
 EOF

@@ -106,6 +106,12 @@ impl FileTokenStore {
         self.flush().await
     }
 
+    pub async fn list_providers(&self) -> Vec<String> {
+        let mut providers: Vec<String> = self.cache.read().await.keys().cloned().collect();
+        providers.sort();
+        providers
+    }
+
     async fn flush(&self) -> Result<(), AgentError> {
         let content = {
             let cache = self.cache.read().await;
@@ -539,5 +545,28 @@ mod tests {
         assert!(!raw.contains("legacy-token"));
         let envelope: TokenStoreEnvelope = serde_json::from_str(&raw).unwrap();
         assert_eq!(envelope.version, TOKEN_STORE_ENVELOPE_VERSION);
+    }
+
+    #[tokio::test]
+    async fn file_token_store_lists_providers_sorted() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+        let store = FileTokenStore::new(&path).await.unwrap();
+
+        store
+            .upsert(sample_credential("nous", "n-1"))
+            .await
+            .unwrap();
+        store
+            .upsert(sample_credential("openai", "o-1"))
+            .await
+            .unwrap();
+        store
+            .upsert(sample_credential("anthropic", "a-1"))
+            .await
+            .unwrap();
+
+        let providers = store.list_providers().await;
+        assert_eq!(providers, vec!["anthropic", "nous", "openai"]);
     }
 }

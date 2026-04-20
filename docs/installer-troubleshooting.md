@@ -2,12 +2,12 @@
 
 This guide covers common shell-install issues on macOS/Linux.
 
-## `hermes: command not found`
+## `hermes-agent-ultra: command not found`
 
 1. Verify the binary exists and is executable:
 
 ```bash
-ls -l ~/.local/bin/hermes
+ls -l ~/.local/bin/hermes-agent-ultra
 ```
 
 2. Ensure your shell PATH includes the install directory:
@@ -16,6 +16,7 @@ ls -l ~/.local/bin/hermes
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
 source ~/.zshrc
 command -v hermes
+command -v hermes-agent-ultra
 ```
 
 3. If you installed to another path, substitute that path in the export line.
@@ -24,7 +25,7 @@ command -v hermes
 
 ```bash
 exec zsh -l
-command -v hermes
+command -v hermes-agent-ultra
 ```
 
 ## Should I `chmod` the entire repo?
@@ -35,7 +36,7 @@ Only set execute bits on files that must be executable, for example:
 
 ```bash
 chmod +x scripts/install.sh
-chmod +x ~/.local/bin/hermes
+chmod +x ~/.local/bin/hermes-agent-ultra
 ```
 
 ## Why does `ls` appear in macOS Privacy/Security as an app?
@@ -65,12 +66,12 @@ script file only.
 
 ## Can setup import keys from a Python/OpenClaw install?
 
-Yes. `hermes setup` now detects common legacy `.env` locations (for example
+Yes. `hermes-agent-ultra setup` (or `hermes setup`) now detects common legacy `.env` locations (for example
 `~/Documents/Projects/hermes-agent/.env` and `~/.openclaw/.env`) and offers to
-import missing keys into `~/.hermes/.env`.
+import missing keys into `~/.hermes-agent-ultra/.env`.
 
 You can also point setup at a specific `.env` source:
 
 ```bash
-HERMES_SETUP_IMPORT_ENV_PATH=/absolute/path/to/.env hermes setup
+HERMES_SETUP_IMPORT_ENV_PATH=/absolute/path/to/.env hermes-agent-ultra setup
 ```

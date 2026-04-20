@@ -6,29 +6,49 @@ use std::path::{Path, PathBuf};
 // hermes_home
 // ---------------------------------------------------------------------------
 
+const DEFAULT_HOME_DIR: &str = ".hermes-agent-ultra";
+const LEGACY_HOME_DIR: &str = ".hermes";
+
 /// Return the hermes home directory.
 ///
 /// - If the `HERMES_HOME` environment variable is set, use that.
-/// - Otherwise default to `~/.hermes`.
+/// - Else if `HERMES_AGENT_ULTRA_HOME` is set, use that.
+/// - Otherwise default to `~/.hermes-agent-ultra`.
+/// - Backward-compat: if `~/.hermes-agent-ultra` does not exist but
+///   `~/.hermes` exists, use `~/.hermes`.
 pub fn hermes_home() -> PathBuf {
-    if let Ok(home) = std::env::var("HERMES_HOME") {
-        PathBuf::from(home)
+    if let Some(home) = env_var_path("HERMES_HOME") {
+        return home;
+    }
+    if let Some(home) = env_var_path("HERMES_AGENT_ULTRA_HOME") {
+        return home;
+    }
+
+    let home_dir = user_home_dir();
+    let primary = home_dir.join(DEFAULT_HOME_DIR);
+    let legacy = home_dir.join(LEGACY_HOME_DIR);
+    if primary.exists() || !legacy.exists() {
+        primary
     } else {
-        dirs_home().join(".hermes")
+        legacy
     }
 }
 
+fn env_var_path(var: &str) -> Option<PathBuf> {
+    std::env::var(var)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+}
+
 /// Best-effort home directory resolution.
-fn dirs_home() -> PathBuf {
-    // Try the `directories` crate first; fall back to $HOME / $USERPROFILE.
-    if let Some(dirs) = directories::ProjectDirs::from("", "", "hermes") {
-        dirs.config_dir().to_path_buf()
-    } else if let Ok(home) = std::env::var("HOME") {
+fn user_home_dir() -> PathBuf {
+    if let Ok(home) = std::env::var("HOME") {
         PathBuf::from(home)
     } else if let Ok(home) = std::env::var("USERPROFILE") {
         PathBuf::from(home)
     } else {
-        // Last resort: current directory
         PathBuf::from(".")
     }
 }
@@ -113,9 +133,8 @@ mod tests {
 
     #[test]
     fn hermes_home_respects_env() {
-        // If HERMES_HOME is not set, we should get ~/.hermes
+        // Ensure helper always yields a concrete path.
         let home = hermes_home();
-        // Just ensure it's a valid path (not empty)
         assert!(!home.as_os_str().is_empty());
     }
 
@@ -127,6 +146,7 @@ mod tests {
     #[test]
     fn derived_paths_and_explicit_home() {
         let original = std::env::var("HERMES_HOME").ok();
+        let original_ultra = std::env::var("HERMES_AGENT_ULTRA_HOME").ok();
 
         // -- Part 1: derived paths are consistent --
         std::env::set_var("HERMES_HOME", "/tmp/hermes-path-test");
@@ -149,10 +169,21 @@ mod tests {
         assert_eq!(hermes_home(), PathBuf::from("/tmp/test-hermes"));
         assert_eq!(config_path(), PathBuf::from("/tmp/test-hermes/config.yaml"));
 
+        // -- Part 3: ultra env alias works when HERMES_HOME is absent --
+        std::env::remove_var("HERMES_HOME");
+        std::env::set_var("HERMES_AGENT_ULTRA_HOME", "/tmp/test-hermes-ultra");
+        assert_eq!(hermes_home(), PathBuf::from("/tmp/test-hermes-ultra"));
+        assert_eq!(config_path(), PathBuf::from("/tmp/test-hermes-ultra/config.yaml"));
+        std::env::remove_var("HERMES_AGENT_ULTRA_HOME");
+
         // Restore
         match original {
             Some(v) => std::env::set_var("HERMES_HOME", v),
             None => std::env::remove_var("HERMES_HOME"),
+        }
+        match original_ultra {
+            Some(v) => std::env::set_var("HERMES_AGENT_ULTRA_HOME", v),
+            None => std::env::remove_var("HERMES_AGENT_ULTRA_HOME"),
         }
     }
 }

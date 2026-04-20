@@ -14,6 +14,10 @@ otlp = ["hermes-telemetry/otlp"]
 name = "hermes"
 path = "src/main.rs"
 
+[[bin]]
+name = "hermes-agent-ultra"
+path = "src/main.rs"
+
 [dependencies]
 hermes-core = { workspace = true }
 hermes-agent = { workspace = true }

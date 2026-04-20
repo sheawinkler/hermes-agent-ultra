@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="Lumio-Research/hermes-agent-rs"
+REPO="${REPO:-sheawinkler/hermes-agent-ultra}"
 VERSION="${1:-latest}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
-BIN_NAME="hermes"
+CANONICAL_BIN_NAME="${CANONICAL_BIN_NAME:-hermes-agent-ultra}"
+LEGACY_BIN_NAME="${LEGACY_BIN_NAME:-hermes}"
+RELEASE_BIN_BASENAME="${RELEASE_BIN_BASENAME:-hermes}"
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -38,7 +40,7 @@ need_cmd tar
 need_cmd install
 
 TARGET="$(detect_target)"
-ASSET="${BIN_NAME}-${TARGET}.tar.gz"
+ASSET="${RELEASE_BIN_BASENAME}-${TARGET}.tar.gz"
 
 if [[ "$VERSION" == "latest" ]]; then
   URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
@@ -46,23 +48,42 @@ else
   URL="https://github.com/${REPO}/releases/download/${VERSION}/${ASSET}"
 fi
 
-echo "Installing ${BIN_NAME} from ${URL}"
+echo "Installing ${CANONICAL_BIN_NAME} from ${URL}"
 mkdir -p "${INSTALL_DIR}"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-curl -fsSL "${URL}" -o "${TMP_DIR}/hermes.tar.gz"
-tar -xzf "${TMP_DIR}/hermes.tar.gz" -C "${TMP_DIR}"
-install -m 0755 "${TMP_DIR}/hermes" "${INSTALL_DIR}/${BIN_NAME}"
+curl -fsSL "${URL}" -o "${TMP_DIR}/${RELEASE_BIN_BASENAME}.tar.gz"
+tar -xzf "${TMP_DIR}/${RELEASE_BIN_BASENAME}.tar.gz" -C "${TMP_DIR}"
 
-echo "Installed to ${INSTALL_DIR}/${BIN_NAME}"
-if [[ ! -x "${INSTALL_DIR}/${BIN_NAME}" ]]; then
-  echo "Install appears incomplete: ${INSTALL_DIR}/${BIN_NAME} is not executable." >&2
+SOURCE_BIN=""
+for candidate in "${CANONICAL_BIN_NAME}" "${RELEASE_BIN_BASENAME}" "${LEGACY_BIN_NAME}"; do
+  if [[ -f "${TMP_DIR}/${candidate}" ]]; then
+    SOURCE_BIN="${TMP_DIR}/${candidate}"
+    break
+  fi
+done
+if [[ -z "${SOURCE_BIN}" ]]; then
+  echo "No executable binary found in release archive (${ASSET})." >&2
   exit 1
 fi
 
-if command -v "${BIN_NAME}" >/dev/null 2>&1; then
-  echo "Detected on PATH: $(command -v "${BIN_NAME}")"
+install -m 0755 "${SOURCE_BIN}" "${INSTALL_DIR}/${CANONICAL_BIN_NAME}"
+if [[ "${LEGACY_BIN_NAME}" != "${CANONICAL_BIN_NAME}" ]]; then
+  ln -sfn "${CANONICAL_BIN_NAME}" "${INSTALL_DIR}/${LEGACY_BIN_NAME}"
+fi
+
+echo "Installed to ${INSTALL_DIR}/${CANONICAL_BIN_NAME}"
+if [[ ! -x "${INSTALL_DIR}/${CANONICAL_BIN_NAME}" ]]; then
+  echo "Install appears incomplete: ${INSTALL_DIR}/${CANONICAL_BIN_NAME} is not executable." >&2
+  exit 1
+fi
+
+if command -v "${CANONICAL_BIN_NAME}" >/dev/null 2>&1; then
+  echo "Detected on PATH: $(command -v "${CANONICAL_BIN_NAME}")"
+  if command -v "${LEGACY_BIN_NAME}" >/dev/null 2>&1; then
+    echo "Legacy alias available: $(command -v "${LEGACY_BIN_NAME}")"
+  fi
 else
   echo "Binary is not currently on PATH."
   echo "Add this line to your shell config, then restart your shell:"

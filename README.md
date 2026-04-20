@@ -221,25 +221,25 @@ Every error type converts automatically via `From` traits. The compiler ensures 
 **One-line installer** (auto-detects OS/CPU, downloads the latest release, installs to `~/.local/bin` by default):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Lumio-Research/hermes-agent-rs/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/sheawinkler/hermes-agent-ultra/main/scripts/install.sh | bash
 ```
 
 Use another directory (example: system path):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Lumio-Research/hermes-agent-rs/main/scripts/install.sh | sudo INSTALL_DIR=/usr/local/bin bash
+curl -fsSL https://raw.githubusercontent.com/sheawinkler/hermes-agent-ultra/main/scripts/install.sh | sudo INSTALL_DIR=/usr/local/bin bash
 ```
 
 **From source with Cargo** (if you have the Rust toolchain):
 
 ```bash
-cargo install --git https://github.com/Lumio-Research/hermes-agent-rs hermes-cli --locked
+cargo install --git https://github.com/sheawinkler/hermes-agent-ultra hermes-cli --locked --bin hermes-agent-ultra --bin hermes
 ```
 
 The script lives at [`scripts/install.sh`](scripts/install.sh) if you prefer to review it before running.
 It does **not** rewrite your shell profile automatically.
 
-If `hermes` is still not found after install, add the install directory to PATH:
+If `hermes-agent-ultra` is still not found after install, add the install directory to PATH:
 
 ```bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
@@ -249,9 +249,20 @@ source ~/.zshrc
 Installer troubleshooting (macOS permissions, PATH, and safe chmod scope):
 - [`docs/installer-troubleshooting.md`](docs/installer-troubleshooting.md)
 
-After install, run `hermes setup` to initialize `~/.hermes`. Setup can import
+After install, run `hermes-agent-ultra setup` (or `hermes setup`) to initialize `~/.hermes-agent-ultra`.
+Setup can import
 missing API keys from legacy Python/OpenClaw `.env` files into
-`~/.hermes/.env`.
+`~/.hermes-agent-ultra/.env`.
+
+Encrypted secret vault (recommended for provider keys):
+
+```bash
+hermes-agent-ultra secrets set openai
+hermes-agent-ultra secrets list
+hermes-agent-ultra secrets get openai
+```
+
+The runtime auto-hydrates provider env vars from the vault when env vars are unset.
 
 ---
 
@@ -259,45 +270,48 @@ Manual download (latest release binary for your platform):
 
 ```bash
 # macOS (Apple Silicon)
-curl -LO https://github.com/Lumio-Research/hermes-agent-rs/releases/latest/download/hermes-macos-aarch64.tar.gz
+curl -LO https://github.com/sheawinkler/hermes-agent-ultra/releases/latest/download/hermes-macos-aarch64.tar.gz
 tar xzf hermes-macos-aarch64.tar.gz && sudo mv hermes /usr/local/bin/
 
 # macOS (Intel)
-curl -LO https://github.com/Lumio-Research/hermes-agent-rs/releases/latest/download/hermes-macos-x86_64.tar.gz
+curl -LO https://github.com/sheawinkler/hermes-agent-ultra/releases/latest/download/hermes-macos-x86_64.tar.gz
 tar xzf hermes-macos-x86_64.tar.gz && sudo mv hermes /usr/local/bin/
 
 # Linux (x86_64)
-curl -LO https://github.com/Lumio-Research/hermes-agent-rs/releases/latest/download/hermes-linux-x86_64.tar.gz
+curl -LO https://github.com/sheawinkler/hermes-agent-ultra/releases/latest/download/hermes-linux-x86_64.tar.gz
 tar xzf hermes-linux-x86_64.tar.gz && sudo mv hermes /usr/local/bin/
 
 # Linux (ARM64)
-curl -LO https://github.com/Lumio-Research/hermes-agent-rs/releases/latest/download/hermes-linux-aarch64.tar.gz
+curl -LO https://github.com/sheawinkler/hermes-agent-ultra/releases/latest/download/hermes-linux-aarch64.tar.gz
 tar xzf hermes-linux-aarch64.tar.gz && sudo mv hermes /usr/local/bin/
 
 # Linux (musl / Alpine / Docker)
-curl -LO https://github.com/Lumio-Research/hermes-agent-rs/releases/latest/download/hermes-linux-x86_64-musl.tar.gz
+curl -LO https://github.com/sheawinkler/hermes-agent-ultra/releases/latest/download/hermes-linux-x86_64-musl.tar.gz
 tar xzf hermes-linux-x86_64-musl.tar.gz && sudo mv hermes /usr/local/bin/
 
 # Windows (x86_64)
 # Download hermes-windows-x86_64.zip from the releases page
 ```
 
-All release binaries: https://github.com/Lumio-Research/hermes-agent-rs/releases
+All release binaries: https://github.com/sheawinkler/hermes-agent-ultra/releases
 
 ## Building from source
 
 ```bash
 cargo build --release
 # Binary at target/release/hermes
+# Canonical binary at target/release/hermes-agent-ultra (legacy alias: target/release/hermes)
 ```
 
 ## Running
 
 ```bash
-hermes              # Interactive chat
-hermes --help       # All commands
-hermes gateway start  # Start multi-platform gateway
-hermes doctor       # Check dependencies and config
+hermes-agent-ultra              # Interactive chat
+hermes-agent-ultra --help       # All commands
+hermes-agent-ultra gateway start  # Start multi-platform gateway
+hermes-agent-ultra doctor       # Check dependencies and config
+# Legacy alias still works:
+hermes --help
 ```
 
 ## Testing

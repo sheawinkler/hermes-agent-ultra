@@ -1,6 +1,6 @@
 //! CLI argument parsing using clap (Requirement 9.7).
 //!
-//! Defines the command-line interface for the hermes binary.
+//! Defines the command-line interface for the hermes binaries.
 
 use clap::{Parser, Subcommand};
 
@@ -109,6 +109,20 @@ pub enum CliCommand {
         /// Provider: openai/anthropic/... / `telegram` (writes Bot token to config.yaml) / `copilot`.
         /// If omitted, uses `HERMES_AUTH_DEFAULT_PROVIDER` or `openai`.
         provider: Option<String>,
+    },
+
+    /// Encrypted secret vault management.
+    Secrets {
+        /// Action: list/status/get/set/remove
+        action: Option<String>,
+        /// Provider key namespace (e.g. openai, anthropic, nous).
+        provider: Option<String>,
+        /// Secret value (used with `set`; if omitted, prompt is shown).
+        #[arg(long)]
+        value: Option<String>,
+        /// Show full secret value for `get` (default masks output).
+        #[arg(long)]
+        show: bool,
     },
 
     /// Cron management commands.
@@ -311,12 +325,13 @@ pub enum CliCommand {
 /// Hermes Agent CLI.
 #[derive(Debug, Clone, Parser)]
 #[command(
-    name = "hermes",
+    name = "hermes-agent-ultra",
     version,
-    about = "Hermes Agent — autonomous AI agent with tool use",
-    long_about = "Hermes Agent is an autonomous AI agent that can use tools, execute code, \
-                  and interact with various platforms. Start an interactive session with `hermes` \
-                  or use subcommands for specific tasks."
+    about = "Hermes Agent Ultra — autonomous AI agent with tool use",
+    long_about = "Hermes Agent Ultra is an autonomous AI agent that can use tools, execute code, \
+                  and interact with various platforms. Start an interactive session with \
+                  `hermes-agent-ultra` (or legacy alias `hermes`) or use subcommands for \
+                  specific tasks."
 )]
 pub struct Cli {
     /// The subcommand to execute. Defaults to starting an interactive session.
@@ -464,6 +479,33 @@ mod tests {
                 assert_eq!(value.as_deref(), Some("gpt-4o"));
             }
             _ => panic!("Expected Config command"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_secrets_set() {
+        let cli = Cli::try_parse_from(vec![
+            "hermes-agent-ultra",
+            "secrets",
+            "set",
+            "openai",
+            "--value",
+            "sk-test",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(CliCommand::Secrets {
+                action,
+                provider,
+                value,
+                show,
+            }) => {
+                assert_eq!(action.as_deref(), Some("set"));
+                assert_eq!(provider.as_deref(), Some("openai"));
+                assert_eq!(value.as_deref(), Some("sk-test"));
+                assert!(!show);
+            }
+            _ => panic!("Expected Secrets command"),
         }
     }
 }
