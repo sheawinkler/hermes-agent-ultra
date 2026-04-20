@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -59,6 +60,14 @@ pub struct ChatCompletionRequest {
     pub messages: Vec<ChatMessage>,
     #[serde(default)]
     pub stream: bool,
+    #[serde(default)]
+    pub user: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub personality: Option<String>,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f64>,
 }
@@ -129,6 +138,17 @@ pub struct ApiError {
     pub code: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ApiInboundRequest {
+    pub request_id: String,
+    pub session_id: String,
+    pub user_id: String,
+    pub model: Option<String>,
+    pub provider: Option<String>,
+    pub personality: Option<String>,
+    pub prompt: String,
+}
+
 // ---------------------------------------------------------------------------
 // Pending response mailbox
 // ---------------------------------------------------------------------------
@@ -149,6 +169,7 @@ pub struct ApiServerAdapter {
     stop_signal: Arc<Notify>,
     shutdown_tx: RwLock<Option<tokio::sync::oneshot::Sender<()>>>,
     mailbox: Arc<RwLock<ResponseMailbox>>,
+    inbound_tx: Arc<RwLock<Option<mpsc::Sender<ApiInboundRequest>>>>,
 }
 
 impl ApiServerAdapter {
@@ -165,11 +186,16 @@ impl ApiServerAdapter {
             stop_signal: Arc::new(Notify::new()),
             shutdown_tx: RwLock::new(None),
             mailbox: Arc::new(RwLock::new(ResponseMailbox::default())),
+            inbound_tx: Arc::new(RwLock::new(None)),
         }
     }
 
     pub fn config(&self) -> &ApiServerConfig {
         &self.config
+    }
+
+    pub async fn set_inbound_sender(&self, tx: mpsc::Sender<ApiInboundRequest>) {
+        *self.inbound_tx.write().await = Some(tx);
     }
 
     fn make_completion_id() -> String {
@@ -251,6 +277,7 @@ impl PlatformAdapter for ApiServerAdapter {
             .map_err(|e| GatewayError::ConnectionFailed(format!("Invalid address: {e}")))?;
 
         let mailbox = self.mailbox.clone();
+        let inbound_tx = self.inbound_tx.clone();
         let auth_token = self.config.auth_token.clone();
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
@@ -278,9 +305,12 @@ impl PlatformAdapter for ApiServerAdapter {
                         match accept {
                             Ok((stream, peer)) => {
                                 let mailbox = mailbox.clone();
+                                let inbound_tx = inbound_tx.clone();
                                 let auth_token = auth_token.clone();
                                 tokio::spawn(async move {
-                                    if let Err(e) = handle_connection(stream, peer, mailbox, auth_token).await {
+                                    if let Err(e) =
+                                        handle_connection(stream, peer, mailbox, inbound_tx, auth_token).await
+                                    {
                                         debug!("API connection error from {peer}: {e}");
                                     }
                                 });
@@ -365,26 +395,38 @@ impl PlatformAdapter for ApiServerAdapter {
 async fn handle_connection(
     stream: tokio::net::TcpStream,
     _peer: SocketAddr,
-    _mailbox: Arc<RwLock<ResponseMailbox>>,
+    mailbox: Arc<RwLock<ResponseMailbox>>,
+    inbound_tx: Arc<RwLock<Option<mpsc::Sender<ApiInboundRequest>>>>,
     auth_token: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::io::AsyncWriteExt;
 
-    let mut buf = vec![0u8; 65536];
     let (mut reader, mut writer) = stream.into_split();
-    let n = reader.read(&mut buf).await?;
-    if n == 0 {
+    let raw = read_http_request(&mut reader).await?;
+    if raw.is_empty() {
         return Ok(());
     }
 
-    let request = String::from_utf8_lossy(&buf[..n]);
-    let first_line = request.lines().next().unwrap_or("");
+    let Some(header_end) = find_bytes(&raw, b"\r\n\r\n") else {
+        let body = r#"{"error":{"message":"Invalid HTTP request","type":"invalid_request_error","code":"400"}}"#;
+        let resp = format!(
+            "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        );
+        writer.write_all(resp.as_bytes()).await?;
+        return Ok(());
+    };
+
+    let header_text = String::from_utf8_lossy(&raw[..header_end]);
+    let body_bytes = &raw[(header_end + 4).min(raw.len())..];
+    let first_line = header_text.lines().next().unwrap_or("");
     let parts: Vec<&str> = first_line.split_whitespace().collect();
     let method = parts.first().copied().unwrap_or("GET");
     let path = parts.get(1).copied().unwrap_or("/");
 
     // Extract Authorization header
-    let auth_header = request
+    let auth_header = header_text
         .lines()
         .find(|l| l.to_lowercase().starts_with("authorization:"))
         .map(|l| l.splitn(2, ':').nth(1).unwrap_or("").trim().to_string());
@@ -409,22 +451,146 @@ async fn handle_connection(
 
     match (method, path) {
         ("POST", "/v1/chat/completions") | ("POST", "/v1/responses") => {
-            let body_start = request.find("\r\n\r\n").map(|i| i + 4).unwrap_or(n);
-            let body_str = &request[body_start..];
+            let body_str = String::from_utf8_lossy(body_bytes);
 
-            let parsed: Result<ChatCompletionRequest, _> = serde_json::from_str(body_str);
+            let parsed: Result<ChatCompletionRequest, _> = serde_json::from_str(&body_str);
             match parsed {
                 Ok(req) => {
                     let request_id = ApiServerAdapter::make_completion_id();
                     let model = req.model.as_deref().unwrap_or("hermes").to_string();
-                    let last_msg = req
-                        .messages
-                        .last()
-                        .map(|m| m.content.clone())
-                        .unwrap_or_default();
+                    let prompt = extract_latest_user_prompt(&req.messages).unwrap_or_default();
+                    if prompt.trim().is_empty() {
+                        let err = serde_json::json!({
+                            "error": {
+                                "message": "Request must include at least one user message",
+                                "type":"invalid_request_error",
+                                "code":"400"
+                            }
+                        });
+                        let body = serde_json::to_string(&err)?;
+                        let resp = format!(
+                            "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                            body.len(),
+                            body
+                        );
+                        writer.write_all(resp.as_bytes()).await?;
+                        return Ok(());
+                    }
 
-                    // Echo back with a placeholder response for now
-                    let reply = format!("Received: {}", last_msg);
+                    let session_id = req.session_id.unwrap_or_else(|| request_id.clone());
+                    let mailbox_key = session_id.clone();
+                    let user_id = req
+                        .user
+                        .filter(|u| !u.trim().is_empty())
+                        .unwrap_or_else(|| "api-client".to_string());
+                    let inbound = ApiInboundRequest {
+                        request_id: request_id.clone(),
+                        session_id,
+                        user_id,
+                        model: req.model.clone(),
+                        provider: req.provider.clone(),
+                        personality: req.personality.clone(),
+                        prompt,
+                    };
+
+                    let (reply_tx, mut reply_rx) = mpsc::channel::<String>(1);
+                    {
+                        let mut guard = mailbox.write().await;
+                        guard.pending.insert(mailbox_key.clone(), reply_tx);
+                    }
+
+                    let maybe_inbound = inbound_tx.read().await.clone();
+                    let Some(tx) = maybe_inbound else {
+                        let mut guard = mailbox.write().await;
+                        guard.pending.remove(&mailbox_key);
+                        let err = serde_json::json!({
+                            "error": {
+                                "message":"Gateway inbound pipeline is not configured",
+                                "type":"service_unavailable",
+                                "code":"503"
+                            }
+                        });
+                        let body = serde_json::to_string(&err)?;
+                        let resp = format!(
+                            "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                            body.len(),
+                            body
+                        );
+                        writer.write_all(resp.as_bytes()).await?;
+                        return Ok(());
+                    };
+
+                    if tx.send(inbound).await.is_err() {
+                        let mut guard = mailbox.write().await;
+                        guard.pending.remove(&mailbox_key);
+                        let err = serde_json::json!({
+                            "error": {
+                                "message":"Gateway inbound queue is unavailable",
+                                "type":"service_unavailable",
+                                "code":"503"
+                            }
+                        });
+                        let body = serde_json::to_string(&err)?;
+                        let resp = format!(
+                            "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                            body.len(),
+                            body
+                        );
+                        writer.write_all(resp.as_bytes()).await?;
+                        return Ok(());
+                    }
+
+                    let reply = match tokio::time::timeout(
+                        Duration::from_secs(120),
+                        reply_rx.recv(),
+                    )
+                    .await
+                    {
+                        Ok(Some(msg)) => msg,
+                        Ok(None) => {
+                            let err = serde_json::json!({
+                                "error": {
+                                    "message":"Gateway closed response channel",
+                                    "type":"internal_error",
+                                    "code":"502"
+                                }
+                            });
+                            let body = serde_json::to_string(&err)?;
+                            let resp = format!(
+                                "HTTP/1.1 502 Bad Gateway\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                                body.len(),
+                                body
+                            );
+                            writer.write_all(resp.as_bytes()).await?;
+                            let mut guard = mailbox.write().await;
+                            guard.pending.remove(&mailbox_key);
+                            return Ok(());
+                        }
+                        Err(_) => {
+                            let err = serde_json::json!({
+                                "error": {
+                                    "message":"Gateway response timeout",
+                                    "type":"timeout_error",
+                                    "code":"504"
+                                }
+                            });
+                            let body = serde_json::to_string(&err)?;
+                            let resp = format!(
+                                "HTTP/1.1 504 Gateway Timeout\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                                body.len(),
+                                body
+                            );
+                            writer.write_all(resp.as_bytes()).await?;
+                            let mut guard = mailbox.write().await;
+                            guard.pending.remove(&mailbox_key);
+                            return Ok(());
+                        }
+                    };
+
+                    {
+                        let mut guard = mailbox.write().await;
+                        guard.pending.remove(&mailbox_key);
+                    }
 
                     if req.stream {
                         let header = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\n\r\n";
@@ -502,4 +668,105 @@ async fn handle_connection(
     }
 
     Ok(())
+}
+
+fn extract_latest_user_prompt(messages: &[ChatMessage]) -> Option<String> {
+    messages
+        .iter()
+        .rev()
+        .find(|m| m.role.eq_ignore_ascii_case("user"))
+        .map(|m| m.content.clone())
+        .or_else(|| messages.last().map(|m| m.content.clone()))
+}
+
+fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if needle.is_empty() || haystack.len() < needle.len() {
+        return None;
+    }
+    haystack.windows(needle.len()).position(|w| w == needle)
+}
+
+fn parse_content_length(headers: &str) -> usize {
+    headers
+        .lines()
+        .find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            if name.trim().eq_ignore_ascii_case("content-length") {
+                value.trim().parse::<usize>().ok()
+            } else {
+                None
+            }
+        })
+        .unwrap_or(0)
+}
+
+async fn read_http_request(
+    reader: &mut tokio::net::tcp::OwnedReadHalf,
+) -> Result<Vec<u8>, Box<dyn std::error::Error + Send + Sync>> {
+    use tokio::io::AsyncReadExt;
+
+    let mut buf = Vec::with_capacity(16 * 1024);
+    let mut chunk = [0_u8; 8192];
+    let mut expected_total: Option<usize> = None;
+
+    loop {
+        let n = reader.read(&mut chunk).await?;
+        if n == 0 {
+            break;
+        }
+        buf.extend_from_slice(&chunk[..n]);
+        if buf.len() > 2 * 1024 * 1024 {
+            break;
+        }
+
+        if expected_total.is_none() {
+            if let Some(header_end) = find_bytes(&buf, b"\r\n\r\n") {
+                let header_text = String::from_utf8_lossy(&buf[..header_end]);
+                let body_len = parse_content_length(&header_text);
+                expected_total = Some(header_end + 4 + body_len);
+            }
+        }
+        if let Some(total) = expected_total {
+            if buf.len() >= total {
+                break;
+            }
+        }
+    }
+
+    Ok(buf)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_content_length_is_case_insensitive() {
+        let h = "POST /x HTTP/1.1\r\nHost: localhost\r\nContent-Length: 42\r\n\r\n";
+        assert_eq!(parse_content_length(h), 42);
+        let h2 = "POST /x HTTP/1.1\r\ncontent-length: 9\r\n\r\n";
+        assert_eq!(parse_content_length(h2), 9);
+    }
+
+    #[test]
+    fn extract_latest_user_prompt_prefers_user_role() {
+        let msgs = vec![
+            ChatMessage {
+                role: "system".into(),
+                content: "rules".into(),
+            },
+            ChatMessage {
+                role: "assistant".into(),
+                content: "hello".into(),
+            },
+            ChatMessage {
+                role: "user".into(),
+                content: "final prompt".into(),
+            },
+        ];
+        assert_eq!(
+            extract_latest_user_prompt(&msgs).as_deref(),
+            Some("final prompt")
+        );
+    }
 }

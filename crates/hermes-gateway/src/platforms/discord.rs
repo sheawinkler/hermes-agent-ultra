@@ -956,7 +956,7 @@ impl DiscordAdapter {
         commands: &[SlashCommand],
     ) -> Result<(), GatewayError> {
         let app_id = self.config.application_id.as_deref().ok_or_else(|| {
-            GatewayError::ConfigError("application_id required for slash commands".into())
+            GatewayError::Platform("application_id required for slash commands".into())
         })?;
 
         let url = format!("{}/applications/{}/commands", DISCORD_API_BASE, app_id);
@@ -993,7 +993,7 @@ impl DiscordAdapter {
         commands: &[SlashCommand],
     ) -> Result<(), GatewayError> {
         let app_id = self.config.application_id.as_deref().ok_or_else(|| {
-            GatewayError::ConfigError("application_id required for slash commands".into())
+            GatewayError::Platform("application_id required for slash commands".into())
         })?;
 
         let url = format!(

@@ -19,7 +19,25 @@ hermes-core = { workspace = true }
 hermes-agent = { workspace = true }
 hermes-tools = { workspace = true }
 hermes-config = { workspace = true }
-hermes-gateway = { workspace = true, features = ["telegram"] }
+hermes-gateway = { workspace = true, features = [
+    "telegram",
+    "discord",
+    "slack",
+    "whatsapp",
+    "signal",
+    "matrix",
+    "mattermost",
+    "dingtalk",
+    "feishu",
+    "wecom",
+    "weixin",
+    "bluebubbles",
+    "email",
+    "sms",
+    "homeassistant",
+    "api-server",
+    "webhook",
+] }
 hermes-cron = { workspace = true }
 hermes-environments = { workspace = true }
 hermes-mcp = { workspace = true }
