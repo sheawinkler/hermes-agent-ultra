@@ -8,21 +8,21 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use hermes_auth::{exchange_refresh_token, OAuth2Endpoints};
-use hermes_intelligence::AdaptivePolicyEngine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::task::JoinSet;
 use tokio::time::sleep;
 
 use hermes_core::{
-    AgentError, AgentResult, BudgetConfig, LlmProvider, Message, StreamChunk, ToolCall, ToolError,
-    ToolResult, ToolSchema, UsageStats,
+    AgentError, AgentResult, BudgetConfig, LlmProvider, LlmResponse, Message, MessageRole,
+    StreamChunk, ToolCall, ToolError, ToolResult, ToolSchema, UsageStats,
 };
 
 use crate::api_bridge::CodexProvider;
@@ -39,6 +39,11 @@ use crate::plugins::{HookResult, HookType, PluginManager};
 use crate::provider::{AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider};
 use crate::providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
+};
+use crate::python_alignment::{
+    budget_pressure_text, inject_budget_pressure_into_last_tool_result,
+    looks_like_codex_intermediate_ack, sanitize_surrogates, strip_budget_warnings_from_messages,
+    strip_think_blocks_for_ack, CODEX_CONTINUE_USER_MESSAGE,
 };
 use crate::skill_orchestrator::SkillOrchestrator;
 use crate::smart_model_routing::{
@@ -380,8 +385,53 @@ pub struct AgentConfig {
     pub skill_creation_nudge_interval: u32,
 
     /// Run Python-style background memory/skill review after a session (extra LLM calls).
-    #[serde(default)]
+    /// Python has no master off-switch; matches default-on (`cli-config.yaml` can override via `agent`).
+    #[serde(default = "default_background_review_enabled")]
     pub background_review_enabled: bool,
+
+    /// Exact system prompt from SQLite when continuing a session (stable Anthropic prefix cache).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stored_system_prompt: Option<String>,
+
+    /// Progress ratio (0–1) at which Python emits a *caution* budget nudge (`_budget_caution_threshold`).
+    #[serde(default = "default_budget_caution_threshold")]
+    pub budget_caution_threshold: f64,
+
+    /// Progress ratio (0–1) at which Python emits an urgent budget warning (`_budget_warning_threshold`).
+    #[serde(default = "default_budget_warning_threshold")]
+    pub budget_warning_threshold: f64,
+
+    /// When false, skip `_get_budget_warning`-style injection entirely.
+    #[serde(default = "default_budget_pressure_enabled")]
+    pub budget_pressure_enabled: bool,
+
+    /// Retries when the model returns empty assistant text with no tools (Python `_empty_content_retries`, max 3).
+    #[serde(default = "default_empty_content_max_retries")]
+    pub empty_content_max_retries: u32,
+
+    /// Thinking-only prefill rounds (Python `_thinking_prefill_retries`, max 2).
+    #[serde(default = "default_thinking_prefill_max_retries")]
+    pub thinking_prefill_max_retries: u32,
+
+    /// Run one compression pass before the first LLM call if context is already over threshold.
+    #[serde(default = "default_preflight_context_compress")]
+    pub preflight_context_compress: bool,
+
+    /// Optional replacement for the **persisted** last user message (API-facing user text may differ).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub persist_user_message: Option<String>,
+
+    /// Max retries when the model emits unknown tool names.
+    #[serde(default = "default_invalid_tool_call_max_retries")]
+    pub invalid_tool_call_max_retries: u32,
+
+    /// Max retries when tool call arguments are invalid JSON.
+    #[serde(default = "default_invalid_tool_json_max_retries")]
+    pub invalid_tool_json_max_retries: u32,
+
+    /// Max retries when streaming assembles truncated tool arguments (`finish_reason=length` parity).
+    #[serde(default = "default_truncated_tool_call_max_retries")]
+    pub truncated_tool_call_max_retries: u32,
 }
 
 fn default_max_turns() -> u32 {
@@ -420,6 +470,46 @@ fn default_skill_creation_nudge_interval() -> u32 {
     10
 }
 
+fn default_background_review_enabled() -> bool {
+    true
+}
+
+fn default_budget_caution_threshold() -> f64 {
+    0.7
+}
+
+fn default_budget_warning_threshold() -> f64 {
+    0.9
+}
+
+fn default_budget_pressure_enabled() -> bool {
+    true
+}
+
+fn default_empty_content_max_retries() -> u32 {
+    3
+}
+
+fn default_thinking_prefill_max_retries() -> u32 {
+    2
+}
+
+fn default_preflight_context_compress() -> bool {
+    true
+}
+
+fn default_invalid_tool_call_max_retries() -> u32 {
+    3
+}
+
+fn default_invalid_tool_json_max_retries() -> u32 {
+    3
+}
+
+fn default_truncated_tool_call_max_retries() -> u32 {
+    3
+}
+
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
@@ -456,7 +546,18 @@ impl Default for AgentConfig {
             acp_args: Vec::new(),
             memory_nudge_interval: default_memory_nudge_interval(),
             skill_creation_nudge_interval: default_skill_creation_nudge_interval(),
-            background_review_enabled: false,
+            background_review_enabled: default_background_review_enabled(),
+            stored_system_prompt: None,
+            budget_caution_threshold: default_budget_caution_threshold(),
+            budget_warning_threshold: default_budget_warning_threshold(),
+            budget_pressure_enabled: default_budget_pressure_enabled(),
+            empty_content_max_retries: default_empty_content_max_retries(),
+            thinking_prefill_max_retries: default_thinking_prefill_max_retries(),
+            preflight_context_compress: default_preflight_context_compress(),
+            persist_user_message: None,
+            invalid_tool_call_max_retries: default_invalid_tool_call_max_retries(),
+            invalid_tool_json_max_retries: default_invalid_tool_json_max_retries(),
+            truncated_tool_call_max_retries: default_truncated_tool_call_max_retries(),
         }
     }
 }
@@ -569,6 +670,12 @@ fn rand_u64_range(min: u64, max: u64) -> u64 {
     }
 }
 
+/// Result of collecting one streaming completion (may end with user interrupt).
+enum StreamCollectOutcome {
+    Complete(LlmResponse),
+    Interrupted(LlmResponse),
+}
+
 /// The main agent loop.
 ///
 /// Owns the configuration, a tool registry, and an LLM provider.
@@ -586,8 +693,6 @@ pub struct AgentLoop {
     pub callbacks: Arc<AgentCallbacks>,
     /// Sub-agent delegation depth (0 = root).
     pub delegate_depth: u32,
-    /// Adaptive self-evolution policy engine.
-    pub evolution_engine: std::sync::Mutex<AdaptivePolicyEngine>,
     /// Primary LLM credential pool (Python `primary["credential_pool"]` / runtime pool).
     pub primary_credential_pool: Option<Arc<CredentialPool>>,
     /// Memory/skill nudge counters (persist for the lifetime of this `AgentLoop`).
@@ -618,6 +723,70 @@ struct TurnRuntimeRoute {
 }
 
 impl AgentLoop {
+    /// Populate [`AgentConfig::stored_system_prompt`] from SQLite (`sessions.system_prompt`) for session continuation.
+    ///
+    /// Call before [`AgentLoop::run`] when resuming a gateway/CLI session so Anthropic prefix cache matches Python.
+    pub fn hydrate_stored_system_prompt_from_hermes_home(
+        config: &mut AgentConfig,
+        hermes_home: &std::path::Path,
+    ) -> Result<(), AgentError> {
+        let Some(ref sid) = config.session_id else {
+            return Ok(());
+        };
+        if sid.trim().is_empty() {
+            return Ok(());
+        }
+        let sp = crate::session_persistence::SessionPersistence::new(hermes_home);
+        sp.ensure_db()?;
+        if let Some(prompt) = sp.get_system_prompt(sid)? {
+            config.stored_system_prompt = Some(prompt);
+        }
+        Ok(())
+    }
+
+    /// Build [`AgentResult`] messages for return / persistence (applies `persist_user_message` override).
+    fn messages_for_persisted_result(
+        &self,
+        ctx: &ContextManager,
+        persist_user_idx: Option<usize>,
+    ) -> Vec<Message> {
+        let mut msgs = ctx.get_messages().to_vec();
+        if let (Some(idx), Some(override_text)) = (
+            persist_user_idx,
+            self.config.persist_user_message.as_deref(),
+        ) {
+            if let Some(msg) = msgs.get_mut(idx) {
+                if msg.role == MessageRole::User {
+                    msg.content = Some(override_text.to_string());
+                }
+            }
+        }
+        msgs
+    }
+
+    fn graceful_interrupt_result(
+        &self,
+        ctx: &ContextManager,
+        total_turns: u32,
+        tool_errors: &[hermes_core::ToolErrorRecord],
+        accumulated_usage: Option<UsageStats>,
+        session_cost_usd: f64,
+        session_started_hooks_fired: bool,
+        persist_user_idx: Option<usize>,
+    ) -> AgentResult {
+        self.memory_on_session_end(ctx.get_messages());
+        AgentResult {
+            messages: self.messages_for_persisted_result(ctx, persist_user_idx),
+            finished_naturally: false,
+            total_turns,
+            tool_errors: tool_errors.to_vec(),
+            usage: accumulated_usage,
+            interrupted: true,
+            session_cost_usd: Some(session_cost_usd),
+            session_started_hooks_fired,
+        }
+    }
+
     /// Create a new agent loop.
     pub fn new(
         config: AgentConfig,
@@ -633,7 +802,6 @@ impl AgentLoop {
             plugin_manager: None,
             callbacks: Arc::new(AgentCallbacks::default()),
             delegate_depth: 0,
-            evolution_engine: std::sync::Mutex::new(AdaptivePolicyEngine::default()),
             primary_credential_pool: None,
             evolution_counters: Arc::new(Mutex::new(EvolutionCounters::default())),
             oauth_refresh_backoff: Arc::new(Mutex::new(HashMap::new())),
@@ -657,7 +825,6 @@ impl AgentLoop {
             plugin_manager: None,
             callbacks: Arc::new(AgentCallbacks::default()),
             delegate_depth: 0,
-            evolution_engine: std::sync::Mutex::new(AdaptivePolicyEngine::default()),
             primary_credential_pool: None,
             evolution_counters: Arc::new(Mutex::new(EvolutionCounters::default())),
             oauth_refresh_backoff: Arc::new(Mutex::new(HashMap::new())),
@@ -1583,7 +1750,7 @@ impl AgentLoop {
     /// - then append optional configured `system_prompt`
     fn build_system_prompt(
         &self,
-        task_hint: &str,
+        _task_hint: &str,
         tool_schemas: &[ToolSchema],
         model_for_prompt: &str,
     ) -> String {
@@ -1695,12 +1862,97 @@ impl AgentLoop {
             builder = builder.with_block(hint);
         }
 
-        let merged = builder.build().to_string();
-        if let Ok(engine) = self.evolution_engine.lock() {
-            engine.optimize_prompt_template(&merged, task_hint)
-        } else {
-            merged
+        builder.build().to_string()
+    }
+
+    /// Returns `(prompt, restored_from_storage)` — restored prompts skip fresh `build_system_prompt`.
+    fn resolve_initial_system_prompt(
+        &self,
+        task_hint: &str,
+        tool_schemas: &[ToolSchema],
+    ) -> (String, bool) {
+        if let Some(ref s) = self.config.stored_system_prompt {
+            let t = s.trim();
+            if !t.is_empty() {
+                return (s.clone(), true);
+            }
         }
+        (
+            self.build_system_prompt(task_hint, tool_schemas, &self.config.model),
+            false,
+        )
+    }
+
+    /// Compress when total chars exceed 80% of the context budget (Python auto-compaction).
+    fn auto_compress_if_over_threshold(&self, ctx: &mut ContextManager) {
+        let total_chars = ctx.total_chars();
+        let max_c = ctx.max_context_chars().max(1);
+        let threshold = (max_c as f64 * 0.8) as usize;
+        if total_chars <= threshold {
+            return;
+        }
+        tracing::info!(
+            "Context pressure at {}%, triggering compression",
+            (total_chars * 100) / max_c
+        );
+        if let Some(note) = self.memory_pre_compress_note(ctx.get_messages()) {
+            ctx.add_message(Message::system(note));
+        }
+        ctx.compress();
+    }
+
+    fn assistant_visible_text(m: &Message) -> bool {
+        m.content
+            .as_deref()
+            .map(str::trim)
+            .map(|s| !s.is_empty())
+            .unwrap_or(false)
+    }
+
+    fn assistant_visible_text_after_think_blocks(m: &Message) -> bool {
+        let Some(content) = m.content.as_deref() else {
+            return false;
+        };
+        !strip_think_blocks_for_ack(content).trim().is_empty()
+    }
+
+    fn assistant_has_reasoning(m: &Message) -> bool {
+        m.reasoning_content
+            .as_deref()
+            .map(str::trim)
+            .map(|s| !s.is_empty())
+            .unwrap_or(false)
+    }
+
+    fn normalize_tool_call_arguments(tc: &mut ToolCall) -> Result<(), String> {
+        let trimmed = tc.function.arguments.trim();
+        if trimmed.is_empty() {
+            tc.function.arguments = "{}".to_string();
+            return Ok(());
+        }
+        serde_json::from_str::<Value>(trimmed)
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    }
+
+    fn extra_body_for_api_mode(&self, api_mode: &ApiMode) -> Option<Value> {
+        let mut body = self
+            .config
+            .extra_body
+            .clone()
+            .unwrap_or_else(|| serde_json::json!({}));
+        if !body.is_object() {
+            return self.config.extra_body.clone();
+        }
+        if !matches!(api_mode, ApiMode::CodexResponses) {
+            if body.get("strict_tool_calls").is_none()
+                && body.get("strict_api").is_none()
+                && body.get("provider_strict").is_none()
+            {
+                body["strict_api"] = Value::Bool(true);
+            }
+        }
+        Some(body)
     }
 
     // -- Retry-aware LLM call ---------------------------------------------
@@ -1739,18 +1991,16 @@ impl AgentLoop {
         }
         let api_messages = self.messages_for_api_call(ctx);
         let retry = &self.config.retry;
-        let is_long_task = ctx.total_chars() > 8_000 || ctx.get_messages().len() > 28;
         let (effective_max_retries, effective_base_delay_ms) =
-            if let Ok(engine) = self.evolution_engine.lock() {
-                engine.recommend_retry(retry.max_retries, retry.base_delay_ms, is_long_task)
-            } else {
-                (retry.max_retries, retry.base_delay_ms)
-            };
+            (retry.max_retries, retry.base_delay_ms);
+        let default_extra_body = self.extra_body_for_api_mode(&self.config.api_mode);
 
         for attempt in 0..=effective_max_retries {
+            self.interrupt.check_interrupt()?;
             let result = if let Some(rt) = route {
                 let (provider_name, model_name) = self.extract_provider_and_model(model);
                 let mode = rt.api_mode.as_ref().unwrap_or(&self.config.api_mode);
+                let extra_body_for_call = self.extra_body_for_api_mode(mode);
                 let pool = self.credential_pool_for_route(rt);
                 let routed_provider = self.build_runtime_provider(
                     rt.provider.as_deref().unwrap_or(provider_name.as_str()),
@@ -1770,7 +2020,7 @@ impl AgentLoop {
                                 self.config.max_tokens,
                                 self.config.temperature,
                                 Some(model),
-                                self.config.extra_body.as_ref(),
+                                extra_body_for_call.as_ref(),
                             )
                             .await
                     }
@@ -1787,7 +2037,7 @@ impl AgentLoop {
                                 self.config.max_tokens,
                                 self.config.temperature,
                                 Some(self.config.model.as_str()),
-                                self.config.extra_body.as_ref(),
+                                default_extra_body.as_ref(),
                             )
                             .await
                     }
@@ -1800,7 +2050,7 @@ impl AgentLoop {
                         self.config.max_tokens,
                         self.config.temperature,
                         Some(model),
-                        self.config.extra_body.as_ref(),
+                        default_extra_body.as_ref(),
                     )
                     .await
             };
@@ -1841,7 +2091,7 @@ impl AgentLoop {
                                                 self.config.max_tokens,
                                                 self.config.temperature,
                                                 Some(fallback),
-                                                self.config.extra_body.as_ref(),
+                                                default_extra_body.as_ref(),
                                             )
                                             .await;
                                         return fallback_result
@@ -1870,6 +2120,184 @@ impl AgentLoop {
         unreachable!()
     }
 
+    fn assemble_stream_assistant_message(
+        content: &str,
+        reasoning_content: &str,
+        tool_calls: &[ToolCall],
+    ) -> Message {
+        if tool_calls.is_empty() || tool_calls.iter().all(|tc| tc.function.name.is_empty()) {
+            let mut m = Message::assistant(content.to_string());
+            if !reasoning_content.is_empty() {
+                m.reasoning_content = Some(reasoning_content.to_string());
+            }
+            m
+        } else {
+            let content_opt = if content.is_empty() {
+                None
+            } else {
+                Some(content.to_string())
+            };
+            let mut m = Message::assistant_with_tool_calls(content_opt, tool_calls.to_vec());
+            if !reasoning_content.is_empty() {
+                m.reasoning_content = Some(reasoning_content.to_string());
+            }
+            m
+        }
+    }
+
+    /// Collect one streaming completion into [`LlmResponse`] (first attempt in `run_stream` D-step).
+    async fn collect_stream_llm_response(
+        &self,
+        ctx: &ContextManager,
+        tool_schemas: &[ToolSchema],
+        route: Option<&TurnRuntimeRoute>,
+        active_model: &str,
+        on_chunk: &(dyn Fn(StreamChunk) + Send + Sync),
+    ) -> Result<StreamCollectOutcome, AgentError> {
+        let api_messages = self.messages_for_api_call(ctx);
+        let default_extra_body = self.extra_body_for_api_mode(&self.config.api_mode);
+        let mut stream = if let Some(rt) = route {
+            let (provider_name, model_name) = self.extract_provider_and_model(active_model);
+            let mode = rt.api_mode.as_ref().unwrap_or(&self.config.api_mode);
+            let extra_body_for_call = self.extra_body_for_api_mode(mode);
+            let pool = self.credential_pool_for_route(rt);
+            match self.build_runtime_provider(
+                rt.provider.as_deref().unwrap_or(provider_name.as_str()),
+                model_name,
+                rt.base_url.as_deref(),
+                rt.api_key_env.as_deref(),
+                None,
+                Some(mode),
+                pool,
+            ) {
+                Ok(provider) => provider.chat_completion_stream(
+                    &api_messages,
+                    tool_schemas,
+                    self.config.max_tokens,
+                    self.config.temperature,
+                    Some(active_model),
+                    extra_body_for_call.as_ref(),
+                ),
+                Err(e) => {
+                    tracing::warn!(
+                        "Runtime route unavailable (reason={:?}) for stream, falling back to primary runtime: {}",
+                        rt.routing_reason,
+                        e
+                    );
+                    self.llm_provider.chat_completion_stream(
+                        &api_messages,
+                        tool_schemas,
+                        self.config.max_tokens,
+                        self.config.temperature,
+                        Some(self.config.model.as_str()),
+                        default_extra_body.as_ref(),
+                    )
+                }
+            }
+        } else {
+            self.llm_provider.chat_completion_stream(
+                &api_messages,
+                tool_schemas,
+                self.config.max_tokens,
+                self.config.temperature,
+                Some(active_model),
+                default_extra_body.as_ref(),
+            )
+        };
+
+        let mut content = String::new();
+        let mut reasoning_content = String::new();
+        let mut tool_calls: Vec<ToolCall> = Vec::new();
+        let mut last_usage: Option<UsageStats> = None;
+        let mut finish_reason: Option<String> = None;
+
+        while let Some(chunk_result) = stream.next().await {
+            if self.interrupt.take_interrupt_graceful().is_some() {
+                let message = Self::assemble_stream_assistant_message(
+                    &content,
+                    &reasoning_content,
+                    &tool_calls,
+                );
+                return Ok(StreamCollectOutcome::Interrupted(LlmResponse {
+                    message,
+                    usage: last_usage.clone(),
+                    model: active_model.to_string(),
+                    finish_reason: Some("interrupted".to_string()),
+                }));
+            }
+            let chunk = chunk_result?;
+
+            if let Some(ref delta) = chunk.delta {
+                if let Some(ref text) = delta.content {
+                    content.push_str(text);
+                    if let Some(ref cb) = self.callbacks.on_stream_delta {
+                        cb(text);
+                    }
+                }
+                if let Some(ref extra) = delta.extra {
+                    if let Some(thinking) = extra.get("thinking").and_then(|v| v.as_str()) {
+                        reasoning_content.push_str(thinking);
+                        if let Some(ref cb) = self.callbacks.on_thinking {
+                            cb(thinking);
+                        }
+                    }
+                }
+                if let Some(ref tc_deltas) = delta.tool_calls {
+                    for tcd in tc_deltas {
+                        let idx = tcd.index as usize;
+                        while tool_calls.len() <= idx {
+                            tool_calls.push(ToolCall {
+                                id: String::new(),
+                                function: hermes_core::FunctionCall {
+                                    name: String::new(),
+                                    arguments: String::new(),
+                                },
+                            });
+                        }
+                        if let Some(ref id) = tcd.id {
+                            tool_calls[idx].id = id.clone();
+                        }
+                        if let Some(ref fc) = tcd.function {
+                            if let Some(ref name) = fc.name {
+                                tool_calls[idx].function.name = name.clone();
+                            }
+                            if let Some(ref args) = fc.arguments {
+                                tool_calls[idx].function.arguments.push_str(args);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if let Some(ref usage) = chunk.usage {
+                last_usage = Some(usage.clone());
+            }
+            if let Some(ref fr) = chunk.finish_reason {
+                finish_reason = Some(fr.clone());
+            }
+
+            on_chunk(chunk);
+        }
+
+        let has_truncated_tool_args = tool_calls.iter().any(|tc| {
+            let trimmed = tc.function.arguments.trim();
+            !trimmed.is_empty() && serde_json::from_str::<Value>(trimmed).is_err()
+        });
+        if has_truncated_tool_args {
+            finish_reason = Some("length".to_string());
+        }
+
+        let message =
+            Self::assemble_stream_assistant_message(&content, &reasoning_content, &tool_calls);
+
+        Ok(StreamCollectOutcome::Complete(LlmResponse {
+            message,
+            usage: last_usage,
+            model: active_model.to_string(),
+            finish_reason,
+        }))
+    }
+
     /// Run the agent loop (non-streaming).
     ///
     /// Sends the initial messages to the LLM, then iteratively:
@@ -1884,6 +2312,14 @@ impl AgentLoop {
         let mut ctx = ContextManager::default_budget();
         let mut tool_errors: Vec<hermes_core::ToolErrorRecord> = Vec::new();
         let session_id = self.config.session_id.as_deref().unwrap_or("");
+        let mut messages = messages;
+        for msg in messages.iter_mut() {
+            if let Some(ref mut c) = msg.content {
+                *c = sanitize_surrogates(c).into_owned();
+            }
+        }
+        strip_budget_warnings_from_messages(&mut messages);
+
         let task_hint = messages
             .iter()
             .rev()
@@ -1894,16 +2330,39 @@ impl AgentLoop {
         // Determine which tools to expose
         let tool_schemas: Vec<ToolSchema> = tools.unwrap_or_else(|| self.tool_registry.schemas());
 
-        // Build and inject system prompt
-        let system_content =
-            self.build_system_prompt(&task_hint, &tool_schemas, &self.config.model);
+        // Build and inject system prompt (or reuse SQLite-cached prompt for session continuity)
+        let (system_content, restored_system) =
+            self.resolve_initial_system_prompt(&task_hint, &tool_schemas);
         ctx.add_message(Message::system(&system_content));
+
+        let mut session_started_hooks_fired = false;
+        if !restored_system {
+            let hook_ctx = serde_json::json!({
+                "session_id": self.config.session_id,
+                "model": self.config.model,
+            });
+            let _results = self.invoke_hook(HookType::OnSessionStart, &hook_ctx);
+            self.inject_hook_context(&_results, &mut ctx);
+            session_started_hooks_fired = true;
+        }
 
         // Add initial messages
         for msg in messages {
             ctx.add_message(msg);
         }
         self.hydrate_todo_store(&ctx);
+
+        let persist_user_idx = if self.config.persist_user_message.is_some() {
+            ctx.get_messages()
+                .iter()
+                .enumerate()
+                .filter(|(_, m)| m.role == MessageRole::User)
+                .last()
+                .map(|(i, _)| i)
+        } else {
+            None
+        };
+        let mut codex_ack_continuations: u32 = 0;
 
         let mut review_memory_at_end = false;
         if self.config.memory_nudge_interval > 0
@@ -1927,13 +2386,12 @@ impl AgentLoop {
             .and_then(|m| m.content.clone())
             .unwrap_or_default();
         let mem_ctx_raw = self.memory_prefetch(&first_user, session_id);
-        let mem_ctx = if let Ok(engine) = self.evolution_engine.lock() {
-            engine.optimize_memory_context(&mem_ctx_raw)
-        } else {
-            mem_ctx_raw
-        };
-        if !mem_ctx.is_empty() {
-            ctx.add_message(Message::system(&mem_ctx));
+        if !mem_ctx_raw.is_empty() {
+            ctx.add_message(Message::system(&mem_ctx_raw));
+        }
+
+        if self.config.preflight_context_compress {
+            self.auto_compress_if_over_threshold(&mut ctx);
         }
 
         let mut total_turns: u32 = 0;
@@ -1944,9 +2402,23 @@ impl AgentLoop {
         let mut cost_warned = false;
         let mut forced_runtime_route: Option<TurnRuntimeRoute> = None;
         let mut last_checkpoint_messages: Option<Vec<Message>> = None;
+        let mut invalid_tool_retries: u32 = 0;
+        let mut invalid_json_retries: u32 = 0;
+        let mut last_content_with_tools: Option<String> = None;
+        let mut context_pressure_warned_at: f64 = 0.0;
 
         loop {
-            self.interrupt.check_interrupt()?;
+            if self.interrupt.take_interrupt_graceful().is_some() {
+                return Ok(self.graceful_interrupt_result(
+                    &ctx,
+                    total_turns,
+                    &tool_errors,
+                    accumulated_usage.clone(),
+                    session_cost_usd,
+                    session_started_hooks_fired,
+                    persist_user_idx,
+                ));
+            }
 
             if total_turns >= self.config.max_turns {
                 tracing::warn!(
@@ -1959,11 +2431,14 @@ impl AgentLoop {
                 }
                 self.memory_on_session_end(ctx.get_messages());
                 return Ok(AgentResult {
-                    messages: ctx.get_messages().to_vec(),
+                    messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
                     finished_naturally: false,
                     total_turns,
                     tool_errors,
                     usage: accumulated_usage,
+                    interrupted: false,
+                    session_cost_usd: Some(session_cost_usd),
+                    session_started_hooks_fired,
                 });
             }
 
@@ -2002,12 +2477,6 @@ impl AgentLoop {
                 self.memory_sync(&u, &a, session_id);
             }
 
-            // Inject budget warning when close to the turn limit
-            if let Some(warning) = self.get_budget_warning(total_turns) {
-                tracing::info!("{}", warning);
-                ctx.add_message(Message::system(&warning));
-            }
-
             // --- Pre-LLM hook ---
             let turn_runtime_route = forced_runtime_route
                 .clone()
@@ -2020,11 +2489,76 @@ impl AgentLoop {
             let pre_results = self.invoke_hook(HookType::PreLlmCall, &hook_ctx);
             self.inject_hook_context(&pre_results, &mut ctx);
 
-            // --- LLM API call with retry ---
+            // --- LLM API call with transport retry + semantic empty/thinking recovery (Python parity) ---
             let api_start = Instant::now();
-            let response = self
-                .call_llm_with_retry(&ctx, &tool_schemas, turn_runtime_route.as_ref())
-                .await?;
+            let mut inner_empty = 0u32;
+            let mut inner_thinking = 0u32;
+            let mut turn_usage_acc: Option<UsageStats> = None;
+            let response = loop {
+                if self.interrupt.take_interrupt_graceful().is_some() {
+                    return Ok(self.graceful_interrupt_result(
+                        &ctx,
+                        total_turns,
+                        &tool_errors,
+                        accumulated_usage.clone(),
+                        session_cost_usd,
+                        session_started_hooks_fired,
+                        persist_user_idx,
+                    ));
+                }
+                let r = match self
+                    .call_llm_with_retry(&ctx, &tool_schemas, turn_runtime_route.as_ref())
+                    .await
+                {
+                    Ok(r) => r,
+                    Err(AgentError::Interrupted { .. }) => {
+                        return Ok(self.graceful_interrupt_result(
+                            &ctx,
+                            total_turns,
+                            &tool_errors,
+                            accumulated_usage.clone(),
+                            session_cost_usd,
+                            session_started_hooks_fired,
+                            persist_user_idx,
+                        ));
+                    }
+                    Err(e) => return Err(e),
+                };
+                if let Some(ref u) = r.usage {
+                    turn_usage_acc = Some(merge_usage(turn_usage_acc, u));
+                }
+
+                let has_tools = r
+                    .message
+                    .tool_calls
+                    .as_ref()
+                    .map_or(false, |tc| !tc.is_empty());
+                if has_tools {
+                    break r;
+                }
+                if Self::assistant_visible_text(&r.message) {
+                    break r;
+                }
+                if Self::assistant_has_reasoning(&r.message)
+                    && inner_thinking < self.config.thinking_prefill_max_retries
+                {
+                    inner_thinking += 1;
+                    ctx.add_message(r.message.clone());
+                    continue;
+                }
+                if !Self::assistant_has_reasoning(&r.message)
+                    && inner_empty < self.config.empty_content_max_retries
+                {
+                    inner_empty += 1;
+                    tracing::warn!(
+                        "empty assistant response — retrying ({}/{})",
+                        inner_empty,
+                        self.config.empty_content_max_retries
+                    );
+                    continue;
+                }
+                break r;
+            };
             let api_elapsed = api_start.elapsed().as_millis() as u64;
             _total_api_time_ms += api_elapsed;
 
@@ -2037,8 +2571,8 @@ impl AgentLoop {
             let post_results = self.invoke_hook(HookType::PostLlmCall, &post_ctx);
             self.inject_hook_context(&post_results, &mut ctx);
 
-            // Accumulate usage
-            if let Some(ref usage) = response.usage {
+            // Accumulate usage (merged across semantic-retried sub-calls)
+            if let Some(ref usage) = turn_usage_acc {
                 accumulated_usage = Some(merge_usage(accumulated_usage, usage));
                 if let Some(cost) =
                     estimate_usage_cost_usd(usage, response.model.as_str(), &self.config)
@@ -2074,18 +2608,38 @@ impl AgentLoop {
                     )));
                     self.memory_on_session_end(ctx.get_messages());
                     return Ok(AgentResult {
-                        messages: ctx.get_messages().to_vec(),
+                        messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
                         finished_naturally: false,
                         total_turns,
                         tool_errors,
                         usage: accumulated_usage,
+                        interrupted: false,
+                        session_cost_usd: Some(session_cost_usd),
+                        session_started_hooks_fired,
                     });
                 }
             }
 
+            let history_includes_tool = ctx
+                .get_messages()
+                .iter()
+                .any(|m| m.role == MessageRole::Tool);
             let assistant_msg = response.message.clone();
             let tool_calls = assistant_msg.tool_calls.clone();
             ctx.add_message(assistant_msg.clone());
+            if assistant_msg
+                .tool_calls
+                .as_ref()
+                .map_or(false, |v| !v.is_empty())
+                && Self::assistant_visible_text_after_think_blocks(&assistant_msg)
+            {
+                last_content_with_tools = assistant_msg
+                    .content
+                    .as_deref()
+                    .map(strip_think_blocks_for_ack)
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+            }
 
             // Step complete callback
             if let Some(ref cb) = self.callbacks.on_step_complete {
@@ -2096,6 +2650,28 @@ impl AgentLoop {
             let tool_calls = match tool_calls {
                 Some(calls) if !calls.is_empty() => calls,
                 _ => {
+                    if self.config.api_mode == ApiMode::CodexResponses
+                        && !tool_schemas.is_empty()
+                        && codex_ack_continuations < 2
+                        && looks_like_codex_intermediate_ack(
+                            &task_hint,
+                            assistant_msg.content.as_deref().unwrap_or(""),
+                            history_includes_tool,
+                        )
+                    {
+                        codex_ack_continuations += 1;
+                        ctx.add_message(Message::user(CODEX_CONTINUE_USER_MESSAGE));
+                        continue;
+                    }
+                    if !Self::assistant_visible_text_after_think_blocks(&assistant_msg) {
+                        if let Some(fallback) = last_content_with_tools.take() {
+                            if let Some(last) = ctx.get_messages_mut().last_mut() {
+                                if last.role == MessageRole::Assistant {
+                                    last.content = Some(fallback);
+                                }
+                            }
+                        }
+                    }
                     tracing::debug!("No tool calls in response, finishing naturally");
                     // Final memory sync
                     let (u, a) = extract_last_user_assistant(ctx.get_messages());
@@ -2103,14 +2679,19 @@ impl AgentLoop {
                     self.spawn_background_review(total_turns, &ctx, review_memory_at_end);
                     self.memory_on_session_end(ctx.get_messages());
                     return Ok(AgentResult {
-                        messages: ctx.get_messages().to_vec(),
+                        messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
                         finished_naturally: true,
                         total_turns,
                         tool_errors,
                         usage: accumulated_usage,
+                        interrupted: false,
+                        session_cost_usd: Some(session_cost_usd),
+                        session_started_hooks_fired,
                     });
                 }
             };
+
+            codex_ack_continuations = 0;
 
             // Deduplicate tool calls
             let mut tool_calls = Self::deduplicate_tool_calls(&tool_calls);
@@ -2118,6 +2699,76 @@ impl AgentLoop {
                 self.repair_tool_call(tc);
                 self.hydrate_session_search_args(tc);
             }
+            let invalid_tool_calls: Vec<String> = tool_calls
+                .iter()
+                .filter(|tc| self.tool_registry.get(&tc.function.name).is_none())
+                .map(|tc| tc.function.name.clone())
+                .collect();
+            if !invalid_tool_calls.is_empty() {
+                invalid_tool_retries = invalid_tool_retries.saturating_add(1);
+                let available = self.tool_registry.names().join(", ");
+                if invalid_tool_retries >= self.config.invalid_tool_call_max_retries {
+                    ctx.add_message(Message::system(format!(
+                        "Max invalid tool retries reached ({}). Last invalid tool: {}",
+                        self.config.invalid_tool_call_max_retries, invalid_tool_calls[0]
+                    )));
+                    self.memory_on_session_end(ctx.get_messages());
+                    return Ok(AgentResult {
+                        messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
+                        finished_naturally: false,
+                        total_turns,
+                        tool_errors,
+                        usage: accumulated_usage,
+                        interrupted: false,
+                        session_cost_usd: Some(session_cost_usd),
+                        session_started_hooks_fired,
+                    });
+                }
+                for tc in &tool_calls {
+                    let content = if self.tool_registry.get(&tc.function.name).is_none() {
+                        format!(
+                            "Tool '{}' does not exist. Available tools: {}",
+                            tc.function.name, available
+                        )
+                    } else {
+                        "Skipped: another tool call in this turn used an invalid name. Please retry this tool call.".to_string()
+                    };
+                    ctx.add_message(Message::tool_result(tc.id.clone(), content));
+                }
+                continue;
+            }
+            invalid_tool_retries = 0;
+
+            let mut invalid_json_args: Vec<(String, String)> = Vec::new();
+            for tc in &mut tool_calls {
+                if let Err(e) = Self::normalize_tool_call_arguments(tc) {
+                    invalid_json_args.push((tc.function.name.clone(), e));
+                }
+            }
+            if !invalid_json_args.is_empty() {
+                invalid_json_retries = invalid_json_retries.saturating_add(1);
+                if invalid_json_retries < self.config.invalid_tool_json_max_retries {
+                    let _ = ctx.get_messages_mut().pop();
+                    continue;
+                }
+                invalid_json_retries = 0;
+                for tc in &tool_calls {
+                    let content = if let Some((_, err)) = invalid_json_args
+                        .iter()
+                        .find(|(name, _)| name == &tc.function.name)
+                    {
+                        format!(
+                                "Error: Invalid JSON arguments. {}. For tools with no required parameters, use an empty object: {{}}. Please retry with valid JSON.",
+                                err
+                            )
+                    } else {
+                        "Skipped: other tool call in this response had invalid JSON.".to_string()
+                    };
+                    ctx.add_message(Message::tool_result(tc.id.clone(), content));
+                }
+                continue;
+            }
+            invalid_json_retries = 0;
 
             for tc in &tool_calls {
                 if let Ok(mut c) = self.evolution_counters.lock() {
@@ -2148,7 +2799,17 @@ impl AgentLoop {
             }
 
             // --- Execute tool calls in parallel ---
-            self.interrupt.check_interrupt()?;
+            if self.interrupt.take_interrupt_graceful().is_some() {
+                return Ok(self.graceful_interrupt_result(
+                    &ctx,
+                    total_turns,
+                    &tool_errors,
+                    accumulated_usage.clone(),
+                    session_cost_usd,
+                    session_started_hooks_fired,
+                    persist_user_idx,
+                ));
+            }
             let tool_start = Instant::now();
             let results = self
                 .execute_tool_calls(
@@ -2182,9 +2843,6 @@ impl AgentLoop {
                 let Some(tc) = tool_calls.iter().find(|tc| tc.id == res.tool_call_id) else {
                     continue;
                 };
-                if let Ok(mut engine) = self.evolution_engine.lock() {
-                    engine.record_tool_outcome(&tc.function.name, !res.is_error);
-                }
                 let tc_ctx = serde_json::json!({
                     "tool": &tc.function.name,
                     "is_error": res.is_error,
@@ -2204,24 +2862,55 @@ impl AgentLoop {
             let mut results = results;
             budget::enforce_budget(&mut results, &self.config.budget);
 
+            if !results.is_empty() {
+                let w = budget_pressure_text(
+                    total_turns,
+                    self.config.max_turns,
+                    self.config.budget_caution_threshold,
+                    self.config.budget_warning_threshold,
+                    self.config.budget_pressure_enabled,
+                );
+                if let Some(ref text) = w {
+                    tracing::info!("{}", text);
+                }
+                inject_budget_pressure_into_last_tool_result(&mut results, w.as_deref());
+            }
+
             for result in results {
                 ctx.add_message(Message::tool_result(&result.tool_call_id, &result.content));
             }
+            if !tool_calls.is_empty()
+                && tool_calls
+                    .iter()
+                    .all(|tc| tc.function.name == "execute_code")
+            {
+                total_turns = total_turns.saturating_sub(1);
+            }
             self.emit_background_review_metrics(total_turns, &ctx);
 
-            // Auto context compression
             let total_chars = ctx.total_chars();
-            let threshold = (200_000_f64 * 0.8) as usize;
-            if total_chars > threshold {
-                tracing::info!(
-                    "Context pressure at {}%, triggering compression",
-                    (total_chars * 100) / 200_000
-                );
-                if let Some(note) = self.memory_pre_compress_note(ctx.get_messages()) {
-                    ctx.add_message(Message::system(note));
+            let threshold = ((ctx.max_context_chars().max(1) as f64) * 0.8) as usize;
+            if threshold > 0 {
+                let progress = total_chars as f64 / threshold as f64;
+                let tier = if progress >= 0.95 {
+                    0.95
+                } else if progress >= 0.85 {
+                    0.85
+                } else {
+                    0.0
+                };
+                if tier > context_pressure_warned_at {
+                    context_pressure_warned_at = tier;
+                    tracing::warn!(
+                        "Context pressure {:.0}% of compaction threshold ({} / {})",
+                        progress * 100.0,
+                        total_chars,
+                        threshold
+                    );
                 }
-                ctx.compress();
             }
+
+            self.auto_compress_if_over_threshold(&mut ctx);
         }
     }
 
@@ -2242,10 +2931,63 @@ impl AgentLoop {
                 return self.run(messages, tools).await;
             }
         };
+        let stream_mute = Arc::new(AtomicBool::new(false));
+        let stream_needs_break = Arc::new(AtomicBool::new(false));
+        let raw_emit = on_chunk;
+        let mute_for_emit = stream_mute.clone();
+        let break_for_emit = stream_needs_break.clone();
+        let on_chunk: Box<dyn Fn(StreamChunk) + Send + Sync> =
+            Box::new(move |chunk: StreamChunk| {
+                let StreamChunk {
+                    delta,
+                    finish_reason,
+                    usage,
+                } = chunk;
+                if let Some(delta_val) = delta {
+                    if let Some(content) = delta_val.content.clone() {
+                        if mute_for_emit.load(Ordering::Acquire) {
+                            return;
+                        }
+                        let mut out = content;
+                        if break_for_emit.swap(false, Ordering::AcqRel) {
+                            out = format!("\n\n{}", out);
+                        }
+                        raw_emit(StreamChunk {
+                            delta: Some(hermes_core::StreamDelta {
+                                content: Some(out),
+                                tool_calls: delta_val.tool_calls,
+                                extra: delta_val.extra,
+                            }),
+                            finish_reason,
+                            usage,
+                        });
+                        return;
+                    }
+                    raw_emit(StreamChunk {
+                        delta: Some(delta_val),
+                        finish_reason,
+                        usage,
+                    });
+                    return;
+                }
+                raw_emit(StreamChunk {
+                    delta: None,
+                    finish_reason,
+                    usage,
+                });
+            });
 
         let mut ctx = ContextManager::default_budget();
         let mut tool_errors: Vec<hermes_core::ToolErrorRecord> = Vec::new();
         let session_id = self.config.session_id.as_deref().unwrap_or("");
+        let mut messages = messages;
+        for msg in messages.iter_mut() {
+            if let Some(ref mut c) = msg.content {
+                *c = sanitize_surrogates(c).into_owned();
+            }
+        }
+        strip_budget_warnings_from_messages(&mut messages);
+
         let task_hint = messages
             .iter()
             .rev()
@@ -2254,14 +2996,37 @@ impl AgentLoop {
             .unwrap_or_default();
 
         let tool_schemas: Vec<ToolSchema> = tools.unwrap_or_else(|| self.tool_registry.schemas());
-        let system_content =
-            self.build_system_prompt(&task_hint, &tool_schemas, &self.config.model);
+        let (system_content, restored_system) =
+            self.resolve_initial_system_prompt(&task_hint, &tool_schemas);
         ctx.add_message(Message::system(&system_content));
+
+        let mut session_started_hooks_fired = false;
+        if !restored_system {
+            let hook_ctx = serde_json::json!({
+                "session_id": self.config.session_id,
+                "model": self.config.model,
+            });
+            let _results = self.invoke_hook(HookType::OnSessionStart, &hook_ctx);
+            self.inject_hook_context(&_results, &mut ctx);
+            session_started_hooks_fired = true;
+        }
 
         for msg in messages {
             ctx.add_message(msg);
         }
         self.hydrate_todo_store(&ctx);
+
+        let persist_user_idx = if self.config.persist_user_message.is_some() {
+            ctx.get_messages()
+                .iter()
+                .enumerate()
+                .filter(|(_, m)| m.role == MessageRole::User)
+                .last()
+                .map(|(i, _)| i)
+        } else {
+            None
+        };
+        let mut codex_ack_continuations: u32 = 0;
 
         let mut review_memory_at_end = false;
         if self.config.memory_nudge_interval > 0
@@ -2285,13 +3050,12 @@ impl AgentLoop {
             .and_then(|m| m.content.clone())
             .unwrap_or_default();
         let mem_ctx_raw = self.memory_prefetch(&first_user, session_id);
-        let mem_ctx = if let Ok(engine) = self.evolution_engine.lock() {
-            engine.optimize_memory_context(&mem_ctx_raw)
-        } else {
-            mem_ctx_raw
-        };
-        if !mem_ctx.is_empty() {
-            ctx.add_message(Message::system(&mem_ctx));
+        if !mem_ctx_raw.is_empty() {
+            ctx.add_message(Message::system(&mem_ctx_raw));
+        }
+
+        if self.config.preflight_context_compress {
+            self.auto_compress_if_over_threshold(&mut ctx);
         }
 
         let mut total_turns: u32 = 0;
@@ -2300,9 +3064,24 @@ impl AgentLoop {
         let mut cost_warned = false;
         let mut forced_runtime_route: Option<TurnRuntimeRoute> = None;
         let mut last_checkpoint_messages: Option<Vec<Message>> = None;
+        let mut invalid_tool_retries: u32 = 0;
+        let mut invalid_json_retries: u32 = 0;
+        let mut truncated_tool_call_retries: u32 = 0;
+        let mut last_content_with_tools: Option<String> = None;
+        let mut context_pressure_warned_at: f64 = 0.0;
 
         loop {
-            self.interrupt.check_interrupt()?;
+            if self.interrupt.take_interrupt_graceful().is_some() {
+                return Ok(self.graceful_interrupt_result(
+                    &ctx,
+                    total_turns,
+                    &tool_errors,
+                    accumulated_usage.clone(),
+                    session_cost_usd,
+                    session_started_hooks_fired,
+                    persist_user_idx,
+                ));
+            }
 
             if total_turns >= self.config.max_turns {
                 tracing::warn!(
@@ -2313,12 +3092,16 @@ impl AgentLoop {
                 if let Some(msg) = summary_msg {
                     ctx.add_message(msg);
                 }
+                self.memory_on_session_end(ctx.get_messages());
                 return Ok(AgentResult {
-                    messages: ctx.get_messages().to_vec(),
+                    messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
                     finished_naturally: false,
                     total_turns,
                     tool_errors,
                     usage: accumulated_usage,
+                    interrupted: false,
+                    session_cost_usd: Some(session_cost_usd),
+                    session_started_hooks_fired,
                 });
             }
 
@@ -2352,11 +3135,6 @@ impl AgentLoop {
                 self.memory_sync(&u, &a, session_id);
             }
 
-            if let Some(warning) = self.get_budget_warning(total_turns) {
-                tracing::info!("{}", warning);
-                ctx.add_message(Message::system(&warning));
-            }
-
             // Pre-LLM hook
             let turn_runtime_route = forced_runtime_route
                 .clone()
@@ -2368,118 +3146,131 @@ impl AgentLoop {
             let hook_ctx = serde_json::json!({"turn": total_turns, "model": active_model});
             let pre_results = self.invoke_hook(HookType::PreLlmCall, &hook_ctx);
             self.inject_hook_context(&pre_results, &mut ctx);
-            let api_messages = self.messages_for_api_call(&ctx);
 
-            // --- Streaming LLM call ---
-            let mut stream = if let Some(ref rt) = turn_runtime_route {
-                let (provider_name, model_name) = self.extract_provider_and_model(active_model);
-                let mode = rt.api_mode.as_ref().unwrap_or(&self.config.api_mode);
-                let pool = self.credential_pool_for_route(rt);
-                match self.build_runtime_provider(
-                    rt.provider.as_deref().unwrap_or(provider_name.as_str()),
-                    model_name,
-                    rt.base_url.as_deref(),
-                    rt.api_key_env.as_deref(),
-                    None,
-                    Some(mode),
-                    pool,
-                ) {
-                    Ok(provider) => provider.chat_completion_stream(
-                        &api_messages,
-                        &tool_schemas,
-                        self.config.max_tokens,
-                        self.config.temperature,
-                        Some(active_model),
-                        self.config.extra_body.as_ref(),
-                    ),
-                    Err(e) => {
-                        tracing::warn!(
-                            "Runtime route unavailable (reason={:?}) for stream, falling back to primary runtime: {}",
-                            rt.routing_reason,
-                            e
-                        );
-                        self.llm_provider.chat_completion_stream(
-                            &api_messages,
+            // --- Streaming first attempt + same D-step semantic recovery as `run()` (retries use non-stream) ---
+            let api_start = Instant::now();
+            let mut inner_empty = 0u32;
+            let mut inner_thinking = 0u32;
+            let mut turn_usage_acc: Option<UsageStats> = None;
+            let mut inner_attempt: u32 = 0;
+            let response = loop {
+                if self.interrupt.take_interrupt_graceful().is_some() {
+                    return Ok(self.graceful_interrupt_result(
+                        &ctx,
+                        total_turns,
+                        &tool_errors,
+                        accumulated_usage.clone(),
+                        session_cost_usd,
+                        session_started_hooks_fired,
+                        persist_user_idx,
+                    ));
+                }
+                let r = if inner_attempt == 0 {
+                    match self
+                        .collect_stream_llm_response(
+                            &ctx,
                             &tool_schemas,
-                            self.config.max_tokens,
-                            self.config.temperature,
-                            Some(self.config.model.as_str()),
-                            self.config.extra_body.as_ref(),
+                            turn_runtime_route.as_ref(),
+                            active_model,
+                            &*on_chunk,
                         )
+                        .await?
+                    {
+                        StreamCollectOutcome::Complete(resp) => resp,
+                        StreamCollectOutcome::Interrupted(partial) => {
+                            if let Some(ref u) = partial.usage {
+                                accumulated_usage = Some(merge_usage(accumulated_usage.clone(), u));
+                                if let Some(cost) =
+                                    estimate_usage_cost_usd(u, partial.model.as_str(), &self.config)
+                                {
+                                    session_cost_usd += cost;
+                                }
+                            }
+                            ctx.add_message(partial.message);
+                            return Ok(self.graceful_interrupt_result(
+                                &ctx,
+                                total_turns,
+                                &tool_errors,
+                                accumulated_usage.clone(),
+                                session_cost_usd,
+                                session_started_hooks_fired,
+                                persist_user_idx,
+                            ));
+                        }
                     }
+                } else {
+                    match self
+                        .call_llm_with_retry(&ctx, &tool_schemas, turn_runtime_route.as_ref())
+                        .await
+                    {
+                        Ok(r) => r,
+                        Err(AgentError::Interrupted { .. }) => {
+                            return Ok(self.graceful_interrupt_result(
+                                &ctx,
+                                total_turns,
+                                &tool_errors,
+                                accumulated_usage.clone(),
+                                session_cost_usd,
+                                session_started_hooks_fired,
+                                persist_user_idx,
+                            ));
+                        }
+                        Err(e) => return Err(e),
+                    }
+                };
+                inner_attempt = inner_attempt.saturating_add(1);
+
+                if let Some(ref u) = r.usage {
+                    turn_usage_acc = Some(merge_usage(turn_usage_acc, u));
                 }
-            } else {
-                self.llm_provider.chat_completion_stream(
-                    &api_messages,
-                    &tool_schemas,
-                    self.config.max_tokens,
-                    self.config.temperature,
-                    Some(active_model),
-                    self.config.extra_body.as_ref(),
-                )
+
+                let has_tools = r
+                    .message
+                    .tool_calls
+                    .as_ref()
+                    .map_or(false, |tc| !tc.is_empty());
+                if has_tools {
+                    break r;
+                }
+                if Self::assistant_visible_text(&r.message) {
+                    break r;
+                }
+                if Self::assistant_has_reasoning(&r.message)
+                    && inner_thinking < self.config.thinking_prefill_max_retries
+                {
+                    inner_thinking += 1;
+                    ctx.add_message(r.message.clone());
+                    continue;
+                }
+                if !Self::assistant_has_reasoning(&r.message)
+                    && inner_empty < self.config.empty_content_max_retries
+                {
+                    inner_empty += 1;
+                    tracing::warn!(
+                        "empty assistant response (stream path) — retrying ({}/{})",
+                        inner_empty,
+                        self.config.empty_content_max_retries
+                    );
+                    continue;
+                }
+                break r;
             };
+            let _api_elapsed_ms = api_start.elapsed().as_millis() as u64;
 
-            let mut content = String::new();
-            let mut reasoning_content = String::new();
-            let mut tool_calls: Vec<ToolCall> = Vec::new();
-            let mut last_usage: Option<UsageStats> = None;
+            // --- Post-LLM hook ---
+            let post_ctx = serde_json::json!({
+                "turn": total_turns,
+                "api_time_ms": _api_elapsed_ms,
+                "has_tool_calls": response.message.tool_calls.as_ref().map_or(false, |tc| !tc.is_empty()),
+            });
+            let post_results = self.invoke_hook(HookType::PostLlmCall, &post_ctx);
+            self.inject_hook_context(&post_results, &mut ctx);
 
-            while let Some(chunk_result) = stream.next().await {
-                let chunk = chunk_result?;
-
-                if let Some(ref delta) = chunk.delta {
-                    if let Some(ref text) = delta.content {
-                        content.push_str(text);
-                        if let Some(ref cb) = self.callbacks.on_stream_delta {
-                            cb(text);
-                        }
-                    }
-                    // Accumulate reasoning/thinking tokens if present
-                    if let Some(ref extra) = delta.extra {
-                        if let Some(thinking) = extra.get("thinking").and_then(|v| v.as_str()) {
-                            reasoning_content.push_str(thinking);
-                            if let Some(ref cb) = self.callbacks.on_thinking {
-                                cb(thinking);
-                            }
-                        }
-                    }
-                    if let Some(ref tc_deltas) = delta.tool_calls {
-                        for tcd in tc_deltas {
-                            let idx = tcd.index as usize;
-                            while tool_calls.len() <= idx {
-                                tool_calls.push(ToolCall {
-                                    id: String::new(),
-                                    function: hermes_core::FunctionCall {
-                                        name: String::new(),
-                                        arguments: String::new(),
-                                    },
-                                });
-                            }
-                            if let Some(ref id) = tcd.id {
-                                tool_calls[idx].id = id.clone();
-                            }
-                            if let Some(ref fc) = tcd.function {
-                                if let Some(ref name) = fc.name {
-                                    tool_calls[idx].function.name = name.clone();
-                                }
-                                if let Some(ref args) = fc.arguments {
-                                    tool_calls[idx].function.arguments.push_str(args);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if let Some(ref usage) = chunk.usage {
-                    last_usage = Some(usage.clone());
-                }
-
-                on_chunk(chunk);
-            }
-
-            if let Some(ref usage) = last_usage {
+            if let Some(ref usage) = turn_usage_acc {
                 accumulated_usage = Some(merge_usage(accumulated_usage, usage));
-                if let Some(cost) = estimate_usage_cost_usd(usage, active_model, &self.config) {
+                if let Some(cost) =
+                    estimate_usage_cost_usd(usage, response.model.as_str(), &self.config)
+                {
                     session_cost_usd += cost;
                 }
             }
@@ -2511,66 +3302,215 @@ impl AgentLoop {
                     )));
                     self.memory_on_session_end(ctx.get_messages());
                     return Ok(AgentResult {
-                        messages: ctx.get_messages().to_vec(),
+                        messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
                         finished_naturally: false,
                         total_turns,
                         tool_errors,
                         usage: accumulated_usage,
+                        interrupted: false,
+                        session_cost_usd: Some(session_cost_usd),
+                        session_started_hooks_fired,
                     });
                 }
             }
 
-            // Post-LLM hook
-            let post_ctx = serde_json::json!({
-                "turn": total_turns,
-                "has_tool_calls": !tool_calls.is_empty(),
-            });
-            self.invoke_hook(HookType::PostLlmCall, &post_ctx);
-
-            // Build assistant message
-            let assistant_msg = if tool_calls.is_empty()
-                || tool_calls.iter().all(|tc| tc.function.name.is_empty())
+            let history_includes_tool = ctx
+                .get_messages()
+                .iter()
+                .any(|m| m.role == MessageRole::Tool);
+            let assistant_msg = response.message.clone();
+            let tool_calls = assistant_msg.tool_calls.clone();
+            ctx.add_message(assistant_msg.clone());
+            if assistant_msg
+                .tool_calls
+                .as_ref()
+                .map_or(false, |v| !v.is_empty())
+                && Self::assistant_visible_text_after_think_blocks(&assistant_msg)
             {
-                Message::assistant(&content)
-            } else {
-                let content_opt = if content.is_empty() {
-                    None
-                } else {
-                    Some(content.clone())
-                };
-                Message::assistant_with_tool_calls(content_opt, tool_calls.clone())
-            };
-
-            ctx.add_message(assistant_msg);
+                last_content_with_tools = assistant_msg
+                    .content
+                    .as_deref()
+                    .map(strip_think_blocks_for_ack)
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty());
+            }
+            if response.finish_reason.as_deref() == Some("length")
+                && assistant_msg
+                    .tool_calls
+                    .as_ref()
+                    .map_or(false, |calls| !calls.is_empty())
+                && truncated_tool_call_retries < self.config.truncated_tool_call_max_retries
+            {
+                truncated_tool_call_retries = truncated_tool_call_retries.saturating_add(1);
+                let _ = ctx.get_messages_mut().pop();
+                continue;
+            }
+            truncated_tool_call_retries = 0;
 
             if let Some(ref cb) = self.callbacks.on_step_complete {
                 cb(total_turns);
             }
 
             let tool_calls: Vec<ToolCall> = tool_calls
+                .unwrap_or_default()
                 .into_iter()
                 .filter(|tc| !tc.function.name.is_empty())
                 .collect();
 
             if tool_calls.is_empty() {
+                if self.config.api_mode == ApiMode::CodexResponses
+                    && !tool_schemas.is_empty()
+                    && codex_ack_continuations < 2
+                    && looks_like_codex_intermediate_ack(
+                        &task_hint,
+                        assistant_msg.content.as_deref().unwrap_or(""),
+                        history_includes_tool,
+                    )
+                {
+                    codex_ack_continuations += 1;
+                    ctx.add_message(Message::user(CODEX_CONTINUE_USER_MESSAGE));
+                    continue;
+                }
+                if !Self::assistant_visible_text_after_think_blocks(&assistant_msg) {
+                    if let Some(fallback) = last_content_with_tools.take() {
+                        if let Some(last) = ctx.get_messages_mut().last_mut() {
+                            if last.role == MessageRole::Assistant {
+                                last.content = Some(fallback);
+                            }
+                        }
+                    }
+                }
                 let (u, a) = extract_last_user_assistant(ctx.get_messages());
                 self.memory_sync(&u, &a, session_id);
                 self.spawn_background_review(total_turns, &ctx, review_memory_at_end);
                 self.memory_on_session_end(ctx.get_messages());
+                if stream_mute.swap(false, Ordering::AcqRel) {
+                    on_chunk(StreamChunk {
+                        delta: Some(hermes_core::StreamDelta {
+                            content: None,
+                            tool_calls: None,
+                            extra: Some(serde_json::json!({
+                                "control": "mute_post_response",
+                                "enabled": false
+                            })),
+                        }),
+                        finish_reason: None,
+                        usage: None,
+                    });
+                }
                 return Ok(AgentResult {
-                    messages: ctx.get_messages().to_vec(),
+                    messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
                     finished_naturally: true,
                     total_turns,
                     tool_errors,
                     usage: accumulated_usage,
+                    interrupted: false,
+                    session_cost_usd: Some(session_cost_usd),
+                    session_started_hooks_fired,
                 });
             }
+
+            codex_ack_continuations = 0;
 
             let mut tool_calls = Self::deduplicate_tool_calls(&tool_calls);
             for tc in &mut tool_calls {
                 self.repair_tool_call(tc);
                 self.hydrate_session_search_args(tc);
             }
+            let all_housekeeping = tool_calls.iter().all(|tc| {
+                matches!(
+                    tc.function.name.as_str(),
+                    "memory" | "todo" | "skill_manage" | "session_search"
+                )
+            });
+            let should_mute_post =
+                all_housekeeping && Self::assistant_visible_text_after_think_blocks(&assistant_msg);
+            let was_muted = stream_mute.swap(should_mute_post, Ordering::AcqRel);
+            if was_muted != should_mute_post {
+                on_chunk(StreamChunk {
+                    delta: Some(hermes_core::StreamDelta {
+                        content: None,
+                        tool_calls: None,
+                        extra: Some(serde_json::json!({
+                            "control": "mute_post_response",
+                            "enabled": should_mute_post
+                        })),
+                    }),
+                    finish_reason: None,
+                    usage: None,
+                });
+            }
+
+            let invalid_tool_calls: Vec<String> = tool_calls
+                .iter()
+                .filter(|tc| self.tool_registry.get(&tc.function.name).is_none())
+                .map(|tc| tc.function.name.clone())
+                .collect();
+            if !invalid_tool_calls.is_empty() {
+                invalid_tool_retries = invalid_tool_retries.saturating_add(1);
+                let available = self.tool_registry.names().join(", ");
+                if invalid_tool_retries >= self.config.invalid_tool_call_max_retries {
+                    ctx.add_message(Message::system(format!(
+                        "Max invalid tool retries reached ({}). Last invalid tool: {}",
+                        self.config.invalid_tool_call_max_retries, invalid_tool_calls[0]
+                    )));
+                    self.memory_on_session_end(ctx.get_messages());
+                    return Ok(AgentResult {
+                        messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
+                        finished_naturally: false,
+                        total_turns,
+                        tool_errors,
+                        usage: accumulated_usage,
+                        interrupted: false,
+                        session_cost_usd: Some(session_cost_usd),
+                        session_started_hooks_fired,
+                    });
+                }
+                for tc in &tool_calls {
+                    let content = if self.tool_registry.get(&tc.function.name).is_none() {
+                        format!(
+                            "Tool '{}' does not exist. Available tools: {}",
+                            tc.function.name, available
+                        )
+                    } else {
+                        "Skipped: another tool call in this turn used an invalid name. Please retry this tool call.".to_string()
+                    };
+                    ctx.add_message(Message::tool_result(tc.id.clone(), content));
+                }
+                continue;
+            }
+            invalid_tool_retries = 0;
+
+            let mut invalid_json_args: Vec<(String, String)> = Vec::new();
+            for tc in &mut tool_calls {
+                if let Err(e) = Self::normalize_tool_call_arguments(tc) {
+                    invalid_json_args.push((tc.function.name.clone(), e));
+                }
+            }
+            if !invalid_json_args.is_empty() {
+                invalid_json_retries = invalid_json_retries.saturating_add(1);
+                if invalid_json_retries < self.config.invalid_tool_json_max_retries {
+                    let _ = ctx.get_messages_mut().pop();
+                    continue;
+                }
+                invalid_json_retries = 0;
+                for tc in &tool_calls {
+                    let content = if let Some((_, err)) = invalid_json_args
+                        .iter()
+                        .find(|(name, _)| name == &tc.function.name)
+                    {
+                        format!(
+                                "Error: Invalid JSON arguments. {}. For tools with no required parameters, use an empty object: {{}}. Please retry with valid JSON.",
+                                err
+                            )
+                    } else {
+                        "Skipped: other tool call in this response had invalid JSON.".to_string()
+                    };
+                    ctx.add_message(Message::tool_result(tc.id.clone(), content));
+                }
+                continue;
+            }
+            invalid_json_retries = 0;
             for tc in &tool_calls {
                 if let Ok(mut c) = self.evolution_counters.lock() {
                     match tc.function.name.as_str() {
@@ -2591,6 +3531,18 @@ impl AgentLoop {
                         serde_json::from_str(&tc.function.arguments).unwrap_or(Value::Null);
                     cb(&tc.function.name, &args);
                 }
+            }
+
+            if self.interrupt.take_interrupt_graceful().is_some() {
+                return Ok(self.graceful_interrupt_result(
+                    &ctx,
+                    total_turns,
+                    &tool_errors,
+                    accumulated_usage.clone(),
+                    session_cost_usd,
+                    session_started_hooks_fired,
+                    persist_user_idx,
+                ));
             }
 
             let mut results = self
@@ -2623,9 +3575,6 @@ impl AgentLoop {
                 let Some(tc) = tool_calls.iter().find(|tc| tc.id == res.tool_call_id) else {
                     continue;
                 };
-                if let Ok(mut engine) = self.evolution_engine.lock() {
-                    engine.record_tool_outcome(&tc.function.name, !res.is_error);
-                }
                 let tc_ctx = serde_json::json!({"tool": &tc.function.name, "is_error": res.is_error, "turn": total_turns});
                 self.invoke_hook(HookType::PostToolCall, &tc_ctx);
                 if let Some(ref cb) = self.callbacks.on_tool_complete {
@@ -2638,23 +3587,65 @@ impl AgentLoop {
 
             budget::enforce_budget(&mut results, &self.config.budget);
 
+            if !results.is_empty() {
+                let w = budget_pressure_text(
+                    total_turns,
+                    self.config.max_turns,
+                    self.config.budget_caution_threshold,
+                    self.config.budget_warning_threshold,
+                    self.config.budget_pressure_enabled,
+                );
+                if let Some(ref text) = w {
+                    tracing::info!("{}", text);
+                }
+                inject_budget_pressure_into_last_tool_result(&mut results, w.as_deref());
+            }
+
             for result in results {
                 ctx.add_message(Message::tool_result(&result.tool_call_id, &result.content));
             }
+            if !tool_calls.is_empty()
+                && tool_calls
+                    .iter()
+                    .all(|tc| tc.function.name == "execute_code")
+            {
+                total_turns = total_turns.saturating_sub(1);
+            }
+            stream_needs_break.store(true, Ordering::Release);
+            on_chunk(StreamChunk {
+                delta: Some(hermes_core::StreamDelta {
+                    content: None,
+                    tool_calls: None,
+                    extra: Some(serde_json::json!({"control": "stream_break"})),
+                }),
+                finish_reason: None,
+                usage: None,
+            });
             self.emit_background_review_metrics(total_turns, &ctx);
 
             let total_chars = ctx.total_chars();
-            let threshold = (200_000_f64 * 0.8) as usize;
-            if total_chars > threshold {
-                tracing::info!(
-                    "Context pressure at {}%, triggering compression",
-                    (total_chars * 100) / 200_000
-                );
-                if let Some(note) = self.memory_pre_compress_note(ctx.get_messages()) {
-                    ctx.add_message(Message::system(note));
+            let threshold = ((ctx.max_context_chars().max(1) as f64) * 0.8) as usize;
+            if threshold > 0 {
+                let progress = total_chars as f64 / threshold as f64;
+                let tier = if progress >= 0.95 {
+                    0.95
+                } else if progress >= 0.85 {
+                    0.85
+                } else {
+                    0.0
+                };
+                if tier > context_pressure_warned_at {
+                    context_pressure_warned_at = tier;
+                    tracing::warn!(
+                        "Context pressure {:.0}% of compaction threshold ({} / {})",
+                        progress * 100.0,
+                        total_chars,
+                        threshold
+                    );
                 }
-                ctx.compress();
             }
+
+            self.auto_compress_if_over_threshold(&mut ctx);
         }
     }
 
@@ -2740,20 +3731,6 @@ impl AgentLoop {
         );
         if let Ok(updated) = serde_json::to_string(&args) {
             tc.function.arguments = updated;
-        }
-    }
-
-    /// Return a budget warning message when the agent is close to the turn limit.
-    fn get_budget_warning(&self, current_turn: u32) -> Option<String> {
-        let remaining = self.config.max_turns.saturating_sub(current_turn);
-        if remaining <= 3 && remaining > 0 {
-            Some(format!(
-                "[SYSTEM WARNING] You have {} turn(s) remaining before the conversation limit. \
-                 Please wrap up your current task and provide a final summary.",
-                remaining
-            ))
-        } else {
-            None
         }
     }
 
@@ -2942,36 +3919,7 @@ impl AgentLoop {
                     signature,
                 })
             }
-            ResolveTurnOutcome::Primary { .. } => {
-                if !self.config.smart_model_routing.evolution_model_hints {
-                    return None;
-                }
-                if let Ok(engine) = self.evolution_engine.lock() {
-                    if let Some(model) = engine.recommend_model_for_text(text) {
-                        let candidate = model.trim();
-                        if candidate.is_empty() || candidate == self.config.model {
-                            return None;
-                        }
-                        let mut sig = self.primary_runtime_snapshot().to_signature();
-                        sig.model = candidate.to_string();
-                        return Some(TurnRuntimeRoute {
-                            model: candidate.to_string(),
-                            provider: None,
-                            base_url: None,
-                            api_key_env: None,
-                            api_mode: None,
-                            command: None,
-                            args: Vec::new(),
-                            credential_pool: self.primary_credential_pool.clone(),
-                            credential_pool_fallback: true,
-                            route_label: None,
-                            routing_reason: Some("policy_recommendation".to_string()),
-                            signature: sig,
-                        });
-                    }
-                }
-                None
-            }
+            ResolveTurnOutcome::Primary { .. } => None,
         }
     }
 
@@ -3011,7 +3959,7 @@ impl AgentLoop {
                 self.config.max_tokens,
                 self.config.temperature,
                 Some(self.config.model.as_str()),
-                self.config.extra_body.as_ref(),
+                self.extra_body_for_api_mode(&self.config.api_mode).as_ref(),
             )
             .await
             .map_err(|e| AgentError::LlmApi(e.to_string()))?;
@@ -3589,7 +4537,6 @@ mod tests {
                     base_url: None,
                     api_key_env: None,
                 }),
-                evolution_model_hints: false,
             },
             ..AgentConfig::default()
         };
@@ -3748,7 +4695,6 @@ mod tests {
                     base_url: Some("https://api.openai.com/v1".to_string()),
                     api_key_env: None,
                 }),
-                evolution_model_hints: false,
             },
             ..AgentConfig::default()
         };
@@ -3836,7 +4782,6 @@ mod tests {
                     base_url: None,
                     api_key_env: None,
                 }),
-                evolution_model_hints: false,
             },
             ..AgentConfig::default()
         };
@@ -3939,7 +4884,6 @@ mod tests {
                     base_url: None,
                     api_key_env: None,
                 }),
-                evolution_model_hints: false,
             },
             ..AgentConfig::default()
         };
@@ -4164,7 +5108,6 @@ mod tests {
                     base_url: Some("acp://copilot".to_string()),
                     api_key_env: None,
                 }),
-                evolution_model_hints: false,
             },
             ..AgentConfig::default()
         };
@@ -4243,7 +5186,6 @@ mod tests {
                     base_url: Some("acp+tcp://127.0.0.1:8765".to_string()),
                     api_key_env: None,
                 }),
-                evolution_model_hints: false,
             },
             ..AgentConfig::default()
         };
@@ -4308,7 +5250,6 @@ mod tests {
                     base_url: None,
                     api_key_env: None,
                 }),
-                evolution_model_hints: false,
             },
             ..AgentConfig::default()
         };
@@ -4546,11 +5487,14 @@ mod tests {
 
         let agent = AgentLoop::new(config, registry, Arc::new(DummyProvider));
 
-        assert!(agent.get_budget_warning(1).is_none());
-        assert!(agent.get_budget_warning(7).is_some()); // 3 remaining
-        assert!(agent.get_budget_warning(8).is_some()); // 2 remaining
-        assert!(agent.get_budget_warning(9).is_some()); // 1 remaining
-        assert!(agent.get_budget_warning(10).is_none()); // 0 remaining
+        let max = agent.config.max_turns;
+        assert!(budget_pressure_text(6, max, 0.7, 0.9, true).is_none());
+        assert!(budget_pressure_text(7, max, 0.7, 0.9, true).is_some());
+        let w = budget_pressure_text(9, max, 0.7, 0.9, true).unwrap();
+        assert!(w.contains("BUDGET WARNING"), "{w}");
+        let w10 = budget_pressure_text(10, max, 0.7, 0.9, true).unwrap();
+        assert!(w10.contains("BUDGET WARNING"), "{w10}");
+        let _ = agent;
     }
 
     #[test]

@@ -162,6 +162,7 @@ pub fn arb_agent_result() -> impl Strategy<Value = AgentResult> {
                 total_turns,
                 tool_errors,
                 usage,
+                ..Default::default()
             },
         )
 }

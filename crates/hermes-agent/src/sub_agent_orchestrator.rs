@@ -304,6 +304,7 @@ impl SubAgentOrchestrator {
         });
 
         let result = match timeout(self.cfg.timeout, join).await {
+            Ok(Ok(Ok(result))) if result.interrupted => Err(SubAgentError::Cancelled),
             Ok(Ok(Ok(result))) => Ok(result),
             Ok(Ok(Err(AgentError::Interrupted { .. }))) => Err(SubAgentError::Cancelled),
             Ok(Ok(Err(e))) => Err(SubAgentError::Agent(e)),

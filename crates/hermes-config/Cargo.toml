@@ -17,6 +17,12 @@ url = { workspace = true }
 indexmap = { workspace = true }
 chrono = { workspace = true }
 
+[features]
+default = []
+# Exposes `managed_gateway::test_lock` so downstream crates' tests can
+# serialise on the same global env-var lock and avoid races.
+test-helpers = []
+
 [dev-dependencies]
 proptest = { workspace = true }
 tempfile = "3"

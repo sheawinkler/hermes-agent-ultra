@@ -23,6 +23,8 @@ jobs:
         run: bash scripts/check-runtime-placeholders.sh
       - name: Tests
         run: cargo test --workspace
+      - name: Parity fixture tests
+        run: cargo test -p hermes-parity-tests
 
   cross-build:
     runs-on: ubuntu-latest

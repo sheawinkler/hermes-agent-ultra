@@ -29,10 +29,11 @@ webhook = []
 [dependencies]
 hermes-core = { workspace = true }
 hermes-config = { workspace = true }
-hermes-intelligence = { workspace = true }
+hermes-tools = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true, features = ["multipart"] }

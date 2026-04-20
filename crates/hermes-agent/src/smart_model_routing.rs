@@ -114,10 +114,6 @@ pub struct SmartModelRoutingConfig {
     pub max_simple_words: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cheap_model: Option<CheapModelRouteConfig>,
-    /// When true, allow `AdaptivePolicyEngine::recommend_model_for_text` to override the model
-    /// on non-cheap turns (Rust extension; **off** by default for Python `resolve_turn_route` parity).
-    #[serde(default)]
-    pub evolution_model_hints: bool,
 }
 
 fn default_max_simple_chars() -> usize {
@@ -135,7 +131,6 @@ impl Default for SmartModelRoutingConfig {
             max_simple_chars: default_max_simple_chars(),
             max_simple_words: default_max_simple_words(),
             cheap_model: None,
-            evolution_model_hints: false,
         }
     }
 }
@@ -351,7 +346,6 @@ mod tests {
                 base_url: None,
                 api_key_env: None,
             }),
-            evolution_model_hints: false,
         }
     }
 

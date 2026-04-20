@@ -70,6 +70,36 @@ impl BackgroundTaskManager {
         Ok(id)
     }
 
+    /// Submit a background task with a caller-chosen id (e.g. Python-shaped `bg_…` / `btw_…`).
+    pub fn submit_with_id(&self, id: String, prompt: String) -> Result<String, String> {
+        let tasks = self.tasks.lock().unwrap();
+        let running_count = tasks
+            .values()
+            .filter(|t| t.status == TaskStatus::Running)
+            .count();
+        if running_count >= self.max_concurrent {
+            return Err(format!(
+                "Maximum concurrent background tasks ({}) reached. Wait for a task to complete.",
+                self.max_concurrent
+            ));
+        }
+        if tasks.contains_key(&id) {
+            return Err("Task id already exists".to_string());
+        }
+        drop(tasks);
+
+        let task = BackgroundTask {
+            id: id.clone(),
+            prompt,
+            status: TaskStatus::Running,
+            result: None,
+            created_at: chrono::Utc::now(),
+        };
+
+        self.tasks.lock().unwrap().insert(id.clone(), task);
+        Ok(id)
+    }
+
     /// Mark a task as completed with a result.
     pub fn complete(&self, id: &str, result: String) {
         if let Some(task) = self.tasks.lock().unwrap().get_mut(id) {

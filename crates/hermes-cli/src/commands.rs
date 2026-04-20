@@ -7,7 +7,6 @@ use std::process::Stdio;
 use std::sync::Arc;
 
 use hermes_core::AgentError;
-use hermes_intelligence::{OutcomeDrivenUpdater, PolicyStore, PolicyUpdateRequest};
 use regex::Regex;
 
 use crate::app::App;
@@ -739,166 +738,10 @@ fn handle_reasoning_command(_app: &mut App) -> Result<CommandResult, AgentError>
     Ok(CommandResult::Handled)
 }
 
-/// Same secret as HTTP `X-Hermes-Policy-Admin` (`hermes-http` PolicyGuardConfig).
-fn policy_admin_token_from_env() -> Option<String> {
-    std::env::var("HERMES_POLICY_ADMIN_TOKEN")
-        .ok()
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            std::env::var("HERMES_HTTP_POLICY_ADMIN_KEY")
-                .ok()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-        })
-}
-
-fn ensure_policy_cli_admin_token() -> Result<(), AgentError> {
-    if std::env::var("HERMES_POLICY_CLI_INSECURE").ok().as_deref() == Some("1") {
-        return Ok(());
-    }
-    if policy_admin_token_from_env().is_some() {
-        Ok(())
-    } else {
-        Err(AgentError::Config(
-            "Policy CLI: set HERMES_POLICY_ADMIN_TOKEN to the same value as HTTP header X-Hermes-Policy-Admin \
-(legacy: HERMES_HTTP_POLICY_ADMIN_KEY). Local dev only: HERMES_POLICY_CLI_INSECURE=1."
-                .to_string(),
-        ))
-    }
-}
-
-fn handle_policy_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
-    let policy_dir = hermes_config::hermes_home().join("policies");
-    std::fs::create_dir_all(&policy_dir)
-        .map_err(|e| AgentError::Io(format!("Failed to create policy dir: {}", e)))?;
-    let policy_path = policy_dir.join("policy_store.json");
-    let audit_path = policy_dir.join("policy_audit.json");
-
-    let mut store = if policy_path.exists() {
-        PolicyStore::load_from_path(&policy_path)
-            .map_err(|e| AgentError::Config(format!("Failed to load policy store: {}", e)))?
-    } else {
-        let engine = app
-            .agent
-            .evolution_engine
-            .lock()
-            .map_err(|_| AgentError::Config("Evolution engine lock poisoned".to_string()))?
-            .clone();
-        PolicyStore::new(engine)
-    };
-
-    if args.is_empty() {
-        println!("Usage:");
-        println!("  /policy update [rollout_ratio] [reason...]");
-        println!("  /policy promote [reason...]");
-        println!("  /policy rollback [reason...]");
-        println!("  /policy export");
-        println!();
-        println!("Admin token (same as HTTP X-Hermes-Policy-Admin):");
-        println!("  export HERMES_POLICY_ADMIN_TOKEN=...  (or HERMES_HTTP_POLICY_ADMIN_KEY)");
-        println!("  Local dev bypass: HERMES_POLICY_CLI_INSECURE=1");
-        return Ok(CommandResult::Handled);
-    }
-
-    match args[0] {
-        "update" => {
-            ensure_policy_cli_admin_token()?;
-            let (rollout_ratio, reason_idx) = if args.len() >= 2 {
-                match args[1].parse::<f64>() {
-                    Ok(v) => (v.clamp(0.0, 1.0), 2),
-                    Err(_) => (0.15, 1),
-                }
-            } else {
-                (0.15, 1)
-            };
-            let reason = if args.len() > reason_idx {
-                args[reason_idx..].join(" ")
-            } else {
-                "cli_update".to_string()
-            };
-            let version = store
-                .apply_update(
-                    &OutcomeDrivenUpdater::default(),
-                    PolicyUpdateRequest {
-                        actor: "cli".to_string(),
-                        reason: reason.clone(),
-                        rollout_ratio,
-                    },
-                )
-                .map_err(|e| AgentError::Config(format!("Policy update failed: {}", e)))?;
-            println!(
-                "Policy candidate promoted to canary: version={} rollout={:.2}",
-                version, rollout_ratio
-            );
-        }
-        "promote" => {
-            ensure_policy_cli_admin_token()?;
-            let reason = if args.len() > 1 {
-                args[1..].join(" ")
-            } else {
-                "cli_promote".to_string()
-            };
-            match store.promote_active_to_stable("cli", &reason) {
-                Some(v) => println!("Policy promoted to stable: {}", v),
-                None => println!("No active canary to promote."),
-            }
-        }
-        "rollback" => {
-            ensure_policy_cli_admin_token()?;
-            if store.active.version == store.stable.version {
-                println!("Active policy already stable, nothing to rollback.");
-            } else {
-                let reason = if args.len() > 1 {
-                    args[1..].join(" ")
-                } else {
-                    "cli_manual_rollback".to_string()
-                };
-                let from = store.active.version.clone();
-                let to = store.stable.version.clone();
-                store.history.push(store.active.clone());
-                store.audit_log.push(hermes_intelligence::PolicyAuditEvent {
-                    at_epoch_secs: chrono::Utc::now().timestamp() as u64,
-                    actor: "cli".to_string(),
-                    action: "manual_rollback".to_string(),
-                    reason,
-                    from_version: from,
-                    to_version: to.clone(),
-                    rollout_ratio: 0.0,
-                    delta_summary: "manual_operator_action".to_string(),
-                });
-                store.active = store.stable.clone();
-                store.candidate = None;
-                println!("Policy rolled back to stable: {}", to);
-            }
-        }
-        "export" => {
-            ensure_policy_cli_admin_token()?;
-            store
-                .save_to_path(&policy_path)
-                .map_err(|e| AgentError::Io(format!("Failed to save policy store: {}", e)))?;
-            store
-                .save_audit_log(&audit_path)
-                .map_err(|e| AgentError::Io(format!("Failed to save policy audit: {}", e)))?;
-            println!(
-                "Policy exported:\n  store: {}\n  audit: {}",
-                policy_path.display(),
-                audit_path.display()
-            );
-            return Ok(CommandResult::Handled);
-        }
-        _ => {
-            println!("Unknown /policy action: {}", args[0]);
-            return Ok(CommandResult::Handled);
-        }
-    }
-
-    store
-        .save_to_path(&policy_path)
-        .map_err(|e| AgentError::Io(format!("Failed to save policy store: {}", e)))?;
-    store
-        .save_audit_log(&audit_path)
-        .map_err(|e| AgentError::Io(format!("Failed to save policy audit: {}", e)))?;
+fn handle_policy_command(_app: &mut App, _args: &[&str]) -> Result<CommandResult, AgentError> {
+    println!(
+        "The adaptive `/policy` CLI was removed — Hermes Python has no equivalent policy store."
+    );
     Ok(CommandResult::Handled)
 }
 

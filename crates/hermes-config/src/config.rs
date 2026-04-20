@@ -89,6 +89,10 @@ pub struct GatewayConfig {
     #[serde(default)]
     pub profile: ProfileConfig,
 
+    /// Agent loop nudges + background review (parity with Python `memory` / `skills` cadence).
+    #[serde(default)]
+    pub agent: AgentLoopBehaviorConfig,
+
     /// Override for the hermes home directory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home_dir: Option<String>,
@@ -115,7 +119,47 @@ impl Default for GatewayConfig {
             tools_config: ToolsSettings::default(),
             mcp_servers: Vec::new(),
             profile: ProfileConfig::default(),
+            agent: AgentLoopBehaviorConfig::default(),
             home_dir: None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AgentLoopBehaviorConfig (Python-shaped nudge + background review)
+// ---------------------------------------------------------------------------
+
+/// Mirrors Python defaults: `memory.nudge_interval` / `skills.creation_nudge_interval`,
+/// and implicit background memory/skill review when those intervals fire.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AgentLoopBehaviorConfig {
+    #[serde(default = "default_agent_memory_nudge_interval")]
+    pub memory_nudge_interval: u32,
+    #[serde(default = "default_agent_skill_nudge_interval")]
+    pub skill_creation_nudge_interval: u32,
+    /// When true (default), spawn the extra LLM pass for memory/skill review — Python has no master off-switch.
+    #[serde(default = "default_agent_background_review_enabled")]
+    pub background_review_enabled: bool,
+}
+
+fn default_agent_memory_nudge_interval() -> u32 {
+    10
+}
+
+fn default_agent_skill_nudge_interval() -> u32 {
+    10
+}
+
+fn default_agent_background_review_enabled() -> bool {
+    true
+}
+
+impl Default for AgentLoopBehaviorConfig {
+    fn default() -> Self {
+        Self {
+            memory_nudge_interval: default_agent_memory_nudge_interval(),
+            skill_creation_nudge_interval: default_agent_skill_nudge_interval(),
+            background_review_enabled: default_agent_background_review_enabled(),
         }
     }
 }
@@ -234,9 +278,6 @@ pub struct SmartModelRoutingConfig {
     /// Optional cheap route target.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cheap_model: Option<CheapModelRouteConfig>,
-    /// When true, allow adaptive policy model hints on non-cheap turns (Rust extension).
-    #[serde(default)]
-    pub evolution_model_hints: bool,
 }
 
 impl Default for SmartModelRoutingConfig {
@@ -246,7 +287,6 @@ impl Default for SmartModelRoutingConfig {
             max_simple_chars: default_max_simple_chars(),
             max_simple_words: default_max_simple_words(),
             cheap_model: None,
-            evolution_model_hints: false,
         }
     }
 }

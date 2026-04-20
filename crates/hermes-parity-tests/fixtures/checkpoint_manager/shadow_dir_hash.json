@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "fixture_group": "checkpoint_manager",
+  "python_module": "tools/checkpoint_manager.py (dir_hash = sha256(abs_path).hexdigest()[:16])",
+  "cases": [
+    {
+      "id": "demo_workspace_path",
+      "op": "checkpoint_shadow_dir_id",
+      "input": { "abs_path": "/workspace/demo" },
+      "expected": "4de1d2f8b60db00a",
+      "skip": false
+    }
+  ]
+}

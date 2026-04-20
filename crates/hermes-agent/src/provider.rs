@@ -8,7 +8,8 @@ use futures::stream::BoxStream;
 use futures::StreamExt;
 use reqwest::Client;
 use serde_json::Value;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use hermes_core::{
     AgentError, FunctionCall, FunctionCallDelta, LlmProvider, LlmResponse, Message, MessageRole,
@@ -35,7 +36,9 @@ pub struct GenericProvider {
     /// Default model identifier.
     pub model: String,
     /// HTTP client.
-    client: Client,
+    client: Arc<Mutex<Client>>,
+    /// Last time we rebuilt the client transport.
+    client_refreshed_at: Arc<Mutex<Instant>>,
     /// Optional custom headers to send with every request.
     pub extra_headers: Vec<(String, String)>,
     /// Optional rate limit tracker.
@@ -55,7 +58,8 @@ impl GenericProvider {
             base_url: base_url.into(),
             api_key: api_key.into(),
             model: model.into(),
-            client: Client::new(),
+            client: Arc::new(Mutex::new(Client::new())),
+            client_refreshed_at: Arc::new(Mutex::new(Instant::now())),
             extra_headers: Vec::new(),
             rate_limiter: None,
             credential_pool: None,
@@ -163,6 +167,139 @@ impl GenericProvider {
         // reqwest handles connection pooling internally; dropping clones and relying
         // on idle timeout is currently sufficient for our runtime.
     }
+
+    fn current_client(&self) -> Client {
+        self.client
+            .lock()
+            .map(|c| c.clone())
+            .unwrap_or_else(|_| Client::new())
+    }
+
+    fn refresh_client(&self, reason: &str) {
+        tracing::warn!("rebuilding primary HTTP client: {}", reason);
+        if let Ok(mut c) = self.client.lock() {
+            *c = Client::new();
+        }
+        if let Ok(mut t) = self.client_refreshed_at.lock() {
+            *t = Instant::now();
+        }
+    }
+
+    fn maybe_refresh_stale_client(&self) {
+        const STALE_CLIENT_REFRESH_SECS: u64 = 300;
+        let stale_after = Duration::from_secs(STALE_CLIENT_REFRESH_SECS);
+        let should_refresh = self
+            .client_refreshed_at
+            .lock()
+            .map(|t| t.elapsed() >= stale_after)
+            .unwrap_or(false);
+        if should_refresh {
+            self.refresh_client("proactive stale connection cleanup");
+        }
+    }
+
+    fn is_connection_recoverable(err: &reqwest::Error) -> bool {
+        if err.is_connect() || err.is_timeout() || err.is_request() {
+            return true;
+        }
+        let msg = err.to_string().to_lowercase();
+        msg.contains("connection reset")
+            || msg.contains("connection closed")
+            || msg.contains("broken pipe")
+            || msg.contains("pool")
+            || msg.contains("eof")
+    }
+
+    fn should_sanitize_tool_calls(extra_body: Option<&Value>) -> bool {
+        extra_body
+            .and_then(|v| {
+                v.get("strict_tool_calls")
+                    .or_else(|| v.get("strict_api"))
+                    .or_else(|| v.get("provider_strict"))
+            })
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+    }
+
+    fn sanitize_messages_for_strict_api(messages: &[Message], enabled: bool) -> Value {
+        if !enabled {
+            return serde_json::to_value(messages).unwrap_or_else(|_| serde_json::json!([]));
+        }
+        let mut out = Vec::with_capacity(messages.len());
+        for msg in messages {
+            let mut api_msg = serde_json::to_value(msg).unwrap_or_else(|_| serde_json::json!({}));
+            if let Some(tool_calls) = api_msg.get_mut("tool_calls").and_then(|v| v.as_array_mut()) {
+                for tc in tool_calls.iter_mut() {
+                    if let Some(obj) = tc.as_object_mut() {
+                        let id = obj.get("id").cloned();
+                        let function = obj.get("function").cloned();
+                        let mut stripped = serde_json::Map::new();
+                        if let Some(v) = id {
+                            stripped.insert("id".to_string(), v);
+                        }
+                        stripped.insert(
+                            "type".to_string(),
+                            obj.get("type")
+                                .cloned()
+                                .unwrap_or_else(|| Value::String("function".to_string())),
+                        );
+                        if let Some(v) = function {
+                            stripped.insert("function".to_string(), v);
+                        }
+                        *obj = stripped;
+                    }
+                }
+            }
+            out.push(api_msg);
+        }
+        Value::Array(out)
+    }
+
+    fn build_request(
+        &self,
+        client: &Client,
+        url: &str,
+        api_key: &str,
+        body: &Value,
+    ) -> reqwest::RequestBuilder {
+        let mut req = client
+            .post(url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .json(body);
+        for (key, value) in &self.extra_headers {
+            req = req.header(key.as_str(), value.as_str());
+        }
+        req
+    }
+
+    async fn send_with_dead_connection_recovery(
+        &self,
+        url: &str,
+        api_key: &str,
+        body: &Value,
+    ) -> Result<reqwest::Response, AgentError> {
+        self.maybe_refresh_stale_client();
+        let client = self.current_client();
+        match self.build_request(&client, url, api_key, body).send().await {
+            Ok(resp) => Ok(resp),
+            Err(e) => {
+                if !Self::is_connection_recoverable(&e) {
+                    return Err(AgentError::LlmApi(format!("HTTP request failed: {e}")));
+                }
+                self.refresh_client(&format!("recoverable transport error: {e}"));
+                let retry_client = self.current_client();
+                self.build_request(&retry_client, url, api_key, body)
+                    .send()
+                    .await
+                    .map_err(|e2| {
+                        AgentError::LlmApi(format!(
+                            "HTTP request failed after reconnect retry: {e2}"
+                        ))
+                    })
+            }
+        }
+    }
 }
 
 #[async_trait]
@@ -180,10 +317,12 @@ impl LlmProvider for GenericProvider {
 
         let effective_model = model.unwrap_or(&self.model);
         let api_key = self.effective_api_key();
+        let strict_tool_sanitize = Self::should_sanitize_tool_calls(extra_body);
+        let api_messages = Self::sanitize_messages_for_strict_api(messages, strict_tool_sanitize);
 
         let mut body = serde_json::json!({
             "model": effective_model,
-            "messages": messages,
+            "messages": api_messages,
         });
 
         if let Some(mt) = max_tokens {
@@ -206,21 +345,9 @@ impl LlmProvider for GenericProvider {
 
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
 
-        let mut req = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&body);
-
-        for (key, value) in &self.extra_headers {
-            req = req.header(key.as_str(), value.as_str());
-        }
-
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| AgentError::LlmApi(format!("HTTP request failed: {e}")))?;
+        let resp = self
+            .send_with_dead_connection_recovery(&url, &api_key, &body)
+            .await?;
 
         self.update_rate_limit(resp.headers());
 
@@ -263,10 +390,13 @@ impl LlmProvider for GenericProvider {
 
             let effective_model = model.as_deref().unwrap_or(&provider.model);
             let api_key = provider.effective_api_key();
+            let strict_tool_sanitize = GenericProvider::should_sanitize_tool_calls(extra_body.as_ref());
+            let api_messages =
+                GenericProvider::sanitize_messages_for_strict_api(&messages, strict_tool_sanitize);
 
             let mut body = serde_json::json!({
                 "model": effective_model,
-                "messages": messages,
+                "messages": api_messages,
                 "stream": true,
             });
 
@@ -292,21 +422,13 @@ impl LlmProvider for GenericProvider {
 
             let url = format!("{}/chat/completions", provider.base_url.trim_end_matches('/'));
 
-            let mut req = provider
-                .client
-                .post(&url)
-                .header("Authorization", format!("Bearer {}", api_key))
-                .header("Content-Type", "application/json")
-                .json(&body);
-
-            for (key, value) in &provider.extra_headers {
-                req = req.header(key.as_str(), value.as_str());
-            }
-
-            let resp = match req.send().await {
+            let resp = match provider
+                .send_with_dead_connection_recovery(&url, &api_key, &body)
+                .await
+            {
                 Ok(r) => r,
                 Err(e) => {
-                    yield Err(AgentError::LlmApi(format!("HTTP request failed: {e}")));
+                    yield Err(e);
                     return;
                 }
             };
@@ -484,7 +606,9 @@ pub struct AnthropicProvider {
     /// Default model identifier.
     pub model: String,
     /// HTTP client.
-    client: Client,
+    client: Arc<Mutex<Client>>,
+    /// Last time we rebuilt the client transport.
+    client_refreshed_at: Arc<Mutex<Instant>>,
     /// Anthropic API version header.
     pub api_version: String,
     /// Optional rate limit tracker.
@@ -500,7 +624,8 @@ impl AnthropicProvider {
             base_url: "https://api.anthropic.com".to_string(),
             api_key: api_key.into(),
             model: "claude-3-5-sonnet-20241022".to_string(),
-            client: Client::new(),
+            client: Arc::new(Mutex::new(Client::new())),
+            client_refreshed_at: Arc::new(Mutex::new(Instant::now())),
             api_version: "2023-06-01".to_string(),
             rate_limiter: None,
             credential_pool: None,
@@ -551,6 +676,79 @@ impl AnthropicProvider {
     fn update_rate_limit(&self, headers: &reqwest::header::HeaderMap) {
         if let Some(ref tracker) = self.rate_limiter {
             tracker.update_from_headers(headers);
+        }
+    }
+
+    fn current_client(&self) -> Client {
+        self.client
+            .lock()
+            .map(|c| c.clone())
+            .unwrap_or_else(|_| Client::new())
+    }
+
+    fn refresh_client(&self, reason: &str) {
+        tracing::warn!("rebuilding anthropic HTTP client: {}", reason);
+        if let Ok(mut c) = self.client.lock() {
+            *c = Client::new();
+        }
+        if let Ok(mut t) = self.client_refreshed_at.lock() {
+            *t = Instant::now();
+        }
+    }
+
+    fn maybe_refresh_stale_client(&self) {
+        const STALE_CLIENT_REFRESH_SECS: u64 = 300;
+        let stale_after = Duration::from_secs(STALE_CLIENT_REFRESH_SECS);
+        let should_refresh = self
+            .client_refreshed_at
+            .lock()
+            .map(|t| t.elapsed() >= stale_after)
+            .unwrap_or(false);
+        if should_refresh {
+            self.refresh_client("proactive stale connection cleanup");
+        }
+    }
+
+    fn build_request(
+        &self,
+        client: &Client,
+        url: &str,
+        api_key: &str,
+        body: &Value,
+    ) -> reqwest::RequestBuilder {
+        client
+            .post(url)
+            .header("x-api-key", api_key)
+            .header("anthropic-version", &self.api_version)
+            .header("Content-Type", "application/json")
+            .json(body)
+    }
+
+    async fn send_with_dead_connection_recovery(
+        &self,
+        url: &str,
+        api_key: &str,
+        body: &Value,
+    ) -> Result<reqwest::Response, AgentError> {
+        self.maybe_refresh_stale_client();
+        let client = self.current_client();
+        match self.build_request(&client, url, api_key, body).send().await {
+            Ok(resp) => Ok(resp),
+            Err(e) => {
+                if !GenericProvider::is_connection_recoverable(&e) {
+                    return Err(AgentError::LlmApi(format!("HTTP request failed: {e}")));
+                }
+                self.refresh_client(&format!("recoverable transport error: {e}"));
+                let retry_client = self.current_client();
+                self.build_request(&retry_client, url, api_key, body)
+                    .send()
+                    .await
+                    .map_err(|e2| {
+                        AgentError::LlmApi(format!(
+                            "HTTP request failed after reconnect retry: {e2}"
+                        ))
+                    })
+            }
         }
     }
 
@@ -773,19 +971,9 @@ impl LlmProvider for AnthropicProvider {
         }
 
         let url = format!("{}/v1/messages", self.base_url.trim_end_matches('/'));
-
-        let req = self
-            .client
-            .post(&url)
-            .header("x-api-key", &api_key)
-            .header("anthropic-version", &self.api_version)
-            .header("Content-Type", "application/json")
-            .json(&body);
-
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| AgentError::LlmApi(format!("HTTP request failed: {e}")))?;
+        let resp = self
+            .send_with_dead_connection_recovery(&url, &api_key, &body)
+            .await?;
 
         self.update_rate_limit(resp.headers());
 
@@ -856,19 +1044,10 @@ impl LlmProvider for AnthropicProvider {
 
             let url = format!("{}/v1/messages", provider.base_url.trim_end_matches('/'));
 
-            let resp = match provider
-                .client
-                .post(&url)
-                .header("x-api-key", &api_key)
-                .header("anthropic-version", &provider.api_version)
-                .header("Content-Type", "application/json")
-                .json(&body)
-                .send()
-                .await
-            {
+            let resp = match provider.send_with_dead_connection_recovery(&url, &api_key, &body).await {
                 Ok(r) => r,
                 Err(e) => {
-                    yield Err(AgentError::LlmApi(format!("HTTP request failed: {e}")));
+                    yield Err(e);
                     return;
                 }
             };
@@ -1156,10 +1335,14 @@ impl LlmProvider for OpenRouterProvider {
         provider.check_rate_limit().await;
 
         let api_key = provider.effective_api_key();
+        let strict_tool_sanitize =
+            GenericProvider::should_sanitize_tool_calls(merged_extra.as_ref());
+        let api_messages =
+            GenericProvider::sanitize_messages_for_strict_api(messages, strict_tool_sanitize);
 
         let mut body = serde_json::json!({
             "model": effective_model,
-            "messages": messages,
+            "messages": api_messages,
         });
 
         if let Some(mt) = max_tokens {
@@ -1184,21 +1367,9 @@ impl LlmProvider for OpenRouterProvider {
             provider.base_url.trim_end_matches('/')
         );
 
-        let mut req = provider
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", api_key))
-            .header("Content-Type", "application/json")
-            .json(&body);
-
-        for (key, value) in &provider.extra_headers {
-            req = req.header(key.as_str(), value.as_str());
-        }
-
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| AgentError::LlmApi(format!("HTTP request failed: {e}")))?;
+        let resp = provider
+            .send_with_dead_connection_recovery(&url, &api_key, &body)
+            .await?;
 
         provider.update_rate_limit(resp.headers());
 

@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "fixture_group": "anthropic_adapter",
+  "python_module": "agent/anthropic_adapter.py",
+  "cases": [
+    {
+      "id": "common_betas_native",
+      "op": "common_betas_for_base_url",
+      "input": { "base_url": null },
+      "expected": [
+        "interleaved-thinking-2025-05-14",
+        "fine-grained-tool-streaming-2025-05-14"
+      ]
+    },
+    {
+      "id": "common_betas_minimax_strips_tool_streaming",
+      "op": "common_betas_for_base_url",
+      "input": {
+        "base_url": "https://api.minimax.io/anthropic/v1"
+      },
+      "expected": ["interleaved-thinking-2025-05-14"]
+    },
+    {
+      "id": "default_betas_oauth_appends",
+      "op": "default_anthropic_beta_list",
+      "input": { "base_url": null, "is_oauth": true },
+      "expected": [
+        "interleaved-thinking-2025-05-14",
+        "fine-grained-tool-streaming-2025-05-14",
+        "claude-code-20250219",
+        "oauth-2025-04-20"
+      ]
+    },
+    {
+      "id": "fast_mode_third_party_null",
+      "op": "fast_mode_request_beta_list",
+      "input": {
+        "base_url": "https://example.com/v1",
+        "is_oauth": false
+      },
+      "expected": null
+    }
+  ]
+}

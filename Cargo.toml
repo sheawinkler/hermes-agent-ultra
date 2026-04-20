@@ -13,10 +13,11 @@ members = [
     "crates/hermes-config",
     "crates/hermes-intelligence",
     "crates/hermes-acp",
-    "crates/hermes-rl",
+    "crates/hermes-eval",
     "crates/hermes-http",
     "crates/hermes-auth",
     "crates/hermes-telemetry",
+    "crates/hermes-parity-tests",
 ]
 
 [workspace.package]
@@ -39,10 +40,11 @@ hermes-environments = { path = "crates/hermes-environments" }
 hermes-config = { path = "crates/hermes-config" }
 hermes-intelligence = { path = "crates/hermes-intelligence" }
 hermes-acp = { path = "crates/hermes-acp" }
-hermes-rl = { path = "crates/hermes-rl" }
+hermes-eval = { path = "crates/hermes-eval" }
 hermes-http = { path = "crates/hermes-http" }
 hermes-auth = { path = "crates/hermes-auth" }
 hermes-telemetry = { path = "crates/hermes-telemetry" }
+hermes-parity-tests = { path = "crates/hermes-parity-tests" }
 
 # Async runtime
 tokio = { version = "1", features = ["full"] }

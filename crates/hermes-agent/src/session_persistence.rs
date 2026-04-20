@@ -15,6 +15,29 @@ use hermes_core::{AgentError, Message, MessageRole};
 // SessionPersistence
 // ---------------------------------------------------------------------------
 
+/// Join leading consecutive system messages (Python `_cached_system_prompt` / Anthropic prefix parity for persistence).
+pub fn leading_system_prompt_for_persist(messages: &[Message]) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    for m in messages {
+        if m.role != MessageRole::System {
+            break;
+        }
+        if let Some(c) = m
+            .content
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            parts.push(c.to_string());
+        }
+    }
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("\n\n"))
+    }
+}
+
 /// Manages session persistence to SQLite and markdown log files.
 pub struct SessionPersistence {
     /// Path to the SQLite database file.
@@ -80,7 +103,8 @@ impl SessionPersistence {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 title TEXT,
-                message_count INTEGER DEFAULT 0
+                message_count INTEGER DEFAULT 0,
+                system_prompt TEXT
             );
 
             CREATE TABLE IF NOT EXISTS messages (
@@ -112,6 +136,15 @@ impl SessionPersistence {
         )
         .map_err(|e| AgentError::Io(format!("Failed to create tables: {e}")))?;
 
+        if let Err(e) = conn.execute("ALTER TABLE sessions ADD COLUMN system_prompt TEXT", []) {
+            let msg = e.to_string();
+            if !msg.contains("duplicate column") {
+                return Err(AgentError::Io(format!(
+                    "Failed to migrate sessions.system_prompt: {e}"
+                )));
+            }
+        }
+
         Ok(())
     }
 
@@ -123,6 +156,7 @@ impl SessionPersistence {
         model: Option<&str>,
         platform: Option<&str>,
         title: Option<&str>,
+        system_prompt: Option<&str>,
     ) -> Result<(), AgentError> {
         self.ensure_db()?;
 
@@ -133,12 +167,13 @@ impl SessionPersistence {
 
         // Upsert session record
         conn.execute(
-            "INSERT INTO sessions (id, model, platform, created_at, updated_at, title, message_count)
-             VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6)
+            "INSERT INTO sessions (id, model, platform, created_at, updated_at, title, message_count, system_prompt)
+             VALUES (?1, ?2, ?3, ?4, ?4, ?5, ?6, ?7)
              ON CONFLICT(id) DO UPDATE SET
                 updated_at = ?4,
                 message_count = ?6,
-                title = COALESCE(?5, sessions.title)",
+                title = COALESCE(?5, sessions.title),
+                system_prompt = COALESCE(?7, sessions.system_prompt)",
             rusqlite::params![
                 session_id,
                 model.unwrap_or("unknown"),
@@ -146,6 +181,7 @@ impl SessionPersistence {
                 now,
                 title,
                 messages.len() as i64,
+                system_prompt,
             ],
         )
         .map_err(|e| AgentError::Io(format!("Failed to upsert session: {e}")))?;
@@ -294,6 +330,23 @@ impl SessionPersistence {
         Ok(path)
     }
 
+    /// Load persisted full system prompt for prefix-cache continuity (Python `sessions.system_prompt`).
+    pub fn get_system_prompt(&self, session_id: &str) -> Result<Option<String>, AgentError> {
+        self.ensure_db()?;
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let mut stmt = conn
+            .prepare("SELECT system_prompt FROM sessions WHERE id = ?1")
+            .map_err(|e| AgentError::Io(format!("Failed to prepare query: {e}")))?;
+        match stmt.query_row(rusqlite::params![session_id], |r| {
+            r.get::<_, Option<String>>(0)
+        }) {
+            Ok(s) => Ok(s.filter(|t| !t.trim().is_empty())),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(AgentError::Io(format!("Failed to read system_prompt: {e}"))),
+        }
+    }
+
     /// Load a previous session from SQLite.
     pub fn load_session(&self, session_id: &str) -> Result<Vec<Message>, AgentError> {
         let conn = rusqlite::Connection::open(&self.db_path)
@@ -365,8 +418,14 @@ mod tests {
             Some("gpt-4o"),
             None,
             Some("Test"),
+            Some("cached system blob"),
         )
         .unwrap();
+
+        assert_eq!(
+            sp.get_system_prompt("test-session-1").unwrap().as_deref(),
+            Some("cached system blob")
+        );
 
         let loaded = sp.load_session("test-session-1").unwrap();
         assert_eq!(loaded.len(), 3);
@@ -430,7 +489,7 @@ mod tests {
         let sp = SessionPersistence::new(tmp.path());
 
         let messages1 = vec![Message::user("First")];
-        sp.persist_session("replace-test", &messages1, None, None, None)
+        sp.persist_session("replace-test", &messages1, None, None, None, None)
             .unwrap();
 
         let messages2 = vec![
@@ -438,7 +497,7 @@ mod tests {
             Message::assistant("Response"),
             Message::user("Second"),
         ];
-        sp.persist_session("replace-test", &messages2, None, None, None)
+        sp.persist_session("replace-test", &messages2, None, None, None, None)
             .unwrap();
 
         let loaded = sp.load_session("replace-test").unwrap();

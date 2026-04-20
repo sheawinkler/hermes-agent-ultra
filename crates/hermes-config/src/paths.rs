@@ -123,6 +123,14 @@ pub fn env_path() -> PathBuf {
     hermes_home().join(".env")
 }
 
+/// `$hermes_home/auth.json` — credential store written by `hermes auth login`.
+///
+/// Mirrors Python's `tools.managed_tool_gateway.auth_json_path()`. Used by
+/// the managed-tool-gateway resolver to read provider OAuth tokens.
+pub fn auth_json_path() -> PathBuf {
+    hermes_home().join("auth.json")
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

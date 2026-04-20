@@ -9,14 +9,9 @@
 //!
 //! Also integrates `StreamManager` for progressive message editing.
 
+use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
-
-use chrono::{DateTime, Utc};
-use hermes_intelligence::{
-    AdaptivePolicyEngine, OutcomeDrivenUpdater, OutcomeSignals, PolicyStore, PolicyUpdateRequest,
-};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
@@ -234,8 +229,6 @@ pub struct Gateway {
     usage_stats: RwLock<HashMap<String, UsageStats>>,
     /// Tracks async `/background` and `/btw` tasks.
     background_tasks: Arc<BackgroundTaskManager>,
-    /// Adaptive policy store (active/stable/history + hard gate rollback).
-    evolution_policies: std::sync::Mutex<PolicyStore>,
     /// MCP reload generation number.
     mcp_reload_generation: RwLock<u64>,
 }
@@ -262,9 +255,6 @@ impl Gateway {
             runtime_state: RwLock::new(HashMap::new()),
             usage_stats: RwLock::new(HashMap::new()),
             background_tasks: Arc::new(BackgroundTaskManager::new(8)),
-            evolution_policies: std::sync::Mutex::new(PolicyStore::new(
-                AdaptivePolicyEngine::default(),
-            )),
             mcp_reload_generation: RwLock::new(0),
         }
     }
@@ -945,9 +935,7 @@ impl Gateway {
         messages: Vec<Message>,
         session_key: &str,
     ) -> Result<(), GatewayError> {
-        let started = Instant::now();
         let runtime_context = self.build_runtime_context(incoming, session_key).await;
-        let selected_model = runtime_context.model.clone();
         let context_handler = self.message_handler_with_context.read().await.clone();
         let response = if let Some(handler) = context_handler {
             handler(messages, runtime_context).await?
@@ -971,13 +959,6 @@ impl Gateway {
         self.send_message(&incoming.platform, &incoming.chat_id, &response, None)
             .await?;
 
-        self.record_route_feedback(
-            selected_model.as_deref(),
-            true,
-            started.elapsed().as_millis() as u64,
-            incoming.text.len() + response.len(),
-        );
-
         Ok(())
     }
 
@@ -988,9 +969,7 @@ impl Gateway {
         messages: Vec<Message>,
         session_key: &str,
     ) -> Result<(), GatewayError> {
-        let started = Instant::now();
         let runtime_context = self.build_runtime_context(incoming, session_key).await;
-        let selected_model = runtime_context.model.clone();
         let context_handler = self.streaming_handler_with_context.read().await.clone();
         let legacy_messages = self
             .inject_runtime_hints(session_key, messages.clone())
@@ -1056,13 +1035,6 @@ impl Gateway {
             .await;
         self.bump_output_usage(session_key, response.chars().count())
             .await;
-
-        self.record_route_feedback(
-            selected_model.as_deref(),
-            true,
-            started.elapsed().as_millis() as u64,
-            incoming.text.len() + response.len(),
-        );
 
         Ok(())
     }
@@ -1244,12 +1216,6 @@ impl Gateway {
         isolated_context: bool,
     ) -> Result<bool, GatewayError> {
         let trimmed = prompt.trim();
-        let plan = self
-            .evolution_policies
-            .lock()
-            .ok()
-            .map(|store| store.active_engine().recommend_long_task_plan(trimmed))
-            .unwrap_or_default();
         if trimmed.eq_ignore_ascii_case("list") {
             let tasks = self.background_tasks.list_tasks();
             let summary = if tasks.is_empty() {
@@ -1295,29 +1261,22 @@ impl Gateway {
             return Ok(true);
         }
 
-        let task_id = self
-            .background_tasks
-            .submit(trimmed.to_string())
+        let task_id = if isolated_context {
+            Self::python_async_task_id("btw")
+        } else {
+            Self::python_async_task_id("bg")
+        };
+        self.background_tasks
+            .submit_with_id(task_id.clone(), trimmed.to_string())
             .map_err(GatewayError::Platform)?;
+
+        let preview = Self::gateway_command_preview(trimmed);
         let ack = if isolated_context {
-            format!(
-                "🛰 BTW task queued: {}\nPlan: parallel={} split={} checkpoint={} retry_boost={}\nUse /background status {} to check progress.",
-                task_id,
-                plan.parallelism,
-                plan.split_subtasks,
-                plan.checkpoint_interval_turns,
-                plan.retry_boost,
-                task_id
-            )
+            format!("💬 /btw: \"{}\"\nReply will appear here shortly.", preview)
         } else {
             format!(
-                "🧵 Background task queued: {}\nPlan: parallel={} split={} checkpoint={} retry_boost={}\nUse /background status {} to check progress.",
-                task_id,
-                plan.parallelism,
-                plan.split_subtasks,
-                plan.checkpoint_interval_turns,
-                plan.retry_boost,
-                task_id
+                "🔄 Background task started: \"{}\"\nTask ID: {}\nYou can keep chatting — results will appear when done.",
+                preview, task_id
             )
         };
         self.send_message(&incoming.platform, &incoming.chat_id, &ack, None)
@@ -1337,32 +1296,21 @@ impl Gateway {
         }
         let manager = self.background_tasks.clone();
         let task_id_for_task = task_id.clone();
+        // Python `GatewayRunner._run_background_task`: only `user_message=prompt` (fresh session).
+        // Python `_run_btw_task`: `conversation_history` snapshot + ephemeral user turn (no tools).
         let original_messages = if isolated_context {
-            vec![
-                Message::system(format!(
-                    "[execution_plan]\nparallelism={}\nsplit_subtasks={}\ncheckpoint_interval_turns={}\nretry_boost={}",
-                    plan.parallelism,
-                    plan.split_subtasks,
-                    plan.checkpoint_interval_turns,
-                    plan.retry_boost
-                )),
-                Message::user(trimmed),
-            ]
+            let mut history = self.session_manager.get_messages(session_key).await;
+            let btw_user = format!(
+                "[Ephemeral /btw side question. Answer using the conversation \
+                 context. No tools available. Be direct and concise.]\n\n{}",
+                trimmed
+            );
+            history.push(Message::user(btw_user));
+            history
         } else {
-            let mut m = self.session_manager.get_messages(session_key).await;
-            m.push(Message::system(format!(
-                "[execution_plan]\nparallelism={}\nsplit_subtasks={}\ncheckpoint_interval_turns={}\nretry_boost={}",
-                plan.parallelism,
-                plan.split_subtasks,
-                plan.checkpoint_interval_turns,
-                plan.retry_boost
-            )));
-            m.push(Message::user(trimmed));
-            m
+            vec![Message::user(trimmed)]
         };
-        let legacy_messages = self
-            .inject_runtime_hints(session_key, original_messages.clone())
-            .await;
+        let legacy_messages = original_messages.clone();
         let runtime_context = self.build_runtime_context(incoming, session_key).await;
         tokio::spawn(async move {
             let result = if let Some(handler) = context_handler {
@@ -1382,6 +1330,28 @@ impl Gateway {
         });
 
         Ok(true)
+    }
+
+    /// `preview = prompt[:60] + ("..." if len(prompt) > 60 else "")` (Python gateway).
+    fn gateway_command_preview(prompt: &str) -> String {
+        let t = prompt.trim();
+        let mut it = t.chars();
+        let head: String = it.by_ref().take(60).collect();
+        if it.next().is_some() {
+            format!("{}...", head)
+        } else {
+            head
+        }
+    }
+
+    /// Python: `f"{kind}_{%H%M%S}_{os.urandom(3).hex()}"` style task ids (`bg_…`, `btw_…`).
+    fn python_async_task_id(kind: &str) -> String {
+        let ts = chrono::Utc::now().format("%H%M%S");
+        let salt = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| (d.subsec_nanos() as u64) ^ d.as_secs().wrapping_mul(0x9e37_79b9_85f0_a7b5))
+            .unwrap_or(0xABCDEF);
+        format!("{}_{}_{:06x}", kind, ts, salt & 0xFFFFFF)
     }
 
     // -----------------------------------------------------------------------
@@ -1527,119 +1497,12 @@ impl Gateway {
             .filter(|s| !s.is_empty())
     }
 
-    /// Persist adaptive policy store to disk for audit/rollback.
-    pub fn save_policy_store(&self, path: &std::path::Path) -> Result<(), GatewayError> {
-        let store = self
-            .evolution_policies
-            .lock()
-            .map_err(|_| GatewayError::Platform("Policy store lock poisoned".into()))?;
-        store
-            .save_to_path(path)
-            .map_err(|e| GatewayError::Platform(format!("Failed to save policy store: {}", e)))
-    }
-
-    /// Hot-reload adaptive policy store from disk.
-    pub fn load_policy_store(&self, path: &std::path::Path) -> Result<(), GatewayError> {
-        let loaded = PolicyStore::load_from_path(path)
-            .map_err(|e| GatewayError::Platform(format!("Failed to load policy store: {}", e)))?;
-        let mut store = self
-            .evolution_policies
-            .lock()
-            .map_err(|_| GatewayError::Platform("Policy store lock poisoned".into()))?;
-        *store = loaded;
-        Ok(())
-    }
-
-    /// Persist policy audit events for external analysis.
-    pub fn save_policy_audit_log(&self, path: &std::path::Path) -> Result<(), GatewayError> {
-        let store = self
-            .evolution_policies
-            .lock()
-            .map_err(|_| GatewayError::Platform("Policy store lock poisoned".into()))?;
-        store
-            .save_audit_log(path)
-            .map_err(|e| GatewayError::Platform(format!("Failed to save policy audit log: {}", e)))
-    }
-
-    /// Export policy store as pretty JSON string.
-    pub fn export_policy_store_json(&self) -> Result<String, GatewayError> {
-        let store = self
-            .evolution_policies
-            .lock()
-            .map_err(|_| GatewayError::Platform("Policy store lock poisoned".into()))?;
-        serde_json::to_string_pretty(&*store)
-            .map_err(|e| GatewayError::Platform(format!("Failed to serialize policy store: {}", e)))
-    }
-
-    /// Export policy audit log as pretty JSON string.
-    pub fn export_policy_audit_json(&self) -> Result<String, GatewayError> {
-        let store = self
-            .evolution_policies
-            .lock()
-            .map_err(|_| GatewayError::Platform("Policy store lock poisoned".into()))?;
-        serde_json::to_string_pretty(&store.audit_log)
-            .map_err(|e| GatewayError::Platform(format!("Failed to serialize policy audit: {}", e)))
-    }
-
-    /// Apply one online outcome-driven policy update and move active to canary.
-    pub fn apply_outcome_policy_update(
-        &self,
-        actor: &str,
-        reason: &str,
-        rollout_ratio: f64,
-    ) -> Result<String, GatewayError> {
-        let mut store = self
-            .evolution_policies
-            .lock()
-            .map_err(|_| GatewayError::Platform("Policy store lock poisoned".into()))?;
-        let request = PolicyUpdateRequest {
-            actor: actor.to_string(),
-            reason: reason.to_string(),
-            rollout_ratio,
-        };
-        store
-            .apply_update(&OutcomeDrivenUpdater::default(), request)
-            .map_err(|e| GatewayError::Platform(format!("Failed to apply policy update: {}", e)))
-    }
-
-    /// Manually promote active canary policy to stable.
-    pub fn promote_active_policy_stable(&self, actor: &str, reason: &str) -> Option<String> {
-        let mut store = self.evolution_policies.lock().ok()?;
-        store.promote_active_to_stable(actor, reason)
-    }
-
-    /// Force rollback active policy to stable policy.
-    pub fn rollback_active_policy(&self, actor: &str, reason: &str) -> Option<String> {
-        let mut store = self.evolution_policies.lock().ok()?;
-        if store.active.version == store.stable.version {
-            return None;
-        }
-        let from = store.active.version.clone();
-        let to = store.stable.version.clone();
-        let active_snapshot = store.active.clone();
-        store.history.push(active_snapshot);
-        store.audit_log.push(hermes_intelligence::PolicyAuditEvent {
-            at_epoch_secs: chrono::Utc::now().timestamp() as u64,
-            actor: actor.to_string(),
-            action: "manual_rollback".to_string(),
-            reason: reason.to_string(),
-            from_version: from,
-            to_version: to.clone(),
-            rollout_ratio: 0.0,
-            delta_summary: "manual_operator_action".to_string(),
-        });
-        store.active = store.stable.clone();
-        store.candidate = None;
-        Some(to)
-    }
-
-    /// Resolve model routing candidate for a message.
+    /// Resolve model routing candidate for a message (static heuristics only; no adaptive policy store).
     pub fn load_smart_model_routing(&self, text: &str) -> Option<String> {
-        if let Ok(store) = self.evolution_policies.lock() {
-            if let Some(model) = store.active_engine().recommend_model_for_text(text) {
-                return Some(model);
-            }
-        }
+        Self::heuristic_model_hint(text)
+    }
+
+    fn heuristic_model_hint(text: &str) -> Option<String> {
         if text.len() > 2000 || text.contains("analyze") || text.contains("refactor") {
             Some("openai:gpt-4o".to_string())
         } else if text.contains("quick") || text.contains("summary") {
@@ -1699,60 +1562,9 @@ impl Gateway {
         if has_model {
             return;
         }
-        let adaptive_model = self.evolution_policies.lock().ok().and_then(|store| {
-            if self.session_in_rollout(session_key, store.active.rollout_ratio) {
-                store.active_engine().recommend_model_for_text(text)
-            } else {
-                None
-            }
-        });
-        let selected = adaptive_model.or_else(|| self.load_smart_model_routing(text));
-        if let Some(model) = selected {
+        if let Some(model) = Self::heuristic_model_hint(text) {
             let mut states = self.runtime_state.write().await;
             states.entry(session_key.to_string()).or_default().model = Some(model);
-        }
-    }
-
-    fn session_in_rollout(&self, session_key: &str, ratio: f64) -> bool {
-        if ratio <= 0.0 {
-            return false;
-        }
-        if ratio >= 1.0 {
-            return true;
-        }
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        session_key.hash(&mut hasher);
-        let bucket = (hasher.finish() % 10_000) as f64 / 10_000.0;
-        bucket < ratio
-    }
-
-    fn record_route_feedback(
-        &self,
-        model: Option<&str>,
-        success: bool,
-        latency_ms: u64,
-        payload_chars: usize,
-    ) {
-        let Some(model_name) = model else {
-            return;
-        };
-        let estimated_cost = (payload_chars as f64 / 4.0) * 2.0e-6;
-        let outcome = OutcomeSignals {
-            success,
-            latency_ms,
-            cost_usd: estimated_cost,
-            errors: if success { 0 } else { 1 },
-        };
-        if let Ok(mut store) = self.evolution_policies.lock() {
-            store
-                .active_engine_mut()
-                .record_model_outcome(model_name, &outcome);
-            if let Some(rollback_reason) = store.rollback_if_needed() {
-                warn!("Adaptive policy rollback: {}", rollback_reason);
-            } else if let Some(version) = store.auto_promote_if_healthy(60) {
-                info!("Adaptive policy promoted to stable: {}", version);
-            }
         }
     }
 }
@@ -1963,13 +1775,13 @@ mod tests {
             let msgs = sent.lock().unwrap();
             let queued = msgs
                 .iter()
-                .find(|(_, text)| text.contains("Background task queued"))
+                .find(|(_, text)| text.contains("Background task started"))
                 .expect("queue ack should exist");
             queued
                 .1
-                .split_whitespace()
-                .find(|part| part.contains('-'))
-                .unwrap()
+                .lines()
+                .find_map(|line| line.strip_prefix("Task ID: ").map(str::trim))
+                .expect("task id line")
                 .to_string()
         };
 

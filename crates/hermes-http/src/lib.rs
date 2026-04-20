@@ -2,9 +2,8 @@
 //!
 //! Environment (see also `security` module):
 //! - `HERMES_HTTP_MAX_BODY_BYTES` — max JSON body size for POST routes (default 2 MiB).
-//! - Policy routes: `HERMES_HTTP_POLICY_*` and idempotency `HERMES_HTTP_POLICY_IDEMPOTENCY_*` (see `security.rs`).
+//! Policy HTTP routes are intentionally omitted (Hermes Python does not expose them).
 
-mod idempotency;
 mod security;
 
 pub use security::parse_allowed_ips;
@@ -12,6 +11,7 @@ pub use security::PolicyGuardConfig;
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::path::Path as FsPath;
 use std::sync::Arc;
 use std::sync::Mutex;
 
@@ -20,7 +20,7 @@ use axum::body::Body;
 use axum::extract::ws::{Message as WsMessage, WebSocket};
 use axum::extract::{Path, State, WebSocketUpgrade};
 use axum::http::header;
-use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode};
+use axum::http::StatusCode;
 use axum::middleware;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -34,7 +34,8 @@ use hermes_agent::provider::{
 use hermes_agent::providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
 };
-use hermes_agent::{AgentConfig, AgentLoop};
+use hermes_agent::session_persistence::SessionPersistence;
+use hermes_agent::{leading_system_prompt_for_persist, AgentConfig, AgentLoop};
 use hermes_config::GatewayConfig;
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
@@ -127,8 +128,6 @@ pub struct HttpServerState {
     pub tool_registry: Arc<ToolRegistry>,
     gateway: Arc<Gateway>,
     outbound: ChatOutboundBuffer,
-    policy_guard: security::PolicyGuardConfig,
-    idempotency: Arc<idempotency::PolicyIdempotencyCache>,
 }
 
 impl HttpServerState {
@@ -162,11 +161,35 @@ impl HttpServerState {
                 let agent_tools = agent_tools.clone();
                 Box::pin(async move {
                     hermes_telemetry::record_llm_request();
+                    let effective_model = resolve_model_for_gateway(
+                        config.model.as_deref().unwrap_or("gpt-4o"),
+                        &ctx,
+                    );
                     let agent = build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools);
                     let result = agent
                         .run(messages, None)
                         .await
                         .map_err(|e| GatewayError::Platform(e.to_string()))?;
+                    let home = ctx
+                        .home
+                        .as_deref()
+                        .or(config.home_dir.as_deref())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty());
+                    if let Some(h) = home {
+                        if !ctx.session_key.trim().is_empty() {
+                            let sp = SessionPersistence::new(FsPath::new(h));
+                            let sys = leading_system_prompt_for_persist(&result.messages);
+                            let _ = sp.persist_session(
+                                &ctx.session_key,
+                                &result.messages,
+                                Some(&effective_model),
+                                Some(ctx.platform.as_str()),
+                                None,
+                                sys.as_deref(),
+                            );
+                        }
+                    }
                     Ok(extract_last_assistant_reply(&result.messages))
                 })
             }))
@@ -178,12 +201,46 @@ impl HttpServerState {
                 let agent_tools = agent_tools_stream.clone();
                 Box::pin(async move {
                     hermes_telemetry::record_llm_request();
+                    let effective_model = resolve_model_for_gateway(
+                        config.model.as_deref().unwrap_or("gpt-4o"),
+                        &ctx,
+                    );
                     let agent = build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools);
                     let emit = on_chunk.clone();
+                    let ui_state = Arc::new(Mutex::new((false, false))); // (muted, needs_break)
+                    let ui_state_cb = ui_state.clone();
                     let stream_cb: Box<dyn Fn(StreamChunk) + Send + Sync> =
                         Box::new(move |chunk: StreamChunk| {
                             if let Some(delta) = chunk.delta {
+                                if let Some(extra) = delta.extra.as_ref() {
+                                    if let Some(control) =
+                                        extra.get("control").and_then(|v| v.as_str())
+                                    {
+                                        if control == "mute_post_response" {
+                                            let enabled = extra
+                                                .get("enabled")
+                                                .and_then(|v| v.as_bool())
+                                                .unwrap_or(false);
+                                            if let Ok(mut st) = ui_state_cb.lock() {
+                                                st.0 = enabled;
+                                            }
+                                        } else if control == "stream_break" {
+                                            if let Ok(mut st) = ui_state_cb.lock() {
+                                                st.1 = true;
+                                            }
+                                        }
+                                    }
+                                }
                                 if let Some(text) = delta.content {
+                                    if let Ok(mut st) = ui_state_cb.lock() {
+                                        if st.0 {
+                                            return;
+                                        }
+                                        if st.1 {
+                                            emit("\n\n".to_string());
+                                            st.1 = false;
+                                        }
+                                    }
                                     emit(text);
                                 }
                             }
@@ -193,6 +250,26 @@ impl HttpServerState {
                         .run_stream(messages, None, Some(stream_cb))
                         .await
                         .map_err(|e| GatewayError::Platform(e.to_string()))?;
+                    let home = ctx
+                        .home
+                        .as_deref()
+                        .or(config.home_dir.as_deref())
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty());
+                    if let Some(h) = home {
+                        if !ctx.session_key.trim().is_empty() {
+                            let sp = SessionPersistence::new(FsPath::new(h));
+                            let sys = leading_system_prompt_for_persist(&result.messages);
+                            let _ = sp.persist_session(
+                                &ctx.session_key,
+                                &result.messages,
+                                Some(&effective_model),
+                                Some(ctx.platform.as_str()),
+                                None,
+                                sys.as_deref(),
+                            );
+                        }
+                    }
                     Ok(extract_last_assistant_reply(&result.messages))
                 })
             }))
@@ -203,16 +280,11 @@ impl HttpServerState {
             .await
             .map_err(|e| AgentError::Io(e.to_string()))?;
 
-        let policy_guard = security::PolicyGuardConfig::from_env();
-        let idempotency = Arc::new(idempotency::PolicyIdempotencyCache::from_env());
-
         Ok(Self {
             config: Arc::new(config),
             tool_registry,
             gateway,
             outbound,
-            policy_guard,
-            idempotency,
         })
     }
 }
@@ -255,93 +327,6 @@ pub struct CommandResponse {
     pub output: String,
 }
 
-#[derive(Debug, Deserialize)]
-pub struct PolicyUpdateHttpRequest {
-    pub actor: String,
-    pub reason: String,
-    #[serde(default = "default_policy_rollout_ratio")]
-    pub rollout_ratio: f64,
-    #[serde(default)]
-    pub idempotency_key: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct PolicyActionHttpRequest {
-    pub actor: String,
-    pub reason: String,
-    #[serde(default)]
-    pub idempotency_key: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct PolicyActionHttpResponse {
-    pub ok: bool,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct PolicyExportHttpResponse {
-    pub policy_store: String,
-    pub audit_log: String,
-}
-
-fn default_policy_rollout_ratio() -> f64 {
-    0.15
-}
-
-static IDEMPOTENCY_HEADER: HeaderName = HeaderName::from_static("idempotency-key");
-static REPLAYED_HEADER: HeaderName = HeaderName::from_static("x-idempotent-replayed");
-
-fn resolve_policy_idempotency_key(headers: &HeaderMap, body_key: Option<&str>) -> Option<String> {
-    headers
-        .get(&IDEMPOTENCY_HEADER)
-        .and_then(|v| v.to_str().ok())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
-        .or_else(|| {
-            body_key
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-        })
-}
-
-fn policy_idempotency_lookup_key(route: &'static str, idem: &str) -> String {
-    format!("{}\n{}", route, idem)
-}
-
-fn policy_guard_http_err(e: &'static str) -> HttpError {
-    let status = if e.contains("HERMES_HTTP_POLICY_REQUIRE_ADMIN")
-        || e.contains("HERMES_HTTP_POLICY_EXPORT_REQUIRE_ADMIN")
-        || e.contains("HERMES_HTTP_POLICY_ADMIN_KEY is empty")
-    {
-        StatusCode::SERVICE_UNAVAILABLE
-    } else if e.contains("X-Hermes-Policy-Admin") {
-        StatusCode::UNAUTHORIZED
-    } else if e.contains("ALLOWED_ACTORS") {
-        StatusCode::FORBIDDEN
-    } else {
-        StatusCode::BAD_REQUEST
-    };
-    HttpError {
-        status,
-        message: e.to_string(),
-    }
-}
-
-fn idempotent_json_response(status: u16, json_body: String) -> Response {
-    Response::builder()
-        .status(StatusCode::from_u16(status).unwrap_or(StatusCode::OK))
-        .header(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        )
-        .header(REPLAYED_HEADER.clone(), HeaderValue::from_static("true"))
-        .body(Body::from(json_body))
-        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
-}
-
 fn max_request_body_bytes() -> usize {
     const DEFAULT: usize = 2 * 1024 * 1024;
     std::env::var("HERMES_HTTP_MAX_BODY_BYTES")
@@ -363,10 +348,6 @@ pub fn router(state: HttpServerState) -> Router {
         .route("/metrics", get(metrics_prometheus))
         .route("/v1/sessions/{session_id}/messages", post(send_message))
         .route("/v1/commands", post(exec_command))
-        .route("/v1/policy/update", post(policy_update))
-        .route("/v1/policy/promote", post(policy_promote))
-        .route("/v1/policy/rollback", post(policy_rollback))
-        .route("/v1/policy/export", get(policy_export))
         .route("/v1/ws/{session_id}", get(ws_upgrade))
         .with_state(state)
         .layer(middleware::from_fn(move |req, next| {
@@ -571,202 +552,6 @@ async fn ws_upgrade(
     ws.on_upgrade(move |socket| handle_ws(socket, state, session_id))
 }
 
-async fn policy_update(
-    State(state): State<HttpServerState>,
-    headers: HeaderMap,
-    Json(req): Json<PolicyUpdateHttpRequest>,
-) -> Result<Response, HttpError> {
-    hermes_telemetry::record_http_request();
-    state
-        .policy_guard
-        .check_mutation_admin(&headers)
-        .map_err(policy_guard_http_err)?;
-    state
-        .policy_guard
-        .check_actor(&req.actor)
-        .map_err(policy_guard_http_err)?;
-    let route = "POST /v1/policy/update";
-    let idem = resolve_policy_idempotency_key(&headers, req.idempotency_key.as_deref());
-    if let Some(ref k) = idem {
-        let ck = policy_idempotency_lookup_key(route, k);
-        if let Some((status, body)) = state.idempotency.get(&ck) {
-            return Ok(idempotent_json_response(status, body));
-        }
-    }
-    let version = state
-        .gateway
-        .apply_outcome_policy_update(&req.actor, &req.reason, req.rollout_ratio)
-        .map_err(|e| HttpError {
-            status: StatusCode::BAD_GATEWAY,
-            message: e.to_string(),
-        })?;
-    let resp = PolicyActionHttpResponse {
-        ok: true,
-        message: "candidate policy promoted to canary".to_string(),
-        version: Some(version),
-    };
-    let body = serde_json::to_string(&resp).map_err(|e| HttpError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        message: e.to_string(),
-    })?;
-    if let Some(ref k) = idem {
-        state
-            .idempotency
-            .insert(policy_idempotency_lookup_key(route, k), 200, body.clone());
-    }
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        )
-        .body(Body::from(body))
-        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()))
-}
-
-async fn policy_promote(
-    State(state): State<HttpServerState>,
-    headers: HeaderMap,
-    Json(req): Json<PolicyActionHttpRequest>,
-) -> Result<Response, HttpError> {
-    hermes_telemetry::record_http_request();
-    state
-        .policy_guard
-        .check_mutation_admin(&headers)
-        .map_err(policy_guard_http_err)?;
-    state
-        .policy_guard
-        .check_actor(&req.actor)
-        .map_err(policy_guard_http_err)?;
-    let route = "POST /v1/policy/promote";
-    let idem = resolve_policy_idempotency_key(&headers, req.idempotency_key.as_deref());
-    if let Some(ref k) = idem {
-        let ck = policy_idempotency_lookup_key(route, k);
-        if let Some((status, body)) = state.idempotency.get(&ck) {
-            return Ok(idempotent_json_response(status, body));
-        }
-    }
-    let promoted = state
-        .gateway
-        .promote_active_policy_stable(&req.actor, &req.reason);
-    let (ok, message, version) = match promoted {
-        Some(v) => (
-            true,
-            "active canary promoted to stable".to_string(),
-            Some(v),
-        ),
-        None => (false, "no active canary to promote".to_string(), None),
-    };
-    let resp = PolicyActionHttpResponse {
-        ok,
-        message,
-        version,
-    };
-    let body = serde_json::to_string(&resp).map_err(|e| HttpError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        message: e.to_string(),
-    })?;
-    if let Some(ref k) = idem {
-        state
-            .idempotency
-            .insert(policy_idempotency_lookup_key(route, k), 200, body.clone());
-    }
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        )
-        .body(Body::from(body))
-        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()))
-}
-
-async fn policy_rollback(
-    State(state): State<HttpServerState>,
-    headers: HeaderMap,
-    Json(req): Json<PolicyActionHttpRequest>,
-) -> Result<Response, HttpError> {
-    hermes_telemetry::record_http_request();
-    state
-        .policy_guard
-        .check_mutation_admin(&headers)
-        .map_err(policy_guard_http_err)?;
-    state
-        .policy_guard
-        .check_actor(&req.actor)
-        .map_err(policy_guard_http_err)?;
-    let route = "POST /v1/policy/rollback";
-    let idem = resolve_policy_idempotency_key(&headers, req.idempotency_key.as_deref());
-    if let Some(ref k) = idem {
-        let ck = policy_idempotency_lookup_key(route, k);
-        if let Some((status, body)) = state.idempotency.get(&ck) {
-            return Ok(idempotent_json_response(status, body));
-        }
-    }
-    let rolled = state
-        .gateway
-        .rollback_active_policy(&req.actor, &req.reason);
-    let (ok, message, version) = match rolled {
-        Some(v) => (
-            true,
-            "active policy rolled back to stable".to_string(),
-            Some(v),
-        ),
-        None => (false, "active policy already stable".to_string(), None),
-    };
-    let resp = PolicyActionHttpResponse {
-        ok,
-        message,
-        version,
-    };
-    let body = serde_json::to_string(&resp).map_err(|e| HttpError {
-        status: StatusCode::INTERNAL_SERVER_ERROR,
-        message: e.to_string(),
-    })?;
-    if let Some(ref k) = idem {
-        state
-            .idempotency
-            .insert(policy_idempotency_lookup_key(route, k), 200, body.clone());
-    }
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json"),
-        )
-        .body(Body::from(body))
-        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response()))
-}
-
-async fn policy_export(
-    State(state): State<HttpServerState>,
-    headers: HeaderMap,
-) -> Result<Json<PolicyExportHttpResponse>, HttpError> {
-    hermes_telemetry::record_http_request();
-    state
-        .policy_guard
-        .check_export_admin(&headers)
-        .map_err(policy_guard_http_err)?;
-    let policy_store = state
-        .gateway
-        .export_policy_store_json()
-        .map_err(|e| HttpError {
-            status: StatusCode::BAD_GATEWAY,
-            message: e.to_string(),
-        })?;
-    let audit_log = state
-        .gateway
-        .export_policy_audit_json()
-        .map_err(|e| HttpError {
-            status: StatusCode::BAD_GATEWAY,
-            message: e.to_string(),
-        })?;
-    Ok(Json(PolicyExportHttpResponse {
-        policy_store,
-        audit_log,
-    }))
-}
-
 async fn handle_ws(mut socket: WebSocket, state: HttpServerState, session_id: String) {
     let _ = socket
         .send(WsMessage::Text(
@@ -878,8 +663,10 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
                     api_key_env: m.api_key_env.clone(),
                 }
             }),
-            evolution_model_hints: config.smart_model_routing.evolution_model_hints,
         },
+        memory_nudge_interval: config.agent.memory_nudge_interval,
+        skill_creation_nudge_interval: config.agent.skill_creation_nudge_interval,
+        background_review_enabled: config.agent.background_review_enabled,
         ..AgentConfig::default()
     }
 }
@@ -985,6 +772,21 @@ fn build_agent_for_gateway_context(
     let mut agent_config = build_agent_config(config, &effective_model);
     if let Some(personality) = ctx.personality.clone() {
         agent_config.personality = Some(personality);
+    }
+    if !ctx.session_key.trim().is_empty() {
+        agent_config.session_id = Some(ctx.session_key.clone());
+    }
+    let home = ctx
+        .home
+        .as_deref()
+        .or(config.home_dir.as_deref())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    if let Some(h) = home {
+        let _ = AgentLoop::hydrate_stored_system_prompt_from_hermes_home(
+            &mut agent_config,
+            FsPath::new(h),
+        );
     }
     AgentLoop::new(agent_config, agent_tools, provider)
 }

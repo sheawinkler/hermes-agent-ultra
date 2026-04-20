@@ -17,6 +17,7 @@ pub mod registry;
 pub mod tools;
 pub mod toolset;
 pub mod toolset_distributions;
+pub mod tts_streaming;
 pub mod v4a_patch;
 
 // Re-export registry types
