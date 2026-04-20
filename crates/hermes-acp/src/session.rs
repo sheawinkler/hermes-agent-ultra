@@ -189,6 +189,58 @@ impl SessionManager {
         }
     }
 
+    /// Update a session's model identifier.
+    pub fn update_model(&self, session_id: &str, model: &str) -> Option<SessionState> {
+        let mut sessions = self.sessions.lock().unwrap();
+        if let Some(state) = sessions.get_mut(session_id) {
+            state.model = Some(model.to_string());
+            state.touch();
+            let cloned = state.clone();
+            drop(sessions);
+            self.persist(&cloned);
+            Some(cloned)
+        } else {
+            None
+        }
+    }
+
+    /// Update a session's mode identifier.
+    pub fn update_mode(&self, session_id: &str, mode: &str) -> Option<SessionState> {
+        let mut sessions = self.sessions.lock().unwrap();
+        if let Some(state) = sessions.get_mut(session_id) {
+            state.mode = Some(mode.to_string());
+            state.touch();
+            let cloned = state.clone();
+            drop(sessions);
+            self.persist(&cloned);
+            Some(cloned)
+        } else {
+            None
+        }
+    }
+
+    /// Set or replace a session config option.
+    pub fn set_config_option(
+        &self,
+        session_id: &str,
+        key: &str,
+        value: &str,
+    ) -> Option<SessionState> {
+        let mut sessions = self.sessions.lock().unwrap();
+        if let Some(state) = sessions.get_mut(session_id) {
+            state
+                .config_options
+                .insert(key.to_string(), value.to_string());
+            state.touch();
+            let cloned = state.clone();
+            drop(sessions);
+            self.persist(&cloned);
+            Some(cloned)
+        } else {
+            None
+        }
+    }
+
     /// Update a session's phase.
     pub fn set_phase(&self, session_id: &str, phase: SessionPhase) {
         let mut sessions = self.sessions.lock().unwrap();
@@ -309,5 +361,27 @@ mod tests {
         let state = mgr.create_session("/tmp");
         assert!(mgr.remove_session(&state.session_id));
         assert!(mgr.get_session(&state.session_id).is_none());
+    }
+
+    #[test]
+    fn test_update_model_mode_and_config_option() {
+        let mgr = SessionManager::new();
+        let state = mgr.create_session("/tmp");
+        let sid = state.session_id;
+
+        mgr.update_model(&sid, "openai:gpt-4o");
+        mgr.update_mode(&sid, "code");
+        mgr.set_config_option(&sid, "temperature", "0.2");
+
+        let updated = mgr.get_session(&sid).expect("session should exist");
+        assert_eq!(updated.model.as_deref(), Some("openai:gpt-4o"));
+        assert_eq!(updated.mode.as_deref(), Some("code"));
+        assert_eq!(
+            updated
+                .config_options
+                .get("temperature")
+                .map(String::as_str),
+            Some("0.2")
+        );
     }
 }

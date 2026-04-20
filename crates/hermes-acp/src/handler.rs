@@ -11,12 +11,31 @@ use tokio::sync::Mutex;
 use crate::events::{AcpEvent, EventSink, ToolCallIdTracker};
 use crate::permissions::PermissionStore;
 use crate::protocol::*;
-use crate::session::{SessionManager, SessionPhase};
+use crate::session::{SessionManager, SessionPhase, SessionState};
 
 /// Trait for handling ACP requests.
 #[async_trait::async_trait]
 pub trait AcpHandler: Send + Sync {
     async fn handle_request(&self, request: AcpRequest) -> AcpResponse;
+}
+
+/// Output returned by a concrete ACP prompt executor.
+#[derive(Debug, Clone, Default)]
+pub struct PromptExecutionOutput {
+    pub response_text: String,
+    pub usage: Option<Usage>,
+    pub total_turns: Option<u32>,
+}
+
+/// Pluggable ACP prompt executor.
+#[async_trait::async_trait]
+pub trait AcpPromptExecutor: Send + Sync {
+    async fn execute_prompt(
+        &self,
+        session: &SessionState,
+        user_text: &str,
+        history: &[Value],
+    ) -> Result<PromptExecutionOutput, String>;
 }
 
 // ---------------------------------------------------------------------------
@@ -77,6 +96,7 @@ pub struct HermesAcpHandler {
     pub event_sink: Arc<EventSink>,
     pub permission_store: Arc<PermissionStore>,
     version: String,
+    prompt_executor: Option<Arc<dyn AcpPromptExecutor>>,
 }
 
 impl HermesAcpHandler {
@@ -90,7 +110,13 @@ impl HermesAcpHandler {
             event_sink,
             permission_store,
             version: env!("CARGO_PKG_VERSION").to_string(),
+            prompt_executor: None,
         }
+    }
+
+    pub fn with_prompt_executor(mut self, prompt_executor: Arc<dyn AcpPromptExecutor>) -> Self {
+        self.prompt_executor = Some(prompt_executor);
+        self
     }
 
     fn available_commands(&self) -> Vec<Value> {
@@ -309,6 +335,15 @@ fn param_str<'a>(p: &'a serde_json::Map<String, Value>, key: &str) -> Option<&'a
     p.get(key)?.as_str()
 }
 
+fn param_value_as_string(p: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
+    let value = p.get(key)?;
+    if let Some(s) = value.as_str() {
+        Some(s.to_string())
+    } else {
+        Some(value.to_string())
+    }
+}
+
 #[async_trait::async_trait]
 impl AcpHandler for HermesAcpHandler {
     async fn handle_request(&self, request: AcpRequest) -> AcpResponse {
@@ -493,37 +528,89 @@ impl AcpHandler for HermesAcpHandler {
 
                 self.event_sink
                     .push(AcpEvent::thinking(session_id, "Processing prompt..."));
-                let turn = history
-                    .iter()
-                    .filter(|m| {
-                        m.get("role")
-                            .and_then(|v| v.as_str())
-                            .map(|r| r == "user")
-                            .unwrap_or(false)
+                let session_snapshot = self
+                    .session_manager
+                    .get_session(session_id)
+                    .ok_or_else(|| format!("Session not found: {session_id}"));
+                let session_snapshot = match session_snapshot {
+                    Ok(s) => s,
+                    Err(e) => {
+                        self.event_sink.push(AcpEvent::error(session_id, &e));
+                        self.session_manager
+                            .set_phase(session_id, SessionPhase::Failed);
+                        return AcpResponse::error(request.id, -32602, e);
+                    }
+                };
+
+                let prompt_result = if let Some(executor) = &self.prompt_executor {
+                    executor
+                        .execute_prompt(&session_snapshot, &user_text, &history)
+                        .await
+                } else {
+                    let turn = history
+                        .iter()
+                        .filter(|m| {
+                            m.get("role")
+                                .and_then(|v| v.as_str())
+                                .map(|r| r == "user")
+                                .unwrap_or(false)
+                        })
+                        .count();
+                    let snippet = user_text.chars().take(200).collect::<String>();
+                    Ok(PromptExecutionOutput {
+                        response_text: format!(
+                            "ACP session {} processed turn {}.\n\n{}",
+                            session_id, turn, snippet
+                        ),
+                        usage: None,
+                        total_turns: Some(1),
                     })
-                    .count();
-                let snippet = user_text.chars().take(200).collect::<String>();
-                let response_text = format!(
-                    "ACP session {} processed turn {}.\n\n{}",
-                    session_id, turn, snippet
-                );
-                self.event_sink
-                    .push(AcpEvent::message_delta(session_id, &response_text));
-                self.event_sink
-                    .push(AcpEvent::message_complete(session_id, &response_text));
-                self.event_sink.push(AcpEvent::step_complete(session_id, 1));
+                };
+                let prompt_result = match prompt_result {
+                    Ok(r) => r,
+                    Err(err) => {
+                        self.event_sink.push(AcpEvent::error(session_id, &err));
+                        self.session_manager
+                            .set_phase(session_id, SessionPhase::Failed);
+                        return AcpResponse::error(request.id, -32000, err);
+                    }
+                };
+
+                let response_text = prompt_result.response_text.trim().to_string();
+                if !response_text.is_empty() {
+                    self.event_sink
+                        .push(AcpEvent::message_delta(session_id, &response_text));
+                    self.event_sink
+                        .push(AcpEvent::message_complete(session_id, &response_text));
+                }
+                self.event_sink.push(AcpEvent::step_complete(
+                    session_id,
+                    prompt_result.total_turns.unwrap_or(1),
+                ));
 
                 history.push(json!({
                     "role": "assistant",
-                    "content": response_text.clone(),
+                    "content": response_text,
                 }));
                 self.session_manager.set_history(session_id, history);
+
+                if let Some(usage) = prompt_result.usage.as_ref() {
+                    self.session_manager.add_usage(
+                        session_id,
+                        usage.input_tokens,
+                        usage.output_tokens,
+                    );
+                }
                 self.session_manager.save_session(session_id);
 
                 self.session_manager
                     .set_phase(session_id, SessionPhase::Idle);
 
-                AcpResponse::success(request.id, json!({"stop_reason": "end_turn"}))
+                let mut payload = json!({"stop_reason": "end_turn"});
+                if let Some(usage) = prompt_result.usage {
+                    payload["usage"] = serde_json::to_value(usage).unwrap_or_else(|_| json!({}));
+                }
+                AcpResponse::success(request.id, payload)
             }
 
             // -- Session configuration --------------------------------------
@@ -536,17 +623,24 @@ impl AcpHandler for HermesAcpHandler {
                     .or_else(|| param_str(p, "model"))
                     .unwrap_or("");
 
-                if let Some(mut state) = self.session_manager.get_session(session_id) {
-                    // Update model in session manager
-                    let mut sessions = self.session_manager.list_sessions();
-                    tracing::info!("Session {}: model switched to {}", session_id, model_id);
-                    AcpResponse::success(request.id, json!({}))
-                } else {
-                    AcpResponse::error(
+                if model_id.trim().is_empty() {
+                    return AcpResponse::error(
+                        request.id,
+                        -32602,
+                        "Missing model_id/model for session/set_model",
+                    );
+                }
+
+                match self.session_manager.update_model(session_id, model_id) {
+                    Some(_) => {
+                        tracing::info!("Session {}: model switched to {}", session_id, model_id);
+                        AcpResponse::success(request.id, json!({}))
+                    }
+                    None => AcpResponse::error(
                         request.id,
                         -32602,
                         format!("Session not found: {}", session_id),
-                    )
+                    ),
                 }
             }
 
@@ -555,20 +649,61 @@ impl AcpHandler for HermesAcpHandler {
                     return AcpResponse::error(request.id, -32602, "Missing params");
                 };
                 let session_id = param_str(p, "session_id").unwrap_or("");
-                let _mode_id = param_str(p, "mode_id").unwrap_or("");
-                if self.session_manager.get_session(session_id).is_some() {
-                    AcpResponse::success(request.id, json!({}))
-                } else {
-                    AcpResponse::error(
+                let mode_id = param_str(p, "mode_id")
+                    .or_else(|| param_str(p, "mode"))
+                    .unwrap_or("");
+                if mode_id.trim().is_empty() {
+                    return AcpResponse::error(
+                        request.id,
+                        -32602,
+                        "Missing mode_id/mode for session/set_mode",
+                    );
+                }
+                match self.session_manager.update_mode(session_id, mode_id) {
+                    Some(_) => AcpResponse::success(request.id, json!({})),
+                    None => AcpResponse::error(
                         request.id,
                         -32602,
                         format!("Session not found: {}", session_id),
-                    )
+                    ),
                 }
             }
 
             AcpMethod::SetConfigOption => {
-                AcpResponse::success(request.id, json!({"config_options": []}))
+                let Some(p) = params_obj(&request.params) else {
+                    return AcpResponse::error(request.id, -32602, "Missing params");
+                };
+                let session_id = param_str(p, "session_id").unwrap_or("");
+                let key = param_str(p, "key")
+                    .or_else(|| param_str(p, "option"))
+                    .or_else(|| param_str(p, "name"))
+                    .unwrap_or("");
+                let value = param_value_as_string(p, "value")
+                    .or_else(|| param_value_as_string(p, "option_value"))
+                    .unwrap_or_default();
+
+                if key.trim().is_empty() {
+                    return AcpResponse::error(
+                        request.id,
+                        -32602,
+                        "Missing key/option for session/set_config",
+                    );
+                }
+
+                match self
+                    .session_manager
+                    .set_config_option(session_id, key, &value)
+                {
+                    Some(_) => AcpResponse::success(
+                        request.id,
+                        json!({"config_options": [{"key": key, "value": value}]}),
+                    ),
+                    None => AcpResponse::error(
+                        request.id,
+                        -32602,
+                        format!("Session not found: {}", session_id),
+                    ),
+                }
             }
 
             // -- Legacy methods ---------------------------------------------
@@ -720,6 +855,30 @@ impl AcpHandler for DefaultAcpHandler {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    struct EchoPromptExecutor;
+
+    #[async_trait::async_trait]
+    impl AcpPromptExecutor for EchoPromptExecutor {
+        async fn execute_prompt(
+            &self,
+            _session: &SessionState,
+            user_text: &str,
+            _history: &[Value],
+        ) -> Result<PromptExecutionOutput, String> {
+            Ok(PromptExecutionOutput {
+                response_text: format!("executor:{user_text}"),
+                usage: Some(Usage {
+                    input_tokens: 3,
+                    output_tokens: 5,
+                    total_tokens: 8,
+                    thought_tokens: None,
+                    cached_read_tokens: None,
+                }),
+                total_turns: Some(2),
+            })
+        }
+    }
 
     fn make_handler() -> HermesAcpHandler {
         HermesAcpHandler::new(
@@ -900,5 +1059,106 @@ mod tests {
             .cloned()
             .unwrap_or_default();
         assert!(!tools.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_prompt_uses_custom_executor_and_records_usage() {
+        let handler = HermesAcpHandler::new(
+            Arc::new(SessionManager::new()),
+            Arc::new(EventSink::default()),
+            Arc::new(PermissionStore::new()),
+        )
+        .with_prompt_executor(Arc::new(EchoPromptExecutor));
+
+        let req = AcpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(1)),
+            method: "session/new".into(),
+            params: Some(json!({"cwd": "."})),
+        };
+        let resp = handler.handle_request(req).await;
+        let session_id = resp.result.unwrap()["session_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let req = AcpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(2)),
+            method: "prompt".into(),
+            params: Some(json!({
+                "session_id": session_id.clone(),
+                "text": "hello"
+            })),
+        };
+        let resp = handler.handle_request(req).await;
+        let usage = resp.result.unwrap()["usage"].clone();
+        assert_eq!(usage["input_tokens"], 3);
+        assert_eq!(usage["output_tokens"], 5);
+
+        let state = handler.session_manager.get_session(&session_id).unwrap();
+        assert_eq!(state.total_prompt_tokens, 3);
+        assert_eq!(state.total_completion_tokens, 5);
+        assert_eq!(
+            state
+                .history
+                .last()
+                .and_then(|v| v.get("content"))
+                .and_then(|v| v.as_str()),
+            Some("executor:hello")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_set_session_fields_persist() {
+        let handler = make_handler();
+
+        let req = AcpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(1)),
+            method: "session/new".into(),
+            params: Some(json!({"cwd": "."})),
+        };
+        let resp = handler.handle_request(req).await;
+        let session_id = resp.result.unwrap()["session_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let set_model = AcpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(2)),
+            method: "session/set_model".into(),
+            params: Some(json!({"session_id": session_id, "model_id": "nous:gpt-5.4"})),
+        };
+        let _ = handler.handle_request(set_model).await;
+
+        let set_mode = AcpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(3)),
+            method: "session/set_mode".into(),
+            params: Some(json!({"session_id": session_id, "mode_id": "code"})),
+        };
+        let _ = handler.handle_request(set_mode).await;
+
+        let set_cfg = AcpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(4)),
+            method: "session/set_config".into(),
+            params: Some(json!({
+                "session_id": session_id,
+                "key": "temperature",
+                "value": "0.1"
+            })),
+        };
+        let _ = handler.handle_request(set_cfg).await;
+
+        let state = handler.session_manager.get_session(&session_id).unwrap();
+        assert_eq!(state.model.as_deref(), Some("nous:gpt-5.4"));
+        assert_eq!(state.mode.as_deref(), Some("code"));
+        assert_eq!(
+            state.config_options.get("temperature").map(String::as_str),
+            Some("0.1")
+        );
     }
 }
