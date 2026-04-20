@@ -20,6 +20,13 @@ command -v hermes
 
 3. If you installed to another path, substitute that path in the export line.
 
+4. If your shell still resolves an old PATH after sourcing, reload a fresh login shell:
+
+```bash
+exec zsh -l
+command -v hermes
+```
+
 ## Should I `chmod` the entire repo?
 
 No. Do not chmod the whole repository.

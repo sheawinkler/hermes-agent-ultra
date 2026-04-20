@@ -130,6 +130,7 @@ Rust's tokio runtime gives real parallel execution — not Python's cooperative 
 ### 17 Platform Adapters
 
 Telegram, Discord, Slack, WhatsApp, Signal, Matrix, Mattermost, DingTalk, Feishu, WeCom, Weixin, Email, SMS, BlueBubbles, Home Assistant, Webhook, API Server.
+Matrix E2EE status: encryption-state detection and key APIs (`/keys/query`, `/keys/claim`) are implemented for metadata/key lifecycle handling. Full Olm/Megolm content decryption remains a dedicated cryptographic integration track.
 
 ### 30 Tool Backends
 
@@ -155,6 +156,9 @@ Built-in MCP client and server. Connect to external tool providers or expose Her
 ### ACP (Agent Communication Protocol)
 
 Inter-agent communication with session management, event streaming, and permission controls.
+- `hermes acp start` runs a stdio JSON-RPC ACP server.
+- ACP `prompt` execution uses the same Rust `AgentLoop` + provider/tool stack as the CLI runtime.
+- Session-level ACP config updates (`session/set_model`, `session/set_mode`, `session/set_config`) persist in session state.
 
 ---
 

@@ -70,4 +70,5 @@ else
   echo
   echo "zsh quick apply:"
   echo "  echo 'export PATH=\"${INSTALL_DIR}:\$PATH\"' >> ~/.zshrc && source ~/.zshrc"
+  echo "  exec zsh -l"
 fi
