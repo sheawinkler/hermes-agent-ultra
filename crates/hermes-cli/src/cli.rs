@@ -248,7 +248,7 @@ pub enum CliCommand {
 
     /// ACP (Agent Communication Protocol) server.
     Acp {
-        /// Action: start/status
+        /// Action: start/status/stop/restart
         action: Option<String>,
     },
 
