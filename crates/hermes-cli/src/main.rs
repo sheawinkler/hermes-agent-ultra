@@ -420,10 +420,7 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
 
     match action.as_deref() {
         Some("setup") => {
-            println!("Gateway setup wizard");
-            println!("--------------------");
-            println!("Edit config.yaml and enable platforms under `platforms:`");
-            println!("Then run `hermes gateway start`.");
+            run_gateway_setup(&cli).await?;
         }
         None | Some("start") => {
             println!("Starting Hermes Gateway...");
@@ -661,20 +658,53 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
                         }));
                     } else {
                         println!(
-                            "Telegram is enabled but token is missing; skipping telegram adapter."
+                            "Telegram is enabled but token is missing; skipping telegram adapter.\n  Fix: run `hermes auth login telegram` or set `platforms.telegram.token` in config.yaml."
                         );
                     }
                 }
             }
             if let Some(platform_cfg) = config.platforms.get("weixin") {
                 if platform_cfg.enabled {
-                    let wx_cfg = WeixinConfig::from_platform_config(platform_cfg);
-                    match WeChatAdapter::new(wx_cfg) {
-                        Ok(adapter) => {
-                            gateway.register_adapter("weixin", Arc::new(adapter)).await;
-                        }
-                        Err(e) => {
-                            println!("Weixin is enabled but failed to initialize: {}", e);
+                    let account_id_missing = platform_cfg
+                        .extra
+                        .get("account_id")
+                        .and_then(|v| v.as_str())
+                        .map(str::trim)
+                        .map(|s| s.is_empty())
+                        .unwrap_or(true);
+                    let token_missing = platform_cfg
+                        .token
+                        .as_deref()
+                        .map(str::trim)
+                        .map(|s| s.is_empty())
+                        .unwrap_or(true)
+                        && platform_cfg
+                            .extra
+                            .get("token")
+                            .and_then(|v| v.as_str())
+                            .map(str::trim)
+                            .map(|s| s.is_empty())
+                            .unwrap_or(true);
+                    if account_id_missing {
+                        println!(
+                            "Weixin is enabled but account_id is missing; skipping weixin adapter.\n  Fix: run `hermes auth login weixin --qr` (recommended) or set `platforms.weixin.extra.account_id`."
+                        );
+                    } else if token_missing {
+                        println!(
+                            "Weixin is enabled but token is missing; skipping weixin adapter.\n  Fix: run `hermes auth login weixin --qr` or set `platforms.weixin.token`."
+                        );
+                    } else {
+                        let wx_cfg = WeixinConfig::from_platform_config(platform_cfg);
+                        match WeChatAdapter::new(wx_cfg) {
+                            Ok(adapter) => {
+                                gateway.register_adapter("weixin", Arc::new(adapter)).await;
+                            }
+                            Err(e) => {
+                                println!(
+                                    "Weixin is enabled but failed to initialize: {}\n  Hint: rerun `hermes auth login weixin --qr` and check account file under ~/.hermes/weixin/accounts/.",
+                                    e
+                                );
+                            }
                         }
                     }
                 }
@@ -1259,6 +1289,272 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
             );
         }
     }
+    Ok(())
+}
+
+async fn prompt_yes_no(question: &str, default_yes: bool) -> Result<bool, AgentError> {
+    let hint = if default_yes { "[Y/n]" } else { "[y/N]" };
+    let ans = prompt_line(format!("{question} {hint}: ")).await?;
+    if ans.trim().is_empty() {
+        return Ok(default_yes);
+    }
+    let v = ans.trim().to_ascii_lowercase();
+    Ok(matches!(v.as_str(), "y" | "yes" | "1" | "true" | "on"))
+}
+
+fn parse_csv_list(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+async fn run_gateway_setup(cli: &Cli) -> Result<(), AgentError> {
+    println!("Gateway setup wizard");
+    println!("--------------------");
+    println!("This wizard configures chat platforms in config.yaml.");
+
+    let setup_weixin = prompt_yes_no("Configure Weixin / WeChat now?", true).await?;
+    let setup_telegram = prompt_yes_no("Configure Telegram now?", false).await?;
+    if !setup_weixin && !setup_telegram {
+        println!("No platform selected. You can rerun with `hermes gateway setup`.");
+        return Ok(());
+    }
+
+    if setup_weixin {
+        run_auth(
+            cli.clone(),
+            Some("login".to_string()),
+            Some("weixin".to_string()),
+            true,
+        )
+        .await?;
+    } else {
+        println!("Skipped Weixin setup.");
+    }
+
+    if setup_telegram {
+        run_auth(
+            cli.clone(),
+            Some("login".to_string()),
+            Some("telegram".to_string()),
+            false,
+        )
+        .await?;
+    } else {
+        println!("Skipped Telegram setup.");
+    }
+
+    let cfg_path = hermes_state_root(cli).join("config.yaml");
+    let mut disk =
+        load_user_config_file(&cfg_path).map_err(|e| AgentError::Config(e.to_string()))?;
+    if setup_weixin {
+        let wx = disk
+            .platforms
+            .entry("weixin".to_string())
+            .or_insert_with(PlatformConfig::default);
+        wx.enabled = true;
+
+        println!();
+        println!("Direct message policy:");
+        println!("  1) pairing (recommended)");
+        println!("  2) open");
+        println!("  3) allowlist");
+        println!("  4) disabled");
+        let dm_choice = prompt_line("Choose [1-4] (default 1): ").await?;
+        match dm_choice.trim() {
+            "2" => {
+                wx.extra.insert(
+                    "dm_policy".to_string(),
+                    serde_json::Value::String("open".to_string()),
+                );
+                wx.extra.insert(
+                    "allow_from".to_string(),
+                    serde_json::Value::Array(Vec::new()),
+                );
+            }
+            "3" => {
+                let current = wx
+                    .extra
+                    .get("allow_from")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str())
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    })
+                    .unwrap_or_default();
+                let line = prompt_line(format!(
+                    "Allowed Weixin user IDs (comma-separated, current: {}): ",
+                    if current.is_empty() {
+                        "(none)"
+                    } else {
+                        &current
+                    }
+                ))
+                .await?;
+                let ids = parse_csv_list(&line);
+                wx.extra.insert(
+                    "dm_policy".to_string(),
+                    serde_json::Value::String("allowlist".to_string()),
+                );
+                wx.extra.insert(
+                    "allow_from".to_string(),
+                    serde_json::Value::Array(
+                        ids.into_iter().map(serde_json::Value::String).collect(),
+                    ),
+                );
+            }
+            "4" => {
+                wx.extra.insert(
+                    "dm_policy".to_string(),
+                    serde_json::Value::String("disabled".to_string()),
+                );
+                wx.extra.insert(
+                    "allow_from".to_string(),
+                    serde_json::Value::Array(Vec::new()),
+                );
+            }
+            _ => {
+                wx.extra.insert(
+                    "dm_policy".to_string(),
+                    serde_json::Value::String("pairing".to_string()),
+                );
+                wx.extra.insert(
+                    "allow_from".to_string(),
+                    serde_json::Value::Array(Vec::new()),
+                );
+            }
+        }
+
+        println!();
+        println!("Group message policy:");
+        println!("  1) disabled (recommended)");
+        println!("  2) open");
+        println!("  3) allowlist");
+        let group_choice = prompt_line("Choose [1-3] (default 1): ").await?;
+        match group_choice.trim() {
+            "2" => {
+                wx.extra.insert(
+                    "group_policy".to_string(),
+                    serde_json::Value::String("open".to_string()),
+                );
+                wx.extra.insert(
+                    "group_allow_from".to_string(),
+                    serde_json::Value::Array(Vec::new()),
+                );
+            }
+            "3" => {
+                let current = wx
+                    .extra
+                    .get("group_allow_from")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str())
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    })
+                    .unwrap_or_default();
+                let line = prompt_line(format!(
+                    "Allowed Weixin group IDs (comma-separated, current: {}): ",
+                    if current.is_empty() {
+                        "(none)"
+                    } else {
+                        &current
+                    }
+                ))
+                .await?;
+                let ids = parse_csv_list(&line);
+                wx.extra.insert(
+                    "group_policy".to_string(),
+                    serde_json::Value::String("allowlist".to_string()),
+                );
+                wx.extra.insert(
+                    "group_allow_from".to_string(),
+                    serde_json::Value::Array(
+                        ids.into_iter().map(serde_json::Value::String).collect(),
+                    ),
+                );
+            }
+            _ => {
+                wx.extra.insert(
+                    "group_policy".to_string(),
+                    serde_json::Value::String("disabled".to_string()),
+                );
+                wx.extra.insert(
+                    "group_allow_from".to_string(),
+                    serde_json::Value::Array(Vec::new()),
+                );
+            }
+        }
+
+        let home_default = wx.home_channel.clone().unwrap_or_default();
+        let home_input = prompt_line(format!(
+            "Weixin home channel (optional, current: {}): ",
+            if home_default.is_empty() {
+                "(none)"
+            } else {
+                &home_default
+            }
+        ))
+        .await?;
+        if !home_input.trim().is_empty() {
+            wx.home_channel = Some(home_input.trim().to_string());
+        }
+    }
+
+    if setup_telegram {
+        let tg = disk
+            .platforms
+            .entry("telegram".to_string())
+            .or_insert_with(PlatformConfig::default);
+        tg.enabled = true;
+
+        let use_polling = prompt_yes_no("Telegram use polling mode?", true).await?;
+        tg.extra
+            .insert("polling".to_string(), serde_json::Value::Bool(use_polling));
+        if use_polling {
+            tg.webhook_url = None;
+        } else {
+            let webhook_default = tg.webhook_url.clone().unwrap_or_default();
+            let webhook_input = prompt_line(format!(
+                "Telegram webhook URL (current: {}): ",
+                if webhook_default.is_empty() {
+                    "(none)"
+                } else {
+                    &webhook_default
+                }
+            ))
+            .await?;
+            if !webhook_input.trim().is_empty() {
+                tg.webhook_url = Some(webhook_input.trim().to_string());
+            }
+        }
+
+        let tg_home_default = tg.home_channel.clone().unwrap_or_default();
+        let tg_home = prompt_line(format!(
+            "Telegram home channel (optional, current: {}): ",
+            if tg_home_default.is_empty() {
+                "(none)"
+            } else {
+                &tg_home_default
+            }
+        ))
+        .await?;
+        if !tg_home.trim().is_empty() {
+            tg.home_channel = Some(tg_home.trim().to_string());
+        }
+    }
+
+    validate_config(&disk).map_err(|e| AgentError::Config(e.to_string()))?;
+    save_config_yaml(&cfg_path, &disk).map_err(|e| AgentError::Config(e.to_string()))?;
+
+    println!();
+    println!("Gateway setup complete.");
+    println!("Config saved: {}", cfg_path.display());
+    println!("Next step: `hermes gateway start`");
     Ok(())
 }
 
