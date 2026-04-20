@@ -10,6 +10,7 @@ fork-specific history.
   - Default mode: create a sync branch and open a PR
 - `scripts/cron-upstream-sync.sh`
   - Cron-safe wrapper around `sync-upstream.sh`
+  - Uses a lock file (`~/.hermes/locks/upstream-sync.lock`) to avoid overlap
 - `scripts/install-upstream-sync-cron.sh`
   - Installs/updates a crontab entry with a stable marker
 
@@ -50,5 +51,7 @@ Default log path:
 - Requires configured `origin` and `upstream` remotes.
 - Requires a clean working tree.
 - `gh` CLI is optional; without it the script still pushes the sync branch.
+- Cron entry exports `REPO_ROOT` explicitly so the wrapper runs against the
+  intended repository path.
 - Default verification command is:
   - `cargo test -p hermes-gateway`

@@ -36,17 +36,11 @@ pub fn split_markdown(text: &str, max_len: usize) -> Vec<String> {
         chunks.push(closed_chunk);
         remaining = rest.trim_start_matches('\n');
 
-        // Prepend reopened formatting to the next chunk
+        // Prepend reopened formatting to the next chunk.
         if !reopen_prefix.is_empty() && !remaining.is_empty() {
-            let mut next = reopen_prefix;
-            next.push_str(remaining);
-            // We need to own this string for the next iteration
-            // Use a small trick: push to chunks temporarily and fix up
-            remaining = ""; // will be replaced
-            chunks.push(next); // placeholder
-            let last = chunks.pop().unwrap();
-            // Re-process the remainder with the prefix
-            let sub_chunks = split_markdown(&last, max_len);
+            let mut combined = reopen_prefix;
+            combined.push_str(remaining);
+            let sub_chunks = split_markdown(&combined, max_len);
             chunks.extend(sub_chunks);
             break;
         }
