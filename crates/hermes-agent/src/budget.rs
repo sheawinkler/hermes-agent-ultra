@@ -35,7 +35,6 @@ pub fn enforce_budget(results: &mut [ToolResult], budget: &BudgetConfig) {
         return;
     }
 
-    let over_budget = total_chars - budget.max_aggregate_chars;
     let ratio = budget.max_aggregate_chars as f64 / total_chars as f64;
 
     for result in results.iter_mut() {

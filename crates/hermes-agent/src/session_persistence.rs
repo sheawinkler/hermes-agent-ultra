@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use hermes_core::{AgentError, Message, MessageRole};
 
 // ---------------------------------------------------------------------------
@@ -36,10 +36,30 @@ impl SessionPersistence {
         }
     }
 
-    /// Create using the default `~/.hermes` directory.
+    /// Create using default home resolution:
+    /// `HERMES_HOME` → `HERMES_AGENT_ULTRA_HOME` → `~/.hermes-agent-ultra`
+    /// with legacy fallback to `~/.hermes`.
     pub fn default_home() -> Self {
-        let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-        Self::new(home.join(".hermes"))
+        if let Ok(home) = std::env::var("HERMES_HOME") {
+            let home = home.trim();
+            if !home.is_empty() {
+                return Self::new(home);
+            }
+        }
+        if let Ok(home) = std::env::var("HERMES_AGENT_ULTRA_HOME") {
+            let home = home.trim();
+            if !home.is_empty() {
+                return Self::new(home);
+            }
+        }
+        let base = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+        let primary = base.join(".hermes-agent-ultra");
+        let legacy = base.join(".hermes");
+        if primary.exists() || !legacy.exists() {
+            Self::new(primary)
+        } else {
+            Self::new(legacy)
+        }
     }
 
     /// Ensure the SQLite database and tables exist.
