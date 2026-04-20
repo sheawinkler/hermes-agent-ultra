@@ -328,13 +328,10 @@ impl McpServer {
                 .map(|s| s.to_string())
                 .or_else(|| resource.mime_type.clone())
                 .unwrap_or_else(|| "text/plain".to_string());
-            let text = resp
-                .text()
-                .await
-                .map_err(|e| McpError::Protocol {
-                    code: -32603,
-                    message: e.to_string(),
-                })?;
+            let text = resp.text().await.map_err(|e| McpError::Protocol {
+                code: -32603,
+                message: e.to_string(),
+            })?;
             return Ok(vec![serde_json::json!({
                 "uri": resource.uri,
                 "mimeType": mime,

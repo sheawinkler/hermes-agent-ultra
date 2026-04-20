@@ -152,8 +152,7 @@ fn encrypt_token_cache(
     cache: &TokenCache,
 ) -> Result<TokenStoreEnvelope, AgentError> {
     let plaintext = serde_json::to_vec(cache).map_err(|e| AgentError::Config(e.to_string()))?;
-    let cipher =
-        Aes256Gcm::new_from_slice(key).map_err(|e| AgentError::Config(e.to_string()))?;
+    let cipher = Aes256Gcm::new_from_slice(key).map_err(|e| AgentError::Config(e.to_string()))?;
     let mut nonce_bytes = [0u8; TOKEN_STORE_NONCE_BYTES];
     rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
@@ -189,8 +188,7 @@ fn decrypt_token_cache(
     let ciphertext = base64::engine::general_purpose::STANDARD
         .decode(envelope.ciphertext_b64.trim())
         .map_err(|e| AgentError::Config(format!("invalid token store payload: {}", e)))?;
-    let cipher =
-        Aes256Gcm::new_from_slice(key).map_err(|e| AgentError::Config(e.to_string()))?;
+    let cipher = Aes256Gcm::new_from_slice(key).map_err(|e| AgentError::Config(e.to_string()))?;
     let plaintext = cipher
         .decrypt(Nonce::from_slice(&nonce), ciphertext.as_ref())
         .map_err(|_| AgentError::AuthFailed("failed to decrypt token store".into()))?;
@@ -241,10 +239,7 @@ async fn write_file_private(path: &Path, content: &[u8]) -> Result<(), AgentErro
             .await
             .map_err(|e| AgentError::Io(e.to_string()))?;
     }
-    let tmp_path = path.with_extension(format!(
-        "{}.tmp",
-        uuid::Uuid::new_v4().simple()
-    ));
+    let tmp_path = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
     tokio::fs::write(&tmp_path, content)
         .await
         .map_err(|e| AgentError::Io(e.to_string()))?;
@@ -514,7 +509,9 @@ mod tests {
         assert!(!raw.contains("super-secret-token"));
         let envelope: TokenStoreEnvelope = serde_json::from_str(&raw).unwrap();
         assert_eq!(envelope.version, TOKEN_STORE_ENVELOPE_VERSION);
-        assert!(tokio::fs::try_exists(path.with_extension("key")).await.unwrap());
+        assert!(tokio::fs::try_exists(path.with_extension("key"))
+            .await
+            .unwrap());
 
         let reopened = FileTokenStore::new(&path).await.unwrap();
         let got = reopened.get("openai").await.unwrap();

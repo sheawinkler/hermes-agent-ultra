@@ -371,7 +371,11 @@ mod tests {
     fn verify_signature_rejects_malformed_signature() {
         let secret = "s3cr3t";
         let body = br#"{"chat_id":"c1","text":"hello"}"#;
-        assert!(!WebhookAdapter::verify_signature(secret, body, "sha256=xyz"));
+        assert!(!WebhookAdapter::verify_signature(
+            secret,
+            body,
+            "sha256=xyz"
+        ));
         assert!(!WebhookAdapter::verify_signature(secret, body, ""));
     }
 
