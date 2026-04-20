@@ -13,7 +13,7 @@ discord = []
 slack = []
 whatsapp = []
 signal = []
-matrix = []
+matrix = ["dep:matrix-sdk-crypto", "dep:ruma"]
 mattermost = []
 dingtalk = []
 feishu = []
@@ -49,6 +49,8 @@ webpki-roots = "0.26"
 hmac = "0.12"
 sha1 = "0.10"
 base64 = { workspace = true }
+matrix-sdk-crypto = { version = "0.16", optional = true }
+ruma = { version = "0.14", features = ["client-api-c", "rand", "canonical-json"], optional = true }
 aes = { version = "0.8", optional = true }
 rand = { version = "0.8", optional = true }
 
