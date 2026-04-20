@@ -6,6 +6,7 @@
 //! - resources/list, resources/read
 //! - prompts/list
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -78,6 +79,8 @@ pub struct McpServer {
     tool_registry: Arc<ToolRegistry>,
     /// Resources exposed by this server.
     resources: Vec<ResourceInfo>,
+    /// Optional pre-registered resource contents by URI.
+    resource_contents: HashMap<String, Vec<Value>>,
     /// Prompts exposed by this server.
     prompts: Vec<McpPromptInfo>,
     /// Server info.
@@ -99,6 +102,7 @@ impl McpServer {
         Self {
             tool_registry,
             resources: Vec::new(),
+            resource_contents: HashMap::new(),
             prompts: Vec::new(),
             server_info: ServerInfo {
                 name: "hermes-agent".to_string(),
@@ -117,6 +121,28 @@ impl McpServer {
     /// Add a resource to be exposed by this server.
     pub fn add_resource(&mut self, resource: ResourceInfo) {
         self.resources.push(resource);
+    }
+
+    /// Add a text resource and its content in one call.
+    pub fn add_resource_text(&mut self, mut resource: ResourceInfo, text: impl Into<String>) {
+        if resource.mime_type.is_none() {
+            resource.mime_type = Some("text/plain".to_string());
+        }
+        let uri = resource.uri.clone();
+        self.resources.push(resource.clone());
+        self.resource_contents.insert(
+            uri.clone(),
+            vec![serde_json::json!({
+                "uri": uri,
+                "mimeType": resource.mime_type.clone().unwrap_or_else(|| "text/plain".to_string()),
+                "text": text.into(),
+            })],
+        );
+    }
+
+    /// Replace resource contents for a URI.
+    pub fn set_resource_contents(&mut self, uri: &str, contents: Vec<Value>) {
+        self.resource_contents.insert(uri.to_string(), contents);
     }
 
     /// Add a prompt to be exposed by this server.
@@ -257,15 +283,69 @@ impl McpServer {
             .find(|r| r.uri == uri)
             .ok_or_else(|| McpError::ResourceNotFound(uri.to_string()))?;
 
-        // Resources are static for now; in a real implementation,
-        // this would read the actual resource content.
+        if let Some(contents) = self.resource_contents.get(uri) {
+            return Ok(serde_json::json!({ "contents": contents }));
+        }
+
+        let contents = self.read_dynamic_resource(resource).await?;
         Ok(serde_json::json!({
-            "contents": [{
-                "uri": resource.uri,
-                "mimeType": resource.mime_type,
-                "text": "",
-            }]
+            "contents": contents
         }))
+    }
+
+    async fn read_dynamic_resource(&self, resource: &ResourceInfo) -> Result<Vec<Value>, McpError> {
+        let uri = resource.uri.as_str();
+        if let Some(path) = uri.strip_prefix("file://") {
+            let text = tokio::fs::read_to_string(path)
+                .await
+                .map_err(|e| McpError::Io(e.to_string()))?;
+            return Ok(vec![serde_json::json!({
+                "uri": resource.uri,
+                "mimeType": resource
+                    .mime_type
+                    .clone()
+                    .unwrap_or_else(|| "text/plain".to_string()),
+                "text": text,
+            })]);
+        }
+
+        if uri.starts_with("http://") || uri.starts_with("https://") {
+            let resp = reqwest::Client::new()
+                .get(uri)
+                .send()
+                .await
+                .map_err(|e| McpError::ConnectionError(e.to_string()))?;
+            if !resp.status().is_success() {
+                return Err(McpError::Protocol {
+                    code: resp.status().as_u16() as i64,
+                    message: format!("resource fetch failed: {}", resp.status()),
+                });
+            }
+            let mime = resp
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string())
+                .or_else(|| resource.mime_type.clone())
+                .unwrap_or_else(|| "text/plain".to_string());
+            let text = resp
+                .text()
+                .await
+                .map_err(|e| McpError::Protocol {
+                    code: -32603,
+                    message: e.to_string(),
+                })?;
+            return Ok(vec![serde_json::json!({
+                "uri": resource.uri,
+                "mimeType": mime,
+                "text": text,
+            })]);
+        }
+
+        Err(McpError::NotConfigured(format!(
+            "No content loader registered for resource URI '{}'",
+            resource.uri
+        )))
     }
 
     /// Handle prompts/list request.
@@ -395,6 +475,7 @@ impl McpServer {
 #[cfg(test)]
 mod tests {
     use super::{McpCapabilityPolicy, McpPromptInfo, McpServer};
+    use crate::client::ResourceInfo;
     use hermes_tools::ToolRegistry;
     use serde_json::json;
     use std::sync::Arc;
@@ -428,5 +509,61 @@ mod tests {
             .await
             .expect_err("prompt read should be denied");
         assert!(matches!(err, crate::McpError::Forbidden(_)));
+    }
+
+    #[tokio::test]
+    async fn resources_read_returns_registered_text_content() {
+        let mut server = McpServer::new(Arc::new(ToolRegistry::new()));
+        server.add_resource_text(
+            ResourceInfo {
+                uri: "memory://note".to_string(),
+                name: "note".to_string(),
+                description: Some("test note".to_string()),
+                mime_type: Some("text/plain".to_string()),
+            },
+            "hello world",
+        );
+
+        let result = server
+            .handle_request("resources/read", json!({"uri":"memory://note"}))
+            .await
+            .expect("resource read should succeed");
+
+        let text = result
+            .get("contents")
+            .and_then(|v| v.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|first| first.get("text"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert_eq!(text, "hello world");
+    }
+
+    #[tokio::test]
+    async fn resources_read_file_uri_loads_text() {
+        let temp = tempfile::NamedTempFile::new().expect("temp file");
+        std::fs::write(temp.path(), "file content").expect("write");
+        let uri = format!("file://{}", temp.path().display());
+
+        let mut server = McpServer::new(Arc::new(ToolRegistry::new()));
+        server.add_resource(ResourceInfo {
+            uri: uri.clone(),
+            name: "file".to_string(),
+            description: None,
+            mime_type: Some("text/plain".to_string()),
+        });
+
+        let result = server
+            .handle_request("resources/read", json!({"uri":uri}))
+            .await
+            .expect("resource read should succeed");
+        let text = result
+            .get("contents")
+            .and_then(|v| v.as_array())
+            .and_then(|arr| arr.first())
+            .and_then(|first| first.get("text"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        assert_eq!(text, "file content");
     }
 }
