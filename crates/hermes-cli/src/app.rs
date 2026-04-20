@@ -518,10 +518,8 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
     let api_key = match api_key {
         Some(k) => k,
         None => {
-            tracing::warn!(
-                "No API key for provider '{provider_name}'; falling back to StubProvider"
-            );
-            return Arc::new(StubProvider {
+            tracing::warn!("No API key for provider '{provider_name}'; using NoBackendProvider");
+            return Arc::new(NoBackendProvider {
                 model: model.to_string(),
             });
         }
@@ -592,15 +590,15 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
 }
 
 // ---------------------------------------------------------------------------
-// StubProvider — fallback when no API key is configured
+// NoBackendProvider — explicit fallback when no API key is configured
 // ---------------------------------------------------------------------------
 
-struct StubProvider {
+struct NoBackendProvider {
     model: String,
 }
 
 #[async_trait::async_trait]
-impl LlmProvider for StubProvider {
+impl LlmProvider for NoBackendProvider {
     async fn chat_completion(
         &self,
         _messages: &[hermes_core::Message],
@@ -611,7 +609,7 @@ impl LlmProvider for StubProvider {
         _extra_body: Option<&Value>,
     ) -> Result<hermes_core::LlmResponse, AgentError> {
         Err(AgentError::LlmApi(format!(
-            "StubProvider: no LLM backend configured for model '{}'. \
+            "NoBackendProvider: no LLM backend configured for model '{}'. \
              Configure an API key and provider in the config file.",
             self.model
         )))
@@ -628,7 +626,7 @@ impl LlmProvider for StubProvider {
     ) -> futures::stream::BoxStream<'static, Result<hermes_core::StreamChunk, AgentError>> {
         futures::stream::once(async move {
             Err(AgentError::LlmApi(
-                "StubProvider: no LLM backend configured for streaming.".to_string(),
+                "NoBackendProvider: no LLM backend configured for streaming.".to_string(),
             ))
         })
         .boxed()

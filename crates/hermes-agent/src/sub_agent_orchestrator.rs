@@ -426,9 +426,9 @@ mod tests {
     use hermes_core::{LlmResponse, StreamChunk, ToolSchema};
     use std::sync::Arc;
 
-    // Minimal LlmProvider stub that always returns an empty assistant response
-    // so the child loop finishes in a single turn. We only care about
-    // plumbing here — behavioural tests live in agent_loop::tests.
+    // Minimal test provider that returns a deterministic assistant response
+    // so the child loop finishes in a single turn. Behavioural tests live
+    // in agent_loop::tests.
     struct NoopProvider;
     #[async_trait::async_trait]
     impl LlmProvider for NoopProvider {

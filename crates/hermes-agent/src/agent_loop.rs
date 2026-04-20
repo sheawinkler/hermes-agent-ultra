@@ -1282,7 +1282,7 @@ impl AgentLoop {
         refresh_token: &str,
     ) -> Result<OAuthStoreCredential, AgentError> {
         let endpoints = OAuth2Endpoints {
-            authorize_url: "https://placeholder.invalid/oauth/authorize".to_string(),
+            authorize_url: "http://127.0.0.1/oauth/authorize-unused".to_string(),
             token_url: token_url.to_string(),
             client_id: client_id.to_string(),
             redirect_uri: "http://127.0.0.1/unused".to_string(),

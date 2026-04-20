@@ -1,7 +1,7 @@
-//! Helpers for CLI / tooling: build a [`CronScheduler`] backed by disk + a minimal LLM stub.
+//! Helpers for CLI / tooling: build a [`CronScheduler`] backed by disk + a minimal LLM.
 //!
-//! The stub provider is only suitable for **manual `run`** smoke tests and job CRUD;
-//! production gateways should inject a real [`hermes_core::LlmProvider`].
+//! This fallback scheduler is suitable for CRUD/status operations and tests.
+//! Real execution paths should inject a live [`hermes_core::LlmProvider`].
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -34,10 +34,10 @@ impl LlmProvider for MinimalCronLlm {
     ) -> Result<LlmResponse, AgentError> {
         Ok(LlmResponse {
             message: Message::assistant(
-                "CLI cron manual run (minimal stub LLM — configure gateway for real execution).",
+                "CLI cron manual run (fallback LLM path — configure gateway for real execution).",
             ),
             usage: None,
-            model: model.unwrap_or("stub").to_string(),
+            model: model.unwrap_or("fallback").to_string(),
             finish_reason: Some("stop".into()),
         })
     }

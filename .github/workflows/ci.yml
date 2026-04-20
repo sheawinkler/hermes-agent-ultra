@@ -19,6 +19,8 @@ jobs:
         run: cargo fmt --all --check
       - name: Clippy
         run: cargo clippy --workspace --all-targets
+      - name: Placeholder gate
+        run: bash scripts/check-runtime-placeholders.sh
       - name: Tests
         run: cargo test --workspace
 

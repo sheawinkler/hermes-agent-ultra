@@ -106,6 +106,11 @@ cd "${REPO_ROOT}"
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || \
   die "Not a git repository: ${REPO_ROOT}"
 
+git remote get-url "${ORIGIN_REMOTE}" >/dev/null 2>&1 || \
+  die "Origin remote '${ORIGIN_REMOTE}' is not configured"
+git remote get-url "${UPSTREAM_REMOTE}" >/dev/null 2>&1 || \
+  die "Upstream remote '${UPSTREAM_REMOTE}' is not configured"
+
 if [[ -n "$(git status --porcelain)" ]]; then
   die "Working tree is not clean. Commit/stash changes before syncing."
 fi

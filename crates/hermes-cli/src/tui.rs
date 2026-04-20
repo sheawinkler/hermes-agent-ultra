@@ -301,9 +301,8 @@ impl TuiState {
             }
             // Ctrl+V → paste from clipboard (best-effort via crossterm)
             KeyCode::Char('v') if mods.contains(KeyModifiers::CONTROL) => {
-                // Clipboard paste is platform-dependent; we handle pasted text
-                // via the bracketed paste event in crossterm. This is a no-op
-                // placeholder — actual paste arrives as rapid Char events.
+                // Bracketed paste is delivered as regular Char events in this input loop,
+                // so no dedicated Ctrl+V action is required here.
                 false
             }
             // Ctrl+R → toggle history search

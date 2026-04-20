@@ -270,15 +270,15 @@ pub fn generate_project_hints(working_dir: &Path) -> String {
             } else {
                 format!("{}, ... ({} total)", dirs[..10].join(", "), dirs.len())
             };
-            hints.push(&""); // placeholder for formatting
+            let project_type = if hints.is_empty() {
+                "unknown".to_string()
+            } else {
+                hints.join(", ")
+            };
             return format!(
                 "Working directory: {}\nProject type: {}\nSubdirectories: {}",
                 working_dir.display(),
-                if hints.len() > 1 {
-                    hints[..hints.len() - 1].join(", ")
-                } else {
-                    "unknown".to_string()
-                },
+                project_type,
                 dir_list
             );
         }
