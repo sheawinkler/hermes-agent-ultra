@@ -1592,6 +1592,27 @@ fn cron_cli_error(e: CronError) -> AgentError {
     AgentError::Config(e.to_string())
 }
 
+fn build_live_cron_scheduler(cli: &Cli, data_dir: &Path) -> Result<CronScheduler, AgentError> {
+    let config =
+        load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;
+    let current_model = config.model.clone().unwrap_or_else(|| "gpt-4o".to_string());
+    let provider = build_provider(&config, &current_model);
+
+    let tool_registry = Arc::new(ToolRegistry::new());
+    let terminal_backend: Arc<dyn hermes_core::TerminalBackend> = Arc::new(LocalBackend::default());
+    let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
+    let skill_provider: Arc<dyn hermes_core::SkillProvider> =
+        Arc::new(SkillManager::new(skill_store));
+    hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
+
+    let runner = Arc::new(CronRunner::new(
+        provider,
+        Arc::new(bridge_tool_registry(&tool_registry)),
+    ));
+    let persistence = Arc::new(FileJobPersistence::with_dir(data_dir.to_path_buf()));
+    Ok(CronScheduler::new(persistence, runner))
+}
+
 async fn run_cron(
     cli: Cli,
     action: Option<String>,
@@ -1651,7 +1672,8 @@ async fn run_cron(
                     println!("Resumed job {}", jid);
                 }
                 "run" => {
-                    let result = sched.run_job(&jid).await.map_err(cron_cli_error)?;
+                    let live_sched = build_live_cron_scheduler(&cli, &data_dir)?;
+                    let result = live_sched.run_job(&jid).await.map_err(cron_cli_error)?;
                     let json = serde_json::to_string_pretty(&result)
                         .unwrap_or_else(|_| format!("{result:#?}"));
                     println!("{}", json);
@@ -1933,6 +1955,157 @@ async fn run_lumio(action: Option<String>, model: Option<String>) -> Result<(), 
     Ok(())
 }
 
+fn discover_setup_env_sources() -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+
+    if let Ok(explicit) = std::env::var("HERMES_SETUP_IMPORT_ENV_PATH") {
+        if !explicit.trim().is_empty() {
+            candidates.push(PathBuf::from(explicit));
+        }
+    }
+    if let Ok(py_home) = std::env::var("HERMES_PYTHON_HOME") {
+        if !py_home.trim().is_empty() {
+            candidates.push(PathBuf::from(py_home).join(".env"));
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join("Documents/Projects/hermes-agent/.env"));
+        candidates.push(home.join("Projects/hermes-agent/.env"));
+        candidates.push(home.join("Documents/Projects/hermes-agent-python/.env"));
+    }
+    if let Some(claw_dir) = hermes_cli::claw_migrate::find_openclaw_dir(None) {
+        candidates.push(claw_dir.join(".env"));
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        if let Some(parent) = cwd.parent() {
+            candidates.push(parent.join("hermes-agent/.env"));
+        }
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    candidates
+        .into_iter()
+        .filter(|p| p.is_file())
+        .filter(|p| seen.insert(p.clone()))
+        .collect()
+}
+
+fn parse_env_assignment(line: &str) -> Option<(String, String)> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return None;
+    }
+    let (key, value) = trimmed.split_once('=')?;
+    let key = key.trim();
+    if key.is_empty() {
+        return None;
+    }
+    Some((key.to_string(), value.trim().to_string()))
+}
+
+fn read_env_key(path: &Path, key: &str) -> Option<String> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    for line in raw.lines() {
+        if let Some((k, v)) = parse_env_assignment(line) {
+            if k == key {
+                return Some(v.trim_matches('"').trim_matches('\'').to_string());
+            }
+        }
+    }
+    None
+}
+
+fn merge_missing_env_keys(src: &Path, dst: &Path, label: &str) -> Result<usize, AgentError> {
+    let src_content = std::fs::read_to_string(src)
+        .map_err(|e| AgentError::Io(format!("read {}: {}", src.display(), e)))?;
+    let existing = std::fs::read_to_string(dst).unwrap_or_default();
+
+    let existing_keys: std::collections::HashSet<String> = existing
+        .lines()
+        .filter_map(parse_env_assignment)
+        .map(|(k, _)| k)
+        .collect();
+
+    let mut to_import = Vec::new();
+    for line in src_content.lines() {
+        if let Some((k, _)) = parse_env_assignment(line) {
+            if !existing_keys.contains(&k) {
+                to_import.push(line.trim().to_string());
+            }
+        }
+    }
+
+    if to_import.is_empty() {
+        return Ok(0);
+    }
+
+    let mut out = existing;
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
+    out.push_str(&format!("# Imported by `hermes setup` from {label}\n"));
+    for line in &to_import {
+        out.push_str(line);
+        out.push('\n');
+    }
+    std::fs::write(dst, out)
+        .map_err(|e| AgentError::Io(format!("write {}: {}", dst.display(), e)))?;
+    Ok(to_import.len())
+}
+
+fn maybe_import_legacy_env(
+    reader: &mut dyn std::io::BufRead,
+    env_path: &Path,
+) -> Result<(), AgentError> {
+    use std::io::Write;
+
+    let sources: Vec<PathBuf> = discover_setup_env_sources()
+        .into_iter()
+        .filter(|p| p != env_path)
+        .collect();
+    if sources.is_empty() {
+        return Ok(());
+    }
+
+    println!("\nDetected legacy environment file(s):");
+    for (idx, src) in sources.iter().enumerate() {
+        println!("  {}) {}", idx + 1, src.display());
+    }
+
+    print!(
+        "Import missing keys into {} from the first source? [Y/n]: ",
+        env_path.display()
+    );
+    std::io::stdout().flush().ok();
+    let mut answer = String::new();
+    reader.read_line(&mut answer).ok();
+    if matches!(answer.trim().to_ascii_lowercase().as_str(), "n" | "no") {
+        println!("Skipped legacy .env import.");
+        return Ok(());
+    }
+
+    let source = &sources[0];
+    let imported = merge_missing_env_keys(
+        source,
+        env_path,
+        &source
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("legacy source"),
+    )?;
+    if imported == 0 {
+        println!("No new keys to import from {}.", source.display());
+    } else {
+        println!(
+            "Imported {} key(s) from {} into {}.",
+            imported,
+            source.display(),
+            env_path.display()
+        );
+    }
+    Ok(())
+}
+
 /// Handle `hermes setup`.
 async fn run_setup() -> Result<(), AgentError> {
     use std::io::{self, BufRead, Write};
@@ -1960,11 +2133,23 @@ async fn run_setup() -> Result<(), AgentError> {
     }
 
     let config_path = config_dir.join("config.yaml");
+    let env_path = config_dir.join(".env");
     let stdin = io::stdin();
     let mut reader = stdin.lock();
 
+    // 2. Optional import from legacy Python/OpenClaw .env files
+    maybe_import_legacy_env(&mut reader, &env_path)?;
+
     // 2. Prompt for API key
-    print!("\nOpenAI API key (leave blank to skip): ");
+    let has_env_openai_key = read_env_key(&env_path, "OPENAI_API_KEY").is_some();
+    if has_env_openai_key {
+        print!(
+            "\nOpenAI API key (leave blank to keep OPENAI_API_KEY from {}): ",
+            env_path.display()
+        );
+    } else {
+        print!("\nOpenAI API key (leave blank to skip): ");
+    }
     io::stdout().flush().ok();
     let mut api_key = String::new();
     reader.read_line(&mut api_key).ok();
@@ -2021,6 +2206,11 @@ async fn run_setup() -> Result<(), AgentError> {
         config_content.push_str("llm_providers:\n");
         config_content.push_str("  openai:\n");
         config_content.push_str(&format!("    api_key: {}\n", api_key));
+    } else if has_env_openai_key {
+        println!(
+            "  ✓ Keeping OPENAI_API_KEY from {} for runtime auth",
+            env_path.display()
+        );
     }
 
     std::fs::write(&config_path, &config_content)

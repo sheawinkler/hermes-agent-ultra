@@ -62,3 +62,15 @@ sh scripts/install.sh
 
 If this works while `./scripts/install.sh` fails, fix execute permission on the
 script file only.
+
+## Can setup import keys from a Python/OpenClaw install?
+
+Yes. `hermes setup` now detects common legacy `.env` locations (for example
+`~/Documents/Projects/hermes-agent/.env` and `~/.openclaw/.env`) and offers to
+import missing keys into `~/.hermes/.env`.
+
+You can also point setup at a specific `.env` source:
+
+```bash
+HERMES_SETUP_IMPORT_ENV_PATH=/absolute/path/to/.env hermes setup
+```

@@ -249,6 +249,10 @@ source ~/.zshrc
 Installer troubleshooting (macOS permissions, PATH, and safe chmod scope):
 - [`docs/installer-troubleshooting.md`](docs/installer-troubleshooting.md)
 
+After install, run `hermes setup` to initialize `~/.hermes`. Setup can import
+missing API keys from legacy Python/OpenClaw `.env` files into
+`~/.hermes/.env`.
+
 ---
 
 Manual download (latest release binary for your platform):
@@ -300,6 +304,7 @@ hermes doctor       # Check dependencies and config
 
 ```bash
 cargo test --workspace   # 641 tests
+bash scripts/check-runtime-placeholders.sh
 ```
 
 ## Contributing
