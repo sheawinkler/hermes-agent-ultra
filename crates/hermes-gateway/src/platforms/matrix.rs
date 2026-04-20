@@ -7,8 +7,12 @@
 //! All HTTP calls target the Matrix Client-Server API v3 endpoints.
 
 use std::collections::HashSet;
+use std::io::Write;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use regex::Regex;
@@ -30,6 +34,81 @@ use crate::platforms::helpers::{media_category, mime_from_extension};
 const SYNC_TIMEOUT_MS: u64 = 30_000;
 const SYNC_TIMELINE_LIMIT: u64 = 50;
 const BACKOFF_STEPS: &[u64] = &[2, 5, 10, 30, 60];
+const DEFAULT_DECRYPT_FFI_TIMEOUT_MS: u64 = 1_500;
+const DECRYPT_FFI_COMMAND_ENV: &str = "HERMES_MATRIX_DECRYPT_FFI_COMMAND";
+const DECRYPT_FFI_ARGS_ENV: &str = "HERMES_MATRIX_DECRYPT_FFI_ARGS";
+const DECRYPT_FFI_TIMEOUT_ENV: &str = "HERMES_MATRIX_DECRYPT_FFI_TIMEOUT_MS";
+
+#[derive(Debug, Clone)]
+struct MatrixDecryptFfiConfig {
+    command: String,
+    args: Vec<String>,
+    timeout: Duration,
+}
+
+impl MatrixDecryptFfiConfig {
+    fn from_env() -> Option<Self> {
+        let command = std::env::var(DECRYPT_FFI_COMMAND_ENV)
+            .ok()?
+            .trim()
+            .to_string();
+        if command.is_empty() {
+            return None;
+        }
+
+        let args = std::env::var(DECRYPT_FFI_ARGS_ENV)
+            .ok()
+            .map(|raw| Self::parse_args(&raw))
+            .unwrap_or_default();
+
+        let timeout_ms = match std::env::var(DECRYPT_FFI_TIMEOUT_ENV) {
+            Ok(raw) => match raw.parse::<u64>() {
+                Ok(v) if v > 0 => v,
+                _ => {
+                    warn!(
+                        env_var = DECRYPT_FFI_TIMEOUT_ENV,
+                        value = %raw,
+                        default_ms = DEFAULT_DECRYPT_FFI_TIMEOUT_MS,
+                        "Invalid Matrix decrypt FFI timeout; using default"
+                    );
+                    DEFAULT_DECRYPT_FFI_TIMEOUT_MS
+                }
+            },
+            Err(_) => DEFAULT_DECRYPT_FFI_TIMEOUT_MS,
+        };
+
+        Some(Self {
+            command,
+            args,
+            timeout: Duration::from_millis(timeout_ms),
+        })
+    }
+
+    fn parse_args(raw: &str) -> Vec<String> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Vec::new();
+        }
+
+        if trimmed.starts_with('[') {
+            if let Ok(parsed) = serde_json::from_str::<Vec<String>>(trimmed) {
+                return parsed
+                    .into_iter()
+                    .filter(|arg| !arg.trim().is_empty())
+                    .collect();
+            }
+            warn!(
+                env_var = DECRYPT_FFI_ARGS_ENV,
+                "Failed to parse Matrix decrypt FFI args JSON; falling back to whitespace split"
+            );
+        }
+
+        trimmed
+            .split_whitespace()
+            .map(|arg| arg.to_string())
+            .collect()
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Incoming message types
@@ -53,6 +132,14 @@ pub struct RelatesTo {
     pub rel_type: String,
     pub event_id: String,
     pub key: Option<String>,
+}
+
+#[derive(Debug)]
+struct MatrixDecryptFfiOutput {
+    body: String,
+    event_type: String,
+    is_edit: bool,
+    relates_to: Option<RelatesTo>,
 }
 
 /// Tracks the `next_batch` token for incremental `/sync` polling.
@@ -460,6 +547,7 @@ pub struct MatrixAdapter {
     stop_signal: Arc<Notify>,
     sync_running: AtomicBool,
     pub e2ee: MatrixE2ee,
+    decrypt_ffi: Option<MatrixDecryptFfiConfig>,
 }
 
 impl MatrixAdapter {
@@ -467,6 +555,15 @@ impl MatrixAdapter {
         let base = BasePlatformAdapter::new(&config.access_token).with_proxy(config.proxy.clone());
         base.validate_token()?;
         let client = base.build_client()?;
+        let decrypt_ffi = MatrixDecryptFfiConfig::from_env();
+        if let Some(cfg) = &decrypt_ffi {
+            info!(
+                command = %cfg.command,
+                args_len = cfg.args.len(),
+                timeout_ms = cfg.timeout.as_millis() as u64,
+                "Matrix decrypt FFI bridge enabled"
+            );
+        }
         Ok(Self {
             base,
             e2ee: MatrixE2ee::new(
@@ -480,6 +577,7 @@ impl MatrixAdapter {
             txn_counter: AtomicU64::new(0),
             stop_signal: Arc::new(Notify::new()),
             sync_running: AtomicBool::new(false),
+            decrypt_ffi,
         })
     }
 
@@ -1137,7 +1235,7 @@ impl MatrixAdapter {
             .and_then(|v| v.as_str())
             .map(String::from);
 
-        let mut messages = self.parse_sync_events(&body);
+        let messages = self.parse_sync_events(&body);
 
         // Auto-join on invite
         let invites = self.parse_invites(&body);
@@ -1276,21 +1374,7 @@ impl MatrixAdapter {
                         self.e2ee.remember_encrypted_room(room_id);
                     }
                     "m.room.encrypted" => {
-                        self.e2ee.remember_encrypted_room(room_id);
-                        let body = Self::render_encrypted_event_body(event);
-                        warn!(
-                            event_id,
-                            room_id, "Received encrypted event — forwarding encrypted metadata"
-                        );
-                        messages.push(IncomingMatrixMessage {
-                            room_id: room_id.clone(),
-                            event_id,
-                            sender,
-                            body,
-                            event_type: "m.room.encrypted".to_string(),
-                            is_edit: false,
-                            relates_to: None,
-                        });
+                        messages.push(self.parse_encrypted_event(room_id, event_id, sender, event));
                     }
                     _ => {}
                 }
@@ -1298,6 +1382,254 @@ impl MatrixAdapter {
         }
 
         messages
+    }
+
+    fn parse_encrypted_event(
+        &self,
+        room_id: &str,
+        event_id: String,
+        sender: String,
+        event: &serde_json::Value,
+    ) -> IncomingMatrixMessage {
+        self.e2ee.remember_encrypted_room(room_id);
+
+        if let Some(cfg) = &self.decrypt_ffi {
+            match self.run_decrypt_ffi(room_id, &event_id, &sender, event, cfg) {
+                Ok(decrypted) => {
+                    debug!(
+                        event_id = %event_id,
+                        room_id,
+                        event_type = %decrypted.event_type,
+                        "Decrypted Matrix encrypted event via FFI"
+                    );
+                    return IncomingMatrixMessage {
+                        room_id: room_id.to_string(),
+                        event_id,
+                        sender,
+                        body: decrypted.body,
+                        event_type: decrypted.event_type,
+                        is_edit: decrypted.is_edit,
+                        relates_to: decrypted.relates_to,
+                    };
+                }
+                Err(err) => {
+                    warn!(
+                        event_id = %event_id,
+                        room_id,
+                        error = %err,
+                        "Matrix decrypt FFI failed; forwarding encrypted metadata fallback"
+                    );
+                }
+            }
+        }
+
+        let body = Self::render_encrypted_event_body(event);
+        warn!(
+            event_id = %event_id,
+            room_id,
+            "Received encrypted event — forwarding encrypted metadata"
+        );
+        IncomingMatrixMessage {
+            room_id: room_id.to_string(),
+            event_id,
+            sender,
+            body,
+            event_type: "m.room.encrypted".to_string(),
+            is_edit: false,
+            relates_to: None,
+        }
+    }
+
+    fn run_decrypt_ffi(
+        &self,
+        room_id: &str,
+        event_id: &str,
+        sender: &str,
+        event: &serde_json::Value,
+        cfg: &MatrixDecryptFfiConfig,
+    ) -> Result<MatrixDecryptFfiOutput, String> {
+        let payload = serde_json::json!({
+            "room_id": room_id,
+            "event_id": event_id,
+            "sender": sender,
+            "event": event,
+        });
+        let payload_bytes =
+            serde_json::to_vec(&payload).map_err(|e| format!("serialize payload failed: {e}"))?;
+
+        let mut child = Command::new(&cfg.command)
+            .args(&cfg.args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| format!("spawn failed for '{}': {e}", cfg.command))?;
+
+        if let Some(stdin) = child.stdin.as_mut() {
+            stdin
+                .write_all(&payload_bytes)
+                .map_err(|e| format!("write stdin failed: {e}"))?;
+            stdin
+                .flush()
+                .map_err(|e| format!("flush stdin failed: {e}"))?;
+        }
+        drop(child.stdin.take());
+
+        let started = Instant::now();
+        loop {
+            match child.try_wait() {
+                Ok(Some(_status)) => {
+                    let output = child
+                        .wait_with_output()
+                        .map_err(|e| format!("wait failed: {e}"))?;
+                    if !output.status.success() {
+                        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                        return Err(if stderr.is_empty() {
+                            format!("process exited with {}", output.status)
+                        } else {
+                            format!("process exited with {}: {stderr}", output.status)
+                        });
+                    }
+                    let stdout = String::from_utf8(output.stdout)
+                        .map_err(|e| format!("stdout is not valid UTF-8: {e}"))?;
+                    return Self::parse_decrypt_ffi_output(stdout.trim());
+                }
+                Ok(None) => {
+                    if started.elapsed() >= cfg.timeout {
+                        let _ = child.kill();
+                        let output = child.wait_with_output().ok();
+                        let stderr = output
+                            .as_ref()
+                            .map(|out| String::from_utf8_lossy(&out.stderr).trim().to_string())
+                            .unwrap_or_default();
+                        return Err(if stderr.is_empty() {
+                            format!("process timed out after {}ms", cfg.timeout.as_millis())
+                        } else {
+                            format!(
+                                "process timed out after {}ms: {stderr}",
+                                cfg.timeout.as_millis()
+                            )
+                        });
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+                Err(e) => return Err(format!("try_wait failed: {e}")),
+            }
+        }
+    }
+
+    fn parse_decrypt_ffi_output(stdout: &str) -> Result<MatrixDecryptFfiOutput, String> {
+        if stdout.is_empty() {
+            return Err("empty stdout from decrypt FFI".to_string());
+        }
+
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(stdout) {
+            if let Some(err) = value.get("error").and_then(|v| v.as_str()) {
+                return Err(format!("decrypt FFI error: {err}"));
+            }
+
+            let relates_to = value
+                .get("relates_to")
+                .or_else(|| value.get("m.relates_to"))
+                .or_else(|| value.get("content").and_then(|c| c.get("m.relates_to")))
+                .and_then(Self::parse_relates_to_json);
+            let is_edit = value
+                .get("is_edit")
+                .and_then(|v| v.as_bool())
+                .unwrap_or_else(|| {
+                    relates_to
+                        .as_ref()
+                        .map(|r| r.rel_type == "m.replace")
+                        .unwrap_or(false)
+                });
+            let body = if is_edit {
+                value
+                    .get("m.new_content")
+                    .and_then(|nc| nc.get("body"))
+                    .and_then(|v| v.as_str())
+                    .or_else(|| {
+                        value
+                            .get("content")
+                            .and_then(|c| c.get("m.new_content"))
+                            .and_then(|nc| nc.get("body"))
+                            .and_then(|v| v.as_str())
+                    })
+                    .or_else(|| value.get("body").and_then(|v| v.as_str()))
+                    .or_else(|| {
+                        value
+                            .get("content")
+                            .and_then(|c| c.get("body"))
+                            .and_then(|v| v.as_str())
+                    })
+            } else {
+                value
+                    .get("body")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| {
+                        value
+                            .get("content")
+                            .and_then(|c| c.get("body"))
+                            .and_then(|v| v.as_str())
+                    })
+                    .or_else(|| {
+                        value
+                            .get("content")
+                            .and_then(|c| c.get("m.new_content"))
+                            .and_then(|nc| nc.get("body"))
+                            .and_then(|v| v.as_str())
+                    })
+            }
+            .map(|s| s.trim().to_string())
+            .unwrap_or_default();
+
+            if body.is_empty() {
+                return Err("decrypt FFI JSON missing non-empty body".to_string());
+            }
+
+            let event_type = value
+                .get("event_type")
+                .or_else(|| value.get("type"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("m.room.message")
+                .to_string();
+
+            return Ok(MatrixDecryptFfiOutput {
+                body,
+                event_type,
+                is_edit,
+                relates_to,
+            });
+        }
+
+        Ok(MatrixDecryptFfiOutput {
+            body: stdout.to_string(),
+            event_type: "m.room.message".to_string(),
+            is_edit: false,
+            relates_to: None,
+        })
+    }
+
+    fn parse_relates_to_json(value: &serde_json::Value) -> Option<RelatesTo> {
+        let rel_type = value
+            .get("rel_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let event_id = value
+            .get("event_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        if rel_type.is_empty() || event_id.is_empty() {
+            return None;
+        }
+
+        let key = value.get("key").and_then(|v| v.as_str()).map(String::from);
+        Some(RelatesTo {
+            rel_type,
+            event_id,
+            key,
+        })
     }
 
     fn render_encrypted_event_body(event: &serde_json::Value) -> String {
@@ -1720,6 +2052,109 @@ mod tests {
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].event_type, "m.room.encrypted");
         assert!(msgs[0].body.contains("m.megolm.v1.aes-sha2"));
+        assert!(adapter.e2ee.is_room_marked_encrypted("!room:test"));
+    }
+
+    #[test]
+    fn test_parse_decrypt_ffi_output_accepts_matrix_message_shape() {
+        let out = MatrixAdapter::parse_decrypt_ffi_output(
+            r#"{"type":"m.room.message","content":{"body":"hello from decrypt"}}"#,
+        )
+        .unwrap();
+        assert_eq!(out.body, "hello from decrypt");
+        assert_eq!(out.event_type, "m.room.message");
+        assert!(!out.is_edit);
+        assert!(out.relates_to.is_none());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_parse_sync_encrypted_event_uses_ffi_bridge() {
+        let config = MatrixConfig {
+            homeserver_url: "https://matrix.test".into(),
+            user_id: "@bot:test".into(),
+            access_token: "tok".into(),
+            room_id: None,
+            proxy: AdapterProxyConfig::default(),
+        };
+        let mut adapter = MatrixAdapter::new(config).unwrap();
+        adapter.decrypt_ffi = Some(MatrixDecryptFfiConfig {
+            command: "sh".to_string(),
+            args: vec![
+                "-lc".to_string(),
+                "cat >/dev/null; printf '%s' '{\"body\":\"decrypted hello\",\"event_type\":\"m.room.message\"}'"
+                    .to_string(),
+            ],
+            timeout: Duration::from_millis(500),
+        });
+
+        let sync = serde_json::json!({
+            "rooms": {
+                "join": {
+                    "!room:test": {
+                        "timeline": {
+                            "events": [{
+                                "type": "m.room.encrypted",
+                                "event_id": "$enc2",
+                                "sender": "@user:test",
+                                "content": {
+                                    "algorithm": "m.megolm.v1.aes-sha2",
+                                    "ciphertext": "xyz"
+                                }
+                            }]
+                        }
+                    }
+                }
+            }
+        });
+
+        let msgs = adapter.parse_sync_events(&sync);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].event_type, "m.room.message");
+        assert_eq!(msgs[0].body, "decrypted hello");
+        assert!(adapter.e2ee.is_room_marked_encrypted("!room:test"));
+    }
+
+    #[test]
+    fn test_parse_sync_encrypted_event_fallback_when_ffi_fails() {
+        let config = MatrixConfig {
+            homeserver_url: "https://matrix.test".into(),
+            user_id: "@bot:test".into(),
+            access_token: "tok".into(),
+            room_id: None,
+            proxy: AdapterProxyConfig::default(),
+        };
+        let mut adapter = MatrixAdapter::new(config).unwrap();
+        adapter.decrypt_ffi = Some(MatrixDecryptFfiConfig {
+            command: "/definitely-not-a-real-binary-hermes".to_string(),
+            args: Vec::new(),
+            timeout: Duration::from_millis(100),
+        });
+
+        let sync = serde_json::json!({
+            "rooms": {
+                "join": {
+                    "!room:test": {
+                        "timeline": {
+                            "events": [{
+                                "type": "m.room.encrypted",
+                                "event_id": "$enc3",
+                                "sender": "@user:test",
+                                "content": {
+                                    "algorithm": "m.megolm.v1.aes-sha2",
+                                    "session_id": "abc123"
+                                }
+                            }]
+                        }
+                    }
+                }
+            }
+        });
+
+        let msgs = adapter.parse_sync_events(&sync);
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].event_type, "m.room.encrypted");
+        assert!(msgs[0].body.contains("session_id=abc123"));
         assert!(adapter.e2ee.is_room_marked_encrypted("!room:test"));
     }
 
