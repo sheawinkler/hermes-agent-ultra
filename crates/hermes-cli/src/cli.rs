@@ -106,9 +106,12 @@ pub enum CliCommand {
     Auth {
         /// Action: "login", "logout", "status".
         action: Option<String>,
-        /// Provider: openai/anthropic/... / `telegram` (writes Bot token to config.yaml) / `copilot`.
+        /// Provider: openai/anthropic/... / `telegram` / `weixin|wechat|wx` (write platform token to config.yaml) / `copilot`.
         /// If omitted, uses `HERMES_AUTH_DEFAULT_PROVIDER` or `openai`.
         provider: Option<String>,
+        /// For Weixin login: prefer QR flow (scan to obtain token).
+        #[arg(long)]
+        qr: bool,
     },
 
     /// Encrypted secret vault management.
@@ -229,7 +232,7 @@ pub enum CliCommand {
 
     /// Login to a provider.
     Login {
-        /// Provider name (openai/anthropic/nous/copilot).
+        /// Provider name (openai/anthropic/nous/copilot/telegram/weixin).
         provider: Option<String>,
     },
 
