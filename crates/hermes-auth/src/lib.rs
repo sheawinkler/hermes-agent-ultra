@@ -4,13 +4,23 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use aes_gcm::aead::{Aead, KeyInit};
+use aes_gcm::{Aes256Gcm, Nonce};
 use base64::Engine;
 use chrono::{DateTime, Duration, Utc};
 use hermes_core::AgentError;
+use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::RwLock;
 use url::Url;
+
+const TOKEN_STORE_ENVELOPE_VERSION: u8 = 1;
+const TOKEN_STORE_KEY_BYTES: usize = 32;
+const TOKEN_STORE_NONCE_BYTES: usize = 12;
+const TOKEN_STORE_KEY_ENV: &str = "HERMES_TOKEN_STORE_KEY_B64";
+
+type TokenCache = HashMap<String, OAuthCredential>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthCredential {
@@ -29,6 +39,13 @@ impl OAuthCredential {
             None => false,
         }
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TokenStoreEnvelope {
+    version: u8,
+    nonce_b64: String,
+    ciphertext_b64: String,
 }
 
 #[derive(Debug, Clone)]
@@ -50,27 +67,26 @@ pub fn generate_pkce_pair() -> PkcePair {
 #[derive(Clone)]
 pub struct FileTokenStore {
     path: PathBuf,
-    cache: Arc<RwLock<HashMap<String, OAuthCredential>>>,
+    key: Arc<[u8; TOKEN_STORE_KEY_BYTES]>,
+    cache: Arc<RwLock<TokenCache>>,
 }
 
 impl FileTokenStore {
     pub async fn new(path: impl AsRef<Path>) -> Result<Self, AgentError> {
         let path = path.as_ref().to_path_buf();
-        let initial = if tokio::fs::try_exists(&path)
-            .await
-            .map_err(|e| AgentError::Io(e.to_string()))?
-        {
-            let raw = tokio::fs::read_to_string(&path)
-                .await
-                .map_err(|e| AgentError::Io(e.to_string()))?;
-            serde_json::from_str(&raw).unwrap_or_default()
-        } else {
-            HashMap::new()
-        };
-        Ok(Self {
+        let key_path = path.with_extension("key");
+        let key = load_or_create_store_key(&key_path).await?;
+        let (initial, migrate_legacy) = load_token_cache(&path, &key).await?;
+        let store = Self {
             path,
+            key: Arc::new(key),
             cache: Arc::new(RwLock::new(initial)),
-        })
+        };
+        if migrate_legacy {
+            // Rewrite legacy plaintext content to encrypted envelope format.
+            store.flush().await?;
+        }
+        Ok(store)
     }
 
     pub async fn get(&self, provider: &str) -> Option<OAuthCredential> {
@@ -91,17 +107,168 @@ impl FileTokenStore {
     }
 
     async fn flush(&self) -> Result<(), AgentError> {
-        if let Some(parent) = self.path.parent() {
-            tokio::fs::create_dir_all(parent)
-                .await
-                .map_err(|e| AgentError::Io(e.to_string()))?;
-        }
-        let content = serde_json::to_string_pretty(&*self.cache.read().await)
-            .map_err(|e| AgentError::Config(e.to_string()))?;
-        tokio::fs::write(&self.path, content)
-            .await
-            .map_err(|e| AgentError::Io(e.to_string()))
+        let content = {
+            let cache = self.cache.read().await;
+            let envelope = encrypt_token_cache(&self.key, &cache)?;
+            serde_json::to_vec_pretty(&envelope).map_err(|e| AgentError::Config(e.to_string()))?
+        };
+        write_file_private(&self.path, &content).await
     }
+}
+
+async fn load_token_cache(
+    path: &Path,
+    key: &[u8; TOKEN_STORE_KEY_BYTES],
+) -> Result<(TokenCache, bool), AgentError> {
+    if !tokio::fs::try_exists(path)
+        .await
+        .map_err(|e| AgentError::Io(e.to_string()))?
+    {
+        return Ok((HashMap::new(), false));
+    }
+    let raw = tokio::fs::read_to_string(path)
+        .await
+        .map_err(|e| AgentError::Io(e.to_string()))?;
+    if raw.trim().is_empty() {
+        return Ok((HashMap::new(), false));
+    }
+
+    if let Ok(envelope) = serde_json::from_str::<TokenStoreEnvelope>(&raw) {
+        let cache = decrypt_token_cache(key, &envelope)?;
+        return Ok((cache, false));
+    }
+
+    let legacy: TokenCache =
+        serde_json::from_str(&raw).map_err(|e| AgentError::Config(e.to_string()))?;
+    tracing::warn!(
+        path = %path.display(),
+        "Legacy plaintext token store detected; migrating to encrypted format"
+    );
+    Ok((legacy, true))
+}
+
+fn encrypt_token_cache(
+    key: &[u8; TOKEN_STORE_KEY_BYTES],
+    cache: &TokenCache,
+) -> Result<TokenStoreEnvelope, AgentError> {
+    let plaintext = serde_json::to_vec(cache).map_err(|e| AgentError::Config(e.to_string()))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|e| AgentError::Config(e.to_string()))?;
+    let mut nonce_bytes = [0u8; TOKEN_STORE_NONCE_BYTES];
+    rand::rngs::OsRng.fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let ciphertext = cipher
+        .encrypt(nonce, plaintext.as_ref())
+        .map_err(|_| AgentError::AuthFailed("failed to encrypt token store".into()))?;
+    Ok(TokenStoreEnvelope {
+        version: TOKEN_STORE_ENVELOPE_VERSION,
+        nonce_b64: base64::engine::general_purpose::STANDARD.encode(nonce_bytes),
+        ciphertext_b64: base64::engine::general_purpose::STANDARD.encode(ciphertext),
+    })
+}
+
+fn decrypt_token_cache(
+    key: &[u8; TOKEN_STORE_KEY_BYTES],
+    envelope: &TokenStoreEnvelope,
+) -> Result<TokenCache, AgentError> {
+    if envelope.version != TOKEN_STORE_ENVELOPE_VERSION {
+        return Err(AgentError::Config(format!(
+            "unsupported token store envelope version: {}",
+            envelope.version
+        )));
+    }
+    let nonce = base64::engine::general_purpose::STANDARD
+        .decode(envelope.nonce_b64.trim())
+        .map_err(|e| AgentError::Config(format!("invalid token store nonce: {}", e)))?;
+    if nonce.len() != TOKEN_STORE_NONCE_BYTES {
+        return Err(AgentError::Config(format!(
+            "invalid token store nonce length: {}",
+            nonce.len()
+        )));
+    }
+    let ciphertext = base64::engine::general_purpose::STANDARD
+        .decode(envelope.ciphertext_b64.trim())
+        .map_err(|e| AgentError::Config(format!("invalid token store payload: {}", e)))?;
+    let cipher =
+        Aes256Gcm::new_from_slice(key).map_err(|e| AgentError::Config(e.to_string()))?;
+    let plaintext = cipher
+        .decrypt(Nonce::from_slice(&nonce), ciphertext.as_ref())
+        .map_err(|_| AgentError::AuthFailed("failed to decrypt token store".into()))?;
+    serde_json::from_slice::<TokenCache>(&plaintext).map_err(|e| AgentError::Config(e.to_string()))
+}
+
+async fn load_or_create_store_key(path: &Path) -> Result<[u8; TOKEN_STORE_KEY_BYTES], AgentError> {
+    if let Ok(raw) = std::env::var(TOKEN_STORE_KEY_ENV) {
+        return decode_store_key(raw.trim());
+    }
+    if tokio::fs::try_exists(path)
+        .await
+        .map_err(|e| AgentError::Io(e.to_string()))?
+    {
+        let raw = tokio::fs::read_to_string(path)
+            .await
+            .map_err(|e| AgentError::Io(e.to_string()))?;
+        return decode_store_key(raw.trim());
+    }
+
+    let mut key = [0u8; TOKEN_STORE_KEY_BYTES];
+    rand::rngs::OsRng.fill_bytes(&mut key);
+    let encoded = base64::engine::general_purpose::STANDARD.encode(key);
+    write_file_private(path, encoded.as_bytes()).await?;
+    Ok(key)
+}
+
+fn decode_store_key(encoded: &str) -> Result<[u8; TOKEN_STORE_KEY_BYTES], AgentError> {
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .map_err(|e| AgentError::Config(format!("invalid {}: {}", TOKEN_STORE_KEY_ENV, e)))?;
+    if decoded.len() != TOKEN_STORE_KEY_BYTES {
+        return Err(AgentError::Config(format!(
+            "{} must decode to exactly {} bytes (got {})",
+            TOKEN_STORE_KEY_ENV,
+            TOKEN_STORE_KEY_BYTES,
+            decoded.len()
+        )));
+    }
+    let mut key = [0u8; TOKEN_STORE_KEY_BYTES];
+    key.copy_from_slice(&decoded);
+    Ok(key)
+}
+
+async fn write_file_private(path: &Path, content: &[u8]) -> Result<(), AgentError> {
+    if let Some(parent) = path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .map_err(|e| AgentError::Io(e.to_string()))?;
+    }
+    let tmp_path = path.with_extension(format!(
+        "{}.tmp",
+        uuid::Uuid::new_v4().simple()
+    ));
+    tokio::fs::write(&tmp_path, content)
+        .await
+        .map_err(|e| AgentError::Io(e.to_string()))?;
+    set_private_permissions(&tmp_path).await?;
+    tokio::fs::rename(&tmp_path, path)
+        .await
+        .map_err(|e| AgentError::Io(e.to_string()))?;
+    set_private_permissions(path).await
+}
+
+async fn set_private_permissions(path: &Path) -> Result<(), AgentError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o600);
+        tokio::fs::set_permissions(path, perms)
+            .await
+            .map_err(|e| AgentError::Io(e.to_string()))?;
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+    }
+    Ok(())
 }
 
 pub type RefreshHandler = Arc<
@@ -301,6 +468,7 @@ pub async fn exchange_refresh_token(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     #[test]
     fn authorization_url_contains_pkce_and_state() {
@@ -318,5 +486,61 @@ mod tests {
         assert!(url.contains("state=state-xyz"));
         assert!(url.contains("client_id=cid"));
         assert!(url.contains("scope=openid"));
+    }
+
+    fn sample_credential(provider: &str, access_token: &str) -> OAuthCredential {
+        OAuthCredential {
+            provider: provider.to_string(),
+            access_token: access_token.to_string(),
+            refresh_token: Some("refresh-token".to_string()),
+            token_type: "Bearer".to_string(),
+            scope: Some("openid".to_string()),
+            expires_at: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn file_token_store_encrypts_and_roundtrips() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+
+        let store = FileTokenStore::new(&path).await.unwrap();
+        store
+            .upsert(sample_credential("openai", "super-secret-token"))
+            .await
+            .unwrap();
+
+        let raw = tokio::fs::read_to_string(&path).await.unwrap();
+        assert!(!raw.contains("super-secret-token"));
+        let envelope: TokenStoreEnvelope = serde_json::from_str(&raw).unwrap();
+        assert_eq!(envelope.version, TOKEN_STORE_ENVELOPE_VERSION);
+        assert!(tokio::fs::try_exists(path.with_extension("key")).await.unwrap());
+
+        let reopened = FileTokenStore::new(&path).await.unwrap();
+        let got = reopened.get("openai").await.unwrap();
+        assert_eq!(got.access_token, "super-secret-token");
+    }
+
+    #[tokio::test]
+    async fn file_token_store_migrates_legacy_plaintext() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("tokens.json");
+
+        let mut legacy = HashMap::new();
+        legacy.insert(
+            "anthropic".to_string(),
+            sample_credential("anthropic", "legacy-token"),
+        );
+        let legacy_json = serde_json::to_string_pretty(&legacy).unwrap();
+        tokio::fs::write(&path, legacy_json).await.unwrap();
+
+        let store = FileTokenStore::new(&path).await.unwrap();
+        let got = store.get("anthropic").await.unwrap();
+        assert_eq!(got.access_token, "legacy-token");
+
+        let raw = tokio::fs::read_to_string(&path).await.unwrap();
+        assert!(!raw.contains("legacy-token"));
+        let envelope: TokenStoreEnvelope = serde_json::from_str(&raw).unwrap();
+        assert_eq!(envelope.version, TOKEN_STORE_ENVELOPE_VERSION);
     }
 }
