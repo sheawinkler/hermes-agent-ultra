@@ -47,6 +47,7 @@ md5 = "0.7"
 rustls = { version = "0.23", default-features = false, features = ["ring", "logging", "std", "tls12"] }
 webpki-roots = "0.26"
 hmac = "0.12"
+sha2 = "0.10"
 sha1 = "0.10"
 base64 = { workspace = true }
 matrix-sdk-crypto = { version = "0.16", optional = true }
