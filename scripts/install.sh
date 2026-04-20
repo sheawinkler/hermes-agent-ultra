@@ -6,6 +6,13 @@ VERSION="${1:-latest}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 BIN_NAME="hermes"
 
+need_cmd() {
+  command -v "$1" >/dev/null 2>&1 || {
+    echo "Missing required command: $1" >&2
+    exit 1
+  }
+}
+
 detect_target() {
   local os arch
   os="$(uname -s)"
@@ -26,6 +33,10 @@ detect_target() {
   echo "${os}-${arch}"
 }
 
+need_cmd curl
+need_cmd tar
+need_cmd install
+
 TARGET="$(detect_target)"
 ASSET="${BIN_NAME}-${TARGET}.tar.gz"
 
@@ -45,4 +56,18 @@ tar -xzf "${TMP_DIR}/hermes.tar.gz" -C "${TMP_DIR}"
 install -m 0755 "${TMP_DIR}/hermes" "${INSTALL_DIR}/${BIN_NAME}"
 
 echo "Installed to ${INSTALL_DIR}/${BIN_NAME}"
-echo "Ensure ${INSTALL_DIR} is in your PATH."
+if [[ ! -x "${INSTALL_DIR}/${BIN_NAME}" ]]; then
+  echo "Install appears incomplete: ${INSTALL_DIR}/${BIN_NAME} is not executable." >&2
+  exit 1
+fi
+
+if command -v "${BIN_NAME}" >/dev/null 2>&1; then
+  echo "Detected on PATH: $(command -v "${BIN_NAME}")"
+else
+  echo "Binary is not currently on PATH."
+  echo "Add this line to your shell config, then restart your shell:"
+  echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
+  echo
+  echo "zsh quick apply:"
+  echo "  echo 'export PATH=\"${INSTALL_DIR}:\$PATH\"' >> ~/.zshrc && source ~/.zshrc"
+fi

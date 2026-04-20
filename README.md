@@ -233,6 +233,17 @@ cargo install --git https://github.com/Lumio-Research/hermes-agent-rs hermes-cli
 ```
 
 The script lives at [`scripts/install.sh`](scripts/install.sh) if you prefer to review it before running.
+It does **not** rewrite your shell profile automatically.
+
+If `hermes` is still not found after install, add the install directory to PATH:
+
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+Installer troubleshooting (macOS permissions, PATH, and safe chmod scope):
+- [`docs/installer-troubleshooting.md`](docs/installer-troubleshooting.md)
 
 ---
 
