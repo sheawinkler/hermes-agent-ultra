@@ -229,7 +229,8 @@ impl RlToolset {
 
     /// List available training environments.
     ///
-    /// Returns placeholder data.
+    /// Returns the built-in environment set supported by the lightweight
+    /// local RL orchestration path.
     pub fn list_environments(&self) -> Vec<String> {
         vec![
             "code-generation".to_string(),
@@ -239,11 +240,7 @@ impl RlToolset {
     }
 
     /// Configure a training environment.
-    pub fn configure_environment(
-        &self,
-        environment: &str,
-        config: &serde_json::Value,
-    ) -> String {
+    pub fn configure_environment(&self, environment: &str, config: &serde_json::Value) -> String {
         let mut lock = env_configs().lock().expect("rl env config lock poisoned");
         lock.insert(environment.to_string(), config.clone());
         "configured".to_string()

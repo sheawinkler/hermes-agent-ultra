@@ -4,8 +4,8 @@
 //! it approaches the model's context window limit.
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::time::Duration;
 
 use crate::model_metadata::estimate_tokens_rough;
 
@@ -63,15 +63,15 @@ pub trait ContextEngine: Send + Sync {
 // ---------------------------------------------------------------------------
 
 /// Default context engine that compresses by removing older messages
-/// and replacing them with a summary marker.
-///
-/// In a full implementation, this would call an LLM to generate a summary
-/// of the removed messages.  The current version uses a simple truncation
-/// strategy with a placeholder summary.
+/// and replacing them with a structured summary marker.
 pub struct DefaultContextEngine {
     /// Fraction of messages to keep (from the end).
     pub keep_ratio: f64,
-    /// Whether to generate an LLM summary (placeholder for now).
+    /// Whether to attempt LLM summary generation via optional HTTP endpoint.
+    ///
+    /// If enabled, the engine reads `HERMES_CONTEXT_SUMMARY_URL` and sends
+    /// removed messages to that endpoint. On any failure it falls back to
+    /// deterministic heuristic summarization.
     pub use_llm_summary: bool,
 }
 
@@ -86,6 +86,183 @@ impl DefaultContextEngine {
     pub fn with_keep_ratio(mut self, ratio: f64) -> Self {
         self.keep_ratio = ratio.clamp(0.1, 0.9);
         self
+    }
+
+    async fn maybe_generate_summary(
+        &self,
+        removed_messages: &[Value],
+        removed_count: usize,
+        removed_tokens: u64,
+        keep_count: usize,
+    ) -> String {
+        if self.use_llm_summary {
+            if let Some(summary) = self
+                .llm_summary_via_endpoint(removed_messages, removed_count, removed_tokens)
+                .await
+            {
+                return summary;
+            }
+        }
+
+        self.heuristic_summary(removed_messages, removed_count, removed_tokens, keep_count)
+    }
+
+    async fn llm_summary_via_endpoint(
+        &self,
+        removed_messages: &[Value],
+        removed_count: usize,
+        removed_tokens: u64,
+    ) -> Option<String> {
+        let endpoint = std::env::var("HERMES_CONTEXT_SUMMARY_URL").ok()?;
+        if endpoint.trim().is_empty() {
+            return None;
+        }
+
+        let timeout_secs = std::env::var("HERMES_CONTEXT_SUMMARY_TIMEOUT_SECS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(8)
+            .clamp(1, 60);
+        let client = reqwest::Client::builder()
+            .timeout(Duration::from_secs(timeout_secs))
+            .build()
+            .ok()?;
+        let payload = serde_json::json!({
+            "messages": removed_messages,
+            "removed_count": removed_count,
+            "removed_tokens": removed_tokens,
+            "format": "concise-bullets"
+        });
+        let response = client.post(endpoint).json(&payload).send().await.ok()?;
+        if !response.status().is_success() {
+            return None;
+        }
+        let value = response.json::<Value>().await.ok()?;
+        let summary = value.get("summary").and_then(|v| v.as_str())?;
+        let summary = summary.trim();
+        if summary.is_empty() {
+            None
+        } else {
+            Some(summary.to_string())
+        }
+    }
+
+    fn heuristic_summary(
+        &self,
+        removed_messages: &[Value],
+        removed_count: usize,
+        removed_tokens: u64,
+        keep_count: usize,
+    ) -> String {
+        const MAX_SECTION_ITEMS: usize = 4;
+        const MAX_ITEM_CHARS: usize = 180;
+        const MAX_SUMMARY_CHARS: usize = 1700;
+
+        let mut goals: Vec<String> = Vec::new();
+        let mut decisions: Vec<String> = Vec::new();
+        let mut tool_outcomes: Vec<String> = Vec::new();
+
+        for msg in removed_messages.iter().rev() {
+            let role = msg.get("role").and_then(|r| r.as_str()).unwrap_or("");
+            let text = Self::extract_message_text(msg);
+            if text.is_empty() {
+                continue;
+            }
+            let concise = Self::truncate_sentence(&text, MAX_ITEM_CHARS);
+            if concise.is_empty() {
+                continue;
+            }
+
+            match role {
+                "user" if goals.len() < MAX_SECTION_ITEMS => {
+                    if !goals.contains(&concise) {
+                        goals.push(concise);
+                    }
+                }
+                "assistant" if decisions.len() < MAX_SECTION_ITEMS => {
+                    if !decisions.contains(&concise) {
+                        decisions.push(concise);
+                    }
+                }
+                "tool" if tool_outcomes.len() < MAX_SECTION_ITEMS => {
+                    if !tool_outcomes.contains(&concise) {
+                        tool_outcomes.push(concise);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        goals.reverse();
+        decisions.reverse();
+        tool_outcomes.reverse();
+
+        let mut lines: Vec<String> = vec![format!(
+            "[Context compressed: {} earlier messages (~{} tokens) summarized. {} messages retained.]",
+            removed_count, removed_tokens, keep_count
+        )];
+
+        if !goals.is_empty() {
+            lines.push("User goals:".to_string());
+            for g in &goals {
+                lines.push(format!("- {g}"));
+            }
+        }
+        if !decisions.is_empty() {
+            lines.push("Assistant trajectory:".to_string());
+            for d in &decisions {
+                lines.push(format!("- {d}"));
+            }
+        }
+        if !tool_outcomes.is_empty() {
+            lines.push("Tool outcomes:".to_string());
+            for t in &tool_outcomes {
+                lines.push(format!("- {t}"));
+            }
+        }
+
+        let mut out = lines.join("\n");
+        if out.chars().count() > MAX_SUMMARY_CHARS {
+            out = out.chars().take(MAX_SUMMARY_CHARS).collect::<String>() + "...";
+        }
+        out
+    }
+
+    fn extract_message_text(msg: &Value) -> String {
+        if let Some(s) = msg.get("content").and_then(|c| c.as_str()) {
+            return Self::normalize_whitespace(s);
+        }
+        if let Some(arr) = msg.get("content").and_then(|c| c.as_array()) {
+            let text_parts: Vec<String> = arr
+                .iter()
+                .filter_map(|block| block.get("text").and_then(|t| t.as_str()))
+                .map(Self::normalize_whitespace)
+                .filter(|s| !s.is_empty())
+                .collect();
+            return text_parts.join(" ");
+        }
+        String::new()
+    }
+
+    fn normalize_whitespace(input: &str) -> String {
+        input.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    fn truncate_sentence(input: &str, max_chars: usize) -> String {
+        if input.is_empty() {
+            return String::new();
+        }
+        let mut clipped = input.to_string();
+        if let Some((idx, _)) = input
+            .char_indices()
+            .find(|(_, c)| matches!(c, '.' | '!' | '?' | '\n'))
+        {
+            clipped = input[..=idx].to_string();
+        }
+        if clipped.chars().count() <= max_chars {
+            return clipped;
+        }
+        clipped.chars().take(max_chars).collect::<String>() + "..."
     }
 }
 
@@ -124,10 +301,14 @@ impl ContextEngine for DefaultContextEngine {
             })
             .sum();
 
-        let summary = format!(
-            "[Context compressed: {} earlier messages (~{} tokens) summarized. {} messages retained.]",
-            removed_count, removed_tokens, keep_count,
-        );
+        let summary = self
+            .maybe_generate_summary(
+                &messages[..removed_count],
+                removed_count,
+                removed_tokens,
+                keep_count,
+            )
+            .await;
 
         let mut result = Vec::with_capacity(keep_count + 1);
         result.push(serde_json::json!({

@@ -1,8 +1,8 @@
 //! Bundled memory provider plugins.
 //!
 //! Each module implements `MemoryProviderPlugin` for a specific external
-//! memory backend. The built-in provider is always registered first;
-//! at most ONE of these external providers can be active at a time.
+//! memory backend. The built-in provider is always registered first.
+//! External providers are additive and can run side-by-side.
 
 pub mod byterover;
 pub mod contextlattice;
