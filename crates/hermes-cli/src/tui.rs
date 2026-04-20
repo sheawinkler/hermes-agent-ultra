@@ -24,7 +24,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 use tokio::sync::mpsc;
 
-use hermes_core::AgentError;
+use hermes_core::{AgentError, StreamChunk};
 
 use crate::app::App;
 use crate::commands;
@@ -45,6 +45,8 @@ pub enum Event {
     Message(String),
     /// Agent produced a streaming delta.
     StreamDelta(String),
+    /// Agent produced a full stream chunk (including control metadata).
+    StreamChunk(StreamChunk),
     /// Agent finished processing.
     AgentDone,
     /// Interrupt signal (Ctrl+C).
@@ -158,6 +160,10 @@ pub struct TuiState {
     pub processing: bool,
     /// Buffer for streaming agent output.
     pub stream_buffer: String,
+    /// Whether post-response deltas are currently muted.
+    pub stream_muted: bool,
+    /// Whether the next visible token should be prefixed by a paragraph break.
+    pub stream_needs_break: bool,
     /// Status message shown in the status bar.
     pub status_message: String,
     /// Selection anchor for text selection (byte offset, None if no selection).
@@ -227,6 +233,8 @@ impl Default for TuiState {
             scroll_offset: 0,
             processing: false,
             stream_buffer: String::new(),
+            stream_muted: false,
+            stream_needs_break: false,
             status_message: String::new(),
             selection_anchor: None,
             message_browse_index: None,
@@ -835,6 +843,7 @@ fn render_status(
 pub async fn run(mut app: App) -> Result<(), AgentError> {
     let mut tui = Tui::new().map_err(|e| AgentError::Config(e.to_string()))?;
     let mut state = TuiState::default();
+    app.set_stream_handle(Some(StreamHandle::from(tui.event_sender())));
 
     // Spawn crossterm event reader
     let event_sender = tui.event_sender();
@@ -933,14 +942,43 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                     Some(Event::StreamDelta(delta)) => {
                         state.stream_buffer.push_str(&delta);
                     }
+                    Some(Event::StreamChunk(chunk)) => {
+                        if let Some(delta) = chunk.delta {
+                            if let Some(extra) = delta.extra.as_ref() {
+                                if let Some(control) = extra.get("control").and_then(|v| v.as_str()) {
+                                    if control == "mute_post_response" {
+                                        state.stream_muted = extra
+                                            .get("enabled")
+                                            .and_then(|v| v.as_bool())
+                                            .unwrap_or(false);
+                                    } else if control == "stream_break" {
+                                        state.stream_needs_break = true;
+                                    }
+                                }
+                            }
+                            if let Some(content) = delta.content {
+                                if !state.stream_muted {
+                                    if state.stream_needs_break {
+                                        state.stream_buffer.push_str("\n\n");
+                                        state.stream_needs_break = false;
+                                    }
+                                    state.stream_buffer.push_str(&content);
+                                }
+                            }
+                        }
+                    }
                     Some(Event::AgentDone) => {
                         state.processing = false;
                         state.stream_buffer.clear();
+                        state.stream_muted = false;
+                        state.stream_needs_break = false;
                         state.status_message.clear();
                     }
                     Some(Event::Interrupt) => {
                         state.processing = false;
                         state.stream_buffer.clear();
+                        state.stream_muted = false;
+                        state.stream_needs_break = false;
                     }
                     None => {
                         // Channel closed
@@ -975,6 +1013,11 @@ impl StreamHandle {
     /// Send a streaming text delta to the TUI.
     pub fn send_delta(&self, text: &str) {
         let _ = self.sender.send(Event::StreamDelta(text.to_string()));
+    }
+
+    /// Send a full streaming chunk to the TUI event loop.
+    pub fn send_chunk(&self, chunk: StreamChunk) {
+        let _ = self.sender.send(Event::StreamChunk(chunk));
     }
 
     /// Signal that the agent has finished.

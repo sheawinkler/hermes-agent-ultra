@@ -27,6 +27,7 @@ use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_tools::ToolRegistry;
 
 use crate::cli::Cli;
+use crate::tui::StreamHandle;
 
 // ---------------------------------------------------------------------------
 // App
@@ -66,6 +67,9 @@ pub struct App {
 
     /// Interrupt controller for stopping agent execution.
     pub interrupt_controller: InterruptController,
+
+    /// Optional TUI streaming sink for incremental chunks.
+    pub stream_handle: Option<StreamHandle>,
 }
 
 impl std::fmt::Debug for App {
@@ -148,7 +152,13 @@ impl App {
             input_history: Vec::new(),
             history_index: 0,
             interrupt_controller: InterruptController::new(),
+            stream_handle: None,
         })
+    }
+
+    /// Attach a streaming handle (used by TUI mode).
+    pub fn set_stream_handle(&mut self, handle: Option<StreamHandle>) {
+        self.stream_handle = handle;
     }
 
     /// Run the interactive REPL loop.
@@ -316,11 +326,25 @@ impl App {
         self.interrupt_controller.clear_interrupt();
 
         let messages = self.messages.clone();
-        let result = self.agent.run(messages, None).await;
+        let result = if self.config.streaming.enabled {
+            let stream_handle = self.stream_handle.clone();
+            let stream_cb: Option<Box<dyn Fn(hermes_core::StreamChunk) + Send + Sync>> =
+                stream_handle.map(|h| {
+                    Box::new(move |chunk: hermes_core::StreamChunk| {
+                        h.send_chunk(chunk);
+                    }) as Box<dyn Fn(hermes_core::StreamChunk) + Send + Sync>
+                });
+            self.agent.run_stream(messages, None, stream_cb).await
+        } else {
+            self.agent.run(messages, None).await
+        };
 
         match result {
             Ok(result) => {
                 self.messages = result.messages;
+                if let Some(handle) = &self.stream_handle {
+                    handle.send_done();
+                }
                 if result.interrupted {
                     tracing::info!("Agent loop returned interrupted=true (graceful stop)");
                     println!("[Agent execution interrupted]");
@@ -333,6 +357,9 @@ impl App {
             }
             Err(AgentError::Interrupted { message }) => {
                 self.interrupt_controller.clear_interrupt();
+                if let Some(handle) = &self.stream_handle {
+                    handle.send_done();
+                }
                 if let Some(redirect) = message {
                     tracing::info!("Agent interrupted with redirect: {}", redirect);
                 } else {
@@ -340,7 +367,12 @@ impl App {
                 }
                 println!("[Agent execution interrupted]");
             }
-            Err(e) => return Err(e),
+            Err(e) => {
+                if let Some(handle) = &self.stream_handle {
+                    handle.send_done();
+                }
+                return Err(e);
+            }
         }
 
         Ok(())
