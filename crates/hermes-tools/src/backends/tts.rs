@@ -1,68 +1,47 @@
-//! Real TTS backends: Edge TTS, ElevenLabs, and OpenAI TTS.
+//! Real TTS backends: ElevenLabs and OpenAI TTS.
+//!
+//! Zero-Python: Edge TTS (which required the `edge-tts` Python CLI) is no
+//! longer supported. Callers that want free / no-key TTS should use local
+//! ONNX models via the forthcoming `LocalOnnxTtsBackend` (Sprint 6) or
+//! OpenAI's cheap `tts-1` endpoint.
 
 use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::json;
 
 use crate::tools::tts::TtsBackend;
+use crate::tts_streaming::minimax::MiniMaxTtsBackend;
+use hermes_config::managed_gateway::{
+    resolve_managed_tool_gateway, resolve_openai_audio_api_key, ManagedToolGatewayConfig,
+    ResolveOptions,
+};
 use hermes_core::ToolError;
 
-/// TTS backend that dispatches to Edge TTS, ElevenLabs, or OpenAI based on provider.
+/// TTS backend that dispatches to ElevenLabs, OpenAI, or MiniMax based on
+/// the `provider` argument. Defaults to `openai` when no API keys hint at a
+/// preferred provider.
 pub struct MultiTtsBackend {
     client: Client,
     elevenlabs_key: Option<String>,
-    openai_key: Option<String>,
     openai_base_url: String,
+    minimax: MiniMaxTtsBackend,
+    minimax_available: bool,
 }
 
 impl MultiTtsBackend {
     pub fn new() -> Self {
+        let minimax_available = std::env::var("MINIMAX_API_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .is_some();
         Self {
             client: Client::new(),
             elevenlabs_key: std::env::var("ELEVENLABS_API_KEY").ok(),
-            openai_key: std::env::var("OPENAI_API_KEY").ok(),
             openai_base_url: std::env::var("OPENAI_BASE_URL")
                 .unwrap_or_else(|_| "https://api.openai.com/v1".to_string()),
+            minimax: MiniMaxTtsBackend::from_env(),
+            minimax_available,
         }
-    }
-
-    async fn edge_tts(&self, text: &str, voice: &str) -> Result<String, ToolError> {
-        // Edge TTS uses a WebSocket connection to Microsoft's speech service.
-        // For simplicity, we shell out to the edge-tts CLI if available,
-        // or return a signal for the caller to handle.
-        let output_path =
-            std::env::temp_dir().join(format!("hermes_tts_{}.mp3", uuid::Uuid::new_v4()));
-
-        let output = tokio::process::Command::new("edge-tts")
-            .arg("--voice")
-            .arg(voice)
-            .arg("--text")
-            .arg(text)
-            .arg("--write-media")
-            .arg(output_path.to_str().unwrap_or("output.mp3"))
-            .output()
-            .await
-            .map_err(|e| {
-                ToolError::ExecutionFailed(format!(
-                    "edge-tts command failed (is it installed? pip install edge-tts): {}",
-                    e
-                ))
-            })?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(ToolError::ExecutionFailed(format!(
-                "edge-tts error: {}",
-                stderr
-            )));
-        }
-
-        Ok(json!({
-            "provider": "edge_tts",
-            "file": output_path.display().to_string(),
-            "voice": voice,
-        })
-        .to_string())
     }
 
     async fn elevenlabs_tts(&self, text: &str, voice: &str) -> Result<String, ToolError> {
@@ -112,15 +91,34 @@ impl MultiTtsBackend {
             "provider": "elevenlabs",
             "file": output_path.display().to_string(),
             "voice": voice,
+            "bytes": bytes.len(),
         })
         .to_string())
     }
 
     async fn openai_tts(&self, text: &str, voice: &str) -> Result<String, ToolError> {
-        let api_key = self
-            .openai_key
-            .as_ref()
-            .ok_or_else(|| ToolError::ExecutionFailed("OPENAI_API_KEY not set".into()))?;
+        // Resolve transport in priority order:
+        // 1. Managed Nous gateway (HERMES_ENABLE_NOUS_MANAGED_TOOLS + Nous token)
+        // 2. Direct OpenAI with VOICE_TOOLS_OPENAI_KEY override or OPENAI_API_KEY
+        let managed = resolve_managed_tool_gateway("openai-audio", ResolveOptions::default());
+        let (endpoint, bearer, transport) = match managed {
+            Some(cfg) => Self::openai_audio_managed_endpoint(&cfg),
+            None => {
+                let key = resolve_openai_audio_api_key();
+                if key.is_empty() {
+                    return Err(ToolError::ExecutionFailed(
+                        "OPENAI_API_KEY (or VOICE_TOOLS_OPENAI_KEY) not set, and no managed \
+                         openai-audio gateway is configured."
+                            .into(),
+                    ));
+                }
+                (
+                    format!("{}/audio/speech", self.openai_base_url),
+                    key,
+                    "direct",
+                )
+            }
+        };
 
         let body = json!({
             "model": "tts-1",
@@ -130,8 +128,8 @@ impl MultiTtsBackend {
 
         let resp = self
             .client
-            .post(format!("{}/audio/speech", self.openai_base_url))
-            .header("Authorization", format!("Bearer {}", api_key))
+            .post(&endpoint)
+            .header("Authorization", format!("Bearer {}", bearer))
             .json(&body)
             .send()
             .await
@@ -159,10 +157,36 @@ impl MultiTtsBackend {
 
         Ok(json!({
             "provider": "openai",
+            "transport": transport,
             "file": output_path.display().to_string(),
             "voice": voice,
+            "bytes": bytes.len(),
         })
         .to_string())
+    }
+
+    /// Compose the OpenAI-audio gateway endpoint + bearer for a resolved
+    /// managed config. Public visibility kept tight (`pub(crate)`) so the
+    /// `tts_premium` handler can reuse it later if needed.
+    pub(crate) fn openai_audio_managed_endpoint(
+        cfg: &ManagedToolGatewayConfig,
+    ) -> (String, String, &'static str) {
+        let base = cfg.gateway_origin.trim_end_matches('/');
+        (
+            format!("{base}/audio/speech"),
+            cfg.nous_user_token.clone(),
+            "managed",
+        )
+    }
+
+    /// Public accessor so other tool handlers (e.g. `tts_premium`) can reuse
+    /// the ElevenLabs HTTP path without instantiating a second client.
+    pub async fn synthesize_elevenlabs(
+        &self,
+        text: &str,
+        voice: &str,
+    ) -> Result<String, ToolError> {
+        self.elevenlabs_tts(text, voice).await
     }
 }
 
@@ -180,13 +204,20 @@ impl TtsBackend for MultiTtsBackend {
         voice: Option<&str>,
         provider: Option<&str>,
     ) -> Result<String, ToolError> {
-        let provider = provider.unwrap_or("edge_tts");
-
-        match provider {
-            "edge_tts" => {
-                let voice = voice.unwrap_or("en-US-AriaNeural");
-                self.edge_tts(text, voice).await
+        // Default provider preference:
+        // 1. ELEVENLABS_API_KEY set → elevenlabs (highest quality)
+        // 2. Otherwise OpenAI (cheapest HTTP-only path)
+        // Zero-Python: edge_tts removed entirely — callers asking for
+        // "edge_tts" receive a clear migration error.
+        let resolved_provider = provider.unwrap_or_else(|| {
+            if self.elevenlabs_key.is_some() {
+                "elevenlabs"
+            } else {
+                "openai"
             }
+        });
+
+        match resolved_provider {
             "elevenlabs" => {
                 let voice = voice.unwrap_or("21m00Tcm4TlvDq8ikWAM"); // Rachel
                 self.elevenlabs_tts(text, voice).await
@@ -195,10 +226,75 @@ impl TtsBackend for MultiTtsBackend {
                 let voice = voice.unwrap_or("alloy");
                 self.openai_tts(text, voice).await
             }
+            "minimax" => {
+                if !self.minimax_available {
+                    return Err(ToolError::ExecutionFailed("MINIMAX_API_KEY not set".into()));
+                }
+                self.minimax.synthesize(text, voice, provider).await
+            }
+            "edge_tts" | "edge-tts" | "neutts" => Err(ToolError::InvalidParams(format!(
+                "{resolved_provider} is not supported in hermes-agent-rust (zero-Python). \
+                 Use provider='openai' (OPENAI_API_KEY), 'elevenlabs' (ELEVENLABS_API_KEY), \
+                 or 'minimax' (MINIMAX_API_KEY)."
+            ))),
             other => Err(ToolError::InvalidParams(format!(
-                "Unknown TTS provider: '{}'. Use 'edge_tts', 'elevenlabs', or 'openai'.",
-                other
+                "Unknown TTS provider: '{other}'. Use 'openai', 'elevenlabs', or 'minimax'.",
             ))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn openai_audio_managed_endpoint_appends_audio_speech() {
+        let cfg = ManagedToolGatewayConfig {
+            vendor: "openai-audio".into(),
+            gateway_origin: "https://openai-audio-gateway.example.com/".into(),
+            nous_user_token: "tok-xyz".into(),
+            managed_mode: true,
+        };
+        let (endpoint, bearer, transport) = MultiTtsBackend::openai_audio_managed_endpoint(&cfg);
+        assert_eq!(
+            endpoint,
+            "https://openai-audio-gateway.example.com/audio/speech"
+        );
+        assert_eq!(bearer, "tok-xyz");
+        assert_eq!(transport, "managed");
+    }
+
+    #[tokio::test]
+    async fn test_edge_tts_returns_migration_error() {
+        let backend = MultiTtsBackend::new();
+        let err = backend
+            .synthesize("hello", None, Some("edge_tts"))
+            .await
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("not supported") || msg.contains("zero-Python"));
+        assert!(msg.contains("openai") || msg.contains("elevenlabs"));
+    }
+
+    #[tokio::test]
+    async fn test_neutts_returns_migration_error() {
+        let backend = MultiTtsBackend::new();
+        let err = backend
+            .synthesize("hi", None, Some("neutts"))
+            .await
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("not supported") || msg.contains("zero-Python"));
+    }
+
+    #[tokio::test]
+    async fn test_unknown_provider_errors() {
+        let backend = MultiTtsBackend::new();
+        let err = backend
+            .synthesize("hello", None, Some("bogus"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("Unknown"));
     }
 }

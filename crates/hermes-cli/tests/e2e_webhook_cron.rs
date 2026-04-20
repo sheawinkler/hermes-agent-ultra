@@ -37,6 +37,7 @@ async fn cron_completion_delivers_json_to_registered_webhook_url() {
         total_turns: 1,
         tool_errors: vec![],
         usage: None,
+        ..Default::default()
     };
     let event = CronCompletionEvent::new(&job, "schedule", Ok(&result));
 

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "fixture_group": "hermes_core",
+  "python_module": "hermes_core::tool_call_parser::format_tool_calls (Hermes XML)",
+  "cases": [
+    {
+      "id": "empty_calls",
+      "op": "format_tool_calls",
+      "input": { "calls": [] },
+      "expected": ""
+    },
+    {
+      "id": "single_no_args",
+      "op": "format_tool_calls",
+      "input": {
+        "calls": [
+          {
+            "id": "",
+            "name": "search",
+            "arguments": "{}"
+          }
+        ]
+      },
+      "expected": "<function_calls>\n<invoke name=\"search\">\n</invoke>\n</function_calls>"
+    }
+  ]
+}

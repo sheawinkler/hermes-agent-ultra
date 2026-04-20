@@ -47,7 +47,6 @@ hermes-environments = { workspace = true }
 hermes-mcp = { workspace = true }
 hermes-acp = { workspace = true }
 hermes-skills = { workspace = true }
-hermes-intelligence = { workspace = true }
 hermes-auth = { workspace = true }
 hermes-telemetry = { workspace = true }
 clap = { workspace = true }

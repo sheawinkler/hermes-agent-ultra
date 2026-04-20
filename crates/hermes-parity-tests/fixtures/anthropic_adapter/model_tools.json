@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "fixture_group": "anthropic_adapter",
+  "python_module": "agent/anthropic_adapter.py",
+  "cases": [
+    {
+      "id": "normalize_strip_prefix_and_dots",
+      "op": "normalize_model_name",
+      "input": {
+        "model": "anthropic/claude-opus-4.6",
+        "preserve_dots": false
+      },
+      "expected": "claude-opus-4-6"
+    },
+    {
+      "id": "normalize_preserve_dots",
+      "op": "normalize_model_name",
+      "input": {
+        "model": "anthropic/qwen3.5-plus",
+        "preserve_dots": true
+      },
+      "expected": "qwen3.5-plus"
+    },
+    {
+      "id": "sanitize_dots",
+      "op": "sanitize_tool_id",
+      "input": { "tool_id": "abc.123" },
+      "expected": "abc_123"
+    },
+    {
+      "id": "sanitize_empty",
+      "op": "sanitize_tool_id",
+      "input": { "tool_id": "" },
+      "expected": "tool_0"
+    },
+    {
+      "id": "oauth_console_key",
+      "op": "is_oauth_token",
+      "input": { "key": "sk-ant-api03-xxx" },
+      "expected": false
+    },
+    {
+      "id": "oauth_setup_token",
+      "op": "is_oauth_token",
+      "input": { "key": "sk-ant-oat-xxx" },
+      "expected": true
+    }
+  ]
+}

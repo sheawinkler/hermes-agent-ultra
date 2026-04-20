@@ -26,3 +26,4 @@ reqwest = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
+hermes-config = { workspace = true, features = ["test-helpers"] }

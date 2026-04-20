@@ -9,6 +9,7 @@ description = "Cron scheduler for Hermes Agent"
 [dependencies]
 hermes-core = { workspace = true }
 hermes-agent = { workspace = true }
+hermes-tools = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

@@ -372,6 +372,11 @@ impl ContextManager {
             .map(|m| m.content.as_deref().map(|c| c.len()).unwrap_or(0))
             .sum()
     }
+
+    /// Configured maximum context character budget (same units as [`Self::total_chars`]).
+    pub fn max_context_chars(&self) -> usize {
+        self.max_context_chars
+    }
 }
 
 // ---------------------------------------------------------------------------

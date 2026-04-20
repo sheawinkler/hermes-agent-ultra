@@ -8,15 +8,17 @@ description = "Tool registry, toolsets, and tool implementations for Hermes Agen
 
 [dependencies]
 hermes-core = { workspace = true }
-hermes-rl = { workspace = true }
+hermes-config = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tracing = { workspace = true }
 async-trait = { workspace = true }
 regex = { workspace = true }
-reqwest = { workspace = true, features = ["json", "multipart"] }
+reqwest = { workspace = true, features = ["json", "multipart", "stream"] }
 rusqlite = { workspace = true }
+futures = { workspace = true }
+bytes = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }
 indexmap = { workspace = true }
@@ -27,3 +29,5 @@ rand = "0.8"
 
 [dev-dependencies]
 proptest = { workspace = true }
+tempfile = "3"
+hermes-config = { workspace = true, features = ["test-helpers"] }

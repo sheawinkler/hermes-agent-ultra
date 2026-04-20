@@ -263,8 +263,12 @@ pub struct ToolErrorRecord {
     pub turn: u32,
 }
 
+fn is_false(v: &bool) -> bool {
+    !*v
+}
+
 /// Final result of an agent run.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct AgentResult {
     pub messages: Vec<Message>,
     pub finished_naturally: bool,
@@ -273,6 +277,15 @@ pub struct AgentResult {
     pub tool_errors: Vec<ToolErrorRecord>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<UsageStats>,
+    /// Set when the loop stopped due to [`crate::AgentError::Interrupted`] (Python parity).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub interrupted: bool,
+    /// Estimated session spend in USD when cost tracking is active.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_cost_usd: Option<f64>,
+    /// Hook / plugin parity: `on_session_start` ran this run (new session, not restored prompt).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub session_started_hooks_fired: bool,
 }
 
 // ---------------------------------------------------------------------------

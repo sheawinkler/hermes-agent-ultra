@@ -71,6 +71,21 @@ impl InterruptController {
         self.flag.load(Ordering::Acquire)
     }
 
+    /// If an interrupt is pending, consume it (clear flag + redirect) and return `Some(redirect)`.
+    ///
+    /// Used by the agent loop for **graceful** shutdown with
+    /// [`hermes_core::AgentResult::interrupted`] instead of
+    /// [`AgentError::Interrupted`]. Call sites that still need the legacy error
+    /// should use [`Self::check_interrupt`].
+    pub fn take_interrupt_graceful(&self) -> Option<Option<String>> {
+        if !self.is_interrupted() {
+            return None;
+        }
+        let msg = self.take_redirect_message();
+        self.clear_interrupt();
+        Some(msg)
+    }
+
     /// Take the redirect message (if any), leaving `None` in its place.
     pub fn take_redirect_message(&self) -> Option<String> {
         if let Ok(mut guard) = self.redirect_message.lock() {

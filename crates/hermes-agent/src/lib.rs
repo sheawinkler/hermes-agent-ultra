@@ -6,6 +6,7 @@
 
 pub mod agent_loop;
 pub mod api_bridge;
+pub mod auxiliary_builder;
 pub mod budget;
 pub mod compression;
 pub mod context;
@@ -20,6 +21,7 @@ pub mod oauth;
 pub mod plugins;
 pub mod provider;
 pub mod providers_extra;
+pub mod python_alignment;
 pub mod rate_limit;
 pub mod reasoning;
 pub mod session_persistence;
@@ -46,6 +48,7 @@ pub use budget::{check_aggregate_budget, enforce_budget, truncate_result};
 
 // Re-export LLM providers
 pub use api_bridge::CodexProvider;
+pub use auxiliary_builder::{build_default_auxiliary_client, AuxiliaryWiringSummary};
 pub use provider::{AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider};
 pub use providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
@@ -75,13 +78,20 @@ pub use plugins::{Plugin, PluginManager, PluginMeta};
 pub use skill_orchestrator::SkillOrchestrator;
 
 // Re-export session persistence
-pub use session_persistence::SessionPersistence;
+pub use session_persistence::{leading_system_prompt_for_persist, SessionPersistence};
 
 // Re-export context files
 pub use context_files::{load_hermes_context_files, load_workspace_context, scan_context_content};
 
 // Re-export subdirectory hints
 pub use subdirectory_hints::{generate_project_hints, SubdirectoryHintTracker};
+
+// Python `run_agent.py` alignment helpers (budget strip/inject, surrogate sanitize)
+pub use python_alignment::{
+    budget_pressure_text, inject_budget_pressure_into_last_tool_result,
+    looks_like_codex_intermediate_ack, sanitize_surrogates, strip_budget_warnings_from_messages,
+    strip_think_blocks_for_ack, CODEX_CONTINUE_USER_MESSAGE,
+};
 
 // Re-export sub-agent orchestrator
 pub use sub_agent_orchestrator::{

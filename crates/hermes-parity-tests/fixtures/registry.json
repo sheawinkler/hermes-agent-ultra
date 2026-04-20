@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "description": "Golden JSON parity modules (all entries are active with fixtures under fixtures/). Roadmap items such as send_message / Tirith live in PARITY_PLAN.md until fixtures land.",
+  "modules": [
+    {
+      "id": "anthropic_adapter",
+      "status": "active",
+      "python": "agent/anthropic_adapter.py",
+      "rust": "hermes_intelligence::anthropic_adapter",
+      "fixture_dirs": ["anthropic_adapter"]
+    },
+    {
+      "id": "hermes_core_tool_format",
+      "status": "active",
+      "python": "N/A (Hermes XML round-trip)",
+      "rust": "hermes_core::tool_call_parser::format_tool_calls",
+      "fixture_dirs": ["hermes_core"]
+    },
+    {
+      "id": "checkpoint_manager",
+      "status": "active",
+      "python": "tools/checkpoint_manager.py",
+      "rust": "hermes_parity_tests::harness::checkpoint_shadow_dir_id",
+      "fixture_dirs": ["checkpoint_manager"],
+      "note": "Full snapshot/rollback parity requires Rust checkpoint backend + git2 tests."
+    }
+  ]
+}

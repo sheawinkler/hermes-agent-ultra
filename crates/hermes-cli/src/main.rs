@@ -6,7 +6,8 @@
 use clap::CommandFactory;
 use clap::Parser;
 use clap_complete::{generate, Shell as CompletionShell};
-use hermes_agent::AgentLoop;
+use hermes_agent::session_persistence::SessionPersistence;
+use hermes_agent::{leading_system_prompt_for_persist, AgentLoop};
 use hermes_auth::{AuthManager, FileTokenStore, OAuthCredential};
 use hermes_cli::app::{
     bridge_tool_registry, build_agent_config, build_provider, provider_api_key_from_env,
@@ -50,7 +51,7 @@ use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_telemetry::init_telemetry_from_env;
 use hermes_tools::ToolRegistry;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc};
 #[tokio::main]
 async fn main() {
@@ -492,12 +493,36 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
                     let config = config_arc.clone();
                     let agent_tools = agent_tools_for_msg.clone();
                     Box::pin(async move {
+                        let effective_model = resolve_model_for_gateway(
+                            config.model.as_deref().unwrap_or("gpt-4o"),
+                            &ctx,
+                        );
                         let agent =
                             build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools);
                         let result = agent
                             .run(messages, None)
                             .await
                             .map_err(|e| hermes_gateway::GatewayError::Platform(e.to_string()))?;
+                        let home = ctx
+                            .home
+                            .as_deref()
+                            .or(config.home_dir.as_deref())
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty());
+                        if let Some(h) = home {
+                            if !ctx.session_key.trim().is_empty() {
+                                let sp = SessionPersistence::new(Path::new(h));
+                                let sys = leading_system_prompt_for_persist(&result.messages);
+                                let _ = sp.persist_session(
+                                    &ctx.session_key,
+                                    &result.messages,
+                                    Some(&effective_model),
+                                    Some(ctx.platform.as_str()),
+                                    None,
+                                    sys.as_deref(),
+                                );
+                            }
+                        }
                         Ok(extract_last_assistant_reply(&result.messages))
                     })
                 }))
@@ -507,13 +532,47 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
                     let config = config_arc_stream.clone();
                     let agent_tools = agent_tools_for_stream.clone();
                     Box::pin(async move {
+                        let effective_model = resolve_model_for_gateway(
+                            config.model.as_deref().unwrap_or("gpt-4o"),
+                            &ctx,
+                        );
                         let agent =
                             build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools);
                         let emit = on_chunk.clone();
+                        let ui_state = Arc::new(Mutex::new((false, false))); // (muted, needs_break)
+                        let ui_state_cb = ui_state.clone();
                         let stream_cb: Box<dyn Fn(StreamChunk) + Send + Sync> =
                             Box::new(move |chunk: StreamChunk| {
                                 if let Some(delta) = chunk.delta {
+                                    if let Some(extra) = delta.extra.as_ref() {
+                                        if let Some(control) =
+                                            extra.get("control").and_then(|v| v.as_str())
+                                        {
+                                            if control == "mute_post_response" {
+                                                let enabled = extra
+                                                    .get("enabled")
+                                                    .and_then(|v| v.as_bool())
+                                                    .unwrap_or(false);
+                                                if let Ok(mut st) = ui_state_cb.lock() {
+                                                    st.0 = enabled;
+                                                }
+                                            } else if control == "stream_break" {
+                                                if let Ok(mut st) = ui_state_cb.lock() {
+                                                    st.1 = true;
+                                                }
+                                            }
+                                        }
+                                    }
                                     if let Some(text) = delta.content {
+                                        if let Ok(mut st) = ui_state_cb.lock() {
+                                            if st.0 {
+                                                return;
+                                            }
+                                            if st.1 {
+                                                emit("\n\n".to_string());
+                                                st.1 = false;
+                                            }
+                                        }
                                         emit(text);
                                     }
                                 }
@@ -523,6 +582,26 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
                             .run_stream(messages, None, Some(stream_cb))
                             .await
                             .map_err(|e| hermes_gateway::GatewayError::Platform(e.to_string()))?;
+                        let home = ctx
+                            .home
+                            .as_deref()
+                            .or(config.home_dir.as_deref())
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty());
+                        if let Some(h) = home {
+                            if !ctx.session_key.trim().is_empty() {
+                                let sp = SessionPersistence::new(Path::new(h));
+                                let sys = leading_system_prompt_for_persist(&result.messages);
+                                let _ = sp.persist_session(
+                                    &ctx.session_key,
+                                    &result.messages,
+                                    Some(&effective_model),
+                                    Some(ctx.platform.as_str()),
+                                    None,
+                                    sys.as_deref(),
+                                );
+                            }
+                        }
                         Ok(extract_last_assistant_reply(&result.messages))
                     })
                 }))
@@ -1211,6 +1290,18 @@ fn build_agent_for_gateway_context(
     }
     if !ctx.session_key.trim().is_empty() {
         agent_config.session_id = Some(ctx.session_key.clone());
+    }
+    let home = ctx
+        .home
+        .as_deref()
+        .or(config.home_dir.as_deref())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    if let Some(h) = home {
+        let _ = AgentLoop::hydrate_stored_system_prompt_from_hermes_home(
+            &mut agent_config,
+            Path::new(h),
+        );
     }
     AgentLoop::new(agent_config, agent_tools, provider)
 }

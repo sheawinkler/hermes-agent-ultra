@@ -5,6 +5,9 @@ use reqwest::Client;
 use serde_json::{json, Value};
 
 use crate::tools::web::{WebExtractBackend, WebSearchBackend};
+use hermes_config::managed_gateway::{
+    resolve_managed_tool_gateway, ManagedToolGatewayConfig, ResolveOptions,
+};
 use hermes_core::ToolError;
 
 // ---------------------------------------------------------------------------
@@ -293,26 +296,109 @@ impl WebSearchBackend for ExaSearchBackend {
 // FirecrawlExtractBackend
 // ---------------------------------------------------------------------------
 
-/// Real Firecrawl API extract backend.
-pub struct FirecrawlExtractBackend {
-    client: Client,
-    api_key: String,
+/// Identifies how a Firecrawl request reaches the API. Reflected in the
+/// returned JSON's `transport` field for observability.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FirecrawlTransport {
+    /// Direct call to `https://api.firecrawl.dev/v1/...` with the user's
+    /// `FIRECRAWL_API_KEY`.
+    Direct { api_key: String },
+    /// Routed through a Nous-managed gateway with a Nous OAuth bearer.
+    Managed {
+        endpoint_root: String,
+        nous_token: String,
+    },
 }
 
-impl FirecrawlExtractBackend {
-    pub fn new(api_key: String) -> Self {
-        Self {
-            client: Client::new(),
-            api_key,
+impl FirecrawlTransport {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Direct { .. } => "direct",
+            Self::Managed { .. } => "managed",
         }
     }
 
-    /// Create from environment variable `FIRECRAWL_API_KEY`.
+    fn scrape_endpoint(&self) -> String {
+        match self {
+            Self::Direct { .. } => "https://api.firecrawl.dev/v1/scrape".into(),
+            Self::Managed { endpoint_root, .. } => format!("{endpoint_root}/v1/scrape"),
+        }
+    }
+
+    fn bearer(&self) -> &str {
+        match self {
+            Self::Direct { api_key } => api_key,
+            Self::Managed { nous_token, .. } => nous_token,
+        }
+    }
+}
+
+/// Real Firecrawl API extract backend.
+///
+/// Resolution order at construction time:
+///
+/// 1. Direct: `FIRECRAWL_API_KEY` env var → calls firecrawl.dev directly.
+/// 2. Managed: when (1) is missing AND `HERMES_ENABLE_NOUS_MANAGED_TOOLS`
+///    is on with a Nous access token, the call is routed through the
+///    `firecrawl` vendor gateway.
+///
+/// `transport` is reflected in the returned JSON so callers can audit
+/// where the request actually went.
+#[derive(Debug)]
+pub struct FirecrawlExtractBackend {
+    client: Client,
+    transport: FirecrawlTransport,
+}
+
+impl FirecrawlExtractBackend {
+    /// Construct a direct backend from an explicit API key.
+    pub fn new(api_key: String) -> Self {
+        Self {
+            client: Client::new(),
+            transport: FirecrawlTransport::Direct { api_key },
+        }
+    }
+
+    /// Construct a managed-mode backend from a resolved gateway config.
+    pub fn from_managed(cfg: &ManagedToolGatewayConfig) -> Self {
+        Self {
+            client: Client::new(),
+            transport: FirecrawlTransport::Managed {
+                endpoint_root: cfg.gateway_origin.trim_end_matches('/').to_string(),
+                nous_token: cfg.nous_user_token.clone(),
+            },
+        }
+    }
+
+    /// Resolve the best-available transport.
+    ///
+    /// Priority: direct `FIRECRAWL_API_KEY` → Nous-managed `firecrawl`
+    /// vendor → `Err` with a hint covering both paths.
+    pub fn from_env_or_managed() -> Result<Self, ToolError> {
+        if let Ok(api_key) = std::env::var("FIRECRAWL_API_KEY") {
+            let trimmed = api_key.trim();
+            if !trimmed.is_empty() {
+                return Ok(Self::new(trimmed.to_string()));
+            }
+        }
+        if let Some(cfg) = resolve_managed_tool_gateway("firecrawl", ResolveOptions::default()) {
+            return Ok(Self::from_managed(&cfg));
+        }
+        Err(ToolError::ExecutionFailed(
+            "FIRECRAWL_API_KEY not set and Nous-managed firecrawl gateway is not configured."
+                .into(),
+        ))
+    }
+
+    /// Backwards-compatible alias of [`from_env_or_managed`]. Kept for any
+    /// existing callers that still call `from_env()`.
     pub fn from_env() -> Result<Self, ToolError> {
-        let api_key = std::env::var("FIRECRAWL_API_KEY").map_err(|_| {
-            ToolError::ExecutionFailed("FIRECRAWL_API_KEY environment variable not set".into())
-        })?;
-        Ok(Self::new(api_key))
+        Self::from_env_or_managed()
+    }
+
+    /// Reports the active transport. Useful for tests/logging.
+    pub fn transport_label(&self) -> &'static str {
+        self.transport.label()
     }
 }
 
@@ -328,8 +414,11 @@ impl WebExtractBackend for FirecrawlExtractBackend {
 
         let resp = self
             .client
-            .post("https://api.firecrawl.dev/v1/scrape")
-            .header("Authorization", format!("Bearer {}", self.api_key))
+            .post(self.transport.scrape_endpoint())
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.transport.bearer()),
+            )
             .header("Content-Type", "application/json")
             .json(&body)
             .send()
@@ -376,9 +465,119 @@ impl WebExtractBackend for FirecrawlExtractBackend {
             "content": markdown,
             "metadata": metadata,
             "links": links,
+            "transport": self.transport.label(),
         });
 
         serde_json::to_string_pretty(&result)
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize result: {}", e)))
+    }
+}
+
+#[cfg(test)]
+mod firecrawl_managed_tests {
+    use super::*;
+    use hermes_config::managed_gateway::test_lock;
+
+    /// Hermetic env scope: HERMES_HOME → tempdir + flag/token cleared.
+    struct EnvScope {
+        _tmp: tempfile::TempDir,
+        original: Vec<(&'static str, Option<String>)>,
+        _g: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl EnvScope {
+        fn new() -> Self {
+            let g = test_lock::lock();
+            let tmp = tempfile::tempdir().unwrap();
+            let keys = [
+                "HERMES_HOME",
+                "FIRECRAWL_API_KEY",
+                "HERMES_ENABLE_NOUS_MANAGED_TOOLS",
+                "TOOL_GATEWAY_USER_TOKEN",
+                "TOOL_GATEWAY_DOMAIN",
+                "TOOL_GATEWAY_SCHEME",
+            ];
+            let original = keys.iter().map(|k| (*k, std::env::var(k).ok())).collect();
+            for k in &keys {
+                std::env::remove_var(k);
+            }
+            std::env::set_var("HERMES_HOME", tmp.path());
+            Self {
+                _tmp: tmp,
+                original,
+                _g: g,
+            }
+        }
+    }
+
+    impl Drop for EnvScope {
+        fn drop(&mut self) {
+            for (k, v) in &self.original {
+                match v {
+                    Some(val) => std::env::set_var(k, val),
+                    None => std::env::remove_var(k),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn from_env_or_managed_prefers_direct_key() {
+        let _g = EnvScope::new();
+        std::env::set_var("FIRECRAWL_API_KEY", "direct-key");
+        let b = FirecrawlExtractBackend::from_env_or_managed().unwrap();
+        assert_eq!(b.transport_label(), "direct");
+    }
+
+    #[test]
+    fn from_env_or_managed_falls_back_to_nous_gateway() {
+        let _g = EnvScope::new();
+        std::env::remove_var("FIRECRAWL_API_KEY");
+        std::env::set_var("HERMES_ENABLE_NOUS_MANAGED_TOOLS", "1");
+        std::env::set_var("TOOL_GATEWAY_USER_TOKEN", "nous-tok");
+        let b = FirecrawlExtractBackend::from_env_or_managed().unwrap();
+        assert_eq!(b.transport_label(), "managed");
+    }
+
+    #[test]
+    fn from_env_or_managed_errors_when_neither_configured() {
+        let _g = EnvScope::new();
+        let err = FirecrawlExtractBackend::from_env_or_managed().unwrap_err();
+        assert!(err.to_string().contains("FIRECRAWL_API_KEY"));
+        assert!(err.to_string().contains("firecrawl gateway"));
+    }
+
+    #[test]
+    fn from_managed_uses_resolved_origin_and_token() {
+        let cfg = ManagedToolGatewayConfig {
+            vendor: "firecrawl".into(),
+            gateway_origin: "https://firecrawl.gw.example.com/".into(),
+            nous_user_token: "tok".into(),
+            managed_mode: true,
+        };
+        let b = FirecrawlExtractBackend::from_managed(&cfg);
+        match &b.transport {
+            FirecrawlTransport::Managed {
+                endpoint_root,
+                nous_token,
+            } => {
+                assert_eq!(endpoint_root, "https://firecrawl.gw.example.com");
+                assert_eq!(nous_token, "tok");
+                assert_eq!(
+                    b.transport.scrape_endpoint(),
+                    "https://firecrawl.gw.example.com/v1/scrape"
+                );
+            }
+            _ => panic!("expected managed transport"),
+        }
+    }
+
+    #[test]
+    fn empty_direct_key_falls_through_to_managed_fallback_or_error() {
+        let _g = EnvScope::new();
+        std::env::set_var("FIRECRAWL_API_KEY", "   ");
+        // No managed config either → expect Err.
+        let err = FirecrawlExtractBackend::from_env_or_managed().unwrap_err();
+        assert!(err.to_string().contains("FIRECRAWL_API_KEY"));
     }
 }

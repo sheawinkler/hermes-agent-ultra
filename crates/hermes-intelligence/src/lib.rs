@@ -6,22 +6,21 @@
 //! model metadata, usage pricing, and context engine.
 
 pub mod anthropic_adapter;
+pub mod auxiliary;
 pub mod context_engine;
 pub mod credential_pool;
 pub mod display;
 pub mod error_classifier;
 pub mod insights;
 pub mod model_metadata;
+pub mod models_dev;
 pub mod prompt;
 pub mod redact;
 pub mod router;
-pub mod self_evolution;
+pub mod session_insights;
 pub mod title;
 pub mod usage;
 pub mod usage_pricing;
-
-#[cfg(feature = "rl")]
-pub mod rl;
 
 pub use error_classifier::{ErrorCategory, ErrorClassifier, RetryStrategy};
 pub use insights::Insights;
@@ -30,15 +29,11 @@ pub use redact::{RedactionPattern, Redactor};
 pub use router::{
     ModelCapability, ModelInfo as RouterModelInfo, ModelRequirements, RouterError, SmartModelRouter,
 };
-pub use self_evolution::{
-    AdaptivePolicyEngine, EvolutionConfig, HardGateConfig, LongTaskPlan, OutcomeDrivenUpdater,
-    OutcomeSignals, PolicyAuditEvent, PolicyStore, PolicyUpdateRequest, PolicyUpdater,
-    PolicyVersion,
-};
 pub use title::{TitleError, TitleGenerator};
 pub use usage::{ModelPricing, ModelUsage, UsageRecord, UsageSummary, UsageTracker};
 
 pub use anthropic_adapter::{
+    default_anthropic_beta_header_value, default_anthropic_beta_list, fast_mode_request_beta_list,
     AnthropicContent, AnthropicContentBlock, AnthropicMessage, AnthropicTool,
     NormalizedAssistantMessage, NormalizedToolCall, ReasoningConfig, ReasoningEffort,
 };
@@ -62,6 +57,3 @@ pub use usage_pricing::{
     normalize_usage, resolve_billing_route, BillingMode, BillingRoute, CanonicalUsage, CostResult,
     CostSource, CostStatus, PricingEntry,
 };
-
-#[cfg(feature = "rl")]
-pub use rl::*;

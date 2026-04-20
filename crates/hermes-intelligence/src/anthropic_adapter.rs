@@ -643,6 +643,10 @@ pub fn normalize_anthropic_response(
                 }
                 reasoning_details.push(block.clone());
             }
+            "redacted_thinking" => {
+                // No plaintext reasoning; preserve the block for auditing (matches message-path handling).
+                reasoning_details.push(block.clone());
+            }
             "tool_use" => {
                 let mut name = block
                     .get("name")
@@ -756,6 +760,43 @@ pub fn common_betas_for_base_url(base_url: Option<&str>) -> Vec<&'static str> {
     } else {
         COMMON_BETAS.to_vec()
     }
+}
+
+/// Beta list for `default_headers["anthropic-beta"]` when constructing an Anthropic client.
+///
+/// Mirrors Python: common betas for the endpoint, plus OAuth-only betas when using Bearer
+/// (setup-tokens, managed keys, JWTs) on native Anthropic.
+pub fn default_anthropic_beta_list(base_url: Option<&str>, is_oauth: bool) -> Vec<&'static str> {
+    let mut betas = common_betas_for_base_url(base_url);
+    if is_oauth {
+        betas.extend_from_slice(OAUTH_ONLY_BETAS);
+    }
+    betas
+}
+
+/// Comma-separated `anthropic-beta` header value for [`default_anthropic_beta_list`].
+pub fn default_anthropic_beta_header_value(base_url: Option<&str>, is_oauth: bool) -> String {
+    default_anthropic_beta_list(base_url, is_oauth).join(",")
+}
+
+/// Full beta list for a per-request `extra_headers` override when enabling fast mode
+/// (`speed: "fast"`). Only valid for native Anthropic — third-party proxies reject the
+/// unknown fast-mode beta.
+///
+/// Returns `None` when fast mode must not be used (third-party endpoint).
+pub fn fast_mode_request_beta_list(
+    base_url: Option<&str>,
+    is_oauth: bool,
+) -> Option<Vec<&'static str>> {
+    if is_third_party_endpoint(base_url) {
+        return None;
+    }
+    let mut betas = common_betas_for_base_url(base_url);
+    if is_oauth {
+        betas.extend_from_slice(OAUTH_ONLY_BETAS);
+    }
+    betas.push(FAST_MODE_BETA);
+    Some(betas)
 }
 
 /// Check if a base URL requires Bearer auth (e.g. MiniMax).
@@ -881,5 +922,36 @@ mod tests {
         assert_eq!(msg.content, Some("Hello!".to_string()));
         assert_eq!(msg.tool_calls.as_ref().unwrap().len(), 1);
         assert_eq!(reason, "tool_calls");
+    }
+
+    #[test]
+    fn test_normalize_redacted_thinking_in_reasoning_details() {
+        let redacted = serde_json::json!({"type": "redacted_thinking", "data": "opaque"});
+        let blocks = vec![
+            serde_json::json!({"type": "text", "text": "Hi"}),
+            redacted.clone(),
+        ];
+        let (msg, _) = normalize_anthropic_response(&blocks, "end_turn", false);
+        assert_eq!(msg.reasoning, None);
+        assert_eq!(msg.reasoning_details.as_ref().unwrap().len(), 1);
+        assert_eq!(msg.reasoning_details.unwrap()[0], redacted);
+    }
+
+    #[test]
+    fn test_default_anthropic_beta_list_oauth_appends() {
+        let api = default_anthropic_beta_list(None, false);
+        assert!(api
+            .iter()
+            .any(|b| *b == "fine-grained-tool-streaming-2025-05-14"));
+
+        let oauth = default_anthropic_beta_list(None, true);
+        assert!(oauth.iter().any(|b| *b == "oauth-2025-04-20"));
+        assert!(oauth.len() > api.len());
+    }
+
+    #[test]
+    fn test_fast_mode_beta_list_third_party_none() {
+        assert!(fast_mode_request_beta_list(Some("https://example.com/v1"), false).is_none());
+        assert!(fast_mode_request_beta_list(None, false).is_some());
     }
 }

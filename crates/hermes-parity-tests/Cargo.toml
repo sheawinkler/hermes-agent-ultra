@@ -1,13 +1,15 @@
 [package]
-name = "hermes-rl"
+name = "hermes-parity-tests"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "RL training and trajectory utilities for Hermes Agent"
+description = "Python↔Rust parity fixtures and harness for Hermes Agent"
 
 [dependencies]
+hermes-core = { workspace = true }
+hermes-intelligence = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-chrono = { workspace = true }
+sha2 = "0.10"
 thiserror = { workspace = true }

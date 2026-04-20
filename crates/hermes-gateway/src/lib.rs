@@ -29,6 +29,7 @@ pub mod session;
 pub mod ssrf;
 pub mod sticker_cache;
 pub mod stream;
+pub mod tool_backends;
 pub mod voice;
 
 // Re-export core types from hermes-core

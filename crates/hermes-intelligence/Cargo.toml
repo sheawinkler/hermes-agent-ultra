@@ -20,10 +20,9 @@ chrono = { workspace = true }
 uuid = { workspace = true }
 thiserror = { workspace = true }
 futures = { workspace = true }
-
-[features]
-default = ["rl"]
-rl = []
+strsim = "0.11"
+dirs = "6"
+tempfile = "3"
 
 [dev-dependencies]
 proptest = { workspace = true }

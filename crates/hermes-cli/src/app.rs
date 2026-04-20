@@ -18,8 +18,9 @@ use hermes_agent::provider::{
 use hermes_agent::providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
 };
+use hermes_agent::sub_agent_orchestrator::SubAgentOrchestrator;
 use hermes_agent::{AgentConfig, AgentLoop, InterruptController};
-use hermes_config::{load_config, GatewayConfig};
+use hermes_config::{hermes_home as hermes_home_dir, load_config, GatewayConfig};
 use hermes_core::{AgentError, LlmProvider};
 use hermes_environments::LocalBackend;
 use hermes_skills::{FileSkillStore, SkillManager};
@@ -130,7 +131,10 @@ impl App {
         let agent_config = build_agent_config(&config, &current_model);
         let provider = build_provider(&config, &current_model);
 
-        let agent = Arc::new(AgentLoop::new(agent_config, agent_tool_registry, provider));
+        let agent_inner = AgentLoop::new(agent_config, agent_tool_registry, provider);
+        let hermes_home = hermes_home_dir();
+        let orchestrator = Arc::new(SubAgentOrchestrator::from_parent(&agent_inner, hermes_home));
+        let agent = Arc::new(agent_inner.with_sub_agent_orchestrator(orchestrator));
 
         Ok(Self {
             config: Arc::new(config),
@@ -290,7 +294,10 @@ impl App {
         let agent_config = build_agent_config(&self.config, &self.current_model);
         let agent_tool_registry = Arc::new(bridge_tool_registry(&self.tool_registry));
 
-        self.agent = Arc::new(AgentLoop::new(agent_config, agent_tool_registry, provider));
+        let agent_inner = AgentLoop::new(agent_config, agent_tool_registry, provider);
+        let hermes_home = hermes_home_dir();
+        let orchestrator = Arc::new(SubAgentOrchestrator::from_parent(&agent_inner, hermes_home));
+        self.agent = Arc::new(agent_inner.with_sub_agent_orchestrator(orchestrator));
 
         tracing::info!("Switched model to: {}", provider_model);
     }
@@ -314,7 +321,10 @@ impl App {
         match result {
             Ok(result) => {
                 self.messages = result.messages;
-                if !result.finished_naturally {
+                if result.interrupted {
+                    tracing::info!("Agent loop returned interrupted=true (graceful stop)");
+                    println!("[Agent execution interrupted]");
+                } else if !result.finished_naturally {
                     tracing::warn!(
                         "Agent stopped after {} turns (did not finish naturally)",
                         result.total_turns
@@ -454,8 +464,10 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
                     api_key_env: m.api_key_env.clone(),
                 }
             }),
-            evolution_model_hints: config.smart_model_routing.evolution_model_hints,
         },
+        memory_nudge_interval: config.agent.memory_nudge_interval,
+        skill_creation_nudge_interval: config.agent.skill_creation_nudge_interval,
+        background_review_enabled: config.agent.background_review_enabled,
         ..AgentConfig::default()
     }
 }

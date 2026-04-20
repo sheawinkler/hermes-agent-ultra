@@ -19,7 +19,6 @@ pub mod messaging;
 pub mod mixture_of_agents;
 pub mod osv_check;
 pub mod process_registry;
-pub mod rl_training;
 pub mod session_search;
 pub mod skill_commands;
 pub mod skill_utils;

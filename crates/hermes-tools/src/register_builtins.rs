@@ -456,99 +456,6 @@ pub fn register_builtin_tools(
         vec![],
     );
 
-    // -- RL Training tools (10) ----------------------------------------------
-    {
-        let rl_data_dir = hermes_data_dir().join("rl");
-        let rl_state = crate::tools::rl_training::RlState::new(rl_data_dir);
-
-        reg(
-            registry,
-            "rl",
-            Arc::new(crate::tools::rl_training::RlListEnvironmentsHandler),
-            "🧪",
-            vec![],
-        );
-        reg(
-            registry,
-            "rl",
-            Arc::new(crate::tools::rl_training::RlSelectEnvironmentHandler {
-                state: rl_state.clone(),
-            }),
-            "🧪",
-            vec![],
-        );
-        reg(
-            registry,
-            "rl",
-            Arc::new(crate::tools::rl_training::RlGetCurrentConfigHandler {
-                state: rl_state.clone(),
-            }),
-            "🧪",
-            vec![],
-        );
-        reg(
-            registry,
-            "rl",
-            Arc::new(crate::tools::rl_training::RlEditConfigHandler {
-                state: rl_state.clone(),
-            }),
-            "🧪",
-            vec![],
-        );
-        reg(
-            registry,
-            "rl",
-            Arc::new(crate::tools::rl_training::RlStartTrainingHandler {
-                state: rl_state.clone(),
-            }),
-            "🚀",
-            vec![],
-        );
-        reg(
-            registry,
-            "rl",
-            Arc::new(crate::tools::rl_training::RlCheckStatusHandler {
-                state: rl_state.clone(),
-            }),
-            "📊",
-            vec![],
-        );
-        reg(
-            registry,
-            "rl",
-            Arc::new(crate::tools::rl_training::RlStopTrainingHandler {
-                state: rl_state.clone(),
-            }),
-            "🛑",
-            vec![],
-        );
-        reg(
-            registry,
-            "rl",
-            Arc::new(crate::tools::rl_training::RlGetResultsHandler {
-                state: rl_state.clone(),
-            }),
-            "📈",
-            vec![],
-        );
-        reg(
-            registry,
-            "rl",
-            Arc::new(crate::tools::rl_training::RlListRunsHandler {
-                state: rl_state.clone(),
-            }),
-            "📋",
-            vec![],
-        );
-        reg(
-            registry,
-            "rl",
-            Arc::new(crate::tools::rl_training::RlTestInferenceHandler { state: rl_state }),
-            "🧪",
-            vec![],
-        );
-    }
-
     // -- Transcription -------------------------------------------------------
     reg(
         registry,
@@ -571,7 +478,7 @@ pub fn register_builtin_tools(
     reg(
         registry,
         "tts",
-        Arc::new(crate::tools::tts_premium::TtsPremiumHandler),
+        Arc::new(crate::tools::tts_premium::TtsPremiumHandler::default()),
         "🎵",
         vec!["ELEVENLABS_API_KEY".into()],
     );
