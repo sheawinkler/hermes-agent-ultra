@@ -1508,8 +1508,10 @@ name = "hermes-skills"
 version = "0.0.4"
 dependencies = [
  "async-trait",
+ "base64",
  "chrono",
  "directories",
+ "ed25519-dalek",
  "hermes-core",
  "jsonwebtoken",
  "minijinja",
