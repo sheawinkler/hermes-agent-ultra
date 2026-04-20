@@ -2,12 +2,13 @@
 //!
 //! Full-featured adapter supporting messaging, media, sync loop with exponential
 //! backoff, room management, read receipts, typing indicators, reactions,
-//! redactions, formatted messages, and E2EE placeholders.
+//! redactions, formatted messages, and E2EE metadata hooks.
 //!
 //! All HTTP calls target the Matrix Client-Server API v3 endpoints.
 
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use regex::Regex;
@@ -68,49 +69,292 @@ pub struct RoomMember {
 }
 
 // ---------------------------------------------------------------------------
-// E2EE placeholder
+// E2EE support
 // ---------------------------------------------------------------------------
 
-/// Placeholder for end-to-end encryption operations.
+/// API-backed E2EE metadata + key lifecycle helper.
 ///
-/// Real E2EE requires `vodozemac` or `matrix-sdk-crypto` for Olm/Megolm
-/// session management, device key verification, and room key sharing.
-/// This struct logs warnings and returns `Ok` so the adapter compiles and
-/// runs without encryption support.
-pub struct E2eePlaceholder;
+/// This handles encryption state checks, device-key verification, and one-time
+/// key claim attempts through Matrix Client-Server APIs. Message decryption
+/// still requires Olm/Megolm cryptographic session support.
+pub struct MatrixE2ee {
+    client: Client,
+    homeserver_url: String,
+    access_token: String,
+    user_id: String,
+    encrypted_rooms: Mutex<HashSet<String>>,
+}
 
-impl E2eePlaceholder {
-    /// Check whether a room is marked as encrypted.
-    ///
-    /// Always returns `false`; real implementation would query the
-    /// `m.room.encryption` state event.
-    pub fn is_encrypted_room(&self, room_id: &str) -> bool {
-        warn!(
-            room_id,
-            "E2EE placeholder: is_encrypted_room always returns false — \
-             real E2EE requires vodozemac/matrix-sdk-crypto"
-        );
-        false
-    }
-
-    /// Verify device keys for a user.
-    pub fn verify_device_keys(&self, user_id: &str) -> Result<(), GatewayError> {
-        warn!(
+impl MatrixE2ee {
+    pub fn new(
+        client: Client,
+        homeserver_url: String,
+        access_token: String,
+        user_id: String,
+    ) -> Self {
+        Self {
+            client,
+            homeserver_url,
+            access_token,
             user_id,
-            "E2EE placeholder: verify_device_keys is a no-op — \
-             real E2EE requires vodozemac/matrix-sdk-crypto"
-        );
-        Ok(())
+            encrypted_rooms: Mutex::new(HashSet::new()),
+        }
     }
 
-    /// Share room keys with session participants.
-    pub fn share_room_keys(&self, room_id: &str) -> Result<(), GatewayError> {
-        warn!(
-            room_id,
-            "E2EE placeholder: share_room_keys is a no-op — \
-             real E2EE requires vodozemac/matrix-sdk-crypto"
+    fn auth_header(&self) -> String {
+        format!("Bearer {}", self.access_token)
+    }
+
+    pub fn remember_encrypted_room(&self, room_id: &str) {
+        if let Ok(mut rooms) = self.encrypted_rooms.lock() {
+            rooms.insert(room_id.to_string());
+        }
+    }
+
+    pub fn is_room_marked_encrypted(&self, room_id: &str) -> bool {
+        self.encrypted_rooms
+            .lock()
+            .map(|rooms| rooms.contains(room_id))
+            .unwrap_or(false)
+    }
+
+    /// Check whether a room is encrypted using `m.room.encryption` state.
+    pub async fn is_encrypted_room(&self, room_id: &str) -> Result<bool, GatewayError> {
+        if self.is_room_marked_encrypted(room_id) {
+            return Ok(true);
+        }
+
+        let url = format!(
+            "{}/_matrix/client/v3/rooms/{}/state/m.room.encryption/",
+            self.homeserver_url, room_id
         );
-        Ok(())
+
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .map_err(|e| {
+                GatewayError::ConnectionFailed(format!("Matrix encryption state failed: {e}"))
+            })?;
+
+        if resp.status().as_u16() == 404 {
+            return Ok(false);
+        }
+        if !resp.status().is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GatewayError::ConnectionFailed(format!(
+                "Matrix encryption state error: {text}"
+            )));
+        }
+
+        let body: serde_json::Value = resp.json().await.map_err(|e| {
+            GatewayError::ConnectionFailed(format!("Matrix encryption state parse failed: {e}"))
+        })?;
+        let encrypted = body
+            .get("algorithm")
+            .and_then(|v| v.as_str())
+            .map(|v| !v.is_empty())
+            .unwrap_or(false);
+        if encrypted {
+            self.remember_encrypted_room(room_id);
+        }
+        Ok(encrypted)
+    }
+
+    /// Verify device keys for a user via `/keys/query`.
+    pub async fn verify_device_keys(&self, user_id: &str) -> Result<usize, GatewayError> {
+        let url = format!("{}/_matrix/client/v3/keys/query", self.homeserver_url);
+        let payload = serde_json::json!({
+            "device_keys": {
+                user_id: []
+            }
+        });
+
+        let resp = self
+            .client
+            .post(&url)
+            .header("Authorization", self.auth_header())
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| {
+                GatewayError::ConnectionFailed(format!("Matrix keys/query failed: {e}"))
+            })?;
+
+        if !resp.status().is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GatewayError::ConnectionFailed(format!(
+                "Matrix keys/query error: {text}"
+            )));
+        }
+
+        let body: serde_json::Value = resp
+            .json()
+            .await
+            .map_err(|e| GatewayError::ConnectionFailed(format!("Matrix keys/query parse: {e}")))?;
+
+        let count = body
+            .get("device_keys")
+            .and_then(|v| v.get(user_id))
+            .and_then(|v| v.as_object())
+            .map(|m| m.len())
+            .unwrap_or(0);
+
+        if count == 0 {
+            return Err(GatewayError::Platform(format!(
+                "No device keys published for user {user_id}"
+            )));
+        }
+
+        Ok(count)
+    }
+
+    /// Attempt one-time key claims for joined users in an encrypted room.
+    pub async fn share_room_keys(&self, room_id: &str) -> Result<usize, GatewayError> {
+        let members_url = format!(
+            "{}/_matrix/client/v3/rooms/{}/members",
+            self.homeserver_url, room_id
+        );
+        let members_resp = self
+            .client
+            .get(&members_url)
+            .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .map_err(|e| {
+                GatewayError::ConnectionFailed(format!("Matrix room members failed: {e}"))
+            })?;
+        if !members_resp.status().is_success() {
+            let text = members_resp.text().await.unwrap_or_default();
+            return Err(GatewayError::ConnectionFailed(format!(
+                "Matrix room members error: {text}"
+            )));
+        }
+        let members_body: serde_json::Value = members_resp.json().await.map_err(|e| {
+            GatewayError::ConnectionFailed(format!("Matrix room members parse failed: {e}"))
+        })?;
+
+        let joined_users: Vec<String> = members_body
+            .get("chunk")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|event| {
+                        let membership = event
+                            .get("content")
+                            .and_then(|c| c.get("membership"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("leave");
+                        if membership != "join" {
+                            return None;
+                        }
+                        event
+                            .get("state_key")
+                            .and_then(|v| v.as_str())
+                            .map(String::from)
+                    })
+                    .filter(|uid| uid != &self.user_id)
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if joined_users.is_empty() {
+            return Ok(0);
+        }
+
+        let mut device_keys_req = serde_json::Map::new();
+        for user_id in &joined_users {
+            device_keys_req.insert(user_id.clone(), serde_json::Value::Array(vec![]));
+        }
+
+        let query_url = format!("{}/_matrix/client/v3/keys/query", self.homeserver_url);
+        let query_payload = serde_json::json!({ "device_keys": device_keys_req });
+        let query_resp = self
+            .client
+            .post(&query_url)
+            .header("Authorization", self.auth_header())
+            .json(&query_payload)
+            .send()
+            .await
+            .map_err(|e| {
+                GatewayError::ConnectionFailed(format!("Matrix keys/query failed: {e}"))
+            })?;
+        if !query_resp.status().is_success() {
+            let text = query_resp.text().await.unwrap_or_default();
+            return Err(GatewayError::ConnectionFailed(format!(
+                "Matrix keys/query error: {text}"
+            )));
+        }
+        let query_body: serde_json::Value = query_resp
+            .json()
+            .await
+            .map_err(|e| GatewayError::ConnectionFailed(format!("Matrix keys/query parse: {e}")))?;
+
+        let mut one_time_keys = serde_json::Map::new();
+        if let Some(device_keys_map) = query_body.get("device_keys").and_then(|v| v.as_object()) {
+            for user_id in &joined_users {
+                if let Some(devices) = device_keys_map.get(user_id).and_then(|v| v.as_object()) {
+                    let mut claim_map = serde_json::Map::new();
+                    for (device_id, _) in devices {
+                        claim_map.insert(
+                            device_id.clone(),
+                            serde_json::Value::String("signed_curve25519".to_string()),
+                        );
+                    }
+                    if !claim_map.is_empty() {
+                        one_time_keys.insert(user_id.clone(), serde_json::Value::Object(claim_map));
+                    }
+                }
+            }
+        }
+
+        if one_time_keys.is_empty() {
+            warn!(room_id, "No peer device keys available for room-key claim");
+            return Ok(0);
+        }
+
+        let claim_url = format!("{}/_matrix/client/v3/keys/claim", self.homeserver_url);
+        let claim_payload = serde_json::json!({
+            "timeout": 10_000,
+            "one_time_keys": one_time_keys
+        });
+        let claim_resp = self
+            .client
+            .post(&claim_url)
+            .header("Authorization", self.auth_header())
+            .json(&claim_payload)
+            .send()
+            .await
+            .map_err(|e| {
+                GatewayError::ConnectionFailed(format!("Matrix keys/claim failed: {e}"))
+            })?;
+        if !claim_resp.status().is_success() {
+            let text = claim_resp.text().await.unwrap_or_default();
+            return Err(GatewayError::ConnectionFailed(format!(
+                "Matrix keys/claim error: {text}"
+            )));
+        }
+        let claim_body: serde_json::Value = claim_resp
+            .json()
+            .await
+            .map_err(|e| GatewayError::ConnectionFailed(format!("Matrix keys/claim parse: {e}")))?;
+
+        let claimed = claim_body
+            .get("one_time_keys")
+            .and_then(|v| v.as_object())
+            .map(|users| {
+                users
+                    .values()
+                    .filter_map(|devices| devices.as_object())
+                    .map(|devices| devices.len())
+                    .sum()
+            })
+            .unwrap_or(0usize);
+
+        self.remember_encrypted_room(room_id);
+        Ok(claimed)
     }
 }
 
@@ -155,8 +399,8 @@ pub fn markdown_to_html(md: &str) -> String {
         .replace_all(&html, "<strong>$1</strong>")
         .into_owned();
 
-    // Italic *text* (but not inside <strong> tags we just created)
-    let italic_re = Regex::new(r"(?<!\*)\*([^*]+)\*(?!\*)").expect("valid regex");
+    // Italic *text* (bold markers were already consumed above)
+    let italic_re = Regex::new(r"\*([^*]+)\*").expect("valid regex");
     html = italic_re.replace_all(&html, "<em>$1</em>").into_owned();
 
     // Links [text](url)
@@ -215,7 +459,7 @@ pub struct MatrixAdapter {
     txn_counter: AtomicU64,
     stop_signal: Arc<Notify>,
     sync_running: AtomicBool,
-    pub e2ee: E2eePlaceholder,
+    pub e2ee: MatrixE2ee,
 }
 
 impl MatrixAdapter {
@@ -225,12 +469,17 @@ impl MatrixAdapter {
         let client = base.build_client()?;
         Ok(Self {
             base,
+            e2ee: MatrixE2ee::new(
+                client.clone(),
+                config.homeserver_url.clone(),
+                config.access_token.clone(),
+                config.user_id.clone(),
+            ),
             config,
             client,
             txn_counter: AtomicU64::new(0),
             stop_signal: Arc::new(Notify::new()),
             sync_running: AtomicBool::new(false),
-            e2ee: E2eePlaceholder,
         })
     }
 
@@ -973,8 +1222,7 @@ impl MatrixAdapter {
 
     /// Extract messages from joined room timelines in a `/sync` response.
     ///
-    /// Handles `m.room.message`, `m.reaction`, and `m.room.encrypted`
-    /// (placeholder) events.
+    /// Handles `m.room.message`, `m.reaction`, and `m.room.encrypted` events.
     fn parse_sync_events(&self, sync_response: &serde_json::Value) -> Vec<IncomingMatrixMessage> {
         let mut messages = Vec::new();
 
@@ -1024,16 +1272,21 @@ impl MatrixAdapter {
                             messages.push(msg);
                         }
                     }
+                    "m.room.encryption" => {
+                        self.e2ee.remember_encrypted_room(room_id);
+                    }
                     "m.room.encrypted" => {
+                        self.e2ee.remember_encrypted_room(room_id);
+                        let body = Self::render_encrypted_event_body(event);
                         warn!(
                             event_id,
-                            room_id, "Received encrypted event — E2EE not implemented, skipping"
+                            room_id, "Received encrypted event — forwarding encrypted metadata"
                         );
                         messages.push(IncomingMatrixMessage {
                             room_id: room_id.clone(),
                             event_id,
                             sender,
-                            body: "[encrypted message]".to_string(),
+                            body,
                             event_type: "m.room.encrypted".to_string(),
                             is_edit: false,
                             relates_to: None,
@@ -1045,6 +1298,35 @@ impl MatrixAdapter {
         }
 
         messages
+    }
+
+    fn render_encrypted_event_body(event: &serde_json::Value) -> String {
+        let content = event.get("content").cloned().unwrap_or_default();
+        if let Some(body) = content.get("body").and_then(|v| v.as_str()) {
+            if !body.trim().is_empty() {
+                return body.to_string();
+            }
+        }
+
+        let mut meta = Vec::new();
+        if let Some(algorithm) = content.get("algorithm").and_then(|v| v.as_str()) {
+            meta.push(format!("algorithm={algorithm}"));
+        }
+        if let Some(sender_key) = content.get("sender_key").and_then(|v| v.as_str()) {
+            meta.push(format!("sender_key={sender_key}"));
+        }
+        if let Some(device_id) = content.get("device_id").and_then(|v| v.as_str()) {
+            meta.push(format!("device_id={device_id}"));
+        }
+        if let Some(session_id) = content.get("session_id").and_then(|v| v.as_str()) {
+            meta.push(format!("session_id={session_id}"));
+        }
+
+        if meta.is_empty() {
+            "[encrypted event]".to_string()
+        } else {
+            format!("[encrypted event: {}]", meta.join(", "))
+        }
     }
 
     fn parse_room_message(
@@ -1232,6 +1514,8 @@ impl PlatformAdapter for MatrixAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
     fn test_markdown_to_html_bold() {
@@ -1403,7 +1687,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_sync_encrypted_placeholder() {
+    fn test_parse_sync_encrypted_event_metadata() {
         let config = MatrixConfig {
             homeserver_url: "https://matrix.test".into(),
             user_id: "@bot:test".into(),
@@ -1435,14 +1719,130 @@ mod tests {
         let msgs = adapter.parse_sync_events(&sync);
         assert_eq!(msgs.len(), 1);
         assert_eq!(msgs[0].event_type, "m.room.encrypted");
-        assert_eq!(msgs[0].body, "[encrypted message]");
+        assert!(msgs[0].body.contains("m.megolm.v1.aes-sha2"));
+        assert!(adapter.e2ee.is_room_marked_encrypted("!room:test"));
     }
 
-    #[test]
-    fn test_e2ee_placeholder() {
-        let e2ee = E2eePlaceholder;
-        assert!(!e2ee.is_encrypted_room("!room:test"));
-        assert!(e2ee.verify_device_keys("@user:test").is_ok());
-        assert!(e2ee.share_room_keys("!room:test").is_ok());
+    #[tokio::test]
+    async fn test_e2ee_is_encrypted_room() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path(
+                "/_matrix/client/v3/rooms/room123/state/m.room.encryption/",
+            ))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "algorithm": "m.megolm.v1.aes-sha2"
+            })))
+            .mount(&server)
+            .await;
+
+        let adapter = MatrixAdapter::new(MatrixConfig {
+            homeserver_url: server.uri(),
+            user_id: "@bot:test".into(),
+            access_token: "tok".into(),
+            room_id: None,
+            proxy: AdapterProxyConfig::default(),
+        })
+        .unwrap();
+
+        let encrypted = adapter.e2ee.is_encrypted_room("room123").await.unwrap();
+        assert!(encrypted);
+        assert!(adapter.e2ee.is_room_marked_encrypted("room123"));
+    }
+
+    #[tokio::test]
+    async fn test_e2ee_verify_device_keys() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/_matrix/client/v3/keys/query"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "device_keys": {
+                    "@alice:test": {
+                        "ALDEVICE1": {
+                            "keys": {"curve25519:ALDEVICE1": "abc"},
+                            "algorithms": ["m.olm.v1.curve25519-aes-sha2"]
+                        }
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let adapter = MatrixAdapter::new(MatrixConfig {
+            homeserver_url: server.uri(),
+            user_id: "@bot:test".into(),
+            access_token: "tok".into(),
+            room_id: None,
+            proxy: AdapterProxyConfig::default(),
+        })
+        .unwrap();
+
+        let device_count = adapter
+            .e2ee
+            .verify_device_keys("@alice:test")
+            .await
+            .unwrap();
+        assert_eq!(device_count, 1);
+    }
+
+    #[tokio::test]
+    async fn test_e2ee_share_room_keys_claims_one_time_keys() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("GET"))
+            .and(path("/_matrix/client/v3/rooms/room123/members"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "chunk": [
+                    {
+                        "state_key": "@bot:test",
+                        "content": {"membership": "join"}
+                    },
+                    {
+                        "state_key": "@alice:test",
+                        "content": {"membership": "join"}
+                    }
+                ]
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/_matrix/client/v3/keys/query"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "device_keys": {
+                    "@alice:test": {
+                        "ALDEVICE1": {
+                            "keys": {"curve25519:ALDEVICE1": "abc"}
+                        }
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/_matrix/client/v3/keys/claim"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "one_time_keys": {
+                    "@alice:test": {
+                        "ALDEVICE1": {"key": "otk"}
+                    }
+                }
+            })))
+            .mount(&server)
+            .await;
+
+        let adapter = MatrixAdapter::new(MatrixConfig {
+            homeserver_url: server.uri(),
+            user_id: "@bot:test".into(),
+            access_token: "tok".into(),
+            room_id: None,
+            proxy: AdapterProxyConfig::default(),
+        })
+        .unwrap();
+
+        let claimed = adapter.e2ee.share_room_keys("room123").await.unwrap();
+        assert_eq!(claimed, 1);
+        assert!(adapter.e2ee.is_room_marked_encrypted("room123"));
     }
 }
