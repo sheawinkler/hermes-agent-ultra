@@ -1,12 +1,11 @@
-//! MemoryManager — orchestrates the built-in memory provider plus at most
-//! ONE external plugin memory provider.
+//! MemoryManager — orchestrates the built-in memory provider plus external
+//! plugin memory providers.
 //!
 //! Single integration point in the agent loop. Replaces scattered per-backend
 //! code with one manager that delegates to registered providers.
 //!
 //! The built-in provider is always registered first and cannot be removed.
-//! Only ONE external (non-builtin) provider is allowed at a time — attempting
-//! to register a second external provider is rejected with a warning.
+//! Multiple external providers can be registered and run concurrently.
 //!
 //! Corresponds to Python `agent/memory_manager.py`.
 
@@ -158,14 +157,13 @@ pub fn build_memory_context_block(raw_context: &str) -> String {
 // MemoryManager
 // ---------------------------------------------------------------------------
 
-/// Orchestrates the built-in provider plus at most one external provider.
+/// Orchestrates the built-in provider plus external providers.
 ///
-/// The builtin provider is always first. Only one non-builtin (external)
-/// provider is allowed. Failures in one provider never block the other.
+/// The builtin provider is always first. Failures in one provider never block
+/// the others.
 pub struct MemoryManager {
     providers: Vec<Arc<dyn MemoryProviderPlugin>>,
     tool_to_provider: HashMap<String, Arc<dyn MemoryProviderPlugin>>,
-    has_external: bool,
     /// Tracks turns since last memory write for the nudge mechanism.
     turns_since_memory_write: u32,
     /// After this many turns without a memory write, inject a nudge.
@@ -178,7 +176,6 @@ impl MemoryManager {
         Self {
             providers: Vec::new(),
             tool_to_provider: HashMap::new(),
-            has_external: false,
             turns_since_memory_write: 0,
             memory_nudge_threshold: 8,
         }
@@ -195,31 +192,8 @@ impl MemoryManager {
     /// Register a memory provider.
     ///
     /// Built-in provider (name `"builtin"`) is always accepted.
-    /// Only ONE external (non-builtin) provider is allowed — a second
-    /// attempt is rejected with a warning.
+    /// External providers are additive and can run concurrently.
     pub fn add_provider(&mut self, provider: Arc<dyn MemoryProviderPlugin>) {
-        let is_builtin = provider.name() == "builtin";
-
-        if !is_builtin {
-            if self.has_external {
-                let existing = self
-                    .providers
-                    .iter()
-                    .find(|p| p.name() != "builtin")
-                    .map(|p| p.name().to_string())
-                    .unwrap_or_else(|| "unknown".to_string());
-                tracing::warn!(
-                    "Rejected memory provider '{}' — external provider '{}' is \
-                     already registered. Only one external memory provider is \
-                     allowed at a time.",
-                    provider.name(),
-                    existing,
-                );
-                return;
-            }
-            self.has_external = true;
-        }
-
         // Index tool names → provider for routing
         for schema in provider.get_tool_schemas() {
             if let Some(tool_name) = schema.get("name").and_then(|n| n.as_str()) {
@@ -558,13 +532,12 @@ mod tests {
     }
 
     #[test]
-    fn test_reject_second_external() {
+    fn test_accept_multiple_external() {
         let mut mm = MemoryManager::new();
         mm.add_provider(Arc::new(TestProvider::new("builtin")));
         mm.add_provider(Arc::new(TestProvider::new("honcho")));
         mm.add_provider(Arc::new(TestProvider::new("hindsight")));
-        // Only builtin + honcho should be registered
-        assert_eq!(mm.providers().len(), 2);
+        assert_eq!(mm.providers().len(), 3);
     }
 
     #[test]

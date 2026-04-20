@@ -5,6 +5,7 @@
 //! at most ONE of these external providers can be active at a time.
 
 pub mod byterover;
+pub mod contextlattice;
 pub mod hindsight;
 pub mod holographic;
 pub mod honcho;
@@ -28,6 +29,12 @@ pub fn discover_available_providers() -> Vec<Arc<dyn MemoryProviderPlugin>> {
     if honcho.is_available() {
         tracing::info!("Discovered memory provider: honcho");
         providers.push(Arc::new(honcho));
+    }
+
+    let contextlattice = contextlattice::ContextLatticeMemoryPlugin::new();
+    if contextlattice.is_available() {
+        tracing::info!("Discovered memory provider: contextlattice");
+        providers.push(Arc::new(contextlattice));
     }
 
     let hindsight = hindsight::HindsightPlugin::new();
@@ -80,12 +87,18 @@ pub fn discover_available_providers() -> Vec<Arc<dyn MemoryProviderPlugin>> {
 pub fn auto_register_provider(
     manager: &mut crate::memory_manager::MemoryManager,
 ) -> Option<String> {
+    auto_register_providers(manager).into_iter().next()
+}
+
+/// Auto-register all available external memory providers into the given
+/// MemoryManager. Returns registered provider names in discovery order.
+pub fn auto_register_providers(manager: &mut crate::memory_manager::MemoryManager) -> Vec<String> {
     let providers = discover_available_providers();
-    if let Some(provider) = providers.into_iter().next() {
+    let mut names = Vec::new();
+    for provider in providers {
         let name = provider.name().to_string();
         manager.add_provider(provider);
-        Some(name)
-    } else {
-        None
+        names.push(name);
     }
+    names
 }
