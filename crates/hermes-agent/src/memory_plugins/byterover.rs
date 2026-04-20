@@ -87,7 +87,7 @@ fn resolve_brv_path() -> Option<String> {
 }
 
 /// Run a `brv` CLI command. Returns `(success, output_or_error)`.
-fn run_brv(args: &[&str], timeout_secs: u64, cwd: &str) -> (bool, String) {
+fn run_brv(args: &[&str], _timeout_secs: u64, cwd: &str) -> (bool, String) {
     let brv_path = match resolve_brv_path() {
         Some(p) => p,
         None => {

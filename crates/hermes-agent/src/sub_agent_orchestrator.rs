@@ -28,7 +28,7 @@ use std::time::Duration;
 use chrono::{DateTime, Utc};
 use hermes_core::{AgentError, LlmProvider, Message};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::json;
 use tokio::time::timeout;
 
 use crate::agent_loop::{AgentConfig, AgentLoop, ToolRegistry};
@@ -519,7 +519,7 @@ mod tests {
                 ..Default::default()
             })
             .await;
-        let parsed: Value = serde_json::from_str(&out).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(parsed["status"], "timeout");
         assert!(parsed["sub_agent_id"]
             .as_str()
@@ -559,7 +559,7 @@ mod tests {
                 ..Default::default()
             })
             .await;
-        let parsed: Value = serde_json::from_str(&out).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
         // Parent interrupt propagates to child; status should be cancelled or
         // completed depending on scheduling. We accept either (cancelled most
         // of the time; completed if watcher missed the window). The lineage

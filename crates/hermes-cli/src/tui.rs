@@ -9,10 +9,9 @@
 //! - Theme/skin engine support (9.8)
 
 use std::io::Stdout;
-use std::sync::Arc;
 use std::time::Duration;
 
-use crossterm::event::{Event as CrosstermEvent, KeyEvent, MouseEvent};
+use crossterm::event::{Event as CrosstermEvent, KeyEvent};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -24,7 +23,6 @@ use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 use tokio::sync::mpsc;
-use tokio::sync::RwLock;
 
 use hermes_core::AgentError;
 
