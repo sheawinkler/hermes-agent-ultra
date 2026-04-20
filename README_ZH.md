@@ -228,6 +228,8 @@ cargo test --workspace   # 641 个测试
 
 ## 许可证
 
-MIT — 见 [LICENSE](LICENSE)。
+本仓库是一个 fork。许可范围与归属说明请参阅：
 
-基于 [Nous Research](https://nousresearch.com) 的 [Hermes Agent](https://github.com/NousResearch/hermes-agent)。
+- [LICENSE](LICENSE)
+- [NOTICE](NOTICE)
+- [UPSTREAM_ATTRIBUTION.md](UPSTREAM_ATTRIBUTION.md)

@@ -293,8 +293,21 @@ cargo test --workspace   # 641 tests
 git config core.hooksPath scripts/git-hooks  # Enable pre-commit fmt check
 ```
 
-## License
+## Upstream Sync Automation
 
-MIT — see [LICENSE](LICENSE).
+Use the built-in sync scripts to keep this fork current with upstream:
+- [docs/upstream-sync.md](docs/upstream-sync.md)
 
-Based on [Hermes Agent](https://github.com/NousResearch/hermes-agent) by [Nous Research](https://nousresearch.com).
+## Licensing and Attribution
+
+This repository is maintained as a fork of
+[Lumio-Research/hermes-agent-rs](https://github.com/Lumio-Research/hermes-agent-rs).
+
+- Fork-authored contributions are licensed under MIT; see [LICENSE](LICENSE).
+- Upstream-authored portions remain under upstream ownership/terms.
+- As of 2026-04-20, upstream metadata did not publish a root `LICENSE` file, so
+  this fork does not claim to relicense upstream material.
+
+Attribution and provenance details:
+- [NOTICE](NOTICE)
+- [UPSTREAM_ATTRIBUTION.md](UPSTREAM_ATTRIBUTION.md)

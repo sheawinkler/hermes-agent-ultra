@@ -1,0 +1,21 @@
+Fork Notice and Attribution
+===========================
+
+This repository is a maintained fork:
+- Fork: https://github.com/sheawinkler/hermes-agent-rs
+- Upstream: https://github.com/Lumio-Research/hermes-agent-rs
+
+Upstream authors and contributors retain credit for upstream-authored work.
+
+Fork maintainer:
+- Shea Winkler
+
+Representative fork-authored integration work:
+- 69ca3a0 build(gateway): enable full adapter feature set and unblock compilation
+- da4cf7c feat(gateway): wire api-server and multi-adapter runtime routing
+- fb79b98 merge parity integration branch into main
+
+This NOTICE is attribution metadata only and does not grant new rights for
+upstream-authored material.
+
+See LICENSE and UPSTREAM_ATTRIBUTION.md for licensing scope and provenance.

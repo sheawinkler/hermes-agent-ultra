@@ -218,6 +218,8 @@ cargo test --workspace   # 641 テスト
 
 ## ライセンス
 
-MIT — [LICENSE](LICENSE) 参照。
+このリポジトリは fork です。ライセンス範囲と帰属情報は以下を参照してください。
 
-[Nous Research](https://nousresearch.com) の [Hermes Agent](https://github.com/NousResearch/hermes-agent) に基づく。
+- [LICENSE](LICENSE)
+- [NOTICE](NOTICE)
+- [UPSTREAM_ATTRIBUTION.md](UPSTREAM_ATTRIBUTION.md)

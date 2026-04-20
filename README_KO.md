@@ -218,6 +218,8 @@ cargo test --workspace   # 641개 테스트
 
 ## 라이선스
 
-MIT — [LICENSE](LICENSE) 참조.
+이 저장소는 포크 저장소입니다. 라이선스 범위와 출처 정보는 아래 문서를 참고하세요.
 
-[Nous Research](https://nousresearch.com)의 [Hermes Agent](https://github.com/NousResearch/hermes-agent) 기반.
+- [LICENSE](LICENSE)
+- [NOTICE](NOTICE)
+- [UPSTREAM_ATTRIBUTION.md](UPSTREAM_ATTRIBUTION.md)
