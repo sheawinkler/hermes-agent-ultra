@@ -458,7 +458,7 @@ async fn handle_connection(
                 Ok(req) => {
                     let request_id = ApiServerAdapter::make_completion_id();
                     let model = req.model.as_deref().unwrap_or("hermes").to_string();
-                    let prompt = extract_latest_user_prompt(&req.messages).unwrap_or_default();
+                    let prompt = build_prompt_from_messages(&req.messages).unwrap_or_default();
                     if prompt.trim().is_empty() {
                         let err = serde_json::json!({
                             "error": {
@@ -670,13 +670,47 @@ async fn handle_connection(
     Ok(())
 }
 
-fn extract_latest_user_prompt(messages: &[ChatMessage]) -> Option<String> {
-    messages
+fn build_prompt_from_messages(messages: &[ChatMessage]) -> Option<String> {
+    if messages.is_empty() {
+        return None;
+    }
+
+    let has_user_message = messages
         .iter()
-        .rev()
-        .find(|m| m.role.eq_ignore_ascii_case("user"))
-        .map(|m| m.content.clone())
-        .or_else(|| messages.last().map(|m| m.content.clone()))
+        .any(|m| m.role.trim().eq_ignore_ascii_case("user"));
+    if !has_user_message {
+        return None;
+    }
+
+    if messages.len() == 1 {
+        let only = &messages[0];
+        if only.role.trim().eq_ignore_ascii_case("user") {
+            return Some(only.content.clone());
+        }
+    }
+
+    let mut prompt = String::new();
+    for (idx, msg) in messages.iter().enumerate() {
+        let role = msg.role.trim();
+        let role_upper = role.to_ascii_uppercase();
+        if idx > 0 {
+            prompt.push_str("\n\n");
+        }
+        prompt.push('[');
+        prompt.push_str(if role.is_empty() {
+            "MESSAGE"
+        } else {
+            role_upper.as_str()
+        });
+        prompt.push_str("]\n");
+        prompt.push_str(&msg.content);
+    }
+
+    if prompt.trim().is_empty() {
+        None
+    } else {
+        Some(prompt)
+    }
 }
 
 fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
@@ -749,7 +783,19 @@ mod tests {
     }
 
     #[test]
-    fn extract_latest_user_prompt_prefers_user_role() {
+    fn build_prompt_from_messages_preserves_single_user_prompt() {
+        let msgs = vec![ChatMessage {
+            role: "user".into(),
+            content: "final prompt".into(),
+        }];
+        assert_eq!(
+            build_prompt_from_messages(&msgs).as_deref(),
+            Some("final prompt")
+        );
+    }
+
+    #[test]
+    fn build_prompt_from_messages_preserves_multi_message_transcript() {
         let msgs = vec![
             ChatMessage {
                 role: "system".into(),
@@ -764,9 +810,24 @@ mod tests {
                 content: "final prompt".into(),
             },
         ];
-        assert_eq!(
-            extract_latest_user_prompt(&msgs).as_deref(),
-            Some("final prompt")
-        );
+        let rendered = build_prompt_from_messages(&msgs).expect("prompt should exist");
+        assert!(rendered.contains("[SYSTEM]\nrules"));
+        assert!(rendered.contains("[ASSISTANT]\nhello"));
+        assert!(rendered.contains("[USER]\nfinal prompt"));
+    }
+
+    #[test]
+    fn build_prompt_from_messages_requires_user_message() {
+        let msgs = vec![
+            ChatMessage {
+                role: "system".into(),
+                content: "rules".into(),
+            },
+            ChatMessage {
+                role: "assistant".into(),
+                content: "hello".into(),
+            },
+        ];
+        assert!(build_prompt_from_messages(&msgs).is_none());
     }
 }
