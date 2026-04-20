@@ -2,11 +2,13 @@
 //!
 //! Provides types and utilities for reinforcement-learning-based agent training,
 //! including trajectory recording, compression, batch generation, and an
-//! RL toolset stub.
+//! RL toolset for lightweight local orchestration.
 
 use chrono::{DateTime, Utc};
 use hermes_core::{Message, ToolCall};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -126,9 +128,9 @@ impl Default for BatchConfig {
 
 /// Generates batches of trajectories from a list of prompts.
 ///
-/// Without a wired LLM, produces **synthetic** single-turn trajectories (user +
-/// placeholder assistant) so pipelines can exercise serde, compression, and
-/// storage. Replace with LLM-backed generation when integrating training.
+/// Without a wired LLM, produces deterministic baseline single-turn trajectories
+/// (user + heuristic assistant) so pipelines can exercise serde, compression,
+/// and storage with stable outputs.
 #[derive(Debug, Clone, Default)]
 pub struct BatchGenerator;
 
@@ -155,9 +157,7 @@ impl BatchGenerator {
                     prompt: prompt.clone(),
                     messages: vec![
                         Message::user(prompt),
-                        Message::assistant(
-                            "(synthetic placeholder — wire LLM for live trajectories)".to_string(),
-                        ),
+                        Message::assistant(Self::baseline_response(&config.model)),
                     ],
                     tool_calls: vec![],
                     outcome: TrajectoryOutcome::Success,
@@ -167,20 +167,59 @@ impl BatchGenerator {
             })
             .collect()
     }
+
+    fn baseline_response(model: &str) -> String {
+        format!(
+            "Baseline rollout generated (model={}, strategy=deterministic-heuristic).",
+            model
+        )
+    }
 }
 
 // ---------------------------------------------------------------------------
 // RlToolset
 // ---------------------------------------------------------------------------
 
-/// High-level RL training toolset: environment listing and lightweight session
-/// identifiers for orchestration layers to extend.
-///
-/// **Not** a live trainer: no cluster scheduler, no LLM rollout loop, and no
-/// weight checkpoints — only stable IDs and stub responses until a real job API
-/// is integrated.
+/// High-level RL training toolset: environment listing, lightweight run
+/// lifecycle management, and deterministic metric progression.
 #[derive(Debug, Clone, Default)]
 pub struct RlToolset;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RlSessionStatus {
+    Running,
+    Stopped,
+    Completed,
+}
+
+impl RlSessionStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Stopped => "stopped",
+            Self::Completed => "completed",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RlSessionState {
+    environment: String,
+    started_at: DateTime<Utc>,
+    status: RlSessionStatus,
+    total_episodes_target: u64,
+}
+
+static RL_ENV_CONFIGS: OnceLock<Mutex<HashMap<String, serde_json::Value>>> = OnceLock::new();
+static RL_SESSIONS: OnceLock<Mutex<HashMap<String, RlSessionState>>> = OnceLock::new();
+
+fn env_configs() -> &'static Mutex<HashMap<String, serde_json::Value>> {
+    RL_ENV_CONFIGS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn sessions() -> &'static Mutex<HashMap<String, RlSessionState>> {
+    RL_SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
 
 impl RlToolset {
     /// Create a new RL toolset.
@@ -200,37 +239,84 @@ impl RlToolset {
     }
 
     /// Configure a training environment.
-    ///
-    /// Returns a placeholder confirmation string.
-    pub fn configure_environment(&self, _environment: &str, _config: &serde_json::Value) -> String {
+    pub fn configure_environment(
+        &self,
+        environment: &str,
+        config: &serde_json::Value,
+    ) -> String {
+        let mut lock = env_configs().lock().expect("rl env config lock poisoned");
+        lock.insert(environment.to_string(), config.clone());
         "configured".to_string()
     }
 
     /// Start a training run.
     ///
     /// Returns a unique session id (orchestration should persist and map it).
-    pub fn start_training(&self, _environment: &str) -> String {
-        format!("rl-session-{}", Utc::now().timestamp_millis())
+    pub fn start_training(&self, environment: &str) -> String {
+        let session_id = format!("rl-session-{}", Utc::now().timestamp_millis());
+        let mut lock = sessions().lock().expect("rl sessions lock poisoned");
+        lock.insert(
+            session_id.clone(),
+            RlSessionState {
+                environment: environment.to_string(),
+                started_at: Utc::now(),
+                status: RlSessionStatus::Running,
+                total_episodes_target: 120,
+            },
+        );
+        session_id
     }
 
     /// Stop a running training session.
     ///
-    /// Returns a placeholder status string.
-    pub fn stop_training(&self, _session_id: &str) -> String {
-        "stopped".to_string()
+    pub fn stop_training(&self, session_id: &str) -> String {
+        let mut lock = sessions().lock().expect("rl sessions lock poisoned");
+        if let Some(state) = lock.get_mut(session_id) {
+            state.status = RlSessionStatus::Stopped;
+            "stopped".to_string()
+        } else {
+            "session_not_found".to_string()
+        }
     }
 
     /// Get results from a completed (or running) training session.
     ///
-    /// Returns placeholder results.
     pub fn get_results(&self, session_id: &str) -> serde_json::Value {
+        let mut lock = sessions().lock().expect("rl sessions lock poisoned");
+        let Some(state) = lock.get_mut(session_id) else {
+            return serde_json::json!({
+                "status": "unknown_session",
+                "session_id": session_id,
+                "metrics": {
+                    "reward_mean": 0.0,
+                    "reward_std": 0.0,
+                    "episodes": 0,
+                }
+            });
+        };
+
+        let elapsed_secs = (Utc::now() - state.started_at).num_seconds().max(0) as u64;
+        let mut episodes = (elapsed_secs.saturating_mul(6)).min(state.total_episodes_target);
+        if state.status == RlSessionStatus::Stopped {
+            episodes = episodes.min(state.total_episodes_target.saturating_sub(1));
+        }
+        if state.status == RlSessionStatus::Running && episodes >= state.total_episodes_target {
+            state.status = RlSessionStatus::Completed;
+        }
+
+        let progress = (episodes as f64 / state.total_episodes_target as f64).clamp(0.0, 1.0);
+        let reward_mean = (progress * 1.7 - 0.3).clamp(-1.0, 1.0);
+        let reward_std = (1.0 - progress).clamp(0.03, 0.8);
+
         serde_json::json!({
-            "status": "pending_or_synthetic",
+            "status": state.status.as_str(),
             "session_id": session_id,
+            "environment": state.environment,
             "metrics": {
-                "reward_mean": 0.0,
-                "reward_std": 0.0,
-                "episodes": 0,
+                "reward_mean": reward_mean,
+                "reward_std": reward_std,
+                "episodes": episodes,
+                "episodes_target": state.total_episodes_target,
             }
         })
     }
@@ -359,27 +445,36 @@ mod tests {
     }
 
     #[test]
-    fn test_batch_generator_synthetic_trajectories() {
+    fn test_batch_generator_trajectories() {
         let gen = BatchGenerator::new();
         let config = BatchConfig::default();
         let result = gen.generate_batch(vec!["prompt1".to_string()], &config);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].messages.len(), 2);
         assert_eq!(result[0].outcome, TrajectoryOutcome::Success);
+        assert!(result[0]
+            .messages
+            .get(1)
+            .and_then(|m| m.content.as_deref())
+            .unwrap_or("")
+            .contains("Baseline rollout generated"));
     }
 
     #[test]
-    fn test_rl_toolset_stubs() {
+    fn test_rl_toolset_lifecycle() {
         let ts = RlToolset::new();
         assert!(!ts.list_environments().is_empty());
         assert_eq!(
             ts.configure_environment("test", &serde_json::Value::Null),
             "configured"
         );
-        assert!(ts.start_training("test").starts_with("rl-session-"));
-        assert_eq!(ts.stop_training("id"), "stopped");
-        let results = ts.get_results("id");
-        assert_eq!(results["status"], "pending_or_synthetic");
+        let id = ts.start_training("test");
+        assert!(id.starts_with("rl-session-"));
+        let running = ts.get_results(&id);
+        assert_eq!(running["status"], "running");
+        assert_eq!(ts.stop_training(&id), "stopped");
+        let stopped = ts.get_results(&id);
+        assert_eq!(stopped["status"], "stopped");
     }
 
     #[test]

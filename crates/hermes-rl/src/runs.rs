@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -39,7 +40,7 @@ impl RunManager {
 
     /// Create and register a new training run.
     pub fn create_run(&mut self, environment: &str, config: TrainingConfig) -> String {
-        let id = format!("run-{}", uuid_v4_stub());
+        let id = generate_run_id();
         let run = TrainingRun {
             id: id.clone(),
             environment: environment.to_string(),
@@ -100,11 +101,8 @@ impl RunManager {
     }
 }
 
-fn uuid_v4_stub() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    format!("{:016x}", nanos)
+fn generate_run_id() -> String {
+    static RUN_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+    let seq = RUN_ID_COUNTER.fetch_add(1, Ordering::Relaxed);
+    format!("{}-{:04}", Utc::now().timestamp_millis(), seq)
 }
