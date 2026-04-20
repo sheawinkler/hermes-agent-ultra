@@ -4215,6 +4215,119 @@ fn count_files_recursive(dir: &std::path::Path) -> usize {
     count
 }
 
+fn acp_history_to_messages(
+    history: &[serde_json::Value],
+    fallback_user_text: &str,
+) -> Vec<hermes_core::Message> {
+    let mut messages = Vec::new();
+
+    for item in history {
+        let role = item.get("role").and_then(|v| v.as_str()).unwrap_or("");
+        let content = item
+            .get("content")
+            .or_else(|| item.get("text"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        match role {
+            "system" if !content.is_empty() => messages.push(hermes_core::Message::system(content)),
+            "user" if !content.is_empty() => messages.push(hermes_core::Message::user(content)),
+            "assistant" => {
+                if let Some(tool_calls_val) = item.get("tool_calls") {
+                    if let Ok(tool_calls) =
+                        serde_json::from_value::<Vec<hermes_core::ToolCall>>(tool_calls_val.clone())
+                    {
+                        let assistant = hermes_core::Message::assistant_with_tool_calls(
+                            if content.is_empty() {
+                                None
+                            } else {
+                                Some(content)
+                            },
+                            tool_calls,
+                        );
+                        messages.push(assistant);
+                        continue;
+                    }
+                }
+                if !content.is_empty() {
+                    messages.push(hermes_core::Message::assistant(content));
+                }
+            }
+            "tool" if !content.is_empty() => {
+                let tool_call_id = item
+                    .get("tool_call_id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("tool_call");
+                messages.push(hermes_core::Message::tool_result(tool_call_id, content));
+            }
+            _ => {}
+        }
+    }
+
+    let has_user_tail = messages
+        .last()
+        .map(|m| matches!(m.role, hermes_core::MessageRole::User))
+        .unwrap_or(false);
+    if !has_user_tail && !fallback_user_text.trim().is_empty() {
+        messages.push(hermes_core::Message::user(fallback_user_text));
+    }
+
+    messages
+}
+
+struct CliAcpPromptExecutor {
+    config: Arc<hermes_config::GatewayConfig>,
+    tool_registry: Arc<hermes_tools::ToolRegistry>,
+}
+
+#[async_trait::async_trait]
+impl hermes_acp::AcpPromptExecutor for CliAcpPromptExecutor {
+    async fn execute_prompt(
+        &self,
+        session: &hermes_acp::SessionState,
+        user_text: &str,
+        history: &[serde_json::Value],
+    ) -> Result<hermes_acp::PromptExecutionOutput, String> {
+        let model = session
+            .model
+            .clone()
+            .or_else(|| self.config.model.clone())
+            .unwrap_or_else(|| "gpt-4o".to_string());
+
+        let provider = crate::app::build_provider(&self.config, &model);
+        let mut agent_config = crate::app::build_agent_config(&self.config, &model);
+        agent_config.session_id = Some(session.session_id.clone());
+
+        let agent_tools = Arc::new(crate::app::bridge_tool_registry(&self.tool_registry));
+        let agent = hermes_agent::AgentLoop::new(agent_config, agent_tools, provider);
+        let messages = acp_history_to_messages(history, user_text);
+
+        let result = agent.run(messages, None).await.map_err(|e| e.to_string())?;
+        let response_text = result
+            .messages
+            .iter()
+            .rev()
+            .find(|m| matches!(m.role, hermes_core::MessageRole::Assistant))
+            .and_then(|m| m.content.clone())
+            .unwrap_or_default();
+
+        let usage = result.usage.map(|u| hermes_acp::Usage {
+            input_tokens: u.prompt_tokens,
+            output_tokens: u.completion_tokens,
+            total_tokens: u.total_tokens,
+            thought_tokens: None,
+            cached_read_tokens: None,
+        });
+
+        Ok(hermes_acp::PromptExecutionOutput {
+            response_text,
+            usage,
+            total_turns: Some(result.total_turns),
+        })
+    }
+}
+
 /// Handle `hermes acp [action]`.
 pub async fn handle_cli_acp(action: Option<String>) -> Result<(), hermes_core::AgentError> {
     match action.as_deref().unwrap_or("status") {
@@ -4223,20 +4336,48 @@ pub async fn handle_cli_acp(action: Option<String>) -> Result<(), hermes_core::A
                 .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
 
             let model = config.model.clone().unwrap_or_else(|| "gpt-4o".to_string());
-
-            let acp_config = hermes_acp::AcpConfig {
-                model,
-                personality: config.personality.clone(),
-                tools: vec![],
-                max_turns: config.max_turns as usize,
-            };
+            let max_turns = config.max_turns as usize;
 
             println!(
                 "Starting ACP server (model={}, max_turns={})...",
-                acp_config.model, acp_config.max_turns
+                model, max_turns
             );
 
-            hermes_acp::start_acp_server(acp_config)
+            let tool_registry = Arc::new(hermes_tools::ToolRegistry::new());
+            let terminal_backend: Arc<dyn hermes_core::TerminalBackend> =
+                Arc::new(hermes_environments::LocalBackend::default());
+            let skill_store = Arc::new(hermes_skills::FileSkillStore::new(
+                hermes_skills::FileSkillStore::default_dir(),
+            ));
+            let skill_provider: Arc<dyn hermes_core::SkillProvider> =
+                Arc::new(hermes_skills::SkillManager::new(skill_store));
+            hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
+
+            let prompt_executor = Arc::new(CliAcpPromptExecutor {
+                config: Arc::new(config.clone()),
+                tool_registry,
+            });
+
+            let session_manager = Arc::new(hermes_acp::SessionManager::new());
+            let event_sink = Arc::new(hermes_acp::EventSink::default());
+            let permission_store = Arc::new(hermes_acp::PermissionStore::new());
+            let handler = Arc::new(
+                hermes_acp::HermesAcpHandler::new(
+                    session_manager.clone(),
+                    event_sink.clone(),
+                    permission_store.clone(),
+                )
+                .with_prompt_executor(prompt_executor),
+            );
+            let server = hermes_acp::AcpServer::with_components(
+                handler,
+                session_manager,
+                event_sink,
+                permission_store,
+            );
+
+            server
+                .run()
                 .await
                 .map_err(|e| hermes_core::AgentError::Io(format!("ACP server error: {}", e)))?;
         }

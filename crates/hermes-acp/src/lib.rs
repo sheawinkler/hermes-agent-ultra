@@ -18,7 +18,9 @@ pub mod server;
 pub mod session;
 
 pub use events::{AcpEvent, AcpEventKind, EventSink, ToolCallIdTracker};
-pub use handler::{AcpHandler, DefaultAcpHandler, HermesAcpHandler};
+pub use handler::{
+    AcpHandler, AcpPromptExecutor, DefaultAcpHandler, HermesAcpHandler, PromptExecutionOutput,
+};
 pub use permissions::{
     ApprovalCallback, PermissionKind, PermissionOption, PermissionOutcome, PermissionRequest,
     PermissionStore,
@@ -81,7 +83,15 @@ pub async fn start_acp_server(config: AcpConfig) -> Result<(), Box<dyn std::erro
         permission_store.clone(),
     ));
 
-    start_acp_server_with_handler(config, handler).await
+    tracing::info!(
+        "Starting ACP server: model={}, tools={:?}, max_turns={}",
+        config.model,
+        config.tools,
+        config.max_turns,
+    );
+
+    let server = AcpServer::with_components(handler, session_manager, event_sink, permission_store);
+    server.run().await
 }
 
 /// Start the ACP server with a custom handler implementation.
