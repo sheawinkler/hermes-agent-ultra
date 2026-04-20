@@ -879,7 +879,7 @@ impl Gateway {
                     .session_manager
                     .get_user_sessions(&incoming.user_id)
                     .await;
-                let matched = sessions.iter().any(|s| {
+                let matched = sessions.iter().find(|s| {
                     let key = self.session_manager.compose_session_key(
                         &s.platform,
                         &s.chat_id,
@@ -887,12 +887,23 @@ impl Gateway {
                     );
                     key == session_id || s.id == session_id
                 });
-                let msg = if matched {
-                    format!(
-                        "🔁 Session `{}` matches your account.\n\
-                         (Cross-chat transcript routing is not fully wired in this gateway build.)",
-                        session_id
-                    )
+                let msg = if let Some(target) = matched {
+                    let copied = self
+                        .session_manager
+                        .replace_messages(session_key, target.messages.clone())
+                        .await;
+                    if copied {
+                        format!(
+                            "🔁 Switched to session `{}`.\nLoaded {} message(s) into this chat context.",
+                            session_id,
+                            target.messages.len()
+                        )
+                    } else {
+                        format!(
+                            "❌ Could not switch to `{}` because the current chat session key is missing.",
+                            session_id
+                        )
+                    }
                 } else {
                     format!(
                         "❌ No session matching `{}` for your user. Try `/sessions` to list keys.",

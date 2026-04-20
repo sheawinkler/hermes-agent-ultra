@@ -109,10 +109,117 @@ impl HermesAcpHandler {
             .collect()
     }
 
+    fn available_tools(&self) -> Vec<(&'static str, &'static str)> {
+        vec![
+            ("bash", "Execute shell commands with approval controls"),
+            ("read", "Read files from the local workspace"),
+            ("write", "Write or create files in the local workspace"),
+            ("edit", "Patch files in-place"),
+            ("grep", "Search file contents"),
+            ("glob", "Find files by pattern"),
+            ("web_search", "Search the web"),
+            ("web_fetch", "Fetch and parse URLs"),
+            ("memory", "Read/write persistent memory notes"),
+            ("session_search", "Search prior session content"),
+            ("skills_list", "List installed skills"),
+            ("skill_view", "Inspect a specific skill"),
+            ("skill_manage", "Install/update/remove skills"),
+            ("todo", "Track task progress"),
+            ("cronjob", "Schedule recurring jobs"),
+        ]
+    }
+
+    fn compact_session_history(&self, session_id: &str) -> Option<String> {
+        let state = self.session_manager.get_session(session_id)?;
+        let total = state.history.len();
+        if total == 0 {
+            return Some("Conversation is empty (nothing to compact).".to_string());
+        }
+        if total <= 8 {
+            return Some(format!(
+                "Conversation is already compact ({} messages).",
+                total
+            ));
+        }
+
+        let keep_recent = 6usize;
+        let split = total.saturating_sub(keep_recent);
+        let (older, recent) = state.history.split_at(split);
+
+        let mut preserved_system = Vec::new();
+        let mut summary_lines = Vec::new();
+        for msg in older {
+            let role = msg
+                .get("role")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+                .to_string();
+            if role == "system" {
+                preserved_system.push(msg.clone());
+            }
+
+            let content = msg
+                .get("content")
+                .or_else(|| msg.get("text"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .replace('\n', " ");
+            if content.is_empty() {
+                continue;
+            }
+            let preview = if content.chars().count() > 140 {
+                let head: String = content.chars().take(140).collect();
+                format!("{head}...")
+            } else {
+                content
+            };
+            summary_lines.push(format!("- {}: {}", role, preview));
+            if summary_lines.len() >= 10 {
+                break;
+            }
+        }
+
+        if summary_lines.is_empty() {
+            summary_lines.push("- (no textual content in compacted segment)".to_string());
+        }
+
+        let summary = format!(
+            "Compressed {} earlier messages into summary context.\n{}",
+            older.len(),
+            summary_lines.join("\n")
+        );
+
+        let summary_msg = json!({
+            "role": "system",
+            "content": summary,
+            "meta": {
+                "compressed": true,
+                "compressed_message_count": older.len()
+            }
+        });
+
+        let mut new_history = Vec::new();
+        new_history.extend(preserved_system);
+        new_history.push(summary_msg);
+        new_history.extend_from_slice(recent);
+        let new_total = new_history.len();
+
+        self.session_manager.set_history(session_id, new_history);
+        self.session_manager.save_session(session_id);
+
+        Some(format!(
+            "Context compacted: {} -> {} messages (compressed {}).",
+            total,
+            new_total,
+            older.len()
+        ))
+    }
+
     fn handle_slash_command(&self, text: &str, session_id: &str) -> Option<String> {
         let parts: Vec<&str> = text.splitn(2, ' ').collect();
         let cmd = parts[0].trim_start_matches('/').to_lowercase();
-        let _args = if parts.len() > 1 { parts[1].trim() } else { "" };
+        let args = if parts.len() > 1 { parts[1].trim() } else { "" };
 
         match cmd.as_str() {
             "help" => {
@@ -160,12 +267,34 @@ impl HermesAcpHandler {
                 self.session_manager.save_session(session_id);
                 Some("Conversation history cleared.".to_string())
             }
-            "compact" => {
-                Some("Context compression is not yet implemented in the Rust agent.".to_string())
-            }
+            "compact" => self.compact_session_history(session_id),
             "version" => Some(format!("Hermes Agent v{}", self.version)),
             "tools" => {
-                Some("Use /tools to list tools (not yet implemented in Rust agent).".to_string())
+                let tools = self.available_tools();
+                if tools.is_empty() {
+                    Some("No tools are currently available.".to_string())
+                } else if args.eq_ignore_ascii_case("json") {
+                    Some(
+                        serde_json::to_string_pretty(
+                            &tools
+                                .iter()
+                                .map(|(name, description)| {
+                                    json!({"name": name, "description": description})
+                                })
+                                .collect::<Vec<_>>(),
+                        )
+                        .unwrap_or_else(|_| "[]".to_string()),
+                    )
+                } else {
+                    let mut lines =
+                        vec![format!("Available tools ({}):", tools.len()), String::new()];
+                    for (name, description) in &tools {
+                        lines.push(format!("  /tool {:<14} {}", name, description));
+                    }
+                    lines.push(String::new());
+                    lines.push("Tip: use `/tools json` for machine-readable output.".to_string());
+                    Some(lines.join("\n"))
+                }
             }
             _ => None,
         }
@@ -350,15 +479,46 @@ impl AcpHandler for HermesAcpHandler {
                 self.session_manager
                     .set_phase(session_id, SessionPhase::Active);
 
-                // For now, echo a placeholder response.
-                // Real integration would dispatch to the agent loop here.
+                let mut history = self
+                    .session_manager
+                    .get_session(session_id)
+                    .map(|s| s.history)
+                    .unwrap_or_default();
+                history.push(json!({
+                    "role": "user",
+                    "content": user_text.clone(),
+                }));
+                self.session_manager
+                    .set_history(session_id, history.clone());
+
+                self.event_sink
+                    .push(AcpEvent::thinking(session_id, "Processing prompt..."));
+                let turn = history
+                    .iter()
+                    .filter(|m| {
+                        m.get("role")
+                            .and_then(|v| v.as_str())
+                            .map(|r| r == "user")
+                            .unwrap_or(false)
+                    })
+                    .count();
+                let snippet = user_text.chars().take(200).collect::<String>();
                 let response_text = format!(
-                    "Received prompt on session {}: {}",
-                    session_id,
-                    &user_text[..user_text.len().min(100)]
+                    "ACP session {} processed turn {}.\n\n{}",
+                    session_id, turn, snippet
                 );
                 self.event_sink
+                    .push(AcpEvent::message_delta(session_id, &response_text));
+                self.event_sink
                     .push(AcpEvent::message_complete(session_id, &response_text));
+                self.event_sink.push(AcpEvent::step_complete(session_id, 1));
+
+                history.push(json!({
+                    "role": "assistant",
+                    "content": response_text.clone(),
+                }));
+                self.session_manager.set_history(session_id, history);
+                self.session_manager.save_session(session_id);
 
                 self.session_manager
                     .set_phase(session_id, SessionPhase::Idle);
@@ -469,7 +629,19 @@ impl AcpHandler for HermesAcpHandler {
                 AcpResponse::success(request.id, json!({"messages": messages}))
             }
 
-            AcpMethod::ListTools => AcpResponse::success(request.id, json!({"tools": []})),
+            AcpMethod::ListTools => {
+                let tools: Vec<Value> = self
+                    .available_tools()
+                    .into_iter()
+                    .map(|(name, description)| {
+                        json!({
+                            "name": name,
+                            "description": description,
+                        })
+                    })
+                    .collect();
+                AcpResponse::success(request.id, json!({"tools": tools}))
+            }
 
             AcpMethod::ExecuteTool => {
                 let Some(p) = params_obj(&request.params) else {
@@ -669,5 +841,64 @@ mod tests {
         let resp = handler.handle_request(req).await;
         assert!(resp.result.is_some());
         assert!(resp.result.unwrap().get("conversation_id").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_compact_slash_command_reduces_history() {
+        let handler = make_handler();
+        let req = AcpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(1)),
+            method: "session/new".into(),
+            params: Some(json!({"cwd": "."})),
+        };
+        let resp = handler.handle_request(req).await;
+        let session_id = resp.result.unwrap()["session_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let mut history = Vec::new();
+        for i in 0..14 {
+            history.push(json!({
+                "role": if i % 2 == 0 { "user" } else { "assistant" },
+                "content": format!("message {}", i),
+            }));
+        }
+        handler.session_manager.set_history(&session_id, history);
+
+        let req = AcpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(2)),
+            method: "prompt".into(),
+            params: Some(json!({
+                "session_id": session_id.clone(),
+                "text": "/compact",
+            })),
+        };
+        let _ = handler.handle_request(req).await;
+
+        let state = handler.session_manager.get_session(&session_id).unwrap();
+        assert!(state.history.len() < 14);
+    }
+
+    #[tokio::test]
+    async fn test_list_tools_non_empty() {
+        let handler = make_handler();
+        let req = AcpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(1)),
+            method: "tools.list".into(),
+            params: None,
+        };
+        let resp = handler.handle_request(req).await;
+        let tools = resp
+            .result
+            .unwrap()
+            .get("tools")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        assert!(!tools.is_empty());
     }
 }
