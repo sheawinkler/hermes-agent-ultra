@@ -3,6 +3,8 @@
 //! Handles voice message transcription (STT) and text-to-speech (TTS) responses.
 
 use hermes_core::AgentError;
+use std::collections::{HashMap, HashSet};
+use std::sync::Mutex;
 
 /// Voice mode state.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -57,11 +59,15 @@ pub enum TtsProvider {
 /// Voice mode manager.
 pub struct VoiceManager {
     config: VoiceConfig,
+    joined_channels: Mutex<HashMap<String, HashSet<String>>>,
 }
 
 impl VoiceManager {
     pub fn new(config: VoiceConfig) -> Self {
-        Self { config }
+        Self {
+            config,
+            joined_channels: Mutex::new(HashMap::new()),
+        }
     }
 
     pub fn is_enabled(&self) -> bool {
@@ -139,9 +145,6 @@ impl VoiceManager {
     }
 
     /// Join a voice channel on a platform (e.g., Discord voice channel).
-    ///
-    /// This is a placeholder that records the join intent. Actual voice channel
-    /// connectivity depends on the platform adapter's capabilities.
     pub async fn join_voice_channel(
         &self,
         platform: &str,
@@ -152,13 +155,27 @@ impl VoiceManager {
                 "Voice mode is disabled; enable it before joining a channel".into(),
             ));
         }
+        let platform = Self::normalize_identifier(platform, "platform")?;
+        let channel_id = Self::normalize_identifier(channel_id, "channel_id")?;
+
+        let mut lock = self
+            .joined_channels
+            .lock()
+            .map_err(|_| AgentError::Io("voice join lock poisoned".into()))?;
+        let entry = lock.entry(platform.clone()).or_default();
+        if !entry.insert(channel_id.clone()) {
+            tracing::debug!(
+                platform = platform,
+                channel_id = channel_id,
+                "Voice channel already joined"
+            );
+            return Ok(());
+        }
         tracing::info!(
             platform = platform,
             channel_id = channel_id,
-            "Joining voice channel"
+            "Joined voice channel"
         );
-        // Platform-specific join logic would be delegated to the platform adapter.
-        // This serves as the gateway-level coordinator.
         Ok(())
     }
 
@@ -168,35 +185,119 @@ impl VoiceManager {
         platform: &str,
         channel_id: &str,
     ) -> Result<(), AgentError> {
+        let platform = Self::normalize_identifier(platform, "platform")?;
+        let channel_id = Self::normalize_identifier(channel_id, "channel_id")?;
+
+        let mut lock = self
+            .joined_channels
+            .lock()
+            .map_err(|_| AgentError::Io("voice leave lock poisoned".into()))?;
+        let Some(channels) = lock.get_mut(&platform) else {
+            return Err(AgentError::Config(format!(
+                "Voice channel is not joined for platform '{}'",
+                platform
+            )));
+        };
+        if !channels.remove(&channel_id) {
+            return Err(AgentError::Config(format!(
+                "Voice channel '{}' is not currently joined on '{}'",
+                channel_id, platform
+            )));
+        }
+        if channels.is_empty() {
+            lock.remove(&platform);
+        }
         tracing::info!(
             platform = platform,
             channel_id = channel_id,
-            "Leaving voice channel"
+            "Left voice channel"
         );
         Ok(())
     }
 
-    /// Simple voice activity detection (VAD) placeholder.
+    /// Lightweight voice activity detection (VAD) using RMS energy.
     ///
-    /// Checks if the audio data contains enough energy to be considered speech.
-    /// In production, use a proper VAD library (e.g., webrtc-vad or silero-vad).
+    /// Uses 16-bit PCM little-endian RMS when possible and falls back to
+    /// byte-level average amplitude otherwise.
     fn detect_voice_activity(&self, audio_data: &[u8]) -> bool {
         if audio_data.len() < 320 {
             return false;
         }
 
-        // Compute average absolute amplitude from raw PCM-like data
-        let sum: u64 = audio_data
+        // Prefer 16-bit PCM RMS when byte alignment suggests PCM frames.
+        if audio_data.len() % 2 == 0 {
+            let mut sum_sq = 0.0_f64;
+            let mut n = 0usize;
+            for frame in audio_data.chunks_exact(2) {
+                let sample = i16::from_le_bytes([frame[0], frame[1]]) as f64 / 32768.0;
+                sum_sq += sample * sample;
+                n += 1;
+            }
+            if n > 0 {
+                let rms = (sum_sq / n as f64).sqrt();
+                let threshold = std::env::var("HERMES_VAD_RMS_THRESHOLD")
+                    .ok()
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .unwrap_or(0.01)
+                    .clamp(0.001, 0.25);
+                return rms >= threshold;
+            }
+        }
+
+        let avg: f64 = audio_data
             .iter()
             .map(|&b| {
                 let signed = b as i8;
-                signed.unsigned_abs() as u64
+                signed.unsigned_abs() as f64
             })
-            .sum();
-        let avg = sum / audio_data.len() as u64;
+            .sum::<f64>()
+            / audio_data.len() as f64;
+        avg >= 12.0
+    }
 
-        // Threshold: if average amplitude is above ~10, consider it voice
-        avg > 10
+    fn normalize_identifier(value: &str, field: &str) -> Result<String, AgentError> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(AgentError::Config(format!(
+                "Voice {} must be non-empty",
+                field
+            )));
+        }
+        if trimmed.len() > 256 {
+            return Err(AgentError::Config(format!(
+                "Voice {} exceeds maximum length",
+                field
+            )));
+        }
+        Ok(trimmed.to_string())
+    }
+
+    pub fn is_joined(&self, platform: &str, channel_id: &str) -> bool {
+        let lock = match self.joined_channels.lock() {
+            Ok(l) => l,
+            Err(_) => return false,
+        };
+        lock.get(platform)
+            .map(|channels| channels.contains(channel_id))
+            .unwrap_or(false)
+    }
+
+    pub fn joined_channel_count(&self) -> usize {
+        let lock = match self.joined_channels.lock() {
+            Ok(l) => l,
+            Err(_) => return 0,
+        };
+        lock.values().map(|channels| channels.len()).sum()
+    }
+
+    pub fn leave_all_channels(&self) -> usize {
+        let mut lock = match self.joined_channels.lock() {
+            Ok(l) => l,
+            Err(_) => return 0,
+        };
+        let count: usize = lock.values().map(|channels| channels.len()).sum();
+        lock.clear();
+        count
     }
 
     async fn transcribe_whisper(
@@ -479,6 +580,7 @@ impl VoiceManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::f32::consts::PI;
 
     #[test]
     fn test_voice_state_default() {
@@ -496,5 +598,57 @@ mod tests {
         let state = mgr.toggle();
         assert_eq!(state, VoiceState::Disabled);
         assert!(!mgr.is_enabled());
+    }
+
+    #[tokio::test]
+    async fn test_voice_join_leave_lifecycle() {
+        let mut config = VoiceConfig::default();
+        config.state = VoiceState::FullDuplex;
+        let mgr = VoiceManager::new(config);
+
+        mgr.join_voice_channel("discord", "room-1")
+            .await
+            .expect("join should succeed");
+        assert!(mgr.is_joined("discord", "room-1"));
+        assert_eq!(mgr.joined_channel_count(), 1);
+
+        // Idempotent join
+        mgr.join_voice_channel("discord", "room-1")
+            .await
+            .expect("duplicate join should be no-op");
+        assert_eq!(mgr.joined_channel_count(), 1);
+
+        mgr.leave_voice_channel("discord", "room-1")
+            .await
+            .expect("leave should succeed");
+        assert_eq!(mgr.joined_channel_count(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_join_requires_voice_enabled() {
+        let mgr = VoiceManager::new(VoiceConfig::default());
+        let err = mgr
+            .join_voice_channel("discord", "room-1")
+            .await
+            .expect_err("disabled voice should reject join");
+        assert!(err.to_string().contains("Voice mode is disabled"));
+    }
+
+    #[test]
+    fn test_vad_detects_rms_energy() {
+        let mut cfg = VoiceConfig::default();
+        cfg.auto_detect_voice = true;
+        let mgr = VoiceManager::new(cfg);
+
+        // 200ms at 16 kHz sine wave with moderate amplitude.
+        let mut pcm = Vec::new();
+        let freq = 440.0_f32;
+        let sample_rate = 16_000.0_f32;
+        for i in 0..3200 {
+            let t = i as f32 / sample_rate;
+            let sample = (0.2 * (2.0 * PI * freq * t).sin() * i16::MAX as f32) as i16;
+            pcm.extend_from_slice(&sample.to_le_bytes());
+        }
+        assert!(mgr.detect_voice_activity(&pcm));
     }
 }

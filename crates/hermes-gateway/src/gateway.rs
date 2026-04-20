@@ -1003,7 +1003,7 @@ impl Gateway {
             .await;
         let stream_id = stream_handle.id.clone();
 
-        // Send an initial placeholder message
+        // Send an initial streaming anchor message.
         self.send_message(&incoming.platform, &incoming.chat_id, "...", None)
             .await?;
 
