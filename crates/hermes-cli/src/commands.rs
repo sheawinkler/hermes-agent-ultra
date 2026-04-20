@@ -3,6 +3,7 @@
 //! Defines and dispatches all supported `/` commands in the interactive
 //! REPL, and provides auto-completion suggestions.
 
+use std::process::Stdio;
 use std::sync::Arc;
 
 use hermes_core::AgentError;
@@ -181,10 +182,52 @@ fn handle_personality_command(app: &mut App, args: &[&str]) -> Result<CommandRes
     Ok(CommandResult::Handled)
 }
 
-fn handle_skills_command(app: &mut App) -> Result<CommandResult, AgentError> {
-    // In a full implementation, we would query the skill provider.
-    println!("Skills (not yet loaded — skill provider not connected)");
-    println!("Use /skills to list available skills once a skill provider is configured.");
+fn handle_skills_command(_app: &mut App) -> Result<CommandResult, AgentError> {
+    let skills_dir = hermes_config::hermes_home().join("skills");
+    if !skills_dir.exists() {
+        println!(
+            "No skills directory found at {}. Run `hermes setup` first.",
+            skills_dir.display()
+        );
+        return Ok(CommandResult::Handled);
+    }
+
+    let mut skills: Vec<(String, String)> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&skills_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let skill_md = path.join("SKILL.md");
+            if !path.is_dir() || !skill_md.exists() {
+                continue;
+            }
+            let name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
+            let title = std::fs::read_to_string(&skill_md)
+                .ok()
+                .and_then(|c| {
+                    c.lines()
+                        .find(|l| l.starts_with('#'))
+                        .map(|l| l.trim_start_matches('#').trim().to_string())
+                })
+                .unwrap_or_else(|| "(no description)".to_string());
+            skills.push((name, title));
+        }
+    }
+    skills.sort_by(|a, b| a.0.cmp(&b.0));
+
+    if skills.is_empty() {
+        println!("No installed skills found in {}.", skills_dir.display());
+        println!("Install skills with `hermes skills install <name>`.");
+    } else {
+        println!("Installed skills ({}):", skills.len());
+        for (name, title) in &skills {
+            println!("  • {} — {}", name, title);
+        }
+        println!("\nUse `hermes skills inspect <name>` for details.");
+    }
     Ok(CommandResult::Handled)
 }
 
@@ -490,10 +533,162 @@ fn handle_background_command(_app: &mut App, args: &[&str]) -> Result<CommandRes
         println!("Queues a task to run in the background while you continue chatting.");
         return Ok(CommandResult::Handled);
     }
+
     let task = args.join(" ");
+    let job_id = format!(
+        "{}-{}",
+        chrono::Utc::now().format("%Y%m%d%H%M%S"),
+        uuid::Uuid::new_v4().simple()
+    );
+    let jobs_dir = hermes_config::hermes_home().join("background_jobs");
+    std::fs::create_dir_all(&jobs_dir).map_err(|e| {
+        AgentError::Io(format!(
+            "Failed to create background job directory {}: {}",
+            jobs_dir.display(),
+            e
+        ))
+    })?;
+    let status_path = jobs_dir.join(format!("{}.json", job_id));
+    let log_path = jobs_dir.join(format!("{}.log", job_id));
+
+    let status = serde_json::json!({
+        "id": job_id,
+        "task": task,
+        "status": "queued",
+        "created_at": chrono::Utc::now().to_rfc3339(),
+        "started_at": serde_json::Value::Null,
+        "finished_at": serde_json::Value::Null,
+        "exit_code": serde_json::Value::Null,
+        "log_path": log_path,
+    });
+    std::fs::write(
+        &status_path,
+        serde_json::to_string_pretty(&status).unwrap_or_else(|_| "{}".to_string()),
+    )
+    .map_err(|e| AgentError::Io(format!("Failed to write background status: {}", e)))?;
+
+    let task_for_run = task.clone();
+    let status_path_for_run = status_path.clone();
+    let log_path_for_run = log_path.clone();
+    tokio::spawn(async move {
+        let started = chrono::Utc::now().to_rfc3339();
+        let mut queued = read_json_map(&status_path_for_run);
+        queued.insert(
+            "status".to_string(),
+            serde_json::Value::String("running".into()),
+        );
+        queued.insert(
+            "started_at".to_string(),
+            serde_json::Value::String(started.clone()),
+        );
+        let _ = write_json_map(&status_path_for_run, &queued);
+
+        let exe = match std::env::current_exe() {
+            Ok(p) => p,
+            Err(e) => {
+                let mut failed = queued.clone();
+                failed.insert("status".into(), serde_json::Value::String("failed".into()));
+                failed.insert(
+                    "finished_at".into(),
+                    serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
+                );
+                failed.insert(
+                    "error".into(),
+                    serde_json::Value::String(format!("current_exe: {}", e)),
+                );
+                let _ = write_json_map(&status_path_for_run, &failed);
+                return;
+            }
+        };
+
+        let mut cmd = tokio::process::Command::new(exe);
+        cmd.arg("chat")
+            .arg("--query")
+            .arg(task_for_run)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        if let Ok(home) = std::env::var("HERMES_HOME") {
+            cmd.env("HERMES_HOME", home);
+        }
+
+        let out = cmd.output().await;
+        match out {
+            Ok(output) => {
+                let exit = output.status.code().unwrap_or(-1);
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                let log = format!(
+                    "task: {}\nstarted_at: {}\nfinished_at: {}\nexit_code: {}\n\n[stdout]\n{}\n\n[stderr]\n{}\n",
+                    queued
+                        .get("task")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(""),
+                    started,
+                    chrono::Utc::now().to_rfc3339(),
+                    exit,
+                    stdout,
+                    stderr
+                );
+                let _ = std::fs::write(&log_path_for_run, log);
+
+                let mut done = queued.clone();
+                done.insert(
+                    "status".into(),
+                    serde_json::Value::String(if output.status.success() {
+                        "completed".into()
+                    } else {
+                        "failed".into()
+                    }),
+                );
+                done.insert(
+                    "finished_at".into(),
+                    serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
+                );
+                done.insert("exit_code".into(), serde_json::json!(exit));
+                let _ = write_json_map(&status_path_for_run, &done);
+            }
+            Err(e) => {
+                let mut failed = queued.clone();
+                failed.insert("status".into(), serde_json::Value::String("failed".into()));
+                failed.insert(
+                    "finished_at".into(),
+                    serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
+                );
+                failed.insert(
+                    "error".into(),
+                    serde_json::Value::String(format!("spawn/output failed: {}", e)),
+                );
+                let _ = write_json_map(&status_path_for_run, &failed);
+            }
+        }
+    });
+
     println!("[Background task queued: \"{}\"]", task);
-    println!("(Background execution is not yet fully implemented — task will run inline)");
-    Ok(CommandResult::NeedsAgent)
+    println!("Job ID: {}", status["id"].as_str().unwrap_or("unknown"));
+    println!("Status: {}", status_path.display());
+    println!("Logs:   {}", log_path.display());
+    println!("This task runs in a detached `hermes chat --query ...` process.");
+
+    Ok(CommandResult::Handled)
+}
+
+fn read_json_map(path: &std::path::Path) -> serde_json::Map<String, serde_json::Value> {
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default()
+}
+
+fn write_json_map(
+    path: &std::path::Path,
+    map: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), std::io::Error> {
+    let content = serde_json::to_string_pretty(&serde_json::Value::Object(map.clone()))
+        .unwrap_or_else(|_| "{}".to_string());
+    std::fs::write(path, content)
 }
 
 fn handle_verbose_command(_app: &mut App) -> Result<CommandResult, AgentError> {
@@ -1824,6 +2019,10 @@ fn plugin_git_host_allowed(url: &str, allow_untrusted: bool) -> bool {
         .any(|h| host == *h || host.ends_with(&format!(".{}", h)))
 }
 
+fn short_sha(sha: &str) -> String {
+    sha.chars().take(8).collect()
+}
+
 /// Static scan of a cloned plugin tree: risky patterns in scripts/config.
 fn scan_plugin_security(root: &std::path::Path) -> Vec<String> {
     let mut out = Vec::new();
@@ -2353,7 +2552,8 @@ pub async fn handle_cli_plugins(
         }
         "update" => {
             let plugin_name = name.as_deref();
-            let mut count = 0u32;
+            let mut checked = 0u32;
+            let mut updated = 0u32;
             if !plugins_dir.exists() {
                 println!("No plugins installed.");
                 return Ok(());
@@ -2376,20 +2576,94 @@ pub async fn handle_cli_plugins(
                     }
                     let manifest = path.join("plugin.yaml");
                     if manifest.exists() {
+                        checked += 1;
                         println!("  Checking updates for '{}'...", dir_name);
-                        println!("    (Registry version check not yet implemented)");
-                        count += 1;
+
+                        let git_dir = path.join(".git");
+                        if !git_dir.exists() {
+                            println!("    Skipped: plugin is not a git checkout.");
+                            continue;
+                        }
+
+                        let path_s = path.to_string_lossy().to_string();
+                        let before = tokio::process::Command::new("git")
+                            .args(["-C", &path_s, "rev-parse", "HEAD"])
+                            .output()
+                            .await
+                            .map_err(|e| {
+                                hermes_core::AgentError::Io(format!(
+                                    "git rev-parse failed for {}: {}",
+                                    dir_name, e
+                                ))
+                            })?;
+                        if !before.status.success() {
+                            let stderr = String::from_utf8_lossy(&before.stderr);
+                            println!(
+                                "    Skipped: cannot read current revision ({})",
+                                stderr.trim()
+                            );
+                            continue;
+                        }
+                        let before_sha = String::from_utf8_lossy(&before.stdout).trim().to_string();
+
+                        let pull = tokio::process::Command::new("git")
+                            .args(["-C", &path_s, "pull", "--ff-only"])
+                            .output()
+                            .await
+                            .map_err(|e| {
+                                hermes_core::AgentError::Io(format!(
+                                    "git pull failed for {}: {}",
+                                    dir_name, e
+                                ))
+                            })?;
+
+                        if !pull.status.success() {
+                            let stderr = String::from_utf8_lossy(&pull.stderr);
+                            println!("    Update failed: {}", stderr.trim());
+                            continue;
+                        }
+
+                        let after = tokio::process::Command::new("git")
+                            .args(["-C", &path_s, "rev-parse", "HEAD"])
+                            .output()
+                            .await
+                            .map_err(|e| {
+                                hermes_core::AgentError::Io(format!(
+                                    "git rev-parse failed for {} after update: {}",
+                                    dir_name, e
+                                ))
+                            })?;
+                        if !after.status.success() {
+                            let stderr = String::from_utf8_lossy(&after.stderr);
+                            println!(
+                                "    Updated but could not read final revision ({})",
+                                stderr.trim()
+                            );
+                            continue;
+                        }
+                        let after_sha = String::from_utf8_lossy(&after.stdout).trim().to_string();
+
+                        if before_sha == after_sha {
+                            println!("    Up to date ({})", short_sha(&after_sha));
+                        } else {
+                            updated += 1;
+                            println!(
+                                "    Updated: {} -> {}",
+                                short_sha(&before_sha),
+                                short_sha(&after_sha)
+                            );
+                        }
                     }
                 }
             }
-            if count == 0 {
+            if checked == 0 {
                 if let Some(n) = plugin_name {
                     println!("Plugin '{}' not found.", n);
                 } else {
                     println!("No plugins to update.");
                 }
             } else {
-                println!("Checked {} plugin(s).", count);
+                println!("Checked {} plugin(s); updated {}.", checked, updated);
             }
         }
         "inspect" | "info" => {
@@ -2427,14 +2701,51 @@ pub async fn handle_cli_plugins(
 
 /// Handle `hermes memory [action]`.
 pub async fn handle_cli_memory(action: Option<String>) -> Result<(), hermes_core::AgentError> {
+    let hermes_home = hermes_config::hermes_home();
+    let memories_dir = hermes_home.join("memories");
+    let memory_md = memories_dir.join("MEMORY.md");
+    let user_md = memories_dir.join("USER.md");
+    let legacy_memory_db = hermes_home.join("memory.db");
+    let disabled_marker = hermes_home.join(".memory_disabled");
+
     match action.as_deref().unwrap_or("status") {
         "status" => {
-            let memory_db = hermes_config::hermes_home().join("memory.db");
-            if memory_db.exists() {
-                let size = std::fs::metadata(&memory_db).map(|m| m.len()).unwrap_or(0);
-                println!("Memory provider: sqlite (file-based)");
-                println!("  Database: {}", memory_db.display());
+            if disabled_marker.exists() {
+                println!("Memory provider: disabled");
+                println!("  Marker: {}", disabled_marker.display());
+                println!("Run `hermes memory setup` to re-enable.");
+                return Ok(());
+            }
+
+            if memory_md.exists() || user_md.exists() {
+                let mem_size = std::fs::metadata(&memory_md).map(|m| m.len()).unwrap_or(0);
+                let user_size = std::fs::metadata(&user_md).map(|m| m.len()).unwrap_or(0);
+                println!("Memory provider: files (MEMORY.md + USER.md)");
+                println!("  Directory: {}", memories_dir.display());
+                println!(
+                    "  MEMORY.md: {} ({:.1} KB)",
+                    memory_md.display(),
+                    mem_size as f64 / 1024.0
+                );
+                println!(
+                    "  USER.md:   {} ({:.1} KB)",
+                    user_md.display(),
+                    user_size as f64 / 1024.0
+                );
+                if legacy_memory_db.exists() {
+                    println!(
+                        "  Legacy file detected (unused by current memory backend): {}",
+                        legacy_memory_db.display()
+                    );
+                }
+            } else if legacy_memory_db.exists() {
+                let size = std::fs::metadata(&legacy_memory_db)
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+                println!("Memory provider: legacy sqlite artifact only");
+                println!("  File: {}", legacy_memory_db.display());
                 println!("  Size: {} KB", size / 1024);
+                println!("Run `hermes memory setup` to initialize the current file backend.");
             } else {
                 println!("Memory provider: not configured");
                 println!("Run `hermes memory setup` to initialize.");
@@ -2443,21 +2754,47 @@ pub async fn handle_cli_memory(action: Option<String>) -> Result<(), hermes_core
         "setup" => {
             println!("Memory Provider Setup");
             println!("---------------------");
-            println!("Available providers:");
-            println!("  1) sqlite  — Local SQLite database (default)");
-            println!("  2) redis   — Redis-backed memory (requires REDIS_URL)");
-            println!("  3) qdrant  — Qdrant vector store (requires QDRANT_URL)");
-            println!("\nInitializing default SQLite provider...");
-            let memory_db = hermes_config::hermes_home().join("memory.db");
-            println!("Memory database will be stored at: {}", memory_db.display());
-            println!("(Full setup wizard with provider selection coming soon)");
+            std::fs::create_dir_all(&memories_dir)
+                .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+            if !memory_md.exists() {
+                std::fs::write(
+                    &memory_md,
+                    "# Hermes MEMORY\n\nStore durable assistant memory entries here.\n",
+                )
+                .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+            }
+            if !user_md.exists() {
+                std::fs::write(
+                    &user_md,
+                    "# Hermes USER\n\nStore durable user profile entries here.\n",
+                )
+                .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+            }
+            if disabled_marker.exists() {
+                let _ = std::fs::remove_file(&disabled_marker);
+            }
+            println!("Initialized file memory backend.");
+            println!("  MEMORY.md: {}", memory_md.display());
+            println!("  USER.md:   {}", user_md.display());
+            println!("Memory is enabled for subsequent sessions.");
         }
         "off" => {
+            std::fs::create_dir_all(&hermes_home)
+                .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+            std::fs::write(
+                &disabled_marker,
+                format!(
+                    "disabled_at={}\nreason=hermes memory off\n",
+                    chrono::Utc::now().to_rfc3339()
+                ),
+            )
+            .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
             println!("Memory provider disabled.");
-            println!("(Persistent memory will not be used in future sessions)");
+            println!("  Marker: {}", disabled_marker.display());
+            println!("Run `hermes memory setup` to re-enable.");
         }
         other => {
-            println!("Memory action '{}' is not yet implemented.", other);
+            println!("Unknown memory action '{}'.", other);
             println!("Available actions: status, setup, off");
         }
     }
@@ -3905,11 +4242,22 @@ pub async fn handle_cli_acp(action: Option<String>) -> Result<(), hermes_core::A
         }
         "status" => {
             println!("ACP server: not running");
+            println!("ACP runs as a stdio JSON-RPC server in the foreground.");
             println!("Start with `hermes acp start`.");
         }
+        "stop" => {
+            println!("ACP stop is not a separate command in stdio mode.");
+            println!("If running, stop it by closing the parent process or sending Ctrl+C.");
+        }
+        "restart" => {
+            println!("ACP restart in stdio mode is equivalent to stop + start.");
+            println!("Use:");
+            println!("  1) Stop the current process (Ctrl+C)");
+            println!("  2) Run `hermes acp start`");
+        }
         other => {
-            println!("ACP action '{}' is not yet implemented.", other);
-            println!("Available actions: start, status");
+            println!("Unknown ACP action '{}'.", other);
+            println!("Available actions: start, status, stop, restart");
         }
     }
     Ok(())
