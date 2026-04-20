@@ -112,44 +112,102 @@ impl ContextCompressor {
     }
 
     /// Build a plain-text summary string from a slice of messages.
-    ///
-    /// The strategy is simple truncation: concatenate each message on a
-    /// single line in the form `Role: content...` and then truncate the
-    /// result to a reasonable maximum length so the summary itself does
-    /// not dominate the context budget.
     fn build_summary(messages: &[Message]) -> String {
         const MAX_SUMMARY_CHARS: usize = 2048;
+        const MAX_ITEMS_PER_SECTION: usize = 5;
+        const MAX_ITEM_CHARS: usize = 180;
 
-        let mut buf = String::from("[Conversation summary] Earlier conversation:\n");
+        let mut goals: Vec<String> = Vec::new();
+        let mut assistant_updates: Vec<String> = Vec::new();
+        let mut tool_updates: Vec<String> = Vec::new();
 
-        for msg in messages {
-            let role_label = match msg.role {
-                MessageRole::System => "System",
-                MessageRole::User => "User",
-                MessageRole::Assistant => "Assistant",
-                MessageRole::Tool => "Tool",
-            };
-
-            let content = msg.content.as_deref().unwrap_or("<no content>");
-
-            // For each message add a single line; truncate long content.
-            let remaining = MAX_SUMMARY_CHARS.saturating_sub(buf.len());
-            if remaining == 0 {
-                break;
+        for msg in messages.iter().rev() {
+            let content = msg.content.as_deref().unwrap_or("").trim();
+            if content.is_empty() {
+                continue;
+            }
+            let compact = Self::compact_whitespace(content);
+            let concise = Self::truncate_item(&compact, MAX_ITEM_CHARS);
+            if concise.is_empty() {
+                continue;
             }
 
-            let line = format!("{role_label}: {content}\n");
-            if line.len() <= remaining {
-                buf.push_str(&line);
-            } else {
-                // Truncate this line to fit and stop — we've hit the cap.
-                buf.push_str(&line[..remaining.saturating_sub(1)]);
-                buf.push('\n');
-                break;
+            match msg.role {
+                MessageRole::User if goals.len() < MAX_ITEMS_PER_SECTION => {
+                    if !goals.contains(&concise) {
+                        goals.push(concise);
+                    }
+                }
+                MessageRole::Assistant if assistant_updates.len() < MAX_ITEMS_PER_SECTION => {
+                    if !assistant_updates.contains(&concise) {
+                        assistant_updates.push(concise);
+                    }
+                }
+                MessageRole::Tool if tool_updates.len() < MAX_ITEMS_PER_SECTION => {
+                    if !tool_updates.contains(&concise) {
+                        tool_updates.push(concise);
+                    }
+                }
+                _ => {}
             }
         }
 
-        buf
+        goals.reverse();
+        assistant_updates.reverse();
+        tool_updates.reverse();
+
+        let mut lines: Vec<String> = vec![
+            "[Conversation summary] Earlier conversation compressed into key points:".to_string(),
+        ];
+        if !goals.is_empty() {
+            lines.push("User goals and requests:".to_string());
+            for item in &goals {
+                lines.push(format!("- {item}"));
+            }
+        }
+        if !assistant_updates.is_empty() {
+            lines.push("Assistant commitments and guidance:".to_string());
+            for item in &assistant_updates {
+                lines.push(format!("- {item}"));
+            }
+        }
+        if !tool_updates.is_empty() {
+            lines.push("Tool outputs and execution state:".to_string());
+            for item in &tool_updates {
+                lines.push(format!("- {item}"));
+            }
+        }
+
+        if goals.is_empty() && assistant_updates.is_empty() && tool_updates.is_empty() {
+            lines.push(format!("- {} message(s) were compressed.", messages.len()));
+        }
+
+        let mut out = lines.join("\n");
+        if out.chars().count() > MAX_SUMMARY_CHARS {
+            out = out.chars().take(MAX_SUMMARY_CHARS).collect::<String>() + "...";
+        }
+        out
+    }
+
+    fn compact_whitespace(input: &str) -> String {
+        input.split_whitespace().collect::<Vec<_>>().join(" ")
+    }
+
+    fn truncate_item(input: &str, max_chars: usize) -> String {
+        if input.is_empty() {
+            return String::new();
+        }
+        let mut clipped = input.to_string();
+        if let Some((idx, _)) = input
+            .char_indices()
+            .find(|(_, c)| matches!(c, '.' | '!' | '?' | '\n'))
+        {
+            clipped = input[..=idx].to_string();
+        }
+        if clipped.chars().count() <= max_chars {
+            return clipped;
+        }
+        clipped.chars().take(max_chars).collect::<String>() + "..."
     }
 }
 
