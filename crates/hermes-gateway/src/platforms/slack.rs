@@ -156,7 +156,7 @@ pub struct SlackEvent {
 }
 
 /// Incoming message parsed from a Slack event.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IncomingSlackMessage {
     pub channel: String,
     pub user_id: Option<String>,
