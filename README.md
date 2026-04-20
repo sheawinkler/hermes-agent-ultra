@@ -130,7 +130,7 @@ Rust's tokio runtime gives real parallel execution — not Python's cooperative 
 ### 17 Platform Adapters
 
 Telegram, Discord, Slack, WhatsApp, Signal, Matrix, Mattermost, DingTalk, Feishu, WeCom, Weixin, Email, SMS, BlueBubbles, Home Assistant, Webhook, API Server.
-Matrix E2EE status: encryption-state detection and key APIs (`/keys/query`, `/keys/claim`) are implemented, and encrypted timeline events can optionally be decrypted through an external bridge command (`HERMES_MATRIX_DECRYPT_FFI_COMMAND`, optional args/timeouts via `HERMES_MATRIX_DECRYPT_FFI_ARGS` / `HERMES_MATRIX_DECRYPT_FFI_TIMEOUT_MS`). Native in-process Olm/Megolm decryption remains a dedicated cryptographic integration track.
+Matrix E2EE status: encryption-state detection and key APIs (`/keys/query`, `/keys/claim`) are implemented, encrypted timeline events support in-process native Olm/Megolm decrypt when `HERMES_MATRIX_NATIVE_DECRYPT=1` (optional device override: `HERMES_MATRIX_DEVICE_ID`), and the external decrypt bridge remains available as fallback (`HERMES_MATRIX_DECRYPT_FFI_COMMAND`, optional args/timeouts via `HERMES_MATRIX_DECRYPT_FFI_ARGS` / `HERMES_MATRIX_DECRYPT_FFI_TIMEOUT_MS`).
 
 ### 30 Tool Backends
 
