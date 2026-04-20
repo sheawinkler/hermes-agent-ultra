@@ -11,7 +11,8 @@
 
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
@@ -22,6 +23,7 @@ use hermes_core::types::{Message, MessageRole};
 use crate::background::{BackgroundTaskManager, TaskStatus};
 use crate::commands::{handle_command, GatewayCommandResult};
 use crate::dm::{DmDecision, DmManager};
+use crate::hooks::{HookEvent, HookRegistry};
 use crate::session::SessionManager;
 use crate::stream::{StreamConfig, StreamManager};
 
@@ -122,6 +124,10 @@ pub struct GatewayRuntimeContext {
     pub yolo: bool,
     pub reasoning: bool,
     pub mcp_reload_generation: u64,
+    /// Messages queued by handlers to be delivered only after the main reply.
+    pub deferred_post_delivery_messages: Option<Arc<StdMutex<Vec<String>>>>,
+    /// Release flag shared with handlers for post-delivery gating.
+    pub deferred_post_delivery_released: Option<Arc<AtomicBool>>,
 }
 
 /// Context-aware callback type for processing messages through the agent loop.
@@ -231,6 +237,8 @@ pub struct Gateway {
     background_tasks: Arc<BackgroundTaskManager>,
     /// MCP reload generation number.
     mcp_reload_generation: RwLock<u64>,
+    /// Optional hook registry for runtime event emission.
+    hook_registry: RwLock<Option<Arc<HookRegistry>>>,
 }
 
 impl Gateway {
@@ -256,6 +264,7 @@ impl Gateway {
             usage_stats: RwLock::new(HashMap::new()),
             background_tasks: Arc::new(BackgroundTaskManager::new(8)),
             mcp_reload_generation: RwLock::new(0),
+            hook_registry: RwLock::new(None),
         }
     }
 
@@ -329,6 +338,19 @@ impl Gateway {
         handler: StreamingMessageHandlerWithContext,
     ) {
         *self.streaming_handler_with_context.write().await = Some(handler);
+    }
+
+    /// Attach gateway hook registry for emitting lifecycle/progress events.
+    pub async fn set_hook_registry(&self, registry: Arc<HookRegistry>) {
+        *self.hook_registry.write().await = Some(registry);
+    }
+
+    /// Emit one hook event if a registry is configured.
+    pub async fn emit_hook_event(&self, event_type: &str, context: serde_json::Value) {
+        let registry = self.hook_registry.read().await.clone();
+        if let Some(reg) = registry {
+            reg.emit(&HookEvent::new(event_type, context)).await;
+        }
     }
 
     /// Register a platform adapter under the given name.
@@ -412,16 +434,34 @@ impl Gateway {
         }
 
         // 2. Get or create session
-        let _session = self
-            .session_manager
-            .get_or_create_session(&incoming.platform, &incoming.chat_id, &incoming.user_id)
-            .await;
-
         let session_key = self.session_manager.compose_session_key(
             &incoming.platform,
             &incoming.chat_id,
             &incoming.user_id,
         );
+        let existing_session = self.session_manager.get_session(&session_key).await;
+        let session = self
+            .session_manager
+            .get_or_create_session(&incoming.platform, &incoming.chat_id, &incoming.user_id)
+            .await;
+        let session_started = existing_session.is_none();
+        let session_auto_reset = existing_session
+            .as_ref()
+            .map(|s| s.created_at != session.created_at)
+            .unwrap_or(false);
+        if session_started || session_auto_reset {
+            self.emit_hook_event(
+                "session:start",
+                serde_json::json!({
+                    "platform": incoming.platform,
+                    "chat_id": incoming.chat_id,
+                    "user_id": incoming.user_id,
+                    "session_id": session_key,
+                    "reason": if session_started { "new" } else { "auto_reset" }
+                }),
+            )
+            .await;
+        }
 
         // Slash commands are executed directly by the gateway command runtime.
         if incoming.text.trim_start().starts_with('/') {
@@ -463,6 +503,21 @@ impl Gateway {
         session_key: &str,
     ) -> Result<bool, GatewayError> {
         let result = handle_command(&incoming.text);
+        if !matches!(result, GatewayCommandResult::Unknown(_)) {
+            if let Some(command_name) = Self::extract_command_name(&incoming.text) {
+                self.emit_hook_event(
+                    &format!("command:{}", command_name),
+                    serde_json::json!({
+                        "platform": incoming.platform,
+                        "chat_id": incoming.chat_id,
+                        "user_id": incoming.user_id,
+                        "session_id": session_key,
+                        "command": command_name
+                    }),
+                )
+                .await;
+            }
+        }
         let handled = self
             .apply_command_result(incoming, session_key, result)
             .await?;
@@ -484,7 +539,27 @@ impl Gateway {
                 Ok(true)
             }
             GatewayCommandResult::ResetSession(reply) => {
+                self.emit_hook_event(
+                    "session:end",
+                    serde_json::json!({
+                        "platform": incoming.platform,
+                        "chat_id": incoming.chat_id,
+                        "user_id": incoming.user_id,
+                        "session_id": session_key
+                    }),
+                )
+                .await;
                 self.session_manager.reset_session(session_key).await;
+                self.emit_hook_event(
+                    "session:reset",
+                    serde_json::json!({
+                        "platform": incoming.platform,
+                        "chat_id": incoming.chat_id,
+                        "user_id": incoming.user_id,
+                        "session_id": session_key
+                    }),
+                )
+                .await;
                 self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
                     .await?;
                 Ok(true)
@@ -935,17 +1010,51 @@ impl Gateway {
         messages: Vec<Message>,
         session_key: &str,
     ) -> Result<(), GatewayError> {
-        let runtime_context = self.build_runtime_context(incoming, session_key).await;
+        self.emit_hook_event(
+            "agent:start",
+            serde_json::json!({
+                "platform": incoming.platform,
+                "chat_id": incoming.chat_id,
+                "user_id": incoming.user_id,
+                "session_id": session_key,
+                "streaming": false
+            }),
+        )
+        .await;
+        let deferred_messages = Arc::new(StdMutex::new(Vec::new()));
+        let deferred_release = Arc::new(AtomicBool::new(false));
+        let mut runtime_context = self.build_runtime_context(incoming, session_key).await;
+        runtime_context.deferred_post_delivery_messages = Some(deferred_messages.clone());
+        runtime_context.deferred_post_delivery_released = Some(deferred_release.clone());
         let context_handler = self.message_handler_with_context.read().await.clone();
-        let response = if let Some(handler) = context_handler {
-            handler(messages, runtime_context).await?
+        let response_result = if let Some(handler) = context_handler {
+            handler(messages, runtime_context).await
         } else {
             let handler = self.message_handler.read().await;
             let handler = handler
                 .as_ref()
                 .ok_or_else(|| GatewayError::Platform("No message handler configured".into()))?;
             let messages = self.inject_runtime_hints(session_key, messages).await;
-            handler(messages).await?
+            handler(messages).await
+        };
+        let response = match response_result {
+            Ok(text) => text,
+            Err(e) => {
+                self.emit_hook_event(
+                    "agent:end",
+                    serde_json::json!({
+                        "platform": incoming.platform,
+                        "chat_id": incoming.chat_id,
+                        "user_id": incoming.user_id,
+                        "session_id": session_key,
+                        "streaming": false,
+                        "success": false,
+                        "error": e.to_string()
+                    }),
+                )
+                .await;
+                return Err(e);
+            }
         };
 
         // Add assistant response to session
@@ -958,6 +1067,26 @@ impl Gateway {
         // Send response back to the platform
         self.send_message(&incoming.platform, &incoming.chat_id, &response, None)
             .await?;
+        self.flush_post_delivery_messages(
+            &incoming.platform,
+            &incoming.chat_id,
+            deferred_messages,
+            deferred_release,
+        )
+        .await;
+        self.emit_hook_event(
+            "agent:end",
+            serde_json::json!({
+                "platform": incoming.platform,
+                "chat_id": incoming.chat_id,
+                "user_id": incoming.user_id,
+                "session_id": session_key,
+                "streaming": false,
+                "success": true,
+                "response_chars": response.chars().count()
+            }),
+        )
+        .await;
 
         Ok(())
     }
@@ -969,7 +1098,22 @@ impl Gateway {
         messages: Vec<Message>,
         session_key: &str,
     ) -> Result<(), GatewayError> {
-        let runtime_context = self.build_runtime_context(incoming, session_key).await;
+        self.emit_hook_event(
+            "agent:start",
+            serde_json::json!({
+                "platform": incoming.platform,
+                "chat_id": incoming.chat_id,
+                "user_id": incoming.user_id,
+                "session_id": session_key,
+                "streaming": true
+            }),
+        )
+        .await;
+        let deferred_messages = Arc::new(StdMutex::new(Vec::new()));
+        let deferred_release = Arc::new(AtomicBool::new(false));
+        let mut runtime_context = self.build_runtime_context(incoming, session_key).await;
+        runtime_context.deferred_post_delivery_messages = Some(deferred_messages.clone());
+        runtime_context.deferred_post_delivery_released = Some(deferred_release.clone());
         let context_handler = self.streaming_handler_with_context.read().await.clone();
         let legacy_messages = self
             .inject_runtime_hints(session_key, messages.clone())
@@ -1016,14 +1160,33 @@ impl Gateway {
         });
 
         // Invoke the streaming handler
-        let response = if let Some(handler) = context_handler {
-            handler(messages, runtime_context, on_chunk).await?
+        let response_result = if let Some(handler) = context_handler {
+            handler(messages, runtime_context, on_chunk).await
         } else {
             let handler = self.streaming_handler.read().await;
             let handler = handler
                 .as_ref()
                 .ok_or_else(|| GatewayError::Platform("No streaming handler configured".into()))?;
-            handler(legacy_messages, on_chunk).await?
+            handler(legacy_messages, on_chunk).await
+        };
+        let response = match response_result {
+            Ok(text) => text,
+            Err(e) => {
+                self.emit_hook_event(
+                    "agent:end",
+                    serde_json::json!({
+                        "platform": incoming.platform,
+                        "chat_id": incoming.chat_id,
+                        "user_id": incoming.user_id,
+                        "session_id": session_key,
+                        "streaming": true,
+                        "success": false,
+                        "error": e.to_string()
+                    }),
+                )
+                .await;
+                return Err(e);
+            }
         };
 
         // Finish the stream
@@ -1035,6 +1198,26 @@ impl Gateway {
             .await;
         self.bump_output_usage(session_key, response.chars().count())
             .await;
+        self.flush_post_delivery_messages(
+            &incoming.platform,
+            &incoming.chat_id,
+            deferred_messages,
+            deferred_release,
+        )
+        .await;
+        self.emit_hook_event(
+            "agent:end",
+            serde_json::json!({
+                "platform": incoming.platform,
+                "chat_id": incoming.chat_id,
+                "user_id": incoming.user_id,
+                "session_id": session_key,
+                "streaming": true,
+                "success": true,
+                "response_chars": response.chars().count()
+            }),
+        )
+        .await;
 
         Ok(())
     }
@@ -1107,6 +1290,32 @@ impl Gateway {
             yolo: state.yolo,
             reasoning: state.reasoning,
             mcp_reload_generation,
+            deferred_post_delivery_messages: None,
+            deferred_post_delivery_released: None,
+        }
+    }
+
+    async fn flush_post_delivery_messages(
+        &self,
+        platform: &str,
+        chat_id: &str,
+        pending: Arc<StdMutex<Vec<String>>>,
+        released: Arc<AtomicBool>,
+    ) {
+        released.store(true, Ordering::Release);
+        let queued = match pending.lock() {
+            Ok(mut guard) => std::mem::take(&mut *guard),
+            Err(_) => Vec::new(),
+        };
+        for message in queued {
+            if let Err(e) = self.send_message(platform, chat_id, &message, None).await {
+                warn!(
+                    platform = platform,
+                    chat_id = chat_id,
+                    error = %e,
+                    "Failed to flush deferred post-delivery message"
+                );
+            }
         }
     }
 
@@ -1354,6 +1563,18 @@ impl Gateway {
         format!("{}_{}_{:06x}", kind, ts, salt & 0xFFFFFF)
     }
 
+    fn extract_command_name(text: &str) -> Option<String> {
+        let trimmed = text.trim_start();
+        if !trimmed.starts_with('/') {
+            return None;
+        }
+        let token = trimmed[1..].split_whitespace().next()?.trim();
+        if token.is_empty() {
+            return None;
+        }
+        Some(token.to_ascii_lowercase())
+    }
+
     // -----------------------------------------------------------------------
     // Message sending (delegates to adapters)
     // -----------------------------------------------------------------------
@@ -1572,6 +1793,7 @@ impl Gateway {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hooks::{HookEvent, HookHandler, HookRegistry};
     use crate::session::SessionManager;
     use async_trait::async_trait;
     use hermes_config::session::SessionConfig;
@@ -1579,6 +1801,25 @@ mod tests {
 
     struct TestAdapter {
         messages: Arc<Mutex<Vec<(String, String)>>>,
+    }
+
+    struct RecordingHook {
+        seen: Arc<Mutex<Vec<(String, serde_json::Value)>>>,
+    }
+
+    #[async_trait]
+    impl HookHandler for RecordingHook {
+        async fn handle(&self, event: &HookEvent) -> Result<(), String> {
+            self.seen
+                .lock()
+                .unwrap()
+                .push((event.event_type.clone(), event.context.clone()));
+            Ok(())
+        }
+
+        fn name(&self) -> &str {
+            "recording-hook"
+        }
     }
 
     #[async_trait]
@@ -2107,5 +2348,398 @@ mod tests {
         assert!(echoed.contains("platform=test"));
         assert!(echoed.contains("user=user1"));
         assert!(echoed.contains("has_legacy_hint=false"));
+    }
+
+    #[tokio::test]
+    async fn gateway_deferred_post_delivery_messages_flush_after_main_reply() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("test", adapter).await;
+        gw.set_message_handler_with_context(Arc::new(|_messages, ctx| {
+            Box::pin(async move {
+                let pending = ctx
+                    .deferred_post_delivery_messages
+                    .expect("deferred queue should be present");
+                let released = ctx
+                    .deferred_post_delivery_released
+                    .expect("release flag should be present");
+                assert!(
+                    !released.load(std::sync::atomic::Ordering::Acquire),
+                    "release must remain false before main reply delivery"
+                );
+                pending
+                    .lock()
+                    .unwrap()
+                    .push("💾 deferred-memory-update".to_string());
+                Ok("main-response".to_string())
+            })
+        }))
+        .await;
+
+        let incoming = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "hello".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&incoming).await.is_ok());
+
+        let msgs = sent.lock().unwrap();
+        let ordered: Vec<String> = msgs.iter().map(|(_, t)| t.clone()).collect();
+        assert_eq!(
+            ordered,
+            vec![
+                "main-response".to_string(),
+                "💾 deferred-memory-update".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn gateway_status_then_main_then_deferred_order_matches_python_chain() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Arc::new(Gateway::new(
+            session_mgr,
+            dm_manager,
+            GatewayConfig::default(),
+        ));
+        gw.register_adapter("test", adapter).await;
+
+        let gw_for_handler = gw.clone();
+        gw.set_message_handler_with_context(Arc::new(move |_messages, ctx| {
+            let gw = gw_for_handler.clone();
+            Box::pin(async move {
+                let pending = ctx
+                    .deferred_post_delivery_messages
+                    .expect("deferred queue should be present");
+                pending.lock().unwrap().push("💾 bg-review".to_string());
+
+                // Mirrors Python's status_callback: status is forwarded immediately.
+                gw.send_message(&ctx.platform, &ctx.chat_id, "⚠️ context pressure", None)
+                    .await
+                    .expect("status callback send should succeed");
+
+                Ok("main-response".to_string())
+            })
+        }))
+        .await;
+
+        let incoming = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "hello".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&incoming).await.is_ok());
+
+        let msgs = sent.lock().unwrap();
+        let ordered: Vec<String> = msgs.iter().map(|(_, t)| t.clone()).collect();
+        assert_eq!(
+            ordered,
+            vec![
+                "⚠️ context pressure".to_string(),
+                "main-response".to_string(),
+                "💾 bg-review".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn gateway_streaming_flushes_deferred_after_stream_finishes() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let mut cfg = GatewayConfig::default();
+        cfg.streaming_enabled = true;
+        let gw = Arc::new(Gateway::new(session_mgr, dm_manager, cfg));
+        gw.register_adapter("test", adapter).await;
+
+        gw.set_streaming_handler_with_context(Arc::new(|_messages, ctx, _on_chunk| {
+            Box::pin(async move {
+                let pending = ctx
+                    .deferred_post_delivery_messages
+                    .expect("deferred queue should be present");
+                let released = ctx
+                    .deferred_post_delivery_released
+                    .expect("release flag should be present");
+                assert!(
+                    !released.load(std::sync::atomic::Ordering::Acquire),
+                    "release must stay false while stream handler is running"
+                );
+                pending
+                    .lock()
+                    .unwrap()
+                    .push("💾 stream-bg-review".to_string());
+                Ok("stream-final".to_string())
+            })
+        }))
+        .await;
+
+        let incoming = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "hello".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&incoming).await.is_ok());
+
+        let msgs = sent.lock().unwrap();
+        let ordered: Vec<String> = msgs.iter().map(|(_, t)| t.clone()).collect();
+        assert_eq!(
+            ordered,
+            vec!["...".to_string(), "💾 stream-bg-review".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn gateway_emits_agent_start_and_end_hooks() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+        let hook_seen = Arc::new(Mutex::new(Vec::new()));
+        let mut hooks = HookRegistry::new();
+        hooks.register_in_process(
+            "agent:*",
+            Arc::new(RecordingHook {
+                seen: hook_seen.clone(),
+            }),
+        );
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.set_hook_registry(Arc::new(hooks)).await;
+        gw.register_adapter("test", adapter).await;
+        gw.set_message_handler(Arc::new(|_messages| {
+            Box::pin(async move { Ok("main-response".to_string()) })
+        }))
+        .await;
+
+        let incoming = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "hello".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&incoming).await.is_ok());
+
+        let events = hook_seen.lock().unwrap();
+        let names: Vec<String> = events.iter().map(|(name, _)| name.clone()).collect();
+        assert_eq!(
+            names,
+            vec!["agent:start".to_string(), "agent:end".to_string()]
+        );
+        let end_payload = events
+            .iter()
+            .find(|(name, _)| name == "agent:end")
+            .map(|(_, ctx)| ctx.clone())
+            .expect("agent:end payload should exist");
+        assert_eq!(end_payload["success"], serde_json::json!(true));
+    }
+
+    #[tokio::test]
+    async fn gateway_hook_event_order_captures_start_status_step_end() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+        let hook_seen = Arc::new(Mutex::new(Vec::new()));
+        let mut hooks = HookRegistry::new();
+        hooks.register_in_process(
+            "agent:*",
+            Arc::new(RecordingHook {
+                seen: hook_seen.clone(),
+            }),
+        );
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Arc::new(Gateway::new(
+            session_mgr,
+            dm_manager,
+            GatewayConfig::default(),
+        ));
+        gw.set_hook_registry(Arc::new(hooks)).await;
+        gw.register_adapter("test", adapter).await;
+
+        let gw_for_handler = gw.clone();
+        gw.set_message_handler_with_context(Arc::new(move |_messages, ctx| {
+            let gw = gw_for_handler.clone();
+            Box::pin(async move {
+                gw.emit_hook_event(
+                    "agent:status",
+                    serde_json::json!({
+                        "platform": ctx.platform,
+                        "user_id": ctx.user_id,
+                        "session_id": ctx.session_key,
+                        "event_type": "lifecycle",
+                        "message": "Context pressure 85%"
+                    }),
+                )
+                .await;
+                gw.emit_hook_event(
+                    "agent:step",
+                    serde_json::json!({
+                        "platform": ctx.platform,
+                        "user_id": ctx.user_id,
+                        "session_id": ctx.session_key,
+                        "iteration": 1,
+                        "tool_names": ["memory"],
+                        "tools": [{"name":"memory","result":"ok"}]
+                    }),
+                )
+                .await;
+                Ok("done".to_string())
+            })
+        }))
+        .await;
+
+        let incoming = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "hello".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&incoming).await.is_ok());
+
+        let events = hook_seen.lock().unwrap();
+        let names: Vec<String> = events.iter().map(|(name, _)| name.clone()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "agent:start".to_string(),
+                "agent:status".to_string(),
+                "agent:step".to_string(),
+                "agent:end".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn gateway_emits_session_start_and_command_hook_events() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+        let hook_seen = Arc::new(Mutex::new(Vec::new()));
+        let mut hooks = HookRegistry::new();
+        hooks.register_in_process(
+            "session:*",
+            Arc::new(RecordingHook {
+                seen: hook_seen.clone(),
+            }),
+        );
+        hooks.register_in_process(
+            "command:*",
+            Arc::new(RecordingHook {
+                seen: hook_seen.clone(),
+            }),
+        );
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.set_hook_registry(Arc::new(hooks)).await;
+        gw.register_adapter("test", adapter).await;
+
+        let incoming = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/status".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&incoming).await.is_ok());
+
+        let events = hook_seen.lock().unwrap();
+        let names: Vec<String> = events.iter().map(|(name, _)| name.clone()).collect();
+        assert!(names.contains(&"session:start".to_string()));
+        assert!(names.contains(&"command:status".to_string()));
+    }
+
+    #[tokio::test]
+    async fn gateway_emits_session_end_and_reset_for_reset_command() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+        let hook_seen = Arc::new(Mutex::new(Vec::new()));
+        let mut hooks = HookRegistry::new();
+        hooks.register_in_process(
+            "session:*",
+            Arc::new(RecordingHook {
+                seen: hook_seen.clone(),
+            }),
+        );
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.set_hook_registry(Arc::new(hooks)).await;
+        gw.register_adapter("test", adapter).await;
+        gw.set_message_handler(Arc::new(|_messages| {
+            Box::pin(async move { Ok("assistant".to_string()) })
+        }))
+        .await;
+
+        let normal = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "hello".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&normal).await.is_ok());
+
+        let reset = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/reset".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&reset).await.is_ok());
+
+        let events = hook_seen.lock().unwrap();
+        let names: Vec<String> = events.iter().map(|(name, _)| name.clone()).collect();
+        assert!(names.contains(&"session:end".to_string()));
+        assert!(names.contains(&"session:reset".to_string()));
     }
 }

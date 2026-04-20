@@ -282,6 +282,11 @@ pub struct AgentConfig {
     #[serde(default)]
     pub stream: bool,
 
+    /// Suppress user-facing lifecycle/status output for this agent session.
+    /// Intended for child/delegated/background agents to match Python quiet_mode semantics.
+    #[serde(default)]
+    pub quiet_mode: bool,
+
     /// Temperature for LLM sampling.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f64>,
@@ -389,6 +394,11 @@ pub struct AgentConfig {
     #[serde(default = "default_background_review_enabled")]
     pub background_review_enabled: bool,
 
+    /// Emit background review metrics snapshots (`debug` tracing only).
+    /// Child sessions disable this for stricter quiet-mode parity.
+    #[serde(default = "default_background_review_metrics_enabled")]
+    pub background_review_metrics_enabled: bool,
+
     /// Exact system prompt from SQLite when continuing a session (stable Anthropic prefix cache).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stored_system_prompt: Option<String>,
@@ -474,6 +484,10 @@ fn default_background_review_enabled() -> bool {
     true
 }
 
+fn default_background_review_metrics_enabled() -> bool {
+    true
+}
+
 fn default_budget_caution_threshold() -> f64 {
     0.7
 }
@@ -522,6 +536,7 @@ impl Default for AgentConfig {
             personality: None,
             extra_body: None,
             stream: false,
+            quiet_mode: false,
             temperature: None,
             max_tokens: None,
             max_concurrent_delegates: default_max_concurrent_delegates(),
@@ -547,6 +562,7 @@ impl Default for AgentConfig {
             memory_nudge_interval: default_memory_nudge_interval(),
             skill_creation_nudge_interval: default_skill_creation_nudge_interval(),
             background_review_enabled: default_background_review_enabled(),
+            background_review_metrics_enabled: default_background_review_metrics_enabled(),
             stored_system_prompt: None,
             budget_caution_threshold: default_budget_caution_threshold(),
             budget_warning_threshold: default_budget_warning_threshold(),
@@ -606,6 +622,12 @@ pub struct AgentCallbacks {
     pub on_stream_delta: Option<Box<dyn Fn(&str) + Send + Sync>>,
     /// Called after each completed LLM step (full response assembled).
     pub on_step_complete: Option<Box<dyn Fn(u32) + Send + Sync>>,
+    /// Called when background memory/skill review completes or fails.
+    ///
+    /// Payload is a user-friendly summary string suitable for direct UI output.
+    pub background_review_callback: Option<Arc<dyn Fn(&str) + Send + Sync>>,
+    /// Called for lifecycle/status notices (context pressure, retries, etc.).
+    pub status_callback: Option<Arc<dyn Fn(&str, &str) + Send + Sync>>,
 }
 
 /// Classify an API error for retry/failover decisions.
@@ -1891,14 +1913,25 @@ impl AgentLoop {
         if total_chars <= threshold {
             return;
         }
-        tracing::info!(
+        let message = format!(
             "Context pressure at {}%, triggering compression",
             (total_chars * 100) / max_c
         );
+        tracing::info!("{message}");
+        self.emit_status("lifecycle", &message);
         if let Some(note) = self.memory_pre_compress_note(ctx.get_messages()) {
             ctx.add_message(Message::system(note));
         }
         ctx.compress();
+    }
+
+    fn emit_status(&self, event_type: &str, message: &str) {
+        if self.config.quiet_mode {
+            return;
+        }
+        if let Some(cb) = self.callbacks.status_callback.as_ref() {
+            cb(event_type, message);
+        }
     }
 
     fn should_emit_context_pressure_warning(
@@ -2142,6 +2175,15 @@ impl AgentLoop {
                                 delay.as_millis(),
                                 attempt + 1,
                                 effective_max_retries
+                            );
+                            self.emit_status(
+                                "lifecycle",
+                                &format!(
+                                    "LLM API retry in {}ms (attempt {}/{})",
+                                    delay.as_millis(),
+                                    attempt + 1,
+                                    effective_max_retries
+                                ),
                             );
                             sleep(delay).await;
                         }
@@ -2577,6 +2619,13 @@ impl AgentLoop {
                     && inner_thinking < self.config.thinking_prefill_max_retries
                 {
                     inner_thinking += 1;
+                    self.emit_status(
+                        "lifecycle",
+                        &format!(
+                            "Reasoning-only response — retrying ({}/{})",
+                            inner_thinking, self.config.thinking_prefill_max_retries
+                        ),
+                    );
                     ctx.add_message(r.message.clone());
                     continue;
                 }
@@ -2588,6 +2637,13 @@ impl AgentLoop {
                         "empty assistant response — retrying ({}/{})",
                         inner_empty,
                         self.config.empty_content_max_retries
+                    );
+                    self.emit_status(
+                        "lifecycle",
+                        &format!(
+                            "Empty assistant response — retrying ({}/{})",
+                            inner_empty, self.config.empty_content_max_retries
+                        ),
                     );
                     continue;
                 }
@@ -2740,8 +2796,22 @@ impl AgentLoop {
                 .collect();
             if !invalid_tool_calls.is_empty() {
                 invalid_tool_retries = invalid_tool_retries.saturating_add(1);
+                self.emit_status(
+                    "lifecycle",
+                    &format!(
+                        "Invalid tool call detected — retrying ({}/{})",
+                        invalid_tool_retries, self.config.invalid_tool_call_max_retries
+                    ),
+                );
                 let available = self.tool_registry.names().join(", ");
                 if invalid_tool_retries >= self.config.invalid_tool_call_max_retries {
+                    self.emit_status(
+                        "lifecycle",
+                        &format!(
+                            "Max invalid tool retries reached ({})",
+                            self.config.invalid_tool_call_max_retries
+                        ),
+                    );
                     ctx.add_message(Message::system(format!(
                         "Max invalid tool retries reached ({}). Last invalid tool: {}",
                         self.config.invalid_tool_call_max_retries, invalid_tool_calls[0]
@@ -2782,9 +2852,23 @@ impl AgentLoop {
             if !invalid_json_args.is_empty() {
                 invalid_json_retries = invalid_json_retries.saturating_add(1);
                 if invalid_json_retries < self.config.invalid_tool_json_max_retries {
+                    self.emit_status(
+                        "lifecycle",
+                        &format!(
+                            "Invalid tool JSON arguments — retrying ({}/{})",
+                            invalid_json_retries, self.config.invalid_tool_json_max_retries
+                        ),
+                    );
                     let _ = ctx.get_messages_mut().pop();
                     continue;
                 }
+                self.emit_status(
+                    "lifecycle",
+                    &format!(
+                        "Max invalid JSON retries reached ({}); returning tool errors",
+                        self.config.invalid_tool_json_max_retries
+                    ),
+                );
                 invalid_json_retries = 0;
                 for tc in &tool_calls {
                     let content = if let Some((_, err)) = invalid_json_args
@@ -2940,12 +3024,14 @@ impl AgentLoop {
                     &mut context_pressure_last_warn_at,
                     &mut context_pressure_last_warn_percent,
                 ) {
-                    tracing::warn!(
+                    let message = format!(
                         "Context pressure {:.0}% of compaction threshold ({} / {})",
                         progress * 100.0,
                         total_chars,
                         threshold
                     );
+                    tracing::warn!("{}", message);
+                    self.emit_status("lifecycle", &message);
                 }
             }
 
@@ -3280,6 +3366,13 @@ impl AgentLoop {
                     && inner_thinking < self.config.thinking_prefill_max_retries
                 {
                     inner_thinking += 1;
+                    self.emit_status(
+                        "lifecycle",
+                        &format!(
+                            "Reasoning-only response — retrying ({}/{})",
+                            inner_thinking, self.config.thinking_prefill_max_retries
+                        ),
+                    );
                     ctx.add_message(r.message.clone());
                     continue;
                 }
@@ -3291,6 +3384,13 @@ impl AgentLoop {
                         "empty assistant response (stream path) — retrying ({}/{})",
                         inner_empty,
                         self.config.empty_content_max_retries
+                    );
+                    self.emit_status(
+                        "lifecycle",
+                        &format!(
+                            "Empty assistant response — retrying ({}/{})",
+                            inner_empty, self.config.empty_content_max_retries
+                        ),
                     );
                     continue;
                 }
@@ -3383,6 +3483,13 @@ impl AgentLoop {
                 && truncated_tool_call_retries < self.config.truncated_tool_call_max_retries
             {
                 truncated_tool_call_retries = truncated_tool_call_retries.saturating_add(1);
+                self.emit_status(
+                    "lifecycle",
+                    &format!(
+                        "Truncated tool arguments — retrying ({}/{})",
+                        truncated_tool_call_retries, self.config.truncated_tool_call_max_retries
+                    ),
+                );
                 let _ = ctx.get_messages_mut().pop();
                 continue;
             }
@@ -3489,8 +3596,22 @@ impl AgentLoop {
                 .collect();
             if !invalid_tool_calls.is_empty() {
                 invalid_tool_retries = invalid_tool_retries.saturating_add(1);
+                self.emit_status(
+                    "lifecycle",
+                    &format!(
+                        "Invalid tool call detected — retrying ({}/{})",
+                        invalid_tool_retries, self.config.invalid_tool_call_max_retries
+                    ),
+                );
                 let available = self.tool_registry.names().join(", ");
                 if invalid_tool_retries >= self.config.invalid_tool_call_max_retries {
+                    self.emit_status(
+                        "lifecycle",
+                        &format!(
+                            "Max invalid tool retries reached ({})",
+                            self.config.invalid_tool_call_max_retries
+                        ),
+                    );
                     ctx.add_message(Message::system(format!(
                         "Max invalid tool retries reached ({}). Last invalid tool: {}",
                         self.config.invalid_tool_call_max_retries, invalid_tool_calls[0]
@@ -3531,9 +3652,23 @@ impl AgentLoop {
             if !invalid_json_args.is_empty() {
                 invalid_json_retries = invalid_json_retries.saturating_add(1);
                 if invalid_json_retries < self.config.invalid_tool_json_max_retries {
+                    self.emit_status(
+                        "lifecycle",
+                        &format!(
+                            "Invalid tool JSON arguments — retrying ({}/{})",
+                            invalid_json_retries, self.config.invalid_tool_json_max_retries
+                        ),
+                    );
                     let _ = ctx.get_messages_mut().pop();
                     continue;
                 }
+                self.emit_status(
+                    "lifecycle",
+                    &format!(
+                        "Max invalid JSON retries reached ({}); returning tool errors",
+                        self.config.invalid_tool_json_max_retries
+                    ),
+                );
                 invalid_json_retries = 0;
                 for tc in &tool_calls {
                     let content = if let Some((_, err)) = invalid_json_args
@@ -3682,12 +3817,14 @@ impl AgentLoop {
                     &mut context_pressure_last_warn_at,
                     &mut context_pressure_last_warn_percent,
                 ) {
-                    tracing::warn!(
+                    let message = format!(
                         "Context pressure {:.0}% of compaction threshold ({} / {})",
                         progress * 100.0,
                         total_chars,
                         threshold
                     );
+                    tracing::warn!("{}", message);
+                    self.emit_status("lifecycle", &message);
                 }
             }
 
@@ -4252,6 +4389,9 @@ impl AgentLoop {
     }
 
     fn emit_background_review_metrics(&self, turn: u32, ctx: &ContextManager) {
+        if !self.config.background_review_metrics_enabled {
+            return;
+        }
         let snapshot = ctx.get_messages().to_vec();
         tokio::spawn(async move {
             let tool_msg_count = snapshot
@@ -4302,13 +4442,29 @@ impl AgentLoop {
         hist.push(Message::user(prompt));
         let mut cfg = self.config.clone();
         cfg.background_review_enabled = false;
+        cfg.background_review_metrics_enabled = false;
+        cfg.memory_nudge_interval = 0;
+        cfg.skill_creation_nudge_interval = 0;
+        cfg.max_concurrent_delegates = 0;
+        cfg.quiet_mode = true;
         cfg.max_turns = cfg.max_turns.min(8);
         let tools = self.tool_registry.clone();
         let provider = self.llm_provider.clone();
+        let review_cb = self.callbacks.background_review_callback.clone();
         tokio::spawn(async move {
             let agent = AgentLoop::new(cfg, tools, provider);
-            if let Err(e) = agent.run(hist, None).await {
-                tracing::debug!(error = %e, "background memory/skill review failed");
+            match agent.run(hist, None).await {
+                Ok(result) => {
+                    if let Some(cb) = review_cb.as_ref() {
+                        if let Some(summary) = summarize_background_review_result(&result.messages)
+                        {
+                            cb(&summary);
+                        }
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!(error = %e, "background memory/skill review failed");
+                }
             }
         });
     }
@@ -4342,6 +4498,84 @@ fn extract_last_user_assistant(messages: &[Message]) -> (String, String) {
         .and_then(|m| m.content.clone())
         .unwrap_or_default();
     (user, assistant)
+}
+
+fn summarize_background_review_result(messages: &[Message]) -> Option<String> {
+    let mut actions: Vec<String> = Vec::new();
+    for msg in messages {
+        if !matches!(msg.role, hermes_core::MessageRole::Tool) {
+            continue;
+        }
+        let Some(raw) = msg.content.as_deref() else {
+            continue;
+        };
+        let Ok(data) = serde_json::from_str::<Value>(raw) else {
+            continue;
+        };
+        if !data
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        let message = data
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        let target = data
+            .get("target")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string();
+        if message.is_empty() {
+            continue;
+        }
+        let lower = message.to_ascii_lowercase();
+        if lower.contains("created") || lower.contains("updated") {
+            actions.push(message);
+        } else if lower.contains("added") || (!target.is_empty() && lower.contains("add")) {
+            let label = match target.as_str() {
+                "memory" => "Memory",
+                "user" => "User profile",
+                _ => target.as_str(),
+            };
+            if !label.is_empty() {
+                actions.push(format!("{label} updated"));
+            }
+        } else if message.contains("Entry added") {
+            let label = match target.as_str() {
+                "memory" => "Memory",
+                "user" => "User profile",
+                _ => target.as_str(),
+            };
+            if !label.is_empty() {
+                actions.push(format!("{label} updated"));
+            }
+        } else if lower.contains("removed") || lower.contains("replaced") {
+            let label = match target.as_str() {
+                "memory" => "Memory",
+                "user" => "User profile",
+                _ => target.as_str(),
+            };
+            if !label.is_empty() {
+                actions.push(format!("{label} updated"));
+            }
+        }
+    }
+    if actions.is_empty() {
+        return None;
+    }
+    let mut deduped: Vec<String> = Vec::new();
+    for action in actions {
+        if !deduped.iter().any(|a| a == &action) {
+            deduped.push(action);
+        }
+    }
+    Some(format!("💾 {}", deduped.join(" · ")))
 }
 
 fn default_model_cost_per_million(model: &str) -> Option<(f64, f64)> {
@@ -4395,6 +4629,7 @@ fn merge_usage(existing: Option<UsageStats>, new: &UsageStats) -> UsageStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hermes_core::JsonSchema;
 
     #[test]
     fn test_agent_config_default() {
@@ -4416,6 +4651,241 @@ mod tests {
         assert_eq!(config.checkpoint_interval_turns, 3);
         assert_eq!(config.rollback_on_tool_error_threshold, 3);
         assert!(!config.smart_model_routing.enabled);
+        assert!(config.background_review_metrics_enabled);
+    }
+
+    #[test]
+    fn summarize_background_review_nothing_to_save() {
+        let msgs = vec![Message::assistant("Nothing to save.")];
+        let out = summarize_background_review_result(&msgs);
+        assert!(out.is_none());
+    }
+
+    #[test]
+    fn summarize_background_review_counts_tool_calls() {
+        let msgs = vec![
+            Message::tool_result(
+                "tc_mem",
+                "{\"success\":true,\"message\":\"Skill 'prospect-scanner' created.\"}",
+            ),
+            Message::tool_result(
+                "tc_skill",
+                "{\"success\":true,\"message\":\"Entry added\",\"target\":\"memory\"}",
+            ),
+            Message::tool_result("tc_skip", "{\"success\":false,\"message\":\"failed\"}"),
+        ];
+        let out = summarize_background_review_result(&msgs).expect("summary should exist");
+        assert!(out.starts_with("💾 "));
+        assert!(out.contains("Skill 'prospect-scanner' created."));
+        assert!(out.contains("Memory updated"));
+    }
+
+    #[test]
+    fn status_callback_receives_context_pressure_messages() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let captured = Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
+        let cap_ref = captured.clone();
+        let callbacks = AgentCallbacks {
+            status_callback: Some(Arc::new(move |kind, msg| {
+                cap_ref
+                    .lock()
+                    .expect("status callback lock")
+                    .push((kind.to_string(), msg.to_string()));
+            })),
+            ..Default::default()
+        };
+
+        let agent = AgentLoop::new(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        )
+        .with_callbacks(callbacks);
+
+        let mut ctx = ContextManager::new(100);
+        ctx.add_message(Message::user("x".repeat(90)));
+        agent.auto_compress_if_over_threshold(&mut ctx);
+
+        let rows = captured.lock().expect("captured lock");
+        assert!(rows
+            .iter()
+            .any(|(kind, msg)| kind == "lifecycle" && msg.contains("triggering compression")));
+    }
+
+    #[tokio::test]
+    async fn status_callback_receives_empty_response_retry_notice() {
+        use futures::stream::BoxStream;
+
+        #[derive(Default)]
+        struct RetryDummyProvider {
+            calls: std::sync::Mutex<u32>,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for RetryDummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                let mut n = self.calls.lock().expect("calls lock");
+                *n += 1;
+                let msg = if *n == 1 {
+                    Message::assistant("")
+                } else {
+                    Message::assistant("ok")
+                };
+                Ok(hermes_core::LlmResponse {
+                    message: msg,
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let captured = Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
+        let cap_ref = captured.clone();
+        let callbacks = AgentCallbacks {
+            status_callback: Some(Arc::new(move |kind, msg| {
+                cap_ref
+                    .lock()
+                    .expect("status callback lock")
+                    .push((kind.to_string(), msg.to_string()));
+            })),
+            ..Default::default()
+        };
+
+        let cfg = AgentConfig {
+            max_turns: 1,
+            empty_content_max_retries: 1,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            cfg,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(RetryDummyProvider::default()),
+        )
+        .with_callbacks(callbacks);
+
+        let result = agent.run(vec![Message::user("hello")], None).await;
+        assert!(result.is_ok());
+        let rows = captured.lock().expect("captured lock");
+        assert!(rows.iter().any(|(kind, msg)| {
+            kind == "lifecycle" && msg.contains("Empty assistant response — retrying")
+        }));
+    }
+
+    #[test]
+    fn quiet_mode_suppresses_status_callback() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let captured = Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
+        let cap_ref = captured.clone();
+        let callbacks = AgentCallbacks {
+            status_callback: Some(Arc::new(move |kind, msg| {
+                cap_ref
+                    .lock()
+                    .expect("status callback lock")
+                    .push((kind.to_string(), msg.to_string()));
+            })),
+            ..Default::default()
+        };
+
+        let cfg = AgentConfig {
+            quiet_mode: true,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), Arc::new(DummyProvider))
+            .with_callbacks(callbacks);
+        let mut ctx = ContextManager::new(100);
+        ctx.add_message(Message::user("x".repeat(90)));
+        agent.auto_compress_if_over_threshold(&mut ctx);
+
+        assert!(captured.lock().expect("captured lock").is_empty());
     }
 
     #[test]
@@ -5089,6 +5559,90 @@ mod tests {
                 case.runs
             );
         }
+    }
+
+    #[test]
+    fn test_iters_since_skill_resets_then_reincrements_on_followup_iteration() {
+        use futures::stream::BoxStream;
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        struct TwoStepProvider {
+            calls: Arc<AtomicU32>,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for TwoStepProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                let n = self.calls.fetch_add(1, Ordering::SeqCst);
+                let msg = if n == 0 {
+                    Message::assistant_with_tool_calls(
+                        None,
+                        vec![hermes_core::ToolCall {
+                            id: "tc_skill".to_string(),
+                            function: hermes_core::FunctionCall {
+                                name: "skill_manage".to_string(),
+                                arguments: "{}".to_string(),
+                            },
+                        }],
+                    )
+                } else {
+                    Message::assistant("done")
+                };
+                Ok(hermes_core::LlmResponse {
+                    message: msg,
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let mut registry = ToolRegistry::new();
+        registry.register(
+            "skill_manage",
+            ToolSchema::new("skill_manage", "Manage skills", JsonSchema::new("object")),
+            Arc::new(|_args| Ok("{\"success\":true}".to_string())),
+        );
+
+        let config = AgentConfig {
+            skill_creation_nudge_interval: 10,
+            ..AgentConfig::default()
+        };
+        let provider = TwoStepProvider {
+            calls: Arc::new(AtomicU32::new(0)),
+        };
+        let agent = AgentLoop::new(config, Arc::new(registry), Arc::new(provider));
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let _ = rt
+            .block_on(agent.run(vec![Message::user("hello")], None))
+            .expect("agent run should succeed");
+
+        let counters = agent.evolution_counters.lock().expect("counter lock");
+        // Iteration #1 increments then skill_manage resets to 0.
+        // Iteration #2 (final assistant turn) increments again to 1.
+        // Python follows the same cadence because `_iters_since_skill += 1`
+        // happens at each loop iteration before the tool/reset branch.
+        assert_eq!(counters.iters_since_skill, 1);
     }
 
     #[test]

@@ -33,8 +33,14 @@ pub mod feishu;
 #[cfg(feature = "wecom")]
 pub mod wecom;
 
+#[cfg(feature = "wecom-callback")]
+pub mod wecom_callback;
+
 #[cfg(feature = "weixin")]
 pub mod weixin;
+
+#[cfg(feature = "qqbot")]
+pub mod qqbot;
 
 #[cfg(feature = "bluebubbles")]
 pub mod bluebubbles;

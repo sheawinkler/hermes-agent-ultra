@@ -95,8 +95,14 @@ pub use platforms::feishu::FeishuAdapter;
 #[cfg(feature = "wecom")]
 pub use platforms::wecom::WeComAdapter;
 
+#[cfg(feature = "wecom-callback")]
+pub use platforms::wecom_callback::WeComCallbackAdapter;
+
 #[cfg(feature = "weixin")]
 pub use platforms::weixin::WeChatAdapter;
+
+#[cfg(feature = "qqbot")]
+pub use platforms::qqbot::QqBotAdapter;
 
 #[cfg(feature = "bluebubbles")]
 pub use platforms::bluebubbles::BlueBubblesAdapter;

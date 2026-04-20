@@ -7,7 +7,7 @@ use clap::CommandFactory;
 use clap::Parser;
 use clap_complete::{generate, Shell as CompletionShell};
 use hermes_agent::session_persistence::SessionPersistence;
-use hermes_agent::{leading_system_prompt_for_persist, AgentLoop};
+use hermes_agent::{leading_system_prompt_for_persist, AgentCallbacks, AgentLoop};
 use hermes_auth::{AuthManager, FileTokenStore, OAuthCredential};
 use hermes_cli::app::{
     bridge_tool_registry, build_agent_config, build_provider, provider_api_key_from_env,
@@ -29,6 +29,7 @@ use hermes_cron::{
 use hermes_environments::LocalBackend;
 use hermes_gateway::gateway::GatewayConfig as RuntimeGatewayConfig;
 use hermes_gateway::gateway::IncomingMessage as GatewayIncomingMessage;
+use hermes_gateway::hooks::HookRegistry;
 use hermes_gateway::platforms::api_server::{ApiInboundRequest, ApiServerAdapter, ApiServerConfig};
 use hermes_gateway::platforms::bluebubbles::{BlueBubblesAdapter, BlueBubblesConfig};
 use hermes_gateway::platforms::dingtalk::{DingTalkAdapter, DingTalkConfig};
@@ -38,12 +39,16 @@ use hermes_gateway::platforms::feishu::{FeishuAdapter, FeishuConfig};
 use hermes_gateway::platforms::homeassistant::{HomeAssistantAdapter, HomeAssistantConfig};
 use hermes_gateway::platforms::matrix::{MatrixAdapter, MatrixConfig};
 use hermes_gateway::platforms::mattermost::{MattermostAdapter, MattermostConfig};
+use hermes_gateway::platforms::qqbot::{QqBotAdapter, QqBotConfig};
 use hermes_gateway::platforms::signal::{SignalAdapter, SignalConfig};
 use hermes_gateway::platforms::slack::{SlackAdapter, SlackConfig};
 use hermes_gateway::platforms::sms::{SmsAdapter, SmsConfig};
 use hermes_gateway::platforms::telegram::{TelegramAdapter, TelegramConfig};
 use hermes_gateway::platforms::webhook::{WebhookAdapter, WebhookConfig, WebhookPayload};
 use hermes_gateway::platforms::wecom::{WeComAdapter, WeComConfig};
+use hermes_gateway::platforms::wecom_callback::{
+    WeComCallbackAdapter, WeComCallbackApp, WeComCallbackConfig,
+};
 use hermes_gateway::platforms::weixin::{WeChatAdapter, WeixinConfig};
 use hermes_gateway::platforms::whatsapp::{WhatsAppAdapter, WhatsAppConfig};
 use hermes_gateway::{DmManager, Gateway, GatewayRuntimeContext, SessionManager};
@@ -51,6 +56,7 @@ use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_telemetry::init_telemetry_from_env;
 use hermes_tools::ToolRegistry;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 use tokio::sync::{broadcast, mpsc};
 #[tokio::main]
@@ -438,6 +444,17 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
                     "Note: no chat platforms enabled in config.yaml — gateway still runs cron + HTTP webhooks."
                 );
             }
+            let requirement_issues = gateway_requirement_issues(&config);
+            if !requirement_issues.is_empty() {
+                let mut msg = String::from("Gateway requirement check failed:\n");
+                for issue in requirement_issues {
+                    msg.push_str("  - ");
+                    msg.push_str(&issue);
+                    msg.push('\n');
+                }
+                msg.push_str("请先执行 `hermes gateway setup` 或 `hermes auth login <provider>` 修复后再启动。");
+                return Err(AgentError::Config(msg));
+            }
 
             let pid_path = gateway_pid_path_for_cli(&cli);
             if let Some(pid) = read_gateway_pid(&pid_path) {
@@ -475,6 +492,18 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
                 dm_manager,
                 runtime_gateway_config,
             ));
+            let mut hook_registry = HookRegistry::new();
+            hook_registry.register_builtins();
+            hook_registry.discover_and_load(&hermes_home().join("hooks"));
+            gateway.set_hook_registry(Arc::new(hook_registry)).await;
+            gateway
+                .emit_hook_event(
+                    "gateway:startup",
+                    serde_json::json!({
+                        "enabled_platforms": enabled.iter().map(|s| s.as_str()).collect::<Vec<_>>()
+                    }),
+                )
+                .await;
 
             let tool_registry = Arc::new(ToolRegistry::new());
             let terminal_backend: Arc<dyn hermes_core::TerminalBackend> =
@@ -489,17 +518,142 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
             let agent_tools_for_cron = agent_registry.clone();
             let config_arc = Arc::new(config.clone());
             let config_arc_stream = config_arc.clone();
+            let gateway_for_review = gateway.clone();
+            let gateway_for_review_stream = gateway.clone();
             gateway
                 .set_message_handler_with_context(Arc::new(move |messages, ctx| {
                     let config = config_arc.clone();
                     let agent_tools = agent_tools_for_msg.clone();
+                    let gateway_for_review = gateway_for_review.clone();
                     Box::pin(async move {
                         let effective_model = resolve_model_for_gateway(
                             config.model.as_deref().unwrap_or("gpt-4o"),
                             &ctx,
                         );
+                        let platform_for_review = ctx.platform.clone();
+                        let chat_for_review = ctx.chat_id.clone();
+                        let deferred_queue = ctx.deferred_post_delivery_messages.clone();
+                        let deferred_released = ctx.deferred_post_delivery_released.clone();
+                        let gateway_for_review_cb = gateway_for_review.clone();
+                        let review_cb = Arc::new(move |text: &str| {
+                            if let (Some(queue), Some(released)) =
+                                (deferred_queue.as_ref(), deferred_released.as_ref())
+                            {
+                                if !released.load(Ordering::Acquire) {
+                                    if let Ok(mut guard) = queue.lock() {
+                                        guard.push(text.to_string());
+                                        return;
+                                    }
+                                }
+                            }
+                            let gw = gateway_for_review_cb.clone();
+                            let platform = platform_for_review.clone();
+                            let chat_id = chat_for_review.clone();
+                            let msg = text.to_string();
+                            tokio::spawn(async move {
+                                let _ = gw.send_message(&platform, &chat_id, &msg, None).await;
+                            });
+                        });
+                        let gateway_for_status = gateway_for_review.clone();
+                        let gateway_for_status_hook = gateway_for_review.clone();
+                        let platform_for_status = ctx.platform.clone();
+                        let chat_for_status = ctx.chat_id.clone();
+                        let platform_for_status_hook = ctx.platform.clone();
+                        let user_for_status_hook = ctx.user_id.clone();
+                        let session_for_status_hook = ctx.session_key.clone();
+                        let status_cb = Arc::new(move |event_type: &str, message: &str| {
+                            if message.trim().is_empty() {
+                                return;
+                            }
+                            let gw = gateway_for_status.clone();
+                            let platform = platform_for_status.clone();
+                            let chat_id = chat_for_status.clone();
+                            let msg = message.to_string();
+                            tokio::spawn(async move {
+                                let _ = gw.send_message(&platform, &chat_id, &msg, None).await;
+                            });
+                            let gw_hook = gateway_for_status_hook.clone();
+                            let platform = platform_for_status_hook.clone();
+                            let user_id = user_for_status_hook.clone();
+                            let session_id = session_for_status_hook.clone();
+                            let event_type = event_type.to_string();
+                            let message = message.to_string();
+                            tokio::spawn(async move {
+                                gw_hook
+                                    .emit_hook_event(
+                                        "agent:status",
+                                        serde_json::json!({
+                                            "platform": platform,
+                                            "user_id": user_id,
+                                            "session_id": session_id,
+                                            "event_type": event_type,
+                                            "message": message
+                                        }),
+                                    )
+                                    .await;
+                            });
+                        });
+                        let tool_events = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+                        let tool_events_for_complete = tool_events.clone();
+                        let on_tool_complete: Box<dyn Fn(&str, &str) + Send + Sync> =
+                            Box::new(move |name: &str, result: &str| {
+                                if let Ok(mut guard) = tool_events_for_complete.lock() {
+                                    guard.push(serde_json::json!({
+                                        "name": name,
+                                        "result": truncate_hook_tool_result(result)
+                                    }));
+                                }
+                            });
+                        let tool_events_for_step = tool_events.clone();
+                        let gateway_for_step_hook = gateway_for_review.clone();
+                        let platform_for_step_hook = ctx.platform.clone();
+                        let user_for_step_hook = ctx.user_id.clone();
+                        let session_for_step_hook = ctx.session_key.clone();
+                        let on_step_complete: Box<dyn Fn(u32) + Send + Sync> =
+                            Box::new(move |iteration: u32| {
+                                let tools = if let Ok(mut guard) = tool_events_for_step.lock() {
+                                    std::mem::take(&mut *guard)
+                                } else {
+                                    Vec::new()
+                                };
+                                let tool_names: Vec<String> = tools
+                                    .iter()
+                                    .filter_map(|v| {
+                                        v.get("name")
+                                            .and_then(|n| n.as_str())
+                                            .map(|s| s.to_string())
+                                    })
+                                    .collect();
+                                let gw_hook = gateway_for_step_hook.clone();
+                                let platform = platform_for_step_hook.clone();
+                                let user_id = user_for_step_hook.clone();
+                                let session_id = session_for_step_hook.clone();
+                                tokio::spawn(async move {
+                                    gw_hook
+                                        .emit_hook_event(
+                                            "agent:step",
+                                            serde_json::json!({
+                                                "platform": platform,
+                                                "user_id": user_id,
+                                                "session_id": session_id,
+                                                "iteration": iteration,
+                                                "tool_names": tool_names,
+                                                "tools": tools
+                                            }),
+                                        )
+                                        .await;
+                                });
+                            });
+                        let callbacks = AgentCallbacks {
+                            background_review_callback: Some(review_cb),
+                            status_callback: Some(status_cb),
+                            on_tool_complete: Some(on_tool_complete),
+                            on_step_complete: Some(on_step_complete),
+                            ..Default::default()
+                        };
                         let agent =
-                            build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools);
+                            build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools)
+                                .with_callbacks(callbacks);
                         let result = agent
                             .run(messages, None)
                             .await
@@ -532,13 +686,136 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
                 .set_streaming_handler_with_context(Arc::new(move |messages, ctx, on_chunk| {
                     let config = config_arc_stream.clone();
                     let agent_tools = agent_tools_for_stream.clone();
+                    let gateway_for_review = gateway_for_review_stream.clone();
                     Box::pin(async move {
                         let effective_model = resolve_model_for_gateway(
                             config.model.as_deref().unwrap_or("gpt-4o"),
                             &ctx,
                         );
+                        let platform_for_review = ctx.platform.clone();
+                        let chat_for_review = ctx.chat_id.clone();
+                        let deferred_queue = ctx.deferred_post_delivery_messages.clone();
+                        let deferred_released = ctx.deferred_post_delivery_released.clone();
+                        let gateway_for_review_cb = gateway_for_review.clone();
+                        let review_cb = Arc::new(move |text: &str| {
+                            if let (Some(queue), Some(released)) =
+                                (deferred_queue.as_ref(), deferred_released.as_ref())
+                            {
+                                if !released.load(Ordering::Acquire) {
+                                    if let Ok(mut guard) = queue.lock() {
+                                        guard.push(text.to_string());
+                                        return;
+                                    }
+                                }
+                            }
+                            let gw = gateway_for_review_cb.clone();
+                            let platform = platform_for_review.clone();
+                            let chat_id = chat_for_review.clone();
+                            let msg = text.to_string();
+                            tokio::spawn(async move {
+                                let _ = gw.send_message(&platform, &chat_id, &msg, None).await;
+                            });
+                        });
+                        let gateway_for_status = gateway_for_review.clone();
+                        let gateway_for_status_hook = gateway_for_review.clone();
+                        let platform_for_status = ctx.platform.clone();
+                        let chat_for_status = ctx.chat_id.clone();
+                        let platform_for_status_hook = ctx.platform.clone();
+                        let user_for_status_hook = ctx.user_id.clone();
+                        let session_for_status_hook = ctx.session_key.clone();
+                        let status_cb = Arc::new(move |event_type: &str, message: &str| {
+                            if message.trim().is_empty() {
+                                return;
+                            }
+                            let gw = gateway_for_status.clone();
+                            let platform = platform_for_status.clone();
+                            let chat_id = chat_for_status.clone();
+                            let msg = message.to_string();
+                            tokio::spawn(async move {
+                                let _ = gw.send_message(&platform, &chat_id, &msg, None).await;
+                            });
+                            let gw_hook = gateway_for_status_hook.clone();
+                            let platform = platform_for_status_hook.clone();
+                            let user_id = user_for_status_hook.clone();
+                            let session_id = session_for_status_hook.clone();
+                            let event_type = event_type.to_string();
+                            let message = message.to_string();
+                            tokio::spawn(async move {
+                                gw_hook
+                                    .emit_hook_event(
+                                        "agent:status",
+                                        serde_json::json!({
+                                            "platform": platform,
+                                            "user_id": user_id,
+                                            "session_id": session_id,
+                                            "event_type": event_type,
+                                            "message": message
+                                        }),
+                                    )
+                                    .await;
+                            });
+                        });
+                        let tool_events = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+                        let tool_events_for_complete = tool_events.clone();
+                        let on_tool_complete: Box<dyn Fn(&str, &str) + Send + Sync> =
+                            Box::new(move |name: &str, result: &str| {
+                                if let Ok(mut guard) = tool_events_for_complete.lock() {
+                                    guard.push(serde_json::json!({
+                                        "name": name,
+                                        "result": truncate_hook_tool_result(result)
+                                    }));
+                                }
+                            });
+                        let tool_events_for_step = tool_events.clone();
+                        let gateway_for_step_hook = gateway_for_review.clone();
+                        let platform_for_step_hook = ctx.platform.clone();
+                        let user_for_step_hook = ctx.user_id.clone();
+                        let session_for_step_hook = ctx.session_key.clone();
+                        let on_step_complete: Box<dyn Fn(u32) + Send + Sync> =
+                            Box::new(move |iteration: u32| {
+                                let tools = if let Ok(mut guard) = tool_events_for_step.lock() {
+                                    std::mem::take(&mut *guard)
+                                } else {
+                                    Vec::new()
+                                };
+                                let tool_names: Vec<String> = tools
+                                    .iter()
+                                    .filter_map(|v| {
+                                        v.get("name")
+                                            .and_then(|n| n.as_str())
+                                            .map(|s| s.to_string())
+                                    })
+                                    .collect();
+                                let gw_hook = gateway_for_step_hook.clone();
+                                let platform = platform_for_step_hook.clone();
+                                let user_id = user_for_step_hook.clone();
+                                let session_id = session_for_step_hook.clone();
+                                tokio::spawn(async move {
+                                    gw_hook
+                                        .emit_hook_event(
+                                            "agent:step",
+                                            serde_json::json!({
+                                                "platform": platform,
+                                                "user_id": user_id,
+                                                "session_id": session_id,
+                                                "iteration": iteration,
+                                                "tool_names": tool_names,
+                                                "tools": tools
+                                            }),
+                                        )
+                                        .await;
+                                });
+                            });
+                        let callbacks = AgentCallbacks {
+                            background_review_callback: Some(review_cb),
+                            status_callback: Some(status_cb),
+                            on_tool_complete: Some(on_tool_complete),
+                            on_step_complete: Some(on_step_complete),
+                            ..Default::default()
+                        };
                         let agent =
-                            build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools);
+                            build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools)
+                                .with_callbacks(callbacks);
                         let emit = on_chunk.clone();
                         let ui_state = Arc::new(Mutex::new((false, false))); // (muted, needs_break)
                         let ui_state_cb = ui_state.clone();
@@ -646,12 +923,27 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
             register_gateway_adapters(&config, gateway.clone(), &mut sidecar_tasks).await?;
 
             if gateway.adapter_names().await.is_empty() {
-                println!(
-                    "No platform adapters started (e.g. missing required platform config). Cron + webhook delivery still active."
-                );
+                if enabled.is_empty() {
+                    println!("No chat adapters enabled; cron + webhooks still active.");
+                } else {
+                    return Err(AgentError::Config(
+                        "Gateway startup failed: platforms are enabled but no adapters registered."
+                            .to_string(),
+                    ));
+                }
             }
 
             gateway.start_all().await?;
+            {
+                let gw_reconnect = gateway.clone();
+                sidecar_tasks.push(tokio::spawn(async move {
+                    gw_reconnect.platform_reconnect_watcher(20).await;
+                }));
+                let gw_expiry = gateway.clone();
+                sidecar_tasks.push(tokio::spawn(async move {
+                    gw_expiry.session_expiry_watcher(300).await;
+                }));
+            }
             let own_pid = std::process::id();
             std::fs::write(&pid_path, format!("{}\n", own_pid)).map_err(|e| {
                 AgentError::Io(format!("failed to write {}: {}", pid_path.display(), e))
@@ -755,6 +1047,7 @@ fn normalize_gateway_platform_key(raw: &str) -> Option<&'static str> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "telegram" | "tg" => Some("telegram"),
         "weixin" | "wechat" | "wx" => Some("weixin"),
+        "qq" | "qqbot" => Some("qqbot"),
         "discord" => Some("discord"),
         "slack" => Some("slack"),
         "matrix" => Some("matrix"),
@@ -764,6 +1057,7 @@ fn normalize_gateway_platform_key(raw: &str) -> Option<&'static str> {
         "dingtalk" => Some("dingtalk"),
         "feishu" | "lark" => Some("feishu"),
         "wecom" => Some("wecom"),
+        "wecom_callback" | "wecom-callback" => Some("wecom_callback"),
         "bluebubbles" | "imessage" => Some("bluebubbles"),
         "email" => Some("email"),
         "sms" => Some("sms"),
@@ -903,6 +1197,38 @@ async fn configure_platform_basic_prompts(
             let secret = prompt_line("WeCom secret: ").await?;
             set_extra_string_if_nonempty(p, "secret", &secret);
         }
+        "wecom_callback" => {
+            let corp_id = prompt_line("WeCom callback corp_id: ").await?;
+            set_extra_string_if_nonempty(p, "corp_id", &corp_id);
+            let corp_secret = prompt_line("WeCom callback corp_secret: ").await?;
+            set_extra_string_if_nonempty(p, "corp_secret", &corp_secret);
+            let agent_id = prompt_line("WeCom callback agent_id: ").await?;
+            set_extra_string_if_nonempty(p, "agent_id", &agent_id);
+            let token = prompt_line("WeCom callback token: ").await?;
+            set_extra_string_if_nonempty(p, "token", &token);
+            let aes = prompt_line("WeCom callback encoding_aes_key: ").await?;
+            set_extra_string_if_nonempty(p, "encoding_aes_key", &aes);
+            let host = prompt_line("WeCom callback host (default 0.0.0.0): ").await?;
+            set_extra_string_if_nonempty(p, "host", &host);
+            let port = prompt_line("WeCom callback port (default 8645): ").await?;
+            if let Ok(v) = port.trim().parse::<u16>() {
+                p.extra
+                    .insert("port".to_string(), serde_json::Value::from(v));
+            }
+            let path = prompt_line("WeCom callback path (default /wecom/callback): ").await?;
+            set_extra_string_if_nonempty(p, "path", &path);
+        }
+        "qqbot" => {
+            let app_id = prompt_line("QQBot app_id: ").await?;
+            set_extra_string_if_nonempty(p, "app_id", &app_id);
+            let secret = prompt_line("QQBot client_secret: ").await?;
+            set_extra_string_if_nonempty(p, "client_secret", &secret);
+            let markdown = prompt_yes_no("QQBot markdown_support?", true).await?;
+            p.extra.insert(
+                "markdown_support".to_string(),
+                serde_json::Value::Bool(markdown),
+            );
+        }
         "bluebubbles" => {
             let server_url = prompt_line("BlueBubbles server_url: ").await?;
             set_extra_string_if_nonempty(p, "server_url", &server_url);
@@ -985,6 +1311,7 @@ async fn run_gateway_setup(cli: &Cli) -> Result<(), AgentError> {
     println!("Current platform status:");
     for (k, label) in [
         ("weixin", "Weixin"),
+        ("qqbot", "QQBot"),
         ("telegram", "Telegram"),
         ("discord", "Discord"),
         ("slack", "Slack"),
@@ -995,6 +1322,7 @@ async fn run_gateway_setup(cli: &Cli) -> Result<(), AgentError> {
         ("dingtalk", "DingTalk"),
         ("feishu", "Feishu"),
         ("wecom", "WeCom"),
+        ("wecom_callback", "WeCom Callback"),
         ("bluebubbles", "BlueBubbles"),
         ("email", "Email"),
         ("sms", "SMS"),
@@ -1231,6 +1559,15 @@ fn extract_last_assistant_reply(messages: &[hermes_core::Message]) -> String {
         .unwrap_or_else(|| "(no assistant reply)".to_string())
 }
 
+fn truncate_hook_tool_result(result: &str) -> String {
+    let trimmed = result.trim();
+    if trimmed.chars().count() <= 240 {
+        return trimmed.to_string();
+    }
+    let prefix: String = trimmed.chars().take(240).collect();
+    format!("{prefix}...")
+}
+
 fn build_telegram_config(
     platform_cfg: &hermes_config::platform::PlatformConfig,
     token: String,
@@ -1311,6 +1648,63 @@ fn extra_u16(platform_cfg: &PlatformConfig, key: &str, default: u16) -> u16 {
         .and_then(|v| v.as_u64())
         .and_then(|v| u16::try_from(v).ok())
         .unwrap_or(default)
+}
+
+fn gateway_requirement_issues(config: &hermes_config::GatewayConfig) -> Vec<String> {
+    let mut issues = Vec::new();
+
+    let check = |enabled: bool, cond: bool| enabled && !cond;
+
+    if let Some(p) = config.platforms.get("telegram") {
+        if check(p.enabled, platform_token_or_extra(p).is_some()) {
+            issues.push("telegram.enabled=true 但缺少 token".to_string());
+        }
+    }
+    if let Some(p) = config.platforms.get("weixin") {
+        let account_id = extra_string(p, "account_id").is_some();
+        let token = platform_token_or_extra(p).is_some();
+        if check(p.enabled, account_id && token) {
+            issues.push("weixin.enabled=true 但缺少 account_id 或 token".to_string());
+        }
+    }
+    if let Some(p) = config.platforms.get("discord") {
+        if check(p.enabled, platform_token_or_extra(p).is_some()) {
+            issues.push("discord.enabled=true 但缺少 token".to_string());
+        }
+    }
+    if let Some(p) = config.platforms.get("slack") {
+        if check(p.enabled, platform_token_or_extra(p).is_some()) {
+            issues.push("slack.enabled=true 但缺少 token".to_string());
+        }
+    }
+    if let Some(p) = config
+        .platforms
+        .get("qqbot")
+        .or_else(|| config.platforms.get("qq"))
+    {
+        let app_id = extra_string(p, "app_id").is_some();
+        let secret = extra_string(p, "client_secret").is_some();
+        if check(p.enabled, app_id && secret) {
+            issues.push("qqbot.enabled=true 但缺少 app_id 或 client_secret".to_string());
+        }
+    }
+    if let Some(p) = config.platforms.get("wecom_callback") {
+        let ready = extra_string(p, "corp_id").is_some()
+            && extra_string(p, "corp_secret").is_some()
+            && extra_string(p, "agent_id").is_some()
+            && platform_token_or_extra(p)
+                .or_else(|| extra_string(p, "token"))
+                .is_some()
+            && extra_string(p, "encoding_aes_key").is_some();
+        if check(p.enabled, ready) {
+            issues.push(
+                "wecom_callback.enabled=true 但缺少 corp_id/corp_secret/agent_id/token/encoding_aes_key"
+                    .to_string(),
+            );
+        }
+    }
+
+    issues
 }
 
 fn build_api_server_config(platform_cfg: &PlatformConfig) -> ApiServerConfig {
@@ -1670,6 +2064,98 @@ async fn register_gateway_adapters(
         }
     }
 
+    if let Some(platform_cfg) = config.platforms.get("wecom_callback") {
+        if platform_cfg.enabled {
+            let corp_id = extra_string(platform_cfg, "corp_id").unwrap_or_default();
+            let corp_secret = extra_string(platform_cfg, "corp_secret").unwrap_or_default();
+            let agent_id = extra_string(platform_cfg, "agent_id").unwrap_or_default();
+            let token = platform_token_or_extra(platform_cfg)
+                .or_else(|| extra_string(platform_cfg, "token"))
+                .unwrap_or_default();
+            let encoding_aes_key =
+                extra_string(platform_cfg, "encoding_aes_key").unwrap_or_default();
+            if corp_id.is_empty()
+                || corp_secret.is_empty()
+                || agent_id.is_empty()
+                || token.is_empty()
+                || encoding_aes_key.is_empty()
+            {
+                println!(
+                    "WeCom callback is enabled but corp_id/corp_secret/agent_id/token/encoding_aes_key is incomplete; skipping wecom_callback adapter."
+                );
+            } else {
+                let app = WeComCallbackApp {
+                    name: extra_string(platform_cfg, "app_name")
+                        .unwrap_or_else(|| "default".to_string()),
+                    corp_id,
+                    corp_secret,
+                    agent_id,
+                    token,
+                    encoding_aes_key,
+                };
+                let wecom_cb_cfg = WeComCallbackConfig {
+                    host: extra_string(platform_cfg, "host")
+                        .unwrap_or_else(|| "0.0.0.0".to_string()),
+                    port: extra_u16(platform_cfg, "port", 8645),
+                    path: extra_string(platform_cfg, "path")
+                        .unwrap_or_else(|| "/wecom/callback".to_string()),
+                    apps: vec![app],
+                    proxy: Default::default(),
+                };
+                match WeComCallbackAdapter::new(wecom_cb_cfg) {
+                    Ok(adapter) => {
+                        let adapter = Arc::new(adapter);
+                        let (tx, mut rx) =
+                            tokio::sync::mpsc::channel::<GatewayIncomingMessage>(128);
+                        adapter.set_inbound_sender(tx).await;
+                        gateway
+                            .register_adapter("wecom_callback", adapter.clone())
+                            .await;
+                        let gw_clone = gateway.clone();
+                        sidecar_tasks.push(tokio::spawn(async move {
+                            while let Some(incoming) = rx.recv().await {
+                                if let Err(err) = gw_clone.route_message(&incoming).await {
+                                    tracing::warn!(
+                                        "Failed to route wecom_callback message: {}",
+                                        err
+                                    );
+                                }
+                            }
+                        }));
+                    }
+                    Err(e) => println!("WeCom callback enabled but failed to initialize: {}", e),
+                }
+            }
+        }
+    }
+
+    if let Some(platform_cfg) = config
+        .platforms
+        .get("qqbot")
+        .or_else(|| config.platforms.get("qq"))
+    {
+        if platform_cfg.enabled {
+            let app_id = extra_string(platform_cfg, "app_id").unwrap_or_default();
+            let client_secret = extra_string(platform_cfg, "client_secret").unwrap_or_default();
+            if app_id.is_empty() || client_secret.is_empty() {
+                println!(
+                    "QQBot is enabled but app_id/client_secret is missing; skipping qqbot adapter."
+                );
+            } else {
+                let qq_cfg = QqBotConfig {
+                    app_id,
+                    client_secret,
+                    markdown_support: extra_bool(platform_cfg, "markdown_support", true),
+                    proxy: Default::default(),
+                };
+                match QqBotAdapter::new(qq_cfg) {
+                    Ok(adapter) => gateway.register_adapter("qqbot", Arc::new(adapter)).await,
+                    Err(e) => println!("QQBot enabled but failed to initialize: {}", e),
+                }
+            }
+        }
+    }
+
     if let Some(platform_cfg) = config.platforms.get("bluebubbles") {
         if platform_cfg.enabled {
             let server_url = extra_string(platform_cfg, "server_url").unwrap_or_default();
@@ -1887,13 +2373,22 @@ async fn run_telegram_poll_loop(gateway: Arc<Gateway>, adapter: Arc<TelegramAdap
 ///
 /// Set `HERMES_AUTH_DEFAULT_PROVIDER=telegram` if you primarily use the Telegram gateway.
 fn resolve_auth_provider(provider: Option<String>) -> String {
-    let raw = provider
+    if let Some(raw) = provider.filter(|s| !s.trim().is_empty()) {
+        return normalize_auth_provider(&raw);
+    }
+
+    if let Ok(pool) = std::env::var("HERMES_AUTH_PROVIDER_POOL") {
+        for item in pool.split(',') {
+            let item = item.trim();
+            if !item.is_empty() {
+                return normalize_auth_provider(item);
+            }
+        }
+    }
+
+    let raw = std::env::var("HERMES_AUTH_DEFAULT_PROVIDER")
+        .ok()
         .filter(|s| !s.trim().is_empty())
-        .or_else(|| {
-            std::env::var("HERMES_AUTH_DEFAULT_PROVIDER")
-                .ok()
-                .filter(|s| !s.trim().is_empty())
-        })
         .unwrap_or_else(|| "openai".to_string());
     normalize_auth_provider(&raw)
 }
@@ -1901,9 +2396,11 @@ fn resolve_auth_provider(provider: Option<String>) -> String {
 fn normalize_auth_provider(provider: &str) -> String {
     match provider.trim().to_ascii_lowercase().as_str() {
         "wechat" | "wx" => "weixin".to_string(),
+        "qq" => "qqbot".to_string(),
         "tg" => "telegram".to_string(),
         "api-server" => "api_server".to_string(),
         "home-assistant" => "homeassistant".to_string(),
+        "wecom-callback" => "wecom_callback".to_string(),
         "mm" => "mattermost".to_string(),
         "github-copilot" => "copilot".to_string(),
         other => other.to_string(),
@@ -1921,6 +2418,8 @@ fn gateway_platform_provider_key(provider: &str) -> Option<&'static str> {
         "dingtalk" => Some("dingtalk"),
         "feishu" => Some("feishu"),
         "wecom" => Some("wecom"),
+        "wecom_callback" => Some("wecom_callback"),
+        "qqbot" | "qq" => Some("qqbot"),
         "bluebubbles" => Some("bluebubbles"),
         "email" => Some("email"),
         "sms" => Some("sms"),
@@ -2407,6 +2906,80 @@ async fn weixin_qr_login_flow(
     }
 }
 
+async fn print_auth_status_matrix(cli: &Cli, manager: &AuthManager) -> Result<(), AgentError> {
+    let cfg_path = hermes_state_root(cli).join("config.yaml");
+    let disk = load_user_config_file(&cfg_path).map_err(|e| AgentError::Config(e.to_string()))?;
+
+    println!("Auth status matrix:");
+    println!("-------------------");
+
+    for provider in ["openai", "anthropic", "openrouter", "copilot"] {
+        let env_present = provider_api_key_from_env(provider).is_some()
+            || (provider == "copilot"
+                && std::env::var("GITHUB_COPILOT_TOKEN")
+                    .ok()
+                    .map(|v| !v.trim().is_empty())
+                    .unwrap_or(false));
+        let store_present = manager.get_access_token(provider).await?.is_some();
+        let (present, source) = if env_present {
+            (true, "env")
+        } else if store_present {
+            (true, "token_store")
+        } else {
+            (false, "none")
+        };
+        println!("  - {:<16} present={} source={}", provider, present, source);
+    }
+
+    for provider in [
+        "telegram",
+        "weixin",
+        "discord",
+        "slack",
+        "qqbot",
+        "wecom_callback",
+    ] {
+        let (enabled, cfg_token) = disk
+            .platforms
+            .get(provider)
+            .map(|p| (p.enabled, platform_token_or_extra(p).is_some()))
+            .unwrap_or((false, false));
+        let env_present = match provider {
+            "telegram" => std::env::var("TELEGRAM_BOT_TOKEN")
+                .ok()
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false),
+            "weixin" => std::env::var("WEIXIN_TOKEN")
+                .ok()
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false),
+            "qqbot" => {
+                std::env::var("QQ_APP_ID")
+                    .ok()
+                    .map(|v| !v.trim().is_empty())
+                    .unwrap_or(false)
+                    && std::env::var("QQ_CLIENT_SECRET")
+                        .ok()
+                        .map(|v| !v.trim().is_empty())
+                        .unwrap_or(false)
+            }
+            _ => false,
+        };
+        let (present, source) = if env_present {
+            (true, "env")
+        } else if cfg_token {
+            (true, "config")
+        } else {
+            (false, "none")
+        };
+        println!(
+            "  - {:<16} present={} source={} enabled={}",
+            provider, present, source, enabled
+        );
+    }
+    Ok(())
+}
+
 async fn run_auth(
     cli: Cli,
     action: Option<String>,
@@ -2625,6 +3198,10 @@ async fn run_auth(
             println!("{} (removed credential for provider: {})", msg, provider);
         }
         _ => {
+            if provider == "all" || provider == "*" {
+                print_auth_status_matrix(&cli, &manager).await?;
+                return Ok(());
+            }
             if provider == "telegram" {
                 let cfg_path = hermes_state_root(&cli).join("config.yaml");
                 let disk = load_user_config_file(&cfg_path)
@@ -2709,10 +3286,18 @@ async fn run_auth(
                 );
                 return Ok(());
             }
-            let has_token = manager.get_access_token(&provider).await?.is_some();
+            let env_present = provider_api_key_from_env(&provider).is_some();
+            let store_present = manager.get_access_token(&provider).await?.is_some();
+            let (has_token, source) = if env_present {
+                (true, "env")
+            } else if store_present {
+                (true, "token_store")
+            } else {
+                (false, "none")
+            };
             println!(
-                "Auth status: provider='{}', credential_present={}",
-                provider, has_token
+                "Auth status: provider='{}', credential_present={}, source={}",
+                provider, has_token, source
             );
         }
     }
@@ -3872,4 +4457,219 @@ async fn run_profile(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hermes_config::session::SessionConfig;
+    use hermes_config::PlatformConfig;
+    use hermes_gateway::dm::DmManager;
+    use hermes_gateway::{Gateway, SessionManager};
+
+    fn make_platform(enabled: bool, token: Option<&str>) -> PlatformConfig {
+        let mut cfg = PlatformConfig {
+            enabled,
+            ..Default::default()
+        };
+        if let Some(t) = token {
+            cfg.token = Some(t.to_string());
+        }
+        cfg
+    }
+
+    fn make_gateway() -> Arc<Gateway> {
+        Arc::new(Gateway::new(
+            Arc::new(SessionManager::new(SessionConfig::default())),
+            DmManager::with_pair_behavior(),
+            hermes_gateway::gateway::GatewayConfig::default(),
+        ))
+    }
+
+    #[test]
+    fn auth_provider_aliases_cover_primary_chains() {
+        assert_eq!(normalize_auth_provider("tg"), "telegram");
+        assert_eq!(normalize_auth_provider("wechat"), "weixin");
+        assert_eq!(normalize_auth_provider("wx"), "weixin");
+        assert_eq!(normalize_auth_provider("api-server"), "api_server");
+        assert_eq!(normalize_auth_provider("mm"), "mattermost");
+    }
+
+    #[test]
+    fn gateway_auth_provider_keys_include_primary_platforms() {
+        for key in ["telegram", "weixin", "discord", "slack"] {
+            let mapped = gateway_platform_provider_key(key);
+            if key == "telegram" || key == "weixin" {
+                assert!(mapped.is_none(), "{key} handled by dedicated auth flow");
+            } else {
+                assert_eq!(mapped, Some(key));
+            }
+        }
+    }
+
+    #[test]
+    fn gateway_requirement_check_flags_missing_required_fields() {
+        let mut config = hermes_config::GatewayConfig::default();
+        config
+            .platforms
+            .insert("telegram".to_string(), make_platform(true, None));
+        config
+            .platforms
+            .insert("qqbot".to_string(), make_platform(true, None));
+        let issues = gateway_requirement_issues(&config);
+        assert!(issues.iter().any(|s| s.contains("telegram")));
+        assert!(issues.iter().any(|s| s.contains("qqbot")));
+    }
+
+    #[test]
+    fn gateway_requirement_check_accepts_complete_qqbot_and_wecom_callback() {
+        let mut config = hermes_config::GatewayConfig::default();
+
+        let mut qqbot = make_platform(true, None);
+        qqbot
+            .extra
+            .insert("app_id".to_string(), serde_json::json!("qq-app"));
+        qqbot
+            .extra
+            .insert("client_secret".to_string(), serde_json::json!("qq-secret"));
+        config.platforms.insert("qqbot".to_string(), qqbot);
+
+        let mut wecom_cb = make_platform(true, Some("cb-token"));
+        wecom_cb
+            .extra
+            .insert("corp_id".to_string(), serde_json::json!("wwcorp"));
+        wecom_cb
+            .extra
+            .insert("corp_secret".to_string(), serde_json::json!("corp-secret"));
+        wecom_cb
+            .extra
+            .insert("agent_id".to_string(), serde_json::json!("1000002"));
+        wecom_cb.extra.insert(
+            "encoding_aes_key".to_string(),
+            serde_json::json!("abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG"),
+        );
+        config
+            .platforms
+            .insert("wecom_callback".to_string(), wecom_cb);
+
+        assert!(gateway_requirement_issues(&config).is_empty());
+    }
+
+    #[tokio::test]
+    async fn register_gateway_adapters_registers_primary_platforms_when_config_is_complete() {
+        let mut config = hermes_config::GatewayConfig::default();
+
+        let mut telegram = make_platform(true, Some("tg-token"));
+        telegram
+            .extra
+            .insert("polling".to_string(), serde_json::json!(false));
+        config.platforms.insert("telegram".to_string(), telegram);
+
+        let mut weixin = make_platform(true, Some("wx-token"));
+        weixin
+            .extra
+            .insert("account_id".to_string(), serde_json::json!("wxid_abc"));
+        config.platforms.insert("weixin".to_string(), weixin);
+
+        config.platforms.insert(
+            "discord".to_string(),
+            make_platform(true, Some("discord-token")),
+        );
+        config
+            .platforms
+            .insert("slack".to_string(), make_platform(true, Some("xoxb-slack")));
+
+        let gateway = make_gateway();
+        let mut sidecar_tasks = Vec::new();
+        register_gateway_adapters(&config, gateway.clone(), &mut sidecar_tasks)
+            .await
+            .expect("primary platform registration should succeed");
+
+        let mut names = gateway.adapter_names().await;
+        names.sort();
+        assert!(names.contains(&"telegram".to_string()));
+        assert!(names.contains(&"weixin".to_string()));
+        assert!(names.contains(&"discord".to_string()));
+        assert!(names.contains(&"slack".to_string()));
+
+        for task in sidecar_tasks {
+            task.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn register_gateway_adapters_skips_primary_platforms_when_required_credentials_missing() {
+        let mut config = hermes_config::GatewayConfig::default();
+        config
+            .platforms
+            .insert("telegram".to_string(), make_platform(true, None));
+        config
+            .platforms
+            .insert("weixin".to_string(), make_platform(true, None));
+        config
+            .platforms
+            .insert("discord".to_string(), make_platform(true, None));
+        config
+            .platforms
+            .insert("slack".to_string(), make_platform(true, None));
+
+        let gateway = make_gateway();
+        let mut sidecar_tasks = Vec::new();
+        register_gateway_adapters(&config, gateway.clone(), &mut sidecar_tasks)
+            .await
+            .expect("missing credentials should be handled gracefully");
+
+        assert!(
+            gateway.adapter_names().await.is_empty(),
+            "no primary adapter should register when required credentials are missing"
+        );
+        for task in sidecar_tasks {
+            task.abort();
+        }
+    }
+
+    #[tokio::test]
+    async fn register_gateway_adapters_registers_qqbot_and_wecom_callback() {
+        let mut config = hermes_config::GatewayConfig::default();
+
+        let mut qqbot = make_platform(true, None);
+        qqbot
+            .extra
+            .insert("app_id".to_string(), serde_json::json!("qq-app"));
+        qqbot
+            .extra
+            .insert("client_secret".to_string(), serde_json::json!("qq-secret"));
+        config.platforms.insert("qqbot".to_string(), qqbot);
+
+        let mut wecom_cb = make_platform(true, None);
+        wecom_cb
+            .extra
+            .insert("corp_id".to_string(), serde_json::json!("wwcorp"));
+        wecom_cb
+            .extra
+            .insert("corp_secret".to_string(), serde_json::json!("corp-secret"));
+        wecom_cb
+            .extra
+            .insert("agent_id".to_string(), serde_json::json!("1000002"));
+        wecom_cb
+            .extra
+            .insert("token".to_string(), serde_json::json!("cb-token"));
+        wecom_cb.extra.insert(
+            "encoding_aes_key".to_string(),
+            serde_json::json!("abcdefghijklmnopqrstuvwxyz0123456789ABCDEFG"),
+        );
+        config
+            .platforms
+            .insert("wecom_callback".to_string(), wecom_cb);
+
+        let gateway = make_gateway();
+        let mut sidecar_tasks = Vec::new();
+        register_gateway_adapters(&config, gateway.clone(), &mut sidecar_tasks)
+            .await
+            .expect("qqbot and wecom_callback should register");
+
+        let names = gateway.adapter_names().await;
+        assert!(names.contains(&"qqbot".to_string()));
+        assert!(names.contains(&"wecom_callback".to_string()));
+    }
 }

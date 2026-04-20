@@ -28,5 +28,25 @@
     "register_skill_tool": true,
     "expected_turns_since_memory": 0,
     "expected_iters_since_skill": 1
+  },
+  {
+    "name": "skill_counter_hits_threshold_and_resets",
+    "runs": 1,
+    "memory_nudge_interval": 0,
+    "skill_creation_nudge_interval": 1,
+    "register_memory_tool": false,
+    "register_skill_tool": true,
+    "expected_turns_since_memory": 0,
+    "expected_iters_since_skill": 0
+  },
+  {
+    "name": "skill_counter_resets_every_threshold_window",
+    "runs": 2,
+    "memory_nudge_interval": 0,
+    "skill_creation_nudge_interval": 2,
+    "register_memory_tool": false,
+    "register_skill_tool": true,
+    "expected_turns_since_memory": 0,
+    "expected_iters_since_skill": 0
   }
 ]

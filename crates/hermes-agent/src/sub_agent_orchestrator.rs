@@ -344,6 +344,12 @@ impl SubAgentOrchestrator {
         child.session_id = Some(child_session_id);
         child.max_turns = child_turns;
         child.stream = false;
+        // Keep child sessions silent/contained (Python child quiet_mode semantics).
+        child.background_review_enabled = false;
+        child.background_review_metrics_enabled = false;
+        child.memory_nudge_interval = 0;
+        child.skill_creation_nudge_interval = 0;
+        child.quiet_mode = true;
         // Children should not re-spawn grandchildren beyond the contract;
         // depth checks inside AgentLoop::execute_tool_calls still apply.
         child.skip_memory = true;
@@ -601,5 +607,10 @@ mod tests {
         assert_eq!(child.session_id.as_deref(), Some("root::subagent-test"));
         assert_eq!(child.max_cost_usd, Some(1.25));
         assert!(child.skip_memory);
+        assert!(!child.background_review_enabled);
+        assert!(!child.background_review_metrics_enabled);
+        assert_eq!(child.memory_nudge_interval, 0);
+        assert_eq!(child.skill_creation_nudge_interval, 0);
+        assert!(child.quiet_mode);
     }
 }
