@@ -17,6 +17,7 @@ Options:
   --log-dir <path>         Log directory (default: ~/.hermes-agent-ultra/logs)
   --tail <n>               Tail size for final status output (default: 20)
   --set KEY=VALUE          Set/update env key (repeatable)
+  --no-auto-secret         Do not auto-generate GITHUB_WEBHOOK_SECRET
   --non-interactive        Disable prompts; only use existing values + --set overrides
   --show-only              Show detected config and exit without loading services
   --no-load                Do not load/start services after setup
@@ -34,6 +35,7 @@ TAIL_N=20
 INTERACTIVE="1"
 SHOW_ONLY="0"
 LOAD_SERVICES="1"
+AUTO_SECRET="1"
 declare -a SET_OVERRIDES=()
 
 while [[ $# -gt 0 ]]; do
@@ -65,6 +67,10 @@ while [[ $# -gt 0 ]]; do
     --set)
       SET_OVERRIDES+=("${2:?missing value for --set}")
       shift 2
+      ;;
+    --no-auto-secret)
+      AUTO_SECRET="0"
+      shift
       ;;
     --non-interactive)
       INTERACTIVE="0"
@@ -128,6 +134,17 @@ set_env_value() {
   ' "${file}" > "${tmp}"
   mv "${tmp}" "${file}"
   chmod 600 "${file}" >/dev/null 2>&1 || true
+}
+
+generate_secret() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 32
+    return
+  fi
+  python3 - <<'PY'
+import secrets
+print(secrets.token_hex(32))
+PY
 }
 
 mask_secret() {
@@ -252,6 +269,11 @@ bash "${INSTALL_SCRIPT}" \
   --no-load >/dev/null
 
 load_env
+if [[ "${AUTO_SECRET}" == "1" && -z "${GITHUB_WEBHOOK_SECRET:-}" ]]; then
+  set_env_value "${ENV_FILE}" "GITHUB_WEBHOOK_SECRET" "$(generate_secret)"
+  load_env
+  echo "Auto-generated GITHUB_WEBHOOK_SECRET in ${ENV_FILE}."
+fi
 print_config_summary
 
 if [[ "${#SET_OVERRIDES[@]}" -gt 0 ]]; then
@@ -277,7 +299,7 @@ load_env
 
 if [[ "${INTERACTIVE}" == "1" ]]; then
   echo
-  if [[ -z "${GITHUB_WEBHOOK_SECRET:-}" ]]; then
+  if [[ "${AUTO_SECRET}" == "0" && -z "${GITHUB_WEBHOOK_SECRET:-}" ]]; then
     read -r -s -p "Enter GITHUB_WEBHOOK_SECRET (leave empty to skip): " prompt_secret
     echo
     if [[ -n "${prompt_secret}" ]]; then

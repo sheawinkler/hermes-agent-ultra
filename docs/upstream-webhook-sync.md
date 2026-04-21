@@ -48,7 +48,7 @@ Backends are selectable with `--backend`:
 
 ## End-to-End Flow
 
-1. GitHub sends `push` webhook for `Lumio-Research/hermes-agent-rs` `refs/heads/main`.
+1. GitHub sends `push` webhook for `NousResearch/hermes-agent` `refs/heads/main`.
 2. Listener validates signature and scope filters.
 3. Event is enqueued.
 4. Worker dequeues event and runs:
@@ -104,7 +104,7 @@ python3 scripts/upstream_webhook_sync.py listen \
   --host 0.0.0.0 \
   --port 8099 \
   --path /github/upstream-sync \
-  --expected-repo Lumio-Research/hermes-agent-rs \
+  --expected-repo NousResearch/hermes-agent \
   --expected-ref refs/heads/main
 ```
 
@@ -131,15 +131,19 @@ This command will:
 
 - scaffold/update launchd plist files and env file
 - show what is already configured (with secret masking)
-- prompt for missing critical values in interactive terminals
+- auto-generate `GITHUB_WEBHOOK_SECRET` if missing
+- prompt for remaining missing critical values in interactive terminals
 - load/start listener + worker and print final status/log tails
 - enforce dev-only runtime guardrails (role + hostname)
+
+After auto-generation, copy `GITHUB_WEBHOOK_SECRET` from the env file to the
+GitHub webhook `Secret` field for signature verification.
 
 Non-interactive examples:
 
 ```bash
 bash scripts/setup-upstream-webhook-launchd.sh --show-only
-bash scripts/setup-upstream-webhook-launchd.sh --set GITHUB_WEBHOOK_SECRET=your_secret_here
+bash scripts/setup-upstream-webhook-launchd.sh --no-auto-secret
 ```
 
 ### Dev/Runtime Separation Guard

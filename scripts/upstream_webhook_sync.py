@@ -35,7 +35,7 @@ from typing import Any
 
 LOG = logging.getLogger("upstream-webhook-sync")
 
-DEFAULT_UPSTREAM_REPO = "Lumio-Research/hermes-agent-rs"
+DEFAULT_UPSTREAM_REPO = "NousResearch/hermes-agent"
 DEFAULT_UPSTREAM_REF = "refs/heads/main"
 
 

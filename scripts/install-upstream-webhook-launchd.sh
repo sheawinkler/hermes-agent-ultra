@@ -26,6 +26,7 @@ ENV_FILE="${HOME}/.hermes-agent-ultra/upstream-webhook-sync.env"
 LOG_DIR="${HOME}/.hermes-agent-ultra/logs"
 LOAD_SERVICES="1"
 DEFAULT_HOSTNAME="$(hostname -s 2>/dev/null || hostname)"
+AUTO_GENERATE_SECRET="${UPSTREAM_SYNC_AUTO_GENERATE_SECRET:-1}"
 
 ensure_env_key() {
   local file="$1"
@@ -39,6 +40,39 @@ ensure_env_key() {
   cat "${file}" > "${tmp}"
   printf '\n%s=%s\n' "${key}" "${value}" >> "${tmp}"
   mv "${tmp}" "${file}"
+}
+
+upsert_env_key() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  local tmp
+  tmp="$(mktemp)"
+  awk -v k="${key}" -v v="${value}" '
+    BEGIN { done=0 }
+    $0 ~ ("^" k "=") { print k "=" v; done=1; next }
+    { print }
+    END { if (!done) print k "=" v }
+  ' "${file}" > "${tmp}"
+  mv "${tmp}" "${file}"
+}
+
+is_true() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+generate_secret() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 32
+    return
+  fi
+  python3 - <<'PY'
+import secrets
+print(secrets.token_hex(32))
+PY
 }
 
 while [[ $# -gt 0 ]]; do
@@ -103,7 +137,7 @@ UPSTREAM_SYNC_RUNTIME_ROLE=dev
 UPSTREAM_SYNC_ALLOWED_HOSTNAME=${DEFAULT_HOSTNAME}
 UPSTREAM_SYNC_DISABLE_DEV_GUARD=0
 
-UPSTREAM_SYNC_EXPECTED_REPO=Lumio-Research/hermes-agent-rs
+UPSTREAM_SYNC_EXPECTED_REPO=NousResearch/hermes-agent
 UPSTREAM_SYNC_EXPECTED_REF=refs/heads/main
 UPSTREAM_SYNC_HOST=127.0.0.1
 UPSTREAM_SYNC_PORT=8099
@@ -133,6 +167,13 @@ fi
 ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_RUNTIME_ROLE" "dev"
 ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_ALLOWED_HOSTNAME" "${DEFAULT_HOSTNAME}"
 ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_DISABLE_DEV_GUARD" "0"
+ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_EXPECTED_REPO" "NousResearch/hermes-agent"
+if grep -qE '^UPSTREAM_SYNC_EXPECTED_REPO=Lumio-Research/hermes-agent-rs$' "${ENV_FILE}"; then
+  upsert_env_key "${ENV_FILE}" "UPSTREAM_SYNC_EXPECTED_REPO" "NousResearch/hermes-agent"
+fi
+if is_true "${AUTO_GENERATE_SECRET}" && grep -qE '^GITHUB_WEBHOOK_SECRET=$' "${ENV_FILE}"; then
+  upsert_env_key "${ENV_FILE}" "GITHUB_WEBHOOK_SECRET" "$(generate_secret)"
+fi
 chmod 600 "${ENV_FILE}"
 
 cat > "${LISTENER_PLIST}" <<EOF
