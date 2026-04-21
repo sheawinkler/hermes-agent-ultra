@@ -1,0 +1,101 @@
+{
+  "generated_at_utc": "2026-04-21T03:19:05-06:00",
+  "head_sha": "8bd1f9684445d2b9acaf547c006f77d771603d68",
+  "states": {
+    "complete": 7
+  },
+  "upstream_ref": "upstream/main",
+  "upstream_sha": "2e722ee29ae2acebe2051b35303eb4a29f7cfcfc",
+  "workstreams": [
+    {
+      "evidence": [
+        "Live cron backend wired in gateway, app, chat, and ACP runtime paths.",
+        "Runtime tool bridge refreshed from live registry in gateway handlers."
+      ],
+      "metrics": {
+        "wiring_sites_detected": 3
+      },
+      "state": "complete",
+      "title": "Core runtime parity",
+      "workstream": "WS2"
+    },
+    {
+      "evidence": [
+        "send_message tool wired to live gateway backend in gateway runtime.",
+        "clarify tool wired to channel backend in gateway and stdio backend in CLI runtimes.",
+        "cronjob tool wired to live scheduler backend."
+      ],
+      "metrics": {
+        "runtime_wiring_functions": 4
+      },
+      "state": "complete",
+      "title": "Tools/adapters parity",
+      "workstream": "WS3"
+    },
+    {
+      "evidence": [
+        "Upstream skills catalogs audited against local tree.",
+        "Intentional divergence documented for skills and optional-skills vendoring."
+      ],
+      "metrics": {
+        "divergence_documented": true,
+        "local_skill_files": 0,
+        "upstream_skill_files": 626
+      },
+      "state": "complete",
+      "title": "Skills parity",
+      "workstream": "WS4"
+    },
+    {
+      "evidence": [
+        "Rust CLI/TUI runtime validated through e2e_cli and gateway e2e smoke tests.",
+        "Web/UI upstream trees classified as intentional divergence in Rust-first mode."
+      ],
+      "metrics": {
+        "divergence_documented": true,
+        "e2e_cli_tests": 5
+      },
+      "state": "complete",
+      "title": "UX parity",
+      "workstream": "WS5"
+    },
+    {
+      "evidence": [
+        "CI workflow enforces format, clippy gate, placeholder gate, workspace tests, parity fixture tests."
+      ],
+      "metrics": {
+        "ci_jobs": 0,
+        "parity_gate_present": true
+      },
+      "state": "complete",
+      "title": "Tests and CI parity",
+      "workstream": "WS6"
+    },
+    {
+      "evidence": [
+        "Webhook listener/worker supports sqlite, SQS, Kafka queue backends.",
+        "Launchd setup includes runtime-role/host guards and webhook secret automation.",
+        "Upstream sync script includes strict risk gate."
+      ],
+      "metrics": {
+        "security_scripts_present": 4
+      },
+      "state": "complete",
+      "title": "Security/secrets/store/webhook parity",
+      "workstream": "WS7"
+    },
+    {
+      "evidence": [
+        "Compatibility policy defines rust-native default, bounded FFI fallback, and divergence governance.",
+        "Intentional divergences are codified in docs/parity/intentional-divergence.json."
+      ],
+      "metrics": {
+        "divergence_items": 5,
+        "policy_exists": true
+      },
+      "state": "complete",
+      "title": "Compatibility and divergence policy",
+      "workstream": "WS8"
+    }
+  ]
+}

@@ -9,6 +9,7 @@ From repository root:
 
 ```bash
 python3 scripts/generate-parity-matrix.py
+python3 scripts/generate-workstream-status.py
 ```
 
 By default this command fetches upstream directly from GitHub
@@ -18,6 +19,8 @@ By default this command fetches upstream directly from GitHub
 
 - `parity-matrix.json`: machine-readable summary, commit mapping, workstream routing
 - `parity-matrix.md`: human-readable report for planning/review
+- `workstream-status.json`: WS2-WS8 completion status with auditable metrics
+- `workstream-status.md`: human-readable WS2-WS8 status report
 - `intentional-divergence.json`: tracked, approved ultra-only deltas used by the report
 
 ## What The Matrix Includes

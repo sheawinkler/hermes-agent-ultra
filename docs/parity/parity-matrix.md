@@ -1,29 +1,29 @@
 # Parity Matrix
 
-Generated: `2026-04-21T08:52:40.467870+00:00`
+Generated: `2026-04-21T09:34:37.349351+00:00`
 
 ## Scope
 
-- Local ref: `main` (`ff3a56cfbcc7ace695fcf092ed08851e51d9f493`)
-- Upstream ref: `upstream/main` (`e0dc0a88d3218980bdcc888c2741a27ab332eff7`)
+- Local ref: `main` (`8bd1f9684445d2b9acaf547c006f77d771603d68`)
+- Upstream ref: `upstream/main` (`2e722ee29ae2acebe2051b35303eb4a29f7cfcfc`)
 - Merge base: `none (history divergence)`
 
 ## Summary
 
 | Metric | Value |
 | --- | ---: |
-| Commits behind local (`upstream` ancestry only) | 5170 |
-| Commits ahead local (`local` ancestry only) | 114 |
-| Upstream commits missing by patch-id (`git cherry local upstream`, `+`) | 4464 |
+| Commits behind local (`upstream` ancestry only) | 5178 |
+| Commits ahead local (`local` ancestry only) | 117 |
+| Upstream commits missing by patch-id (`git cherry local upstream`, `+`) | 4472 |
 | Upstream commits represented by patch-id (`git cherry local upstream`, `-`) | 4 |
-| Local commits unique by patch-id (`git cherry upstream local`, `+`) | 112 |
-| Files only in upstream tree | 2188 |
-| Files only in local tree | 368 |
+| Local commits unique by patch-id (`git cherry upstream local`, `+`) | 115 |
+| Files only in upstream tree | 2192 |
+| Files only in local tree | 369 |
 | Shared files identical content | 0 |
 | Shared files different content | 8 |
-| Total files changed (`local` vs `upstream`) | 2565 |
-| Insertions (`local` vs `upstream`) | 847775 |
-| Deletions (`local` vs `upstream`) | 129582 |
+| Total files changed (`local` vs `upstream`) | 2570 |
+| Insertions (`local` vs `upstream`) | 849334 |
+| Deletions (`local` vs `upstream`) | 129843 |
 
 ## Top 40 upstream-only buckets
 
@@ -31,7 +31,7 @@ Generated: `2026-04-21T08:52:40.467870+00:00`
 | --- | ---: |
 | `tests/gateway` | 174 |
 | `skills/creative` | 165 |
-| `tests/tools` | 153 |
+| `tests/tools` | 154 |
 | `website/docs` | 127 |
 | `ui-tui/packages` | 126 |
 | `tests/hermes_cli` | 122 |
@@ -91,7 +91,7 @@ Generated: `2026-04-21T08:52:40.467870+00:00`
 | `crates/hermes-gateway` | 45 |
 | `crates/hermes-agent` | 43 |
 | `crates/hermes-intelligence` | 36 |
-| `crates/hermes-cli` | 33 |
+| `crates/hermes-cli` | 34 |
 | `crates/hermes-config` | 18 |
 | `crates/hermes-environments` | 13 |
 | `crates/hermes-core` | 11 |
@@ -132,20 +132,20 @@ Generated: `2026-04-21T08:52:40.467870+00:00`
 
 | Workstream | Issue | Name | Upstream-only | Shared-different | Risk | Effort |
 | --- | ---: | --- | ---: | ---: | --- | --- |
-| `WS6` | #10 | Tests and CI parity | 704 | 0 | high | XL |
+| `WS6` | #10 | Tests and CI parity | 706 | 0 | high | XL |
 | `WS4` | #8 | Skills parity | 626 | 0 | high | XL |
 | `WS5` | #9 | UX parity | 451 | 0 | high | XL |
-| `WS8` | #12 | Compatibility and divergence policy | 197 | 8 | medium | L |
+| `WS8` | #12 | Compatibility and divergence policy | 199 | 8 | medium | L |
 | `WS3` | #7 | Tools and adapters parity | 161 | 0 | high | L |
 | `WS2` | #6 | Core runtime parity | 49 | 0 | critical | M |
 | `WS7` | #11 | Security/secrets/store/webhook parity | 0 | 0 | critical | S |
 
 ## Commit Mapping
 
-- Upstream missing by patch-id: `4464`
+- Upstream missing by patch-id: `4472`
 - Upstream represented by patch-id: `4`
-- Local unique by patch-id: `112`
-- Intentional divergence tracked items: `3` (covered files: `10`)
+- Local unique by patch-id: `115`
+- Intentional divergence tracked items: `5` (covered files: `10`)
 - Merge base is absent; patch-id mapping is used as primary commit equivalence signal.
 
 ## Intentional Divergence Registry
@@ -155,6 +155,8 @@ Generated: `2026-04-21T08:52:40.467870+00:00`
 | `ultra-contextlattice-memory-plugin` | approved | WS3 | 2 | Keep ContextLattice native memory plugin and provider discovery in the Rust agent runtime. |
 | `ultra-webhook-queue-backends` | approved | WS7 | 4 | Preserve webhook-driven sync queue worker architecture with sqlite, SQS, and Kafka support. |
 | `ultra-launchd-webhook-lifecycle` | approved | WS7 | 4 | Preserve launchd-based interactive dev lifecycle management for webhook listener and worker. |
+| `rust-skills-catalog-governance` | approved | WS4 | 0 | Track upstream skills and optional-skills catalogs via parity audits while keeping Rust runtime skill loading externalized (no direct Python skill-tree vendoring). |
+| `rust-cli-tui-primary-ux-surface` | approved | WS5 | 0 | Treat Rust CLI/TUI and gateway as primary UX surface; upstream web/ui-tui trees are tracked as intentional divergence unless explicitly ported. |
 
 
 ## Notes

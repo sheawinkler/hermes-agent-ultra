@@ -33,6 +33,27 @@
         "scripts/status-upstream-webhook-launchd.sh",
         "scripts/uninstall-upstream-webhook-launchd.sh"
       ]
+    },
+    {
+      "id": "rust-skills-catalog-governance",
+      "status": "approved",
+      "workstream": "WS4",
+      "summary": "Track upstream skills and optional-skills catalogs via parity audits while keeping Rust runtime skill loading externalized (no direct Python skill-tree vendoring).",
+      "path_prefixes": [
+        "skills/",
+        "optional-skills/"
+      ]
+    },
+    {
+      "id": "rust-cli-tui-primary-ux-surface",
+      "status": "approved",
+      "workstream": "WS5",
+      "summary": "Treat Rust CLI/TUI and gateway as primary UX surface; upstream web/ui-tui trees are tracked as intentional divergence unless explicitly ported.",
+      "path_prefixes": [
+        "web/",
+        "ui-tui/",
+        "website/"
+      ]
     }
   ]
 }

@@ -1,25 +1,25 @@
 {
-  "generated_at_utc": "2026-04-21T08:52:40.467870+00:00",
+  "generated_at_utc": "2026-04-21T09:34:37.349351+00:00",
   "refs": {
     "local_ref": "main",
-    "local_sha": "ff3a56cfbcc7ace695fcf092ed08851e51d9f493",
+    "local_sha": "8bd1f9684445d2b9acaf547c006f77d771603d68",
     "upstream_ref": "upstream/main",
-    "upstream_sha": "e0dc0a88d3218980bdcc888c2741a27ab332eff7",
+    "upstream_sha": "2e722ee29ae2acebe2051b35303eb4a29f7cfcfc",
     "merge_base": null
   },
   "summary": {
-    "commits_behind": 5170,
-    "commits_ahead": 114,
-    "upstream_patch_missing": 4464,
+    "commits_behind": 5178,
+    "commits_ahead": 117,
+    "upstream_patch_missing": 4472,
     "upstream_patch_represented": 4,
-    "local_patch_unique": 112,
-    "files_only_upstream": 2188,
-    "files_only_local": 368,
+    "local_patch_unique": 115,
+    "files_only_upstream": 2192,
+    "files_only_local": 369,
     "files_shared_identical": 0,
     "files_shared_different": 8,
-    "tree_files_changed": 2565,
-    "tree_insertions": 847775,
-    "tree_deletions": 129582
+    "tree_files_changed": 2570,
+    "tree_insertions": 849334,
+    "tree_deletions": 129843
   },
   "top_upstream_only": [
     {
@@ -32,7 +32,7 @@
     },
     {
       "path": "tests/tools",
-      "count": 153
+      "count": 154
     },
     {
       "path": "website/docs",
@@ -236,7 +236,7 @@
     },
     {
       "path": "crates/hermes-cli",
-      "count": 33
+      "count": 34
     },
     {
       "path": "crates/hermes-config",
@@ -390,7 +390,7 @@
     },
     {
       "path": "tests/tools",
-      "count": 153
+      "count": 154
     },
     {
       "path": "website/docs",
@@ -560,7 +560,7 @@
     },
     {
       "path": "crates/hermes-cli",
-      "count": 33
+      "count": 34
     },
     {
       "path": "crates/hermes-config",
@@ -708,7 +708,7 @@
       "workstream": "WS6",
       "issue": 10,
       "name": "Tests and CI parity",
-      "upstream_only": 704,
+      "upstream_only": 706,
       "shared_different": 0,
       "local_only": 2,
       "risk": "high",
@@ -738,7 +738,7 @@
       "workstream": "WS8",
       "issue": 12,
       "name": "Compatibility and divergence policy",
-      "upstream_only": 197,
+      "upstream_only": 199,
       "shared_different": 8,
       "local_only": 140,
       "risk": "medium",
@@ -760,7 +760,7 @@
       "name": "Core runtime parity",
       "upstream_only": 49,
       "shared_different": 0,
-      "local_only": 129,
+      "local_only": 130,
       "risk": "critical",
       "effort": "M"
     },
@@ -776,9 +776,9 @@
     }
   ],
   "commit_mapping": {
-    "upstream_patch_missing": 4464,
+    "upstream_patch_missing": 4472,
     "upstream_patch_represented": 4,
-    "local_patch_unique": 112,
+    "local_patch_unique": 115,
     "local_patch_equivalent_to_upstream": 1,
     "upstream_patch_missing_sample": [
       "21d80ca68346dfdb8d3556015a723a9217f8566f",
@@ -833,7 +833,7 @@
     "local_patch_equivalent_sample": [
       "b1d41bf1859700455bc89c420a0efd12dec5950b"
     ],
-    "intentional_divergence_items": 3,
+    "intentional_divergence_items": 5,
     "intentional_divergence_covered_files": 10
   },
   "intentional_divergence": [
@@ -873,6 +873,22 @@
         "scripts/status-upstream-webhook-launchd.sh",
         "scripts/uninstall-upstream-webhook-launchd.sh"
       ]
+    },
+    {
+      "id": "rust-skills-catalog-governance",
+      "status": "approved",
+      "workstream": "WS4",
+      "summary": "Track upstream skills and optional-skills catalogs via parity audits while keeping Rust runtime skill loading externalized (no direct Python skill-tree vendoring).",
+      "matched_files": 0,
+      "matched_sample": []
+    },
+    {
+      "id": "rust-cli-tui-primary-ux-surface",
+      "status": "approved",
+      "workstream": "WS5",
+      "summary": "Treat Rust CLI/TUI and gateway as primary UX surface; upstream web/ui-tui trees are tracked as intentional divergence unless explicitly ported.",
+      "matched_files": 0,
+      "matched_sample": []
     }
   ]
 }
