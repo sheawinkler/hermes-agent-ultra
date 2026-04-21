@@ -138,9 +138,6 @@ hermes_tools|clippy::manual_strip|crates/hermes-tools/src/v4a_patch.rs
 hermes_tools|clippy::op_ref|crates/hermes-tools/src/credential_guard.rs
 hermes_tools|clippy::too_many_arguments|crates/hermes-tools/src/registry.rs
 hermes_tools|clippy::too_many_arguments|crates/hermes-tools/src/tools/delegation.rs
-hermes_tools|unused_imports|crates/hermes-tools/src/credential_guard.rs
 hermes_tools|unused_variables|crates/hermes-tools/src/tools/file.rs
 hermes|clippy::question_mark|crates/hermes-cli/src/bin/hermes.rs
 prop_config_roundtrip|unused_imports|crates/hermes-config/tests/prop_config_roundtrip.rs
-prop_error_classifier|noop_method_call|crates/hermes-intelligence/tests/prop_error_classifier.rs
-prop_registry|noop_method_call|crates/hermes-tools/tests/prop_registry.rs
