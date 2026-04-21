@@ -13,6 +13,7 @@ use hermes_cli::app::{
     bridge_tool_registry, build_agent_config, build_provider, provider_api_key_from_env,
 };
 use hermes_cli::cli::{Cli, CliCommand};
+use hermes_cli::config_env::hydrate_env_from_config;
 use hermes_cli::runtime_tool_wiring::{
     wire_cron_scheduler_backend, wire_gateway_clarify_backend, wire_gateway_messaging_backend,
 };
@@ -71,6 +72,13 @@ async fn main() {
     init_tracing(cli.verbose);
     if let Err(err) = hydrate_provider_env_from_vault_for_cli(&cli).await {
         tracing::warn!("Secret-vault hydration skipped: {}", err);
+    }
+    if let Ok(cfg) = load_config(cli.config_dir.as_deref()) {
+        let applied = hydrate_env_from_config(&cfg);
+        tracing::debug!(
+            applied_env_vars = applied,
+            "Hydrated environment from config.yaml"
+        );
     }
 
     tracing::debug!("Hermes Agent starting");
