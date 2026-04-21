@@ -119,6 +119,33 @@ python3 scripts/upstream_webhook_sync.py worker \
   --strict-risk-gate
 ```
 
+## launchd Deployment (Recommended on macOS)
+
+Install user agents:
+
+```bash
+bash scripts/install-upstream-webhook-launchd.sh
+```
+
+Inspect status and logs:
+
+```bash
+bash scripts/status-upstream-webhook-launchd.sh
+```
+
+Uninstall agents:
+
+```bash
+bash scripts/uninstall-upstream-webhook-launchd.sh
+```
+
+The installer creates:
+
+- `~/Library/LaunchAgents/com.hermes_agent_ultra.upstream_webhook_listener.plist`
+- `~/Library/LaunchAgents/com.hermes_agent_ultra.upstream_webhook_worker.plist`
+- `~/.hermes-agent-ultra/upstream-webhook-sync.env` (runtime config + secrets)
+- Logs under `~/.hermes-agent-ultra/logs/`
+
 ## Reliability Notes
 
 - Keep strict risk gate enabled for unattended runs.
