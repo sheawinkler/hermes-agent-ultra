@@ -22,3 +22,15 @@
 - Note template written per SHA:
   - `batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints`
 
+## 2026-04-21 batch-03 (full pending queue triage)
+- Scope: all remaining `pending` commits after batch-01/02.
+- Input pending before pass: `4374`.
+- Actions:
+  - Marked `199` docs/meta-only commits as `superseded`.
+  - Assigned all remaining `4175` commits to explicit implementation work groups (`WG1`–`WG7`) via per-commit notes in `upstream-missing-queue.json`.
+- Artifacts:
+  - `docs/parity/full-queue-triage-groups.json`
+  - `docs/parity/full-queue-triage-groups.md`
+- Resulting disposition totals:
+  - `pending=4175`, `ported=12`, `superseded=349`, `total=4536`
+

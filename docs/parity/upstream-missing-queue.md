@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-21T22:22:18.143372+00:00`
+Generated: `2026-04-21T22:30:02.847749+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `4536`.
 
@@ -16,9 +16,9 @@ Generated: `2026-04-21T22:22:18.143372+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 4374 |
+| pending | 4175 |
 | ported | 12 |
-| superseded | 150 |
+| superseded | 349 |
 
 ## First 100 Pending Commits
 
@@ -61,7 +61,6 @@ Generated: `2026-04-21T22:22:18.143372+00:00`
 | `bdac541d1ee2` | #26 | Rename OPENAI_API_KEY to HERMES_OPENAI_API_KEY in configuration and codebase for clarity and to avoid conflicts. Update related documentation and error messages to reflect the new key name, ensuring backward compatibility with existing setups. |
 | `ec59d71e6083` | #26 | Update PTY write handling in ProcessRegistry to ensure data is encoded as bytes before writing. This change improves compatibility with string inputs and clarifies the expected data type in comments. |
 | `6731230d7340` | #26 | Add special handling for 'process' tool in _build_tool_preview function |
-| `49e1f9ea896d` | #26 | Refactor TODO.md to summarize future improvements for the Hermes Agent, focusing on subagent architecture, task management, dynamic skills expansion, and interactive clarifying questions. Key ideas include context isolation for subagents, task decomposition, progress tracking, and skill acquisition from successful tasks. |
 | `d0f82e6dcca6` | #26 | Removing random project notes doc |
 | `e184f5ab3a51` | #26 | Add todo tool for agent task planning and management |
 | `3b615b0f7a89` | #26 | Enhance tool previews in AIAgent and GatewayRunner |
@@ -91,7 +90,6 @@ Generated: `2026-04-21T22:22:18.143372+00:00`
 | `0e8ee051c64a` | #26 | feat: replace framed input with horizontal rules in CLI |
 | `109dffb2428b` | #26 | fix: refine dynamic height adjustment for input area in CLI |
 | `3f4b494c616f` | #26 | refactor: streamline thinking spinner behavior in AIAgent |
-| `422607df7c80` | #25 | feat: expand README with update and messaging gateway instructions |
 | `4f57d7116d9f` | #26 | Improved stdout handling in the terminal tool to prevent deadlocks by implementing a background thread to continuously drain output, ensuring smooth command execution without blocking. |
 | `b88e441a076a` | #26 | feat: implement cross-channel messaging functionality |
 | `59cb0cecb214` | #25 | feat: add messaging gateway startup functionality |
@@ -101,7 +99,6 @@ Generated: `2026-04-21T22:22:18.143372+00:00`
 | `057d3e1810a2` | #26 | feat: enhance search functionality in ShellFileOperations |
 | `d070b8698d39` | #26 | fix: escape file glob patterns in ShellFileOperations |
 | `4d5f29c74ca9` | #25 | feat: introduce skill management tool for agent-created skills and skills migration to ~/.hermes |
-| `997f793af12e` | #26 | feat: update TODO.md with enhancements to skills and memory systems |
 | `9350e26e681e` | #26 | feat: introduce clarifying questions tool for interactive user engagement |
 | `748f0b2b5fc1` | #26 | feat: enhance clarify tool with configurable timeout and countdown display |
 | `783acd712d6a` | #20 | feat: implement code execution sandbox for programmatic tool calling |
@@ -112,7 +109,6 @@ Generated: `2026-04-21T22:22:18.143372+00:00`
 | `c0d412a736f1` | #26 | refactor: update search tool parameters and documentation for clarity |
 | `90e521112876` | #25 | feat: implement subagent delegation for task management |
 | `ba07d9d5e3a1` | #26 | feat: enhance task delegation with spinner updates and progress display |
-| `b9f3518b33aa` | #26 | refactor: streamline TODO.md for clarity and focus |
 | `c007b9e5bd19` | #25 | chore: update installer banner text for branding consistency |
 | `cfef34f7a61f` | #25 | feat: add multi-provider authentication and inference provider selection |
 | `f6daceb449c4` | #26 | feat: add interactive model selection and saving functionality |
@@ -121,7 +117,11 @@ Generated: `2026-04-21T22:22:18.143372+00:00`
 | `24c241d29b3a` | #21 | add github project management skill |
 | `5c4c0c0cbaf4` | #25 | feat: update branding and visuals across the project |
 | `630bd3d78913` | #26 | feat: improve password prompt handling in terminal tool |
-| `fc37b17b1f4c` | #25 | feat: simplify README instructions for connecting to LLM providers |
-| `3961f8e7a493` | #25 | refactor: update README for improved clarity on provider setup and switching |
 | `9a19fe1f5090` | #26 | chore: remove deprecated session viewer and exported data files |
+| `70dd3a16dccd` | #20 | Cleanup time! |
+| `c48817f69b22` | #26 | chore: update agent-browser dependency and clean up stale daemon processes |
+| `b33ed9176ff8` | #26 | feat: update database schema and enhance message persistence |
+| `5b3f708fcb44` | #26 | feat: enhance stale daemon cleanup and improve error logging in browser tool |
+| `6903c4605ceb` | #26 | chore: update package-lock.json with new dependencies and version upgrades |
+| `3dfc0a9679d6` | #21 | feat: add PPTX editing and creation skills with comprehensive documentation |
 
