@@ -24,6 +24,8 @@ import json
 import logging
 import os
 import pathlib
+import re
+import shutil
 import sqlite3
 import subprocess
 import time
@@ -396,6 +398,321 @@ def parse_report_status(report_path: str) -> str:
     return status
 
 
+def run_git(repo_root: str, args: list[str], check: bool = True) -> tuple[int, str, str]:
+    proc = subprocess.run(
+        ["git", *args],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+    )
+    if check and proc.returncode != 0:
+        raise RuntimeError(f"git {' '.join(args)} failed: {proc.stderr.strip()}")
+    return proc.returncode, proc.stdout.strip(), proc.stderr.strip()
+
+
+def git_ref_exists(repo_root: str, ref: str) -> bool:
+    rc, _, _ = run_git(repo_root, ["rev-parse", "--verify", ref], check=False)
+    return rc == 0
+
+
+def git_show_file(repo_root: str, ref: str, rel_path: str) -> str | None:
+    rc, out, _ = run_git(repo_root, ["show", f"{ref}:{rel_path}"], check=False)
+    if rc != 0:
+        return None
+    return out
+
+
+def rust_fn_block(source: str, fn_name: str) -> str | None:
+    fn_re = re.compile(rf"(?m)^(?:pub\s+)?(?:async\s+)?fn\s+{re.escape(fn_name)}\b")
+    m = fn_re.search(source)
+    if not m:
+        return None
+    start = m.start()
+    next_fn_re = re.compile(r"(?m)^(?:pub\s+)?(?:async\s+)?fn\s+[A-Za-z0-9_]+")
+    n = next_fn_re.search(source, m.end())
+    end = n.start() if n else len(source)
+    return source[start:end]
+
+
+def extract_actions_from_rust_fn(source: str, fn_name: str) -> list[str]:
+    block = rust_fn_block(source, fn_name)
+    if not block:
+        return []
+    actions: set[str] = set()
+    for m in re.finditer(r'unwrap_or\("([A-Za-z0-9_-]+)"\)', block):
+        actions.add(m.group(1))
+    for raw in block.splitlines():
+        line = raw.strip()
+        if "=>" not in line:
+            continue
+        if not (
+            line.startswith("Some(")
+            or line.startswith("None")
+            or line.startswith('"')
+        ):
+            continue
+        for m in re.finditer(r'"([A-Za-z0-9_-]+)"', line):
+            actions.add(m.group(1))
+    return sorted(actions)
+
+
+def camel_to_kebab(name: str) -> str:
+    out: list[str] = []
+    for idx, ch in enumerate(name):
+        if ch.isupper() and idx > 0:
+            out.append("-")
+        out.append(ch.lower())
+    return "".join(out)
+
+
+def extract_top_level_cli_commands(cli_source: str) -> list[str]:
+    names = []
+    for m in re.finditer(r"(?m)^\s{4}([A-Z][A-Za-z0-9_]*)\s*(?:\{|,)", cli_source):
+        variant = m.group(1)
+        names.append(camel_to_kebab(variant))
+    return sorted(set(names))
+
+
+def collect_cli_surface(repo_root: str, ref: str) -> dict[str, Any] | None:
+    cli_rs = git_show_file(repo_root, ref, "crates/hermes-cli/src/cli.rs")
+    main_rs = git_show_file(repo_root, ref, "crates/hermes-cli/src/main.rs")
+    commands_rs = git_show_file(repo_root, ref, "crates/hermes-cli/src/commands.rs")
+    if not cli_rs or not main_rs or not commands_rs:
+        return None
+
+    fn_map: dict[str, tuple[str, str]] = {
+        "tools": ("main", "run_tools"),
+        "gateway": ("main", "run_gateway"),
+        "auth": ("main", "run_auth"),
+        "cron": ("main", "run_cron"),
+        "webhook": ("main", "run_webhook"),
+        "profile": ("main", "run_profile"),
+        "memory": ("commands", "handle_cli_memory"),
+        "mcp": ("commands", "handle_cli_mcp"),
+        "skills": ("commands", "handle_cli_skills"),
+    }
+    source_lookup = {"main": main_rs, "commands": commands_rs}
+    actions: dict[str, list[str]] = {}
+    for command_name, (src_key, fn_name) in fn_map.items():
+        actions[command_name] = extract_actions_from_rust_fn(source_lookup[src_key], fn_name)
+    return {
+        "ref": ref,
+        "top_level": extract_top_level_cli_commands(cli_rs),
+        "actions": actions,
+    }
+
+
+def compute_cli_surface_drift(
+    local_surface: dict[str, Any], upstream_surface: dict[str, Any]
+) -> dict[str, Any]:
+    local_top = set(local_surface.get("top_level", []))
+    upstream_top = set(upstream_surface.get("top_level", []))
+    top_missing = sorted(upstream_top - local_top)
+    top_extra = sorted(local_top - upstream_top)
+
+    all_commands = sorted(
+        set(local_surface.get("actions", {}).keys())
+        | set(upstream_surface.get("actions", {}).keys())
+    )
+    per_command: dict[str, dict[str, list[str]]] = {}
+    missing_total = 0
+    for command_name in all_commands:
+        local_actions = set(local_surface.get("actions", {}).get(command_name, []))
+        upstream_actions = set(upstream_surface.get("actions", {}).get(command_name, []))
+        missing = sorted(upstream_actions - local_actions)
+        extra = sorted(local_actions - upstream_actions)
+        if missing or extra:
+            per_command[command_name] = {
+                "missing_in_local": missing,
+                "extra_in_local": extra,
+            }
+            missing_total += len(missing)
+
+    has_drift = bool(top_missing or missing_total > 0)
+    return {
+        "has_drift": has_drift,
+        "top_level": {
+            "missing_in_local": top_missing,
+            "extra_in_local": top_extra,
+        },
+        "actions": per_command,
+        "missing_action_count": missing_total,
+    }
+
+
+def load_seen_drift_fingerprints(path: str) -> dict[str, Any]:
+    if not os.path.exists(path):
+        return {"fingerprints": {}}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            raw = json.load(fh)
+        if isinstance(raw, dict) and isinstance(raw.get("fingerprints"), dict):
+            return raw
+    except Exception:
+        pass
+    return {"fingerprints": {}}
+
+
+def save_seen_drift_fingerprints(path: str, payload: dict[str, Any]) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2, sort_keys=True)
+
+
+def gh_issue_comment(repo_root: str, issue: int, body: str) -> bool:
+    if shutil.which("gh") is None:
+        return False
+    proc = subprocess.run(
+        ["gh", "issue", "comment", str(issue), "--body", body],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        LOG.warning("gh issue comment failed: %s", proc.stderr.strip())
+        return False
+    return True
+
+
+def gh_issue_create(
+    repo_root: str, title: str, body: str, labels: list[str]
+) -> str | None:
+    if shutil.which("gh") is None:
+        return None
+    cmd = ["gh", "issue", "create", "--title", title, "--body", body]
+    for label in labels:
+        if label.strip():
+            cmd.extend(["--label", label.strip()])
+    proc = subprocess.run(
+        cmd,
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        LOG.warning("gh issue create failed: %s", proc.stderr.strip())
+        return None
+    return proc.stdout.strip().splitlines()[-1].strip() if proc.stdout.strip() else None
+
+
+def maybe_check_cli_surface_drift(
+    *,
+    repo_root: str,
+    report_dir: str,
+    event: SyncEvent,
+    upstream_ref: str,
+    parent_issue: int,
+    open_parity_issue: bool,
+    parity_labels: list[str],
+    enabled: bool,
+) -> dict[str, Any]:
+    if not enabled:
+        return {"enabled": False, "checked": False}
+    local_ref = "HEAD"
+    local_surface = collect_cli_surface(repo_root, local_ref)
+    if local_surface is None:
+        return {"enabled": True, "checked": False, "reason": "local_cli_surface_missing"}
+    if not git_ref_exists(repo_root, upstream_ref):
+        return {
+            "enabled": True,
+            "checked": False,
+            "reason": f"upstream_ref_missing:{upstream_ref}",
+        }
+    upstream_surface = collect_cli_surface(repo_root, upstream_ref)
+    if upstream_surface is None:
+        return {
+            "enabled": True,
+            "checked": False,
+            "reason": f"upstream_cli_surface_missing:{upstream_ref}",
+        }
+
+    drift = compute_cli_surface_drift(local_surface, upstream_surface)
+    generated_at = utc_now_iso()
+    artifact = {
+        "generated_at": generated_at,
+        "delivery_id": event.delivery_id,
+        "repository": event.repository,
+        "upstream_ref": upstream_ref,
+        "local_ref": local_ref,
+        "upstream_after_sha": event.after_sha,
+        "drift": drift,
+        "local_surface": local_surface,
+        "upstream_surface": upstream_surface,
+    }
+    os.makedirs(report_dir, exist_ok=True)
+    artifact_path = os.path.join(report_dir, f"cli-surface-drift-{event.delivery_id}.json")
+    with open(artifact_path, "w", encoding="utf-8") as fh:
+        json.dump(artifact, fh, indent=2, sort_keys=True)
+
+    result = {
+        "enabled": True,
+        "checked": True,
+        "artifact_path": artifact_path,
+        "has_drift": bool(drift.get("has_drift")),
+        "commented_parent_issue": False,
+        "created_issue_url": None,
+    }
+    if not drift.get("has_drift"):
+        return result
+
+    fingerprint_payload = {
+        "top_level_missing": drift.get("top_level", {}).get("missing_in_local", []),
+        "action_missing": {
+            cmd: details.get("missing_in_local", [])
+            for cmd, details in sorted(drift.get("actions", {}).items())
+            if details.get("missing_in_local")
+        },
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(fingerprint_payload, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    seen_path = os.path.join(report_dir, "cli-surface-drift-seen.json")
+    seen = load_seen_drift_fingerprints(seen_path)
+
+    missing_top = drift.get("top_level", {}).get("missing_in_local", [])
+    missing_action_count = int(drift.get("missing_action_count", 0))
+    summary_lines = [
+        "CLI surface drift detected.",
+        f"- delivery_id: `{event.delivery_id}`",
+        f"- upstream_ref: `{upstream_ref}`",
+        f"- upstream_after: `{event.after_sha}`",
+        f"- missing_top_level: `{len(missing_top)}`",
+        f"- missing_actions: `{missing_action_count}`",
+        f"- artifact: `{artifact_path}`",
+    ]
+    if missing_top:
+        summary_lines.append(f"- missing_top_level_names: {', '.join(missing_top[:20])}")
+    comment_body = "\n".join(summary_lines)
+    if parent_issue > 0:
+        result["commented_parent_issue"] = gh_issue_comment(repo_root, parent_issue, comment_body)
+
+    existing = seen.get("fingerprints", {}).get(fingerprint)
+    if open_parity_issue and not existing:
+        title = f"[Parity Drift] CLI surface drift from {upstream_ref} ({event.after_sha[:12]})"
+        issue_body = "\n".join(
+            [
+                "Automated parity drift detector flagged missing upstream command/action surface.",
+                "",
+                f"- delivery_id: `{event.delivery_id}`",
+                f"- upstream_ref: `{upstream_ref}`",
+                f"- upstream_after: `{event.after_sha}`",
+                f"- artifact: `{artifact_path}`",
+                "",
+                "Please port missing surface items and close this issue once parity is restored.",
+            ]
+        )
+        created = gh_issue_create(repo_root, title, issue_body, parity_labels)
+        if created:
+            result["created_issue_url"] = created
+            seen.setdefault("fingerprints", {})[fingerprint] = {
+                "created_at": generated_at,
+                "issue": created,
+                "delivery_id": event.delivery_id,
+            }
+            save_seen_drift_fingerprints(seen_path, seen)
+    return result
+
+
 def run_sync_for_event(
     event: SyncEvent,
     repo_root: str,
@@ -596,6 +913,11 @@ def worker_loop(args: argparse.Namespace) -> int:
     repo_root = args.repo_root
     report_dir = os.path.join(repo_root, ".sync-reports")
     os.makedirs(report_dir, exist_ok=True)
+    parity_labels = [
+        v.strip() for v in str(args.parity_labels).split(",") if v.strip()
+    ]
+    parity_drift_enabled = not bool(args.disable_parity_drift_check)
+    open_parity_issue = not bool(args.no_parity_open_issues)
 
     assist_cmd = args.assist_cmd or os.environ.get("UPSTREAM_SYNC_ASSIST_CMD", "")
     assist_cmd = assist_cmd.strip() or None
@@ -621,7 +943,25 @@ def worker_loop(args: argparse.Namespace) -> int:
             )
             outcome = parse_report_status(report_path)
             if rc == 0:
-                queue.mark_done(item.id, status="done", note=outcome)
+                upstream_ref = (
+                    item.event.after_sha
+                    if item.event.after_sha and git_ref_exists(repo_root, item.event.after_sha)
+                    else args.parity_upstream_ref
+                )
+                drift_result = maybe_check_cli_surface_drift(
+                    repo_root=repo_root,
+                    report_dir=report_dir,
+                    event=item.event,
+                    upstream_ref=upstream_ref,
+                    parent_issue=args.parity_parent_issue,
+                    open_parity_issue=open_parity_issue,
+                    parity_labels=parity_labels,
+                    enabled=parity_drift_enabled,
+                )
+                note = f"{outcome}; drift={'detected' if drift_result.get('has_drift') else 'none'}"
+                if drift_result.get("created_issue_url"):
+                    note += f"; issue={drift_result['created_issue_url']}"
+                queue.mark_done(item.id, status="done", note=note)
                 continue
 
             if outcome in {"risk_blocked", "conflict"}:
@@ -658,6 +998,28 @@ def worker_loop(args: argparse.Namespace) -> int:
                 timeout_sec=args.sync_timeout_sec,
             )
             outcome = parse_report_status(report_path)
+            if rc == 0:
+                upstream_ref = (
+                    event.after_sha
+                    if event.after_sha and git_ref_exists(repo_root, event.after_sha)
+                    else args.parity_upstream_ref
+                )
+                drift_result = maybe_check_cli_surface_drift(
+                    repo_root=repo_root,
+                    report_dir=report_dir,
+                    event=event,
+                    upstream_ref=upstream_ref,
+                    parent_issue=args.parity_parent_issue,
+                    open_parity_issue=open_parity_issue,
+                    parity_labels=parity_labels,
+                    enabled=parity_drift_enabled,
+                )
+                if drift_result.get("has_drift"):
+                    LOG.warning(
+                        "CLI surface drift detected for delivery=%s artifact=%s",
+                        event.delivery_id,
+                        drift_result.get("artifact_path", ""),
+                    )
             # In SQS mode: acknowledge terminal states. Let visibility timeout retry transient failures.
             if rc == 0 or outcome in {"risk_blocked", "conflict"}:
                 consumer.ack(receipt_handle)
@@ -691,6 +1053,28 @@ def worker_loop(args: argparse.Namespace) -> int:
             timeout_sec=args.sync_timeout_sec,
         )
         outcome = parse_report_status(report_path)
+        if rc == 0:
+            upstream_ref = (
+                event.after_sha
+                if event.after_sha and git_ref_exists(repo_root, event.after_sha)
+                else args.parity_upstream_ref
+            )
+            drift_result = maybe_check_cli_surface_drift(
+                repo_root=repo_root,
+                report_dir=report_dir,
+                event=event,
+                upstream_ref=upstream_ref,
+                parent_issue=args.parity_parent_issue,
+                open_parity_issue=open_parity_issue,
+                parity_labels=parity_labels,
+                enabled=parity_drift_enabled,
+            )
+            if drift_result.get("has_drift"):
+                LOG.warning(
+                    "CLI surface drift detected for delivery=%s artifact=%s",
+                    event.delivery_id,
+                    drift_result.get("artifact_path", ""),
+                )
         # Commit offsets for terminal states; for transient failures we keep offset
         # uncommitted so another worker run can retry.
         if rc == 0 or outcome in {"risk_blocked", "conflict"}:
@@ -737,6 +1121,34 @@ def build_parser() -> argparse.ArgumentParser:
     worker.add_argument("--conflict-label", default="upstream-sync-conflict")
     worker.add_argument("--no-tests", action="store_true", default=False)
     worker.add_argument("--no-pr", action="store_true", default=False)
+    worker.add_argument(
+        "--disable-parity-drift-check",
+        action="store_true",
+        default=False,
+        help="Disable CLI command/action drift detection against upstream ref",
+    )
+    worker.add_argument(
+        "--parity-upstream-ref",
+        default="upstream/main",
+        help="Git ref used for parity drift comparison (default: upstream/main)",
+    )
+    worker.add_argument(
+        "--parity-parent-issue",
+        type=int,
+        default=13,
+        help="Issue number to comment with drift reports (default: 13)",
+    )
+    worker.add_argument(
+        "--parity-labels",
+        default="parity,parity-upkeep",
+        help="Comma-separated labels for auto-created drift issues",
+    )
+    worker.add_argument(
+        "--no-parity-open-issues",
+        action="store_true",
+        default=False,
+        help="Do not auto-open new drift issues when new fingerprints are found",
+    )
     worker.add_argument(
         "--assist-cmd",
         default="",

@@ -25,6 +25,10 @@ that needs manual coding.
 - `scripts/upstream_webhook_sync.py worker`
   - Consumes queue event
   - Runs `scripts/sync-upstream.sh` with strict risk gate
+  - Runs CLI command/action parity drift check (`HEAD` vs `upstream/main` or event SHA)
+  - Emits machine-readable drift artifacts under `.sync-reports/cli-surface-drift-*.json`
+  - Comments parent upkeep issue (`#13` by default) when drift is detected
+  - Auto-opens tagged parity drift issues for new drift fingerprints
   - Classifies result:
     - `done`: merged/cherry-picked and branch/PR flow completed
     - `risk_blocked`: strict gate matched high-risk paths
@@ -119,6 +123,23 @@ python3 scripts/upstream_webhook_sync.py worker \
   --strict-risk-gate
 ```
 
+Optional parity drift flags:
+
+```bash
+python3 scripts/upstream_webhook_sync.py worker \
+  --parity-upstream-ref upstream/main \
+  --parity-parent-issue 13 \
+  --parity-labels parity,parity-upkeep
+```
+
+Disable drift checks or issue auto-open:
+
+```bash
+python3 scripts/upstream_webhook_sync.py worker \
+  --disable-parity-drift-check \
+  --no-parity-open-issues
+```
+
 ## launchd Deployment (Recommended on macOS)
 
 Single-command guided setup (recommended):
@@ -183,6 +204,14 @@ The installer creates:
 - `~/Library/LaunchAgents/com.hermes_agent_ultra.upstream_webhook_worker.plist`
 - `~/.hermes-agent-ultra/upstream-webhook-sync.env` (runtime config + secrets)
 - Logs under `~/.hermes-agent-ultra/logs/`
+
+Relevant env keys in `~/.hermes-agent-ultra/upstream-webhook-sync.env`:
+
+- `UPSTREAM_SYNC_DISABLE_PARITY_DRIFT_CHECK=0|1`
+- `UPSTREAM_SYNC_PARITY_UPSTREAM_REF=upstream/main`
+- `UPSTREAM_SYNC_PARITY_PARENT_ISSUE=13`
+- `UPSTREAM_SYNC_PARITY_LABELS=parity,parity-upkeep`
+- `UPSTREAM_SYNC_PARITY_OPEN_ISSUES=1|0`
 
 ## Reliability Notes
 
