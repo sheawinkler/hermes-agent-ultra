@@ -75,6 +75,9 @@ Default report path:
 ## Operational Notes
 
 - Requires configured `origin` and `upstream` remotes.
+- By default, sync validates that `upstream` points to `NousResearch/hermes-agent`.
+  - Override only when intentional: `ALLOW_NON_OFFICIAL_UPSTREAM=1`.
+  - Optional override target repo string: `EXPECTED_UPSTREAM_REPO=<owner/repo>`.
 - Requires a clean working tree.
 - `gh` CLI is optional; without it the script still pushes the sync branch. Conflict issue auto-creation is disabled when `gh` is unavailable.
 - Cron entry exports `REPO_ROOT` explicitly so the wrapper runs against the

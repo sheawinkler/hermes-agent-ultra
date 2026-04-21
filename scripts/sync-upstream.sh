@@ -173,6 +173,17 @@ git remote get-url "${ORIGIN_REMOTE}" >/dev/null 2>&1 || \
 git remote get-url "${UPSTREAM_REMOTE}" >/dev/null 2>&1 || \
   die "Upstream remote '${UPSTREAM_REMOTE}' is not configured"
 
+UPSTREAM_URL="$(git remote get-url "${UPSTREAM_REMOTE}")"
+EXPECTED_UPSTREAM_REPO="${EXPECTED_UPSTREAM_REPO:-NousResearch/hermes-agent}"
+ALLOW_NON_OFFICIAL_UPSTREAM="${ALLOW_NON_OFFICIAL_UPSTREAM:-0}"
+UPSTREAM_URL_LOWER="${UPSTREAM_URL,,}"
+EXPECTED_UPSTREAM_REPO_LOWER="${EXPECTED_UPSTREAM_REPO,,}"
+if [[ "${ALLOW_NON_OFFICIAL_UPSTREAM}" != "1" ]]; then
+  if [[ "${UPSTREAM_URL_LOWER}" != *"${EXPECTED_UPSTREAM_REPO_LOWER}"* ]]; then
+    die "Upstream remote '${UPSTREAM_REMOTE}' URL '${UPSTREAM_URL}' is not '${EXPECTED_UPSTREAM_REPO}'. Set ALLOW_NON_OFFICIAL_UPSTREAM=1 to bypass."
+  fi
+fi
+
 if [[ -n "$(git status --porcelain)" ]]; then
   die "Working tree is not clean. Commit/stash changes before syncing."
 fi
@@ -206,6 +217,9 @@ create_report_header() {
   append_report "strict_risk_gate: ${STRICT_RISK_GATE}"
   append_report "allow_risk_paths: ${ALLOW_RISK_PATHS}"
   append_report "risk_paths_file: ${RISK_PATHS_FILE}"
+  append_report "upstream_url: ${UPSTREAM_URL}"
+  append_report "expected_upstream_repo: ${EXPECTED_UPSTREAM_REPO}"
+  append_report "allow_non_official_upstream: ${ALLOW_NON_OFFICIAL_UPSTREAM}"
   append_report "origin_ref: ${ORIGIN_REF}"
   append_report "upstream_ref: ${UPSTREAM_REF}"
   append_report "origin_sha: ${ORIGIN_SHA}"
