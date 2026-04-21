@@ -4650,13 +4650,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "gateway/platforms/discord.py",
         "gateway/run.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG4-gateway-memory; action=implement",
+      "notes": "ported via cf64aec0: config.yaml values hydrated into environment with env precedence preserved (includes DISCORD_ALLOWED_USERS compatibility env mapping) [ticket #39/#30]",
       "owner": "codex",
       "sha": "92447141d95b5663345cdf5d1b6bbfbae7e4528f",
       "subject": "feat: integrate config.yaml values into environment for enhanced flexibility",
@@ -69166,7 +69166,7 @@
       "target_ticket_name": "GPAR-02 skills parity"
     }
   ],
-  "generated_at_utc": "2026-04-21T23:30:14.644459+00:00",
+  "generated_at_utc": "2026-04-21T23:47:43.144133+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69174,8 +69174,8 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4179,
-      "ported": 15,
+      "pending": 4178,
+      "ported": 16,
       "superseded": 349
     },
     "by_target_ticket": {
