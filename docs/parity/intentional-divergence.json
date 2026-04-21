@@ -1,0 +1,38 @@
+{
+  "items": [
+    {
+      "id": "ultra-contextlattice-memory-plugin",
+      "status": "approved",
+      "workstream": "WS3",
+      "summary": "Keep ContextLattice native memory plugin and provider discovery in the Rust agent runtime.",
+      "path_prefixes": [
+        "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
+        "crates/hermes-agent/src/memory_plugins/mod.rs"
+      ]
+    },
+    {
+      "id": "ultra-webhook-queue-backends",
+      "status": "approved",
+      "workstream": "WS7",
+      "summary": "Preserve webhook-driven sync queue worker architecture with sqlite, SQS, and Kafka support.",
+      "path_prefixes": [
+        "scripts/upstream_webhook_sync.py",
+        "scripts/run-upstream-webhook-listener.sh",
+        "scripts/run-upstream-webhook-worker.sh",
+        "docs/upstream-webhook-sync.md"
+      ]
+    },
+    {
+      "id": "ultra-launchd-webhook-lifecycle",
+      "status": "approved",
+      "workstream": "WS7",
+      "summary": "Preserve launchd-based interactive dev lifecycle management for webhook listener and worker.",
+      "path_prefixes": [
+        "scripts/install-upstream-webhook-launchd.sh",
+        "scripts/setup-upstream-webhook-launchd.sh",
+        "scripts/status-upstream-webhook-launchd.sh",
+        "scripts/uninstall-upstream-webhook-launchd.sh"
+      ]
+    }
+  ]
+}
