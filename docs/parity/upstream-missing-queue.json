@@ -8022,14 +8022,14 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tests/tools/test_homeassistant_tool.py",
         "tools/homeassistant_tool.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "ported via HA entity/service validation hardening in Rust backend",
+      "owner": "sheawinkler",
       "sha": "25fb9aafcbf1530f13b4df2e52a817a6a43dfaa5",
       "subject": "fix: add service domain blocklist and entity_id validation to HA tools",
       "target_ticket": 20,
@@ -68572,7 +68572,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     }
   ],
-  "generated_at_utc": "2026-04-21T17:03:16.233824+00:00",
+  "generated_at_utc": "2026-04-21T17:07:03.145240+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -68580,8 +68580,8 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4504,
-      "ported": 5
+      "pending": 4503,
+      "ported": 6
     },
     "by_target_ticket": {
       "20": 1607,
