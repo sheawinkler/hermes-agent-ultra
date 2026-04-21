@@ -10,7 +10,7 @@ mod skill;
 mod store;
 mod version;
 
-pub use guard::SkillGuard;
+pub use guard::{validate_skill, validate_skill_url, SkillGuard};
 pub use hub::{SkillUpdate, SkillsHubClient};
 pub use skill::{SkillError, SkillManager};
 pub use store::{FileSkillStore, SkillStore};

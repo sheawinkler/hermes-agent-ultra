@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use hermes_core::tool_call_parser::format_tool_calls;
+use hermes_core::tool_call_parser::{format_tool_calls, parse_tool_calls, separate_text_and_calls};
 use hermes_core::types::ToolCall;
 use hermes_intelligence::anthropic_adapter::{
     common_betas_for_base_url, default_anthropic_beta_list, fast_mode_request_beta_list,
@@ -224,6 +224,28 @@ pub fn dispatch_case(op: &str, input: &Value) -> Result<Value, String> {
             )
             .map_err(|e| e.to_string())?;
             Ok(Value::String(format_tool_calls(&calls)))
+        }
+        "parse_tool_calls" => {
+            let content = input
+                .get("content")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "missing input.content".to_string())?;
+            let mut calls = parse_tool_calls(content).map_err(|e| e.to_string())?;
+            for call in &mut calls {
+                call.id.clear();
+            }
+            serde_json::to_value(calls).map_err(|e| e.to_string())
+        }
+        "separate_text_and_calls" => {
+            let content = input
+                .get("content")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "missing input.content".to_string())?;
+            let (text, mut calls) = separate_text_and_calls(content);
+            for call in &mut calls {
+                call.id.clear();
+            }
+            Ok(json!({"text": text, "calls": calls}))
         }
         "checkpoint_shadow_dir_id" => {
             let abs = input

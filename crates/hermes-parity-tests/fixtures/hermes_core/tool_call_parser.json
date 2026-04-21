@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "fixture_group": "hermes_core",
+  "python_module": "tool_call_parser parity intents",
+  "cases": [
+    {
+      "id": "parse_xml_single_call",
+      "op": "parse_tool_calls",
+      "input": {
+        "content": "<function_calls>\n<invoke name=\"search\">\n<parameter name=\"query\">rust async</parameter>\n</invoke>\n</function_calls>"
+      },
+      "expected": [
+        {
+          "id": "",
+          "name": "search",
+          "arguments": "{\"query\":\"rust async\"}"
+        }
+      ]
+    },
+    {
+      "id": "parse_tool_call_fenced_json",
+      "op": "parse_tool_calls",
+      "input": {
+        "content": "```tool_call\n{\"name\":\"calculator\",\"arguments\":{\"expr\":\"2+2\"}}\n```"
+      },
+      "expected": [
+        {
+          "id": "",
+          "name": "calculator",
+          "arguments": "{\"expr\":\"2+2\"}"
+        }
+      ]
+    },
+    {
+      "id": "separate_text_and_calls_xml",
+      "op": "separate_text_and_calls",
+      "input": {
+        "content": "Hello, running tool now.\n\n<function_calls>\n<invoke name=\"lookup\">\n<parameter name=\"item\">status</parameter>\n</invoke>\n</function_calls>"
+      },
+      "expected": {
+        "text": "Hello, running tool now.",
+        "calls": [
+          {
+            "id": "",
+            "name": "lookup",
+            "arguments": "{\"item\":\"status\"}"
+          }
+        ]
+      }
+    }
+  ]
+}
+

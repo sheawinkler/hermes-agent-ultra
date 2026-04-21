@@ -11,7 +11,6 @@ use tracing::{debug, info, instrument};
 use crate::guard::SkillGuard;
 use crate::hub::SkillsHubClient;
 use crate::store::SkillStore;
-use crate::version::compute_version;
 
 // ---------------------------------------------------------------------------
 // SkillError
