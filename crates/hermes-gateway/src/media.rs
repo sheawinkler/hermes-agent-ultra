@@ -9,7 +9,7 @@ use std::time::SystemTime;
 use serde::{Deserialize, Serialize};
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
-use tracing::{debug, warn};
+use tracing::debug;
 
 use hermes_core::errors::GatewayError;
 
@@ -31,6 +31,10 @@ pub struct MediaCacheConfig {
     /// Time-to-live for cached files in seconds (0 = no expiry).
     #[serde(default)]
     pub ttl_seconds: u64,
+
+    /// Maximum size of a single downloaded file in bytes (0 = unlimited).
+    #[serde(default)]
+    pub max_file_size: u64,
 }
 
 impl Default for MediaCacheConfig {
@@ -39,6 +43,7 @@ impl Default for MediaCacheConfig {
             cache_dir: default_cache_dir(),
             max_size: 0,
             ttl_seconds: 0,
+            max_file_size: 0,
         }
     }
 }
@@ -62,6 +67,9 @@ pub struct MediaCache {
 
     /// Time-to-live in seconds (0 = no expiry).
     ttl_seconds: u64,
+
+    /// Maximum size of a single downloaded file in bytes (0 = unlimited).
+    max_file_size: u64,
 
     /// HTTP client for downloading files.
     client: reqwest::Client,
@@ -88,6 +96,7 @@ impl MediaCache {
             cache_dir,
             max_size: config.max_size,
             ttl_seconds: config.ttl_seconds,
+            max_file_size: config.max_file_size,
             client,
         })
     }
@@ -134,7 +143,15 @@ impl MediaCache {
             ))
         })?;
 
-        let dest_path = dest_dir.join(file_name);
+        let safe_name = sanitize_file_name(file_name)?;
+        let dest_path = dest_dir.join(&safe_name);
+
+        if !is_path_within(&dest_path, &dest_dir) {
+            return Err(GatewayError::ConnectionFailed(format!(
+                "Refusing to cache file outside cache directory: {}",
+                safe_name
+            )));
+        }
 
         // If the file already exists and is not expired, return it
         if dest_path.exists() {
@@ -172,15 +189,40 @@ impl MediaCache {
             )));
         }
 
+        if self.max_file_size > 0 {
+            if let Some(content_length) = response.content_length() {
+                if content_length > self.max_file_size {
+                    return Err(GatewayError::ConnectionFailed(format!(
+                        "File too large: {} bytes exceeds max_file_size {}",
+                        content_length, self.max_file_size
+                    )));
+                }
+            }
+        }
+
         let bytes = response.bytes().await.map_err(|e| {
             GatewayError::ConnectionFailed(format!("Failed to read response body: {}", e))
         })?;
+
+        if self.max_file_size > 0 && bytes.len() as u64 > self.max_file_size {
+            return Err(GatewayError::ConnectionFailed(format!(
+                "File too large after download: {} bytes exceeds max_file_size {}",
+                bytes.len(),
+                self.max_file_size
+            )));
+        }
 
         // Check cache size limits
         if self.max_size > 0 {
             let current_size = self.calculate_cache_size().await.unwrap_or(0);
             if current_size + bytes.len() as u64 > self.max_size {
-                warn!("Cache size limit reached, skipping cache for {}", file_name);
+                return Err(GatewayError::ConnectionFailed(format!(
+                    "Cache size limit exceeded while caching {} (current={}, incoming={}, max={})",
+                    safe_name,
+                    current_size,
+                    bytes.len(),
+                    self.max_size
+                )));
             }
         }
 
@@ -297,6 +339,30 @@ impl MediaCache {
     }
 }
 
+fn sanitize_file_name(raw: &str) -> Result<String, GatewayError> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(GatewayError::ConnectionFailed(
+            "File name must not be empty".to_string(),
+        ));
+    }
+    if trimmed.contains('\0')
+        || trimmed.contains('/')
+        || trimmed.contains('\\')
+        || trimmed.contains("..")
+    {
+        return Err(GatewayError::ConnectionFailed(format!(
+            "Unsafe file name rejected: {}",
+            trimmed
+        )));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn is_path_within(path: &Path, root: &Path) -> bool {
+    path.starts_with(root)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -307,6 +373,7 @@ mod tests {
         assert!(!config.cache_dir.is_empty());
         assert_eq!(config.max_size, 0);
         assert_eq!(config.ttl_seconds, 0);
+        assert_eq!(config.max_file_size, 0);
     }
 
     #[tokio::test]
@@ -316,8 +383,27 @@ mod tests {
             cache_dir: dir.path().to_string_lossy().to_string(),
             max_size: 0,
             ttl_seconds: 0,
+            max_file_size: 0,
         };
         let cache = MediaCache::new(&config).unwrap();
         assert!(cache.cache_dir().exists());
+    }
+
+    #[test]
+    fn sanitize_file_name_rejects_path_traversal_patterns() {
+        assert!(sanitize_file_name("../evil.txt").is_err());
+        assert!(sanitize_file_name("..\\evil.txt").is_err());
+        assert!(sanitize_file_name("/tmp/evil.txt").is_err());
+        assert!(sanitize_file_name("subdir/file.txt").is_err());
+        assert!(sanitize_file_name("safe.txt").is_ok());
+    }
+
+    #[test]
+    fn is_path_within_blocks_escape_attempts() {
+        let root = PathBuf::from("/tmp/hermes-cache-test");
+        let ok = root.join("documents").join("file.txt");
+        let bad = PathBuf::from("/tmp/hermes-cache-test-2/file.txt");
+        assert!(is_path_within(&ok, &root));
+        assert!(!is_path_within(&bad, &root));
     }
 }

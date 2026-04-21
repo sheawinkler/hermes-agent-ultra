@@ -35,6 +35,12 @@ const MAX_BACKOFF_MS: u64 = 60_000;
 /// Maximum number of retries for rate-limited requests.
 const RATE_LIMIT_MAX_RETRIES: u32 = 3;
 
+/// Maximum supported Telegram document size for processing (20 MB).
+const TELEGRAM_MAX_DOCUMENT_SIZE_BYTES: u64 = 20 * 1024 * 1024;
+
+/// Supported document extensions for Telegram document processing.
+const SUPPORTED_DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "md", "txt", "docx", "xlsx", "pptx"];
+
 // ---------------------------------------------------------------------------
 // TelegramConfig
 // ---------------------------------------------------------------------------
@@ -146,6 +152,8 @@ pub struct TelegramMessage {
     #[serde(default)]
     pub sticker: Option<Sticker>,
     #[serde(default)]
+    pub document: Option<Document>,
+    #[serde(default)]
     pub reply_to_message: Option<Box<TelegramMessage>>,
     #[serde(default)]
     pub message_thread_id: Option<i64>,
@@ -211,6 +219,20 @@ pub struct Sticker {
     pub set_name: Option<String>,
 }
 
+/// Telegram Document object.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Document {
+    pub file_id: String,
+    #[serde(default)]
+    pub file_unique_id: Option<String>,
+    #[serde(default)]
+    pub file_name: Option<String>,
+    #[serde(default)]
+    pub mime_type: Option<String>,
+    #[serde(default)]
+    pub file_size: Option<u64>,
+}
+
 /// Telegram File object (from getFile).
 #[derive(Debug, Clone, Deserialize)]
 pub struct TelegramFile {
@@ -267,9 +289,14 @@ pub struct IncomingMessage {
     pub is_voice: bool,
     pub is_photo: bool,
     pub is_sticker: bool,
+    pub is_document: bool,
     pub voice_file_id: Option<String>,
     pub photo_file_id: Option<String>,
     pub sticker_file_id: Option<String>,
+    pub document_file_id: Option<String>,
+    pub document_file_name: Option<String>,
+    pub document_mime_type: Option<String>,
+    pub document_file_size: Option<u64>,
     pub reply_to_message_id: Option<i64>,
     pub message_thread_id: Option<i64>,
     pub chat_type: ChatKind,
@@ -773,6 +800,12 @@ impl TelegramAdapter {
         let is_sticker = msg.sticker.is_some();
         let sticker_file_id = msg.sticker.as_ref().map(|s| s.file_id.clone());
 
+        let is_document = msg.document.is_some();
+        let document_file_id = msg.document.as_ref().map(|d| d.file_id.clone());
+        let document_file_name = msg.document.as_ref().and_then(|d| d.file_name.clone());
+        let document_mime_type = msg.document.as_ref().and_then(|d| d.mime_type.clone());
+        let document_file_size = msg.document.as_ref().and_then(|d| d.file_size);
+
         let reply_to_message_id = msg.reply_to_message.as_ref().map(|r| r.message_id);
 
         let chat_type = ChatKind::from_str(&msg.chat.chat_type);
@@ -792,9 +825,14 @@ impl TelegramAdapter {
             is_voice,
             is_photo,
             is_sticker,
+            is_document,
             voice_file_id,
             photo_file_id,
             sticker_file_id,
+            document_file_id,
+            document_file_name,
+            document_mime_type,
+            document_file_size,
             reply_to_message_id,
             message_thread_id: msg.message_thread_id,
             chat_type,
@@ -824,9 +862,14 @@ impl TelegramAdapter {
             is_voice: false,
             is_photo: false,
             is_sticker: false,
+            is_document: false,
             voice_file_id: None,
             photo_file_id: None,
             sticker_file_id: None,
+            document_file_id: None,
+            document_file_name: None,
+            document_mime_type: None,
+            document_file_size: None,
             reply_to_message_id: None,
             message_thread_id: msg.and_then(|m| m.message_thread_id),
             chat_type,
@@ -921,6 +964,50 @@ impl TelegramAdapter {
                 text.replace(&mention, "").trim().to_string()
             }
             None => text.to_string(),
+        }
+    }
+
+    /// Return true if this Telegram document can be processed by parity flows.
+    pub fn is_supported_document(doc: &Document) -> bool {
+        let ext = doc
+            .file_name
+            .as_deref()
+            .and_then(Self::extract_extension)
+            .or_else(|| doc.mime_type.as_deref().and_then(Self::extension_from_mime));
+        ext.map(|e| SUPPORTED_DOCUMENT_EXTENSIONS.contains(&e.as_str()))
+            .unwrap_or(false)
+    }
+
+    /// Return true if this Telegram document exceeds processing size limits.
+    pub fn document_exceeds_size_limit(doc: &Document) -> bool {
+        doc.file_size
+            .map(|sz| sz > TELEGRAM_MAX_DOCUMENT_SIZE_BYTES)
+            .unwrap_or(false)
+    }
+
+    fn extract_extension(name: &str) -> Option<String> {
+        std::path::Path::new(name)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.to_ascii_lowercase())
+            .filter(|e| !e.is_empty())
+    }
+
+    fn extension_from_mime(mime: &str) -> Option<String> {
+        match mime {
+            "application/pdf" => Some("pdf".to_string()),
+            "text/markdown" => Some("md".to_string()),
+            "text/plain" => Some("txt".to_string()),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => {
+                Some("docx".to_string())
+            }
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => {
+                Some("xlsx".to_string())
+            }
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation" => {
+                Some("pptx".to_string())
+            }
+            _ => None,
         }
     }
 
@@ -1193,6 +1280,7 @@ mod tests {
             photo: None,
             caption: None,
             sticker: None,
+            document: None,
             reply_to_message: None,
             message_thread_id: None,
         }
@@ -1218,6 +1306,7 @@ mod tests {
         assert!(!incoming.is_voice);
         assert!(!incoming.is_photo);
         assert!(!incoming.is_sticker);
+        assert!(!incoming.is_document);
         assert!(!incoming.is_group);
         assert_eq!(incoming.chat_type, ChatKind::Private);
         assert!(incoming.callback_query_id.is_none());
@@ -1240,6 +1329,7 @@ mod tests {
                 photo: None,
                 caption: None,
                 sticker: None,
+                document: None,
                 reply_to_message: None,
                 message_thread_id: None,
             }),
@@ -1277,6 +1367,7 @@ mod tests {
                 ]),
                 caption: Some("my photo".into()),
                 sticker: None,
+                document: None,
                 reply_to_message: None,
                 message_thread_id: None,
             }),
@@ -1327,6 +1418,7 @@ mod tests {
                     emoji: Some("😀".into()),
                     set_name: Some("TestPack".into()),
                 }),
+                document: None,
                 reply_to_message: None,
                 message_thread_id: None,
             }),
@@ -1338,6 +1430,42 @@ mod tests {
         assert_eq!(incoming.sticker_file_id, Some("sticker_abc".into()));
         assert!(!incoming.is_voice);
         assert!(!incoming.is_photo);
+        assert!(!incoming.is_document);
+    }
+
+    #[test]
+    fn parse_update_document_message() {
+        let update = Update {
+            update_id: 11,
+            message: Some(TelegramMessage {
+                message_id: 101,
+                chat: make_chat(301, "private"),
+                from: Some(make_user(401, Some("docuser"))),
+                text: None,
+                voice: None,
+                photo: None,
+                caption: Some("document caption".into()),
+                sticker: None,
+                document: Some(Document {
+                    file_id: "doc_abc".into(),
+                    file_unique_id: Some("du_abc".into()),
+                    file_name: Some("notes.md".into()),
+                    mime_type: Some("text/markdown".into()),
+                    file_size: Some(2048),
+                }),
+                reply_to_message: None,
+                message_thread_id: None,
+            }),
+            callback_query: None,
+        };
+
+        let incoming = TelegramAdapter::parse_update(&update).unwrap();
+        assert!(incoming.is_document);
+        assert_eq!(incoming.document_file_id, Some("doc_abc".into()));
+        assert_eq!(incoming.document_file_name, Some("notes.md".into()));
+        assert_eq!(incoming.document_mime_type, Some("text/markdown".into()));
+        assert_eq!(incoming.document_file_size, Some(2048));
+        assert_eq!(incoming.text, Some("document caption".into()));
     }
 
     // -----------------------------------------------------------------------
@@ -1361,6 +1489,7 @@ mod tests {
                     photo: None,
                     caption: None,
                     sticker: None,
+                    document: None,
                     reply_to_message: None,
                     message_thread_id: None,
                 }),
@@ -1413,6 +1542,7 @@ mod tests {
             photo: None,
             caption: None,
             sticker: None,
+            document: None,
             reply_to_message: None,
             message_thread_id: None,
         };
@@ -1428,6 +1558,7 @@ mod tests {
                 photo: None,
                 caption: None,
                 sticker: None,
+                document: None,
                 reply_to_message: Some(Box::new(reply_msg)),
                 message_thread_id: Some(999),
             }),
@@ -1748,6 +1879,57 @@ mod tests {
         assert_eq!(vals[5], 32_000);
         assert_eq!(vals[6], 60_000);
         assert_eq!(vals[7], 60_000);
+    }
+
+    #[test]
+    fn supported_document_type_from_extension_or_mime() {
+        let doc_from_name = Document {
+            file_id: "d1".into(),
+            file_unique_id: None,
+            file_name: Some("report.PDF".into()),
+            mime_type: None,
+            file_size: Some(1024),
+        };
+        assert!(TelegramAdapter::is_supported_document(&doc_from_name));
+
+        let doc_from_mime = Document {
+            file_id: "d2".into(),
+            file_unique_id: None,
+            file_name: None,
+            mime_type: Some("text/plain".into()),
+            file_size: Some(256),
+        };
+        assert!(TelegramAdapter::is_supported_document(&doc_from_mime));
+
+        let doc_unsupported = Document {
+            file_id: "d3".into(),
+            file_unique_id: None,
+            file_name: Some("archive.rar".into()),
+            mime_type: Some("application/x-rar-compressed".into()),
+            file_size: Some(1024),
+        };
+        assert!(!TelegramAdapter::is_supported_document(&doc_unsupported));
+    }
+
+    #[test]
+    fn document_size_limit_check() {
+        let small = Document {
+            file_id: "d1".into(),
+            file_unique_id: None,
+            file_name: Some("ok.txt".into()),
+            mime_type: Some("text/plain".into()),
+            file_size: Some(1_024),
+        };
+        assert!(!TelegramAdapter::document_exceeds_size_limit(&small));
+
+        let large = Document {
+            file_id: "d2".into(),
+            file_unique_id: None,
+            file_name: Some("large.pdf".into()),
+            mime_type: Some("application/pdf".into()),
+            file_size: Some(TELEGRAM_MAX_DOCUMENT_SIZE_BYTES + 1),
+        };
+        assert!(TelegramAdapter::document_exceeds_size_limit(&large));
     }
 
     // -----------------------------------------------------------------------
