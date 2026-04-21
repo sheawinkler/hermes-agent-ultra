@@ -99,6 +99,8 @@ LISTENER_LABEL="${LABEL_PREFIX}.upstream_webhook_listener"
 WORKER_LABEL="${LABEL_PREFIX}.upstream_webhook_worker"
 LISTENER_PLIST="${AGENTS_DIR}/${LISTENER_LABEL}.plist"
 WORKER_PLIST="${AGENTS_DIR}/${WORKER_LABEL}.plist"
+CURRENT_HOST_SHORT="$(hostname -s 2>/dev/null || hostname)"
+CURRENT_HOST_FULL="$(hostname 2>/dev/null || echo "${CURRENT_HOST_SHORT}")"
 
 INSTALL_SCRIPT="${REPO_ROOT}/scripts/install-upstream-webhook-launchd.sh"
 STATUS_SCRIPT="${REPO_ROOT}/scripts/status-upstream-webhook-launchd.sh"
@@ -147,6 +149,14 @@ load_env() {
   fi
 }
 
+host_matches() {
+  local allowed="$1"
+  local short="$2"
+  local full="$3"
+  local allowed_short="${allowed%%.*}"
+  [[ "${allowed}" == "${short}" || "${allowed}" == "${full}" || "${allowed_short}" == "${short}" ]]
+}
+
 print_config_summary() {
   echo
   echo "Current webhook sync configuration:"
@@ -157,6 +167,8 @@ print_config_summary() {
   echo "  endpoint:  ${UPSTREAM_SYNC_HOST:-127.0.0.1}:${UPSTREAM_SYNC_PORT:-8099}${UPSTREAM_SYNC_PATH:-/github/upstream-sync}"
   echo "  strategy:  ${UPSTREAM_SYNC_STRATEGY:-merge}"
   echo "  strict gate: ${UPSTREAM_SYNC_STRICT_RISK_GATE:-1}"
+  echo "  runtime role: ${UPSTREAM_SYNC_RUNTIME_ROLE:-dev}"
+  echo "  allowed host: ${UPSTREAM_SYNC_ALLOWED_HOSTNAME:-<unset>} (current: ${CURRENT_HOST_FULL})"
   echo "  webhook secret: $(mask_secret "${GITHUB_WEBHOOK_SECRET:-}")"
   case "${UPSTREAM_SYNC_BACKEND:-sqlite}" in
     sqlite)
@@ -178,6 +190,8 @@ print_config_summary() {
 
 validate_config() {
   local backend="${UPSTREAM_SYNC_BACKEND:-sqlite}"
+  local role="${UPSTREAM_SYNC_RUNTIME_ROLE:-dev}"
+  local allowed_host="${UPSTREAM_SYNC_ALLOWED_HOSTNAME:-}"
   local ok=1
 
   case "${backend}" in
@@ -187,6 +201,18 @@ validate_config() {
       ok=0
       ;;
   esac
+
+  if [[ "${role}" != "dev" ]]; then
+    echo "Config error: UPSTREAM_SYNC_RUNTIME_ROLE must be 'dev' for this launchd stack." >&2
+    ok=0
+  fi
+  if [[ -z "${allowed_host}" ]]; then
+    echo "Config error: UPSTREAM_SYNC_ALLOWED_HOSTNAME must be set to your dev host." >&2
+    ok=0
+  elif ! host_matches "${allowed_host}" "${CURRENT_HOST_SHORT}" "${CURRENT_HOST_FULL}"; then
+    echo "Config error: this machine ('${CURRENT_HOST_FULL}') does not match UPSTREAM_SYNC_ALLOWED_HOSTNAME='${allowed_host}'." >&2
+    ok=0
+  fi
 
   if [[ -z "${GITHUB_WEBHOOK_SECRET:-}" ]]; then
     echo "Warning: GITHUB_WEBHOOK_SECRET is unset. Signature verification is disabled." >&2

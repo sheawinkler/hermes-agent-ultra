@@ -12,6 +12,38 @@ if [[ -f "${ENV_FILE}" ]]; then
   set +a
 fi
 
+is_true() {
+  case "${1:-}" in
+    1|true|TRUE|yes|YES|on|ON) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+host_matches() {
+  local allowed="$1"
+  local short="${2:-}"
+  local full="${3:-}"
+  local allowed_short="${allowed%%.*}"
+  [[ "${allowed}" == "${short}" || "${allowed}" == "${full}" || "${allowed_short}" == "${short}" ]]
+}
+
+ROLE="${UPSTREAM_SYNC_RUNTIME_ROLE:-dev}"
+ALLOWED_HOSTNAME="${UPSTREAM_SYNC_ALLOWED_HOSTNAME:-}"
+GUARD_BYPASS="${UPSTREAM_SYNC_DISABLE_DEV_GUARD:-0}"
+CURRENT_HOST_SHORT="$(hostname -s 2>/dev/null || hostname)"
+CURRENT_HOST_FULL="$(hostname 2>/dev/null || echo "${CURRENT_HOST_SHORT}")"
+
+if ! is_true "${GUARD_BYPASS}"; then
+  if [[ "${ROLE}" != "dev" ]]; then
+    echo "Refusing to start listener: UPSTREAM_SYNC_RUNTIME_ROLE='${ROLE}' (dev required)." >&2
+    exit 3
+  fi
+  if [[ -n "${ALLOWED_HOSTNAME}" ]] && ! host_matches "${ALLOWED_HOSTNAME}" "${CURRENT_HOST_SHORT}" "${CURRENT_HOST_FULL}"; then
+    echo "Refusing to start listener on host '${CURRENT_HOST_FULL}'. Allowed host is '${ALLOWED_HOSTNAME}'." >&2
+    exit 3
+  fi
+fi
+
 BACKEND="${UPSTREAM_SYNC_BACKEND:-sqlite}"
 HOST="${UPSTREAM_SYNC_HOST:-127.0.0.1}"
 PORT="${UPSTREAM_SYNC_PORT:-8099}"

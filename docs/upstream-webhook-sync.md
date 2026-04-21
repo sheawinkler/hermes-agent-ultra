@@ -133,6 +133,7 @@ This command will:
 - show what is already configured (with secret masking)
 - prompt for missing critical values in interactive terminals
 - load/start listener + worker and print final status/log tails
+- enforce dev-only runtime guardrails (role + hostname)
 
 Non-interactive examples:
 
@@ -140,6 +141,19 @@ Non-interactive examples:
 bash scripts/setup-upstream-webhook-launchd.sh --show-only
 bash scripts/setup-upstream-webhook-launchd.sh --set GITHUB_WEBHOOK_SECRET=your_secret_here
 ```
+
+### Dev/Runtime Separation Guard
+
+Launch wrappers now require:
+
+- `UPSTREAM_SYNC_RUNTIME_ROLE=dev`
+- `UPSTREAM_SYNC_ALLOWED_HOSTNAME` matching the local host
+
+These are auto-populated by the installer for your current machine. If the env
+file is copied to a runtime/agent host, listener/worker startup will refuse to
+run unless the guard is explicitly bypassed with:
+
+- `UPSTREAM_SYNC_DISABLE_DEV_GUARD=1` (not recommended)
 
 Install user agents:
 

@@ -25,6 +25,21 @@ AGENTS_DIR="${HOME}/Library/LaunchAgents"
 ENV_FILE="${HOME}/.hermes-agent-ultra/upstream-webhook-sync.env"
 LOG_DIR="${HOME}/.hermes-agent-ultra/logs"
 LOAD_SERVICES="1"
+DEFAULT_HOSTNAME="$(hostname -s 2>/dev/null || hostname)"
+
+ensure_env_key() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  local tmp
+  if grep -qE "^${key}=" "${file}"; then
+    return 0
+  fi
+  tmp="$(mktemp)"
+  cat "${file}" > "${tmp}"
+  printf '\n%s=%s\n' "${key}" "${value}" >> "${tmp}"
+  mv "${tmp}" "${file}"
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -79,10 +94,14 @@ if [[ ! -f "${ENV_FILE}" ]]; then
   cat > "${ENV_FILE}" <<EOF
 # Upstream webhook sync runtime config.
 # Keep this file private because it may contain webhook secrets.
+# Guardrail: this stack is for DEV/INTEGRATION hosts only.
 
 GITHUB_WEBHOOK_SECRET=
 UPSTREAM_SYNC_BACKEND=sqlite
 UPSTREAM_SYNC_SQLITE_PATH=${REPO_ROOT}/.sync-queue/upstream-events.db
+UPSTREAM_SYNC_RUNTIME_ROLE=dev
+UPSTREAM_SYNC_ALLOWED_HOSTNAME=${DEFAULT_HOSTNAME}
+UPSTREAM_SYNC_DISABLE_DEV_GUARD=0
 
 UPSTREAM_SYNC_EXPECTED_REPO=Lumio-Research/hermes-agent-rs
 UPSTREAM_SYNC_EXPECTED_REF=refs/heads/main
@@ -110,8 +129,11 @@ UPSTREAM_SYNC_KAFKA_BOOTSTRAP=127.0.0.1:9092
 UPSTREAM_SYNC_KAFKA_TOPIC=hermes-upstream-sync
 UPSTREAM_SYNC_KAFKA_GROUP_ID=hermes-upstream-worker
 EOF
-  chmod 600 "${ENV_FILE}"
 fi
+ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_RUNTIME_ROLE" "dev"
+ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_ALLOWED_HOSTNAME" "${DEFAULT_HOSTNAME}"
+ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_DISABLE_DEV_GUARD" "0"
+chmod 600 "${ENV_FILE}"
 
 cat > "${LISTENER_PLIST}" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
