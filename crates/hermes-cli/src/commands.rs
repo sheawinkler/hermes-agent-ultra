@@ -1006,6 +1006,80 @@ pub async fn handle_cli_skills(
             }
             println!("Skill '{}' installed to {}", skill_name, target.display());
         }
+        "reset" => {
+            let skill_name = name.ok_or_else(|| {
+                hermes_core::AgentError::Config(
+                    "Missing skill name. Usage: hermes skills reset <name>".into(),
+                )
+            })?;
+            let target = skills_dir.join(&skill_name);
+            if target.exists() {
+                std::fs::remove_dir_all(&target).map_err(|e| {
+                    hermes_core::AgentError::Io(format!("Failed to remove skill dir: {}", e))
+                })?;
+            }
+            std::fs::create_dir_all(&target).map_err(|e| {
+                hermes_core::AgentError::Io(format!("Failed to create skill dir: {}", e))
+            })?;
+            std::fs::write(
+                target.join("SKILL.md"),
+                format!(
+                    "# {}\n\nReset by CLI. Replace with canonical skill contents.\n",
+                    skill_name
+                ),
+            )
+            .map_err(|e| hermes_core::AgentError::Io(format!("Failed to write SKILL.md: {}", e)))?;
+            println!("Skill '{}' reset at {}", skill_name, target.display());
+        }
+        "subscribe" => {
+            let source = name.ok_or_else(|| {
+                hermes_core::AgentError::Config(
+                    "Missing source. Usage: hermes skills subscribe <name-or-url>".into(),
+                )
+            })?;
+            std::fs::create_dir_all(&skills_dir)
+                .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+            let subscriptions_path = skills_dir.join("subscriptions.json");
+            let mut subscriptions: Vec<serde_json::Value> = if subscriptions_path.exists() {
+                let raw = std::fs::read_to_string(&subscriptions_path)
+                    .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+                serde_json::from_str(&raw).unwrap_or_default()
+            } else {
+                Vec::new()
+            };
+            let normalized = source.trim().to_string();
+            if normalized.is_empty() {
+                return Err(hermes_core::AgentError::Config(
+                    "skills subscribe: source cannot be empty".into(),
+                ));
+            }
+            let exists = subscriptions.iter().any(|item| {
+                item.get("source")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s == normalized)
+                    .unwrap_or(false)
+            });
+            if exists {
+                println!("Skill subscription already exists: {}", normalized);
+                return Ok(());
+            }
+            subscriptions.push(serde_json::json!({
+                "source": normalized,
+                "added_at": chrono::Utc::now().to_rfc3339(),
+                "options": extra.as_deref().unwrap_or(""),
+            }));
+            std::fs::write(
+                &subscriptions_path,
+                serde_json::to_string_pretty(&subscriptions)
+                    .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?,
+            )
+            .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+            println!(
+                "Subscribed to skill source '{}'. Registry: {}",
+                source,
+                subscriptions_path.display()
+            );
+        }
         "inspect" => {
             let skill_name = name.unwrap_or_default();
             let skill_md = skills_dir.join(&skill_name).join("SKILL.md");
@@ -2553,7 +2627,11 @@ pub async fn handle_cli_plugins(
 }
 
 /// Handle `hermes memory [action]`.
-pub async fn handle_cli_memory(action: Option<String>) -> Result<(), hermes_core::AgentError> {
+pub async fn handle_cli_memory(
+    action: Option<String>,
+    target: Option<String>,
+    yes: bool,
+) -> Result<(), hermes_core::AgentError> {
     let hermes_home = hermes_config::hermes_home();
     let memories_dir = hermes_home.join("memories");
     let memory_md = memories_dir.join("MEMORY.md");
@@ -2646,9 +2724,73 @@ pub async fn handle_cli_memory(action: Option<String>) -> Result<(), hermes_core
             println!("  Marker: {}", disabled_marker.display());
             println!("Run `hermes memory setup` to re-enable.");
         }
+        "reset" => {
+            if !yes {
+                return Err(hermes_core::AgentError::Config(
+                    "memory reset requires confirmation flag: use `hermes memory reset [all|memory|user] -y`"
+                        .into(),
+                ));
+            }
+            let reset_target = target
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or("all")
+                .to_ascii_lowercase();
+            let reset_memory = reset_target == "all" || reset_target == "memory";
+            let reset_user = reset_target == "all" || reset_target == "user";
+            if !reset_memory && !reset_user {
+                return Err(hermes_core::AgentError::Config(format!(
+                    "Unknown memory reset target '{}'. Use all|memory|user",
+                    reset_target
+                )));
+            }
+            std::fs::create_dir_all(&memories_dir)
+                .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+            if reset_memory && memory_md.exists() {
+                let _ = std::fs::remove_file(&memory_md);
+            }
+            if reset_user && user_md.exists() {
+                let _ = std::fs::remove_file(&user_md);
+            }
+            if reset_target == "all" && legacy_memory_db.exists() {
+                let _ = std::fs::remove_file(&legacy_memory_db);
+            }
+            if disabled_marker.exists() {
+                let _ = std::fs::remove_file(&disabled_marker);
+            }
+            if reset_memory {
+                std::fs::write(
+                    &memory_md,
+                    "# Hermes MEMORY\n\nStore durable assistant memory entries here.\n",
+                )
+                .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+            }
+            if reset_user {
+                std::fs::write(
+                    &user_md,
+                    "# Hermes USER\n\nStore durable user profile entries here.\n",
+                )
+                .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+            }
+            println!(
+                "Memory reset complete (target={}). MEMORY.md={} USER.md={}",
+                reset_target,
+                if memory_md.exists() {
+                    "present"
+                } else {
+                    "absent"
+                },
+                if user_md.exists() {
+                    "present"
+                } else {
+                    "absent"
+                }
+            );
+        }
         other => {
             println!("Unknown memory action '{}'.", other);
-            println!("Available actions: status, setup, off");
+            println!("Available actions: status, setup, off, reset");
         }
     }
     Ok(())
@@ -2657,10 +2799,15 @@ pub async fn handle_cli_memory(action: Option<String>) -> Result<(), hermes_core
 /// Handle `hermes mcp [action] [--server ...]`.
 pub async fn handle_cli_mcp(
     action: Option<String>,
+    name: Option<String>,
     server: Option<String>,
+    url: Option<String>,
+    command: Option<String>,
 ) -> Result<(), hermes_core::AgentError> {
     let config_dir = hermes_config::hermes_home();
     let mcp_config_path = config_dir.join("mcp_servers.json");
+    let mcp_auth_path = config_dir.join("mcp_auth.json");
+    let selected = name.clone().or(server.clone());
 
     match action.as_deref().unwrap_or("list") {
         "list" => {
@@ -2686,12 +2833,39 @@ pub async fn handle_cli_mcp(
             }
         }
         "add" => {
-            let srv = server.ok_or_else(|| {
-                hermes_core::AgentError::Config(
-                    "Missing server. Usage: hermes mcp add --server <name-or-url>".into(),
+            let (entry_name, entry) = if let Some(name) =
+                name.as_deref().map(str::trim).filter(|s| !s.is_empty())
+            {
+                let entry = if let Some(url) = url.clone().filter(|v| !v.trim().is_empty()) {
+                    serde_json::json!({"url": url, "enabled": true})
+                } else if let Some(command) = command.clone().filter(|v| !v.trim().is_empty()) {
+                    serde_json::json!({"command": command, "enabled": true})
+                } else {
+                    return Err(hermes_core::AgentError::Config(
+                        "mcp add with positional name requires --url or --command".into(),
+                    ));
+                };
+                (name.to_string(), entry)
+            } else {
+                let srv = server
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .ok_or_else(|| {
+                        hermes_core::AgentError::Config(
+                            "Missing server. Usage: hermes mcp add <name> --url <url> | --command <cmd> (legacy: --server <name-or-url>)".into(),
+                        )
+                    })?;
+                (
+                    srv.to_string(),
+                    if srv.starts_with("http://") || srv.starts_with("https://") {
+                        serde_json::json!({"url": srv, "enabled": true})
+                    } else {
+                        serde_json::json!({"url": srv, "enabled": true})
+                    },
                 )
-            })?;
-            println!("Adding MCP server: {}", srv);
+            };
+            println!("Adding MCP server: {}", entry_name);
             let mut servers: serde_json::Value = if mcp_config_path.exists() {
                 let content = std::fs::read_to_string(&mcp_config_path)
                     .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
@@ -2700,10 +2874,7 @@ pub async fn handle_cli_mcp(
                 serde_json::json!({})
             };
             if let Some(obj) = servers.as_object_mut() {
-                obj.insert(
-                    srv.clone(),
-                    serde_json::json!({"url": srv, "enabled": true}),
-                );
+                obj.insert(entry_name.clone(), entry);
             }
             let json = serde_json::to_string_pretty(&servers)
                 .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
@@ -2711,14 +2882,14 @@ pub async fn handle_cli_mcp(
                 .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
             println!(
                 "MCP server '{}' added to {}",
-                srv,
+                entry_name,
                 mcp_config_path.display()
             );
         }
         "remove" => {
-            let srv = server.ok_or_else(|| {
+            let srv = selected.clone().ok_or_else(|| {
                 hermes_core::AgentError::Config(
-                    "Missing server name. Usage: hermes mcp remove --server <name>".into(),
+                    "Missing server name. Usage: hermes mcp remove <name>".into(),
                 )
             })?;
             if !mcp_config_path.exists() {
@@ -2736,6 +2907,16 @@ pub async fn handle_cli_mcp(
                     std::fs::write(&mcp_config_path, json)
                         .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
                     println!("MCP server '{}' removed.", srv);
+                    if mcp_auth_path.exists() {
+                        let raw = std::fs::read_to_string(&mcp_auth_path).unwrap_or_default();
+                        let mut auth: serde_json::Value =
+                            serde_json::from_str(&raw).unwrap_or(serde_json::json!({}));
+                        if let Some(auth_obj) = auth.as_object_mut() {
+                            auth_obj.remove(&srv);
+                            let out = serde_json::to_string_pretty(&auth).unwrap_or_default();
+                            let _ = std::fs::write(&mcp_auth_path, out);
+                        }
+                    }
                 } else {
                     println!("MCP server '{}' not found.", srv);
                 }
@@ -2764,9 +2945,9 @@ pub async fn handle_cli_mcp(
                 .map_err(|e| hermes_core::AgentError::Io(format!("MCP server error: {}", e)))?;
         }
         "test" => {
-            let srv = server.ok_or_else(|| {
+            let srv = selected.clone().ok_or_else(|| {
                 hermes_core::AgentError::Config(
-                    "Missing server name. Usage: hermes mcp test --server <name>".into(),
+                    "Missing server name. Usage: hermes mcp test <name>".into(),
                 )
             })?;
             println!("Testing MCP server: {}...", srv);
@@ -2803,9 +2984,9 @@ pub async fn handle_cli_mcp(
             }
         }
         "configure" => {
-            let srv = server.ok_or_else(|| {
+            let srv = selected.clone().ok_or_else(|| {
                 hermes_core::AgentError::Config(
-                    "Missing server name. Usage: hermes mcp configure --server <name>".into(),
+                    "Missing server name. Usage: hermes mcp configure <name>".into(),
                 )
             })?;
             if !mcp_config_path.exists() {
@@ -2825,9 +3006,83 @@ pub async fn handle_cli_mcp(
                 None => println!("Server '{}' not found.", srv),
             }
         }
+        "login" => {
+            let srv = selected.clone().ok_or_else(|| {
+                hermes_core::AgentError::Config(
+                    "Missing server name. Usage: hermes mcp login <name>".into(),
+                )
+            })?;
+            if !mcp_config_path.exists() {
+                return Err(hermes_core::AgentError::Config(format!(
+                    "No MCP config found at {}",
+                    mcp_config_path.display()
+                )));
+            }
+            let configured = std::fs::read_to_string(&mcp_config_path)
+                .ok()
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                .and_then(|v| v.get(&srv).cloned())
+                .is_some();
+            if !configured {
+                return Err(hermes_core::AgentError::Config(format!(
+                    "MCP server '{}' is not configured",
+                    srv
+                )));
+            }
+
+            let env_key = format!("MCP_{}_TOKEN", srv.to_uppercase().replace('-', "_"));
+            let token_from_env = std::env::var(&env_key)
+                .ok()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty());
+            let token = if let Some(v) = token_from_env {
+                v
+            } else {
+                use std::io::{self, Write};
+                print!("Token for '{}': ", srv);
+                let _ = io::stdout().flush();
+                let mut buf = String::new();
+                io::stdin()
+                    .read_line(&mut buf)
+                    .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+                buf.trim().to_string()
+            };
+            if token.is_empty() {
+                return Err(hermes_core::AgentError::Config(
+                    "Empty token; aborting mcp login".into(),
+                ));
+            }
+            let mut auth: serde_json::Value = if mcp_auth_path.exists() {
+                let raw = std::fs::read_to_string(&mcp_auth_path)
+                    .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+                serde_json::from_str(&raw).unwrap_or(serde_json::json!({}))
+            } else {
+                serde_json::json!({})
+            };
+            if let Some(obj) = auth.as_object_mut() {
+                obj.insert(
+                    srv.clone(),
+                    serde_json::json!({
+                        "token": token,
+                        "updated_at": chrono::Utc::now().to_rfc3339(),
+                    }),
+                );
+            }
+            std::fs::write(
+                &mcp_auth_path,
+                serde_json::to_string_pretty(&auth)
+                    .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?,
+            )
+            .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+            println!(
+                "Stored MCP auth token for '{}' in {}",
+                srv,
+                mcp_auth_path.display()
+            );
+        }
         other => {
             println!("MCP action '{}' is not recognized.", other);
-            println!("Available actions: list, add, remove, serve, test, configure");
+            println!("Available actions: list, add, remove, serve, test, configure, login");
         }
     }
     Ok(())

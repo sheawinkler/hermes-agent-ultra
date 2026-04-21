@@ -83,20 +83,96 @@ async fn main() {
             yolo,
         } => hermes_cli::commands::handle_cli_chat(query, preload_skill, yolo).await,
         CliCommand::Model { provider_model } => run_model(cli, provider_model).await,
-        CliCommand::Tools { action } => run_tools(cli, action).await,
+        CliCommand::Tools {
+            action,
+            name,
+            platform,
+            summary,
+        } => run_tools(cli, action, name, platform, summary).await,
         CliCommand::Config { action, key, value } => run_config(cli, action, key, value).await,
-        CliCommand::Gateway { action } => run_gateway(cli, action).await,
+        CliCommand::Gateway {
+            action,
+            system,
+            all,
+            force,
+            run_as_user,
+            replace,
+            dry_run,
+            yes,
+            deep,
+        } => {
+            run_gateway(
+                cli,
+                action,
+                system,
+                all,
+                force,
+                run_as_user,
+                replace,
+                dry_run,
+                yes,
+                deep,
+            )
+            .await
+        }
         CliCommand::Setup => run_setup().await,
         CliCommand::Doctor => run_doctor(cli).await,
         CliCommand::Update => run_update().await,
         CliCommand::Status => run_status(cli).await,
+        CliCommand::Dashboard {
+            host,
+            port,
+            no_open,
+            insecure,
+        } => run_dashboard(cli, host, port, no_open, insecure).await,
+        CliCommand::Debug {
+            action,
+            url,
+            lines,
+            expire,
+            local,
+        } => run_debug(cli, action, url, lines, expire, local).await,
         CliCommand::Logs { lines, follow } => run_logs(cli, lines, follow).await,
-        CliCommand::Profile { action, name } => run_profile(cli, action, name).await,
+        CliCommand::Profile {
+            action,
+            name,
+            secondary,
+            output,
+            import_name,
+            alias_name,
+            remove,
+            yes,
+            clone,
+            clone_all,
+            clone_from,
+            no_alias,
+        } => {
+            run_profile(
+                cli,
+                action,
+                name,
+                secondary,
+                output,
+                import_name,
+                alias_name,
+                remove,
+                yes,
+                clone,
+                clone_all,
+                clone_from,
+                no_alias,
+            )
+            .await
+        }
         CliCommand::Auth {
             action,
             provider,
+            target,
+            auth_type,
+            label,
+            api_key,
             qr,
-        } => run_auth(cli, action, provider, qr).await,
+        } => run_auth(cli, action, provider, target, auth_type, label, api_key, qr).await,
         CliCommand::Secrets {
             action,
             provider,
@@ -122,10 +198,18 @@ async fn main() {
             )
             .await
         }
-        CliCommand::Memory { action } => hermes_cli::commands::handle_cli_memory(action).await,
-        CliCommand::Mcp { action, server } => {
-            hermes_cli::commands::handle_cli_mcp(action, server).await
-        }
+        CliCommand::Memory {
+            action,
+            target,
+            yes,
+        } => hermes_cli::commands::handle_cli_memory(action, target, yes).await,
+        CliCommand::Mcp {
+            action,
+            name,
+            server,
+            url,
+            command,
+        } => hermes_cli::commands::handle_cli_mcp(action, name, server, url, command).await,
         CliCommand::Sessions { action, id, name } => {
             hermes_cli::commands::handle_cli_sessions(action, id, name).await
         }
@@ -145,11 +229,72 @@ async fn main() {
         CliCommand::Version => hermes_cli::commands::handle_cli_version(),
         CliCommand::Cron {
             action,
+            job_id,
             id,
             schedule,
             prompt,
-        } => run_cron(cli, action, id, schedule, prompt).await,
-        CliCommand::Webhook { action, url, id } => run_webhook(cli, action, url, id).await,
+            name,
+            deliver,
+            repeat,
+            skills,
+            add_skills,
+            remove_skills,
+            clear_skills,
+            script,
+            all,
+        } => {
+            run_cron(
+                cli,
+                action,
+                job_id,
+                id,
+                schedule,
+                prompt,
+                name,
+                deliver,
+                repeat,
+                skills,
+                add_skills,
+                remove_skills,
+                clear_skills,
+                script,
+                all,
+            )
+            .await
+        }
+        CliCommand::Webhook {
+            action,
+            name,
+            url,
+            id,
+            prompt,
+            events,
+            description,
+            skills,
+            deliver,
+            deliver_chat_id,
+            secret,
+            deliver_only,
+            payload,
+        } => {
+            run_webhook(
+                cli,
+                action,
+                name,
+                url,
+                id,
+                prompt,
+                events,
+                description,
+                skills,
+                deliver,
+                deliver_chat_id,
+                secret,
+                deliver_only,
+                payload,
+            )
+            .await
+        }
         CliCommand::Dump { session, output } => run_dump(cli, session, output).await,
         CliCommand::Completion { shell } => run_completion(shell),
         CliCommand::Uninstall { yes } => run_uninstall(yes).await,
@@ -200,7 +345,13 @@ async fn run_model(cli: Cli, provider_model: Option<String>) -> Result<(), Agent
 }
 
 /// Handle `hermes tools [action]`.
-async fn run_tools(_cli: Cli, action: Option<String>) -> Result<(), AgentError> {
+async fn run_tools(
+    cli: Cli,
+    action: Option<String>,
+    name: Option<String>,
+    platform: Option<String>,
+    summary: bool,
+) -> Result<(), AgentError> {
     let registry = Arc::new(hermes_tools::ToolRegistry::new());
     let terminal_backend: Arc<dyn hermes_core::TerminalBackend> = Arc::new(LocalBackend::default());
     let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
@@ -208,42 +359,93 @@ async fn run_tools(_cli: Cli, action: Option<String>) -> Result<(), AgentError> 
         Arc::new(SkillManager::new(skill_store));
     hermes_tools::register_builtin_tools(&registry, terminal_backend, skill_provider);
     let tools = registry.list_tools();
+    let base: PathBuf = cli
+        .config_dir
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(hermes_home);
+    let cfg_path = base.join("config.yaml");
+    let mut disk =
+        load_user_config_file(&cfg_path).map_err(|e| AgentError::Config(e.to_string()))?;
 
     match action.as_deref() {
         None | Some("list") => {
+            let enabled = &disk.tools_config.enabled;
+            let disabled = &disk.tools_config.disabled;
+            if summary {
+                println!(
+                    "Tool summary (platform={}):",
+                    platform.as_deref().unwrap_or("cli")
+                );
+                println!(
+                    "  enabled: {}",
+                    if enabled.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        enabled.join(", ")
+                    }
+                );
+                println!(
+                    "  disabled: {}",
+                    if disabled.is_empty() {
+                        "(none)".to_string()
+                    } else {
+                        disabled.join(", ")
+                    }
+                );
+                return Ok(());
+            }
+
             if tools.is_empty() {
                 println!("No tools registered (tools are loaded at runtime).");
-                println!("\nBuilt-in tool categories:");
-                let categories = [
-                    "web",
-                    "terminal",
-                    "file",
-                    "browser",
-                    "vision",
-                    "image_gen",
-                    "skills",
-                    "memory",
-                    "session_search",
-                    "todo",
-                    "clarify",
-                    "code_execution",
-                    "delegation",
-                    "cronjob",
-                    "messaging",
-                    "homeassistant",
-                ];
-                for cat in &categories {
-                    println!("  • {}", cat);
-                }
             } else {
                 println!("Registered tools ({}):", tools.len());
                 for tool in &tools {
-                    println!("  • {} — {}", tool.name, tool.description);
+                    let state = if disabled.iter().any(|t| t == &tool.name) {
+                        "disabled"
+                    } else {
+                        "enabled"
+                    };
+                    println!("  • {} [{}] — {}", tool.name, state, tool.description);
                 }
+                println!("\nScope: {}", platform.as_deref().unwrap_or("cli"));
             }
         }
+        Some("enable") => {
+            let tool_name = name.ok_or_else(|| {
+                AgentError::Config("tools enable: usage `hermes tools enable <name>`".into())
+            })?;
+            if !disk.tools_config.enabled.iter().any(|t| t == &tool_name) {
+                disk.tools_config.enabled.push(tool_name.clone());
+            }
+            disk.tools_config.disabled.retain(|t| t != &tool_name);
+            save_config_yaml(&cfg_path, &disk).map_err(|e| AgentError::Config(e.to_string()))?;
+            println!(
+                "Enabled tool '{}' for platform '{}'.",
+                tool_name,
+                platform.as_deref().unwrap_or("cli")
+            );
+        }
+        Some("disable") => {
+            let tool_name = name.ok_or_else(|| {
+                AgentError::Config("tools disable: usage `hermes tools disable <name>`".into())
+            })?;
+            if !disk.tools_config.disabled.iter().any(|t| t == &tool_name) {
+                disk.tools_config.disabled.push(tool_name.clone());
+            }
+            disk.tools_config.enabled.retain(|t| t != &tool_name);
+            save_config_yaml(&cfg_path, &disk).map_err(|e| AgentError::Config(e.to_string()))?;
+            println!(
+                "Disabled tool '{}' for platform '{}'.",
+                tool_name,
+                platform.as_deref().unwrap_or("cli")
+            );
+        }
         Some(other) => {
-            println!("Unknown tools action: {}. Use 'list'.", other);
+            println!(
+                "Unknown tools action: {}. Use 'list', 'enable', or 'disable'.",
+                other
+            );
         }
     }
     Ok(())
@@ -428,16 +630,384 @@ fn gateway_pid_terminate(_pid: u32) -> std::io::Result<()> {
     ))
 }
 
+fn gateway_launchd_label() -> &'static str {
+    "com.hermes_agent_ultra.gateway"
+}
+
+#[cfg(target_os = "macos")]
+fn gateway_launchd_plist_path() -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    Some(
+        home.join("Library")
+            .join("LaunchAgents")
+            .join(format!("{}.plist", gateway_launchd_label())),
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+fn gateway_launchd_plist_path() -> Option<PathBuf> {
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn launchd_target() -> String {
+    let uid = unsafe { libc::geteuid() };
+    format!("gui/{uid}")
+}
+
+#[cfg(target_os = "macos")]
+fn launchctl_bootstrap(plist: &Path) -> Result<(), AgentError> {
+    let target = launchd_target();
+    let _ = std::process::Command::new("launchctl")
+        .args(["bootout", &target])
+        .arg(plist)
+        .status();
+    let status = std::process::Command::new("launchctl")
+        .args(["bootstrap", &target])
+        .arg(plist)
+        .status()
+        .map_err(|e| AgentError::Io(format!("launchctl bootstrap: {e}")))?;
+    if !status.success() {
+        return Err(AgentError::Io(format!(
+            "launchctl bootstrap failed for {}",
+            plist.display()
+        )));
+    }
+    let label = format!("{target}/{}", gateway_launchd_label());
+    let _ = std::process::Command::new("launchctl")
+        .args(["kickstart", "-k", &label])
+        .status();
+    Ok(())
+}
+
+fn install_gateway_service(force: bool, dry_run: bool) -> Result<(), AgentError> {
+    #[cfg(target_os = "macos")]
+    {
+        let Some(plist_path) = gateway_launchd_plist_path() else {
+            return Err(AgentError::Io(
+                "unable to resolve launchd plist path".into(),
+            ));
+        };
+        if plist_path.exists() && !force {
+            println!(
+                "Gateway service already installed at {} (use --force to overwrite).",
+                plist_path.display()
+            );
+            return Ok(());
+        }
+        let agents_dir = plist_path
+            .parent()
+            .ok_or_else(|| AgentError::Io("invalid launch agents path".into()))?;
+        if dry_run {
+            println!(
+                "Dry-run: would install gateway service plist at {}",
+                plist_path.display()
+            );
+            return Ok(());
+        }
+        std::fs::create_dir_all(agents_dir)
+            .map_err(|e| AgentError::Io(format!("mkdir {}: {e}", agents_dir.display())))?;
+        let exe = std::env::current_exe()
+            .map_err(|e| AgentError::Io(format!("current_exe failed: {e}")))?;
+        let logs_dir = hermes_home().join("logs");
+        std::fs::create_dir_all(&logs_dir)
+            .map_err(|e| AgentError::Io(format!("mkdir {}: {e}", logs_dir.display())))?;
+        let plist = format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key><string>{label}</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>{exe}</string>
+      <string>gateway</string>
+      <string>run</string>
+    </array>
+    <key>RunAtLoad</key><true/>
+    <key>KeepAlive</key><true/>
+    <key>StandardOutPath</key><string>{stdout}</string>
+    <key>StandardErrorPath</key><string>{stderr}</string>
+  </dict>
+</plist>
+"#,
+            label = gateway_launchd_label(),
+            exe = exe.display(),
+            stdout = logs_dir.join("gateway-service.log").display(),
+            stderr = logs_dir.join("gateway-service.err.log").display(),
+        );
+        std::fs::write(&plist_path, plist)
+            .map_err(|e| AgentError::Io(format!("write {}: {e}", plist_path.display())))?;
+        launchctl_bootstrap(&plist_path)?;
+        println!(
+            "Installed gateway launchd service at {}",
+            plist_path.display()
+        );
+        return Ok(());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (force, dry_run);
+        println!("Gateway install is currently implemented for macOS launchd only.");
+        Ok(())
+    }
+}
+
+fn uninstall_gateway_service(dry_run: bool) -> Result<(), AgentError> {
+    #[cfg(target_os = "macos")]
+    {
+        let Some(plist_path) = gateway_launchd_plist_path() else {
+            return Err(AgentError::Io(
+                "unable to resolve launchd plist path".into(),
+            ));
+        };
+        if dry_run {
+            println!(
+                "Dry-run: would uninstall gateway service plist {}",
+                plist_path.display()
+            );
+            return Ok(());
+        }
+        if plist_path.exists() {
+            let target = launchd_target();
+            let _ = std::process::Command::new("launchctl")
+                .args(["bootout", &target])
+                .arg(&plist_path)
+                .status();
+            std::fs::remove_file(&plist_path)
+                .map_err(|e| AgentError::Io(format!("remove {}: {e}", plist_path.display())))?;
+            println!("Removed gateway launchd service {}", plist_path.display());
+        } else {
+            println!("Gateway service is not installed.");
+        }
+        return Ok(());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = dry_run;
+        println!("Gateway uninstall is currently implemented for macOS launchd only.");
+        Ok(())
+    }
+}
+
+fn try_start_gateway_service() -> Result<bool, AgentError> {
+    #[cfg(target_os = "macos")]
+    {
+        let Some(plist_path) = gateway_launchd_plist_path() else {
+            return Ok(false);
+        };
+        if !plist_path.exists() {
+            return Ok(false);
+        }
+        launchctl_bootstrap(&plist_path)?;
+        return Ok(true);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(false)
+    }
+}
+
+fn try_stop_gateway_service() -> Result<bool, AgentError> {
+    #[cfg(target_os = "macos")]
+    {
+        let Some(plist_path) = gateway_launchd_plist_path() else {
+            return Ok(false);
+        };
+        if !plist_path.exists() {
+            return Ok(false);
+        }
+        let target = launchd_target();
+        let status = std::process::Command::new("launchctl")
+            .args(["bootout", &target])
+            .arg(plist_path)
+            .status()
+            .map_err(|e| AgentError::Io(format!("launchctl bootout: {e}")))?;
+        return Ok(status.success());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(false)
+    }
+}
+
+fn try_restart_gateway_service() -> Result<bool, AgentError> {
+    #[cfg(target_os = "macos")]
+    {
+        let Some(plist_path) = gateway_launchd_plist_path() else {
+            return Ok(false);
+        };
+        if !plist_path.exists() {
+            return Ok(false);
+        }
+        launchctl_bootstrap(&plist_path)?;
+        return Ok(true);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(false)
+    }
+}
+
+fn gateway_service_status() -> Result<Option<String>, AgentError> {
+    #[cfg(target_os = "macos")]
+    {
+        let Some(plist_path) = gateway_launchd_plist_path() else {
+            return Ok(None);
+        };
+        if !plist_path.exists() {
+            return Ok(Some("Gateway service: not installed".to_string()));
+        }
+        let label = format!("{}/{}", launchd_target(), gateway_launchd_label());
+        let out = std::process::Command::new("launchctl")
+            .args(["print", &label])
+            .output()
+            .map_err(|e| AgentError::Io(format!("launchctl print: {e}")))?;
+        if out.status.success() {
+            return Ok(Some(format!(
+                "Gateway service: installed (launchd label {}, running)",
+                gateway_launchd_label()
+            )));
+        }
+        Ok(Some(format!(
+            "Gateway service: installed (launchd label {}, stopped)",
+            gateway_launchd_label()
+        )))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(None)
+    }
+}
+
+fn migrate_legacy_gateway_services(dry_run: bool, yes: bool) -> Result<(), AgentError> {
+    #[cfg(target_os = "macos")]
+    {
+        let home = dirs::home_dir().ok_or_else(|| AgentError::Io("home dir not found".into()))?;
+        let agents = home.join("Library").join("LaunchAgents");
+        if !agents.exists() {
+            println!("No LaunchAgents directory found; nothing to migrate.");
+            return Ok(());
+        }
+        let mut legacy_plists: Vec<PathBuf> = Vec::new();
+        for entry in std::fs::read_dir(&agents)
+            .map_err(|e| AgentError::Io(format!("read {}: {e}", agents.display())))?
+        {
+            let entry = entry.map_err(|e| AgentError::Io(e.to_string()))?;
+            let path = entry.path();
+            let file_name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or_default();
+            let lower = file_name.to_ascii_lowercase();
+            if lower.contains("hermes")
+                && lower.contains("gateway")
+                && file_name != format!("{}.plist", gateway_launchd_label())
+            {
+                legacy_plists.push(path);
+            }
+        }
+        if legacy_plists.is_empty() {
+            println!("No legacy gateway launchd units detected.");
+            return Ok(());
+        }
+        println!("Legacy gateway units detected:");
+        for p in &legacy_plists {
+            println!("  - {}", p.display());
+        }
+        if !yes && !dry_run {
+            return Err(AgentError::Config(
+                "Refusing to remove legacy units without --yes (or use --dry-run).".into(),
+            ));
+        }
+        if dry_run {
+            println!("Dry-run complete; no files removed.");
+            return Ok(());
+        }
+        let target = launchd_target();
+        for p in legacy_plists {
+            let _ = std::process::Command::new("launchctl")
+                .args(["bootout", &target])
+                .arg(&p)
+                .status();
+            let _ = std::fs::remove_file(&p);
+            println!("Removed {}", p.display());
+        }
+        return Ok(());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (dry_run, yes);
+        println!("Legacy gateway migration is currently implemented for macOS launchd only.");
+        Ok(())
+    }
+}
+
 /// Handle `hermes gateway [action]`.
-async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError> {
+#[allow(clippy::too_many_arguments)]
+async fn run_gateway(
+    cli: Cli,
+    action: Option<String>,
+    _system: bool,
+    all: bool,
+    force: bool,
+    _run_as_user: Option<String>,
+    _replace: bool,
+    dry_run: bool,
+    yes: bool,
+    _deep: bool,
+) -> Result<(), AgentError> {
     let config =
         load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;
 
     match action.as_deref() {
+        Some("install") => {
+            install_gateway_service(force, dry_run)?;
+            return Ok(());
+        }
+        Some("uninstall") => {
+            uninstall_gateway_service(dry_run)?;
+            return Ok(());
+        }
+        Some("migrate-legacy") => {
+            migrate_legacy_gateway_services(dry_run, yes)?;
+            return Ok(());
+        }
+        Some("restart") => {
+            if try_restart_gateway_service()? {
+                println!("Gateway service restarted.");
+                return Ok(());
+            }
+            let pid_path = gateway_pid_path_for_cli(&cli);
+            if let Some(pid) = read_gateway_pid(&pid_path) {
+                if gateway_pid_is_alive(pid) {
+                    let _ = gateway_pid_terminate(pid);
+                    let _ = std::fs::remove_file(&pid_path);
+                    println!("Stopped existing gateway process {}.", pid);
+                }
+            }
+            return Box::pin(run_gateway(
+                cli,
+                Some("run".to_string()),
+                false,
+                all,
+                force,
+                None,
+                false,
+                false,
+                yes,
+                false,
+            ))
+            .await;
+        }
         Some("setup") => {
             run_gateway_setup(&cli).await?;
         }
-        None | Some("start") => {
+        None | Some("run") | Some("start") => {
+            if matches!(action.as_deref(), Some("start")) && try_start_gateway_service()? {
+                println!("Gateway service started.");
+                return Ok(());
+            }
             println!("Starting Hermes Gateway...");
 
             // List enabled platforms
@@ -1014,6 +1584,9 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
             println!("Gateway stopped.");
         }
         Some("status") => {
+            if let Some(service_state) = gateway_service_status()? {
+                println!("{service_state}");
+            }
             let pid_path = gateway_pid_path_for_cli(&cli);
             match std::fs::read_to_string(&pid_path) {
                 Ok(raw) => match raw.trim().parse::<u32>() {
@@ -1041,6 +1614,10 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
             }
         }
         Some("stop") => {
+            if try_stop_gateway_service()? {
+                println!("Gateway service stopped.");
+                return Ok(());
+            }
             let pid_path = gateway_pid_path_for_cli(&cli);
             let Some(pid) = read_gateway_pid(&pid_path) else {
                 println!("Gateway stop: no PID file (nothing to stop).");
@@ -1066,7 +1643,7 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
         }
         Some(other) => {
             println!(
-                "Unknown gateway action: {}. Use 'start', 'stop', or 'status'.",
+                "Unknown gateway action: {}. Use 'run', 'start', 'stop', 'restart', 'status', 'install', 'uninstall', 'setup', or 'migrate-legacy'.",
                 other
             );
         }
@@ -1410,6 +1987,10 @@ async fn run_gateway_setup(cli: &Cli) -> Result<(), AgentError> {
                     cli.clone(),
                     Some("login".to_string()),
                     Some("weixin".to_string()),
+                    None,
+                    None,
+                    None,
+                    None,
                     true,
                 )
                 .await?;
@@ -1494,6 +2075,10 @@ async fn run_gateway_setup(cli: &Cli) -> Result<(), AgentError> {
                     cli.clone(),
                     Some("login".to_string()),
                     Some("telegram".to_string()),
+                    None,
+                    None,
+                    None,
+                    None,
                     false,
                 )
                 .await?;
@@ -2513,6 +3098,62 @@ fn secret_vault_path_for_cli(cli: &Cli) -> PathBuf {
     hermes_state_root(cli).join("auth").join("tokens.json")
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct AuthPoolEntry {
+    id: String,
+    label: String,
+    auth_type: String,
+    source: String,
+    access_token: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_status_at: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    last_error_code: Option<u16>,
+}
+
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+struct AuthPoolStore {
+    #[serde(default)]
+    providers: std::collections::BTreeMap<String, Vec<AuthPoolEntry>>,
+}
+
+fn auth_pool_path_for_cli(cli: &Cli) -> PathBuf {
+    hermes_state_root(cli).join("auth").join("pool.json")
+}
+
+fn load_auth_pool_store(path: &Path) -> Result<AuthPoolStore, AgentError> {
+    if !path.exists() {
+        return Ok(AuthPoolStore::default());
+    }
+    let raw = std::fs::read_to_string(path)
+        .map_err(|e| AgentError::Io(format!("read {}: {}", path.display(), e)))?;
+    serde_json::from_str(&raw).map_err(|e| AgentError::Config(format!("parse pool: {}", e)))
+}
+
+fn save_auth_pool_store(path: &Path, store: &AuthPoolStore) -> Result<(), AgentError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AgentError::Io(format!("mkdir {}: {}", parent.display(), e)))?;
+    }
+    let raw = serde_json::to_string_pretty(store).map_err(|e| AgentError::Config(e.to_string()))?;
+    std::fs::write(path, raw)
+        .map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))
+}
+
+fn resolve_pool_target(entries: &[AuthPoolEntry], target: &str) -> Option<usize> {
+    if let Ok(index) = target.parse::<usize>() {
+        if index >= 1 && index <= entries.len() {
+            return Some(index - 1);
+        }
+    }
+    if let Some((idx, _)) = entries.iter().enumerate().find(|(_, e)| e.id == target) {
+        return Some(idx);
+    }
+    entries.iter().position(|e| e.label == target)
+}
+
 async fn lookup_secret_from_vault(
     token_store: &FileTokenStore,
     provider: &str,
@@ -3032,13 +3673,153 @@ async fn run_auth(
     cli: Cli,
     action: Option<String>,
     provider: Option<String>,
+    target: Option<String>,
+    auth_type: Option<String>,
+    label: Option<String>,
+    api_key: Option<String>,
     qr: bool,
 ) -> Result<(), AgentError> {
     let provider = resolve_auth_provider(provider);
     let auth_store_path = secret_vault_path_for_cli(&cli);
     let token_store = FileTokenStore::new(auth_store_path).await?;
     let manager = AuthManager::new(token_store.clone());
+    let pool_path = auth_pool_path_for_cli(&cli);
+    let mut pool_store = load_auth_pool_store(&pool_path)?;
     match action.as_deref().unwrap_or("status") {
+        "add" => {
+            let provider = provider.trim().to_ascii_lowercase();
+            let auth_type = auth_type
+                .as_deref()
+                .unwrap_or("api_key")
+                .replace('-', "_")
+                .to_ascii_lowercase();
+            let token = if let Some(raw) = api_key {
+                raw.trim().to_string()
+            } else {
+                resolve_llm_login_token(&cli, &provider).await?
+            };
+            if token.is_empty() {
+                return Err(AgentError::Config("auth add: empty credential".into()));
+            }
+            let entries = pool_store.providers.entry(provider.clone()).or_default();
+            let default_label = format!("{provider}-{}", entries.len() + 1);
+            let entry = AuthPoolEntry {
+                id: uuid::Uuid::new_v4().simple().to_string()[..6].to_string(),
+                label: label.unwrap_or(default_label),
+                auth_type,
+                source: "manual".to_string(),
+                access_token: token.clone(),
+                last_status: None,
+                last_status_at: None,
+                last_error_code: None,
+            };
+            entries.push(entry.clone());
+            save_auth_pool_store(&pool_path, &pool_store)?;
+            manager
+                .save_credential(OAuthCredential {
+                    provider: provider.clone(),
+                    access_token: entry.access_token.clone(),
+                    refresh_token: None,
+                    token_type: "bearer".to_string(),
+                    scope: None,
+                    expires_at: None,
+                })
+                .await?;
+            println!(
+                "Added pooled credential for provider '{}' (label='{}', id={}).",
+                provider, entry.label, entry.id
+            );
+            return Ok(());
+        }
+        "list" => {
+            if pool_store.providers.is_empty() {
+                println!("No pooled credentials configured.");
+                return Ok(());
+            }
+            if let Some(entries) = pool_store.providers.get(&provider) {
+                println!("{} ({} credentials):", provider, entries.len());
+                for (idx, e) in entries.iter().enumerate() {
+                    let exhausted = if e.last_status.as_deref() == Some("exhausted") {
+                        " exhausted"
+                    } else {
+                        ""
+                    };
+                    println!(
+                        "  #{}  {:<20} {:<8} {}{}",
+                        idx + 1,
+                        e.label,
+                        e.auth_type,
+                        e.source,
+                        exhausted
+                    );
+                }
+                return Ok(());
+            }
+            println!("No pooled credentials for provider '{}'.", provider);
+            return Ok(());
+        }
+        "remove" => {
+            let target = target.ok_or_else(|| {
+                AgentError::Config(
+                    "auth remove usage: hermes auth remove <provider> <index|id|label>".into(),
+                )
+            })?;
+            let Some(entries) = pool_store.providers.get_mut(&provider) else {
+                return Err(AgentError::Config(format!(
+                    "No pooled credentials for provider '{}'",
+                    provider
+                )));
+            };
+            let Some(index) = resolve_pool_target(entries, &target) else {
+                return Err(AgentError::Config(format!(
+                    "Could not resolve auth remove target '{}' for provider '{}'",
+                    target, provider
+                )));
+            };
+            let removed = entries.remove(index);
+            if entries.is_empty() {
+                pool_store.providers.remove(&provider);
+                token_store.remove(&provider).await?;
+            } else if let Some(next) = entries.first() {
+                manager
+                    .save_credential(OAuthCredential {
+                        provider: provider.clone(),
+                        access_token: next.access_token.clone(),
+                        refresh_token: None,
+                        token_type: "bearer".to_string(),
+                        scope: None,
+                        expires_at: None,
+                    })
+                    .await?;
+            }
+            save_auth_pool_store(&pool_path, &pool_store)?;
+            println!(
+                "Removed pooled credential for provider '{}' (label='{}', id={}).",
+                provider, removed.label, removed.id
+            );
+            return Ok(());
+        }
+        "reset" => {
+            let Some(entries) = pool_store.providers.get_mut(&provider) else {
+                println!("No pooled credentials for provider '{}'.", provider);
+                return Ok(());
+            };
+            let mut reset = 0usize;
+            for e in entries.iter_mut() {
+                if e.last_status.is_some() || e.last_error_code.is_some() {
+                    e.last_status = None;
+                    e.last_status_at = None;
+                    e.last_error_code = None;
+                    reset += 1;
+                }
+            }
+            save_auth_pool_store(&pool_path, &pool_store)?;
+            println!(
+                "Reset status on {} pooled credential(s) for provider '{}'.",
+                reset, provider
+            );
+            return Ok(());
+        }
         "login" => {
             if provider == "telegram" {
                 let token = telegram_bot_token_from_env_or_prompt().await?;
@@ -3489,27 +4270,71 @@ fn build_live_cron_scheduler(cli: &Cli, data_dir: &Path) -> Result<CronScheduler
     Ok(CronScheduler::new(persistence, runner))
 }
 
+fn parse_deliver_config(raw: &str) -> Option<hermes_cron::DeliverConfig> {
+    let value = raw.trim().to_ascii_lowercase();
+    let target = match value.as_str() {
+        "origin" => hermes_cron::DeliverTarget::Origin,
+        "local" => hermes_cron::DeliverTarget::Local,
+        "telegram" => hermes_cron::DeliverTarget::Telegram,
+        "discord" => hermes_cron::DeliverTarget::Discord,
+        "slack" => hermes_cron::DeliverTarget::Slack,
+        "email" => hermes_cron::DeliverTarget::Email,
+        "whatsapp" => hermes_cron::DeliverTarget::WhatsApp,
+        "signal" => hermes_cron::DeliverTarget::Signal,
+        "matrix" => hermes_cron::DeliverTarget::Matrix,
+        "mattermost" => hermes_cron::DeliverTarget::Mattermost,
+        "dingtalk" => hermes_cron::DeliverTarget::DingTalk,
+        "feishu" => hermes_cron::DeliverTarget::Feishu,
+        "wecom" => hermes_cron::DeliverTarget::WeCom,
+        "weixin" | "wechat" | "wx" => hermes_cron::DeliverTarget::Weixin,
+        "bluebubbles" | "imessage" => hermes_cron::DeliverTarget::BlueBubbles,
+        "sms" => hermes_cron::DeliverTarget::Sms,
+        "homeassistant" | "ha" => hermes_cron::DeliverTarget::HomeAssistant,
+        _ => return None,
+    };
+    Some(hermes_cron::DeliverConfig {
+        target,
+        platform: None,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn run_cron(
     cli: Cli,
     action: Option<String>,
+    job_id: Option<String>,
     id: Option<String>,
     schedule: Option<String>,
     prompt: Option<String>,
+    name: Option<String>,
+    deliver: Option<String>,
+    repeat: Option<u32>,
+    skills: Vec<String>,
+    add_skills: Vec<String>,
+    remove_skills: Vec<String>,
+    clear_skills: bool,
+    script: Option<String>,
+    all: bool,
 ) -> Result<(), AgentError> {
     let data_dir = hermes_state_root(&cli).join("cron");
     std::fs::create_dir_all(&data_dir)
         .map_err(|e| AgentError::Io(format!("cron dir {}: {}", data_dir.display(), e)))?;
     let sched = cron_scheduler_for_data_dir(data_dir.clone());
+    let resolved_id = job_id.or(id).filter(|s| !s.trim().is_empty());
 
     match action.as_deref().unwrap_or("list") {
         "list" => {
-            let jobs = sched.list_jobs().await;
+            let mut jobs = sched.list_jobs().await;
+            jobs.sort_by(|a, b| a.id.cmp(&b.id));
             if jobs.is_empty() {
                 println!("(no cron jobs in {})", data_dir.display());
                 return Ok(());
             }
             println!("Cron jobs ({}):", data_dir.display());
             for j in jobs {
+                if !all && matches!(j.status, hermes_cron::JobStatus::Completed) {
+                    continue;
+                }
                 let snippet: String = j.prompt.chars().take(48).collect();
                 println!(
                     "  {}  [{}]  {:?}  next_run={:?}  {}",
@@ -3517,11 +4342,35 @@ async fn run_cron(
                 );
             }
         }
-        "create" => {
+        "create" | "add" => {
             let schedule = schedule.unwrap_or_else(|| "0 * * * *".to_string());
             let prompt = prompt
                 .ok_or_else(|| AgentError::Config("cron create: use --prompt \"...\"".into()))?;
-            let job = hermes_cron::CronJob::new(schedule, prompt);
+            let mut job = hermes_cron::CronJob::new(schedule, prompt);
+            if let Some(name) = name.filter(|s| !s.trim().is_empty()) {
+                job.name = Some(name);
+            }
+            if let Some(raw) = deliver.as_deref() {
+                if let Some(cfg) = parse_deliver_config(raw) {
+                    job.deliver = Some(cfg);
+                } else {
+                    return Err(AgentError::Config(format!(
+                        "Unknown deliver target '{}'",
+                        raw
+                    )));
+                }
+            }
+            if let Some(repeat) = repeat {
+                job.repeat = Some(repeat);
+            }
+            if !skills.is_empty() {
+                job.skills = Some(skills.clone());
+            }
+            if let Some(script) = script {
+                if !script.trim().is_empty() {
+                    job.script = Some(script);
+                }
+            }
             let jid = sched.create_job(job).await.map_err(cron_cli_error)?;
             println!(
                 "Created cron job id={} (persisted under {})",
@@ -3529,13 +4378,81 @@ async fn run_cron(
                 data_dir.display()
             );
         }
-        "delete" | "pause" | "resume" | "run" | "history" => {
+        "edit" => {
+            let jid = resolved_id
+                .ok_or_else(|| AgentError::Config("cron edit: use <job-id> or --id".into()))?;
+            let mut job = sched
+                .get_job(&jid)
+                .await
+                .ok_or_else(|| AgentError::Config(format!("unknown job id: {}", jid)))?;
+
+            if let Some(schedule) = schedule {
+                job.schedule = schedule;
+                job.next_run = None;
+            }
+            if let Some(prompt) = prompt {
+                job.prompt = prompt;
+            }
+            if let Some(name) = name {
+                job.name = if name.trim().is_empty() {
+                    None
+                } else {
+                    Some(name)
+                };
+            }
+            if let Some(raw) = deliver.as_deref() {
+                if let Some(cfg) = parse_deliver_config(raw) {
+                    job.deliver = Some(cfg);
+                } else {
+                    return Err(AgentError::Config(format!(
+                        "Unknown deliver target '{}'",
+                        raw
+                    )));
+                }
+            }
+            if let Some(repeat) = repeat {
+                job.repeat = Some(repeat);
+            }
+            if !skills.is_empty() {
+                job.skills = Some(skills.clone());
+            }
+            if clear_skills {
+                job.skills = None;
+            }
+            if !add_skills.is_empty() {
+                let mut current = job.skills.take().unwrap_or_default();
+                for skill in add_skills {
+                    if !current.iter().any(|s| s == &skill) {
+                        current.push(skill);
+                    }
+                }
+                job.skills = Some(current);
+            }
+            if !remove_skills.is_empty() {
+                let mut current = job.skills.take().unwrap_or_default();
+                current.retain(|s| !remove_skills.iter().any(|r| r == s));
+                job.skills = if current.is_empty() {
+                    None
+                } else {
+                    Some(current)
+                };
+            }
+            if let Some(script) = script {
+                if script.trim().is_empty() {
+                    job.script = None;
+                } else {
+                    job.script = Some(script);
+                }
+            }
+            sched.update_job(&jid, job).await.map_err(cron_cli_error)?;
+            println!("Updated job {}", jid);
+        }
+        "delete" | "remove" | "pause" | "resume" | "run" | "history" => {
             let act = action.as_deref().unwrap_or("cron");
-            let jid = id
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| AgentError::Config(format!("{}: use --id <job-id>", act)))?;
+            let jid = resolved_id
+                .ok_or_else(|| AgentError::Config(format!("{}: use <job-id> or --id", act)))?;
             match act {
-                "delete" => {
+                "delete" | "remove" => {
                     sched.remove_job(&jid).await.map_err(cron_cli_error)?;
                     println!("Deleted job {}", jid);
                 }
@@ -3571,9 +4488,49 @@ async fn run_cron(
                 }
             }
         }
+        "status" => {
+            let jobs = sched.list_jobs().await;
+            let active = jobs
+                .iter()
+                .filter(|j| matches!(j.status, hermes_cron::JobStatus::Active))
+                .count();
+            println!(
+                "Cron scheduler status: jobs_total={} active={} data_dir={}",
+                jobs.len(),
+                active,
+                data_dir.display()
+            );
+        }
+        "tick" => {
+            let now = chrono::Utc::now();
+            let due: Vec<String> = sched
+                .list_jobs()
+                .await
+                .into_iter()
+                .filter(|j| j.is_due(now))
+                .map(|j| j.id)
+                .collect();
+            if due.is_empty() {
+                println!("No due jobs at {}.", now);
+                return Ok(());
+            }
+            let live_sched = build_live_cron_scheduler(&cli, &data_dir)?;
+            live_sched
+                .load_persisted_jobs()
+                .await
+                .map_err(cron_cli_error)?;
+            for jid in &due {
+                let result = live_sched.run_job(jid).await;
+                match result {
+                    Ok(_) => println!("tick: ran {}", jid),
+                    Err(e) => println!("tick: {} failed ({})", jid, e),
+                }
+            }
+            println!("Tick complete: {} job(s) processed.", due.len());
+        }
         other => {
             return Err(AgentError::Config(format!(
-                "Unknown cron action: {} (use list|create|delete|pause|resume|run|history)",
+                "Unknown cron action: {} (use list|create|edit|pause|resume|run|remove|delete|history|status|tick)",
                 other
             )));
         }
@@ -3583,6 +4540,59 @@ async fn run_cron(
 
 fn webhook_store_path(cli: &Cli) -> PathBuf {
     hermes_state_root(&cli).join("webhooks.json")
+}
+
+fn webhook_subscriptions_path(cli: &Cli) -> PathBuf {
+    hermes_state_root(&cli).join("webhook_subscriptions.json")
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct WebhookSubscription {
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    events: Vec<String>,
+    secret: String,
+    #[serde(default)]
+    prompt: String,
+    #[serde(default)]
+    skills: Vec<String>,
+    #[serde(default = "default_webhook_deliver")]
+    deliver: String,
+    created_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    deliver_extra: Option<serde_json::Value>,
+    #[serde(default)]
+    deliver_only: bool,
+}
+
+fn default_webhook_deliver() -> String {
+    "log".to_string()
+}
+
+fn load_webhook_subscriptions(
+    path: &Path,
+) -> Result<std::collections::BTreeMap<String, WebhookSubscription>, AgentError> {
+    if !path.exists() {
+        return Ok(std::collections::BTreeMap::new());
+    }
+    let raw = std::fs::read_to_string(path)
+        .map_err(|e| AgentError::Io(format!("read {}: {}", path.display(), e)))?;
+    serde_json::from_str(&raw)
+        .map_err(|e| AgentError::Config(format!("parse {}: {}", path.display(), e)))
+}
+
+fn save_webhook_subscriptions(
+    path: &Path,
+    subs: &std::collections::BTreeMap<String, WebhookSubscription>,
+) -> Result<(), AgentError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AgentError::Io(format!("mkdir {}: {}", parent.display(), e)))?;
+    }
+    let raw = serde_json::to_string_pretty(subs).map_err(|e| AgentError::Config(e.to_string()))?;
+    std::fs::write(path, raw)
+        .map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))
 }
 
 async fn prompt_line(prompt: impl Into<String>) -> Result<String, AgentError> {
@@ -3642,14 +4652,41 @@ async fn resolve_llm_login_token(cli: &Cli, provider: &str) -> Result<String, Ag
 async fn run_webhook(
     cli: Cli,
     action: Option<String>,
+    name: Option<String>,
     url: Option<String>,
     id: Option<String>,
+    prompt: Option<String>,
+    events: Option<String>,
+    description: Option<String>,
+    skills: Option<String>,
+    deliver: Option<String>,
+    deliver_chat_id: Option<String>,
+    secret: Option<String>,
+    deliver_only: bool,
+    payload: Option<String>,
 ) -> Result<(), AgentError> {
     let path = webhook_store_path(&cli);
     let mut store = hermes_cli::webhook_delivery::load_webhook_store(&path)?;
+    let subs_path = webhook_subscriptions_path(&cli);
+    let mut subs = load_webhook_subscriptions(&subs_path)?;
 
     match action.as_deref().unwrap_or("list") {
-        "list" => {
+        "list" | "ls" => {
+            if !subs.is_empty() {
+                println!("Webhook subscriptions ({}):", subs_path.display());
+                for (route, cfg) in &subs {
+                    let events = if cfg.events.is_empty() {
+                        "(all)".to_string()
+                    } else {
+                        cfg.events.join(", ")
+                    };
+                    println!(
+                        "  {}  deliver={}  events={}  created_at={}",
+                        route, cfg.deliver, events, cfg.created_at
+                    );
+                }
+                println!();
+            }
             if store.webhooks.is_empty() {
                 println!("(no webhooks in {})", path.display());
                 return Ok(());
@@ -3658,6 +4695,59 @@ async fn run_webhook(
             for w in &store.webhooks {
                 println!("  {}  {}  {}", w.id, w.url, w.created_at);
             }
+        }
+        "subscribe" => {
+            let route = name
+                .ok_or_else(|| AgentError::Config("webhook subscribe: missing route name".into()))?
+                .trim()
+                .to_ascii_lowercase()
+                .replace(' ', "-");
+            if route.is_empty() {
+                return Err(AgentError::Config(
+                    "webhook subscribe: route name cannot be empty".into(),
+                ));
+            }
+            let secret = secret.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            let events_vec = events
+                .unwrap_or_default()
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>();
+            let skills_vec = skills
+                .unwrap_or_default()
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>();
+            let deliver = deliver.unwrap_or_else(|| "log".to_string());
+            if deliver_only && deliver == "log" {
+                return Err(AgentError::Config(
+                    "--deliver-only requires --deliver to be a real target (not log)".into(),
+                ));
+            }
+            let mut deliver_extra = None;
+            if let Some(chat_id) = deliver_chat_id.filter(|s| !s.trim().is_empty()) {
+                deliver_extra = Some(serde_json::json!({ "chat_id": chat_id }));
+            }
+            let sub = WebhookSubscription {
+                description: description
+                    .unwrap_or_else(|| format!("Agent-created subscription: {route}")),
+                events: events_vec,
+                secret: secret.clone(),
+                prompt: prompt.unwrap_or_default(),
+                skills: skills_vec,
+                deliver: deliver.clone(),
+                created_at: chrono::Utc::now().to_rfc3339(),
+                deliver_extra,
+                deliver_only,
+            };
+            subs.insert(route.clone(), sub);
+            save_webhook_subscriptions(&subs_path, &subs)?;
+            println!("Created webhook subscription: {}", route);
+            println!("  URL path: /webhooks/{}", route);
+            println!("  Secret: {}", secret);
+            println!("  Deliver: {}", deliver);
         }
         "add" => {
             let url = url
@@ -3677,7 +4767,14 @@ async fn run_webhook(
             hermes_cli::webhook_delivery::save_webhook_store(&path, &store)?;
             println!("Added webhook {} -> {}", rec.id, rec.url);
         }
-        "remove" => {
+        "remove" | "rm" => {
+            if let Some(route) = name.filter(|s| !s.trim().is_empty()) {
+                if subs.remove(&route).is_some() {
+                    save_webhook_subscriptions(&subs_path, &subs)?;
+                    println!("Removed subscription '{}'.", route);
+                    return Ok(());
+                }
+            }
             let before = store.webhooks.len();
             if let Some(rid) = id.filter(|s| !s.is_empty()) {
                 store.webhooks.retain(|w| w.id != rid);
@@ -3685,7 +4782,7 @@ async fn run_webhook(
                 store.webhooks.retain(|w| w.url != u);
             } else {
                 return Err(AgentError::Config(
-                    "webhook remove: use --id <id> or --url <exact-url>".into(),
+                    "webhook remove: use <name>, --id <id>, or --url <exact-url>".into(),
                 ));
             }
             if store.webhooks.len() == before {
@@ -3695,9 +4792,55 @@ async fn run_webhook(
                 println!("Updated {}", path.display());
             }
         }
+        "test" => {
+            let route = name.ok_or_else(|| {
+                AgentError::Config("webhook test: usage `hermes webhook test <name>`".into())
+            })?;
+            let sub = subs
+                .get(&route)
+                .ok_or_else(|| AgentError::Config(format!("No subscription named '{}'.", route)))?;
+            let body = payload.unwrap_or_else(|| {
+                r#"{"test":true,"event_type":"test","message":"Hello from hermes webhook test"}"#
+                    .to_string()
+            });
+            let mut mac = hmac::Hmac::<sha2::Sha256>::new_from_slice(sub.secret.as_bytes())
+                .map_err(|e| AgentError::Config(format!("webhook hmac key: {e}")))?;
+            use hmac::Mac;
+            mac.update(body.as_bytes());
+            let sig = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
+            let cfg = load_config(cli.config_dir.as_deref())
+                .map_err(|e| AgentError::Config(e.to_string()))?;
+            let webhook_cfg = cfg.platforms.get("webhook");
+            let host = webhook_cfg
+                .and_then(|p| p.extra.get("host"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("127.0.0.1");
+            let port = webhook_cfg
+                .and_then(|p| p.extra.get("port"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(8644);
+            let display_host = if host == "0.0.0.0" { "127.0.0.1" } else { host };
+            let target_url = format!("http://{}:{}/webhooks/{}", display_host, port, route);
+            let client = reqwest::Client::new();
+            let resp = client
+                .post(&target_url)
+                .header("Content-Type", "application/json")
+                .header("X-Hub-Signature-256", sig)
+                .header("X-GitHub-Event", "test")
+                .body(body)
+                .send()
+                .await
+                .map_err(|e| AgentError::Io(format!("webhook test send: {}", e)))?;
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            println!("Test POST {} -> {}", target_url, status);
+            if !text.trim().is_empty() {
+                println!("{}", text);
+            }
+        }
         other => {
             return Err(AgentError::Config(format!(
-                "Unknown webhook action: {} (use list|add|remove)",
+                "Unknown webhook action: {} (use subscribe|add|list|remove|test)",
                 other
             )));
         }
@@ -4320,6 +5463,321 @@ async fn run_status(cli: Cli) -> Result<(), AgentError> {
 }
 
 /// Handle `hermes logs`.
+fn try_open_url(url: &str) -> Result<(), AgentError> {
+    #[cfg(target_os = "macos")]
+    let mut cmd = std::process::Command::new("open");
+    #[cfg(target_os = "linux")]
+    let mut cmd = std::process::Command::new("xdg-open");
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "start", "", url]);
+        c
+    };
+
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    cmd.arg(url);
+
+    let status = cmd
+        .status()
+        .map_err(|e| AgentError::Io(format!("open browser command failed: {}", e)))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(AgentError::Io(format!(
+            "open browser command exited with status {}",
+            status
+        )))
+    }
+}
+
+fn debug_reports_dir_for_cli(cli: &Cli) -> PathBuf {
+    hermes_state_root(cli).join("debug-reports")
+}
+
+fn prune_old_debug_reports(path: &Path, expire_days: u32) -> Result<usize, AgentError> {
+    if !path.exists() {
+        return Ok(0);
+    }
+    let cutoff = std::time::SystemTime::now()
+        .checked_sub(std::time::Duration::from_secs(expire_days as u64 * 86_400))
+        .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+    let mut removed = 0usize;
+    for entry in std::fs::read_dir(path)
+        .map_err(|e| AgentError::Io(format!("read {}: {}", path.display(), e)))?
+    {
+        let entry = match entry {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let p = entry.path();
+        if !p.is_file() {
+            continue;
+        }
+        let modified = std::fs::metadata(&p)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+        if modified < cutoff {
+            if std::fs::remove_file(&p).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+    Ok(removed)
+}
+
+fn collect_debug_report(cli: &Cli, lines: u32) -> Result<String, AgentError> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let root = hermes_state_root(cli);
+    let cfg_path = root.join("config.yaml");
+    let log_file = root.join("logs").join("hermes.log");
+    let mut report = String::new();
+    report.push_str("# Hermes Debug Report\n\n");
+    report.push_str(&format!("- generated_at: {}\n", now));
+    report.push_str(&format!("- version: {}\n", env!("CARGO_PKG_VERSION")));
+    report.push_str(&format!("- os: {}\n", std::env::consts::OS));
+    report.push_str(&format!("- arch: {}\n", std::env::consts::ARCH));
+    report.push_str(&format!("- state_root: {}\n", root.display()));
+    report.push_str(&format!("- config_path: {}\n", cfg_path.display()));
+    report.push_str(&format!("- log_path: {}\n", log_file.display()));
+    if let Some(svc) = gateway_service_status()? {
+        report.push_str(&format!(
+            "- gateway_service: {}\n",
+            svc.replace('\n', " | ")
+        ));
+    }
+    let pid_path = gateway_pid_path_for_cli(cli);
+    if let Some(pid) = read_gateway_pid(&pid_path) {
+        report.push_str(&format!(
+            "- gateway_pid: {} (alive={})\n",
+            pid,
+            gateway_pid_is_alive(pid)
+        ));
+    } else {
+        report.push_str("- gateway_pid: none\n");
+    }
+    if let Ok(cfg) = load_config(cli.config_dir.as_deref()) {
+        report.push_str("\n## Config Summary\n");
+        report.push_str(&format!(
+            "- model: {}\n",
+            cfg.model.as_deref().unwrap_or("gpt-4o")
+        ));
+        report.push_str(&format!(
+            "- personality: {}\n",
+            cfg.personality.as_deref().unwrap_or("default")
+        ));
+        let mut enabled_platforms: Vec<String> = cfg
+            .platforms
+            .iter()
+            .filter_map(|(k, v)| v.enabled.then_some(k.clone()))
+            .collect();
+        enabled_platforms.sort();
+        report.push_str(&format!(
+            "- enabled_platforms: {}\n",
+            if enabled_platforms.is_empty() {
+                "(none)".to_string()
+            } else {
+                enabled_platforms.join(", ")
+            }
+        ));
+    }
+    report.push_str("\n## Recent Logs\n\n```\n");
+    if log_file.exists() {
+        let content = std::fs::read_to_string(&log_file)
+            .map_err(|e| AgentError::Io(format!("read log {}: {}", log_file.display(), e)))?;
+        let all_lines: Vec<&str> = content.lines().collect();
+        let start = all_lines.len().saturating_sub(lines as usize);
+        for line in &all_lines[start..] {
+            report.push_str(line);
+            report.push('\n');
+        }
+    } else {
+        report.push_str("(log file not found)\n");
+    }
+    report.push_str("```\n");
+    Ok(report)
+}
+
+async fn run_dashboard(
+    cli: Cli,
+    host: String,
+    port: u16,
+    no_open: bool,
+    insecure: bool,
+) -> Result<(), AgentError> {
+    let host_trimmed = host.trim().to_string();
+    let local_host = matches!(host_trimmed.as_str(), "127.0.0.1" | "localhost" | "::1");
+    if !local_host && !insecure {
+        return Err(AgentError::Config(
+            "dashboard refused non-localhost bind without --insecure".into(),
+        ));
+    }
+
+    let cfg_path = hermes_state_root(&cli).join("config.yaml");
+    let mut disk =
+        load_user_config_file(&cfg_path).map_err(|e| AgentError::Config(e.to_string()))?;
+    let api = disk
+        .platforms
+        .entry("api_server".to_string())
+        .or_insert_with(PlatformConfig::default);
+    api.enabled = true;
+    api.extra.insert(
+        "host".to_string(),
+        serde_json::Value::String(host_trimmed.clone()),
+    );
+    api.extra
+        .insert("port".to_string(), serde_json::Value::Number(port.into()));
+    validate_config(&disk).map_err(|e| AgentError::Config(e.to_string()))?;
+    save_config_yaml(&cfg_path, &disk).map_err(|e| AgentError::Config(e.to_string()))?;
+
+    let display_host = if host_trimmed == "0.0.0.0" {
+        "127.0.0.1"
+    } else {
+        host_trimmed.as_str()
+    };
+    let url = format!("http://{}:{}/", display_host, port);
+    println!(
+        "Dashboard config written to {} (api_server enabled).",
+        cfg_path.display()
+    );
+    println!("Dashboard URL: {}", url);
+
+    if !no_open {
+        let url_for_open = url.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+            if let Err(e) = try_open_url(&url_for_open) {
+                eprintln!("Dashboard auto-open failed: {}", e);
+            }
+        });
+    }
+
+    run_gateway(
+        cli,
+        Some("run".to_string()),
+        false,
+        false,
+        false,
+        None,
+        false,
+        false,
+        false,
+        false,
+    )
+    .await
+}
+
+async fn run_debug(
+    cli: Cli,
+    action: Option<String>,
+    url: Option<String>,
+    lines: u32,
+    expire: u32,
+    local: bool,
+) -> Result<(), AgentError> {
+    let reports_dir = debug_reports_dir_for_cli(&cli);
+    std::fs::create_dir_all(&reports_dir)
+        .map_err(|e| AgentError::Io(format!("mkdir {}: {}", reports_dir.display(), e)))?;
+    let removed = prune_old_debug_reports(&reports_dir, expire)?;
+    if removed > 0 {
+        println!(
+            "Pruned {} expired debug report(s) older than {} day(s).",
+            removed, expire
+        );
+    }
+
+    match action.as_deref().unwrap_or("share") {
+        "share" => {
+            let report = collect_debug_report(&cli, lines)?;
+            let filename = format!(
+                "{}-debug-report.md",
+                chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
+            );
+            let path = reports_dir.join(filename);
+            std::fs::write(&path, &report)
+                .map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))?;
+            println!("Debug report saved: {}", path.display());
+            if local {
+                println!("{}", report);
+                return Ok(());
+            }
+
+            match reqwest::Client::new()
+                .post("https://paste.rs")
+                .header("Content-Type", "text/plain; charset=utf-8")
+                .body(report)
+                .send()
+                .await
+            {
+                Ok(resp) if resp.status().is_success() => {
+                    let body = resp.text().await.unwrap_or_default();
+                    println!("Shared debug report URL: {}", body.trim());
+                }
+                Ok(resp) => {
+                    println!(
+                        "Debug share upload failed with status {}. Local report kept at {}",
+                        resp.status(),
+                        path.display()
+                    );
+                }
+                Err(e) => {
+                    println!(
+                        "Debug share upload failed: {}. Local report kept at {}",
+                        e,
+                        path.display()
+                    );
+                }
+            }
+        }
+        "delete" => {
+            let target = url.ok_or_else(|| {
+                AgentError::Config(
+                    "debug delete requires a local report path or file:// URL".into(),
+                )
+            })?;
+            let path = if let Some(rest) = target.strip_prefix("file://") {
+                PathBuf::from(rest)
+            } else {
+                PathBuf::from(&target)
+            };
+            if path.exists() {
+                std::fs::remove_file(&path)
+                    .map_err(|e| AgentError::Io(format!("remove {}: {}", path.display(), e)))?;
+                println!("Removed debug report {}", path.display());
+            } else {
+                println!("Debug report not found: {}", path.display());
+            }
+        }
+        "list" => {
+            let mut entries: Vec<PathBuf> = std::fs::read_dir(&reports_dir)
+                .map(|rd| {
+                    rd.filter_map(|e| e.ok())
+                        .map(|e| e.path())
+                        .filter(|p| p.is_file())
+                        .collect()
+                })
+                .unwrap_or_default();
+            entries.sort();
+            if entries.is_empty() {
+                println!("No debug reports in {}", reports_dir.display());
+            } else {
+                println!("Debug reports ({}):", reports_dir.display());
+                for p in entries {
+                    println!("  {}", p.display());
+                }
+            }
+        }
+        other => {
+            return Err(AgentError::Config(format!(
+                "Unknown debug action '{}'. Use share|delete|list",
+                other
+            )));
+        }
+    }
+    Ok(())
+}
+
 async fn run_logs(cli: Cli, lines: u32, follow: bool) -> Result<(), AgentError> {
     let config_dir = cli
         .config_dir
@@ -4377,11 +5835,105 @@ async fn run_logs(cli: Cli, lines: u32, follow: bool) -> Result<(), AgentError> 
     Ok(())
 }
 
-/// Handle `hermes profile [action] [name]`.
+fn profile_aliases_path(profiles_dir: &Path) -> PathBuf {
+    profiles_dir.join("aliases.json")
+}
+
+fn active_profile_marker_path(profiles_dir: &Path) -> PathBuf {
+    profiles_dir.join(".active_profile")
+}
+
+fn load_profile_aliases(
+    path: &Path,
+) -> Result<std::collections::BTreeMap<String, String>, AgentError> {
+    if !path.exists() {
+        return Ok(std::collections::BTreeMap::new());
+    }
+    let raw = std::fs::read_to_string(path)
+        .map_err(|e| AgentError::Io(format!("read {}: {}", path.display(), e)))?;
+    serde_json::from_str(&raw)
+        .map_err(|e| AgentError::Config(format!("parse {}: {}", path.display(), e)))
+}
+
+fn save_profile_aliases(
+    path: &Path,
+    aliases: &std::collections::BTreeMap<String, String>,
+) -> Result<(), AgentError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AgentError::Io(format!("mkdir {}: {}", parent.display(), e)))?;
+    }
+    let raw =
+        serde_json::to_string_pretty(aliases).map_err(|e| AgentError::Config(e.to_string()))?;
+    std::fs::write(path, raw)
+        .map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))
+}
+
+fn resolve_profile_name(
+    requested: &str,
+    aliases: &std::collections::BTreeMap<String, String>,
+) -> String {
+    aliases
+        .get(requested.trim())
+        .cloned()
+        .unwrap_or_else(|| requested.trim().to_string())
+}
+
+fn resolve_profile_yaml_path(profiles_dir: &Path, name: &str) -> Option<PathBuf> {
+    let yaml = profiles_dir.join(format!("{}.yaml", name));
+    if yaml.exists() {
+        return Some(yaml);
+    }
+    let yml = profiles_dir.join(format!("{}.yml", name));
+    if yml.exists() {
+        return Some(yml);
+    }
+    None
+}
+
+fn read_active_profile_name(profiles_dir: &Path) -> Option<String> {
+    std::fs::read_to_string(active_profile_marker_path(profiles_dir))
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+fn write_active_profile_name(profiles_dir: &Path, name: &str) -> Result<(), AgentError> {
+    let path = active_profile_marker_path(profiles_dir);
+    std::fs::create_dir_all(profiles_dir)
+        .map_err(|e| AgentError::Io(format!("mkdir {}: {}", profiles_dir.display(), e)))?;
+    std::fs::write(&path, format!("{}\n", name.trim()))
+        .map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))
+}
+
+fn load_profile_yaml(path: &Path) -> Result<serde_yaml::Value, AgentError> {
+    let raw = std::fs::read_to_string(path)
+        .map_err(|e| AgentError::Io(format!("read {}: {}", path.display(), e)))?;
+    serde_yaml::from_str(&raw)
+        .map_err(|e| AgentError::Config(format!("parse {}: {}", path.display(), e)))
+}
+
+fn save_profile_yaml(path: &Path, value: &serde_yaml::Value) -> Result<(), AgentError> {
+    let raw = serde_yaml::to_string(value).map_err(|e| AgentError::Config(e.to_string()))?;
+    std::fs::write(path, raw)
+        .map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn run_profile(
     cli: Cli,
     action: Option<String>,
     name: Option<String>,
+    secondary: Option<String>,
+    output: Option<String>,
+    import_name: Option<String>,
+    alias_name: Option<String>,
+    remove: bool,
+    yes: bool,
+    clone: bool,
+    clone_all: bool,
+    clone_from: Option<String>,
+    no_alias: bool,
 ) -> Result<(), AgentError> {
     let config_dir = cli
         .config_dir
@@ -4389,13 +5941,30 @@ async fn run_profile(
         .map(std::path::PathBuf::from)
         .unwrap_or_else(hermes_config::hermes_home);
     let profiles_dir = config_dir.join("profiles");
+    let aliases_path = profile_aliases_path(&profiles_dir);
+    let mut aliases = load_profile_aliases(&aliases_path)?;
 
-    match action.as_deref() {
-        None => {
-            // Show current profile
+    match action.as_deref().unwrap_or("show") {
+        "show" => {
+            if let Some(requested) = name {
+                let resolved = resolve_profile_name(&requested, &aliases);
+                let Some(path) = resolve_profile_yaml_path(&profiles_dir, &resolved) else {
+                    return Err(AgentError::Config(format!(
+                        "profile '{}' not found (resolved to '{}')",
+                        requested, resolved
+                    )));
+                };
+                let raw = std::fs::read_to_string(&path)
+                    .map_err(|e| AgentError::Io(format!("read {}: {}", path.display(), e)))?;
+                println!("{}", raw);
+                return Ok(());
+            }
             let config = load_config(cli.config_dir.as_deref())
                 .map_err(|e| AgentError::Config(e.to_string()))?;
+            let active =
+                read_active_profile_name(&profiles_dir).unwrap_or_else(|| "(none)".to_string());
             println!("Current profile:");
+            println!("  Active:      {}", active);
             println!(
                 "  Model:       {}",
                 config.model.as_deref().unwrap_or("gpt-4o")
@@ -4407,12 +5976,13 @@ async fn run_profile(
             println!("  Max turns:   {}", config.max_turns);
             println!("\nUse `hermes profile list` to see all profiles.");
         }
-        Some("list") => {
+        "list" => {
             if !profiles_dir.exists() {
                 println!("No profiles directory found. Run `hermes setup` first.");
                 return Ok(());
             }
-            let entries: Vec<String> = std::fs::read_dir(&profiles_dir)
+            let active = read_active_profile_name(&profiles_dir);
+            let mut entries: Vec<String> = std::fs::read_dir(&profiles_dir)
                 .map(|rd| {
                     rd.filter_map(|e| e.ok())
                         .filter(|e| {
@@ -4429,77 +5999,365 @@ async fn run_profile(
                         .collect()
                 })
                 .unwrap_or_default();
+            entries.sort();
 
             if entries.is_empty() {
                 println!("No profiles found. Create one with `hermes profile create <name>`.");
             } else {
                 println!("Available profiles:");
                 for name in &entries {
-                    println!("  • {}", name);
+                    let marker = if active.as_deref() == Some(name.as_str()) {
+                        "*"
+                    } else {
+                        " "
+                    };
+                    println!("{} {}", marker, name);
+                }
+                if !aliases.is_empty() {
+                    println!("\nAliases:");
+                    for (alias, target) in &aliases {
+                        println!("  {} -> {}", alias, target);
+                    }
                 }
             }
         }
-        Some("create") => {
-            let name = name.ok_or_else(|| {
+        "create" => {
+            let profile_name = name.ok_or_else(|| {
                 AgentError::Config(
                     "Missing profile name. Usage: hermes profile create <name>".into(),
                 )
             })?;
+            let profile_name = profile_name.trim().to_string();
+            if profile_name.is_empty() {
+                return Err(AgentError::Config("profile create: empty name".into()));
+            }
 
             std::fs::create_dir_all(&profiles_dir)
                 .map_err(|e| AgentError::Io(format!("Failed to create profiles dir: {}", e)))?;
 
-            let profile_path = profiles_dir.join(format!("{}.yaml", name));
+            let profile_path = profiles_dir.join(format!("{}.yaml", profile_name));
             if profile_path.exists() {
-                println!(
+                return Err(AgentError::Config(format!(
                     "Profile '{}' already exists at {}",
-                    name,
+                    profile_name,
                     profile_path.display()
-                );
-                return Ok(());
+                )));
             }
 
-            let content = format!(
-                "# Hermes Profile: {}\nname: {}\nmodel: openai:gpt-4o\npersonality: default\nmax_turns: 50\n",
-                name, name
-            );
-            std::fs::write(&profile_path, content)
-                .map_err(|e| AgentError::Io(format!("Failed to write profile: {}", e)))?;
-            println!("Created profile '{}' at {}", name, profile_path.display());
-            println!(
-                "Edit it to customize, then switch with `hermes profile switch {}`.",
-                name
-            );
-        }
-        Some("switch") => {
-            let name = name.ok_or_else(|| {
-                AgentError::Config(
-                    "Missing profile name. Usage: hermes profile switch <name>".into(),
-                )
-            })?;
+            let source_name = clone_from
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(|s| resolve_profile_name(s, &aliases))
+                .or_else(|| read_active_profile_name(&profiles_dir));
+            let source_value = if clone || clone_all {
+                let src = source_name.clone().ok_or_else(|| {
+                    AgentError::Config(
+                        "profile create --clone/--clone-all requires --clone-from or an active profile"
+                            .into(),
+                    )
+                })?;
+                let src_path = resolve_profile_yaml_path(&profiles_dir, &src).ok_or_else(|| {
+                    AgentError::Config(format!("clone source profile '{}' not found", src))
+                })?;
+                Some(load_profile_yaml(&src_path)?)
+            } else {
+                None
+            };
 
-            let profile_path = profiles_dir.join(format!("{}.yaml", &name));
-            if !profile_path.exists() {
-                // Also try .yml
-                let alt = profiles_dir.join(format!("{}.yml", &name));
-                if !alt.exists() {
-                    println!("Profile '{}' not found. Available profiles:", name);
-                    if let Ok(rd) = std::fs::read_dir(&profiles_dir) {
-                        for entry in rd.filter_map(|e| e.ok()) {
-                            if let Some(stem) = entry.path().file_stem() {
-                                println!("  • {}", stem.to_string_lossy());
+            let mut out_map = serde_yaml::Mapping::new();
+            out_map.insert(
+                serde_yaml::Value::String("name".to_string()),
+                serde_yaml::Value::String(profile_name.clone()),
+            );
+
+            if let Some(src) = source_value {
+                if let Some(src_map) = src.as_mapping() {
+                    if clone_all {
+                        out_map = src_map.clone();
+                        out_map.insert(
+                            serde_yaml::Value::String("name".to_string()),
+                            serde_yaml::Value::String(profile_name.clone()),
+                        );
+                    } else {
+                        for key in ["model", "personality", "max_turns"] {
+                            let k = serde_yaml::Value::String(key.to_string());
+                            if let Some(v) = src_map.get(&k) {
+                                out_map.insert(k, v.clone());
                             }
                         }
                     }
-                    return Ok(());
                 }
             }
-            println!("Switched to profile: {}", name);
-            println!("(Profile loading will be applied on next `hermes` session)");
-        }
-        Some(other) => {
+
+            out_map
+                .entry(serde_yaml::Value::String("model".to_string()))
+                .or_insert_with(|| serde_yaml::Value::String("openai:gpt-4o".to_string()));
+            out_map
+                .entry(serde_yaml::Value::String("personality".to_string()))
+                .or_insert_with(|| serde_yaml::Value::String("default".to_string()));
+            out_map
+                .entry(serde_yaml::Value::String("max_turns".to_string()))
+                .or_insert_with(|| serde_yaml::Value::Number(serde_yaml::Number::from(50u64)));
+
+            save_profile_yaml(&profile_path, &serde_yaml::Value::Mapping(out_map))?;
             println!(
-                "Unknown profile action: '{}'. Use 'list', 'create', or 'switch'.",
+                "Created profile '{}' at {}",
+                profile_name,
+                profile_path.display()
+            );
+
+            if !no_alias {
+                if let Some(alias) = alias_name
+                    .or(secondary)
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                {
+                    aliases.insert(alias.clone(), profile_name.clone());
+                    save_profile_aliases(&aliases_path, &aliases)?;
+                    println!("Added alias '{}' -> '{}'.", alias, profile_name);
+                }
+            }
+        }
+        "use" | "switch" => {
+            let requested = name.ok_or_else(|| {
+                AgentError::Config("Missing profile name. Usage: hermes profile use <name>".into())
+            })?;
+            let resolved = resolve_profile_name(&requested, &aliases);
+            let path = resolve_profile_yaml_path(&profiles_dir, &resolved).ok_or_else(|| {
+                AgentError::Config(format!(
+                    "Profile '{}' not found (resolved to '{}')",
+                    requested, resolved
+                ))
+            })?;
+            let value = load_profile_yaml(&path)?;
+            let mut disk = load_user_config_file(&config_dir.join("config.yaml"))
+                .map_err(|e| AgentError::Config(e.to_string()))?;
+            if let Some(map) = value.as_mapping() {
+                if let Some(v) = map
+                    .get(&serde_yaml::Value::String("model".to_string()))
+                    .and_then(|v| v.as_str())
+                {
+                    disk.model = Some(v.to_string());
+                }
+                if let Some(v) = map
+                    .get(&serde_yaml::Value::String("personality".to_string()))
+                    .and_then(|v| v.as_str())
+                {
+                    disk.personality = Some(v.to_string());
+                }
+                if let Some(v) = map
+                    .get(&serde_yaml::Value::String("max_turns".to_string()))
+                    .and_then(|v| v.as_u64())
+                {
+                    disk.max_turns = v.min(u32::MAX as u64) as u32;
+                }
+            }
+            save_config_yaml(&config_dir.join("config.yaml"), &disk)
+                .map_err(|e| AgentError::Config(e.to_string()))?;
+            write_active_profile_name(&profiles_dir, &resolved)?;
+            println!(
+                "Activated profile '{}' (requested '{}').",
+                resolved, requested
+            );
+        }
+        "delete" => {
+            let requested = name.ok_or_else(|| {
+                AgentError::Config(
+                    "Missing profile name. Usage: hermes profile delete <name>".into(),
+                )
+            })?;
+            let resolved = resolve_profile_name(&requested, &aliases);
+            let path = resolve_profile_yaml_path(&profiles_dir, &resolved).ok_or_else(|| {
+                AgentError::Config(format!(
+                    "Profile '{}' not found (resolved to '{}')",
+                    requested, resolved
+                ))
+            })?;
+            if !yes
+                && !prompt_yes_no(
+                    &format!("Delete profile '{}' ({})?", resolved, path.display()),
+                    false,
+                )
+                .await?
+            {
+                println!("Aborted.");
+                return Ok(());
+            }
+            std::fs::remove_file(&path)
+                .map_err(|e| AgentError::Io(format!("remove {}: {}", path.display(), e)))?;
+            aliases.retain(|alias, target| alias != &requested && target != &resolved);
+            save_profile_aliases(&aliases_path, &aliases)?;
+            if read_active_profile_name(&profiles_dir).as_deref() == Some(resolved.as_str()) {
+                let _ = std::fs::remove_file(active_profile_marker_path(&profiles_dir));
+            }
+            println!("Deleted profile '{}' ({})", resolved, path.display());
+        }
+        "alias" => {
+            if remove {
+                let alias = alias_name
+                    .or(name)
+                    .or(secondary)
+                    .ok_or_else(|| AgentError::Config("profile alias --remove <alias>".into()))?;
+                if aliases.remove(alias.trim()).is_some() {
+                    save_profile_aliases(&aliases_path, &aliases)?;
+                    println!("Removed alias '{}'.", alias.trim());
+                } else {
+                    println!("Alias '{}' not found.", alias.trim());
+                }
+                return Ok(());
+            }
+            let target = name.ok_or_else(|| {
+                AgentError::Config(
+                    "profile alias usage: hermes profile alias <target> --name <alias>".into(),
+                )
+            })?;
+            let alias = alias_name.or(secondary).ok_or_else(|| {
+                AgentError::Config(
+                    "profile alias usage: hermes profile alias <target> --name <alias>".into(),
+                )
+            })?;
+            let resolved_target = resolve_profile_name(&target, &aliases);
+            if resolve_profile_yaml_path(&profiles_dir, &resolved_target).is_none() {
+                return Err(AgentError::Config(format!(
+                    "Alias target profile '{}' not found",
+                    resolved_target
+                )));
+            }
+            aliases.insert(alias.trim().to_string(), resolved_target.clone());
+            save_profile_aliases(&aliases_path, &aliases)?;
+            println!("Alias '{}' -> '{}'", alias.trim(), resolved_target);
+        }
+        "rename" => {
+            let old_requested = name.ok_or_else(|| {
+                AgentError::Config("profile rename usage: hermes profile rename <old> <new>".into())
+            })?;
+            let new_name = secondary.ok_or_else(|| {
+                AgentError::Config("profile rename usage: hermes profile rename <old> <new>".into())
+            })?;
+            let old_resolved = resolve_profile_name(&old_requested, &aliases);
+            let old_path =
+                resolve_profile_yaml_path(&profiles_dir, &old_resolved).ok_or_else(|| {
+                    AgentError::Config(format!("Profile '{}' not found", old_resolved))
+                })?;
+            let new_path = profiles_dir.join(format!("{}.yaml", new_name));
+            if new_path.exists() {
+                return Err(AgentError::Config(format!(
+                    "Target profile '{}' already exists",
+                    new_name
+                )));
+            }
+            std::fs::rename(&old_path, &new_path).map_err(|e| {
+                AgentError::Io(format!(
+                    "rename {} -> {}: {}",
+                    old_path.display(),
+                    new_path.display(),
+                    e
+                ))
+            })?;
+            if let Ok(mut value) = load_profile_yaml(&new_path) {
+                if let Some(map) = value.as_mapping_mut() {
+                    map.insert(
+                        serde_yaml::Value::String("name".to_string()),
+                        serde_yaml::Value::String(new_name.clone()),
+                    );
+                    let _ = save_profile_yaml(&new_path, &value);
+                }
+            }
+            for target in aliases.values_mut() {
+                if target == &old_resolved {
+                    *target = new_name.clone();
+                }
+            }
+            if let Some(v) = aliases.remove(&old_requested) {
+                aliases.insert(
+                    new_name.clone(),
+                    if v == old_resolved {
+                        new_name.clone()
+                    } else {
+                        v
+                    },
+                );
+            }
+            save_profile_aliases(&aliases_path, &aliases)?;
+            if read_active_profile_name(&profiles_dir).as_deref() == Some(old_resolved.as_str()) {
+                write_active_profile_name(&profiles_dir, &new_name)?;
+            }
+            println!("Renamed profile '{}' -> '{}'", old_resolved, new_name);
+        }
+        "export" => {
+            let target = if let Some(n) = name {
+                resolve_profile_name(&n, &aliases)
+            } else {
+                read_active_profile_name(&profiles_dir).ok_or_else(|| {
+                    AgentError::Config(
+                        "profile export: no active profile and no name provided".into(),
+                    )
+                })?
+            };
+            let source = resolve_profile_yaml_path(&profiles_dir, &target)
+                .ok_or_else(|| AgentError::Config(format!("Profile '{}' not found", target)))?;
+            let out = output.unwrap_or_else(|| format!("{}.profile.yaml", target));
+            std::fs::copy(&source, &out).map_err(|e| {
+                AgentError::Io(format!("copy {} -> {}: {}", source.display(), out, e))
+            })?;
+            println!("Exported profile '{}' to {}", target, out);
+        }
+        "import" => {
+            let source = name.ok_or_else(|| {
+                AgentError::Config("profile import usage: hermes profile import <path>".into())
+            })?;
+            let source_path = PathBuf::from(&source);
+            if !source_path.exists() {
+                return Err(AgentError::Config(format!(
+                    "profile import source not found: {}",
+                    source_path.display()
+                )));
+            }
+            let mut value = load_profile_yaml(&source_path)?;
+            let target_name = import_name.unwrap_or_else(|| {
+                source_path
+                    .file_stem()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .into_owned()
+            });
+            std::fs::create_dir_all(&profiles_dir)
+                .map_err(|e| AgentError::Io(format!("mkdir {}: {}", profiles_dir.display(), e)))?;
+            let target_path = profiles_dir.join(format!("{}.yaml", target_name));
+            if target_path.exists() && !yes {
+                return Err(AgentError::Config(format!(
+                    "Target profile exists at {} (re-run with -y to overwrite)",
+                    target_path.display()
+                )));
+            }
+            if let Some(map) = value.as_mapping_mut() {
+                map.insert(
+                    serde_yaml::Value::String("name".to_string()),
+                    serde_yaml::Value::String(target_name.clone()),
+                );
+            }
+            save_profile_yaml(&target_path, &value)?;
+            if !no_alias {
+                if let Some(alias) = alias_name
+                    .or(secondary)
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                {
+                    aliases.insert(alias.clone(), target_name.clone());
+                    save_profile_aliases(&aliases_path, &aliases)?;
+                    println!("Added alias '{}' -> '{}'.", alias, target_name);
+                }
+            }
+            println!(
+                "Imported profile '{}' from {}",
+                target_name,
+                source_path.display()
+            );
+        }
+        other => {
+            println!(
+                "Unknown profile action: '{}'. Use list|show|create|use|delete|alias|rename|export|import.",
                 other
             );
         }

@@ -34,6 +34,14 @@ pub enum CliCommand {
     Tools {
         /// Action: "list", "enable <name>", or "disable <name>".
         action: Option<String>,
+        /// Tool name used by enable/disable actions.
+        name: Option<String>,
+        /// Optional platform scope for tool toggles.
+        #[arg(long)]
+        platform: Option<String>,
+        /// Print compact per-platform summary (upstream parity alias).
+        #[arg(long)]
+        summary: bool,
     },
 
     /// Configuration management.
@@ -57,8 +65,32 @@ pub enum CliCommand {
     ///   hermes gateway start            — start the gateway
     ///   hermes gateway status           — check gateway status
     Gateway {
-        /// Action: "start", "stop", "restart", or "status".
+        /// Action: "run", "start", "stop", "restart", "status", "install", "uninstall", "setup", or "migrate-legacy".
         action: Option<String>,
+        /// Target system-level service scope when supported.
+        #[arg(long)]
+        system: bool,
+        /// Apply action across all known gateway processes.
+        #[arg(long)]
+        all: bool,
+        /// Force reinstall/overwrite for install action.
+        #[arg(long)]
+        force: bool,
+        /// Linux system service run-as user.
+        #[arg(long)]
+        run_as_user: Option<String>,
+        /// Replace existing foreground process when running.
+        #[arg(long)]
+        replace: bool,
+        /// Dry-run for migration/install checks.
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip confirmation prompts.
+        #[arg(short = 'y', long)]
+        yes: bool,
+        /// Deep status checks.
+        #[arg(long)]
+        deep: bool,
     },
 
     /// Run the interactive setup wizard.
@@ -72,6 +104,39 @@ pub enum CliCommand {
 
     /// Show running status (active sessions, model, uptime).
     Status,
+
+    /// Start the dashboard-compatible local HTTP UI/API helper.
+    Dashboard {
+        /// Host bind address (default: 127.0.0.1).
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        /// Port (default: 9119).
+        #[arg(long, default_value_t = 9119)]
+        port: u16,
+        /// Do not auto-open browser.
+        #[arg(long)]
+        no_open: bool,
+        /// Allow binding to non-localhost.
+        #[arg(long)]
+        insecure: bool,
+    },
+
+    /// Debug diagnostics and support report helpers.
+    Debug {
+        /// Action: share/delete.
+        action: Option<String>,
+        /// Optional URL argument for delete action.
+        url: Option<String>,
+        /// Number of log lines for debug share.
+        #[arg(long, default_value_t = 200)]
+        lines: u32,
+        /// Expiry days for uploaded report.
+        #[arg(long, default_value_t = 7)]
+        expire: u32,
+        /// Print report locally instead of uploading.
+        #[arg(long)]
+        local: bool,
+    },
 
     /// Show recent logs.
     ///
@@ -96,19 +161,59 @@ pub enum CliCommand {
     ///   hermes profile create work  — create a new profile named "work"
     ///   hermes profile switch work  — switch to the "work" profile
     Profile {
-        /// Action: "list", "create <name>", "switch <name>", or omitted to show current.
+        /// Action: "list", "use", "create", "delete", "show", "alias", "rename", "export", "import", or "switch" (legacy).
         action: Option<String>,
-        /// Profile name (used with "create" and "switch" actions).
+        /// Primary profile name or archive path depending on action.
         name: Option<String>,
+        /// Secondary positional argument (e.g. new name for `rename`).
+        secondary: Option<String>,
+        /// Output path for `export`.
+        #[arg(short, long)]
+        output: Option<String>,
+        /// Import profile name override for `import`.
+        #[arg(long)]
+        import_name: Option<String>,
+        /// Optional wrapper alias name for `alias`.
+        #[arg(long = "name")]
+        alias_name: Option<String>,
+        /// Remove wrapper alias for `alias`.
+        #[arg(long)]
+        remove: bool,
+        /// Skip confirmation prompts.
+        #[arg(short = 'y', long)]
+        yes: bool,
+        /// Clone config essentials from active/source profile on create.
+        #[arg(long)]
+        clone: bool,
+        /// Clone full profile state on create.
+        #[arg(long = "clone-all")]
+        clone_all: bool,
+        /// Source profile when cloning.
+        #[arg(long = "clone-from")]
+        clone_from: Option<String>,
+        /// Skip alias creation during profile create.
+        #[arg(long = "no-alias")]
+        no_alias: bool,
     },
 
     /// Authentication management.
     Auth {
-        /// Action: "login", "logout", "status".
+        /// Action: "login", "logout", "status", "add", "list", "remove", or "reset".
         action: Option<String>,
         /// Provider: openai/anthropic/... / `telegram` / `weixin|wechat|wx` (write platform token to config.yaml) / `copilot`.
         /// If omitted, uses `HERMES_AUTH_DEFAULT_PROVIDER` or `openai`.
         provider: Option<String>,
+        /// Action target (e.g. pooled credential index/id/label for `remove`).
+        target: Option<String>,
+        /// Credential type for `auth add` (oauth/api-key).
+        #[arg(long = "type")]
+        auth_type: Option<String>,
+        /// Optional pooled credential label for `auth add`.
+        #[arg(long)]
+        label: Option<String>,
+        /// API key value for `auth add` (otherwise interactive prompt).
+        #[arg(long = "api-key")]
+        api_key: Option<String>,
         /// For Weixin login: prefer QR flow (scan to obtain token).
         #[arg(long)]
         qr: bool,
@@ -130,9 +235,11 @@ pub enum CliCommand {
 
     /// Cron management commands.
     Cron {
-        /// Action: list/create/delete/pause/resume/run/history
+        /// Action: list/create/edit/pause/resume/run/remove/delete/history/status/tick
         action: Option<String>,
-        /// Job id (delete/pause/resume/run/history).
+        /// Job id (edit/delete/pause/resume/run/history/remove).
+        job_id: Option<String>,
+        /// Job id (legacy flag alias).
         #[arg(long)]
         id: Option<String>,
         /// Cron schedule (create), e.g. "0 9 * * *".
@@ -141,18 +248,74 @@ pub enum CliCommand {
         /// Prompt text (create).
         #[arg(long)]
         prompt: Option<String>,
+        /// Optional human-friendly job name.
+        #[arg(long)]
+        name: Option<String>,
+        /// Delivery target override.
+        #[arg(long)]
+        deliver: Option<String>,
+        /// Repeat count override.
+        #[arg(long)]
+        repeat: Option<u32>,
+        /// Replace skills list.
+        #[arg(long = "skill")]
+        skills: Vec<String>,
+        /// Append skills list.
+        #[arg(long = "add-skill")]
+        add_skills: Vec<String>,
+        /// Remove skills from list.
+        #[arg(long = "remove-skill")]
+        remove_skills: Vec<String>,
+        /// Clear all attached skills.
+        #[arg(long)]
+        clear_skills: bool,
+        /// Script path/content field.
+        #[arg(long)]
+        script: Option<String>,
+        /// Include inactive jobs (list action).
+        #[arg(long)]
+        all: bool,
     },
 
-    /// Webhook management commands (local registry in `webhooks.json`; `hermes gateway start` POSTs cron completion JSON to each URL).
+    /// Webhook management commands.
     Webhook {
-        /// Action: list/add/remove.
+        /// Action: subscribe/add/list/remove/rm/test.
         action: Option<String>,
+        /// Route/subscription name.
+        name: Option<String>,
         /// Webhook URL (add, or remove by URL).
         #[arg(long)]
         url: Option<String>,
         /// Entry id (remove by id).
         #[arg(long)]
         id: Option<String>,
+        /// Prompt template for subscription routes.
+        #[arg(long)]
+        prompt: Option<String>,
+        /// Comma-separated accepted events.
+        #[arg(long)]
+        events: Option<String>,
+        /// Human-readable description.
+        #[arg(long)]
+        description: Option<String>,
+        /// Comma-separated skills list.
+        #[arg(long)]
+        skills: Option<String>,
+        /// Delivery target.
+        #[arg(long)]
+        deliver: Option<String>,
+        /// Delivery chat id.
+        #[arg(long = "deliver-chat-id")]
+        deliver_chat_id: Option<String>,
+        /// HMAC secret.
+        #[arg(long)]
+        secret: Option<String>,
+        /// Skip agent execution and deliver prompt directly.
+        #[arg(long = "deliver-only")]
+        deliver_only: bool,
+        /// Test payload JSON.
+        #[arg(long)]
+        payload: Option<String>,
     },
 
     /// Start an interactive chat session.
@@ -170,7 +333,7 @@ pub enum CliCommand {
 
     /// Skills management.
     Skills {
-        /// Action: browse/search/install/inspect/list/check/update/audit/uninstall/publish/snapshot/tap/config
+        /// Action: browse/search/install/inspect/list/check/update/audit/uninstall/publish/snapshot/tap/config/reset/subscribe
         action: Option<String>,
         /// Skill name or search query.
         name: Option<String>,
@@ -195,17 +358,30 @@ pub enum CliCommand {
 
     /// Memory provider management.
     Memory {
-        /// Action: setup/status/off
+        /// Action: setup/status/off/reset
         action: Option<String>,
+        /// Reset target (all|memory|user) for `memory reset`.
+        target: Option<String>,
+        /// Skip reset confirmation prompt.
+        #[arg(short = 'y', long)]
+        yes: bool,
     },
 
     /// MCP server management.
     Mcp {
-        /// Action: serve/add/remove/list/test/configure
+        /// Action: serve/add/remove/list/test/configure/login
         action: Option<String>,
-        /// Server name or URL.
+        /// Server name.
+        name: Option<String>,
+        /// Legacy server name or URL option.
         #[arg(long)]
         server: Option<String>,
+        /// URL for add action.
+        #[arg(long)]
+        url: Option<String>,
+        /// Command for stdio server add action.
+        #[arg(long)]
+        command: Option<String>,
     },
 
     /// Session management.
@@ -464,7 +640,7 @@ mod tests {
     fn cli_parse_profile_create() {
         let cli = Cli::try_parse_from(vec!["hermes", "profile", "create", "work"]).unwrap();
         match cli.command {
-            Some(CliCommand::Profile { action, name }) => {
+            Some(CliCommand::Profile { action, name, .. }) => {
                 assert_eq!(action.as_deref(), Some("create"));
                 assert_eq!(name.as_deref(), Some("work"));
             }
