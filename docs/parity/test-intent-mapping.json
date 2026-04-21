@@ -1,0 +1,268 @@
+{
+  "generated_at_utc": "2026-04-21T16:25:15.711062+00:00",
+  "intent_unit": "domain_intent",
+  "intents": [
+    {
+      "evidence_count": 23,
+      "evidence_sample": [
+        "crates/hermes-cli/tests/e2e_gateway_cron_webhook.rs",
+        "crates/hermes-cli/tests/e2e_gateway_process.rs",
+        "crates/hermes-gateway/src/platforms/api_server.rs",
+        "crates/hermes-gateway/src/platforms/bluebubbles.rs",
+        "crates/hermes-gateway/src/platforms/dingtalk.rs",
+        "crates/hermes-gateway/src/platforms/discord.rs",
+        "crates/hermes-gateway/src/platforms/email.rs",
+        "crates/hermes-gateway/src/platforms/feishu.rs",
+        "crates/hermes-gateway/src/platforms/helpers.rs",
+        "crates/hermes-gateway/src/platforms/homeassistant.rs",
+        "crates/hermes-gateway/src/platforms/matrix.rs",
+        "crates/hermes-gateway/src/platforms/mattermost.rs",
+        "crates/hermes-gateway/src/platforms/mod.rs",
+        "crates/hermes-gateway/src/platforms/qqbot.rs",
+        "crates/hermes-gateway/src/platforms/signal.rs",
+        "crates/hermes-gateway/src/platforms/slack.rs",
+        "crates/hermes-gateway/src/platforms/sms.rs",
+        "crates/hermes-gateway/src/platforms/telegram.rs",
+        "crates/hermes-gateway/src/platforms/webhook.rs",
+        "crates/hermes-gateway/src/platforms/wecom.rs",
+        "crates/hermes-gateway/src/platforms/wecom_callback.rs",
+        "crates/hermes-gateway/src/platforms/weixin.rs",
+        "crates/hermes-gateway/src/platforms/whatsapp.rs"
+      ],
+      "id": "gateway-platform-behavior",
+      "mapped": true,
+      "upstream_scope": [
+        "tests/gateway",
+        "gateway/platforms"
+      ]
+    },
+    {
+      "evidence_count": 67,
+      "evidence_sample": [
+        "crates/hermes-tools/src/approval.rs",
+        "crates/hermes-tools/src/backends/browser.rs",
+        "crates/hermes-tools/src/backends/clarify.rs",
+        "crates/hermes-tools/src/backends/code_execution.rs",
+        "crates/hermes-tools/src/backends/cronjob.rs",
+        "crates/hermes-tools/src/backends/delegation.rs",
+        "crates/hermes-tools/src/backends/file.rs",
+        "crates/hermes-tools/src/backends/homeassistant.rs",
+        "crates/hermes-tools/src/backends/image_gen.rs",
+        "crates/hermes-tools/src/backends/memory.rs",
+        "crates/hermes-tools/src/backends/messaging.rs",
+        "crates/hermes-tools/src/backends/mod.rs",
+        "crates/hermes-tools/src/backends/session_search.rs",
+        "crates/hermes-tools/src/backends/todo.rs",
+        "crates/hermes-tools/src/backends/tts.rs",
+        "crates/hermes-tools/src/backends/vision.rs",
+        "crates/hermes-tools/src/backends/web.rs",
+        "crates/hermes-tools/src/credential_guard.rs",
+        "crates/hermes-tools/src/dispatch.rs",
+        "crates/hermes-tools/src/lib.rs",
+        "crates/hermes-tools/src/register_builtins.rs",
+        "crates/hermes-tools/src/registry.rs",
+        "crates/hermes-tools/src/tools/browser.rs",
+        "crates/hermes-tools/src/tools/clarify.rs",
+        "crates/hermes-tools/src/tools/code_execution.rs"
+      ],
+      "id": "tool-runtime-behavior",
+      "mapped": true,
+      "upstream_scope": [
+        "tests/tools",
+        "tools/environments"
+      ]
+    },
+    {
+      "evidence_count": 30,
+      "evidence_sample": [
+        "crates/hermes-cli/src/app.rs",
+        "crates/hermes-cli/src/auth.rs",
+        "crates/hermes-cli/src/banner.rs",
+        "crates/hermes-cli/src/bin/hermes.rs",
+        "crates/hermes-cli/src/checklist.rs",
+        "crates/hermes-cli/src/claw_migrate.rs",
+        "crates/hermes-cli/src/cli.rs",
+        "crates/hermes-cli/src/commands.rs",
+        "crates/hermes-cli/src/copilot_auth.rs",
+        "crates/hermes-cli/src/doctor.rs",
+        "crates/hermes-cli/src/env_loader.rs",
+        "crates/hermes-cli/src/gateway_cmd.rs",
+        "crates/hermes-cli/src/lib.rs",
+        "crates/hermes-cli/src/lumio.rs",
+        "crates/hermes-cli/src/main.rs",
+        "crates/hermes-cli/src/mcp_config.rs",
+        "crates/hermes-cli/src/model_switch.rs",
+        "crates/hermes-cli/src/pairing_store.rs",
+        "crates/hermes-cli/src/profiles.rs",
+        "crates/hermes-cli/src/providers.rs",
+        "crates/hermes-cli/src/runtime_tool_wiring.rs",
+        "crates/hermes-cli/src/setup.rs",
+        "crates/hermes-cli/src/skills_config.rs",
+        "crates/hermes-cli/src/skin_engine.rs",
+        "crates/hermes-cli/src/theme.rs"
+      ],
+      "id": "cli-command-surface",
+      "mapped": true,
+      "upstream_scope": [
+        "tests/hermes_cli",
+        "tests/cli"
+      ]
+    },
+    {
+      "evidence_count": 40,
+      "evidence_sample": [
+        "crates/hermes-agent/src/agent_loop.rs",
+        "crates/hermes-agent/src/api_bridge.rs",
+        "crates/hermes-agent/src/auxiliary_builder.rs",
+        "crates/hermes-agent/src/budget.rs",
+        "crates/hermes-agent/src/compression.rs",
+        "crates/hermes-agent/src/context.rs",
+        "crates/hermes-agent/src/context_files.rs",
+        "crates/hermes-agent/src/credential_pool.rs",
+        "crates/hermes-agent/src/fallback.rs",
+        "crates/hermes-agent/src/honcho_provider.rs",
+        "crates/hermes-agent/src/interrupt.rs",
+        "crates/hermes-agent/src/lib.rs",
+        "crates/hermes-agent/src/memory_manager.rs",
+        "crates/hermes-agent/src/memory_plugins/byterover.rs",
+        "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
+        "crates/hermes-agent/src/memory_plugins/hindsight.rs",
+        "crates/hermes-agent/src/memory_plugins/holographic.rs",
+        "crates/hermes-agent/src/memory_plugins/honcho.rs",
+        "crates/hermes-agent/src/memory_plugins/mem0.rs",
+        "crates/hermes-agent/src/memory_plugins/mod.rs",
+        "crates/hermes-agent/src/memory_plugins/openviking.rs",
+        "crates/hermes-agent/src/memory_plugins/retaindb.rs",
+        "crates/hermes-agent/src/memory_plugins/supermemory.rs",
+        "crates/hermes-agent/src/oauth.rs",
+        "crates/hermes-agent/src/plugins.rs"
+      ],
+      "id": "agent-loop-and-runtime",
+      "mapped": true,
+      "upstream_scope": [
+        "tests/run_agent",
+        "tests/agent"
+      ]
+    },
+    {
+      "evidence_count": 7,
+      "evidence_sample": [
+        "crates/hermes-acp/src/events.rs",
+        "crates/hermes-acp/src/handler.rs",
+        "crates/hermes-acp/src/lib.rs",
+        "crates/hermes-acp/src/permissions.rs",
+        "crates/hermes-acp/src/protocol.rs",
+        "crates/hermes-acp/src/server.rs",
+        "crates/hermes-acp/src/session.rs"
+      ],
+      "id": "acp-protocol-and-transport",
+      "mapped": true,
+      "upstream_scope": [
+        "tests/acp"
+      ]
+    },
+    {
+      "evidence_count": 7,
+      "evidence_sample": [
+        "crates/hermes-cli/src/commands.rs",
+        "crates/hermes-skills/src/guard.rs",
+        "crates/hermes-skills/src/hub.rs",
+        "crates/hermes-skills/src/lib.rs",
+        "crates/hermes-skills/src/skill.rs",
+        "crates/hermes-skills/src/store.rs",
+        "crates/hermes-skills/src/version.rs"
+      ],
+      "id": "skills-management-contract",
+      "mapped": true,
+      "upstream_scope": [
+        "tests/skills",
+        "skills",
+        "optional-skills"
+      ]
+    },
+    {
+      "evidence_count": 9,
+      "evidence_sample": [
+        "crates/hermes-cli/src/commands.rs",
+        "crates/hermes-cron/src/backend.rs",
+        "crates/hermes-cron/src/cli_support.rs",
+        "crates/hermes-cron/src/completion.rs",
+        "crates/hermes-cron/src/job.rs",
+        "crates/hermes-cron/src/lib.rs",
+        "crates/hermes-cron/src/persistence.rs",
+        "crates/hermes-cron/src/runner.rs",
+        "crates/hermes-cron/src/scheduler.rs"
+      ],
+      "id": "cron-and-scheduler-runtime",
+      "mapped": true,
+      "upstream_scope": [
+        "tests/cron"
+      ]
+    },
+    {
+      "evidence_count": 11,
+      "evidence_sample": [
+        "crates/hermes-agent/src/memory_plugins/byterover.rs",
+        "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
+        "crates/hermes-agent/src/memory_plugins/hindsight.rs",
+        "crates/hermes-agent/src/memory_plugins/holographic.rs",
+        "crates/hermes-agent/src/memory_plugins/honcho.rs",
+        "crates/hermes-agent/src/memory_plugins/mem0.rs",
+        "crates/hermes-agent/src/memory_plugins/mod.rs",
+        "crates/hermes-agent/src/memory_plugins/openviking.rs",
+        "crates/hermes-agent/src/memory_plugins/retaindb.rs",
+        "crates/hermes-agent/src/memory_plugins/supermemory.rs",
+        "crates/hermes-agent/tests/parity_self_evolution_fixtures.rs"
+      ],
+      "id": "memory-plugin-integration",
+      "mapped": true,
+      "upstream_scope": [
+        "plugins/memory",
+        "tests/plugins"
+      ]
+    },
+    {
+      "evidence_count": 12,
+      "evidence_sample": [
+        "crates/hermes-environments/src/daytona.rs",
+        "crates/hermes-environments/src/docker.rs",
+        "crates/hermes-environments/src/file_sync.rs",
+        "crates/hermes-environments/src/lib.rs",
+        "crates/hermes-environments/src/local.rs",
+        "crates/hermes-environments/src/managed_modal.rs",
+        "crates/hermes-environments/src/manager.rs",
+        "crates/hermes-environments/src/modal.rs",
+        "crates/hermes-environments/src/singularity.rs",
+        "crates/hermes-environments/src/ssh.rs",
+        "crates/hermes-environments/src/training/mod.rs",
+        "crates/hermes-environments/tests/backend_integration.rs"
+      ],
+      "id": "environment-lifecycle-contract",
+      "mapped": true,
+      "upstream_scope": [
+        "environments/benchmarks",
+        "tools/environments"
+      ]
+    },
+    {
+      "evidence_count": 3,
+      "evidence_sample": [
+        "crates/hermes-core/src/tool_call_parser.rs",
+        "crates/hermes-parity-tests/fixtures/hermes_core/format_tool_calls.json",
+        "crates/hermes-parity-tests/fixtures/hermes_core/tool_call_parser.json"
+      ],
+      "id": "tool-call-parser-contract",
+      "mapped": true,
+      "upstream_scope": [
+        "environments/tool_call_parsers",
+        "tests/integration"
+      ]
+    }
+  ],
+  "summary": {
+    "mapped_intents": 10,
+    "mapping_ratio": 1.0,
+    "total_intents": 10,
+    "unmapped_intents": 0
+  }
+}

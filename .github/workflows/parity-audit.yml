@@ -1,0 +1,69 @@
+name: Parity Audit
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Generate global parity artifacts
+        run: |
+          python3 scripts/generate-parity-matrix.py
+          python3 scripts/generate-workstream-status.py
+          python3 scripts/generate-test-intent-mapping.py
+          python3 scripts/generate-adapter-matrix.py
+          python3 scripts/validate-intentional-divergence.py --check --allow-warnings
+          python3 scripts/generate-upstream-patch-queue.py --max-commits 0
+          python3 scripts/generate-global-parity-proof.py --check-ci
+      - name: Upload parity artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-audit-artifacts
+          path: |
+            docs/parity/parity-matrix.json
+            docs/parity/parity-matrix.md
+            docs/parity/workstream-status.json
+            docs/parity/workstream-status.md
+            docs/parity/test-intent-mapping.json
+            docs/parity/test-intent-mapping.md
+            docs/parity/adapter-feature-matrix.json
+            docs/parity/adapter-feature-matrix.md
+            docs/parity/divergence-validation.json
+            docs/parity/global-parity-proof.json
+            docs/parity/global-parity-proof.md
+            docs/parity/upstream-missing-queue.md
+            docs/parity/upstream-missing-queue.json
+      - name: Comment parity epic on failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BODY=$(python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path("docs/parity/global-parity-proof.json")
+          if not p.exists():
+              print("Automated parity audit failed before proof artifact generation.")
+          else:
+              raw = json.loads(p.read_text(encoding="utf-8"))
+              metrics = raw.get("metrics", {})
+              print("Automated parity audit failed CI gate.")
+              print("")
+              print(f"- commits_behind: `{metrics.get('max_commits_behind')}`")
+              print(f"- upstream_patch_missing: `{metrics.get('max_upstream_patch_missing')}`")
+              print(f"- files_only_upstream: `{metrics.get('max_files_only_upstream')}`")
+              print(f"- shared_different: `{metrics.get('max_shared_different')}`")
+              print(f"- test_intent_mapping_ratio: `{metrics.get('min_test_intent_mapping_ratio')}`")
+          PY
+          )
+          gh issue comment 19 --body "$BODY" || true

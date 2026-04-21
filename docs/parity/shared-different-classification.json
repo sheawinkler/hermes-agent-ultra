@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "generated_from": "docs/parity/parity-matrix.json",
+  "items": [
+    {
+      "path": ".gitignore",
+      "classification": "branding_only",
+      "rationale": "Repository-local ignore patterns and generated artifacts do not affect runtime parity behavior.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "AGENTS.md",
+      "classification": "policy_only",
+      "rationale": "Local operator guidance; not part of Hermes runtime behavior.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "Dockerfile",
+      "classification": "functional",
+      "rationale": "Container build/runtime path impacts deployment behavior and should be tracked for parity deltas.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "LICENSE",
+      "classification": "policy_only",
+      "rationale": "Licensing and attribution metadata; no runtime effect.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "README.md",
+      "classification": "functional",
+      "rationale": "Installation and operational guidance influences real-world runtime setup outcomes.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "flake.nix",
+      "classification": "functional",
+      "rationale": "Nix packaging/install behavior affects reproducible environment parity.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "packaging/homebrew",
+      "classification": "functional",
+      "rationale": "Distribution packaging path impacts install parity for Homebrew users.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "scripts/install.sh",
+      "classification": "functional",
+      "rationale": "Installer behavior directly affects setup parity and bootstrap capabilities.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    }
+  ]
+}

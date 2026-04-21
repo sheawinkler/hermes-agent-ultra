@@ -109,6 +109,13 @@ def run_git(repo_root: Path, args: list[str], check: bool = True) -> str:
     return proc.stdout.strip()
 
 
+def ensure_remote(repo_root: Path, remote: str, url: str) -> None:
+    remotes = set(run_git(repo_root, ["remote"], check=False).splitlines())
+    if remote in remotes:
+        return
+    run_git(repo_root, ["remote", "add", remote, url])
+
+
 def parse_shortstat(text: str) -> dict[str, int]:
     out = {"files_changed": 0, "insertions": 0, "deletions": 0}
     if not text:
@@ -266,10 +273,11 @@ def compute_divergence_coverage(
         prefixes = item.get("path_prefixes", [])
         if not isinstance(prefixes, list):
             prefixes = []
+        norm_prefixes = [str(prefix).rstrip("/") for prefix in prefixes if str(prefix).strip()]
         matched = sorted(
             p
             for p in candidate_paths
-            if any(p == prefix or p.startswith(prefix + "/") for prefix in prefixes)
+            if any(p == prefix or p.startswith(prefix + "/") for prefix in norm_prefixes)
         )
         covered_files.update(matched)
         coverage_rows.append(
@@ -398,6 +406,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Generate parity matrix for local vs upstream.")
     parser.add_argument("--repo-root", default=".", help="Path to repository root.")
     parser.add_argument("--upstream-remote", default="upstream", help="Upstream remote name.")
+    parser.add_argument(
+        "--upstream-url",
+        default="https://github.com/NousResearch/hermes-agent.git",
+        help="Upstream URL used when remote is missing.",
+    )
     parser.add_argument("--local-ref", default="main", help="Local ref to compare.")
     parser.add_argument("--upstream-branch", default="main", help="Upstream branch name.")
     parser.add_argument("--top-n", type=int, default=40, help="Top bucket rows per section.")
@@ -423,6 +436,7 @@ def main() -> int:
     upstream_ref = f"{args.upstream_remote}/{args.upstream_branch}"
     local_ref = args.local_ref
 
+    ensure_remote(repo_root, args.upstream_remote, args.upstream_url)
     if not args.no_fetch:
         run_git(repo_root, ["fetch", args.upstream_remote, "--prune"])
 
@@ -488,7 +502,9 @@ def main() -> int:
 
     divergence_registry_path = (repo_root / args.intentional_divergence).resolve()
     divergence_registry = load_intentional_divergence_registry(divergence_registry_path)
-    candidate_divergence_paths = set(local_only_paths) | set(shared_different_paths)
+    candidate_divergence_paths = (
+        set(local_only_paths) | set(shared_different_paths) | set(upstream_only_paths)
+    )
     divergence_coverage, divergence_covered_files = compute_divergence_coverage(
         divergence_registry, candidate_divergence_paths
     )

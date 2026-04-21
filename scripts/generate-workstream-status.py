@@ -28,6 +28,13 @@ def run_git(args: list[str], check: bool = True) -> str:
     return proc.stdout.strip()
 
 
+def ensure_remote(remote: str, url: str) -> None:
+    remotes = set(run_git(["remote"], check=False).splitlines())
+    if remote in remotes:
+        return
+    run_git(["remote", "add", remote, url])
+
+
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
@@ -297,6 +304,12 @@ def build_status(upstream_ref: str) -> tuple[dict, str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate WS2-WS8 workstream status artifacts.")
     parser.add_argument("--upstream-ref", default="upstream/main")
+    parser.add_argument("--upstream-remote", default="upstream")
+    parser.add_argument(
+        "--upstream-url",
+        default="https://github.com/NousResearch/hermes-agent.git",
+    )
+    parser.add_argument("--no-fetch", action="store_true")
     parser.add_argument(
         "--out-json", default="docs/parity/workstream-status.json", type=Path
     )
@@ -304,6 +317,10 @@ def main() -> int:
         "--out-md", default="docs/parity/workstream-status.md", type=Path
     )
     args = parser.parse_args()
+
+    ensure_remote(args.upstream_remote, args.upstream_url)
+    if not args.no_fetch:
+        run_git(["fetch", args.upstream_remote, "--prune"])
 
     summary, md = build_status(args.upstream_ref)
     args.out_json.parent.mkdir(parents=True, exist_ok=True)

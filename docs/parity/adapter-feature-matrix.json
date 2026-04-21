@@ -1,0 +1,179 @@
+{
+  "generated_at_utc": "2026-04-21T16:25:15.771064+00:00",
+  "items": [
+    {
+      "category": "memory_plugin",
+      "feature": "always",
+      "name": "byterover",
+      "status": "rust-native"
+    },
+    {
+      "category": "memory_plugin",
+      "feature": "always",
+      "name": "contextlattice",
+      "status": "rust-native"
+    },
+    {
+      "category": "memory_plugin",
+      "feature": "always",
+      "name": "hindsight",
+      "status": "rust-native"
+    },
+    {
+      "category": "memory_plugin",
+      "feature": "always",
+      "name": "holographic",
+      "status": "rust-native"
+    },
+    {
+      "category": "memory_plugin",
+      "feature": "always",
+      "name": "honcho",
+      "status": "rust-native"
+    },
+    {
+      "category": "memory_plugin",
+      "feature": "always",
+      "name": "mem0",
+      "status": "rust-native"
+    },
+    {
+      "category": "memory_plugin",
+      "feature": "always",
+      "name": "openviking",
+      "status": "rust-native"
+    },
+    {
+      "category": "memory_plugin",
+      "feature": "always",
+      "name": "retaindb",
+      "status": "rust-native"
+    },
+    {
+      "category": "memory_plugin",
+      "feature": "always",
+      "name": "supermemory",
+      "status": "rust-native"
+    },
+    {
+      "category": "platform_adapter",
+      "feature": "api-server",
+      "name": "api_server",
+      "status": "rust-native"
+    },
+    {
+      "category": "platform_adapter",
+      "feature": "bluebubbles",
+      "name": "bluebubbles",
+      "status": "rust-native"
+    },
+    {
+      "category": "platform_adapter",
+      "feature": "dingtalk",
+      "name": "dingtalk",
+      "status": "rust-native"
+    },
+    {
+      "category": "platform_adapter",
+      "feature": "discord",
+      "name": "discord",
+      "status": "rust-native"
+    },
+    {
+      "category": "platform_adapter",
+      "feature": "email",
+      "name": "email",
+      "status": "rust-native"
+    },
+    {
+      "category": "platform_adapter",
+      "feature": "feishu",
+      "name": "feishu",
+      "status": "rust-native"
+    },
+    {
+      "category": "platform_adapter",
+      "feature": "homeassistant",
+      "name": "homeassistant",
+      "status": "rust-native"
+    },
+    {
+      "category": "platform_adapter",
+      "feature": "matrix",
+      "name": "matrix",
+      "status": "rust-native"
+    },
+    {
+      "category": "platform_adapter",
+      "feature": "mattermost",
+      "name": "mattermost",
+      "status": "rust-native"
+    },
+    {
+      "category": "platform_adapter",
+      "feature": "qqbot",
+      "name": "qqbot",
+      "status": "rust-native"
+    },
+    {
+      "category": "platform_adapter",
+      "feature": "signal",
+      "name": "signal",
+      "status": "rust-native"
+    },
+    {
+      "category": "platform_adapter",
+      "feature": "slack",
+      "name": "slack",
+      "status": "rust-native"
+    },
+    {
+      "category": "platform_adapter",
+      "feature": "sms",
+      "name": "sms",
+      "status": "rust-native"
+    },
+    {
+      "category": "platform_adapter",
+      "feature": "telegram",
+      "name": "telegram",
+      "status": "rust-native"
+    },
+    {
+      "category": "platform_adapter",
+      "feature": "webhook",
+      "name": "webhook",
+      "status": "rust-native"
+    },
+    {
+      "category": "platform_adapter",
+      "feature": "wecom",
+      "name": "wecom",
+      "status": "rust-native"
+    },
+    {
+      "category": "platform_adapter",
+      "feature": "wecom-callback",
+      "name": "wecom_callback",
+      "status": "rust-native"
+    },
+    {
+      "category": "platform_adapter",
+      "feature": "weixin",
+      "name": "weixin",
+      "status": "rust-native"
+    },
+    {
+      "category": "platform_adapter",
+      "feature": "whatsapp",
+      "name": "whatsapp",
+      "status": "rust-native"
+    }
+  ],
+  "summary": {
+    "memory_plugins": 9,
+    "non_rust_native": 0,
+    "placeholder_status_entries": 0,
+    "platform_adapters": 19
+  }
+}

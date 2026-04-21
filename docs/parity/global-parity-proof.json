@@ -1,0 +1,167 @@
+{
+  "ci_gate": {
+    "checks": [
+      {
+        "actual": 5212.0,
+        "limit": 5500,
+        "metric": "max_commits_behind",
+        "status": "pass"
+      },
+      {
+        "actual": 4505.0,
+        "limit": 5000,
+        "metric": "max_upstream_patch_missing",
+        "status": "pass"
+      },
+      {
+        "actual": 2204.0,
+        "limit": 2500,
+        "metric": "max_files_only_upstream",
+        "status": "pass"
+      },
+      {
+        "actual": 8.0,
+        "limit": 15,
+        "metric": "max_shared_different",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_unowned_divergences",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_divergence_review_overdue",
+        "status": "pass"
+      },
+      {
+        "actual": 1.0,
+        "limit": 0.9,
+        "metric": "min_test_intent_mapping_ratio",
+        "status": "pass"
+      }
+    ],
+    "pass": true
+  },
+  "generated_at_utc": "2026-04-21T16:25:18.580614+00:00",
+  "gpar_completion": {
+    "GPAR-01": true,
+    "GPAR-02": true,
+    "GPAR-03": true,
+    "GPAR-04": true,
+    "GPAR-05": true,
+    "GPAR-06": true,
+    "GPAR-07": true,
+    "GPAR-08": true,
+    "GPAR-09": true
+  },
+  "metrics": {
+    "max_commits_behind": 5212.0,
+    "max_divergence_review_overdue": 0.0,
+    "max_files_only_upstream": 2204.0,
+    "max_shared_different": 8.0,
+    "max_unowned_divergences": 0.0,
+    "max_upstream_patch_missing": 4505.0,
+    "min_test_intent_mapping_ratio": 1.0
+  },
+  "program": {
+    "epic_issue": 19,
+    "project_name": "Hermes Ultra Parity Program",
+    "upstream_ref": "upstream/main",
+    "upstream_repo": "NousResearch/hermes-agent"
+  },
+  "queue_summary": {
+    "by_disposition": {
+      "pending": 4509
+    },
+    "by_target_ticket": {
+      "20": 1607,
+      "21": 192,
+      "22": 494,
+      "23": 506,
+      "24": 64,
+      "25": 152,
+      "26": 1494
+    },
+    "total_commits": 4509
+  },
+  "release_gate": {
+    "checks": [
+      {
+        "actual": 5212.0,
+        "limit": 0,
+        "metric": "max_commits_behind",
+        "status": "fail"
+      },
+      {
+        "actual": 4505.0,
+        "limit": 0,
+        "metric": "max_upstream_patch_missing",
+        "status": "fail"
+      },
+      {
+        "actual": 2204.0,
+        "limit": 0,
+        "metric": "max_files_only_upstream",
+        "status": "fail"
+      },
+      {
+        "actual": 8.0,
+        "limit": 0,
+        "metric": "max_shared_different",
+        "status": "fail"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_unowned_divergences",
+        "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_divergence_review_overdue",
+        "status": "pass"
+      },
+      {
+        "actual": 1.0,
+        "limit": 0.9,
+        "metric": "min_test_intent_mapping_ratio",
+        "status": "pass"
+      },
+      {
+        "actual": {
+          "GPAR-01": true,
+          "GPAR-02": true,
+          "GPAR-03": true,
+          "GPAR-04": true,
+          "GPAR-05": true,
+          "GPAR-06": true,
+          "GPAR-07": true,
+          "GPAR-08": true,
+          "GPAR-09": true
+        },
+        "limit": "all true",
+        "metric": "required_workstreams_complete",
+        "status": "pass"
+      }
+    ],
+    "pass": false
+  },
+  "sources": {
+    "adapter_matrix": "docs/parity/adapter-feature-matrix.json",
+    "divergence_validation": "docs/parity/divergence-validation.json",
+    "intent_mapping": "docs/parity/test-intent-mapping.json",
+    "parity_matrix": "docs/parity/parity-matrix.json",
+    "patch_queue": "docs/parity/upstream-missing-queue.json",
+    "shared_diff_classification": "docs/parity/shared-different-classification.json",
+    "thresholds": "docs/parity/global-parity-thresholds.json",
+    "workstream_status": "docs/parity/workstream-status.json"
+  },
+  "ws_legacy_states": {
+    "complete": 7
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "program": {
+    "epic_issue": 19,
+    "project_name": "Hermes Ultra Parity Program",
+    "upstream_repo": "NousResearch/hermes-agent",
+    "upstream_ref": "upstream/main"
+  },
+  "release_thresholds": {
+    "max_commits_behind": 0,
+    "max_upstream_patch_missing": 0,
+    "max_files_only_upstream": 0,
+    "max_shared_different": 0,
+    "max_unowned_divergences": 0,
+    "max_divergence_review_overdue": 0,
+    "min_test_intent_mapping_ratio": 0.9,
+    "required_workstreams_complete": [
+      "GPAR-01",
+      "GPAR-02",
+      "GPAR-03",
+      "GPAR-04",
+      "GPAR-05",
+      "GPAR-06",
+      "GPAR-07",
+      "GPAR-08",
+      "GPAR-09"
+    ]
+  },
+  "ci_thresholds": {
+    "max_commits_behind": 5500,
+    "max_upstream_patch_missing": 5000,
+    "max_files_only_upstream": 2500,
+    "max_shared_different": 15,
+    "max_unowned_divergences": 0,
+    "max_divergence_review_overdue": 0,
+    "min_test_intent_mapping_ratio": 0.9
+  },
+  "drift_alert_thresholds": {
+    "warn_commits_behind": 5200,
+    "warn_upstream_patch_missing": 4600,
+    "warn_files_only_upstream": 2250,
+    "warn_shared_different": 10
+  }
+}

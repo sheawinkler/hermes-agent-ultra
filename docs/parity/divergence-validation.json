@@ -1,0 +1,135 @@
+{
+  "divergence_file": "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/parity/intentional-divergence.json",
+  "generated_at_utc": "2026-04-21T16:25:16.964856+00:00",
+  "items": [
+    {
+      "errors": [],
+      "id": "ultra-contextlattice-memory-plugin",
+      "last_reviewed": "2026-04-21",
+      "matched_files": 2,
+      "matched_sample": [
+        "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
+        "crates/hermes-agent/src/memory_plugins/mod.rs"
+      ],
+      "overdue": false,
+      "owner": "sheawinkler",
+      "review_date": "2026-07-21",
+      "status": "approved",
+      "ticket": 23,
+      "warnings": []
+    },
+    {
+      "errors": [],
+      "id": "ultra-webhook-queue-backends",
+      "last_reviewed": "2026-04-21",
+      "matched_files": 4,
+      "matched_sample": [
+        "docs/upstream-webhook-sync.md",
+        "scripts/run-upstream-webhook-listener.sh",
+        "scripts/run-upstream-webhook-worker.sh",
+        "scripts/upstream_webhook_sync.py"
+      ],
+      "overdue": false,
+      "owner": "sheawinkler",
+      "review_date": "2026-07-21",
+      "status": "approved",
+      "ticket": 26,
+      "warnings": []
+    },
+    {
+      "errors": [],
+      "id": "ultra-launchd-webhook-lifecycle",
+      "last_reviewed": "2026-04-21",
+      "matched_files": 4,
+      "matched_sample": [
+        "scripts/install-upstream-webhook-launchd.sh",
+        "scripts/setup-upstream-webhook-launchd.sh",
+        "scripts/status-upstream-webhook-launchd.sh",
+        "scripts/uninstall-upstream-webhook-launchd.sh"
+      ],
+      "overdue": false,
+      "owner": "sheawinkler",
+      "review_date": "2026-07-21",
+      "status": "approved",
+      "ticket": 26,
+      "warnings": []
+    },
+    {
+      "errors": [],
+      "id": "rust-skills-catalog-governance",
+      "last_reviewed": "2026-04-21",
+      "matched_files": 626,
+      "matched_sample": [
+        "optional-skills/DESCRIPTION.md",
+        "optional-skills/autonomous-ai-agents/DESCRIPTION.md",
+        "optional-skills/autonomous-ai-agents/blackbox/SKILL.md",
+        "optional-skills/autonomous-ai-agents/honcho/SKILL.md",
+        "optional-skills/blockchain/base/SKILL.md",
+        "optional-skills/blockchain/base/scripts/base_client.py",
+        "optional-skills/blockchain/solana/SKILL.md",
+        "optional-skills/blockchain/solana/scripts/solana_client.py",
+        "optional-skills/communication/DESCRIPTION.md",
+        "optional-skills/communication/one-three-one-rule/SKILL.md",
+        "optional-skills/creative/blender-mcp/SKILL.md",
+        "optional-skills/creative/concept-diagrams/SKILL.md",
+        "optional-skills/creative/concept-diagrams/examples/apartment-floor-plan-conversion.md",
+        "optional-skills/creative/concept-diagrams/examples/automated-password-reset-flow.md",
+        "optional-skills/creative/concept-diagrams/examples/autonomous-llm-research-agent-flow.md",
+        "optional-skills/creative/concept-diagrams/examples/banana-journey-tree-to-smoothie.md",
+        "optional-skills/creative/concept-diagrams/examples/commercial-aircraft-structure.md",
+        "optional-skills/creative/concept-diagrams/examples/cpu-ooo-microarchitecture.md",
+        "optional-skills/creative/concept-diagrams/examples/electricity-grid-flow.md",
+        "optional-skills/creative/concept-diagrams/examples/feature-film-production-pipeline.md"
+      ],
+      "overdue": false,
+      "owner": "sheawinkler",
+      "review_date": "2026-06-30",
+      "status": "approved",
+      "ticket": 21,
+      "warnings": []
+    },
+    {
+      "errors": [],
+      "id": "rust-cli-tui-primary-ux-surface",
+      "last_reviewed": "2026-04-21",
+      "matched_files": 459,
+      "matched_sample": [
+        "ui-tui/.gitignore",
+        "ui-tui/.prettierrc",
+        "ui-tui/README.md",
+        "ui-tui/eslint.config.mjs",
+        "ui-tui/package-lock.json",
+        "ui-tui/package.json",
+        "ui-tui/packages/hermes-ink/ambient.d.ts",
+        "ui-tui/packages/hermes-ink/index.d.ts",
+        "ui-tui/packages/hermes-ink/index.js",
+        "ui-tui/packages/hermes-ink/package-lock.json",
+        "ui-tui/packages/hermes-ink/package.json",
+        "ui-tui/packages/hermes-ink/src/bootstrap/state.ts",
+        "ui-tui/packages/hermes-ink/src/entry-exports.ts",
+        "ui-tui/packages/hermes-ink/src/hooks/use-stderr.ts",
+        "ui-tui/packages/hermes-ink/src/hooks/use-stdout.ts",
+        "ui-tui/packages/hermes-ink/src/ink/Ansi.tsx",
+        "ui-tui/packages/hermes-ink/src/ink/bidi.ts",
+        "ui-tui/packages/hermes-ink/src/ink/clearTerminal.ts",
+        "ui-tui/packages/hermes-ink/src/ink/colorize.ts",
+        "ui-tui/packages/hermes-ink/src/ink/components/AlternateScreen.tsx"
+      ],
+      "overdue": false,
+      "owner": "sheawinkler",
+      "review_date": "2026-06-30",
+      "status": "approved",
+      "ticket": 22,
+      "warnings": []
+    }
+  ],
+  "summary": {
+    "errors": 0,
+    "items": 5,
+    "local_paths": 383,
+    "review_overdue": 0,
+    "unowned": 0,
+    "upstream_paths": 2213,
+    "warnings": 0
+  }
+}
