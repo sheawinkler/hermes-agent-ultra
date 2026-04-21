@@ -7,3 +7,4 @@ GEO-AI/
 .env
 *.log
 vout-endianness-analysis.md
+.sync-reports/
