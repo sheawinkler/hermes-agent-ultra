@@ -6286,14 +6286,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tests/tools/test_cron_prompt_injection.py",
         "tools/cronjob_tools.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in Rust parity hardening batch (approval/cron scanner/atomic persistence)",
+      "owner": "sheawinkler",
       "sha": "feea8332d6246cddeb76c90fde663b39cdcbf88b",
       "subject": "fix: cron prompt injection scanner bypass for multi-word variants",
       "target_ticket": 20,
@@ -6957,13 +6957,13 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "cron/jobs.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in Rust parity hardening batch (approval/cron scanner/atomic persistence)",
+      "owner": "sheawinkler",
       "sha": "bf75c450b7d710760488fb1a503b716551b21619",
       "subject": "fix(cron): use atomic write in save_jobs to prevent data loss",
       "target_ticket": 26,
@@ -7746,14 +7746,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tests/tools/test_approval.py",
         "tools/approval.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in Rust parity hardening batch (approval/cron scanner/atomic persistence)",
+      "owner": "sheawinkler",
       "sha": "7166647ca132d54149af35dfd21312a1e3c19625",
       "subject": "fix(security): add re.DOTALL to prevent multiline bypass of dangerous command detection",
       "target_ticket": 20,
@@ -68572,7 +68572,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     }
   ],
-  "generated_at_utc": "2026-04-21T16:52:38.130423+00:00",
+  "generated_at_utc": "2026-04-21T17:03:16.233824+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -68580,8 +68580,8 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4507,
-      "ported": 2
+      "pending": 4504,
+      "ported": 5
     },
     "by_target_ticket": {
       "20": 1607,
