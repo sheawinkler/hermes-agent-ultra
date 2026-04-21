@@ -96,3 +96,16 @@ For event-driven sync (push-triggered, not schedule-triggered), see:
 This path supports SQLite (default), SQS, and Kafka queue backends and is the
 recommended architecture when you want near-real-time upstream ingestion with
 strict risk gating.
+
+## Parity Matrix Snapshot
+
+To generate a reproducible parity snapshot against `upstream/main`:
+
+```bash
+python3 scripts/generate-parity-matrix.py
+```
+
+Artifacts are written to:
+
+- `docs/parity/parity-matrix.json`
+- `docs/parity/parity-matrix.md`

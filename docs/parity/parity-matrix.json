@@ -1,0 +1,103 @@
+{
+  "generated_at_utc": "2026-04-21T08:22:32.788934+00:00",
+  "refs": {
+    "local_ref": "main",
+    "local_sha": "b5eff5cb7cce302580c18276f687aa6f1756ff76",
+    "upstream_ref": "upstream/main",
+    "upstream_sha": "04f9ffb792da7e2234727b69e6171a1e90da47bc",
+    "merge_base": null
+  },
+  "summary": {
+    "commits_behind": 5157,
+    "commits_ahead": 97,
+    "files_missing_from_local": 2552,
+    "files_unique_to_local": 2552,
+    "tree_files_changed": 2552,
+    "tree_insertions": 845986,
+    "tree_deletions": 127871
+  },
+  "top_missing_from_local": [
+    {
+      "path": "tests/gateway",
+      "count": 174
+    },
+    {
+      "path": "skills/creative",
+      "count": 165
+    },
+    {
+      "path": "tests/tools",
+      "count": 152
+    },
+    {
+      "path": "website/docs",
+      "count": 127
+    },
+    {
+      "path": "ui-tui/packages",
+      "count": 126
+    },
+    {
+      "path": "tests/hermes_cli",
+      "count": 122
+    },
+    {
+      "path": "ui-tui/src",
+      "count": 103
+    },
+    {
+      "path": "optional-skills/mlops",
+      "count": 81
+    },
+    {
+      "path": "crates/hermes-tools",
+      "count": 68
+    },
+    {
+      "path": "skills/productivity",
+      "count": 66
+    }
+  ],
+  "top_unique_to_local": [
+    {
+      "path": "tests/gateway",
+      "count": 174
+    },
+    {
+      "path": "skills/creative",
+      "count": 165
+    },
+    {
+      "path": "tests/tools",
+      "count": 152
+    },
+    {
+      "path": "website/docs",
+      "count": 127
+    },
+    {
+      "path": "ui-tui/packages",
+      "count": 126
+    },
+    {
+      "path": "tests/hermes_cli",
+      "count": 122
+    },
+    {
+      "path": "ui-tui/src",
+      "count": 103
+    },
+    {
+      "path": "optional-skills/mlops",
+      "count": 81
+    },
+    {
+      "path": "crates/hermes-tools",
+      "count": 68
+    },
+    {
+      "path": "skills/productivity",
+      "count": 66
+    }
+  ]
+}
