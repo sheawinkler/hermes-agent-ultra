@@ -366,7 +366,11 @@ impl FileSkillStore {
 
     /// Recursively collect [`SkillMeta`] from all `SKILL.md` files under
     /// `dir`. The `relative` prefix is used to reconstruct categories.
-    async fn collect_metas(&self, dir: &Path, metas: &mut Vec<SkillMeta>) -> Result<(), SkillError> {
+    async fn collect_metas(
+        &self,
+        dir: &Path,
+        metas: &mut Vec<SkillMeta>,
+    ) -> Result<(), SkillError> {
         if !dir.exists() {
             return Ok(());
         }
