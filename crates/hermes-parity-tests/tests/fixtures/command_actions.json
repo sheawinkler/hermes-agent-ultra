@@ -1,0 +1,76 @@
+{
+  "required_top_level": [
+    "dashboard",
+    "debug",
+    "tools",
+    "gateway",
+    "auth",
+    "cron",
+    "webhook",
+    "profile",
+    "memory",
+    "mcp",
+    "skills"
+  ],
+  "required_actions": {
+    "tools": ["list", "enable", "disable"],
+    "gateway": [
+      "run",
+      "start",
+      "stop",
+      "restart",
+      "status",
+      "install",
+      "uninstall",
+      "setup",
+      "migrate-legacy"
+    ],
+    "auth": ["login", "logout", "status", "add", "list", "remove", "reset"],
+    "cron": [
+      "list",
+      "create",
+      "add",
+      "edit",
+      "pause",
+      "resume",
+      "run",
+      "remove",
+      "delete",
+      "history",
+      "status",
+      "tick"
+    ],
+    "webhook": ["list", "ls", "subscribe", "add", "remove", "rm", "test"],
+    "profile": [
+      "show",
+      "list",
+      "create",
+      "use",
+      "switch",
+      "delete",
+      "alias",
+      "rename",
+      "export",
+      "import"
+    ],
+    "memory": ["status", "setup", "off", "reset"],
+    "mcp": ["list", "add", "remove", "serve", "test", "configure", "login"],
+    "skills": [
+      "list",
+      "browse",
+      "search",
+      "install",
+      "inspect",
+      "uninstall",
+      "check",
+      "update",
+      "audit",
+      "publish",
+      "snapshot",
+      "tap",
+      "config",
+      "reset",
+      "subscribe"
+    ]
+  }
+}
