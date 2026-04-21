@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-21T21:50:18.247047+00:00`
+Generated: `2026-04-21T22:22:18.143372+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `4536`.
 
@@ -16,112 +16,112 @@ Generated: `2026-04-21T21:50:18.247047+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 4474 |
+| pending | 4374 |
 | ported | 12 |
-| superseded | 50 |
+| superseded | 150 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `1614c15bb112` | #26 | rate limits |
-| `ab7293bed652` | #26 | don't log exit code !=0 as terminal failure |
-| `6af6ff2a0a46` | #26 | updates for stability and speed |
-| `4071ba29dac7` | #26 | Enhance batch processing and tool validation |
-| `66daebe88f00` | #26 | Implement enhanced response handling and tool call validation in run_agent |
-| `13d360030fe0` | #26 | Enhance tool normalization and API integration across modules |
-| `b66c093316b9` | #26 | add default datagen example script |
-| `6e3dbb8d8b68` | #26 | Enhance batch processing with progress tracking and update AIAgent for OpenRouter detection |
-| `b32cc4b09dd3` | #26 | Refactor batch processing with rich progress tracking and update logging in AIAgent |
-| `6eb76c7c1a37` | #26 | Enhance batch processing and image generation tools |
-| `47555602d7f1` | #26 | Add mini-swe-agent runner and trajectory compressor |
-| `ba19d530ad24` | #25 | Update environment configuration and enhance terminal tool integration |
-| `b78076cac75f` | #26 | Enhance trajectory_compressor.py with new input options and sampling functionality |
-| `54ca0997ee98` | #26 | Update .gitignore to include additional directories and files |
-| `248acf715e0f` | #25 | Add browser automation tools and enhance environment configuration |
-| `5438b64e32b9` | #26 | Add new shell scripts for various task runs |
-| `4c05ef0ba8f0` | #26 | Enhance logging and tool initialization for improved performance |
-| `f8846f85a142` | #26 | Add package.json and package-lock.json for project setup |
-| `7ea17bb9576b` | #25 | Update environment configuration and enhance tool definitions |
-| `771cf41fea1f` | #26 | Update environment configuration and enhance terminal tool integration |
-| `e8c6135a9145` | #26 | Update documentation for project structure and tool integration |
-| `8e8b6be690ec` | #26 | Add timeout configuration for trajectory processing |
-| `f172f7d4aa14` | #21 | Add skills tools and enhance model integration |
-| `b292192467e3` | #25 | Enhance documentation for skills system and project structure |
-| `4b68d30b0e92` | #26 | Moved "architecture" dir to "docs" for clarity |
-| `8e986584f44f` | #26 | Update .gitignore to include private keys and CLI config |
-| `bc76a032ba29` | #26 | Add a claude code-like CLI |
-| `c360da4f3531` | #25 | Enhance documentation for CLI and tool integration |
-| `20f287547275` | #26 | Implement browser session inactivity timeout and cleanup |
-| `32254d301023` | #26 | Add skills guidance to system prompts in run_agent.py |
-| `8f5f99c22ab5` | #21 | Add new skills descriptions and enhance skills tool functionality |
-| `9c8d707530c0` | #26 | Update .gitignore to include additional ignored files |
-| `3db83b682411` | #26 | Revise TODO.md to introduce Subagent Architecture and Interactive Clarifying Questions Tool |
-| `affc4e9a8fed` | #26 | Update TODO.md |
-| `971ed2bbdf61` | #25 | Implement sudo support across terminal environments |
-| `bbeed5b5d12d` | #25 | Enhance session logging and interactive sudo support |
-| `9b4d9452ba11` | #25 | Add context compression feature for long conversations |
-| `e114f09f70be` | #26 | Implement reasoning extraction and enhance assistant message handling |
-| `c935a604f876` | #26 | Refactor TODO.md to reorganize task sections and update descriptions |
-| `a3ba41fce21e` | #25 | Implement cron job management system for scheduled tasks (similar to OpenAI's Pulse but the AI can also schedule jobs) |
-| `619c72e566fa` | #23 | Enhance CLI with multi-platform messaging integration and configuration management |
-| `3488576bd873` | #26 | Update terminal configuration and enhance CLI model management |
-| `da4167560f57` | #26 | Enhance terminal backend selection in setup wizard |
-| `ef409c6a24f4` | #25 | Enhance repository cloning in install script |
-| `aa6394e94fdf` | #26 | Update install script to support SSH and HTTPS repository URLs |
-| `69a338610a7a` | #26 | Enhance repository cloning logic in install script |
-| `e87bee9ccd42` | #26 | Refactor setup wizard for improved API key and provider configuration |
-| `bbb5776763e4` | #26 | Enhance tool availability checks and user feedback in CLI |
-| `fef504f03869` | #25 | Refactor configuration file management and improve user feedback |
-| `3ee788dacc79` | #26 | Implement configuration migration system and enhance CLI setup |
-| `ff776b57bf4f` | #25 | Remove outdated .cursorrules file and add comprehensive AGENTS.md documentation |
-| `c9011fc7e192` | #25 | Add uninstall command to CLI and update documentation |
-| `be91af7551f6` | #26 | Refactor TODO list and remove completed items |
-| `76d929e17725` | #26 | Implement dangerous command approval system for terminal tool |
-| `5d3398aa8a20` | #26 | Refactor terminal tool command approval process and enhance CLI feedback |
-| `3e634aa7e4f5` | #26 | Update requirements and enhance environment variable loading in gateway |
-| `17a5efb416b5` | #25 | Enhance messaging gateway configuration and security features |
-| `7eac4ee9fe9f` | #26 | Update agent configuration for maximum tool-calling iterations |
-| `a09b018bd50e` | #23 | Implement continuous typing indicator in message handling |
-| `e7f0ffbf5d1e` | #26 | Add tool progress notifications for messaging channels |
-| `9d9eea9ac970` | #25 | Enhance agent configuration and documentation for tool progress and working directory |
-| `488deb04a4f9` | #23 | fix telegram, import asyncio |
-| `221fb17c5e39` | #23 | Refine typing indicator behavior in message handling |
-| `212460289b51` | #26 | Enhance skills tool to have an arg so it is more reliably called, and error handling in agent |
-| `beeb7896e07e` | #23 | Refactor message handling and error logging in agent and gateway |
-| `9bfe185a2e31` | #26 | Implement interrupt handling for agent and CLI input and persistent prompt line at bottom of CLI :) |
-| `51a6b7d2b5dc` | #23 | Implement interrupt handling for message processing in GatewayRunner and BasePlatformAdapter |
-| `f018999da978` | #26 | initial RL training tools and loop |
-| `8380895ae31f` | #25 | Update README.md |
-| `f6574978de39` | #25 | Add RL training configuration and tools |
-| `12bbca95ecf4` | #26 | Add tinker-atropos submodule and update RL training tools |
-| `3c0d0dba49f9` | #25 | Update RL tools and enhance configuration management |
-| `5c3105b4376c` | #26 | Enhance RL test inference with WandB integration and real-time output streaming |
-| `533c06426941` | #25 | Add file manipulation tools and enhance setup scripts |
-| `ac797259232e` | #25 | Update dependencies and enhance installation scripts |
-| `07b615e96ed4` | #24 | Add support for Atropos Agentic RL environments (requires branch tool_call_support in Atropos atm) |
-| `c0494b3558df` | #26 | Update pyproject.toml to refine dependency management |
-| `a478e4458567` | #26 | Increase max_token_length in TerminalTestEnv to 16000 for enhanced processing capacity |
-| `a8809bbd3e4b` | #25 | Transition installation to uv for py version and speed to be easier to streamline |
-| `d999d9876d9b` | #26 | Enhance async tool execution and error handling in Hermes agent for Atropos integration |
-| `f12ea1bc027b` | #26 | Enhance BatchRunner and AIAgent with new configuration options, default model now opus 4.6, default summarizer gemini flash 3 |
-| `dd70d57b9bc3` | #26 | Refactor BatchRunner and AIAgent for enhanced reasoning and tool management, improved tool definitions for fileops |
-| `c441681dc2e4` | #26 | Update default model to 'anthropic/claude-opus-4.6' and refine terminal working directory settings |
-| `192ce958c37d` | #26 | Enhance CLI command handling and introduce resource cleanup features |
-| `7a11be9f3fdd` | #26 | Enhance browser tool functionality and cleanup process |
-| `1b1307d0d120` | #26 | Implement Anthropic prompt caching for Claude models via OpenRouter |
-| `e8343f2d870e` | #26 | Refactor Singularity environment for persistent container management |
-| `35ad3146a8ab` | #24 | Add new environments and enhance tool context functionality |
-| `ad042fdd68c0` | #24 | Update terminalbench_2 configuration for enhanced performance and evaluation |
-| `5ec75e38b978` | #26 | Enhance tool execution and logging in HermesAgentLoop |
-| `6b4a8d0b175c` | #26 | Add terminal configuration options and enhance environment setup |
-| `ba3fea24f10c` | #24 | Enhance TerminalBench 2 configuration and evaluation handling |
-| `999a28062d1f` | #26 | Implement graceful exit cleanup for terminal tool |
-| `85e629e9154c` | #24 | Add cleanup functionality for orphaned sandboxes in TerminalBench2EvalEnv |
-| `9b0f2a16ca90` | #26 | Enhance CLI functionality with retry and undo commands |
-| `62ba69a29d4e` | #26 | Fix gateway exit code to enable systemd auto-restart on connection failure |
-| `a32ad1a656f0` | #23 | Fix infinite interrupt loop in gateway by consuming pending messages with .pop() and clearing interrupt events before recursion |
-| `140d609e0c8b` | #26 | Refine agent history conversion logic in GatewayRunner |
-| `cfe2f3fe15d0` | #26 | Implement interrupt handling for long-running tool executions in AIAgent |
-| `669545f5518c` | #21 | Add diagramming skills for Excalidraw |
+| `153cd5bb44ef` | #26 | Refactor skills tool integration and enhance system prompt |
+| `8fb44608bfe4` | #21 | Update SKILL.md and related references to implement container binding for labeled shapes and arrows in Excalidraw |
+| `abe925e21260` | #26 | Update hermes-discord toolset to enable full terminal access with safety checks |
+| `ada0b4f131ba` | #23 | Enhance image handling in platform adapters |
+| `137ce05324d0` | #26 | Add image generation tool to toolsets for messaging platforms |
+| `07501bef14bf` | #26 | Add Project_notes.md — centralized status tracker for all side projects |
+| `fc792a4be927` | #26 | Update Project_notes.md: grailed-embedding-search status and TODOs (June 2025) |
+| `389ac5e017ed` | #26 | pass extrabody for agentloop to ban and allowlist providers on openrouter, control thinking, etc |
+| `a291cc99cf70` | #26 | more extra kwarg support for provider selection etc on openrouter in agent rl envs and evals |
+| `1b7bc299f373` | #24 | Enhance TerminalBench2 environment with task filtering due to incompat with modal and logging improvements |
+| `f23856df8ef2` | #26 | Add kill_modal script to manage Modal applications and better handling of file and terminal tools |
+| `f5be6177b231` | #23 | Add Text-to-Speech (TTS) functionality with multiple providers |
+| `ed010752dd1f` | #26 | Update .env.example to use new Docker, Singularity, and Modal images for Python 3.11 with Node.js 20 support |
+| `3099a2f53c85` | #26 | Add timestamp to active system prompt in AIAgent |
+| `84718d183abb` | #26 | Add platform-specific formatting hints and identity for AIAgent |
+| `586b0a7047ea` | #26 | Add Text-to-Speech (TTS) support with Edge TTS and ElevenLabs integration |
+| `ff9ea6c4b1c6` | #26 | Enhance TTS tool to support platform-specific audio formats |
+| `eb49936a60aa` | #25 | Update documentation and installation scripts for TTS audio formats |
+| `5404a8fcd8a5` | #23 | Enhance image handling and analysis capabilities across platforms |
+| `69aa35a51c3d` | #23 | Add messaging platform enhancements: STT, stickers, Discord UX, Slack, pairing, hooks |
+| `2f34e6fd3017` | #26 | Update OpenAI configuration prompts for clarity and detail |
+| `e0c9d495ef77` | #26 | Refine configuration migration process to improve user experience |
+| `dd5fe334f3b4` | #26 | Refactor configuration handling to improve user experience |
+| `0f58dfdea4e2` | #26 | Enhance agent response handling and transcript logging |
+| `635bec06cbb2` | #26 | Update tool definitions handling in GatewayRunner |
+| `60812ae0418d` | #25 | Enhance configuration checks and persona file creation in doctor and install scripts |
+| `45a8098d3afe` | #26 | Remove browserbase SDK check and add Node.js and agent-browser validation in doctor script |
+| `01a3a6ab0d2d` | #26 | Implement cleanup guard to prevent multiple executions on exit |
+| `8117d0adabe3` | #26 | Refactor file operations and environment management in file_tools and terminal_tool |
+| `2c7deb41f6f7` | #26 | Fix Modal backend not working from CLI |
+| `c33feb6dc9d4` | #26 | Fix host CWD leaking into non-local terminal backends |
+| `a7609c97be5f` | #26 | Update docs to match backend key rename and CWD behavior |
+| `48b5cfd0851e` | #26 | Add skip_context_files option to AIAgent for batch processing |
+| `061fa7090720` | #25 | Add background process management with process tool, wait, PTY, and stdin support |
+| `bdac541d1ee2` | #26 | Rename OPENAI_API_KEY to HERMES_OPENAI_API_KEY in configuration and codebase for clarity and to avoid conflicts. Update related documentation and error messages to reflect the new key name, ensuring backward compatibility with existing setups. |
+| `ec59d71e6083` | #26 | Update PTY write handling in ProcessRegistry to ensure data is encoded as bytes before writing. This change improves compatibility with string inputs and clarifies the expected data type in comments. |
+| `6731230d7340` | #26 | Add special handling for 'process' tool in _build_tool_preview function |
+| `49e1f9ea896d` | #26 | Refactor TODO.md to summarize future improvements for the Hermes Agent, focusing on subagent architecture, task management, dynamic skills expansion, and interactive clarifying questions. Key ideas include context isolation for subagents, task decomposition, progress tracking, and skill acquisition from successful tasks. |
+| `d0f82e6dcca6` | #26 | Removing random project notes doc |
+| `e184f5ab3a51` | #26 | Add todo tool for agent task planning and management |
+| `3b615b0f7a89` | #26 | Enhance tool previews in AIAgent and GatewayRunner |
+| `1e316145724d` | #26 | Refactor tool activity messages in AIAgent for improved CLI output |
+| `a7f52911e1c6` | #26 | Refactor CLI output formatting in AIAgent |
+| `dfa3c6265c7e` | #26 | Refactor CLI input prompt and layout in HermesCLI |
+| `54cbf30c1430` | #26 | Refactor dynamic prompt and layout in HermesCLI |
+| `d7cef744ecc9` | #26 | Add autocomplete and multiline support in HermesCLI input |
+| `d9a8e421a4a2` | #26 | Enhance multiline input handling in HermesCLI |
+| `41608beb3585` | #26 | Update multiline input handling in HermesCLI |
+| `50ef18644ba5` | #26 | Update multiline input instructions in HermesCLI |
+| `225ae32e7aff` | #26 | Enhance CLI layout with floating completion menu |
+| `9e85408c7bfd` | #25 | Add todo tool for task management and enhance CLI features |
+| `d59e93d5e9c6` | #26 | Enhance platform toolset configuration and CLI toolset handling |
+| `14e59706b732` | #21 | Add Skills Hub — universal skill search, install, and management from online registries |
+| `655303f2f1e0` | #26 | Add skill name resolution and enhanced install confirmation in Skills Hub |
+| `440c244cac71` | #25 | feat: add persistent memory system + SQLite session store |
+| `56ee8a5cc68a` | #26 | refactor: remove 'read' action from memory tool and agent logging |
+| `a4bc6f73d77d` | #26 | refactor: simplify CLI layout by integrating inline completions |
+| `ac0a70b3698a` | #26 | feat: enhance input area height adjustment in CLI |
+| `37fb01b17d44` | #26 | feat: enhance conversation display with ANSI escape codes |
+| `8e4d0131543e` | #26 | feat: improve ANSI text rendering in CLI |
+| `21c3e9973ac7` | #26 | feat: enhance CLI output formatting with dynamic borders |
+| `d0c8dd78c253` | #26 | fix: ensure proper output rendering in CLI by flushing stdout |
+| `2daf5e4296a4` | #26 | fix: improve CLI output rendering and response display |
+| `5c545e67f350` | #26 | feat: add styled border frame to input area in CLI |
+| `0e8ee051c64a` | #26 | feat: replace framed input with horizontal rules in CLI |
+| `109dffb2428b` | #26 | fix: refine dynamic height adjustment for input area in CLI |
+| `3f4b494c616f` | #26 | refactor: streamline thinking spinner behavior in AIAgent |
+| `422607df7c80` | #25 | feat: expand README with update and messaging gateway instructions |
+| `4f57d7116d9f` | #26 | Improved stdout handling in the terminal tool to prevent deadlocks by implementing a background thread to continuously drain output, ensuring smooth command execution without blocking. |
+| `b88e441a076a` | #26 | feat: implement cross-channel messaging functionality |
+| `59cb0cecb214` | #25 | feat: add messaging gateway startup functionality |
+| `53e13fe1f12c` | #26 | feat: add Slack and WhatsApp setup prompts in setup wizard |
+| `3191a9ba11d4` | #23 | feat: add new conversation command and enhance command handling |
+| `d49af633f06a` | #26 | feat: enhance command execution with stdin support |
+| `057d3e1810a2` | #26 | feat: enhance search functionality in ShellFileOperations |
+| `d070b8698d39` | #26 | fix: escape file glob patterns in ShellFileOperations |
+| `4d5f29c74ca9` | #25 | feat: introduce skill management tool for agent-created skills and skills migration to ~/.hermes |
+| `997f793af12e` | #26 | feat: update TODO.md with enhancements to skills and memory systems |
+| `9350e26e681e` | #26 | feat: introduce clarifying questions tool for interactive user engagement |
+| `748f0b2b5fc1` | #26 | feat: enhance clarify tool with configurable timeout and countdown display |
+| `783acd712d6a` | #20 | feat: implement code execution sandbox for programmatic tool calling |
+| `273b367f0511` | #26 | fix: update documentation and return types for web tools |
+| `3b90fa5c9ba5` | #26 | fix: increase default timeout for code execution sandbox |
+| `ba8b80a16314` | #26 | refactor: improve memory entry handling and file operations |
+| `f9eb5edb9653` | #26 | refactor: rename search tool for clarity and consistency |
+| `c0d412a736f1` | #26 | refactor: update search tool parameters and documentation for clarity |
+| `90e521112876` | #25 | feat: implement subagent delegation for task management |
+| `ba07d9d5e3a1` | #26 | feat: enhance task delegation with spinner updates and progress display |
+| `b9f3518b33aa` | #26 | refactor: streamline TODO.md for clarity and focus |
+| `c007b9e5bd19` | #25 | chore: update installer banner text for branding consistency |
+| `cfef34f7a61f` | #25 | feat: add multi-provider authentication and inference provider selection |
+| `f6daceb449c4` | #26 | feat: add interactive model selection and saving functionality |
+| `77a3dda59d3a` | #25 | feat: enhance README and CLI with multi-provider model selection |
+| `a3d760ff12fc` | #26 | feat: implement provider deactivation and enhance configuration updates |
+| `24c241d29b3a` | #21 | add github project management skill |
+| `5c4c0c0cbaf4` | #25 | feat: update branding and visuals across the project |
+| `630bd3d78913` | #26 | feat: improve password prompt handling in terminal tool |
+| `fc37b17b1f4c` | #25 | feat: simplify README instructions for connecting to LLM providers |
+| `3961f8e7a493` | #25 | refactor: update README for improved clarity on provider setup and switching |
+| `9a19fe1f5090` | #26 | chore: remove deprecated session viewer and exported data files |
 

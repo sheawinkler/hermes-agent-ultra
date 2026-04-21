@@ -747,7 +747,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "run_agent.py",
         "tools/mixture_of_agents_tool.py",
@@ -755,28 +755,28 @@
         "tools/web_tools.py"
       ],
       "files_touched": 4,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "1614c15bb1123a8e5eec0d1b7983ec653bb1cd99",
       "subject": "rate limits",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "batch_runner.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "ab7293bed6529b4f28f3b4109cfe96e5e62fc3e0",
       "subject": "don't log exit code !=0 as terminal failure",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "batch_runner.py",
         "run_agent.py",
@@ -785,15 +785,15 @@
         "tools/web_tools.py"
       ],
       "files_touched": 5,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "6af6ff2a0a4679374c9d4a06f0b9031e305c28ed",
       "subject": "updates for stability and speed",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "batch_runner.py",
         "model_tools.py",
@@ -805,29 +805,29 @@
         "tools/web_tools.py"
       ],
       "files_touched": 8,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "4071ba29dac77bebeafe0801715a93ecca181178",
       "subject": "Enhance batch processing and tool validation",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "run_agent.py",
         "run_datagen_glm4.7.sh"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "66daebe88f003bd635aa5b8b15d8d20cba049cbb",
       "subject": "Implement enhanced response handling and tool call validation in run_agent",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "batch_runner.py",
         "model_tools.py",
@@ -837,42 +837,42 @@
         "tools/web_tools.py"
       ],
       "files_touched": 6,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "13d360030fe0efc8baeee3761519a0b7d295bca1",
       "subject": "Enhance tool normalization and API integration across modules",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "run_datagen_images.sh"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "b66c093316b9b0105b7781e665be25efeec0238f",
       "subject": "add default datagen example script",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "batch_runner.py",
         "run_agent.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "6e3dbb8d8b68243495664304955c02cb30548810",
       "subject": "Enhance batch processing with progress tracking and update AIAgent for OpenRouter detection",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "batch_runner.py",
         "requirements.txt",
@@ -880,15 +880,15 @@
         "run_datagen_images.sh"
       ],
       "files_touched": 4,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "b32cc4b09dd36343a8ab2534a8c0e22c42a84fc0",
       "subject": "Refactor batch processing with rich progress tracking and update logging in AIAgent",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".gitignore",
         "batch_runner.py",
@@ -906,15 +906,15 @@
         "tools/vision_tools.py"
       ],
       "files_touched": 14,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "6eb76c7c1a37f85984f5fd0cec72d50b7abfcbda",
       "subject": "Enhance batch processing and image generation tools",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "configs/trajectory_compression.yaml",
         "mini_swe_runner.py",
@@ -922,15 +922,15 @@
         "trajectory_compressor.py"
       ],
       "files_touched": 4,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "47555602d7f18f606d38f11fa2be2a1a27204b71",
       "subject": "Add mini-swe-agent runner and trajectory compressor",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".env.example",
         ".gitmodules",
@@ -945,41 +945,41 @@
         "tools/terminal_tool.py"
       ],
       "files_touched": 11,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "ba19d530ad2418f8a787c88fc7553ca186b9ae52",
       "subject": "Update environment configuration and enhance terminal tool integration",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "trajectory_compressor.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "b78076cac75fc84d90c95ab401b98f3fa0fcbe1f",
       "subject": "Enhance trajectory_compressor.py with new input options and sampling functionality",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".gitignore"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "54ca0997ee988ed20b2f553e1993197b57f99f9a",
       "subject": "Update .gitignore to include additional directories and files",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".env.example",
         "README.md",
@@ -995,15 +995,15 @@
         "toolsets.py"
       ],
       "files_touched": 12,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "248acf715e0ffcf81c5a2637abade8d1d7ab1b79",
       "subject": "Add browser automation tools and enhance environment configuration",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "configs/run_browser_tasks.sh",
         "configs/run_eval_glm4.7_newterm.sh",
@@ -1012,15 +1012,15 @@
         "configs/run_terminal_tasks.sh"
       ],
       "files_touched": 5,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "5438b64e32b96caa8ffb6f100418d5581f1618b0",
       "subject": "Add new shell scripts for various task runs",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "configs/run_mixed_tasks.sh",
         "configs/run_terminal_tasks.sh",
@@ -1030,29 +1030,29 @@
         "tools/web_tools.py"
       ],
       "files_touched": 6,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "4c05ef0ba8f01886daafc47ec09e7839cdac3136",
       "subject": "Enhance logging and tool initialization for improved performance",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "package-lock.json",
         "package.json"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "f8846f85a142fda912842b8fe8dd8e9771f7bd0b",
       "subject": "Add package.json and package-lock.json for project setup",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".env.example",
         "README.md",
@@ -1064,15 +1064,15 @@
         "pyproject.toml"
       ],
       "files_touched": 8,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "7ea17bb9576b92e880cc44cdec4e0e870beb0794",
       "subject": "Update environment configuration and enhance tool definitions",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".env.example",
         "configs/run_mixed_tasks.sh",
@@ -1080,43 +1080,43 @@
         "tools/terminal_tool.py"
       ],
       "files_touched": 4,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "771cf41fea1f38794140bcdd2f284504dfdbcae4",
       "subject": "Update environment configuration and enhance terminal tool integration",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".cursorrules"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "e8c6135a9145bfac553ef5a364364e5e7524f84c",
       "subject": "Update documentation for project structure and tool integration",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "configs/trajectory_compression.yaml",
         "run_agent.py",
         "trajectory_compressor.py"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "8e8b6be690ec65e1074b282bd6671cf7ef3f7785",
       "subject": "Add timeout configuration for trajectory processing",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "batch_runner.py",
         "configs/test_skills_kimi.sh",
@@ -1140,30 +1140,30 @@
         "skills/mlops/clip/references/applications.md"
       ],
       "files_touched": 189,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "f172f7d4aa145913dca40a7871c693495b3840f2",
       "subject": "Add skills tools and enhance model integration",
       "target_ticket": 21,
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".cursorrules",
         "README.md",
         "architecture/tools.md"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "b292192467e3c8d52df0e215e317b23e07f7e876",
       "subject": "Enhance documentation for skills system and project structure",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "docs/agents.md",
         "docs/llm_client.md",
@@ -1171,28 +1171,28 @@
         "docs/tools.md"
       ],
       "files_touched": 4,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "4b68d30b0e9297f712e61ddec19c77b2dd7dea5e",
       "subject": "Moved \"architecture\" dir to \"docs\" for clarity",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".gitignore"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "8e986584f44f09278e551b829f76dd8ba5d56f63",
       "subject": "Update .gitignore to include private keys and CLI config",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "TODO.md",
         "cli-config.yaml.example",
@@ -1206,15 +1206,15 @@
         "tools/web_tools.py"
       ],
       "files_touched": 10,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "bc76a032ba29edf49d0a53963f1cbb8c51866729",
       "subject": "Add a claude code-like CLI",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".cursorrules",
         "README.md",
@@ -1222,15 +1222,15 @@
         "docs/tools.md"
       ],
       "files_touched": 4,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "c360da4f3531e83f436087d36b3a6ca8878597ea",
       "subject": "Enhance documentation for CLI and tool integration",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".env.example",
         "TODO.md",
@@ -1240,28 +1240,28 @@
         "tools/browser_tool.py"
       ],
       "files_touched": 6,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "20f2875472751d7d681f8b257aee55668e786620",
       "subject": "Implement browser session inactivity timeout and cleanup",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "run_agent.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "32254d301023b678fb372ca192b6da334279a33f",
       "subject": "Add skills guidance to system prompts in run_agent.py",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "TODO.md",
         "skills/mlops/DESCRIPTION.md",
@@ -1270,54 +1270,54 @@
         "tools/skills_tool.py"
       ],
       "files_touched": 5,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "8f5f99c22ab5a4b6b49441e4063a081762ffed8b",
       "subject": "Add new skills descriptions and enhance skills tool functionality",
       "target_ticket": 21,
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".gitignore"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "9c8d707530c0a721dbf969a45a54bba4a503923c",
       "subject": "Update .gitignore to include additional ignored files",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "TODO.md"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "3db83b682411fe9dcbda0944db58ee645f886b0a",
       "subject": "Revise TODO.md to introduce Subagent Architecture and Interactive Clarifying Questions Tool",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "TODO.md"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "affc4e9a8fed24f75d643ea26bf8f28bac7fd988",
       "subject": "Update TODO.md",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".env.example",
         "README.md",
@@ -1327,15 +1327,15 @@
         "tools/terminal_tool.py"
       ],
       "files_touched": 6,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "971ed2bbdf61d07db6fcb54c3fde40fd8897158a",
       "subject": "Implement sudo support across terminal environments",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".env.example",
         "README.md",
@@ -1347,15 +1347,15 @@
         "tools/terminal_tool.py"
       ],
       "files_touched": 8,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "bbeed5b5d12dd3619809d2dc26ade95aedd3d244",
       "subject": "Enhance session logging and interactive sudo support",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".env.example",
         "README.md",
@@ -1366,42 +1366,42 @@
         "run_agent.py"
       ],
       "files_touched": 7,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "9b4d9452ba117a44aaaee897dd685462d2ae334d",
       "subject": "Add context compression feature for long conversations",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "TODO.md",
         "run_agent.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "e114f09f70be8048cdb8e124fed5ff7c4b69c963",
       "subject": "Implement reasoning extraction and enhance assistant message handling",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "TODO.md"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "c935a604f87622e3af91b4c8b9e22ce4b6c7cd6f",
       "subject": "Refactor TODO.md to reorganize task sections and update descriptions",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "README.md",
         "TODO.md",
@@ -1416,15 +1416,15 @@
         "toolsets.py"
       ],
       "files_touched": 11,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "a3ba41fce21e546c011bd830f816c0aaff16c7cd",
       "subject": "Implement cron job management system for scheduled tasks (similar to OpenAI's Pulse but the AI can also schedule jobs)",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "README.md",
         "TODO.md",
@@ -1448,15 +1448,15 @@
         "hermes_agent.egg-info/requires.txt"
       ],
       "files_touched": 37,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "619c72e566fa4f79e6792c3fab71d08794292872",
       "subject": "Enhance CLI with multi-platform messaging integration and configuration management",
       "target_ticket": 23,
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli-config.yaml.example",
         "hermes_cli/config.py",
@@ -1465,80 +1465,80 @@
         "tools/terminal_tool.py"
       ],
       "files_touched": 5,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "3488576bd873795c3648551257514e8899cd00a6",
       "subject": "Update terminal configuration and enhance CLI model management",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/setup.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "da4167560f5774a16b0dc61df9deaa12ada49dde",
       "subject": "Enhance terminal backend selection in setup wizard",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "scripts/install.sh"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "ef409c6a24f477ed76e46d751ecfc9cd4f4b90ab",
       "subject": "Enhance repository cloning in install script",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "scripts/install.ps1"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "aa6394e94fdfeca5b345ba05dc77ba794149f4e7",
       "subject": "Update install script to support SSH and HTTPS repository URLs",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "scripts/install.ps1"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "69a338610a7a1ba8cc5d57e6692b9c6380db64d7",
       "subject": "Enhance repository cloning logic in install script",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/setup.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "e87bee9ccd420e1fb802165420c5b2c03baccb0f",
       "subject": "Refactor setup wizard for improved API key and provider configuration",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py",
         "hermes_cli/doctor.py",
@@ -1546,60 +1546,60 @@
         "model_tools.py"
       ],
       "files_touched": 4,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "bbb5776763e4cc05a3395a94042bcd01ca3bb86f",
       "subject": "Enhance tool availability checks and user feedback in CLI",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/setup.py",
         "scripts/install.ps1",
         "scripts/install.sh"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "fef504f0386908aaf0576d3ffe2c7125166e7b23",
       "subject": "Refactor configuration file management and improve user feedback",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/config.py",
         "hermes_cli/main.py",
         "hermes_cli/setup.py"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "3ee788dacc79b5938b8558f1f0b459ca3ded5b48",
       "subject": "Implement configuration migration system and enhance CLI setup",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".cursorrules",
         "AGENTS.md",
         "README.md"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "ff776b57bf4f0c1b410080cc54b34ee2ba04dc2a",
       "subject": "Remove outdated .cursorrules file and add comprehensive AGENTS.md documentation",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "AGENTS.md",
         "README.md",
@@ -1607,28 +1607,28 @@
         "hermes_cli/uninstall.py"
       ],
       "files_touched": 4,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "c9011fc7e192a3006843fed56e303a68c7ee6c71",
       "subject": "Add uninstall command to CLI and update documentation",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "TODO.md"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "be91af7551f657f5856e93bdf11dcf9f908c806e",
       "subject": "Refactor TODO list and remove completed items",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "AGENTS.md",
         "TODO.md",
@@ -1637,15 +1637,15 @@
         "tools/terminal_tool.py"
       ],
       "files_touched": 5,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "76d929e177251e674e670a39e5dc7348be3f4545",
       "subject": "Implement dangerous command approval system for terminal tool",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "AGENTS.md",
         "cli.py",
@@ -1653,29 +1653,29 @@
         "tools/terminal_tool.py"
       ],
       "files_touched": 4,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "5d3398aa8a206c94a761ad9f2dd3f44fcbdc1f97",
       "subject": "Refactor terminal tool command approval process and enhance CLI feedback",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/run.py",
         "requirements.txt"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "3e634aa7e4f505312a25f39456cc05316d82371b",
       "subject": "Update requirements and enhance environment variable loading in gateway",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".env.example",
         "AGENTS.md",
@@ -1688,15 +1688,15 @@
         "toolsets.py"
       ],
       "files_touched": 9,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "17a5efb416b521b0a89191dd1324e4f161ff9a0b",
       "subject": "Enhance messaging gateway configuration and security features",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "TODO.md",
         "cli-config.yaml.example",
@@ -1707,28 +1707,28 @@
         "run_agent.py"
       ],
       "files_touched": 7,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "7eac4ee9fe9feb9cd23b26345171473dddf44a30",
       "subject": "Update agent configuration for maximum tool-calling iterations",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/base.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "a09b018bd50e6ff2909a5194bcdcafbb0002311c",
       "subject": "Implement continuous typing indicator in message handling",
       "target_ticket": 23,
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/run.py",
         "hermes_cli/config.py",
@@ -1736,57 +1736,57 @@
         "run_agent.py"
       ],
       "files_touched": 4,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "e7f0ffbf5d1e51e7a3cbefcc43e5b6180a37303b",
       "subject": "Add tool progress notifications for messaging channels",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "AGENTS.md",
         "README.md",
         "docs/messaging.md"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "9d9eea9ac970670699ae6f68707d7660dd62f153",
       "subject": "Enhance agent configuration and documentation for tool progress and working directory",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/base.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "488deb04a4f9ab3433aefbb4077aebbe51e3191d",
       "subject": "fix telegram, import asyncio",
       "target_ticket": 23,
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/base.py",
         "gateway/run.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "221fb17c5e3956520852f19a83ade4411fe70c07",
       "subject": "Refine typing indicator behavior in message handling",
       "target_ticket": 23,
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/run.py",
         "model_tools.py",
@@ -1794,15 +1794,15 @@
         "tools/skills_tool.py"
       ],
       "files_touched": 4,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "212460289b51fe1ff64c0cf5deb450f4c9b709fe",
       "subject": "Enhance skills tool to have an arg so it is more reliably called, and error handling in agent",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/base.py",
         "gateway/platforms/telegram.py",
@@ -1810,44 +1810,44 @@
         "run_agent.py"
       ],
       "files_touched": 4,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "beeb7896e07e3f6608042857585349f0ec6cb8b8",
       "subject": "Refactor message handling and error logging in agent and gateway",
       "target_ticket": 23,
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py",
         "gateway/run.py",
         "run_agent.py"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "9bfe185a2e31bcc5743cf30cc195d7b35a14b565",
       "subject": "Implement interrupt handling for agent and CLI input and persistent prompt line at bottom of CLI :)",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/base.py",
         "gateway/run.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "51a6b7d2b5dcbe06a8edce9b0c8d176d91068276",
       "subject": "Implement interrupt handling for message processing in GatewayRunner and BasePlatformAdapter",
       "target_ticket": 23,
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "model_tools.py",
         "rl_cli.py",
@@ -1856,28 +1856,28 @@
         "toolsets.py"
       ],
       "files_touched": 5,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "f018999da97862bfc919a8eaddfec57ce0cdea18",
       "subject": "initial RL training tools and loop",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "README.md"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "8380895ae31f4c6e7f2e2fd5b33c869325f8e7ff",
       "subject": "Update README.md",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".env.example",
         "README.md",
@@ -1888,15 +1888,15 @@
         "tools/rl_training_tool.py"
       ],
       "files_touched": 7,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "f6574978de39c6ccae8a06d13ddabbb2c72c9ce1",
       "subject": "Add RL training configuration and tools",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".gitmodules",
         "model_tools.py",
@@ -1907,15 +1907,15 @@
         "toolsets.py"
       ],
       "files_touched": 7,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "12bbca95ecf4bbca5e3d4056526584ae3624e3c7",
       "subject": "Add tinker-atropos submodule and update RL training tools",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "README.md",
         "model_tools.py",
@@ -1926,28 +1926,28 @@
         "tools/rl_training_tool.py"
       ],
       "files_touched": 7,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "3c0d0dba49f99da4b4e363545dfe1e2fac0417e6",
       "subject": "Update RL tools and enhance configuration management",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tools/rl_training_tool.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "5c3105b4376c7422b7c0c0f76e487f14a72a3e38",
       "subject": "Enhance RL test inference with WandB integration and real-time output streaming",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/doctor.py",
         "model_tools.py",
@@ -1963,15 +1963,15 @@
         "toolsets.py"
       ],
       "files_touched": 12,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "533c064269417d4c213aa8393e3a6098a78fb5d1",
       "subject": "Add file manipulation tools and enhance setup scripts",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".gitignore",
         "README.md",
@@ -1986,15 +1986,15 @@
         "tools/rl_training_tool.py"
       ],
       "files_touched": 11,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "ac797259232e91c107381546137a287b2262f9d0",
       "subject": "Update dependencies and enhance installation scripts",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".gitignore",
         "README.md",
@@ -2018,41 +2018,41 @@
         "environments/tool_call_parsers/longcat_parser.py"
       ],
       "files_touched": 30,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "07b615e96ed4ac9700ec64d02a71969d8ac3edc7",
       "subject": "Add support for Atropos Agentic RL environments (requires branch tool_call_support in Atropos atm)",
       "target_ticket": 24,
       "target_ticket_name": "GPAR-05 environments+parsers+benchmarks"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "pyproject.toml"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "c0494b3558df6cda7ea11196d807366539daa643",
       "subject": "Update pyproject.toml to refine dependency management",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "environments/terminal_test_env.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "a478e4458567f26f47fbbf2a44ef2b27f7ab6ff7",
       "subject": "Increase max_token_length in TerminalTestEnv to 16000 for enhanced processing capacity",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "README.md",
         "hermes_cli/doctor.py",
@@ -2063,15 +2063,15 @@
         "setup-hermes.sh"
       ],
       "files_touched": 7,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "a8809bbd3e4ba9671ce524525ae8a7ad10df1870",
       "subject": "Transition installation to uv for py version and speed to be easier to streamline",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".gitignore",
         "environments/agent_loop.py",
@@ -2084,15 +2084,15 @@
         "tools/terminal_tool.py"
       ],
       "files_touched": 9,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "d999d9876d9bb2e091dcfdb585e1de9592bf96e9",
       "subject": "Enhance async tool execution and error handling in Hermes agent for Atropos integration",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "batch_runner.py",
         "cli-config.yaml.example",
@@ -2103,15 +2103,15 @@
         "run_agent.py"
       ],
       "files_touched": 7,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "f12ea1bc027b001591cd3a5df8dd8bbf6c7581cc",
       "subject": "Enhance BatchRunner and AIAgent with new configuration options, default model now opus 4.6, default summarizer gemini flash 3",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "batch_runner.py",
         "model_tools.py",
@@ -2119,15 +2119,15 @@
         "toolset_distributions.py"
       ],
       "files_touched": 4,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "dd70d57b9bc3229e1b1ae32252bcd01d502b6e9b",
       "subject": "Refactor BatchRunner and AIAgent for enhanced reasoning and tool management, improved tool definitions for fileops",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".env.example",
         "cli.py",
@@ -2136,68 +2136,68 @@
         "tools/terminal_tool.py"
       ],
       "files_touched": 5,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "c441681dc2e45254018792d322519d194518c0db",
       "subject": "Update default model to 'anthropic/claude-opus-4.6' and refine terminal working directory settings",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "192ce958c37d8e2c6e91bbfd521e81310fc4235a",
       "subject": "Enhance CLI command handling and introduce resource cleanup features",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tools/browser_tool.py",
         "tools/terminal_tool.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "7a11be9f3fddc22957e2ec6e56a90b133be28c15",
       "subject": "Enhance browser tool functionality and cleanup process",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "run_agent.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "1b1307d0d120cf83715d128912843c0790247f9c",
       "subject": "Implement Anthropic prompt caching for Claude models via OpenRouter",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tools/terminal_tool.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "e8343f2d870eb5a135a25e942ed9ec3cae563ce0",
       "subject": "Refactor Singularity environment for persistent container management",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "environments/README.md",
         "environments/__init__.py",
@@ -2219,164 +2219,164 @@
         "tools/terminal_tool.py"
       ],
       "files_touched": 18,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "35ad3146a8ab4b64c19dfe1b5b41b192c8d2b60a",
       "subject": "Add new environments and enhance tool context functionality",
       "target_ticket": 24,
       "target_ticket_name": "GPAR-05 environments+parsers+benchmarks"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "environments/benchmarks/terminalbench_2/default.yaml"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "ad042fdd68c0286023c08451096e111133482606",
       "subject": "Update terminalbench_2 configuration for enhanced performance and evaluation",
       "target_ticket": 24,
       "target_ticket_name": "GPAR-05 environments+parsers+benchmarks"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "environments/agent_loop.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "5ec75e38b978e12bbabd915cf0ef716eedbcec77",
       "subject": "Enhance tool execution and logging in HermesAgentLoop",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "environments/hermes_base_env.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "6b4a8d0b175c4befa3df4c88577204d58f6adff3",
       "subject": "Add terminal configuration options and enhance environment setup",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "environments/benchmarks/terminalbench_2/default.yaml",
         "environments/benchmarks/terminalbench_2/terminalbench2_env.py",
         "evals/terminal-bench-2/evaluate_config.yaml"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "ba3fea24f10c77f27ad9554a99a9e3d42d926fdf",
       "subject": "Enhance TerminalBench 2 configuration and evaluation handling",
       "target_ticket": 24,
       "target_ticket_name": "GPAR-05 environments+parsers+benchmarks"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tools/terminal_tool.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "999a28062d1f99ea72f15c9b5a7e5ded2c93e8dc",
       "subject": "Implement graceful exit cleanup for terminal tool",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "environments/benchmarks/terminalbench_2/terminalbench2_env.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "85e629e9154c06b97ff0854947f7e37da182790e",
       "subject": "Add cleanup functionality for orphaned sandboxes in TerminalBench2EvalEnv",
       "target_ticket": 24,
       "target_ticket_name": "GPAR-05 environments+parsers+benchmarks"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "9b0f2a16ca9047a449fd056aeb0610c8f9bd8cff",
       "subject": "Enhance CLI functionality with retry and undo commands",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/run.py",
         "hermes_cli/gateway.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "62ba69a29d4e78635b4eb0c086e569c17bbbe800",
       "subject": "Fix gateway exit code to enable systemd auto-restart on connection failure",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/base.py",
         "gateway/run.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "a32ad1a656f0a7d5caeb572db5fdd24fdf58874e",
       "subject": "Fix infinite interrupt loop in gateway by consuming pending messages with .pop() and clearing interrupt events before recursion",
       "target_ticket": 23,
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/run.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "140d609e0c8b48f6a3bed42867a1790fbf301871",
       "subject": "Refine agent history conversion logic in GatewayRunner",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/run.py",
         "run_agent.py",
         "tools/terminal_tool.py"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "cfe2f3fe15d0eeb121c28acea2606a508d4fff47",
       "subject": "Implement interrupt handling for long-running tool executions in AIAgent",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "skills/diagramming/DESCRIPTION.md",
         "skills/diagramming/excalidraw/SKILL.md",
@@ -2386,8 +2386,8 @@
         "skills/diagramming/excalidraw/scripts/upload.py"
       ],
       "files_touched": 6,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21-100: legacy python-era/upstream-pre-rust stream superseded by rust-native architecture and later parity checkpoints",
+      "owner": "codex",
       "sha": "669545f5518ceb5a5b9dfae3f5d34821e0ab239f",
       "subject": "Add diagramming skills for Excalidraw",
       "target_ticket": 21,
@@ -69030,7 +69030,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-04-21T21:50:18.247047+00:00",
+  "generated_at_utc": "2026-04-21T22:22:18.143372+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69038,9 +69038,9 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4474,
+      "pending": 4374,
       "ported": 12,
-      "superseded": 50
+      "superseded": 150
     },
     "by_target_ticket": {
       "20": 1615,
