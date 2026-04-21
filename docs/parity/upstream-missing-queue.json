@@ -48464,13 +48464,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "cron/jobs.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in rust commit f5abb7e5",
+      "owner": "codex",
       "sha": "2a6cbf52d0c0dbad0cb1b7e0250d9064789ba67a",
       "subject": "fix(cron): prevent silent data loss by raising exceptions on unrecoverable jobs.json read failures (#6797)",
       "target_ticket": 26,
@@ -69030,7 +69030,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-04-21T21:37:43.295704+00:00",
+  "generated_at_utc": "2026-04-21T21:42:20.598844+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69038,8 +69038,8 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4525,
-      "ported": 11
+      "pending": 4524,
+      "ported": 12
     },
     "by_target_ticket": {
       "20": 1615,
