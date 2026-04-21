@@ -33,6 +33,22 @@
         "scripts/status-upstream-webhook-launchd.sh",
         "scripts/uninstall-upstream-webhook-launchd.sh"
       ]
+    },
+    {
+      "id": "ultra-root-branding-and-ops-overrides",
+      "status": "approved",
+      "workstream": "WS8",
+      "summary": "Retain repository-specific branding, local agent policy, and operational installer behavior where root shared files differ from upstream.",
+      "path_prefixes": [
+        ".gitignore",
+        "AGENTS.md",
+        "Dockerfile",
+        "LICENSE",
+        "README.md",
+        "flake.nix",
+        "packaging/homebrew",
+        "scripts/install.sh"
+      ]
     }
   ]
 }

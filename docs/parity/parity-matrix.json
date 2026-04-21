@@ -1,188 +1,27 @@
 {
-  "generated_at_utc": "2026-04-21T08:30:13.201957+00:00",
+  "generated_at_utc": "2026-04-21T08:47:57.680275+00:00",
   "refs": {
     "local_ref": "main",
-    "local_sha": "a23e3bed5d1c02d545b2022d4bee5a212626ec76",
+    "local_sha": "736cfc0879cd441bd0831a1e9b67ca872a22a6c5",
     "upstream_ref": "upstream/main",
-    "upstream_sha": "517f5e263953ab92c6076cd888ea755af106d6d4",
+    "upstream_sha": "65c2a6b27f6e3bf4441ed063fd96611eacf0aa88",
     "merge_base": null
   },
   "summary": {
-    "commits_behind": 5161,
-    "commits_ahead": 98,
-    "upstream_patch_missing": 4455,
+    "commits_behind": 5168,
+    "commits_ahead": 106,
+    "upstream_patch_missing": 4462,
     "upstream_patch_represented": 4,
-    "local_patch_unique": 96,
-    "files_only_upstream": 2184,
-    "files_only_local": 367,
-    "files_shared_identical": 0,
+    "local_patch_unique": 104,
+    "files_only_upstream": 0,
+    "files_only_local": 368,
+    "files_shared_identical": 2186,
     "files_shared_different": 8,
-    "tree_files_changed": 2560,
-    "tree_insertions": 846879,
-    "tree_deletions": 128261
+    "tree_files_changed": 376,
+    "tree_insertions": 2341,
+    "tree_deletions": 129582
   },
-  "top_upstream_only": [
-    {
-      "path": "tests/gateway",
-      "count": 174
-    },
-    {
-      "path": "skills/creative",
-      "count": 165
-    },
-    {
-      "path": "tests/tools",
-      "count": 153
-    },
-    {
-      "path": "website/docs",
-      "count": 127
-    },
-    {
-      "path": "ui-tui/packages",
-      "count": 126
-    },
-    {
-      "path": "tests/hermes_cli",
-      "count": 122
-    },
-    {
-      "path": "ui-tui/src",
-      "count": 103
-    },
-    {
-      "path": "optional-skills/mlops",
-      "count": 81
-    },
-    {
-      "path": "skills/productivity",
-      "count": 66
-    },
-    {
-      "path": "skills/mlops",
-      "count": 65
-    },
-    {
-      "path": "skills/research",
-      "count": 63
-    },
-    {
-      "path": "tests/run_agent",
-      "count": 56
-    },
-    {
-      "path": "tests/agent",
-      "count": 52
-    },
-    {
-      "path": "web/src",
-      "count": 47
-    },
-    {
-      "path": "tests/cli",
-      "count": 45
-    },
-    {
-      "path": "optional-skills/creative",
-      "count": 34
-    },
-    {
-      "path": "gateway/platforms",
-      "count": 32
-    },
-    {
-      "path": "plugins/memory",
-      "count": 31
-    },
-    {
-      "path": "environments/benchmarks",
-      "count": 17
-    },
-    {
-      "path": "skills/github",
-      "count": 16
-    },
-    {
-      "path": "optional-skills/research",
-      "count": 14
-    },
-    {
-      "path": "optional-skills/security",
-      "count": 13
-    },
-    {
-      "path": "environments/tool_call_parsers",
-      "count": 12
-    },
-    {
-      "path": "tools/environments",
-      "count": 11
-    },
-    {
-      "path": "website/static",
-      "count": 11
-    },
-    {
-      "path": ".github/workflows",
-      "count": 10
-    },
-    {
-      "path": "tests/acp",
-      "count": 10
-    },
-    {
-      "path": "optional-skills/health",
-      "count": 9
-    },
-    {
-      "path": "skills/red-teaming",
-      "count": 9
-    },
-    {
-      "path": "optional-skills/mcp",
-      "count": 8
-    },
-    {
-      "path": "optional-skills/productivity",
-      "count": 8
-    },
-    {
-      "path": "tests/integration",
-      "count": 8
-    },
-    {
-      "path": "tests/plugins",
-      "count": 8
-    },
-    {
-      "path": "web/public",
-      "count": 8
-    },
-    {
-      "path": "skills/media",
-      "count": 7
-    },
-    {
-      "path": "tests/cron",
-      "count": 7
-    },
-    {
-      "path": "optional-skills/devops",
-      "count": 6
-    },
-    {
-      "path": "skills/software-development",
-      "count": 6
-    },
-    {
-      "path": "tests/skills",
-      "count": 6
-    },
-    {
-      "path": "scripts/whatsapp-bridge",
-      "count": 5
-    }
-  ],
+  "top_upstream_only": [],
   "top_shared_different": [
     {
       "path": ".gitignore",
@@ -279,15 +118,15 @@
       "count": 5
     },
     {
+      "path": "docs/parity",
+      "count": 4
+    },
+    {
       "path": "crates/hermes-auth",
       "count": 3
     },
     {
       "path": "crates/hermes-telemetry",
-      "count": 3
-    },
-    {
-      "path": "docs/parity",
       "count": 3
     },
     {
@@ -379,168 +218,7 @@
       "count": 1
     }
   ],
-  "top_missing_from_local": [
-    {
-      "path": "tests/gateway",
-      "count": 174
-    },
-    {
-      "path": "skills/creative",
-      "count": 165
-    },
-    {
-      "path": "tests/tools",
-      "count": 153
-    },
-    {
-      "path": "website/docs",
-      "count": 127
-    },
-    {
-      "path": "ui-tui/packages",
-      "count": 126
-    },
-    {
-      "path": "tests/hermes_cli",
-      "count": 122
-    },
-    {
-      "path": "ui-tui/src",
-      "count": 103
-    },
-    {
-      "path": "optional-skills/mlops",
-      "count": 81
-    },
-    {
-      "path": "skills/productivity",
-      "count": 66
-    },
-    {
-      "path": "skills/mlops",
-      "count": 65
-    },
-    {
-      "path": "skills/research",
-      "count": 63
-    },
-    {
-      "path": "tests/run_agent",
-      "count": 56
-    },
-    {
-      "path": "tests/agent",
-      "count": 52
-    },
-    {
-      "path": "web/src",
-      "count": 47
-    },
-    {
-      "path": "tests/cli",
-      "count": 45
-    },
-    {
-      "path": "optional-skills/creative",
-      "count": 34
-    },
-    {
-      "path": "gateway/platforms",
-      "count": 32
-    },
-    {
-      "path": "plugins/memory",
-      "count": 31
-    },
-    {
-      "path": "environments/benchmarks",
-      "count": 17
-    },
-    {
-      "path": "skills/github",
-      "count": 16
-    },
-    {
-      "path": "optional-skills/research",
-      "count": 14
-    },
-    {
-      "path": "optional-skills/security",
-      "count": 13
-    },
-    {
-      "path": "environments/tool_call_parsers",
-      "count": 12
-    },
-    {
-      "path": "tools/environments",
-      "count": 11
-    },
-    {
-      "path": "website/static",
-      "count": 11
-    },
-    {
-      "path": ".github/workflows",
-      "count": 10
-    },
-    {
-      "path": "tests/acp",
-      "count": 10
-    },
-    {
-      "path": "optional-skills/health",
-      "count": 9
-    },
-    {
-      "path": "skills/red-teaming",
-      "count": 9
-    },
-    {
-      "path": "optional-skills/mcp",
-      "count": 8
-    },
-    {
-      "path": "optional-skills/productivity",
-      "count": 8
-    },
-    {
-      "path": "tests/integration",
-      "count": 8
-    },
-    {
-      "path": "tests/plugins",
-      "count": 8
-    },
-    {
-      "path": "web/public",
-      "count": 8
-    },
-    {
-      "path": "skills/media",
-      "count": 7
-    },
-    {
-      "path": "tests/cron",
-      "count": 7
-    },
-    {
-      "path": "optional-skills/devops",
-      "count": 6
-    },
-    {
-      "path": "skills/software-development",
-      "count": 6
-    },
-    {
-      "path": "tests/skills",
-      "count": 6
-    },
-    {
-      "path": "scripts/whatsapp-bridge",
-      "count": 5
-    }
-  ],
+  "top_missing_from_local": [],
   "top_unique_to_local": [
     {
       "path": "crates/hermes-tools",
@@ -603,15 +281,15 @@
       "count": 5
     },
     {
+      "path": "docs/parity",
+      "count": 4
+    },
+    {
       "path": "crates/hermes-auth",
       "count": 3
     },
     {
       "path": "crates/hermes-telemetry",
-      "count": 3
-    },
-    {
-      "path": "docs/parity",
       "count": 3
     },
     {
@@ -705,64 +383,64 @@
   ],
   "workstream_matrix": [
     {
-      "workstream": "WS6",
-      "issue": 10,
-      "name": "Tests and CI parity",
-      "upstream_only": 703,
-      "shared_different": 0,
-      "local_only": 2,
-      "risk": "high",
-      "effort": "XL"
-    },
-    {
-      "workstream": "WS4",
-      "issue": 8,
-      "name": "Skills parity",
-      "upstream_only": 624,
-      "shared_different": 0,
-      "local_only": 0,
-      "risk": "high",
-      "effort": "XL"
-    },
-    {
-      "workstream": "WS5",
-      "issue": 9,
-      "name": "UX parity",
-      "upstream_only": 451,
-      "shared_different": 0,
-      "local_only": 6,
-      "risk": "high",
-      "effort": "XL"
-    },
-    {
       "workstream": "WS8",
       "issue": 12,
       "name": "Compatibility and divergence policy",
-      "upstream_only": 196,
+      "upstream_only": 0,
       "shared_different": 8,
       "local_only": 140,
       "risk": "medium",
-      "effort": "L"
-    },
-    {
-      "workstream": "WS3",
-      "issue": 7,
-      "name": "Tools and adapters parity",
-      "upstream_only": 161,
-      "shared_different": 0,
-      "local_only": 85,
-      "risk": "high",
-      "effort": "L"
+      "effort": "S"
     },
     {
       "workstream": "WS2",
       "issue": 6,
       "name": "Core runtime parity",
-      "upstream_only": 49,
+      "upstream_only": 0,
       "shared_different": 0,
       "local_only": 129,
       "risk": "critical",
-      "effort": "M"
+      "effort": "S"
+    },
+    {
+      "workstream": "WS3",
+      "issue": 7,
+      "name": "Tools and adapters parity",
+      "upstream_only": 0,
+      "shared_different": 0,
+      "local_only": 85,
+      "risk": "high",
+      "effort": "S"
+    },
+    {
+      "workstream": "WS4",
+      "issue": 8,
+      "name": "Skills parity",
+      "upstream_only": 0,
+      "shared_different": 0,
+      "local_only": 0,
+      "risk": "medium",
+      "effort": "S"
+    },
+    {
+      "workstream": "WS5",
+      "issue": 9,
+      "name": "UX parity",
+      "upstream_only": 0,
+      "shared_different": 0,
+      "local_only": 7,
+      "risk": "medium",
+      "effort": "S"
+    },
+    {
+      "workstream": "WS6",
+      "issue": 10,
+      "name": "Tests and CI parity",
+      "upstream_only": 0,
+      "shared_different": 0,
+      "local_only": 2,
+      "risk": "high",
+      "effort": "S"
     },
     {
       "workstream": "WS7",
@@ -776,9 +454,9 @@
     }
   ],
   "commit_mapping": {
-    "upstream_patch_missing": 4455,
+    "upstream_patch_missing": 4462,
     "upstream_patch_represented": 4,
-    "local_patch_unique": 96,
+    "local_patch_unique": 104,
     "local_patch_equivalent_to_upstream": 1,
     "upstream_patch_missing_sample": [
       "21d80ca68346dfdb8d3556015a723a9217f8566f",
@@ -833,8 +511,8 @@
     "local_patch_equivalent_sample": [
       "b1d41bf1859700455bc89c420a0efd12dec5950b"
     ],
-    "intentional_divergence_items": 3,
-    "intentional_divergence_covered_files": 10
+    "intentional_divergence_items": 4,
+    "intentional_divergence_covered_files": 18
   },
   "intentional_divergence": [
     {
@@ -872,6 +550,23 @@
         "scripts/setup-upstream-webhook-launchd.sh",
         "scripts/status-upstream-webhook-launchd.sh",
         "scripts/uninstall-upstream-webhook-launchd.sh"
+      ]
+    },
+    {
+      "id": "ultra-root-branding-and-ops-overrides",
+      "status": "approved",
+      "workstream": "WS8",
+      "summary": "Retain repository-specific branding, local agent policy, and operational installer behavior where root shared files differ from upstream.",
+      "matched_files": 8,
+      "matched_sample": [
+        ".gitignore",
+        "AGENTS.md",
+        "Dockerfile",
+        "LICENSE",
+        "README.md",
+        "flake.nix",
+        "packaging/homebrew/hermes-agent.rb",
+        "scripts/install.sh"
       ]
     }
   ]
