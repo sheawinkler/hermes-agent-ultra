@@ -648,7 +648,7 @@ Write only the summary body. Do not include any preamble or prefix."
             .unwrap_or_else(|| estimate_messages_tokens(&messages));
 
         // Phase 1: prune old tool results.
-        let (mut messages, pruned_count) = self.prune_old_tool_results(
+        let (messages, pruned_count) = self.prune_old_tool_results(
             &messages,
             self.config.protect_last_n,
             Some(self.tail_token_budget),

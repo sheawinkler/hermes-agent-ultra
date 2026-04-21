@@ -38,12 +38,7 @@ hermes_agent|clippy::type_complexity|crates/hermes-agent/src/plugins.rs
 hermes_agent|clippy::unnecessary_cast|crates/hermes-agent/src/provider.rs
 hermes_agent|clippy::unnecessary_map_or|crates/hermes-agent/src/agent_loop.rs
 hermes_agent|clippy::unnecessary_map_or|crates/hermes-agent/src/credential_pool.rs
-hermes_agent|dead_code|crates/hermes-agent/src/memory_plugins/hindsight.rs
-hermes_agent|unused_assignments|crates/hermes-agent/src/memory_plugins/supermemory.rs
-hermes_agent|unused_imports|crates/hermes-agent/src/auxiliary_builder.rs
-hermes_agent|unused_mut|crates/hermes-agent/src/compression.rs
 hermes_agent|unused_mut|crates/hermes-agent/src/subdirectory_hints.rs
-hermes_agent|unused_variables|crates/hermes-agent/src/memory_plugins/holographic.rs
 hermes_cli|clippy::bind_instead_of_map|crates/hermes-cli/src/theme.rs
 hermes_cli|clippy::collapsible_if|crates/hermes-cli/src/commands.rs
 hermes_cli|clippy::double_ended_iterator_last|crates/hermes-cli/src/commands.rs

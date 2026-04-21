@@ -385,11 +385,8 @@ impl SupermemoryMemoryPlugin {
         });
         let mut last_error = String::new();
         for path in ["/v3/profile", "/v1/profile"] {
-            match Self::send_json(config, Method::POST, path, Some(&payload)) {
-                Ok(v) => return Ok(v),
-                Err(e) => {
-                    last_error = e;
-                }
+            if let Ok(v) = Self::send_json(config, Method::POST, path, Some(&payload)) {
+                return Ok(v);
             }
             let get_path = format!("{}?container_tag={}&q={}", path, tag, query.unwrap_or(""));
             match Self::send_json(config, Method::GET, &get_path, None) {

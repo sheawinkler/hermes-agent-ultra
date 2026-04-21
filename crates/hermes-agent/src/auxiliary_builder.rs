@@ -13,7 +13,7 @@ use hermes_intelligence::auxiliary::{
     AuxiliaryClient, AuxiliaryConfig, AuxiliarySource, ProviderCandidate,
 };
 
-use crate::provider::{AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider};
+use crate::provider::{AnthropicProvider, GenericProvider, OpenRouterProvider};
 
 /// Default auxiliary models per source. Mirrors the Python
 /// `_API_KEY_PROVIDER_AUX_MODELS` table — chosen to be cheap and fast.

@@ -210,7 +210,7 @@ impl HolographicMemoryPlugin {
     fn search_facts(
         &self,
         query: &str,
-        category: Option<&str>,
+        _category: Option<&str>,
         min_trust: f64,
         limit: usize,
     ) -> Vec<Value> {
@@ -229,21 +229,10 @@ impl HolographicMemoryPlugin {
             return Vec::new();
         }
 
-        // Keyword-based search using LIKE matching
-        let like_clauses: Vec<String> = keywords
-            .iter()
-            .map(|_| "(LOWER(content) LIKE ?1 OR LOWER(tags) LIKE ?1)".to_string())
-            .collect();
-
-        // Build individual LIKE patterns and combined query
+        // Build individual LIKE patterns and merge results.
         let mut results = Vec::new();
-        let sql = format!(
-            "SELECT fact_id, content, category, tags, trust_score, retrieval_count, helpful_count, created_at, updated_at \
-             FROM facts WHERE trust_score >= ?1 {} ORDER BY trust_score DESC LIMIT ?2",
-            if category.is_some() { "AND category = ?3" } else { "" }
-        );
 
-        // Simplified: search for each keyword and merge results
+        // Search for each keyword and merge results.
         for keyword in &keywords {
             let pattern = format!("%{}%", keyword);
             let mut stmt = match conn.prepare(

@@ -248,42 +248,6 @@ impl HindsightPlugin {
         }
     }
 
-    fn api_url(&self) -> String {
-        self.config
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|c| c.api_url.clone())
-            .unwrap_or_else(|| DEFAULT_API_URL.to_string())
-    }
-
-    fn api_key(&self) -> String {
-        self.config
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|c| c.api_key.clone())
-            .unwrap_or_default()
-    }
-
-    fn bank_id(&self) -> String {
-        self.config
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|c| c.bank_id.clone())
-            .unwrap_or_else(|| "hermes".to_string())
-    }
-
-    fn budget(&self) -> String {
-        self.config
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|c| c.budget.clone())
-            .unwrap_or_else(|| "mid".to_string())
-    }
-
     fn memory_mode(&self) -> String {
         self.config
             .lock()
