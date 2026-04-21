@@ -4,6 +4,7 @@
 //! that stores jobs as JSON files in `~/.hermes/cron/`.
 
 use std::path::PathBuf;
+use std::{collections::HashSet, ffi::OsStr};
 
 use async_trait::async_trait;
 use tokio::fs;
@@ -96,6 +97,21 @@ impl FileJobPersistence {
     fn job_path(&self, id: &str) -> PathBuf {
         self.data_dir.join(format!("{}.json", id))
     }
+
+    /// Return a temporary file path for atomic writes.
+    fn temp_job_path(&self, id: &str) -> PathBuf {
+        self.data_dir
+            .join(format!(".{}.{}.tmp", id, uuid::Uuid::new_v4()))
+    }
+
+    /// Atomically write a job file by writing to a temporary file and renaming.
+    async fn atomic_write_job(&self, id: &str, contents: &str) -> Result<(), std::io::Error> {
+        let tmp = self.temp_job_path(id);
+        let dst = self.job_path(id);
+        fs::write(&tmp, contents).await?;
+        fs::rename(&tmp, &dst).await?;
+        Ok(())
+    }
 }
 
 impl Default for FileJobPersistence {
@@ -108,8 +124,29 @@ impl Default for FileJobPersistence {
 impl JobPersistence for FileJobPersistence {
     async fn save_jobs(&self, jobs: &[CronJob]) -> Result<(), CronPersistenceError> {
         self.ensure_dir().await?;
+
+        // Bulk save is treated as a replace operation:
+        // 1) atomically write each desired job
+        // 2) remove stale JSON files no longer present in `jobs`
+        let mut keep_ids = HashSet::new();
         for job in jobs {
-            self.save_job(job).await?;
+            let contents = serde_json::to_string_pretty(job)?;
+            self.atomic_write_job(&job.id, &contents).await?;
+            keep_ids.insert(job.id.clone());
+        }
+
+        let mut entries = fs::read_dir(&self.data_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.extension() != Some(OsStr::new("json")) {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if !keep_ids.contains(stem) {
+                fs::remove_file(path).await?;
+            }
         }
         Ok(())
     }
@@ -137,9 +174,8 @@ impl JobPersistence for FileJobPersistence {
 
     async fn save_job(&self, job: &CronJob) -> Result<(), CronPersistenceError> {
         self.ensure_dir().await?;
-        let path = self.job_path(&job.id);
         let contents = serde_json::to_string_pretty(job)?;
-        fs::write(path, contents).await?;
+        self.atomic_write_job(&job.id, &contents).await?;
         Ok(())
     }
 
@@ -347,6 +383,41 @@ mod tests {
 
         let loaded = persistence.load_jobs().await.unwrap();
         assert_eq!(loaded.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_save_jobs_bulk_removes_stale_entries() {
+        let dir = tempdir().unwrap();
+        let persistence = FileJobPersistence::with_dir(dir.path().to_path_buf());
+
+        let job1 = crate::job::CronJob::new("0 9 * * *", "Job 1");
+        let job2 = crate::job::CronJob::new("0 10 * * *", "Job 2");
+        persistence
+            .save_jobs(&[job1.clone(), job2.clone()])
+            .await
+            .unwrap();
+
+        // Bulk replace with only one job should remove stale json files.
+        persistence.save_jobs(&[job1.clone()]).await.unwrap();
+
+        let loaded = persistence.load_jobs().await.unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, job1.id);
+    }
+
+    #[tokio::test]
+    async fn test_save_job_atomic_write_no_temp_files_left() {
+        let dir = tempdir().unwrap();
+        let persistence = FileJobPersistence::with_dir(dir.path().to_path_buf());
+        let job = crate::job::CronJob::new("0 9 * * *", "Atomic write");
+        persistence.save_job(&job).await.unwrap();
+
+        let mut entries = fs::read_dir(dir.path()).await.unwrap();
+        while let Some(entry) = entries.next_entry().await.unwrap() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            assert!(!name.ends_with(".tmp"), "unexpected temp file: {name}");
+        }
     }
 
     #[tokio::test]

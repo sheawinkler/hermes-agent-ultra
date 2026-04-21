@@ -1375,6 +1375,7 @@ dependencies = [
  "hermes-agent",
  "hermes-core",
  "hermes-tools",
+ "regex",
  "rusqlite",
  "serde",
  "serde_json",
