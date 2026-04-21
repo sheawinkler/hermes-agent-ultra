@@ -324,6 +324,11 @@ evaluate_risk_gate() {
   fi
 
   append_report "risk_gate_status: blocked"
+  if [[ "${DRY_RUN}" == "1" ]]; then
+    append_report "risk_gate_status_detail: blocked_in_dry_run"
+    log "Strict risk gate would block sync (dry-run)."
+    return 1
+  fi
   publish_risk_issue "${REPORT_FILE}"
   die "Strict risk gate blocked sync due to high-risk path changes. Review ${REPORT_FILE}."
 }
