@@ -87,6 +87,33 @@ pub fn extract_urls(text: &str) -> Vec<String> {
     re.find_iter(text).map(|m| m.as_str().to_string()).collect()
 }
 
+/// Extract markdown image links from text.
+///
+/// Returns `(cleaned_text, image_urls)` where only image tags of the form
+/// `![alt](url)` are removed from the cleaned text. Normal markdown links
+/// `[text](url)` are preserved.
+pub fn extract_markdown_images(text: &str) -> (String, Vec<String>) {
+    let image_re = Regex::new(r"!\[[^\]]*\]\(([^)]+)\)").expect("valid regex");
+    let mut images = Vec::new();
+
+    let cleaned = image_re
+        .replace_all(text, |caps: &regex::Captures| {
+            if let Some(url) = caps.get(1).map(|m| m.as_str().trim()) {
+                images.push(url.to_string());
+            }
+            ""
+        })
+        .to_string();
+
+    let cleaned = cleaned
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string();
+    (cleaned, images)
+}
+
 /// Format a code block with optional language tag.
 pub fn format_code_block(code: &str, lang: Option<&str>) -> String {
     match lang {
@@ -196,6 +223,25 @@ mod tests {
         let urls = extract_urls(text);
         assert_eq!(urls.len(), 2);
         assert!(urls[0].starts_with("https://"));
+    }
+
+    #[test]
+    fn test_extract_markdown_images_preserves_non_image_links() {
+        let text =
+            "See ![diagram](https://img.example.com/a.png) and [doc](https://example.com/a.pdf)";
+        let (cleaned, images) = extract_markdown_images(text);
+        assert_eq!(images, vec!["https://img.example.com/a.png"]);
+        assert_eq!(cleaned, "See and [doc](https://example.com/a.pdf)");
+    }
+
+    #[test]
+    fn test_extract_markdown_images_multiple_tags() {
+        let text = "A ![one](https://i/1.png) B ![two](https://i/2.jpg) C";
+        let (cleaned, images) = extract_markdown_images(text);
+        assert_eq!(images.len(), 2);
+        assert_eq!(images[0], "https://i/1.png");
+        assert_eq!(images[1], "https://i/2.jpg");
+        assert_eq!(cleaned, "A B C");
     }
 
     #[test]
