@@ -17,6 +17,10 @@ Options:
   --report-dir <path>       Report directory (default: <repo>/.sync-reports)
   --conflict-label <label>  Label for conflict issues (default: upstream-sync-conflict)
   --no-conflict-issue       Disable auto issue creation on conflicts
+  --strict-risk-gate        Block sync when high-risk file paths changed upstream
+  --no-strict-risk-gate     Disable strict high-risk path blocking (default)
+  --allow-risk-paths        Override strict risk gate for this run
+  --risk-paths-file <path>  Glob pattern file for high-risk path checks
   --no-tests                Skip post-sync verification command
   --test-cmd <command>      Verification command (default: cargo test -p hermes-gateway)
   --no-pr                   Do not open a PR in branch-pr mode
@@ -46,6 +50,9 @@ TEST_CMD="cargo test -p hermes-gateway"
 CREATE_PR="1"
 CREATE_CONFLICT_ISSUE="1"
 CONFLICT_LABEL="upstream-sync-conflict"
+STRICT_RISK_GATE="${STRICT_RISK_GATE:-0}"
+ALLOW_RISK_PATHS="0"
+RISK_PATHS_FILE=""
 DRY_RUN="0"
 REPORT_DIR=""
 
@@ -87,6 +94,22 @@ while [[ $# -gt 0 ]]; do
       CREATE_CONFLICT_ISSUE="0"
       shift
       ;;
+    --strict-risk-gate)
+      STRICT_RISK_GATE="1"
+      shift
+      ;;
+    --no-strict-risk-gate)
+      STRICT_RISK_GATE="0"
+      shift
+      ;;
+    --allow-risk-paths)
+      ALLOW_RISK_PATHS="1"
+      shift
+      ;;
+    --risk-paths-file)
+      RISK_PATHS_FILE="${2:?missing value for --risk-paths-file}"
+      shift 2
+      ;;
     --no-tests)
       RUN_TESTS="0"
       shift
@@ -126,6 +149,9 @@ command -v git >/dev/null 2>&1 || die "git is required"
 
 if [[ -z "${REPORT_DIR}" ]]; then
   REPORT_DIR="${REPO_ROOT}/.sync-reports"
+fi
+if [[ -z "${RISK_PATHS_FILE}" ]]; then
+  RISK_PATHS_FILE="${REPO_ROOT}/scripts/upstream-risk-paths.txt"
 fi
 mkdir -p "${REPORT_DIR}"
 
@@ -177,6 +203,9 @@ create_report_header() {
   append_report "repo_root: ${REPO_ROOT}"
   append_report "mode: ${MODE}"
   append_report "strategy: ${SYNC_STRATEGY}"
+  append_report "strict_risk_gate: ${STRICT_RISK_GATE}"
+  append_report "allow_risk_paths: ${ALLOW_RISK_PATHS}"
+  append_report "risk_paths_file: ${RISK_PATHS_FILE}"
   append_report "origin_ref: ${ORIGIN_REF}"
   append_report "upstream_ref: ${UPSTREAM_REF}"
   append_report "origin_sha: ${ORIGIN_SHA}"
@@ -200,6 +229,7 @@ fi
 
 DIFF_STAT="$(git diff --stat "${ORIGIN_REF}..${UPSTREAM_REF}" || true)"
 DIFF_NAMES="$(git diff --name-status "${ORIGIN_REF}..${UPSTREAM_REF}" || true)"
+DIFF_FILES="$(git diff --name-only "${ORIGIN_REF}..${UPSTREAM_REF}" || true)"
 
 append_report "## Pending Upstream Commits"
 append_report '```'
@@ -216,6 +246,89 @@ append_report '```'
 append_report "${DIFF_NAMES}"
 append_report '```'
 append_report ""
+
+publish_risk_issue() {
+  local risk_report="$1"
+  if [[ "${CREATE_CONFLICT_ISSUE}" != "1" ]]; then
+    return 0
+  fi
+
+  gh label create "${CONFLICT_LABEL}" --color EAB308 --description "Automated upstream sync risk gate" >/dev/null 2>&1 || true
+
+  local title="upstream sync blocked by strict risk gate (${BASE_BRANCH}, ${TIMESTAMP})"
+  local body_file
+  body_file="$(mktemp)"
+  {
+    echo "Automated upstream sync was blocked by strict risk gating."
+    echo
+    echo "- mode: \`${MODE}\`"
+    echo "- strategy: \`${SYNC_STRATEGY}\`"
+    echo "- strict risk gate: \`${STRICT_RISK_GATE}\`"
+    echo "- allow risk paths: \`${ALLOW_RISK_PATHS}\`"
+    echo "- risk file: \`${RISK_PATHS_FILE}\`"
+    echo "- report: \`${risk_report}\`"
+    echo
+    echo "Review the matched files and rerun with explicit approval if intended."
+  } > "${body_file}"
+
+  if gh issue create --title "${title}" --label "${CONFLICT_LABEL}" --body-file "${body_file}" >/dev/null 2>&1; then
+    log "Strict-risk issue created with label '${CONFLICT_LABEL}'."
+  else
+    log "Failed to create strict-risk issue automatically; review report ${risk_report}."
+  fi
+  rm -f "${body_file}"
+}
+
+evaluate_risk_gate() {
+  if [[ "${STRICT_RISK_GATE}" != "1" ]]; then
+    return 0
+  fi
+
+  if [[ ! -f "${RISK_PATHS_FILE}" ]]; then
+    die "Strict risk gate enabled but pattern file not found: ${RISK_PATHS_FILE}"
+  fi
+
+  mapfile -t changed_files < <(printf '%s\n' "${DIFF_FILES}" | sed '/^\s*$/d')
+  if [[ "${#changed_files[@]}" -eq 0 ]]; then
+    return 0
+  fi
+
+  local matches=()
+  while IFS= read -r pattern; do
+    [[ -z "${pattern}" || "${pattern}" =~ ^[[:space:]]*# ]] && continue
+    for path in "${changed_files[@]}"; do
+      if [[ "${path}" == ${pattern} ]]; then
+        matches+=("${pattern} -> ${path}")
+      fi
+    done
+  done < "${RISK_PATHS_FILE}"
+
+  if [[ "${#matches[@]}" -eq 0 ]]; then
+    append_report "risk_gate_status: pass"
+    return 0
+  fi
+
+  {
+    echo "## Strict Risk Gate Matches"
+    echo '```'
+    printf '%s\n' "${matches[@]}"
+    echo '```'
+    echo
+  } >> "${REPORT_FILE}"
+
+  if [[ "${ALLOW_RISK_PATHS}" == "1" ]]; then
+    append_report "risk_gate_status: bypassed"
+    append_report "risk_gate_bypass: --allow-risk-paths"
+    log "Strict risk gate matched paths, but bypass is enabled for this run."
+    return 0
+  fi
+
+  append_report "risk_gate_status: blocked"
+  publish_risk_issue "${REPORT_FILE}"
+  die "Strict risk gate blocked sync due to high-risk path changes. Review ${REPORT_FILE}."
+}
+
+evaluate_risk_gate
 
 if [[ "${DRY_RUN}" == "1" ]]; then
   append_report "status: dry-run"

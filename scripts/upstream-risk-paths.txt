@@ -1,0 +1,26 @@
+# High-risk paths that require explicit review before auto-sync merge/cherry-pick.
+# Supports shell-style globs used by [[ "$path" == $pattern ]].
+
+# Auth, secrets, security-sensitive runtime surfaces
+crates/hermes-auth/**
+crates/hermes-mcp/src/auth.rs
+crates/hermes-http/src/security.rs
+crates/hermes-agent/src/memory_plugins/supermemory.rs
+crates/hermes-agent/src/memory_plugins/contextlattice.rs
+crates/hermes-agent/src/memory_plugins/*.rs
+
+# Inbound/outbound adapter surfaces and API server behavior
+crates/hermes-gateway/src/platforms/**
+crates/hermes-gateway/src/gateway.rs
+crates/hermes-gateway/src/adapter.rs
+
+# Install/bootstrap and update automation
+scripts/setup-*.sh
+scripts/sync-upstream.sh
+scripts/cron-upstream-sync.sh
+scripts/install-upstream-sync-cron.sh
+
+# Release and supply-chain surfaces
+Cargo.toml
+Cargo.lock
+.github/workflows/**

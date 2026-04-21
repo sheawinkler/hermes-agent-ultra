@@ -9,6 +9,9 @@ SYNC_STRATEGY="${SYNC_STRATEGY:-merge}"
 REPORT_DIR="${REPORT_DIR:-${REPO_ROOT}/.sync-reports}"
 CONFLICT_LABEL="${CONFLICT_LABEL:-upstream-sync-conflict}"
 CREATE_CONFLICT_ISSUE="${CREATE_CONFLICT_ISSUE:-1}"
+STRICT_RISK_GATE="${STRICT_RISK_GATE:-1}"
+ALLOW_RISK_PATHS="${ALLOW_RISK_PATHS:-0}"
+RISK_PATHS_FILE="${RISK_PATHS_FILE:-${REPO_ROOT}/scripts/upstream-risk-paths.txt}"
 
 # Cron has a minimal PATH; include common tool locations explicitly.
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
@@ -34,11 +37,20 @@ ARGS=(
   --strategy "${SYNC_STRATEGY}"
   --report-dir "${REPORT_DIR}"
   --conflict-label "${CONFLICT_LABEL}"
+  --risk-paths-file "${RISK_PATHS_FILE}"
   --test-cmd "cargo test -p hermes-gateway"
 )
 
 if [[ "${CREATE_CONFLICT_ISSUE}" == "0" ]]; then
   ARGS+=(--no-conflict-issue)
+fi
+if [[ "${STRICT_RISK_GATE}" == "1" ]]; then
+  ARGS+=(--strict-risk-gate)
+else
+  ARGS+=(--no-strict-risk-gate)
+fi
+if [[ "${ALLOW_RISK_PATHS}" == "1" ]]; then
+  ARGS+=(--allow-risk-paths)
 fi
 
 exec /usr/bin/env bash "${REPO_ROOT}/scripts/sync-upstream.sh" \

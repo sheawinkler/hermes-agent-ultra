@@ -9,12 +9,13 @@ fork-specific history.
   - One-shot upstream sync (`fetch -> strategy apply -> test -> push`)
   - Default mode: create a sync branch and open a PR
   - Supports `--strategy merge|cherry-pick`
+  - Supports strict risk gating via `--strict-risk-gate`
   - Emits timestamped reports under `.sync-reports/`
   - Can auto-create a labeled GitHub issue on conflict
 - `scripts/cron-upstream-sync.sh`
   - Cron-safe wrapper around `sync-upstream.sh`
   - Uses a lock file (`~/.hermes/locks/upstream-sync.lock`) to avoid overlap
-  - Reads optional env knobs: `SYNC_STRATEGY`, `REPORT_DIR`, `CONFLICT_LABEL`, `CREATE_CONFLICT_ISSUE`
+  - Reads optional env knobs: `SYNC_STRATEGY`, `REPORT_DIR`, `CONFLICT_LABEL`, `CREATE_CONFLICT_ISSUE`, `STRICT_RISK_GATE`, `ALLOW_RISK_PATHS`, `RISK_PATHS_FILE`
 - `scripts/install-upstream-sync-cron.sh`
   - Installs/updates a crontab entry with a stable marker
 
@@ -29,6 +30,18 @@ Cherry-pick mode for linear upstream replay:
 
 ```bash
 bash scripts/sync-upstream.sh --strategy cherry-pick
+```
+
+Strict risk gate (blocks sync if high-risk paths changed upstream):
+
+```bash
+bash scripts/sync-upstream.sh --strict-risk-gate
+```
+
+Explicit one-run bypass after manual review:
+
+```bash
+bash scripts/sync-upstream.sh --strict-risk-gate --allow-risk-paths
 ```
 
 ## Direct-to-main Mode (No PR)
@@ -68,5 +81,8 @@ Default report path:
   intended repository path.
 - On conflicts, the script writes `.sync-reports/upstream-sync-<timestamp>-conflict.txt`.
   - For `--strategy cherry-pick`, it also records rollback tag `rollback/upstream-sync-<timestamp>`.
+- Strict risk patterns default file:
+  - `scripts/upstream-risk-paths.txt`
+- Cron installer defaults to `STRICT_RISK_GATE=1` so unattended syncs pause on sensitive upstream changes.
 - Default verification command is:
   - `cargo test -p hermes-gateway`
