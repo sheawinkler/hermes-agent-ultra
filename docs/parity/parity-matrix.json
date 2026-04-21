@@ -1,25 +1,25 @@
 {
-  "generated_at_utc": "2026-04-21T08:30:13.201957+00:00",
+  "generated_at_utc": "2026-04-21T08:52:40.467870+00:00",
   "refs": {
     "local_ref": "main",
-    "local_sha": "a23e3bed5d1c02d545b2022d4bee5a212626ec76",
+    "local_sha": "ff3a56cfbcc7ace695fcf092ed08851e51d9f493",
     "upstream_ref": "upstream/main",
-    "upstream_sha": "517f5e263953ab92c6076cd888ea755af106d6d4",
+    "upstream_sha": "e0dc0a88d3218980bdcc888c2741a27ab332eff7",
     "merge_base": null
   },
   "summary": {
-    "commits_behind": 5161,
-    "commits_ahead": 98,
-    "upstream_patch_missing": 4455,
+    "commits_behind": 5170,
+    "commits_ahead": 114,
+    "upstream_patch_missing": 4464,
     "upstream_patch_represented": 4,
-    "local_patch_unique": 96,
-    "files_only_upstream": 2184,
-    "files_only_local": 367,
+    "local_patch_unique": 112,
+    "files_only_upstream": 2188,
+    "files_only_local": 368,
     "files_shared_identical": 0,
     "files_shared_different": 8,
-    "tree_files_changed": 2560,
-    "tree_insertions": 846879,
-    "tree_deletions": 128261
+    "tree_files_changed": 2565,
+    "tree_insertions": 847775,
+    "tree_deletions": 129582
   },
   "top_upstream_only": [
     {
@@ -72,7 +72,7 @@
     },
     {
       "path": "tests/agent",
-      "count": 52
+      "count": 53
     },
     {
       "path": "web/src",
@@ -279,15 +279,15 @@
       "count": 5
     },
     {
+      "path": "docs/parity",
+      "count": 4
+    },
+    {
       "path": "crates/hermes-auth",
       "count": 3
     },
     {
       "path": "crates/hermes-telemetry",
-      "count": 3
-    },
-    {
-      "path": "docs/parity",
       "count": 3
     },
     {
@@ -430,7 +430,7 @@
     },
     {
       "path": "tests/agent",
-      "count": 52
+      "count": 53
     },
     {
       "path": "web/src",
@@ -603,15 +603,15 @@
       "count": 5
     },
     {
+      "path": "docs/parity",
+      "count": 4
+    },
+    {
       "path": "crates/hermes-auth",
       "count": 3
     },
     {
       "path": "crates/hermes-telemetry",
-      "count": 3
-    },
-    {
-      "path": "docs/parity",
       "count": 3
     },
     {
@@ -708,7 +708,7 @@
       "workstream": "WS6",
       "issue": 10,
       "name": "Tests and CI parity",
-      "upstream_only": 703,
+      "upstream_only": 704,
       "shared_different": 0,
       "local_only": 2,
       "risk": "high",
@@ -718,7 +718,7 @@
       "workstream": "WS4",
       "issue": 8,
       "name": "Skills parity",
-      "upstream_only": 624,
+      "upstream_only": 626,
       "shared_different": 0,
       "local_only": 0,
       "risk": "high",
@@ -730,7 +730,7 @@
       "name": "UX parity",
       "upstream_only": 451,
       "shared_different": 0,
-      "local_only": 6,
+      "local_only": 7,
       "risk": "high",
       "effort": "XL"
     },
@@ -738,7 +738,7 @@
       "workstream": "WS8",
       "issue": 12,
       "name": "Compatibility and divergence policy",
-      "upstream_only": 196,
+      "upstream_only": 197,
       "shared_different": 8,
       "local_only": 140,
       "risk": "medium",
@@ -776,9 +776,9 @@
     }
   ],
   "commit_mapping": {
-    "upstream_patch_missing": 4455,
+    "upstream_patch_missing": 4464,
     "upstream_patch_represented": 4,
-    "local_patch_unique": 96,
+    "local_patch_unique": 112,
     "local_patch_equivalent_to_upstream": 1,
     "upstream_patch_missing_sample": [
       "21d80ca68346dfdb8d3556015a723a9217f8566f",
