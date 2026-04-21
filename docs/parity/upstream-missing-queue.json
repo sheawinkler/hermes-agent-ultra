@@ -7485,13 +7485,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "gateway/platforms/base.py",
         "tests/gateway/test_platform_base.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG4-gateway-memory; action=implement",
+      "notes": "ported via 81c85d69 (markdown image extraction preserves non-image links) + 064e5116 (fenced block split parity) [ticket #37/#42]",
       "owner": "codex",
       "sha": "ff6d62802df8ac1fa289c1c653b2fb44348e0346",
       "subject": "fix: platform base extract_images and truncate_message bugs + tests",
@@ -69166,7 +69166,7 @@
       "target_ticket_name": "GPAR-02 skills parity"
     }
   ],
-  "generated_at_utc": "2026-04-21T23:24:03.153942+00:00",
+  "generated_at_utc": "2026-04-21T23:30:14.644459+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69174,8 +69174,8 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4180,
-      "ported": 14,
+      "pending": 4179,
+      "ported": 15,
       "superseded": 349
     },
     "by_target_ticket": {
