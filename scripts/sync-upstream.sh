@@ -2,23 +2,27 @@
 set -euo pipefail
 
 usage() {
-  cat <<'EOF'
+  cat <<'USAGE'
 Usage: scripts/sync-upstream.sh [options]
 
 Syncs upstream changes into this fork in a reproducible way.
 
 Options:
-  --repo-root <path>      Repository root (default: script parent)
-  --origin <name>         Origin remote name (default: origin)
-  --upstream <name>       Upstream remote name (default: upstream)
-  --base-branch <name>    Branch to sync (default: main)
-  --mode <mode>           branch-pr (default) | direct-main
-  --no-tests              Skip post-merge test command
-  --test-cmd <command>    Verification command (default: cargo test -p hermes-gateway)
-  --no-pr                 Do not open a PR in branch-pr mode
-  --dry-run               Show what would happen and exit
-  -h, --help              Show help
-EOF
+  --repo-root <path>        Repository root (default: script parent)
+  --origin <name>           Origin remote name (default: origin)
+  --upstream <name>         Upstream remote name (default: upstream)
+  --base-branch <name>      Branch to sync (default: main)
+  --mode <mode>             branch-pr (default) | direct-main
+  --strategy <strategy>     merge (default) | cherry-pick
+  --report-dir <path>       Report directory (default: <repo>/.sync-reports)
+  --conflict-label <label>  Label for conflict issues (default: upstream-sync-conflict)
+  --no-conflict-issue       Disable auto issue creation on conflicts
+  --no-tests                Skip post-sync verification command
+  --test-cmd <command>      Verification command (default: cargo test -p hermes-gateway)
+  --no-pr                   Do not open a PR in branch-pr mode
+  --dry-run                 Show what would happen, emit report, and exit
+  -h, --help                Show help
+USAGE
 }
 
 log() {
@@ -36,10 +40,14 @@ ORIGIN_REMOTE="origin"
 UPSTREAM_REMOTE="upstream"
 BASE_BRANCH="main"
 MODE="branch-pr"
+SYNC_STRATEGY="merge"
 RUN_TESTS="1"
 TEST_CMD="cargo test -p hermes-gateway"
 CREATE_PR="1"
+CREATE_CONFLICT_ISSUE="1"
+CONFLICT_LABEL="upstream-sync-conflict"
 DRY_RUN="0"
+REPORT_DIR=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -62,6 +70,22 @@ while [[ $# -gt 0 ]]; do
     --mode)
       MODE="${2:?missing value for --mode}"
       shift 2
+      ;;
+    --strategy)
+      SYNC_STRATEGY="${2:?missing value for --strategy}"
+      shift 2
+      ;;
+    --report-dir)
+      REPORT_DIR="${2:?missing value for --report-dir}"
+      shift 2
+      ;;
+    --conflict-label)
+      CONFLICT_LABEL="${2:?missing value for --conflict-label}"
+      shift 2
+      ;;
+    --no-conflict-issue)
+      CREATE_CONFLICT_ISSUE="0"
+      shift
       ;;
     --no-tests)
       RUN_TESTS="0"
@@ -91,15 +115,27 @@ done
 
 [[ "${MODE}" == "branch-pr" || "${MODE}" == "direct-main" ]] || \
   die "--mode must be branch-pr or direct-main"
+[[ "${SYNC_STRATEGY}" == "merge" || "${SYNC_STRATEGY}" == "cherry-pick" ]] || \
+  die "--strategy must be merge or cherry-pick"
 
 if [[ "${MODE}" == "direct-main" ]]; then
   CREATE_PR="0"
 fi
 
 command -v git >/dev/null 2>&1 || die "git is required"
+
+if [[ -z "${REPORT_DIR}" ]]; then
+  REPORT_DIR="${REPO_ROOT}/.sync-reports"
+fi
+mkdir -p "${REPORT_DIR}"
+
 if [[ "${CREATE_PR}" == "1" ]] && ! command -v gh >/dev/null 2>&1; then
   log "gh CLI not found; disabling PR creation."
   CREATE_PR="0"
+fi
+if [[ "${CREATE_CONFLICT_ISSUE}" == "1" ]] && ! command -v gh >/dev/null 2>&1; then
+  log "gh CLI not found; disabling conflict issue creation."
+  CREATE_CONFLICT_ISSUE="0"
 fi
 
 cd "${REPO_ROOT}"
@@ -124,33 +160,156 @@ UPSTREAM_REF="refs/remotes/${UPSTREAM_REMOTE}/${BASE_BRANCH}"
 
 ORIGIN_SHA="$(git rev-parse "${ORIGIN_REF}")"
 UPSTREAM_SHA="$(git rev-parse "${UPSTREAM_REF}")"
-
-if git merge-base --is-ancestor "${UPSTREAM_REF}" "${ORIGIN_REF}"; then
-  log "No upstream updates to apply. ${ORIGIN_REF} already contains ${UPSTREAM_REF}."
-  exit 0
-fi
-
 TIMESTAMP="$(date -u +%Y%m%d-%H%M%S)"
 SYNC_BRANCH="chore/upstream-sync-${TIMESTAMP}"
-COMMITS_TO_SYNC="$(git log --oneline --no-decorate "${ORIGIN_REF}..${UPSTREAM_REF}" || true)"
-if [[ -z "${COMMITS_TO_SYNC}" ]]; then
-  COMMITS_TO_SYNC="(origin and upstream have diverged; merge commit will reconcile histories)"
-fi
+ROLLBACK_TAG="rollback/upstream-sync-${TIMESTAMP}"
+REPORT_FILE="${REPORT_DIR}/upstream-sync-${TIMESTAMP}.txt"
 
-if [[ "${DRY_RUN}" == "1" ]]; then
-  log "Dry run summary:"
-  log "  repo_root:      ${REPO_ROOT}"
-  log "  base branch:    ${BASE_BRANCH}"
-  log "  origin sha:     ${ORIGIN_SHA}"
-  log "  upstream sha:   ${UPSTREAM_SHA}"
-  log "  sync branch:    ${SYNC_BRANCH}"
-  log "  mode:           ${MODE}"
-  log "  run tests:      ${RUN_TESTS}"
-  log "  test command:   ${TEST_CMD}"
-  log "  create pr:      ${CREATE_PR}"
-  printf '%s\n' "${COMMITS_TO_SYNC}"
+append_report() {
+  printf '%s\n' "$*" >> "${REPORT_FILE}"
+}
+
+create_report_header() {
+  : > "${REPORT_FILE}"
+  append_report "# Upstream Sync Report"
+  append_report ""
+  append_report "timestamp_utc: ${TIMESTAMP}"
+  append_report "repo_root: ${REPO_ROOT}"
+  append_report "mode: ${MODE}"
+  append_report "strategy: ${SYNC_STRATEGY}"
+  append_report "origin_ref: ${ORIGIN_REF}"
+  append_report "upstream_ref: ${UPSTREAM_REF}"
+  append_report "origin_sha: ${ORIGIN_SHA}"
+  append_report "upstream_sha: ${UPSTREAM_SHA}"
+  append_report ""
+}
+
+create_report_header
+
+if git merge-base --is-ancestor "${UPSTREAM_REF}" "${ORIGIN_REF}"; then
+  append_report "status: no-updates"
+  log "No upstream updates to apply. ${ORIGIN_REF} already contains ${UPSTREAM_REF}."
+  log "Report: ${REPORT_FILE}"
   exit 0
 fi
+
+COMMITS_TO_SYNC="$(git log --oneline --no-decorate "${ORIGIN_REF}..${UPSTREAM_REF}" || true)"
+if [[ -z "${COMMITS_TO_SYNC}" ]]; then
+  COMMITS_TO_SYNC="(origin and upstream diverged; merge strategy required)"
+fi
+
+DIFF_STAT="$(git diff --stat "${ORIGIN_REF}..${UPSTREAM_REF}" || true)"
+DIFF_NAMES="$(git diff --name-status "${ORIGIN_REF}..${UPSTREAM_REF}" || true)"
+
+append_report "## Pending Upstream Commits"
+append_report '```'
+append_report "${COMMITS_TO_SYNC}"
+append_report '```'
+append_report ""
+append_report "## Diff Stat"
+append_report '```'
+append_report "${DIFF_STAT}"
+append_report '```'
+append_report ""
+append_report "## Files"
+append_report '```'
+append_report "${DIFF_NAMES}"
+append_report '```'
+append_report ""
+
+if [[ "${DRY_RUN}" == "1" ]]; then
+  append_report "status: dry-run"
+  log "Dry run complete."
+  log "Report: ${REPORT_FILE}"
+  exit 0
+fi
+
+publish_conflict_issue() {
+  local conflict_report="$1"
+  local reason="$2"
+  local failed_commit="$3"
+  if [[ "${CREATE_CONFLICT_ISSUE}" != "1" ]]; then
+    return 0
+  fi
+
+  gh label create "${CONFLICT_LABEL}" --color E11D48 --description "Automated upstream sync conflict" >/dev/null 2>&1 || true
+
+  local title="upstream sync conflict (${BASE_BRANCH}, ${TIMESTAMP})"
+  local body_file
+  body_file="$(mktemp)"
+  {
+    echo "Automated upstream sync hit a conflict."
+    echo
+    echo "- mode: \\`${MODE}\\`"
+    echo "- strategy: \\`${SYNC_STRATEGY}\\`"
+    echo "- reason: \\`${reason}\\`"
+    if [[ -n "${failed_commit}" ]]; then
+      echo "- failed commit: \\`${failed_commit}\\`"
+    fi
+    if [[ "${SYNC_STRATEGY}" == "cherry-pick" ]]; then
+      echo "- rollback tag: \\`${ROLLBACK_TAG}\\`"
+    fi
+    echo "- report: \\`${conflict_report}\\`"
+    echo
+    echo "See local report for conflicted files and recovery commands."
+  } > "${body_file}"
+
+  if gh issue create --title "${title}" --label "${CONFLICT_LABEL}" --body-file "${body_file}" >/dev/null 2>&1; then
+    log "Conflict issue created with label '${CONFLICT_LABEL}'."
+  else
+    log "Failed to create conflict issue automatically; review report ${conflict_report}."
+  fi
+  rm -f "${body_file}"
+}
+
+handle_conflict() {
+  local reason="$1"
+  local failed_commit="${2:-}"
+  local conflict_report="${REPORT_DIR}/upstream-sync-${TIMESTAMP}-conflict.txt"
+  local conflicted_files
+  conflicted_files="$(git diff --name-only --diff-filter=U || true)"
+
+  if [[ "${SYNC_STRATEGY}" == "cherry-pick" ]]; then
+    git tag -f "${ROLLBACK_TAG}" HEAD >/dev/null 2>&1 || true
+    git cherry-pick --abort >/dev/null 2>&1 || true
+  else
+    git merge --abort >/dev/null 2>&1 || true
+  fi
+
+  {
+    echo "# Upstream Sync Conflict"
+    echo
+    echo "timestamp_utc: ${TIMESTAMP}"
+    echo "mode: ${MODE}"
+    echo "strategy: ${SYNC_STRATEGY}"
+    echo "reason: ${reason}"
+    if [[ -n "${failed_commit}" ]]; then
+      echo "failed_commit: ${failed_commit}"
+    fi
+    echo "origin_sha: ${ORIGIN_SHA}"
+    echo "upstream_sha: ${UPSTREAM_SHA}"
+    if [[ "${SYNC_STRATEGY}" == "cherry-pick" ]]; then
+      echo "rollback_tag: ${ROLLBACK_TAG}"
+      echo "rollback_hint: git checkout ${SYNC_BRANCH} && git reset --hard ${ROLLBACK_TAG}"
+    fi
+    echo
+    echo "## Conflicted files"
+    echo '```'
+    echo "${conflicted_files}"
+    echo '```'
+  } > "${conflict_report}"
+
+  append_report "status: conflict"
+  append_report "conflict_reason: ${reason}"
+  append_report "conflict_report: ${conflict_report}"
+  if [[ "${SYNC_STRATEGY}" == "cherry-pick" ]]; then
+    append_report "rollback_tag: ${ROLLBACK_TAG}"
+  fi
+
+  publish_conflict_issue "${conflict_report}" "${reason}" "${failed_commit}"
+
+  die "${reason}. See ${conflict_report}"
+}
 
 log "Checking out ${BASE_BRANCH} and updating from ${ORIGIN_REMOTE}..."
 git checkout "${BASE_BRANCH}"
@@ -159,10 +318,23 @@ git pull --ff-only "${ORIGIN_REMOTE}" "${BASE_BRANCH}"
 log "Creating sync branch ${SYNC_BRANCH}..."
 git checkout -b "${SYNC_BRANCH}"
 
-log "Merging ${UPSTREAM_REF} into ${SYNC_BRANCH}..."
-if ! git merge --no-edit "${UPSTREAM_REF}"; then
-  git merge --abort || true
-  die "Merge conflict detected. Resolve manually."
+if [[ "${SYNC_STRATEGY}" == "merge" ]]; then
+  log "Merging ${UPSTREAM_REF} into ${SYNC_BRANCH}..."
+  if ! git merge --no-edit "${UPSTREAM_REF}"; then
+    handle_conflict "merge conflict"
+  fi
+else
+  mapfile -t SHAS < <(git rev-list --reverse "${ORIGIN_REF}..${UPSTREAM_REF}")
+  if [[ "${#SHAS[@]}" -eq 0 ]]; then
+    die "No linear commits to cherry-pick; rerun with --strategy merge."
+  fi
+
+  for sha in "${SHAS[@]}"; do
+    log "Cherry-picking ${sha}..."
+    if ! git cherry-pick "${sha}"; then
+      handle_conflict "cherry-pick conflict" "${sha}"
+    fi
+  done
 fi
 
 if [[ "${RUN_TESTS}" == "1" ]]; then
@@ -178,7 +350,9 @@ if [[ "${MODE}" == "direct-main" ]]; then
   git checkout "${BASE_BRANCH}"
   git merge --ff-only "${SYNC_BRANCH}"
   git push "${ORIGIN_REMOTE}" "${BASE_BRANCH}"
+  append_report "status: synced-direct-main"
   log "Direct-main sync complete."
+  log "Report: ${REPORT_FILE}"
   exit 0
 fi
 
@@ -186,19 +360,21 @@ if [[ "${CREATE_PR}" == "1" ]]; then
   TITLE="chore: sync upstream ${BASE_BRANCH} (${TIMESTAMP})"
   BODY_FILE="$(mktemp)"
   trap 'rm -f "${BODY_FILE}"' EXIT
-  cat > "${BODY_FILE}" <<EOF
+  cat > "${BODY_FILE}" <<PRBODY
 Automated upstream sync.
 
+- strategy: \`${SYNC_STRATEGY}\`
 - upstream ref: \`${UPSTREAM_REF}\`
 - upstream sha: \`${UPSTREAM_SHA}\`
 - origin sha before sync: \`${ORIGIN_SHA}\`
 - verification: \`${TEST_CMD}\`
+- report: \`${REPORT_FILE}\`
 
 Commits pending from upstream at sync start:
 \`\`\`
 ${COMMITS_TO_SYNC}
 \`\`\`
-EOF
+PRBODY
 
   if gh pr create --base "${BASE_BRANCH}" --head "${SYNC_BRANCH}" --title "${TITLE}" --body-file "${BODY_FILE}"; then
     log "PR created successfully."
@@ -207,4 +383,7 @@ EOF
   fi
 fi
 
+append_report "status: synced-branch-pr"
+append_report "sync_branch: ${SYNC_BRANCH}"
 log "Sync branch prepared: ${SYNC_BRANCH}"
+log "Report: ${REPORT_FILE}"

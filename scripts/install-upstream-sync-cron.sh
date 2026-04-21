@@ -8,6 +8,10 @@ SCHEDULE="${1:-17 */6 * * *}"
 LOG_FILE="${LOG_FILE:-$HOME/.hermes/logs/upstream-sync.log}"
 MARKER="# hermes-upstream-sync"
 CRON_SYNC_SCRIPT="${REPO_ROOT}/scripts/cron-upstream-sync.sh"
+SYNC_STRATEGY="${SYNC_STRATEGY:-merge}"
+REPORT_DIR="${REPORT_DIR:-${REPO_ROOT}/.sync-reports}"
+CONFLICT_LABEL="${CONFLICT_LABEL:-upstream-sync-conflict}"
+CREATE_CONFLICT_ISSUE="${CREATE_CONFLICT_ISSUE:-1}"
 
 if [[ ! -f "${CRON_SYNC_SCRIPT}" ]]; then
   echo "Missing script: ${CRON_SYNC_SCRIPT}" >&2
@@ -21,7 +25,7 @@ fi
 mkdir -p "$(dirname "${LOG_FILE}")"
 chmod +x "${CRON_SYNC_SCRIPT}" || true
 
-ENTRY="${SCHEDULE} REPO_ROOT='${REPO_ROOT}' /usr/bin/env bash '${CRON_SYNC_SCRIPT}' >> '${LOG_FILE}' 2>&1 ${MARKER}"
+ENTRY="${SCHEDULE} REPO_ROOT='${REPO_ROOT}' SYNC_STRATEGY='${SYNC_STRATEGY}' REPORT_DIR='${REPORT_DIR}' CONFLICT_LABEL='${CONFLICT_LABEL}' CREATE_CONFLICT_ISSUE='${CREATE_CONFLICT_ISSUE}' /usr/bin/env bash '${CRON_SYNC_SCRIPT}' >> '${LOG_FILE}' 2>&1 ${MARKER}"
 
 TMP_CURRENT="$(mktemp)"
 TMP_NEW="$(mktemp)"
