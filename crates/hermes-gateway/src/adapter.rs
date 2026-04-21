@@ -4,9 +4,6 @@
 //! `BasePlatformAdapter` with common fields (token, webhook_url, proxy)
 //! and helper methods shared by all platform adapters.
 
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 

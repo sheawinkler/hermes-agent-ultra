@@ -17,8 +17,8 @@ jobs:
         uses: Swatinem/rust-cache@v2
       - name: Format check
         run: cargo fmt --all --check
-      - name: Clippy
-        run: cargo clippy --workspace --all-targets
+      - name: Clippy Warning Gate
+        run: bash scripts/clippy-warning-gate.sh --check
       - name: Placeholder gate
         run: bash scripts/check-runtime-placeholders.sh
       - name: Tests

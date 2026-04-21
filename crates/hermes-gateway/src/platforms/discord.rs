@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
@@ -26,9 +26,6 @@ const MAX_MESSAGE_LENGTH: usize = 2000;
 
 /// Discord API base URL.
 const DISCORD_API_BASE: &str = "https://discord.com/api/v10";
-
-/// Discord Gateway WebSocket URL.
-const DISCORD_GATEWAY_URL: &str = "wss://gateway.discord.gg/?v=10&encoding=json";
 
 // ---------------------------------------------------------------------------
 // DiscordConfig
@@ -433,10 +430,6 @@ pub struct SlashCommand {
     /// Command type (1 = CHAT_INPUT, 2 = USER, 3 = MESSAGE). Default 1.
     #[serde(rename = "type", default = "default_command_type")]
     pub command_type: u8,
-}
-
-fn default_command_type() -> u8 {
-    1
 }
 
 /// A single option for a slash command.

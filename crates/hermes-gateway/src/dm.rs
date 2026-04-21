@@ -8,7 +8,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-use hermes_config::session::SessionResetPolicy;
 use hermes_config::UnauthorizedDmBehavior;
 
 // ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 description = "CLI/TUI interface for Hermes Agent"
+autobins = false
 
 [features]
 default = []
@@ -12,7 +13,7 @@ otlp = ["hermes-telemetry/otlp"]
 
 [[bin]]
 name = "hermes"
-path = "src/main.rs"
+path = "src/bin/hermes.rs"
 
 [[bin]]
 name = "hermes-agent-ultra"

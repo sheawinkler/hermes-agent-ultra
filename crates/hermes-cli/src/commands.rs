@@ -1088,7 +1088,6 @@ pub async fn handle_cli_skills(
             struct LocalSkill {
                 name: String,
                 version: String,
-                path: std::path::PathBuf,
             }
             let mut installed: Vec<LocalSkill> = Vec::new();
 
@@ -1119,7 +1118,6 @@ pub async fn handle_cli_skills(
                     installed.push(LocalSkill {
                         name: dir_name,
                         version,
-                        path: path.clone(),
                     });
                 }
             }
@@ -1213,7 +1211,6 @@ pub async fn handle_cli_skills(
                         {
                             Ok(resp) if resp.status().is_success() => {
                                 if let Ok(bytes) = resp.bytes().await {
-                                    let target = skills_dir.join(skill_name);
                                     let dec = flate2::read::GzDecoder::new(&bytes[..]);
                                     let mut archive = tar::Archive::new(dec);
                                     if archive.unpack(&skills_dir).is_ok() {
@@ -2804,7 +2801,7 @@ pub async fn handle_cli_mcp(
             }
             let content = std::fs::read_to_string(&mcp_config_path)
                 .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
-            let mut servers: serde_json::Value =
+            let servers: serde_json::Value =
                 serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
             match servers.get(&srv) {
                 Some(cfg) => {
@@ -3866,7 +3863,7 @@ fn claw_status_cmd() {
 
 /// Run the full migration using `claw_migrate::run_migration`.
 fn claw_migrate_cmd() -> Result<(), hermes_core::AgentError> {
-    use crate::claw_migrate::{find_openclaw_dir, run_migration, MigrateOptions, MigrationStatus};
+    use crate::claw_migrate::{find_openclaw_dir, run_migration, MigrateOptions};
 
     println!("OpenClaw → Hermes Migration");
     println!("===========================\n");

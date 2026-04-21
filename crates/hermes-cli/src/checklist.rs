@@ -10,7 +10,7 @@ use std::io::{self, Write};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
-use crossterm::{cursor, execute, style, terminal};
+use crossterm::{cursor, execute, terminal};
 
 /// Result of a checklist interaction.
 #[derive(Debug, Clone)]

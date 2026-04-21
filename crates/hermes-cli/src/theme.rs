@@ -67,7 +67,6 @@ impl ThemeColors {
             "lightblue" | "light_blue" | "light-blue" => Color::LightBlue,
             "lightmagenta" | "light_magenta" | "light-magenta" => Color::LightMagenta,
             "lightcyan" | "light_cyan" | "light-cyan" => Color::LightCyan,
-            "white" => Color::White,
             _ => {
                 // Try hex
                 if let Some(hex) = s.strip_prefix('#') {
@@ -416,7 +415,7 @@ mod tests {
         let theme = default_theme();
         assert_eq!(theme.name, "dark");
         assert!(!theme.colors.primary.is_empty());
-        assert!(!theme.styles.user_input.fg.is_none());
+        assert!(theme.styles.user_input.fg.is_some());
     }
 
     #[test]
