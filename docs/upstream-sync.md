@@ -86,3 +86,13 @@ Default report path:
 - Cron installer defaults to `STRICT_RISK_GATE=1` so unattended syncs pause on sensitive upstream changes.
 - Default verification command is:
   - `cargo test -p hermes-gateway`
+
+## Webhook + Queue Mode
+
+For event-driven sync (push-triggered, not schedule-triggered), see:
+
+- `docs/upstream-webhook-sync.md`
+
+This path supports SQLite (default), SQS, and Kafka queue backends and is the
+recommended architecture when you want near-real-time upstream ingestion with
+strict risk gating.

@@ -8,3 +8,4 @@ GEO-AI/
 *.log
 vout-endianness-analysis.md
 .sync-reports/
+.sync-queue/
