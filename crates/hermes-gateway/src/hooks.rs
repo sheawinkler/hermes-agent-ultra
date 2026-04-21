@@ -831,12 +831,6 @@ mod tests {
 
     #[tokio::test]
     async fn command_hook_runs_true_successfully() {
-        let h = CommandHookHandler::new(
-            "true-hook",
-            vec!["/usr/bin/true".into()],
-            std::env::temp_dir(),
-            5,
-        );
         // Some systems have /bin/true, others /usr/bin/true. Try both.
         let alt = if std::path::Path::new("/usr/bin/true").exists() {
             "/usr/bin/true"
