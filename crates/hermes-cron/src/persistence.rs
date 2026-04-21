@@ -44,6 +44,9 @@ pub enum CronPersistenceError {
     #[error("Serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
 
+    #[error("Corrupted persistence data: {0}")]
+    Corrupted(String),
+
     #[error("SQLite error: {0}")]
     Sqlite(String),
 }
@@ -160,12 +163,14 @@ impl JobPersistence for FileJobPersistence {
             let path = entry.path();
             if path.extension().map_or(false, |ext| ext == "json") {
                 let contents = fs::read_to_string(&path).await?;
-                match serde_json::from_str::<CronJob>(&contents) {
-                    Ok(job) => jobs.push(job),
-                    Err(e) => {
-                        tracing::warn!("Failed to parse job file {}: {}", path.display(), e);
-                    }
-                }
+                let job = serde_json::from_str::<CronJob>(&contents).map_err(|e| {
+                    CronPersistenceError::Corrupted(format!(
+                        "failed to parse job file {}: {}",
+                        path.display(),
+                        e
+                    ))
+                })?;
+                jobs.push(job);
             }
         }
 
@@ -290,26 +295,22 @@ impl JobPersistence for SqliteJobPersistence {
             .prepare("SELECT data FROM cron_jobs")
             .map_err(|e| CronPersistenceError::Sqlite(e.to_string()))?;
 
-        let jobs = stmt
-            .query_map([], |row| {
-                let data: String = row.get(0)?;
-                Ok(data)
-            })
+        let mut rows = stmt
+            .query([])
+            .map_err(|e| CronPersistenceError::Sqlite(e.to_string()))?;
+        let mut jobs = Vec::new();
+        while let Some(row) = rows
+            .next()
             .map_err(|e| CronPersistenceError::Sqlite(e.to_string()))?
-            .filter_map(|row| match row {
-                Ok(data) => match serde_json::from_str::<CronJob>(&data) {
-                    Ok(job) => Some(job),
-                    Err(e) => {
-                        tracing::warn!("Failed to parse job from SQLite: {}", e);
-                        None
-                    }
-                },
-                Err(e) => {
-                    tracing::warn!("Failed to read row from SQLite: {}", e);
-                    None
-                }
-            })
-            .collect();
+        {
+            let data: String = row
+                .get(0)
+                .map_err(|e| CronPersistenceError::Sqlite(e.to_string()))?;
+            let job = serde_json::from_str::<CronJob>(&data).map_err(|e| {
+                CronPersistenceError::Corrupted(format!("failed to parse sqlite cron job row: {e}"))
+            })?;
+            jobs.push(job);
+        }
 
         Ok(jobs)
     }
@@ -421,6 +422,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_file_load_jobs_fails_on_corrupt_json() {
+        let dir = tempdir().unwrap();
+        let persistence = FileJobPersistence::with_dir(dir.path().to_path_buf());
+
+        let corrupt_path = dir.path().join("corrupt.json");
+        fs::write(&corrupt_path, "{not-valid-json").await.unwrap();
+
+        let err = persistence
+            .load_jobs()
+            .await
+            .expect_err("must fail on corruption");
+        assert!(
+            matches!(err, CronPersistenceError::Corrupted(ref msg) if msg.contains("corrupt.json")),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
     async fn test_delete_nonexistent() {
         let dir = tempdir().unwrap();
         let persistence = FileJobPersistence::with_dir(dir.path().to_path_buf());
@@ -488,6 +507,32 @@ mod tests {
         let loaded = persistence.load_jobs().await.unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].prompt, "Updated");
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_load_jobs_fails_on_corrupt_row() {
+        let dir = tempdir().unwrap();
+        let db_path = dir.path().join("test_cron.db");
+        let persistence = SqliteJobPersistence::with_path(db_path);
+
+        // Initialize schema.
+        let _ = persistence.load_jobs().await.unwrap();
+
+        let conn = persistence.open_connection().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO cron_jobs (id, data) VALUES (?1, ?2)",
+            rusqlite::params!["corrupt", "{not-valid-json"],
+        )
+        .unwrap();
+
+        let err = persistence
+            .load_jobs()
+            .await
+            .expect_err("must fail on corruption");
+        assert!(
+            matches!(err, CronPersistenceError::Corrupted(ref msg) if msg.contains("sqlite cron job row")),
+            "unexpected error: {err}"
+        );
     }
 
     #[tokio::test]
