@@ -1,7 +1,7 @@
 {
   "commits": [
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".gitignore",
         "__pycache__/model_tools.cpython-310.pyc",
@@ -13,99 +13,99 @@
         "web_tools.py"
       ],
       "files_touched": 8,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "21d80ca68346dfdb8d3556015a723a9217f8566f",
       "subject": "initital commit",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "model_tools.py",
         "run_agent.py",
         "terminal_tool.py"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "122d8788ae2308dd222eafec393a6862a2e39574",
       "subject": "terminal tool",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "model_tools.py",
         "run_agent.py",
         "terminal_tool.py"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "a49596cbb2c17686f2c6de47393e3c419e4c9444",
       "subject": "terminal tool",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "README.md"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "6d346250b18df94878f7bcc27604c6e9f51208b0",
       "subject": "readme",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "model_tools.py",
         "terminal_tool.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "bab9c75b5b40bfa8788aaec8a3c6f606bb60d240",
       "subject": "more detailed desc",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "README.md"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "45d0b0b1427b965bd7a61f1510dee5cf2479aa0a",
       "subject": "change command",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "README.md",
         "terminal_tool.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "10b4cfeace2487980cf682808e0613dd099f2167",
       "subject": "fix history leakage",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".gitignore",
         "model_tools.py",
@@ -113,15 +113,15 @@
         "web_tools.py"
       ],
       "files_touched": 4,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "bf4223f3818fb5654550b059e416425cb06ab5e2",
       "subject": "implement first pass of scrape/crawl content compression",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "model_tools.py",
         "run_agent.py",
@@ -130,121 +130,121 @@
         "web_tools.py"
       ],
       "files_touched": 5,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "cde7e64418e00a1337325e1259a7f8ba7e563315",
       "subject": "add vision model tool, cli updates for exclusive and inclusive toolsets",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "mixture_of_agents_tool.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "3078053795e838e47797ede02b44e6dead731aac",
       "subject": "add mixture of agents tool",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "image_generation_tool.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "ebb46ba0e6a70dc1caa0005ca4449a63e0657ad1",
       "subject": "add image generation tool",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "requirements.txt"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "bc71dffd4cb7586bd82501f6897ccca1255c2e1c",
       "subject": "update requirements for fal image api",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "model_tools.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "e1710378b7388714b75c8c96ecb917193faf92fc",
       "subject": "update model_tools for imagen and moa",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".gitignore"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "f4ff1f496b259d10316f81af52d16756ab274666",
       "subject": "update gitignore",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "image_generation_tool.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "58d5fa1e4cec2783962328d887b12810d6de0c8c",
       "subject": "update fal requirements",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "mixture_of_agents_tool.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "96cff783357c785ea1ba8a1e61f923364e29f2bd",
       "subject": "cleanup",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "model_tools.py",
         "requirements.txt",
         "web_tools.py"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "4ece87efb0ddb477565a90917538cd6497ce708f",
       "subject": "update to firecrawl",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "mixture_of_agents_tool.py",
         "model_tools.py",
@@ -253,29 +253,29 @@
         "web_tools.py"
       ],
       "files_touched": 5,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "587d1cf720950dbb7f9b4afb527d2d4898574c7f",
       "subject": "Fix Web Tools, Upgrade MoA to GPT5, Add Trajectory Saving",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "model_tools.py",
         "test_run.sh"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "c7fa4447b831e2320b7d07e451bbef63dbf28cf3",
       "subject": "cleanup",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "README.md",
         "model_tools.py",
@@ -284,55 +284,55 @@
         "toolsets.py"
       ],
       "files_touched": 5,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "17608c11422bc1bea8c8c2e2032c41cd4ac57a7a",
       "subject": "Update to use toolsets and make them easy to create and configure",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".gitignore"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "2082c7caa3089cb8bc9f5474726c257044fb52ce",
       "subject": "update gitignore",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".gitignore",
         "run_agent.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "c5386ed7e6425ee750d3fe7d6d6685c076811004",
       "subject": "add better logging when requests fail",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "architecture/message_graph.md"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "045a1737f899d1415d7fb72bd037a1ff011aa322",
       "subject": "- message graphs",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "architecture/agents.md",
         "architecture/llm_client.md",
@@ -341,29 +341,29 @@
         "requirements.txt"
       ],
       "files_touched": 5,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "066514e2a9be69fff56cd1324c3d90ae031de446",
       "subject": "add more architecture docs",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "architecture/agents.md",
         "architecture/message_graph.md"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "e5e77381f0fb6de54cf988a1f088b4833c702bc8",
       "subject": "Made to be more descriptive from comments",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".env.example",
         "README.md",
@@ -378,15 +378,15 @@
         "tools/web_tools.py"
       ],
       "files_touched": 11,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "0411ca188099379218841a7c63e2fb552373e0f5",
       "subject": "Add environment configuration file, restructure tool imports, and enhance README setup instructions",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "pyproject.toml",
         "scripts/test_run.sh",
@@ -398,55 +398,55 @@
         "tools/web_tools.py"
       ],
       "files_touched": 8,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "a7ff4d49e94f717f19ca54b8c0e99994b2555f6b",
       "subject": "A bit of restructuring for simplicity and organization",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "test_run.sh"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "c42d9055ed23b68e6b0b9d1154fadc36876b7dd4",
       "subject": "Move test run back to repo root. weirdness occurred",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tools/terminal_tool.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "6fac6fecde923cff127e0fb042392a15686904e8",
       "subject": "Enhance import handling for Hecate in terminal_tool.py to manage local folder shadowing and improve error reporting for import failures.",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "README.md",
         "toolsets.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "bc5f0e62d9e6c36f8f14a43e5e6c70982f280069",
       "subject": "Add support for enabling all toolsets with 'all' or '*' alias in README and toolset resolution logic",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".cursorrules",
         "README.md",
@@ -456,73 +456,73 @@
         "toolset_distributions.py"
       ],
       "files_touched": 6,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "0e2e69a71ddacdc99ba7282f3b4ab93ded881834",
       "subject": "Add batch processing capabilities with checkpointing and statistics tracking, along with toolset distribution management. Update README and add test scripts for validation.",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "model_tools.py",
         "tools/image_generation_tool.py",
         "toolset_distributions.py"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "22b6d5866c10cc8780c581d50600507eb7f891f7",
       "subject": "Fix some issues around async and tool constraints",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".gitignore"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "a398d320b7f38ec5d71ca7631b554e05cb9e5fd1",
       "subject": "update gitignore",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "README.md",
         "batch_runner.py",
         "run_agent.py"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "d36790de915354343ffad5c66916ee115cc29ed8",
       "subject": "Add ephemeral system prompt support in batch and agent runners. Update README with usage examples and documentation for the new feature. Ensure prompt is not saved to trajectories.",
       "target_ticket": 25,
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".gitignore",
         "requirements.txt",
         "tools/vision_tools.py"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "8d256779d8fa76231702f0f7296052f2395fdb02",
       "subject": "Update vision_tools.py to include image downloading and base64 conversion features.",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "batch_runner.py",
         "run_agent.py",
@@ -530,41 +530,41 @@
         "tools/vision_tools.py"
       ],
       "files_touched": 4,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "de9c0edc515a1245e4a9a42cdb0f915132091836",
       "subject": "some bugfixes",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tools/terminal_tool.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "faecbddd9b3ea790e9babc17297e6f8b776e8c09",
       "subject": "fix terminal interactivity",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tools/terminal_tool.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "a6ec79730cded38a942d2425d9251eccca9ecbee",
       "subject": "terminal tool",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "requirements.txt",
         "run_datagen_megascience.sh",
@@ -573,28 +573,28 @@
         "toolset_distributions.py"
       ],
       "files_touched": 5,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "f6f75cbe2b5d699ba686c05026420c6b320fd423",
       "subject": "update webtools",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tools/terminal_tool.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "0ca3e0aaa95c053f6a3f0697761739532e6176ce",
       "subject": "update snapshot",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "batch_runner.py",
         "model_tools.py",
@@ -602,15 +602,15 @@
         "tools/terminal_tool.py"
       ],
       "files_touched": 4,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "a4db3fdee5b921f39092d3d61ae50c6963a61231",
       "subject": "fix leakage",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "batch_runner.py",
         "model_tools.py",
@@ -618,15 +618,15 @@
         "tools/terminal_tool.py"
       ],
       "files_touched": 4,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "fbd3a2fdb88e67d5ae3923f074d437bd5adeae73",
       "subject": "prevent leakage of morph instances between tasks",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "batch_runner.py",
         "model_tools.py",
@@ -645,102 +645,102 @@
         "tools/web_tools.py"
       ],
       "files_touched": 15,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "c82741c3d8dad2964226a4ed4fa027c9d3fd5631",
       "subject": "some cleanups",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".gitignore"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "d90fcd4e2b9d49e126f8b3e69d723f115b5d5d12",
       "subject": "update gitignore",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".gitignore"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "c27787f09f9fdb0d8b473fb2fc262fd064839b93",
       "subject": "fix gitignore again",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tools/terminal_tool.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "0fbc0475f3c9bc0cf0ed1841afbe7c668e065fcb",
       "subject": "update snapshot id for ipython",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "run_agent.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "2d8f6c46f12496d153cdc16dd47fc4d50a5d00e4",
       "subject": "log first 20 chars",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "batch_runner.py",
         "run_agent.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "0c618482c408e0dbfcf35651b5da58ca934a0ac8",
       "subject": "add logging of prefix of tool call and tool response",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".gitignore",
         "toolset_distributions.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "f957ec226789ca4cb985b57b5e7961ad9f3bde0f",
       "subject": "update distribution and gitignore",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "model_tools.py",
         "tools/simple_terminal_tool.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "batch-triage-2026-04-21: legacy pre-rust python commit superseded by rust-native architecture/state parity at current head",
+      "owner": "codex",
       "sha": "f81395975025145d25825cb6bbb12c1ee3f7af83",
       "subject": "add simple terminal",
       "target_ticket": 26,
@@ -69030,7 +69030,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-04-21T21:42:20.598844+00:00",
+  "generated_at_utc": "2026-04-21T21:50:18.247047+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69038,8 +69038,9 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4524,
-      "ported": 12
+      "pending": 4474,
+      "ported": 12,
+      "superseded": 50
     },
     "by_target_ticket": {
       "20": 1615,

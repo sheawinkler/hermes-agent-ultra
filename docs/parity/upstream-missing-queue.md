@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-21T21:42:20.598844+00:00`
+Generated: `2026-04-21T21:50:18.247047+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `4536`.
 
@@ -16,63 +16,14 @@ Generated: `2026-04-21T21:42:20.598844+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 4524 |
+| pending | 4474 |
 | ported | 12 |
+| superseded | 50 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `21d80ca68346` | #26 | initital commit |
-| `122d8788ae23` | #26 | terminal tool |
-| `a49596cbb2c1` | #26 | terminal tool |
-| `6d346250b18d` | #25 | readme |
-| `bab9c75b5b40` | #26 | more detailed desc |
-| `45d0b0b1427b` | #25 | change command |
-| `10b4cfeace24` | #25 | fix history leakage |
-| `bf4223f3818f` | #26 | implement first pass of scrape/crawl content compression |
-| `cde7e64418e0` | #26 | add vision model tool, cli updates for exclusive and inclusive toolsets |
-| `3078053795e8` | #26 | add mixture of agents tool |
-| `ebb46ba0e6a7` | #26 | add image generation tool |
-| `bc71dffd4cb7` | #26 | update requirements for fal image api |
-| `e1710378b738` | #26 | update model_tools for imagen and moa |
-| `f4ff1f496b25` | #26 | update gitignore |
-| `58d5fa1e4cec` | #26 | update fal requirements |
-| `96cff783357c` | #26 | cleanup |
-| `4ece87efb0dd` | #26 | update to firecrawl |
-| `587d1cf72095` | #26 | Fix Web Tools, Upgrade MoA to GPT5, Add Trajectory Saving |
-| `c7fa4447b831` | #26 | cleanup |
-| `17608c11422b` | #25 | Update to use toolsets and make them easy to create and configure |
-| `2082c7caa308` | #26 | update gitignore |
-| `c5386ed7e642` | #26 | add better logging when requests fail |
-| `045a1737f899` | #26 | - message graphs |
-| `066514e2a9be` | #26 | add more architecture docs |
-| `e5e77381f0fb` | #26 | Made to be more descriptive from comments |
-| `0411ca188099` | #25 | Add environment configuration file, restructure tool imports, and enhance README setup instructions |
-| `a7ff4d49e94f` | #20 | A bit of restructuring for simplicity and organization |
-| `c42d9055ed23` | #26 | Move test run back to repo root. weirdness occurred |
-| `6fac6fecde92` | #26 | Enhance import handling for Hecate in terminal_tool.py to manage local folder shadowing and improve error reporting for import failures. |
-| `bc5f0e62d9e6` | #25 | Add support for enabling all toolsets with 'all' or '*' alias in README and toolset resolution logic |
-| `0e2e69a71dda` | #25 | Add batch processing capabilities with checkpointing and statistics tracking, along with toolset distribution management. Update README and add test scripts for validation. |
-| `22b6d5866c10` | #26 | Fix some issues around async and tool constraints |
-| `a398d320b7f3` | #26 | update gitignore |
-| `d36790de9153` | #25 | Add ephemeral system prompt support in batch and agent runners. Update README with usage examples and documentation for the new feature. Ensure prompt is not saved to trajectories. |
-| `8d256779d8fa` | #26 | Update vision_tools.py to include image downloading and base64 conversion features. |
-| `de9c0edc515a` | #26 | some bugfixes |
-| `faecbddd9b3e` | #26 | fix terminal interactivity |
-| `a6ec79730cde` | #26 | terminal tool |
-| `f6f75cbe2b5d` | #20 | update webtools |
-| `0ca3e0aaa95c` | #26 | update snapshot |
-| `a4db3fdee5b9` | #26 | fix leakage |
-| `fbd3a2fdb88e` | #26 | prevent leakage of morph instances between tasks |
-| `c82741c3d8da` | #20 | some cleanups |
-| `d90fcd4e2b9d` | #26 | update gitignore |
-| `c27787f09f9f` | #26 | fix gitignore again |
-| `0fbc0475f3c9` | #26 | update snapshot id for ipython |
-| `2d8f6c46f124` | #26 | log first 20 chars |
-| `0c618482c408` | #26 | add logging of prefix of tool call and tool response |
-| `f957ec226789` | #26 | update distribution and gitignore |
-| `f81395975025` | #26 | add simple terminal |
 | `1614c15bb112` | #26 | rate limits |
 | `ab7293bed652` | #26 | don't log exit code !=0 as terminal failure |
 | `6af6ff2a0a46` | #26 | updates for stability and speed |
@@ -123,4 +74,54 @@ Generated: `2026-04-21T21:42:20.598844+00:00`
 | `bbb5776763e4` | #26 | Enhance tool availability checks and user feedback in CLI |
 | `fef504f03869` | #25 | Refactor configuration file management and improve user feedback |
 | `3ee788dacc79` | #26 | Implement configuration migration system and enhance CLI setup |
+| `ff776b57bf4f` | #25 | Remove outdated .cursorrules file and add comprehensive AGENTS.md documentation |
+| `c9011fc7e192` | #25 | Add uninstall command to CLI and update documentation |
+| `be91af7551f6` | #26 | Refactor TODO list and remove completed items |
+| `76d929e17725` | #26 | Implement dangerous command approval system for terminal tool |
+| `5d3398aa8a20` | #26 | Refactor terminal tool command approval process and enhance CLI feedback |
+| `3e634aa7e4f5` | #26 | Update requirements and enhance environment variable loading in gateway |
+| `17a5efb416b5` | #25 | Enhance messaging gateway configuration and security features |
+| `7eac4ee9fe9f` | #26 | Update agent configuration for maximum tool-calling iterations |
+| `a09b018bd50e` | #23 | Implement continuous typing indicator in message handling |
+| `e7f0ffbf5d1e` | #26 | Add tool progress notifications for messaging channels |
+| `9d9eea9ac970` | #25 | Enhance agent configuration and documentation for tool progress and working directory |
+| `488deb04a4f9` | #23 | fix telegram, import asyncio |
+| `221fb17c5e39` | #23 | Refine typing indicator behavior in message handling |
+| `212460289b51` | #26 | Enhance skills tool to have an arg so it is more reliably called, and error handling in agent |
+| `beeb7896e07e` | #23 | Refactor message handling and error logging in agent and gateway |
+| `9bfe185a2e31` | #26 | Implement interrupt handling for agent and CLI input and persistent prompt line at bottom of CLI :) |
+| `51a6b7d2b5dc` | #23 | Implement interrupt handling for message processing in GatewayRunner and BasePlatformAdapter |
+| `f018999da978` | #26 | initial RL training tools and loop |
+| `8380895ae31f` | #25 | Update README.md |
+| `f6574978de39` | #25 | Add RL training configuration and tools |
+| `12bbca95ecf4` | #26 | Add tinker-atropos submodule and update RL training tools |
+| `3c0d0dba49f9` | #25 | Update RL tools and enhance configuration management |
+| `5c3105b4376c` | #26 | Enhance RL test inference with WandB integration and real-time output streaming |
+| `533c06426941` | #25 | Add file manipulation tools and enhance setup scripts |
+| `ac797259232e` | #25 | Update dependencies and enhance installation scripts |
+| `07b615e96ed4` | #24 | Add support for Atropos Agentic RL environments (requires branch tool_call_support in Atropos atm) |
+| `c0494b3558df` | #26 | Update pyproject.toml to refine dependency management |
+| `a478e4458567` | #26 | Increase max_token_length in TerminalTestEnv to 16000 for enhanced processing capacity |
+| `a8809bbd3e4b` | #25 | Transition installation to uv for py version and speed to be easier to streamline |
+| `d999d9876d9b` | #26 | Enhance async tool execution and error handling in Hermes agent for Atropos integration |
+| `f12ea1bc027b` | #26 | Enhance BatchRunner and AIAgent with new configuration options, default model now opus 4.6, default summarizer gemini flash 3 |
+| `dd70d57b9bc3` | #26 | Refactor BatchRunner and AIAgent for enhanced reasoning and tool management, improved tool definitions for fileops |
+| `c441681dc2e4` | #26 | Update default model to 'anthropic/claude-opus-4.6' and refine terminal working directory settings |
+| `192ce958c37d` | #26 | Enhance CLI command handling and introduce resource cleanup features |
+| `7a11be9f3fdd` | #26 | Enhance browser tool functionality and cleanup process |
+| `1b1307d0d120` | #26 | Implement Anthropic prompt caching for Claude models via OpenRouter |
+| `e8343f2d870e` | #26 | Refactor Singularity environment for persistent container management |
+| `35ad3146a8ab` | #24 | Add new environments and enhance tool context functionality |
+| `ad042fdd68c0` | #24 | Update terminalbench_2 configuration for enhanced performance and evaluation |
+| `5ec75e38b978` | #26 | Enhance tool execution and logging in HermesAgentLoop |
+| `6b4a8d0b175c` | #26 | Add terminal configuration options and enhance environment setup |
+| `ba3fea24f10c` | #24 | Enhance TerminalBench 2 configuration and evaluation handling |
+| `999a28062d1f` | #26 | Implement graceful exit cleanup for terminal tool |
+| `85e629e9154c` | #24 | Add cleanup functionality for orphaned sandboxes in TerminalBench2EvalEnv |
+| `9b0f2a16ca90` | #26 | Enhance CLI functionality with retry and undo commands |
+| `62ba69a29d4e` | #26 | Fix gateway exit code to enable systemd auto-restart on connection failure |
+| `a32ad1a656f0` | #23 | Fix infinite interrupt loop in gateway by consuming pending messages with .pop() and clearing interrupt events before recursion |
+| `140d609e0c8b` | #26 | Refine agent history conversion logic in GatewayRunner |
+| `cfe2f3fe15d0` | #26 | Implement interrupt handling for long-running tool executions in AIAgent |
+| `669545f5518c` | #21 | Add diagramming skills for Excalidraw |
 
