@@ -1,6 +1,6 @@
 //! Local skill storage: the `SkillStore` trait and `FileSkillStore` implementation.
 
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
@@ -73,12 +73,107 @@ impl FileSkillStore {
             .unwrap_or_else(|| PathBuf::from(".hermes/skills"))
     }
 
-    /// Compute the directory path for a given skill name and optional category.
-    fn skill_dir(&self, name: &str, category: Option<&str>) -> PathBuf {
-        match category {
-            Some(cat) => self.skills_dir.join(cat).join(name),
-            None => self.skills_dir.join(name),
+    /// Validate a skill path segment (`name` / `category`) to prevent path traversal.
+    fn validate_segment(value: &str, field: &str) -> Result<String, SkillError> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            return Err(SkillError::GuardViolation(format!(
+                "Invalid skill {field}: value must be non-empty"
+            )));
         }
+        if trimmed.len() > 128 {
+            return Err(SkillError::GuardViolation(format!(
+                "Invalid skill {field}: value exceeds 128 chars"
+            )));
+        }
+
+        let path = Path::new(trimmed);
+        let mut comps = path.components();
+        let segment = match (comps.next(), comps.next()) {
+            (Some(Component::Normal(seg)), None) => seg.to_string_lossy().to_string(),
+            _ => {
+                return Err(SkillError::GuardViolation(format!(
+                    "Invalid skill {field}: path traversal or separators are not allowed"
+                )))
+            }
+        };
+
+        if segment.starts_with('.') {
+            return Err(SkillError::GuardViolation(format!(
+                "Invalid skill {field}: hidden path segments are not allowed"
+            )));
+        }
+        if segment.chars().any(|c| c.is_control()) {
+            return Err(SkillError::GuardViolation(format!(
+                "Invalid skill {field}: control characters are not allowed"
+            )));
+        }
+        Ok(segment)
+    }
+
+    fn is_hidden_name(name: &str) -> bool {
+        name.starts_with('.')
+    }
+
+    /// Compute the directory path for a given skill name and optional category.
+    fn skill_dir(&self, name: &str, category: Option<&str>) -> Result<PathBuf, SkillError> {
+        let safe_name = Self::validate_segment(name, "name")?;
+        let safe_category = category
+            .map(|c| Self::validate_segment(c, "category"))
+            .transpose()?;
+        Ok(match safe_category {
+            Some(cat) => self.skills_dir.join(cat).join(safe_name),
+            None => self.skills_dir.join(safe_name),
+        })
+    }
+
+    async fn canonical_root(&self) -> Result<PathBuf, SkillError> {
+        fs::create_dir_all(&self.skills_dir)
+            .await
+            .map_err(|e| SkillError::Io(e.to_string()))?;
+        fs::canonicalize(&self.skills_dir)
+            .await
+            .map_err(|e| SkillError::Io(e.to_string()))
+    }
+
+    async fn ensure_path_within_root(&self, path: &Path) -> Result<(), SkillError> {
+        let root = self.canonical_root().await?;
+
+        // For non-existing targets, resolve the parent and append the filename.
+        let resolved = match fs::canonicalize(path).await {
+            Ok(p) => p,
+            Err(_) => {
+                let parent = path.parent().ok_or_else(|| {
+                    SkillError::GuardViolation("Invalid skill path: missing parent".to_string())
+                })?;
+                if !parent.exists() {
+                    // Parent doesn't exist yet; check the nearest guaranteed safe root.
+                    let rel = path.strip_prefix(&self.skills_dir).map_err(|_| {
+                        SkillError::GuardViolation(
+                            "Invalid skill path: outside skills root".to_string(),
+                        )
+                    })?;
+                    root.join(rel)
+                } else {
+                    let parent_real = fs::canonicalize(parent)
+                        .await
+                        .map_err(|e| SkillError::Io(e.to_string()))?;
+                    if let Some(name) = path.file_name() {
+                        parent_real.join(name)
+                    } else {
+                        parent_real
+                    }
+                }
+            }
+        };
+
+        if !resolved.starts_with(&root) {
+            return Err(SkillError::GuardViolation(format!(
+                "Skill path escapes root boundary: {}",
+                path.display()
+            )));
+        }
+        Ok(())
     }
 
     /// Write a `SKILL.md` file with frontmatter + content.
@@ -121,10 +216,12 @@ impl FileSkillStore {
 impl SkillStore for FileSkillStore {
     #[instrument(skip(self, skill), fields(name = %skill.name))]
     async fn save(&self, skill: &Skill) -> Result<(), SkillError> {
-        let dir = self.skill_dir(&skill.name, skill.category.as_deref());
+        let dir = self.skill_dir(&skill.name, skill.category.as_deref())?;
+        self.ensure_path_within_root(&dir).await?;
         fs::create_dir_all(&dir)
             .await
             .map_err(|e| SkillError::Io(e.to_string()))?;
+        self.ensure_path_within_root(&dir).await?;
 
         let fm = SkillFrontmatter {
             name: skill.name.clone(),
@@ -148,10 +245,18 @@ impl SkillStore for FileSkillStore {
     async fn load(&self, name: &str) -> Result<Option<Skill>, SkillError> {
         // Search in all category subdirectories and the root.
         let candidates = self.candidate_dirs(name).await?;
+        let root = self.canonical_root().await?;
 
         for dir in candidates {
             let path = dir.join("SKILL.md");
-            if path.exists() {
+            if fs::try_exists(&path).await.unwrap_or(false) {
+                let real = fs::canonicalize(&path)
+                    .await
+                    .map_err(|e| SkillError::Io(e.to_string()))?;
+                if !real.starts_with(&root) {
+                    tracing::warn!("Skipping skill outside root boundary: {}", path.display());
+                    continue;
+                }
                 let raw = fs::read_to_string(&path)
                     .await
                     .map_err(|e| SkillError::Io(e.to_string()))?;
@@ -186,10 +291,18 @@ impl SkillStore for FileSkillStore {
     #[instrument(skip(self), fields(name = %name))]
     async fn delete(&self, name: &str) -> Result<(), SkillError> {
         let candidates = self.candidate_dirs(name).await?;
+        let root = self.canonical_root().await?;
 
         for dir in candidates {
             let path = dir.join("SKILL.md");
-            if path.exists() {
+            if fs::try_exists(&path).await.unwrap_or(false) {
+                let real = fs::canonicalize(&dir)
+                    .await
+                    .map_err(|e| SkillError::Io(e.to_string()))?;
+                if !real.starts_with(&root) {
+                    tracing::warn!("Refusing to delete skill outside root: {}", dir.display());
+                    continue;
+                }
                 // Remove the whole skill directory.
                 fs::remove_dir_all(&dir)
                     .await
@@ -207,7 +320,9 @@ impl FileSkillStore {
     /// Build a list of candidate directories where a skill named `name`
     /// might live (root + any category subdirectory).
     async fn candidate_dirs(&self, name: &str) -> Result<Vec<PathBuf>, SkillError> {
-        let mut dirs = vec![self.skills_dir.join(name)];
+        let safe_name = Self::validate_segment(name, "name")?;
+        let root = self.canonical_root().await?;
+        let mut dirs = vec![self.skills_dir.join(&safe_name)];
 
         if self.skills_dir.exists() {
             let mut entries = fs::read_dir(&self.skills_dir)
@@ -219,11 +334,30 @@ impl FileSkillStore {
                 .await
                 .map_err(|e| SkillError::Io(e.to_string()))?
             {
-                let path = entry.path();
-                if path.is_dir() {
-                    let candidate = path.join(name);
-                    dirs.push(candidate);
+                let file_name = entry.file_name();
+                let name = file_name.to_string_lossy();
+                if Self::is_hidden_name(&name) {
+                    continue;
                 }
+                let file_type = entry
+                    .file_type()
+                    .await
+                    .map_err(|e| SkillError::Io(e.to_string()))?;
+                // Avoid symlink traversal by only following real directories.
+                if !file_type.is_dir() {
+                    continue;
+                }
+
+                let path = entry.path();
+                let canonical = fs::canonicalize(&path)
+                    .await
+                    .map_err(|e| SkillError::Io(e.to_string()))?;
+                if !canonical.starts_with(&root) {
+                    tracing::warn!("Skipping category outside root: {}", path.display());
+                    continue;
+                }
+                let candidate = path.join(&safe_name);
+                dirs.push(candidate);
             }
         }
 
@@ -232,18 +366,16 @@ impl FileSkillStore {
 
     /// Recursively collect [`SkillMeta`] from all `SKILL.md` files under
     /// `dir`. The `relative` prefix is used to reconstruct categories.
-    fn collect_metas<'a>(
-        &'a self,
-        dir: &'a Path,
-        metas: &'a mut Vec<SkillMeta>,
-    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), SkillError>> + Send + 'a>>
-    {
-        Box::pin(async move {
-            if !dir.exists() {
-                return Ok(());
-            }
+    async fn collect_metas(&self, dir: &Path, metas: &mut Vec<SkillMeta>) -> Result<(), SkillError> {
+        if !dir.exists() {
+            return Ok(());
+        }
 
-            let mut entries = fs::read_dir(dir)
+        let root = self.canonical_root().await?;
+        let mut stack = vec![dir.to_path_buf()];
+
+        while let Some(current_dir) = stack.pop() {
+            let mut entries = fs::read_dir(&current_dir)
                 .await
                 .map_err(|e| SkillError::Io(e.to_string()))?;
 
@@ -252,51 +384,70 @@ impl FileSkillStore {
                 .await
                 .map_err(|e| SkillError::Io(e.to_string()))?
             {
+                let file_name = entry.file_name();
+                let file_name = file_name.to_string_lossy();
+                if Self::is_hidden_name(&file_name) {
+                    continue;
+                }
+
+                let file_type = entry
+                    .file_type()
+                    .await
+                    .map_err(|e| SkillError::Io(e.to_string()))?;
+                // Never recurse into symlinks.
+                if !file_type.is_dir() {
+                    continue;
+                }
+
                 let path = entry.path();
+                let canonical = fs::canonicalize(&path)
+                    .await
+                    .map_err(|e| SkillError::Io(e.to_string()))?;
+                if !canonical.starts_with(&root) {
+                    tracing::warn!("Skipping directory outside root: {}", path.display());
+                    continue;
+                }
 
-                // If we find a SKILL.md, parse its frontmatter for meta.
-                if path.is_dir() {
-                    let skill_file = path.join("SKILL.md");
-                    if skill_file.exists() {
-                        let raw = fs::read_to_string(&skill_file)
-                            .await
-                            .map_err(|e| SkillError::Io(e.to_string()))?;
+                let skill_file = path.join("SKILL.md");
+                if fs::try_exists(&skill_file).await.unwrap_or(false) {
+                    let raw = fs::read_to_string(&skill_file)
+                        .await
+                        .map_err(|e| SkillError::Io(e.to_string()))?;
 
-                        match Self::parse_skill_file(&raw) {
-                            Ok((fm, _)) => {
-                                // Derive category from the path relative to skills_dir.
-                                let category = fm.category.or_else(|| {
-                                    path.parent()
-                                        .and_then(|p| p.strip_prefix(&self.skills_dir).ok())
-                                        .and_then(|rel| {
-                                            let s = rel.to_string_lossy().to_string();
-                                            if s.is_empty() {
-                                                None
-                                            } else {
-                                                Some(s)
-                                            }
-                                        })
-                                });
+                    match Self::parse_skill_file(&raw) {
+                        Ok((fm, _)) => {
+                            // Derive category from the parent path relative to skills root.
+                            let category = fm.category.or_else(|| {
+                                canonical
+                                    .parent()
+                                    .and_then(|p| p.strip_prefix(&root).ok())
+                                    .and_then(|rel| {
+                                        let s = rel.to_string_lossy().to_string();
+                                        if s.is_empty() {
+                                            None
+                                        } else {
+                                            Some(s)
+                                        }
+                                    })
+                            });
 
-                                metas.push(SkillMeta {
-                                    name: fm.name,
-                                    category,
-                                    description: fm.description,
-                                });
-                            }
-                            Err(e) => {
-                                tracing::warn!("Failed to parse {}: {}", skill_file.display(), e);
-                            }
+                            metas.push(SkillMeta {
+                                name: fm.name,
+                                category,
+                                description: fm.description,
+                            });
                         }
-                    } else {
-                        // Recurse into subdirectories.
-                        self.collect_metas(&path, metas).await?;
+                        Err(e) => {
+                            tracing::warn!("Failed to parse {}: {}", skill_file.display(), e);
+                        }
                     }
+                } else {
+                    stack.push(path);
                 }
             }
+        }
 
-            Ok(())
-        })
+        Ok(())
     }
 }
 
@@ -397,5 +548,65 @@ mod tests {
         let store = FileSkillStore::new(dir.path().to_path_buf());
         let result = store.load("nope").await.unwrap();
         assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_reject_path_traversal_name_on_save_and_load() {
+        let dir = tempdir().unwrap();
+        let store = FileSkillStore::new(dir.path().to_path_buf());
+
+        let skill = Skill {
+            name: "../escape".to_string(),
+            content: "Bad".to_string(),
+            category: None,
+            description: None,
+        };
+        assert!(store.save(&skill).await.is_err());
+        assert!(store.load("../escape").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_reject_path_traversal_category_on_save() {
+        let dir = tempdir().unwrap();
+        let store = FileSkillStore::new(dir.path().to_path_buf());
+
+        let skill = Skill {
+            name: "safe-skill".to_string(),
+            content: "Body".to_string(),
+            category: Some("../badcat".to_string()),
+            description: None,
+        };
+        assert!(store.save(&skill).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_list_ignores_hidden_directories() {
+        let dir = tempdir().unwrap();
+        let store = FileSkillStore::new(dir.path().to_path_buf());
+
+        let visible = Skill {
+            name: "visible".to_string(),
+            content: "# Visible".to_string(),
+            category: None,
+            description: None,
+        };
+        store.save(&visible).await.unwrap();
+
+        let hidden_skill_dir = dir.path().join(".hidden").join("secret-skill");
+        fs::create_dir_all(&hidden_skill_dir).await.unwrap();
+        let fm = SkillFrontmatter {
+            name: "secret-skill".to_string(),
+            category: None,
+            description: None,
+            version: Some("0.1.0".to_string()),
+        };
+        let hidden_content = FileSkillStore::render_skill_file(&fm, "# Secret");
+        fs::write(hidden_skill_dir.join("SKILL.md"), hidden_content)
+            .await
+            .unwrap();
+
+        let metas = store.list().await.unwrap();
+        assert_eq!(metas.len(), 1);
+        assert_eq!(metas[0].name, "visible");
     }
 }
