@@ -9,3 +9,6 @@ GEO-AI/
 vout-endianness-analysis.md
 .sync-reports/
 .sync-queue/
+__pycache__/
+**/__pycache__/
+*.pyc
