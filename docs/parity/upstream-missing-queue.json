@@ -9633,15 +9633,15 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tests/tools/test_skills_guard.py",
         "tests/tools/test_symlink_prefix_confusion.py",
         "tools/skills_guard.py"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in Rust skills store hardening: symlink boundary hardening enforced in rust store",
+      "owner": "sheawinkler",
       "sha": "a3ca71fe262ecbdf99f2d5c6f6232c29a02d5fe3",
       "subject": "fix: use is_relative_to() for symlink boundary check in skills_guard",
       "target_ticket": 20,
@@ -9663,15 +9663,15 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "agent/skill_commands.py",
         "tests/tools/test_hidden_dir_filter.py",
         "tools/skills_tool.py"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in Rust skills store hardening: hidden directory filter enforced for skill listing in rust store",
+      "owner": "sheawinkler",
       "sha": "f93b48226c8abc90268b63ac3b3a92b04f8625ee",
       "subject": "fix: use Path.parts for hidden directory filter in skill listing",
       "target_ticket": 20,
@@ -34353,14 +34353,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tests/tools/test_skill_manager_tool.py",
         "tools/skill_manager_tool.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in Rust skills store hardening: skill category traversal blocked in rust store",
+      "owner": "sheawinkler",
       "sha": "3e203de125aaf4608d91defc94060adcad300fae",
       "subject": "fix(skills): block category path traversal in skill manager (#3844)",
       "target_ticket": 20,
@@ -47516,14 +47516,14 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tests/tools/test_skill_manager_tool.py",
         "tools/skill_manager_tool.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in Rust skills store hardening: skill store root boundary checks enforced in rust store",
+      "owner": "sheawinkler",
       "sha": "e683c9db90cd08ecbc4d6c622b7923730e0d4069",
       "subject": "fix(security): enforce path boundary checks in skill manager operations",
       "target_ticket": 20,
@@ -68570,9 +68570,440 @@
       "subject": "fix(tui): address code review findings",
       "target_ticket": 22,
       "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py",
+        "tests/cli/test_cli_markdown_rendering.py",
+        "ui-tui/src/__tests__/text.test.ts",
+        "ui-tui/src/lib/text.ts"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "aa61831a14ee25cc88131b9fb11a03048d45b419",
+      "subject": "fix(cli): keep snake_case underscores intact in strip markdown mode",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/package-lock.json",
+        "web/package-lock.json"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "ce0ecce6cf527532d25d54a60ef99c22ff05b2f9",
+      "subject": "update package.locks",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/cli/test_cli_markdown_rendering.py",
+        "ui-tui/src/__tests__/text.test.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "54c2261214d2e8f2946fe12620152a0487901fb2",
+      "subject": "Rename test variables",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/events/cmd-shortcuts.test.ts",
+        "ui-tui/src/__tests__/clipboard.test.ts",
+        "ui-tui/src/__tests__/osc52.test.ts",
+        "ui-tui/src/__tests__/platform.test.ts",
+        "ui-tui/src/__tests__/terminalParity.test.ts",
+        "ui-tui/src/__tests__/terminalSetup.test.ts",
+        "ui-tui/src/__tests__/useComposerState.test.ts",
+        "ui-tui/src/app/slash/commands/core.ts",
+        "ui-tui/src/app/slash/commands/session.ts",
+        "ui-tui/src/app/useComposerState.ts",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/app/useSubmission.ts",
+        "ui-tui/src/components/appChrome.tsx",
+        "ui-tui/src/components/prompts.tsx",
+        "ui-tui/src/components/textInput.tsx",
+        "ui-tui/src/content/hotkeys.ts",
+        "ui-tui/src/lib/clipboard.ts",
+        "ui-tui/src/lib/osc52.ts",
+        "ui-tui/src/lib/platform.ts"
+      ],
+      "files_touched": 22,
+      "notes": "",
+      "owner": "",
+      "sha": "4b0686f63d1d50b1b603af05235f0c21be63ad77",
+      "subject": "fix(tui): apply path/@ completion on Enter",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/events/cmd-shortcuts.test.ts",
+        "ui-tui/src/__tests__/clipboard.test.ts",
+        "ui-tui/src/__tests__/osc52.test.ts",
+        "ui-tui/src/__tests__/platform.test.ts",
+        "ui-tui/src/__tests__/terminalParity.test.ts",
+        "ui-tui/src/__tests__/terminalSetup.test.ts",
+        "ui-tui/src/__tests__/useComposerState.test.ts",
+        "ui-tui/src/app/slash/commands/core.ts",
+        "ui-tui/src/app/slash/commands/ops.ts",
+        "ui-tui/src/app/slash/commands/session.ts",
+        "ui-tui/src/app/useComposerState.ts",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/components/appChrome.tsx",
+        "ui-tui/src/components/prompts.tsx",
+        "ui-tui/src/components/textInput.tsx",
+        "ui-tui/src/content/hotkeys.ts",
+        "ui-tui/src/lib/clipboard.ts",
+        "ui-tui/src/lib/osc52.ts",
+        "ui-tui/src/lib/platform.ts"
+      ],
+      "files_touched": 22,
+      "notes": "",
+      "owner": "",
+      "sha": "83c1d4ec2703e140219285d325486ac556acb1f8",
+      "subject": "fix(tui): delegate unknown /tools subcommand to slash.exec",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/modelPicker.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "c3b8c8e42cb120be4ce972f984b74c3dccfec18b",
+      "subject": "fix(tui): stabilize model picker viewport height",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/events/cmd-shortcuts.test.ts",
+        "ui-tui/src/__tests__/clipboard.test.ts",
+        "ui-tui/src/__tests__/osc52.test.ts",
+        "ui-tui/src/__tests__/platform.test.ts",
+        "ui-tui/src/__tests__/terminalParity.test.ts",
+        "ui-tui/src/__tests__/terminalSetup.test.ts",
+        "ui-tui/src/__tests__/useComposerState.test.ts",
+        "ui-tui/src/app/slash/commands/core.ts",
+        "ui-tui/src/app/slash/commands/session.ts",
+        "ui-tui/src/app/useComposerState.ts",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/components/appChrome.tsx",
+        "ui-tui/src/components/modelPicker.tsx",
+        "ui-tui/src/components/prompts.tsx",
+        "ui-tui/src/components/sessionPicker.tsx",
+        "ui-tui/src/components/skillsHub.tsx",
+        "ui-tui/src/components/textInput.tsx",
+        "ui-tui/src/content/hotkeys.ts",
+        "ui-tui/src/lib/clipboard.ts"
+      ],
+      "files_touched": 24,
+      "notes": "",
+      "owner": "",
+      "sha": "fc6a27098e4bfcbcb6943159f0a89ede577fbd08",
+      "subject": "fix(tui): raise picker selection contrast with inverse + bold",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/modelPicker.tsx",
+        "ui-tui/src/components/sessionPicker.tsx",
+        "ui-tui/src/components/skillsHub.tsx"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "4ada76b6ede68afb982540adec2c451f640c16e0",
+      "subject": "fix(tui): truncate long picker rows so the height stays stable",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/appOverlays.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "34f24daa8d8aa51a1edb0402bbe8e3a5e10de5fb",
+      "subject": "fix(tui): stabilize slash-completion dropdown height",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/events/cmd-shortcuts.test.ts",
+        "ui-tui/src/__tests__/clipboard.test.ts",
+        "ui-tui/src/__tests__/osc52.test.ts",
+        "ui-tui/src/__tests__/platform.test.ts",
+        "ui-tui/src/__tests__/terminalParity.test.ts",
+        "ui-tui/src/__tests__/terminalSetup.test.ts",
+        "ui-tui/src/__tests__/useComposerState.test.ts",
+        "ui-tui/src/app/slash/commands/core.ts",
+        "ui-tui/src/app/slash/commands/session.ts",
+        "ui-tui/src/app/useComposerState.ts",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/components/appChrome.tsx",
+        "ui-tui/src/components/appOverlays.tsx",
+        "ui-tui/src/components/prompts.tsx",
+        "ui-tui/src/components/textInput.tsx",
+        "ui-tui/src/content/hotkeys.ts",
+        "ui-tui/src/lib/clipboard.ts",
+        "ui-tui/src/lib/osc52.ts",
+        "ui-tui/src/lib/platform.ts"
+      ],
+      "files_touched": 22,
+      "notes": "",
+      "owner": "",
+      "sha": "887dfc4067d14d3514ac39c2a2ac72b30dd71f88",
+      "subject": "fix(tui): pager supports scrolling (up/down/page/top/bottom)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "48f82448735ea33a4eff74f290298db885000324",
+      "subject": "fix(tui): route skills.manage through the long-handler thread pool",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/mlops/inference/llama-cpp/SKILL.md",
+        "skills/mlops/inference/llama-cpp/references/hub-discovery.md",
+        "skills/mlops/inference/llama-cpp/references/quantization.md",
+        "skills/mlops/inference/llama-cpp/references/server.md"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "d6cf2cc058251f60ce31039d486184ab2ac83b86",
+      "subject": "improve llama.cpp skill",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py",
+        "skills/mlops/inference/llama-cpp/SKILL.md"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "7ff7155cbd78b5fa07c4f1f37b25c03d5b602d05",
+      "subject": "fix(skills/llama-cpp): concise description, restore python bindings, fix curl",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_reply_to_injection.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "e889332c99b164126062916a00e07f3973d3f388",
+      "subject": "fix(gateway): always inject reply-to pointer, not just when quoted text is absent (#13676)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/tools/test_image_generation.py",
+        "tools/image_generation_tool.py",
+        "website/docs/user-guide/features/image-generation.md"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "5ffae9228b383b8888432cdfa1fc5514227ba75e",
+      "subject": "feat(image-gen): add GPT Image 2 to FAL catalog (#13677)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py",
+        "tests/hermes_cli/test_config_drift.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "631e8793f4bfff80ce9ed45dfac1bd5870c92559",
+      "subject": "refactor(delegate): drop dead default_toolsets from CLI default config",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli-config.yaml.example",
+        "website/docs/user-guide/features/delegation.md"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "baaf49e9fd2cc8236ddcb9de06e412be3a815512",
+      "subject": "docs(delegate): remove default_toolsets from example config and docs",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/hermes_cli/test_config_drift.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "7c3c7e50c5a76a18bc52a0c51af5b674fbfacd7c",
+      "subject": "test(delegate): make default_toolsets regression test robust to user config",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/base.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "2aa983e2f270a5231a008ab8b02e64f61f27939b",
+      "subject": "feat(gateway): recognize .pdf in MEDIA: tag extraction (#13683)",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/emoji.test.ts",
+        "ui-tui/src/components/markdown.tsx",
+        "ui-tui/src/lib/emoji.ts"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "136519a2c97e96763b9bd83c32dce2872870647d",
+      "subject": "fix(tui): inject VS16 so text-default emoji render as color glyphs",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli-config.yaml.example",
+        "hermes_cli/config.py",
+        "hermes_cli/tips.py",
+        "run_agent.py",
+        "tests/agent/test_subagent_progress.py",
+        "tests/hermes_cli/test_config_drift.py",
+        "tests/tools/test_delegate.py",
+        "tools/delegate_tool.py",
+        "website/docs/guides/delegation-patterns.md",
+        "website/docs/user-guide/features/delegation.md",
+        "website/docs/user-guide/features/overview.md"
+      ],
+      "files_touched": 11,
+      "notes": "",
+      "owner": "",
+      "sha": "48ecb98f8a7521fc07b6204f3148fe149f2cca6d",
+      "subject": "feat(delegate): orchestrator role and configurable spawn depth (default flat)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/auxiliary_client.py",
+        "tests/agent/test_auxiliary_client.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "392b2bb17b659a4a797b392856d98e19a79a6920",
+      "subject": "fix(auxiliary): refresh Nous runtime credentials after aux 401s",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "website/docs/guides/delegation-patterns.md",
+        "website/docs/user-guide/features/delegation.md"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "3e1a3372ab40dbda0e4fee24d9c3882ecdb49031",
+      "subject": "docs(delegate): clarify that the parent agent, not the user, populates goal/context (#13698)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/auxiliary_client.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "0301787653a50e1422999de136a31fc1ddd61000",
+      "subject": "fix(vision): resolve Nous vision model correctly in auto-detect path",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "204f435b48e57f4b4390f5469ffe2f1e801889e8",
+      "subject": "chore(release): add Ifkellx to AUTHOR_MAP for PR #12687",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
     }
   ],
-  "generated_at_utc": "2026-04-21T17:07:03.145240+00:00",
+  "generated_at_utc": "2026-04-21T21:28:38.469639+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -68580,18 +69011,18 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4503,
-      "ported": 6
+      "pending": 4524,
+      "ported": 10
     },
     "by_target_ticket": {
-      "20": 1607,
-      "21": 192,
-      "22": 494,
-      "23": 506,
+      "20": 1614,
+      "21": 194,
+      "22": 506,
+      "23": 507,
       "24": 64,
       "25": 152,
-      "26": 1494
+      "26": 1497
     },
-    "total_commits": 4509
+    "total_commits": 4534
   }
 }
