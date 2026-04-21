@@ -134,8 +134,10 @@ fn find_code_block_end(text: &str, start_pos: usize) -> Option<usize> {
 fn close_and_reopen_formatting(text: &str) -> (String, String) {
     let mut open_marks: Vec<&str> = Vec::new();
 
-    // Track formatting marks: **, *, `, ~~
-    let marks = ["**", "~~", "*", "`"];
+    // Track formatting marks: **, *, ~~.
+    // Backticks are handled separately so fenced code blocks (```) are reopened
+    // with a fence marker instead of a single inline backtick.
+    let marks = ["**", "~~", "*"];
 
     for mark in &marks {
         let count = text.matches(mark).count();
@@ -150,6 +152,12 @@ fn close_and_reopen_formatting(text: &str) -> (String, String) {
         } else if count % 2 != 0 {
             open_marks.push(mark);
         }
+    }
+
+    if is_in_code_block(text) {
+        open_marks.push("```");
+    } else if has_unclosed_inline_code(text) {
+        open_marks.push("`");
     }
 
     if open_marks.is_empty() {
@@ -168,6 +176,27 @@ fn close_and_reopen_formatting(text: &str) -> (String, String) {
     }
 
     (closed, reopen)
+}
+
+fn has_unclosed_inline_code(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    let mut in_fenced_code = false;
+    let mut in_inline_code = false;
+
+    while i < bytes.len() {
+        if i + 2 < bytes.len() && bytes[i] == b'`' && bytes[i + 1] == b'`' && bytes[i + 2] == b'`' {
+            in_fenced_code = !in_fenced_code;
+            i += 3;
+            continue;
+        }
+        if !in_fenced_code && bytes[i] == b'`' {
+            in_inline_code = !in_inline_code;
+        }
+        i += 1;
+    }
+
+    in_inline_code
 }
 
 // ---------------------------------------------------------------------------
@@ -389,5 +418,23 @@ mod tests {
         let result = strip_markdown("```python\nprint('hello')\n```");
         assert!(result.contains("print('hello')"));
         assert!(!result.contains("```"));
+    }
+
+    #[test]
+    fn test_split_markdown_long_code_block_keeps_balanced_fences() {
+        let long_code = "line()\n".repeat(220);
+        let text = format!("```python\n{}```", long_code);
+        let chunks = split_markdown(&text, 120);
+
+        assert!(chunks.len() > 1);
+        for chunk in chunks {
+            assert_eq!(chunk.matches("```").count() % 2, 0);
+        }
+    }
+
+    #[test]
+    fn test_has_unclosed_inline_code_ignores_fenced_blocks() {
+        assert!(!has_unclosed_inline_code("```rust\nlet x = `ok`;\n```"));
+        assert!(has_unclosed_inline_code("prefix `inline"));
     }
 }
