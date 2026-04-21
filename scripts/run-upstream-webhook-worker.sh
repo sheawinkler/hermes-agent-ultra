@@ -62,6 +62,11 @@ STRICT_RISK_GATE="${UPSTREAM_SYNC_STRICT_RISK_GATE:-1}"
 ALLOW_RISK_PATHS="${UPSTREAM_SYNC_ALLOW_RISK_PATHS:-0}"
 NO_TESTS="${UPSTREAM_SYNC_NO_TESTS:-0}"
 NO_PR="${UPSTREAM_SYNC_NO_PR:-0}"
+PARITY_DRIFT_DISABLE="${UPSTREAM_SYNC_DISABLE_PARITY_DRIFT_CHECK:-0}"
+PARITY_UPSTREAM_REF="${UPSTREAM_SYNC_PARITY_UPSTREAM_REF:-upstream/main}"
+PARITY_PARENT_ISSUE="${UPSTREAM_SYNC_PARITY_PARENT_ISSUE:-13}"
+PARITY_LABELS="${UPSTREAM_SYNC_PARITY_LABELS:-parity,parity-upkeep}"
+PARITY_OPEN_ISSUES="${UPSTREAM_SYNC_PARITY_OPEN_ISSUES:-1}"
 
 ARGS=(
   worker
@@ -72,6 +77,9 @@ ARGS=(
   --poll-interval-sec "${POLL_INTERVAL_SEC}"
   --strategy "${STRATEGY}"
   --conflict-label "${CONFLICT_LABEL}"
+  --parity-upstream-ref "${PARITY_UPSTREAM_REF}"
+  --parity-parent-issue "${PARITY_PARENT_ISSUE}"
+  --parity-labels "${PARITY_LABELS}"
 )
 
 case "${BACKEND}" in
@@ -106,6 +114,12 @@ if [[ "${NO_TESTS}" == "1" || "${NO_TESTS}" == "true" ]]; then
 fi
 if [[ "${NO_PR}" == "1" || "${NO_PR}" == "true" ]]; then
   ARGS+=(--no-pr)
+fi
+if [[ "${PARITY_DRIFT_DISABLE}" == "1" || "${PARITY_DRIFT_DISABLE}" == "true" ]]; then
+  ARGS+=(--disable-parity-drift-check)
+fi
+if [[ "${PARITY_OPEN_ISSUES}" == "0" || "${PARITY_OPEN_ISSUES}" == "false" ]]; then
+  ARGS+=(--no-parity-open-issues)
 fi
 
 if [[ -n "${UPSTREAM_SYNC_ASSIST_CMD:-}" ]]; then

@@ -25,6 +25,10 @@ jobs:
         run: cargo test --workspace
       - name: Parity fixture tests
         run: cargo test -p hermes-parity-tests
+      - name: CLI command/action parity contract
+        run: cargo test -p hermes-parity-tests --test cli_command_contract
+      - name: Upstream webhook sync script lint
+        run: python3 -m py_compile scripts/upstream_webhook_sync.py
 
   cross-build:
     runs-on: ubuntu-latest

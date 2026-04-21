@@ -152,6 +152,11 @@ UPSTREAM_SYNC_MAX_ATTEMPTS=3
 UPSTREAM_SYNC_TIMEOUT_SEC=1800
 UPSTREAM_SYNC_POLL_INTERVAL_SEC=10
 UPSTREAM_SYNC_CONFLICT_LABEL=upstream-sync-conflict
+UPSTREAM_SYNC_DISABLE_PARITY_DRIFT_CHECK=0
+UPSTREAM_SYNC_PARITY_UPSTREAM_REF=upstream/main
+UPSTREAM_SYNC_PARITY_PARENT_ISSUE=13
+UPSTREAM_SYNC_PARITY_LABELS=parity,parity-upkeep
+UPSTREAM_SYNC_PARITY_OPEN_ISSUES=1
 
 # Optional Nous/Codex assist command invoked for risk_blocked/conflict/dead.
 UPSTREAM_SYNC_ASSIST_CMD=
@@ -168,6 +173,11 @@ ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_RUNTIME_ROLE" "dev"
 ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_ALLOWED_HOSTNAME" "${DEFAULT_HOSTNAME}"
 ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_DISABLE_DEV_GUARD" "0"
 ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_EXPECTED_REPO" "NousResearch/hermes-agent"
+ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_DISABLE_PARITY_DRIFT_CHECK" "0"
+ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_PARITY_UPSTREAM_REF" "upstream/main"
+ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_PARITY_PARENT_ISSUE" "13"
+ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_PARITY_LABELS" "parity,parity-upkeep"
+ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_PARITY_OPEN_ISSUES" "1"
 if grep -qE '^UPSTREAM_SYNC_EXPECTED_REPO=Lumio-Research/hermes-agent-rs$' "${ENV_FILE}"; then
   upsert_env_key "${ENV_FILE}" "UPSTREAM_SYNC_EXPECTED_REPO" "NousResearch/hermes-agent"
 fi
