@@ -6942,14 +6942,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "gateway/platforms/base.py",
         "gateway/platforms/telegram.py",
         "gateway/run.py"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG4-gateway-memory; action=implement",
+      "notes": "ported in d75a5ec2 (telegram document parsing support + supported type/size checks) [ticket #42/#37]",
       "owner": "codex",
       "sha": "b2172c4b2e808860f3c46dacbb352d3f3347a33d",
       "subject": "feat(telegram): add document file processing for PDF, text, and Office files",
@@ -7559,13 +7559,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "gateway/platforms/telegram.py",
         "tests/gateway/test_telegram_format.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG4-gateway-memory; action=implement",
+      "notes": "ported in 064e5116 (markdown fence balancing prevents malformed cross-line formatting in long splits) [ticket #37]",
       "owner": "codex",
       "sha": "b75960248324ec419de27013654ec1997420e490",
       "subject": "fix: prevent italic regex from spanning newlines in Telegram formatter",
@@ -68658,6 +68658,38 @@
         "ui-tui/src/__tests__/terminalSetup.test.ts",
         "ui-tui/src/__tests__/useComposerState.test.ts",
         "ui-tui/src/app/slash/commands/core.ts",
+        "ui-tui/src/app/slash/commands/session.ts",
+        "ui-tui/src/app/useComposerState.ts",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/components/appChrome.tsx",
+        "ui-tui/src/components/prompts.tsx",
+        "ui-tui/src/components/textInput.tsx",
+        "ui-tui/src/content/hotkeys.ts",
+        "ui-tui/src/lib/clipboard.ts",
+        "ui-tui/src/lib/osc52.ts",
+        "ui-tui/src/lib/platform.ts",
+        "ui-tui/src/lib/terminalParity.ts"
+      ],
+      "files_touched": 21,
+      "notes": "",
+      "owner": "",
+      "sha": "d86c886b3143ebef02b3b8df3b7626d035f05d7b",
+      "subject": "fix(tui): readline parity on Linux \u2014 Ctrl+A = home, Alt+B/F word nav",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/events/cmd-shortcuts.test.ts",
+        "ui-tui/src/__tests__/clipboard.test.ts",
+        "ui-tui/src/__tests__/osc52.test.ts",
+        "ui-tui/src/__tests__/platform.test.ts",
+        "ui-tui/src/__tests__/terminalParity.test.ts",
+        "ui-tui/src/__tests__/terminalSetup.test.ts",
+        "ui-tui/src/__tests__/useComposerState.test.ts",
+        "ui-tui/src/app/slash/commands/core.ts",
         "ui-tui/src/app/slash/commands/ops.ts",
         "ui-tui/src/app/slash/commands/session.ts",
         "ui-tui/src/app/useComposerState.ts",
@@ -68727,6 +68759,38 @@
     {
       "disposition": "pending",
       "files_sample": [
+        "run_agent.py",
+        "tests/run_agent/test_switch_model_fallback_prune.py",
+        "tests/test_tui_gateway_server.py",
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "f0b763c74feed699b2f75f4f237eb64fb8dfdd45",
+      "subject": "fix(model-switch): drop stale provider from fallback chain and env after /model",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/commands.py",
+        "tests/gateway/test_complete_path_at_filter.py",
+        "tests/hermes_cli/test_at_context_completion_filter.py",
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "9d9db1e910eb1208aa345286e3d2d19cc0160ee2",
+      "subject": "fix(tui): @folder: only yields directories, @file: only yields files",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
         "ui-tui/src/components/modelPicker.tsx",
         "ui-tui/src/components/sessionPicker.tsx",
         "ui-tui/src/components/skillsHub.tsx"
@@ -68781,6 +68845,38 @@
       "owner": "codex",
       "sha": "887dfc4067d14d3514ac39c2a2ac72b30dd71f88",
       "subject": "fix(tui): pager supports scrolling (up/down/page/top/bottom)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/events/cmd-shortcuts.test.ts",
+        "ui-tui/src/__tests__/clipboard.test.ts",
+        "ui-tui/src/__tests__/osc52.test.ts",
+        "ui-tui/src/__tests__/platform.test.ts",
+        "ui-tui/src/__tests__/terminalParity.test.ts",
+        "ui-tui/src/__tests__/terminalSetup.test.ts",
+        "ui-tui/src/__tests__/useComposerState.test.ts",
+        "ui-tui/src/app/slash/commands/core.ts",
+        "ui-tui/src/app/slash/commands/session.ts",
+        "ui-tui/src/app/turnController.ts",
+        "ui-tui/src/app/useComposerState.ts",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/components/appChrome.tsx",
+        "ui-tui/src/components/prompts.tsx",
+        "ui-tui/src/components/textInput.tsx",
+        "ui-tui/src/content/hotkeys.ts",
+        "ui-tui/src/lib/clipboard.ts",
+        "ui-tui/src/lib/osc52.ts",
+        "ui-tui/src/lib/platform.ts"
+      ],
+      "files_touched": 22,
+      "notes": "",
+      "owner": "",
+      "sha": "dd5ead1007b188a806c5dd1ab8d5e313e9bfe65a",
+      "subject": "fix(tui): preserve prior segment output on Ctrl+C interrupt",
       "target_ticket": 22,
       "target_ticket_name": "GPAR-03 UX parity"
     },
@@ -69028,9 +69124,49 @@
       "subject": "test(approval): regression guards for thread-local callback contract",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/auxiliary_client.py",
+        "tests/agent/test_auxiliary_main_first.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "7ba9c22cdec922895f185eabe8585b198b3740f1",
+      "subject": "fix(vision): route Nous main-provider vision through tier-aware backend",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/auxiliary_client.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "52cbceea448a05d151434d2063bd79f92e5fdbb9",
+      "subject": "fix(vision): restore tier-aware Nous vision model selection (#13703)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/research/llm-wiki/SKILL.md"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "9fa49206dc52ccaf43d572ca07c36e6551fd6c96",
+      "subject": "feat(llm-wiki): port provenance markers, source hashing, and quality signals from llm-wiki-compiler (#13700)",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
     }
   ],
-  "generated_at_utc": "2026-04-21T22:30:02.847749+00:00",
+  "generated_at_utc": "2026-04-21T23:24:03.153942+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69038,19 +69174,19 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4175,
-      "ported": 12,
+      "pending": 4180,
+      "ported": 14,
       "superseded": 349
     },
     "by_target_ticket": {
-      "20": 1615,
-      "21": 194,
-      "22": 507,
+      "20": 1618,
+      "21": 195,
+      "22": 509,
       "23": 507,
       "24": 64,
       "25": 152,
-      "26": 1497
+      "26": 1498
     },
-    "total_commits": 4536
+    "total_commits": 4543
   }
 }

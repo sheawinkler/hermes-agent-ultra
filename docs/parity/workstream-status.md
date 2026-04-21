@@ -1,7 +1,7 @@
 # Workstream Status
 
-- Local HEAD: `88173d0aee2b00e8ed1152227f6ed9d99599e721`
-- Upstream: `upstream/main` (`b2111a2b4542d30d36bc033d6b075dc4733421f0`)
+- Local HEAD: `d75a5ec2c5c31d3c7db148c5f2982c508d36a2c9`
+- Upstream: `upstream/main` (`9fa49206dc52ccaf43d572ca07c36e6551fd6c96`)
 
 | Workstream | Title | State |
 | --- | --- | --- |
@@ -33,7 +33,7 @@
 - State: **complete**
 - Upstream skills catalogs audited against local tree.
 - Intentional divergence documented for skills and optional-skills vendoring.
-- Metrics: `{"divergence_documented": true, "local_skill_files": 0, "upstream_skill_files": 626}`
+- Metrics: `{"divergence_documented": true, "local_skill_files": 0, "upstream_skill_files": 627}`
 
 ## WS5 — UX parity
 
