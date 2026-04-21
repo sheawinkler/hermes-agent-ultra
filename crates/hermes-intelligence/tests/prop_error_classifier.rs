@@ -17,18 +17,18 @@ use hermes_intelligence::{ErrorCategory, ErrorClassifier, RetryStrategy};
 fn arb_agent_error() -> impl Strategy<Value = AgentError> {
     let short_text = ".{1,64}";
     prop_oneof![
-        short_text.clone().prop_map(AgentError::LlmApi),
-        short_text.clone().prop_map(AgentError::ToolExecution),
-        short_text.clone().prop_map(AgentError::Config),
-        short_text.clone().prop_map(AgentError::Gateway),
-        short_text.clone().prop_map(AgentError::Timeout),
+        short_text.prop_map(AgentError::LlmApi),
+        short_text.prop_map(AgentError::ToolExecution),
+        short_text.prop_map(AgentError::Config),
+        short_text.prop_map(AgentError::Gateway),
+        short_text.prop_map(AgentError::Timeout),
         Just(AgentError::MaxTurnsExceeded),
-        short_text.clone().prop_map(AgentError::InvalidToolCall),
+        short_text.prop_map(AgentError::InvalidToolCall),
         Just(AgentError::ContextTooLong),
         proptest::option::of(0u64..3600)
             .prop_map(|retry_after_secs| AgentError::RateLimited { retry_after_secs }),
-        short_text.clone().prop_map(AgentError::AuthFailed),
-        short_text.clone().prop_map(AgentError::Io),
+        short_text.prop_map(AgentError::AuthFailed),
+        short_text.prop_map(AgentError::Io),
         proptest::option::of(".{1,64}").prop_map(|message| AgentError::Interrupted { message }),
     ]
 }

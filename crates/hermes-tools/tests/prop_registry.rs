@@ -44,7 +44,7 @@ enum Op {
 fn arb_op() -> impl Strategy<Value = Op> {
     let name = "[a-z]{2,8}";
     prop_oneof![
-        name.clone().prop_map(Op::Register),
+        name.prop_map(Op::Register),
         name.prop_map(Op::Deregister),
     ]
 }
