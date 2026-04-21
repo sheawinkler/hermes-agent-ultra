@@ -48477,7 +48477,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "gateway/platforms/api_server.py",
         "gateway/platforms/base.py",
@@ -48487,8 +48487,8 @@
         "website/docs/user-guide/features/api-server.md"
       ],
       "files_touched": 6,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in rust commit 93d82e7b",
+      "owner": "codex",
       "sha": "989b950fbcbf2d5e9b47cef4aa5c5b4eca6b40f5",
       "subject": "fix(security): enforce API_SERVER_KEY for non-loopback binding",
       "target_ticket": 23,
@@ -69001,9 +69001,36 @@
       "subject": "chore(release): add Ifkellx to AUTHOR_MAP for PR #12687",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py",
+        "ui-tui/src/app/useInputHandlers.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "52a79d99d2b443b04145322402155fd5b172394b",
+      "subject": "fix(security): TUI approval overlay accepts blind keystrokes, CLI thread-local callback invisible to agent",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/cli/test_cli_approval_ui.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "ef589b1a23253777b4973257e9c628a83efffca3",
+      "subject": "test(approval): regression guards for thread-local callback contract",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-04-21T21:28:38.469639+00:00",
+  "generated_at_utc": "2026-04-21T21:37:43.295704+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69011,18 +69038,18 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4524,
-      "ported": 10
+      "pending": 4525,
+      "ported": 11
     },
     "by_target_ticket": {
-      "20": 1614,
+      "20": 1615,
       "21": 194,
-      "22": 506,
+      "22": 507,
       "23": 507,
       "24": 64,
       "25": 152,
       "26": 1497
     },
-    "total_commits": 4534
+    "total_commits": 4536
   }
 }

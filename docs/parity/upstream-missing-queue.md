@@ -1,14 +1,14 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-21T21:28:38.469639+00:00`
+Generated: `2026-04-21T21:37:43.295704+00:00`
 
-- Range: `main..upstream/main`; total commits tracked: `4534`.
+- Range: `main..upstream/main`; total commits tracked: `4536`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 1614 |
+| #20 | GPAR-01 tests+CI parity | 1615 |
 | #21 | GPAR-02 skills parity | 194 |
-| #22 | GPAR-03 UX parity | 506 |
+| #22 | GPAR-03 UX parity | 507 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 507 |
 | #24 | GPAR-05 environments+parsers+benchmarks | 64 |
 | #25 | GPAR-06 packaging/docs/install parity | 152 |
@@ -16,8 +16,8 @@ Generated: `2026-04-21T21:28:38.469639+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 4524 |
-| ported | 10 |
+| pending | 4525 |
+| ported | 11 |
 
 ## First 100 Pending Commits
 
