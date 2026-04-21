@@ -27,6 +27,7 @@ pub mod model_switch;
 pub mod pairing_store;
 pub mod profiles;
 pub mod providers;
+pub mod runtime_tool_wiring;
 pub mod setup;
 pub mod skills_config;
 pub mod skin_engine;

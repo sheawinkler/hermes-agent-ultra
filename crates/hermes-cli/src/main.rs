@@ -13,6 +13,9 @@ use hermes_cli::app::{
     bridge_tool_registry, build_agent_config, build_provider, provider_api_key_from_env,
 };
 use hermes_cli::cli::{Cli, CliCommand};
+use hermes_cli::runtime_tool_wiring::{
+    wire_cron_scheduler_backend, wire_gateway_messaging_backend,
+};
 use hermes_cli::App;
 use hermes_config::{
     apply_user_config_patch, gateway_pid_path_in, hermes_home, load_config, load_user_config_file,
@@ -197,7 +200,12 @@ async fn run_model(cli: Cli, provider_model: Option<String>) -> Result<(), Agent
 
 /// Handle `hermes tools [action]`.
 async fn run_tools(_cli: Cli, action: Option<String>) -> Result<(), AgentError> {
-    let registry = hermes_tools::ToolRegistry::new();
+    let registry = Arc::new(hermes_tools::ToolRegistry::new());
+    let terminal_backend: Arc<dyn hermes_core::TerminalBackend> = Arc::new(LocalBackend::default());
+    let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
+    let skill_provider: Arc<dyn hermes_core::SkillProvider> =
+        Arc::new(SkillManager::new(skill_store));
+    hermes_tools::register_builtin_tools(&registry, terminal_backend, skill_provider);
     let tools = registry.list_tools();
 
     match action.as_deref() {
@@ -512,10 +520,9 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
             let skill_provider: Arc<dyn hermes_core::SkillProvider> =
                 Arc::new(SkillManager::new(skill_store));
             hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
-            let agent_registry = Arc::new(bridge_tool_registry(&tool_registry));
-            let agent_tools_for_msg = agent_registry.clone();
-            let agent_tools_for_stream = agent_registry.clone();
-            let agent_tools_for_cron = agent_registry.clone();
+            let tool_registry_for_msg = tool_registry.clone();
+            let tool_registry_for_stream = tool_registry.clone();
+            let agent_tools_for_cron = Arc::new(bridge_tool_registry(&tool_registry));
             let config_arc = Arc::new(config.clone());
             let config_arc_stream = config_arc.clone();
             let gateway_for_review = gateway.clone();
@@ -523,9 +530,10 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
             gateway
                 .set_message_handler_with_context(Arc::new(move |messages, ctx| {
                     let config = config_arc.clone();
-                    let agent_tools = agent_tools_for_msg.clone();
+                    let runtime_tools = tool_registry_for_msg.clone();
                     let gateway_for_review = gateway_for_review.clone();
                     Box::pin(async move {
+                        let agent_tools = Arc::new(bridge_tool_registry(&runtime_tools));
                         let effective_model = resolve_model_for_gateway(
                             config.model.as_deref().unwrap_or("gpt-4o"),
                             &ctx,
@@ -685,9 +693,10 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
             gateway
                 .set_streaming_handler_with_context(Arc::new(move |messages, ctx, on_chunk| {
                     let config = config_arc_stream.clone();
-                    let agent_tools = agent_tools_for_stream.clone();
+                    let runtime_tools = tool_registry_for_stream.clone();
                     let gateway_for_review = gateway_for_review_stream.clone();
                     Box::pin(async move {
+                        let agent_tools = Arc::new(bridge_tool_registry(&runtime_tools));
                         let effective_model = resolve_model_for_gateway(
                             config.model.as_deref().unwrap_or("gpt-4o"),
                             &ctx,
@@ -902,6 +911,8 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
                 .map_err(|e| AgentError::Config(format!("cron load: {e}")))?;
             cron_scheduler.start().await;
             let cron_scheduler = Arc::new(cron_scheduler);
+            wire_cron_scheduler_backend(&tool_registry, cron_scheduler.clone());
+            wire_gateway_messaging_backend(&tool_registry, gateway.clone());
             let webhooks_path = hermes_state_root(&cli).join("webhooks.json");
             tracing::info!(
                 cron_dir = %cron_dir.display(),
