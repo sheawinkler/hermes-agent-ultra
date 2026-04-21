@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use hermes_core::{AgentError, LlmProvider, Message, ToolSchema};
+use hermes_core::{AgentError, LlmProvider, Message};
 
 // ---------------------------------------------------------------------------
 // TitleError
@@ -35,7 +35,6 @@ impl From<AgentError> for TitleError {
 
 /// Generates concise conversation titles from message history.
 pub struct TitleGenerator {
-    client: reqwest::Client,
     llm_provider: Arc<dyn LlmProvider>,
     /// The model name to use for title generation (should be small/fast).
     model: String,
@@ -52,7 +51,6 @@ impl TitleGenerator {
     /// a small, fast model like `gpt-4o-mini` or `claude-haiku`).
     pub fn new(llm_provider: Arc<dyn LlmProvider>, model: impl Into<String>) -> Self {
         Self {
-            client: reqwest::Client::new(),
             llm_provider,
             model: model.into(),
             max_messages: 10,
@@ -204,7 +202,7 @@ mod tests {
                 async fn chat_completion(
                     &self,
                     _messages: &[Message],
-                    _tools: &[ToolSchema],
+                    _tools: &[hermes_core::ToolSchema],
                     _max_tokens: Option<u32>,
                     _temperature: Option<f64>,
                     _model: Option<&str>,
@@ -216,7 +214,7 @@ mod tests {
                 fn chat_completion_stream(
                     &self,
                     _messages: &[Message],
-                    _tools: &[ToolSchema],
+                    _tools: &[hermes_core::ToolSchema],
                     _max_tokens: Option<u32>,
                     _temperature: Option<f64>,
                     _model: Option<&str>,
@@ -227,7 +225,6 @@ mod tests {
                 }
             }
             Self {
-                client: reqwest::Client::new(),
                 llm_provider: Arc::new(MockProvider),
                 model: "test-model".to_string(),
                 max_messages: 10,

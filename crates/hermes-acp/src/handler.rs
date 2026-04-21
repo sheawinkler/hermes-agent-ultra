@@ -6,9 +6,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde_json::{json, Value};
-use tokio::sync::Mutex;
 
-use crate::events::{AcpEvent, EventSink, ToolCallIdTracker};
+use crate::events::{AcpEvent, EventSink};
 use crate::permissions::PermissionStore;
 use crate::protocol::*;
 use crate::session::{SessionManager, SessionPhase, SessionState};
@@ -45,44 +44,36 @@ pub trait AcpPromptExecutor: Send + Sync {
 struct SlashCommand {
     name: &'static str,
     description: &'static str,
-    input_hint: Option<&'static str>,
 }
 
 const SLASH_COMMANDS: &[SlashCommand] = &[
     SlashCommand {
         name: "help",
         description: "Show available commands",
-        input_hint: None,
     },
     SlashCommand {
         name: "model",
         description: "Show or change current model",
-        input_hint: Some("model name to switch to"),
     },
     SlashCommand {
         name: "tools",
         description: "List available tools",
-        input_hint: None,
     },
     SlashCommand {
         name: "context",
         description: "Show conversation context info",
-        input_hint: None,
     },
     SlashCommand {
         name: "reset",
         description: "Clear conversation history",
-        input_hint: None,
     },
     SlashCommand {
         name: "compact",
         description: "Compress conversation context",
-        input_hint: None,
     },
     SlashCommand {
         name: "version",
         description: "Show Hermes version",
-        input_hint: None,
     },
 ];
 
@@ -117,22 +108,6 @@ impl HermesAcpHandler {
     pub fn with_prompt_executor(mut self, prompt_executor: Arc<dyn AcpPromptExecutor>) -> Self {
         self.prompt_executor = Some(prompt_executor);
         self
-    }
-
-    fn available_commands(&self) -> Vec<Value> {
-        SLASH_COMMANDS
-            .iter()
-            .map(|cmd| {
-                let mut obj = json!({
-                    "name": cmd.name,
-                    "description": cmd.description,
-                });
-                if let Some(hint) = cmd.input_hint {
-                    obj["input"] = json!({"hint": hint});
-                }
-                obj
-            })
-            .collect()
     }
 
     fn available_tools(&self) -> Vec<(&'static str, &'static str)> {
@@ -726,7 +701,7 @@ impl AcpHandler for HermesAcpHandler {
                     .unwrap_or("");
                 let msg_id = uuid::Uuid::new_v4().to_string();
 
-                if let Some(mut state) = self.session_manager.get_session(conv_id) {
+                if let Some(state) = self.session_manager.get_session(conv_id) {
                     let mut history = state.history.clone();
                     history.push(json!({
                         "id": msg_id,

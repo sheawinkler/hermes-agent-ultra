@@ -14,7 +14,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use crate::events::EventSink;
 use crate::handler::AcpHandler;
 use crate::permissions::PermissionStore;
-use crate::protocol::{AcpRequest, AcpResponse, SessionUpdate};
+use crate::protocol::{AcpRequest, AcpResponse};
 use crate::session::SessionManager;
 
 /// ACP JSON-RPC server with full protocol support.

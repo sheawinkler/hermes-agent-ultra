@@ -57,10 +57,37 @@ pub async fn dispatch_tools(
 ) -> Vec<ToolResult> {
     let concurrency = pool_size.max(1);
     let mut join_set = JoinSet::new();
+    let mut results: Vec<ToolResult> = Vec::new();
+
+    let mut collect_join = |res: Result<DispatchedResult, tokio::task::JoinError>| match res {
+        Ok(dr) => {
+            let mut content = dr.content;
+            // Per-result truncation
+            if content.len() > budget.max_result_size_chars {
+                let truncated = &content[..budget.max_result_size_chars];
+                let removed = content.len() - budget.max_result_size_chars;
+                content = format!(
+                    "{}\n\n[... truncated {} characters ...]",
+                    truncated, removed
+                );
+            }
+            results.push(ToolResult {
+                tool_call_id: dr.tool_call_id,
+                content,
+                is_error: dr.is_error,
+            });
+        }
+        Err(e) => {
+            // Join error — treat as a tool error
+            results.push(ToolResult::err(
+                "unknown",
+                format!("Task join error: {}", e),
+            ));
+        }
+    };
 
     for call in calls {
         let registry = registry.clone();
-        let max_chars = budget.max_result_size_chars;
         join_set.spawn(async move {
             let start = Instant::now();
             let result = registry
@@ -86,39 +113,16 @@ pub async fn dispatch_tools(
             }
         });
 
-        // If we've reached the concurrency limit, wait for one to complete
-        // This is approximate; JoinSet doesn't support limiting directly,
-        // so we use a semaphore-like approach by waiting when too many are pending
-    }
-
-    let mut results: Vec<ToolResult> = Vec::new();
-    while let Some(res) = join_set.join_next().await {
-        match res {
-            Ok(dr) => {
-                let mut content = dr.content;
-                // Per-result truncation
-                if content.len() > budget.max_result_size_chars {
-                    let truncated = &content[..budget.max_result_size_chars];
-                    let removed = content.len() - budget.max_result_size_chars;
-                    content = format!(
-                        "{}\n\n[... truncated {} characters ...]",
-                        truncated, removed
-                    );
-                }
-                results.push(ToolResult {
-                    tool_call_id: dr.tool_call_id,
-                    content,
-                    is_error: dr.is_error,
-                });
-            }
-            Err(e) => {
-                // Join error — treat as a tool error
-                results.push(ToolResult::err(
-                    "unknown",
-                    format!("Task join error: {}", e),
-                ));
+        // Cap pending tasks to the requested concurrency.
+        if join_set.len() >= concurrency {
+            if let Some(res) = join_set.join_next().await {
+                collect_join(res);
             }
         }
+    }
+
+    while let Some(res) = join_set.join_next().await {
+        collect_join(res);
     }
 
     // Aggregate budget enforcement
@@ -148,7 +152,6 @@ pub async fn dispatch_single(
     registry: Arc<ToolRegistry>,
     max_result_size_chars: usize,
 ) -> ToolResult {
-    let start = Instant::now();
     let result = registry
         .dispatch_async(
             &call.function.name,
@@ -158,7 +161,6 @@ pub async fn dispatch_single(
                 .unwrap_or(serde_json::Value::Null),
         )
         .await;
-    let duration_ms = start.elapsed().as_millis() as u64;
 
     let is_error = result.starts_with(r#"{"error"#);
 

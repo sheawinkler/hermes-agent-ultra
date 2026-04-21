@@ -7,7 +7,6 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::sync::LazyLock;
 
-use hermes_core::types::MessageRole;
 use hermes_core::Message;
 
 // ---------------------------------------------------------------------------
@@ -207,6 +206,7 @@ impl Default for Redactor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hermes_core::MessageRole;
 
     #[test]
     fn test_redact_api_key() {

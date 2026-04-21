@@ -5,8 +5,7 @@ use indexmap::IndexMap;
 use serde_json::{json, Value};
 
 use hermes_core::{
-    tool_schema, AgentError, CommandOutput, JsonSchema, TerminalBackend, ToolError, ToolHandler,
-    ToolSchema,
+    tool_schema, CommandOutput, JsonSchema, TerminalBackend, ToolError, ToolHandler, ToolSchema,
 };
 
 use crate::approval::{ApprovalDecision, ApprovalManager};
@@ -296,6 +295,7 @@ impl ToolHandler for ProcessHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hermes_core::AgentError;
 
     struct MockBackend;
     #[async_trait]

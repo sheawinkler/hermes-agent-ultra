@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use hermes_core::{ToolError, ToolHandler, ToolSchema};
+use hermes_core::{ToolHandler, ToolSchema};
 use serde_json::Value;
 use tracing::warn;
 
@@ -298,7 +298,7 @@ pub struct ToolEntryInfo {
 mod tests {
     use super::*;
     use async_trait::async_trait;
-    use hermes_core::{tool_schema, JsonSchema};
+    use hermes_core::{tool_schema, JsonSchema, ToolError};
 
     struct EchoHandler;
 
