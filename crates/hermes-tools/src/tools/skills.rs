@@ -4,9 +4,7 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_core::{
-    tool_schema, JsonSchema, Skill, SkillMeta, SkillProvider, ToolError, ToolHandler, ToolSchema,
-};
+use hermes_core::{tool_schema, JsonSchema, SkillProvider, ToolError, ToolHandler, ToolSchema};
 
 use std::sync::Arc;
 
@@ -297,7 +295,7 @@ impl ToolHandler for SkillManageHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hermes_core::AgentError;
+    use hermes_core::{AgentError, Skill, SkillMeta};
 
     struct MockSkillProvider;
     #[async_trait]

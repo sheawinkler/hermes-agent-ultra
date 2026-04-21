@@ -4,8 +4,8 @@
 //! Mirrors the Python `acp_adapter/session.py` implementation.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::sync::Mutex;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

@@ -4,7 +4,7 @@
 //! random, and least-used selection strategies.  Tracks rate limit
 //! exhaustion and automatic recovery.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 

@@ -4,11 +4,8 @@
 //! compression and run_agent for pre-flight context checks.
 
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
-use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
-use tracing;
 
 // ---------------------------------------------------------------------------
 // Constants

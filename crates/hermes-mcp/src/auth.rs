@@ -186,14 +186,8 @@ impl OAuthConfig {
             .await
             .map_err(|e| McpError::Auth(format!("Failed to parse token response: {}", e)))?;
 
-        let expires_at = token_response
-            .expires_in
-            .map(|secs| std::time::SystemTime::now() + std::time::Duration::from_secs(secs));
-
         Ok(OAuthToken {
             access_token: token_response.access_token,
-            token_type: token_response.token_type,
-            expires_at,
         })
     }
 }
@@ -202,22 +196,6 @@ impl OAuthConfig {
 #[derive(Debug, Clone)]
 struct OAuthToken {
     access_token: String,
-    token_type: String,
-    expires_at: Option<std::time::SystemTime>,
-}
-
-impl OAuthToken {
-    /// Check if this token has expired (with a 30-second buffer).
-    fn is_expired(&self) -> bool {
-        match self.expires_at {
-            Some(expires_at) => {
-                // Consider token expired 30 seconds before actual expiration
-                let buffer = std::time::Duration::from_secs(30);
-                std::time::SystemTime::now() + buffer >= expires_at
-            }
-            None => false, // No expiration time means it doesn't expire
-        }
-    }
 }
 
 /// Response from an OAuth2 token endpoint.

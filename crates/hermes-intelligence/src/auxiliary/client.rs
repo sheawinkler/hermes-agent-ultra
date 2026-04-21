@@ -17,7 +17,6 @@
 //! [`hermes_core::LlmProvider`] trait.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::time::Duration;
 
 use hermes_core::{LlmResponse, Message, ToolSchema};

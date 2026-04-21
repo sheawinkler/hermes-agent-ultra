@@ -192,7 +192,7 @@ impl CronScheduler {
                 for job_id in due_job_ids {
                     let job = guard.get(&job_id).cloned();
                     if let Some(mut job) = job {
-                        drop(&mut guard);
+                        drop(guard);
 
                         // Run the job
                         tracing::info!(
@@ -230,7 +230,7 @@ impl CronScheduler {
                         // Update the job in memory and persist
                         guard = jobs.lock().await;
                         guard.insert(job.id.clone(), job.clone());
-                        drop(&mut guard);
+                        drop(guard);
 
                         if let Err(e) = persistence.save_job(&job).await {
                             tracing::error!("Failed to persist job '{}': {}", job.id, e);

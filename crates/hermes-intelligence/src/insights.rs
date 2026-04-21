@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use chrono::{Datelike, Duration, NaiveDate, Utc};
+use chrono::{Duration, NaiveDate, Utc};
 
 use crate::usage::{ModelUsage, UsageSummary, UsageTracker};
 
@@ -111,6 +111,7 @@ impl Insights {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::Datelike;
 
     #[test]
     fn test_daily_summary() {
