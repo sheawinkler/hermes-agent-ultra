@@ -67,6 +67,11 @@ PARITY_UPSTREAM_REF="${UPSTREAM_SYNC_PARITY_UPSTREAM_REF:-upstream/main}"
 PARITY_PARENT_ISSUE="${UPSTREAM_SYNC_PARITY_PARENT_ISSUE:-13}"
 PARITY_LABELS="${UPSTREAM_SYNC_PARITY_LABELS:-parity,parity-upkeep}"
 PARITY_OPEN_ISSUES="${UPSTREAM_SYNC_PARITY_OPEN_ISSUES:-1}"
+GLOBAL_PARITY_DISABLE="${UPSTREAM_SYNC_DISABLE_GLOBAL_PARITY_CHECK:-0}"
+GLOBAL_PARITY_PARENT_ISSUE="${UPSTREAM_SYNC_GLOBAL_PARITY_PARENT_ISSUE:-19}"
+GLOBAL_PARITY_LABELS="${UPSTREAM_SYNC_GLOBAL_PARITY_LABELS:-parity,parity-upkeep}"
+GLOBAL_PARITY_OPEN_ISSUES="${UPSTREAM_SYNC_GLOBAL_PARITY_OPEN_ISSUES:-1}"
+GLOBAL_PARITY_MAX_QUEUE_COMMITS="${UPSTREAM_SYNC_GLOBAL_PARITY_MAX_QUEUE_COMMITS:-0}"
 
 ARGS=(
   worker
@@ -80,6 +85,9 @@ ARGS=(
   --parity-upstream-ref "${PARITY_UPSTREAM_REF}"
   --parity-parent-issue "${PARITY_PARENT_ISSUE}"
   --parity-labels "${PARITY_LABELS}"
+  --global-parity-parent-issue "${GLOBAL_PARITY_PARENT_ISSUE}"
+  --global-parity-labels "${GLOBAL_PARITY_LABELS}"
+  --global-parity-max-queue-commits "${GLOBAL_PARITY_MAX_QUEUE_COMMITS}"
 )
 
 case "${BACKEND}" in
@@ -120,6 +128,12 @@ if [[ "${PARITY_DRIFT_DISABLE}" == "1" || "${PARITY_DRIFT_DISABLE}" == "true" ]]
 fi
 if [[ "${PARITY_OPEN_ISSUES}" == "0" || "${PARITY_OPEN_ISSUES}" == "false" ]]; then
   ARGS+=(--no-parity-open-issues)
+fi
+if [[ "${GLOBAL_PARITY_DISABLE}" == "1" || "${GLOBAL_PARITY_DISABLE}" == "true" ]]; then
+  ARGS+=(--disable-global-parity-check)
+fi
+if [[ "${GLOBAL_PARITY_OPEN_ISSUES}" == "0" || "${GLOBAL_PARITY_OPEN_ISSUES}" == "false" ]]; then
+  ARGS+=(--no-global-parity-open-issues)
 fi
 
 if [[ -n "${UPSTREAM_SYNC_ASSIST_CMD:-}" ]]; then

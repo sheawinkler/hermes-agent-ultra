@@ -26,8 +26,11 @@ that needs manual coding.
   - Consumes queue event
   - Runs `scripts/sync-upstream.sh` with strict risk gate
   - Runs CLI command/action parity drift check (`HEAD` vs `upstream/main` or event SHA)
+  - Runs full global parity audit chain (matrix/status/intent/adapter/divergence/queue/proof)
   - Emits machine-readable drift artifacts under `.sync-reports/cli-surface-drift-*.json`
+  - Emits global parity artifacts under `.sync-reports/global-parity-drift-*.json`
   - Comments parent upkeep issue (`#13` by default) when drift is detected
+  - Comments global parity epic issue (`#19` by default) when global parity gate drifts
   - Auto-opens tagged parity drift issues for new drift fingerprints
   - Classifies result:
     - `done`: merged/cherry-picked and branch/PR flow completed
@@ -140,6 +143,14 @@ python3 scripts/upstream_webhook_sync.py worker \
   --no-parity-open-issues
 ```
 
+Disable global parity checks or issue auto-open:
+
+```bash
+python3 scripts/upstream_webhook_sync.py worker \
+  --disable-global-parity-check \
+  --no-global-parity-open-issues
+```
+
 ## launchd Deployment (Recommended on macOS)
 
 Single-command guided setup (recommended):
@@ -212,6 +223,11 @@ Relevant env keys in `~/.hermes-agent-ultra/upstream-webhook-sync.env`:
 - `UPSTREAM_SYNC_PARITY_PARENT_ISSUE=13`
 - `UPSTREAM_SYNC_PARITY_LABELS=parity,parity-upkeep`
 - `UPSTREAM_SYNC_PARITY_OPEN_ISSUES=1|0`
+- `UPSTREAM_SYNC_DISABLE_GLOBAL_PARITY_CHECK=0|1`
+- `UPSTREAM_SYNC_GLOBAL_PARITY_PARENT_ISSUE=19`
+- `UPSTREAM_SYNC_GLOBAL_PARITY_LABELS=parity,parity-upkeep`
+- `UPSTREAM_SYNC_GLOBAL_PARITY_OPEN_ISSUES=1|0`
+- `UPSTREAM_SYNC_GLOBAL_PARITY_MAX_QUEUE_COMMITS=0` (0 = full upstream missing range)
 
 ## Reliability Notes
 

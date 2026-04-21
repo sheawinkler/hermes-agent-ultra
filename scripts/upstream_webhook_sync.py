@@ -595,6 +595,144 @@ def gh_issue_create(
     return proc.stdout.strip().splitlines()[-1].strip() if proc.stdout.strip() else None
 
 
+def run_python_script(
+    repo_root: str, argv: list[str], timeout_sec: int = 1800
+) -> tuple[int, str]:
+    proc = subprocess.run(
+        ["python3", *argv],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        timeout=max(60, timeout_sec),
+    )
+    out = (proc.stdout or "") + ("\n" + proc.stderr if proc.stderr else "")
+    return proc.returncode, out
+
+
+def maybe_check_global_parity_drift(
+    *,
+    repo_root: str,
+    report_dir: str,
+    event: SyncEvent,
+    parent_issue: int,
+    open_parity_issue: bool,
+    parity_labels: list[str],
+    enabled: bool,
+    max_queue_commits: int,
+) -> dict[str, Any]:
+    if not enabled:
+        return {"enabled": False, "checked": False}
+
+    scripts = [
+        ["scripts/generate-parity-matrix.py"],
+        ["scripts/generate-workstream-status.py"],
+        ["scripts/generate-test-intent-mapping.py"],
+        ["scripts/generate-adapter-matrix.py"],
+        ["scripts/validate-intentional-divergence.py", "--check", "--allow-warnings"],
+        [
+            "scripts/generate-upstream-patch-queue.py",
+            "--max-commits",
+            str(max(0, max_queue_commits)),
+        ],
+        ["scripts/generate-global-parity-proof.py", "--check-ci"],
+    ]
+
+    runs: list[dict[str, Any]] = []
+    final_rc = 0
+    for argv in scripts:
+        rc, output = run_python_script(repo_root, argv)
+        runs.append({"argv": argv, "rc": rc, "output_tail": output[-4000:]})
+        if rc != 0:
+            final_rc = rc
+            break
+
+    proof_path = os.path.join(repo_root, "docs/parity/global-parity-proof.json")
+    proof = {}
+    if os.path.exists(proof_path):
+        try:
+            with open(proof_path, "r", encoding="utf-8") as fh:
+                proof = json.load(fh)
+        except Exception:
+            proof = {}
+    ci_gate = proof.get("ci_gate", {}) if isinstance(proof, dict) else {}
+    has_drift = final_rc != 0 or not bool(ci_gate.get("pass"))
+
+    artifact = {
+        "generated_at": utc_now_iso(),
+        "delivery_id": event.delivery_id,
+        "repository": event.repository,
+        "upstream_after_sha": event.after_sha,
+        "has_drift": has_drift,
+        "script_runs": runs,
+        "proof_path": proof_path if os.path.exists(proof_path) else "",
+        "proof_ci_gate": ci_gate,
+    }
+    os.makedirs(report_dir, exist_ok=True)
+    artifact_path = os.path.join(report_dir, f"global-parity-drift-{event.delivery_id}.json")
+    with open(artifact_path, "w", encoding="utf-8") as fh:
+        json.dump(artifact, fh, indent=2, sort_keys=True)
+
+    result = {
+        "enabled": True,
+        "checked": True,
+        "artifact_path": artifact_path,
+        "has_drift": has_drift,
+        "commented_parent_issue": False,
+        "created_issue_url": None,
+    }
+    if not has_drift:
+        return result
+
+    fingerprint_payload = {
+        "ci_checks": ci_gate.get("checks", []),
+        "upstream_after": event.after_sha,
+        "failing_script": runs[-1]["argv"] if runs else [],
+    }
+    fingerprint = hashlib.sha256(
+        json.dumps(fingerprint_payload, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    seen_path = os.path.join(report_dir, "global-parity-drift-seen.json")
+    seen = load_seen_drift_fingerprints(seen_path)
+
+    summary_lines = [
+        "Global parity drift detected.",
+        f"- delivery_id: `{event.delivery_id}`",
+        f"- upstream_after: `{event.after_sha}`",
+        f"- proof_path: `{proof_path}`",
+        f"- artifact: `{artifact_path}`",
+        f"- ci_gate_pass: `{bool(ci_gate.get('pass'))}`",
+    ]
+    comment_body = "\n".join(summary_lines)
+    if parent_issue > 0:
+        result["commented_parent_issue"] = gh_issue_comment(repo_root, parent_issue, comment_body)
+
+    existing = seen.get("fingerprints", {}).get(fingerprint)
+    if open_parity_issue and not existing:
+        title = f"[Parity Drift] Global parity gate drift ({event.after_sha[:12]})"
+        issue_body = "\n".join(
+            [
+                "Automated global parity audit detected CI-gate drift.",
+                "",
+                f"- delivery_id: `{event.delivery_id}`",
+                f"- upstream_after: `{event.after_sha}`",
+                f"- proof_path: `{proof_path}`",
+                f"- artifact: `{artifact_path}`",
+                "",
+                "Please process drift items and keep queue dispositions current.",
+            ]
+        )
+        created = gh_issue_create(repo_root, title, issue_body, parity_labels)
+        if created:
+            result["created_issue_url"] = created
+            seen.setdefault("fingerprints", {})[fingerprint] = {
+                "created_at": utc_now_iso(),
+                "issue": created,
+                "delivery_id": event.delivery_id,
+            }
+            save_seen_drift_fingerprints(seen_path, seen)
+    return result
+
+
 def maybe_check_cli_surface_drift(
     *,
     repo_root: str,
@@ -958,9 +1096,26 @@ def worker_loop(args: argparse.Namespace) -> int:
                     parity_labels=parity_labels,
                     enabled=parity_drift_enabled,
                 )
-                note = f"{outcome}; drift={'detected' if drift_result.get('has_drift') else 'none'}"
+                global_drift_result = maybe_check_global_parity_drift(
+                    repo_root=repo_root,
+                    report_dir=report_dir,
+                    event=item.event,
+                    parent_issue=args.global_parity_parent_issue,
+                    open_parity_issue=(not args.no_global_parity_open_issues),
+                    parity_labels=[
+                        v.strip() for v in str(args.global_parity_labels).split(",") if v.strip()
+                    ],
+                    enabled=(not args.disable_global_parity_check),
+                    max_queue_commits=args.global_parity_max_queue_commits,
+                )
+                note = (
+                    f"{outcome}; cli_drift={'detected' if drift_result.get('has_drift') else 'none'}; "
+                    f"global_drift={'detected' if global_drift_result.get('has_drift') else 'none'}"
+                )
                 if drift_result.get("created_issue_url"):
                     note += f"; issue={drift_result['created_issue_url']}"
+                if global_drift_result.get("created_issue_url"):
+                    note += f"; global_issue={global_drift_result['created_issue_url']}"
                 queue.mark_done(item.id, status="done", note=note)
                 continue
 
@@ -1014,11 +1169,29 @@ def worker_loop(args: argparse.Namespace) -> int:
                     parity_labels=parity_labels,
                     enabled=parity_drift_enabled,
                 )
+                global_drift_result = maybe_check_global_parity_drift(
+                    repo_root=repo_root,
+                    report_dir=report_dir,
+                    event=event,
+                    parent_issue=args.global_parity_parent_issue,
+                    open_parity_issue=(not args.no_global_parity_open_issues),
+                    parity_labels=[
+                        v.strip() for v in str(args.global_parity_labels).split(",") if v.strip()
+                    ],
+                    enabled=(not args.disable_global_parity_check),
+                    max_queue_commits=args.global_parity_max_queue_commits,
+                )
                 if drift_result.get("has_drift"):
                     LOG.warning(
                         "CLI surface drift detected for delivery=%s artifact=%s",
                         event.delivery_id,
                         drift_result.get("artifact_path", ""),
+                    )
+                if global_drift_result.get("has_drift"):
+                    LOG.warning(
+                        "Global parity drift detected for delivery=%s artifact=%s",
+                        event.delivery_id,
+                        global_drift_result.get("artifact_path", ""),
                     )
             # In SQS mode: acknowledge terminal states. Let visibility timeout retry transient failures.
             if rc == 0 or outcome in {"risk_blocked", "conflict"}:
@@ -1069,11 +1242,29 @@ def worker_loop(args: argparse.Namespace) -> int:
                 parity_labels=parity_labels,
                 enabled=parity_drift_enabled,
             )
+            global_drift_result = maybe_check_global_parity_drift(
+                repo_root=repo_root,
+                report_dir=report_dir,
+                event=event,
+                parent_issue=args.global_parity_parent_issue,
+                open_parity_issue=(not args.no_global_parity_open_issues),
+                parity_labels=[
+                    v.strip() for v in str(args.global_parity_labels).split(",") if v.strip()
+                ],
+                enabled=(not args.disable_global_parity_check),
+                max_queue_commits=args.global_parity_max_queue_commits,
+            )
             if drift_result.get("has_drift"):
                 LOG.warning(
                     "CLI surface drift detected for delivery=%s artifact=%s",
                     event.delivery_id,
                     drift_result.get("artifact_path", ""),
+                )
+            if global_drift_result.get("has_drift"):
+                LOG.warning(
+                    "Global parity drift detected for delivery=%s artifact=%s",
+                    event.delivery_id,
+                    global_drift_result.get("artifact_path", ""),
                 )
         # Commit offsets for terminal states; for transient failures we keep offset
         # uncommitted so another worker run can retry.
@@ -1148,6 +1339,35 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Do not auto-open new drift issues when new fingerprints are found",
+    )
+    worker.add_argument(
+        "--disable-global-parity-check",
+        action="store_true",
+        default=False,
+        help="Disable global parity gate audit after successful upstream sync",
+    )
+    worker.add_argument(
+        "--global-parity-parent-issue",
+        type=int,
+        default=19,
+        help="Issue number to comment with global parity drift reports (default: 19)",
+    )
+    worker.add_argument(
+        "--global-parity-labels",
+        default="parity,parity-upkeep",
+        help="Comma-separated labels for global parity drift issues",
+    )
+    worker.add_argument(
+        "--no-global-parity-open-issues",
+        action="store_true",
+        default=False,
+        help="Do not auto-open new global parity drift issues for new fingerprints",
+    )
+    worker.add_argument(
+        "--global-parity-max-queue-commits",
+        type=int,
+        default=0,
+        help="Max commits for generated upstream queue artifact (0 means full range)",
     )
     worker.add_argument(
         "--assist-cmd",
