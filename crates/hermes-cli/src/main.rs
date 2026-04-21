@@ -14,7 +14,7 @@ use hermes_cli::app::{
 };
 use hermes_cli::cli::{Cli, CliCommand};
 use hermes_cli::runtime_tool_wiring::{
-    wire_cron_scheduler_backend, wire_gateway_messaging_backend,
+    wire_cron_scheduler_backend, wire_gateway_clarify_backend, wire_gateway_messaging_backend,
 };
 use hermes_cli::App;
 use hermes_config::{
@@ -54,6 +54,7 @@ use hermes_gateway::platforms::wecom_callback::{
 };
 use hermes_gateway::platforms::weixin::{WeChatAdapter, WeixinConfig};
 use hermes_gateway::platforms::whatsapp::{WhatsAppAdapter, WhatsAppConfig};
+use hermes_gateway::tool_backends::ClarifyDispatcher;
 use hermes_gateway::{DmManager, Gateway, GatewayRuntimeContext, SessionManager};
 use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_telemetry::init_telemetry_from_env;
@@ -520,9 +521,12 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
             let skill_provider: Arc<dyn hermes_core::SkillProvider> =
                 Arc::new(SkillManager::new(skill_store));
             hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
+            let clarify_dispatcher = ClarifyDispatcher::new();
             let tool_registry_for_msg = tool_registry.clone();
             let tool_registry_for_stream = tool_registry.clone();
             let agent_tools_for_cron = Arc::new(bridge_tool_registry(&tool_registry));
+            let clarify_for_msg = clarify_dispatcher.clone();
+            let clarify_for_stream = clarify_dispatcher.clone();
             let config_arc = Arc::new(config.clone());
             let config_arc_stream = config_arc.clone();
             let gateway_for_review = gateway.clone();
@@ -532,7 +536,23 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
                     let config = config_arc.clone();
                     let runtime_tools = tool_registry_for_msg.clone();
                     let gateway_for_review = gateway_for_review.clone();
+                    let clarify = clarify_for_msg.clone();
                     Box::pin(async move {
+                        if let Some(pending) = clarify.take_next().await {
+                            let answer = messages
+                                .iter()
+                                .rev()
+                                .find_map(|m| {
+                                    (m.role == MessageRole::User)
+                                        .then(|| m.content.clone())
+                                        .flatten()
+                                })
+                                .unwrap_or_default();
+                            let _ = pending.respond(answer);
+                            return Ok(
+                                "Clarification received. Continuing task execution...".to_string()
+                            );
+                        }
                         let agent_tools = Arc::new(bridge_tool_registry(&runtime_tools));
                         let effective_model = resolve_model_for_gateway(
                             config.model.as_deref().unwrap_or("gpt-4o"),
@@ -695,7 +715,23 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
                     let config = config_arc_stream.clone();
                     let runtime_tools = tool_registry_for_stream.clone();
                     let gateway_for_review = gateway_for_review_stream.clone();
+                    let clarify = clarify_for_stream.clone();
                     Box::pin(async move {
+                        if let Some(pending) = clarify.take_next().await {
+                            let answer = messages
+                                .iter()
+                                .rev()
+                                .find_map(|m| {
+                                    (m.role == MessageRole::User)
+                                        .then(|| m.content.clone())
+                                        .flatten()
+                                })
+                                .unwrap_or_default();
+                            let _ = pending.respond(answer);
+                            return Ok(
+                                "Clarification received. Continuing task execution...".to_string()
+                            );
+                        }
                         let agent_tools = Arc::new(bridge_tool_registry(&runtime_tools));
                         let effective_model = resolve_model_for_gateway(
                             config.model.as_deref().unwrap_or("gpt-4o"),
@@ -913,6 +949,7 @@ async fn run_gateway(cli: Cli, action: Option<String>) -> Result<(), AgentError>
             let cron_scheduler = Arc::new(cron_scheduler);
             wire_cron_scheduler_backend(&tool_registry, cron_scheduler.clone());
             wire_gateway_messaging_backend(&tool_registry, gateway.clone());
+            wire_gateway_clarify_backend(&tool_registry, clarify_dispatcher);
             let webhooks_path = hermes_state_root(&cli).join("webhooks.json");
             tracing::info!(
                 cron_dir = %cron_dir.display(),
