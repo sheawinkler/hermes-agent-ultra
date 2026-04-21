@@ -109,3 +109,7 @@ Artifacts are written to:
 
 - `docs/parity/parity-matrix.json`
 - `docs/parity/parity-matrix.md`
+- `docs/parity/intentional-divergence.json` (tracked divergence registry)
+
+The matrix uses tree-level blob comparison (works with divergent histories) and
+`git cherry` patch-id mapping for represented vs missing upstream commits.

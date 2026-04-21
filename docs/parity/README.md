@@ -16,5 +16,19 @@ By default this command fetches upstream directly from GitHub
 
 ## Outputs
 
-- `parity-matrix.json`: machine-readable summary and top path buckets
+- `parity-matrix.json`: machine-readable summary, commit mapping, workstream routing
 - `parity-matrix.md`: human-readable report for planning/review
+- `intentional-divergence.json`: tracked, approved ultra-only deltas used by the report
+
+## What The Matrix Includes
+
+- Tree-level path classification that works even when branch histories diverge:
+  - files only in upstream
+  - files only in local
+  - shared files with different content
+  - shared files with identical content
+- Patch-equivalent commit mapping via `git cherry`:
+  - upstream commits missing vs represented
+  - local unique commits
+- Workstream routing to parity tickets:
+  - WS2-WS8 issue mapping, risk level, and effort size.

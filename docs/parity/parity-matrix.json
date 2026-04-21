@@ -1,21 +1,384 @@
 {
-  "generated_at_utc": "2026-04-21T08:22:32.788934+00:00",
+  "generated_at_utc": "2026-04-21T08:30:13.201957+00:00",
   "refs": {
     "local_ref": "main",
-    "local_sha": "b5eff5cb7cce302580c18276f687aa6f1756ff76",
+    "local_sha": "a23e3bed5d1c02d545b2022d4bee5a212626ec76",
     "upstream_ref": "upstream/main",
-    "upstream_sha": "04f9ffb792da7e2234727b69e6171a1e90da47bc",
+    "upstream_sha": "517f5e263953ab92c6076cd888ea755af106d6d4",
     "merge_base": null
   },
   "summary": {
-    "commits_behind": 5157,
-    "commits_ahead": 97,
-    "files_missing_from_local": 2552,
-    "files_unique_to_local": 2552,
-    "tree_files_changed": 2552,
-    "tree_insertions": 845986,
-    "tree_deletions": 127871
+    "commits_behind": 5161,
+    "commits_ahead": 98,
+    "upstream_patch_missing": 4455,
+    "upstream_patch_represented": 4,
+    "local_patch_unique": 96,
+    "files_only_upstream": 2184,
+    "files_only_local": 367,
+    "files_shared_identical": 0,
+    "files_shared_different": 8,
+    "tree_files_changed": 2560,
+    "tree_insertions": 846879,
+    "tree_deletions": 128261
   },
+  "top_upstream_only": [
+    {
+      "path": "tests/gateway",
+      "count": 174
+    },
+    {
+      "path": "skills/creative",
+      "count": 165
+    },
+    {
+      "path": "tests/tools",
+      "count": 153
+    },
+    {
+      "path": "website/docs",
+      "count": 127
+    },
+    {
+      "path": "ui-tui/packages",
+      "count": 126
+    },
+    {
+      "path": "tests/hermes_cli",
+      "count": 122
+    },
+    {
+      "path": "ui-tui/src",
+      "count": 103
+    },
+    {
+      "path": "optional-skills/mlops",
+      "count": 81
+    },
+    {
+      "path": "skills/productivity",
+      "count": 66
+    },
+    {
+      "path": "skills/mlops",
+      "count": 65
+    },
+    {
+      "path": "skills/research",
+      "count": 63
+    },
+    {
+      "path": "tests/run_agent",
+      "count": 56
+    },
+    {
+      "path": "tests/agent",
+      "count": 52
+    },
+    {
+      "path": "web/src",
+      "count": 47
+    },
+    {
+      "path": "tests/cli",
+      "count": 45
+    },
+    {
+      "path": "optional-skills/creative",
+      "count": 34
+    },
+    {
+      "path": "gateway/platforms",
+      "count": 32
+    },
+    {
+      "path": "plugins/memory",
+      "count": 31
+    },
+    {
+      "path": "environments/benchmarks",
+      "count": 17
+    },
+    {
+      "path": "skills/github",
+      "count": 16
+    },
+    {
+      "path": "optional-skills/research",
+      "count": 14
+    },
+    {
+      "path": "optional-skills/security",
+      "count": 13
+    },
+    {
+      "path": "environments/tool_call_parsers",
+      "count": 12
+    },
+    {
+      "path": "tools/environments",
+      "count": 11
+    },
+    {
+      "path": "website/static",
+      "count": 11
+    },
+    {
+      "path": ".github/workflows",
+      "count": 10
+    },
+    {
+      "path": "tests/acp",
+      "count": 10
+    },
+    {
+      "path": "optional-skills/health",
+      "count": 9
+    },
+    {
+      "path": "skills/red-teaming",
+      "count": 9
+    },
+    {
+      "path": "optional-skills/mcp",
+      "count": 8
+    },
+    {
+      "path": "optional-skills/productivity",
+      "count": 8
+    },
+    {
+      "path": "tests/integration",
+      "count": 8
+    },
+    {
+      "path": "tests/plugins",
+      "count": 8
+    },
+    {
+      "path": "web/public",
+      "count": 8
+    },
+    {
+      "path": "skills/media",
+      "count": 7
+    },
+    {
+      "path": "tests/cron",
+      "count": 7
+    },
+    {
+      "path": "optional-skills/devops",
+      "count": 6
+    },
+    {
+      "path": "skills/software-development",
+      "count": 6
+    },
+    {
+      "path": "tests/skills",
+      "count": 6
+    },
+    {
+      "path": "scripts/whatsapp-bridge",
+      "count": 5
+    }
+  ],
+  "top_shared_different": [
+    {
+      "path": ".gitignore",
+      "count": 1
+    },
+    {
+      "path": "AGENTS.md",
+      "count": 1
+    },
+    {
+      "path": "Dockerfile",
+      "count": 1
+    },
+    {
+      "path": "LICENSE",
+      "count": 1
+    },
+    {
+      "path": "README.md",
+      "count": 1
+    },
+    {
+      "path": "flake.nix",
+      "count": 1
+    },
+    {
+      "path": "packaging/homebrew",
+      "count": 1
+    },
+    {
+      "path": "scripts/install.sh",
+      "count": 1
+    }
+  ],
+  "top_local_only": [
+    {
+      "path": "crates/hermes-tools",
+      "count": 68
+    },
+    {
+      "path": "crates/hermes-gateway",
+      "count": 45
+    },
+    {
+      "path": "crates/hermes-agent",
+      "count": 43
+    },
+    {
+      "path": "crates/hermes-intelligence",
+      "count": 36
+    },
+    {
+      "path": "crates/hermes-cli",
+      "count": 33
+    },
+    {
+      "path": "crates/hermes-config",
+      "count": 18
+    },
+    {
+      "path": "crates/hermes-environments",
+      "count": 13
+    },
+    {
+      "path": "crates/hermes-core",
+      "count": 11
+    },
+    {
+      "path": "crates/hermes-eval",
+      "count": 11
+    },
+    {
+      "path": "crates/hermes-parity-tests",
+      "count": 11
+    },
+    {
+      "path": "crates/hermes-cron",
+      "count": 9
+    },
+    {
+      "path": "crates/hermes-acp",
+      "count": 8
+    },
+    {
+      "path": "crates/hermes-mcp",
+      "count": 7
+    },
+    {
+      "path": "crates/hermes-skills",
+      "count": 7
+    },
+    {
+      "path": "crates/hermes-http",
+      "count": 5
+    },
+    {
+      "path": "crates/hermes-auth",
+      "count": 3
+    },
+    {
+      "path": "crates/hermes-telemetry",
+      "count": 3
+    },
+    {
+      "path": "docs/parity",
+      "count": 3
+    },
+    {
+      "path": ".github/workflows",
+      "count": 2
+    },
+    {
+      "path": "crates/hermes-rl",
+      "count": 2
+    },
+    {
+      "path": ".ci/clippy-allowlist.txt",
+      "count": 1
+    },
+    {
+      "path": "Cargo.lock",
+      "count": 1
+    },
+    {
+      "path": "Cargo.toml",
+      "count": 1
+    },
+    {
+      "path": "NOTICE",
+      "count": 1
+    },
+    {
+      "path": "PARITY_PLAN.md",
+      "count": 1
+    },
+    {
+      "path": "README_JA.md",
+      "count": 1
+    },
+    {
+      "path": "README_KO.md",
+      "count": 1
+    },
+    {
+      "path": "README_ZH.md",
+      "count": 1
+    },
+    {
+      "path": "UPSTREAM_ATTRIBUTION.md",
+      "count": 1
+    },
+    {
+      "path": "docs/installer-troubleshooting.md",
+      "count": 1
+    },
+    {
+      "path": "docs/upstream-sync.md",
+      "count": 1
+    },
+    {
+      "path": "docs/upstream-webhook-sync.md",
+      "count": 1
+    },
+    {
+      "path": "scripts/check-runtime-placeholders.sh",
+      "count": 1
+    },
+    {
+      "path": "scripts/clippy-warning-gate.sh",
+      "count": 1
+    },
+    {
+      "path": "scripts/cron-upstream-sync.sh",
+      "count": 1
+    },
+    {
+      "path": "scripts/generate-homebrew-formula.sh",
+      "count": 1
+    },
+    {
+      "path": "scripts/generate-parity-matrix.py",
+      "count": 1
+    },
+    {
+      "path": "scripts/git-hooks",
+      "count": 1
+    },
+    {
+      "path": "scripts/install-upstream-sync-cron.sh",
+      "count": 1
+    },
+    {
+      "path": "scripts/install-upstream-webhook-launchd.sh",
+      "count": 1
+    }
+  ],
   "top_missing_from_local": [
     {
       "path": "tests/gateway",
@@ -27,7 +390,7 @@
     },
     {
       "path": "tests/tools",
-      "count": 152
+      "count": 153
     },
     {
       "path": "website/docs",
@@ -50,54 +413,466 @@
       "count": 81
     },
     {
-      "path": "crates/hermes-tools",
-      "count": 68
-    },
-    {
       "path": "skills/productivity",
       "count": 66
+    },
+    {
+      "path": "skills/mlops",
+      "count": 65
+    },
+    {
+      "path": "skills/research",
+      "count": 63
+    },
+    {
+      "path": "tests/run_agent",
+      "count": 56
+    },
+    {
+      "path": "tests/agent",
+      "count": 52
+    },
+    {
+      "path": "web/src",
+      "count": 47
+    },
+    {
+      "path": "tests/cli",
+      "count": 45
+    },
+    {
+      "path": "optional-skills/creative",
+      "count": 34
+    },
+    {
+      "path": "gateway/platforms",
+      "count": 32
+    },
+    {
+      "path": "plugins/memory",
+      "count": 31
+    },
+    {
+      "path": "environments/benchmarks",
+      "count": 17
+    },
+    {
+      "path": "skills/github",
+      "count": 16
+    },
+    {
+      "path": "optional-skills/research",
+      "count": 14
+    },
+    {
+      "path": "optional-skills/security",
+      "count": 13
+    },
+    {
+      "path": "environments/tool_call_parsers",
+      "count": 12
+    },
+    {
+      "path": "tools/environments",
+      "count": 11
+    },
+    {
+      "path": "website/static",
+      "count": 11
+    },
+    {
+      "path": ".github/workflows",
+      "count": 10
+    },
+    {
+      "path": "tests/acp",
+      "count": 10
+    },
+    {
+      "path": "optional-skills/health",
+      "count": 9
+    },
+    {
+      "path": "skills/red-teaming",
+      "count": 9
+    },
+    {
+      "path": "optional-skills/mcp",
+      "count": 8
+    },
+    {
+      "path": "optional-skills/productivity",
+      "count": 8
+    },
+    {
+      "path": "tests/integration",
+      "count": 8
+    },
+    {
+      "path": "tests/plugins",
+      "count": 8
+    },
+    {
+      "path": "web/public",
+      "count": 8
+    },
+    {
+      "path": "skills/media",
+      "count": 7
+    },
+    {
+      "path": "tests/cron",
+      "count": 7
+    },
+    {
+      "path": "optional-skills/devops",
+      "count": 6
+    },
+    {
+      "path": "skills/software-development",
+      "count": 6
+    },
+    {
+      "path": "tests/skills",
+      "count": 6
+    },
+    {
+      "path": "scripts/whatsapp-bridge",
+      "count": 5
     }
   ],
   "top_unique_to_local": [
     {
-      "path": "tests/gateway",
-      "count": 174
-    },
-    {
-      "path": "skills/creative",
-      "count": 165
-    },
-    {
-      "path": "tests/tools",
-      "count": 152
-    },
-    {
-      "path": "website/docs",
-      "count": 127
-    },
-    {
-      "path": "ui-tui/packages",
-      "count": 126
-    },
-    {
-      "path": "tests/hermes_cli",
-      "count": 122
-    },
-    {
-      "path": "ui-tui/src",
-      "count": 103
-    },
-    {
-      "path": "optional-skills/mlops",
-      "count": 81
-    },
-    {
       "path": "crates/hermes-tools",
       "count": 68
     },
     {
-      "path": "skills/productivity",
-      "count": 66
+      "path": "crates/hermes-gateway",
+      "count": 45
+    },
+    {
+      "path": "crates/hermes-agent",
+      "count": 43
+    },
+    {
+      "path": "crates/hermes-intelligence",
+      "count": 36
+    },
+    {
+      "path": "crates/hermes-cli",
+      "count": 33
+    },
+    {
+      "path": "crates/hermes-config",
+      "count": 18
+    },
+    {
+      "path": "crates/hermes-environments",
+      "count": 13
+    },
+    {
+      "path": "crates/hermes-core",
+      "count": 11
+    },
+    {
+      "path": "crates/hermes-eval",
+      "count": 11
+    },
+    {
+      "path": "crates/hermes-parity-tests",
+      "count": 11
+    },
+    {
+      "path": "crates/hermes-cron",
+      "count": 9
+    },
+    {
+      "path": "crates/hermes-acp",
+      "count": 8
+    },
+    {
+      "path": "crates/hermes-mcp",
+      "count": 7
+    },
+    {
+      "path": "crates/hermes-skills",
+      "count": 7
+    },
+    {
+      "path": "crates/hermes-http",
+      "count": 5
+    },
+    {
+      "path": "crates/hermes-auth",
+      "count": 3
+    },
+    {
+      "path": "crates/hermes-telemetry",
+      "count": 3
+    },
+    {
+      "path": "docs/parity",
+      "count": 3
+    },
+    {
+      "path": ".github/workflows",
+      "count": 2
+    },
+    {
+      "path": "crates/hermes-rl",
+      "count": 2
+    },
+    {
+      "path": ".ci/clippy-allowlist.txt",
+      "count": 1
+    },
+    {
+      "path": "Cargo.lock",
+      "count": 1
+    },
+    {
+      "path": "Cargo.toml",
+      "count": 1
+    },
+    {
+      "path": "NOTICE",
+      "count": 1
+    },
+    {
+      "path": "PARITY_PLAN.md",
+      "count": 1
+    },
+    {
+      "path": "README_JA.md",
+      "count": 1
+    },
+    {
+      "path": "README_KO.md",
+      "count": 1
+    },
+    {
+      "path": "README_ZH.md",
+      "count": 1
+    },
+    {
+      "path": "UPSTREAM_ATTRIBUTION.md",
+      "count": 1
+    },
+    {
+      "path": "docs/installer-troubleshooting.md",
+      "count": 1
+    },
+    {
+      "path": "docs/upstream-sync.md",
+      "count": 1
+    },
+    {
+      "path": "docs/upstream-webhook-sync.md",
+      "count": 1
+    },
+    {
+      "path": "scripts/check-runtime-placeholders.sh",
+      "count": 1
+    },
+    {
+      "path": "scripts/clippy-warning-gate.sh",
+      "count": 1
+    },
+    {
+      "path": "scripts/cron-upstream-sync.sh",
+      "count": 1
+    },
+    {
+      "path": "scripts/generate-homebrew-formula.sh",
+      "count": 1
+    },
+    {
+      "path": "scripts/generate-parity-matrix.py",
+      "count": 1
+    },
+    {
+      "path": "scripts/git-hooks",
+      "count": 1
+    },
+    {
+      "path": "scripts/install-upstream-sync-cron.sh",
+      "count": 1
+    },
+    {
+      "path": "scripts/install-upstream-webhook-launchd.sh",
+      "count": 1
+    }
+  ],
+  "workstream_matrix": [
+    {
+      "workstream": "WS6",
+      "issue": 10,
+      "name": "Tests and CI parity",
+      "upstream_only": 703,
+      "shared_different": 0,
+      "local_only": 2,
+      "risk": "high",
+      "effort": "XL"
+    },
+    {
+      "workstream": "WS4",
+      "issue": 8,
+      "name": "Skills parity",
+      "upstream_only": 624,
+      "shared_different": 0,
+      "local_only": 0,
+      "risk": "high",
+      "effort": "XL"
+    },
+    {
+      "workstream": "WS5",
+      "issue": 9,
+      "name": "UX parity",
+      "upstream_only": 451,
+      "shared_different": 0,
+      "local_only": 6,
+      "risk": "high",
+      "effort": "XL"
+    },
+    {
+      "workstream": "WS8",
+      "issue": 12,
+      "name": "Compatibility and divergence policy",
+      "upstream_only": 196,
+      "shared_different": 8,
+      "local_only": 140,
+      "risk": "medium",
+      "effort": "L"
+    },
+    {
+      "workstream": "WS3",
+      "issue": 7,
+      "name": "Tools and adapters parity",
+      "upstream_only": 161,
+      "shared_different": 0,
+      "local_only": 85,
+      "risk": "high",
+      "effort": "L"
+    },
+    {
+      "workstream": "WS2",
+      "issue": 6,
+      "name": "Core runtime parity",
+      "upstream_only": 49,
+      "shared_different": 0,
+      "local_only": 129,
+      "risk": "critical",
+      "effort": "M"
+    },
+    {
+      "workstream": "WS7",
+      "issue": 11,
+      "name": "Security/secrets/store/webhook parity",
+      "upstream_only": 0,
+      "shared_different": 0,
+      "local_only": 5,
+      "risk": "critical",
+      "effort": "S"
+    }
+  ],
+  "commit_mapping": {
+    "upstream_patch_missing": 4455,
+    "upstream_patch_represented": 4,
+    "local_patch_unique": 96,
+    "local_patch_equivalent_to_upstream": 1,
+    "upstream_patch_missing_sample": [
+      "21d80ca68346dfdb8d3556015a723a9217f8566f",
+      "122d8788ae2308dd222eafec393a6862a2e39574",
+      "a49596cbb2c17686f2c6de47393e3c419e4c9444",
+      "6d346250b18df94878f7bcc27604c6e9f51208b0",
+      "bab9c75b5b40bfa8788aaec8a3c6f606bb60d240",
+      "45d0b0b1427b965bd7a61f1510dee5cf2479aa0a",
+      "10b4cfeace2487980cf682808e0613dd099f2167",
+      "bf4223f3818fb5654550b059e416425cb06ab5e2",
+      "cde7e64418e00a1337325e1259a7f8ba7e563315",
+      "3078053795e838e47797ede02b44e6dead731aac",
+      "ebb46ba0e6a70dc1caa0005ca4449a63e0657ad1",
+      "bc71dffd4cb7586bd82501f6897ccca1255c2e1c",
+      "e1710378b7388714b75c8c96ecb917193faf92fc",
+      "f4ff1f496b259d10316f81af52d16756ab274666",
+      "58d5fa1e4cec2783962328d887b12810d6de0c8c",
+      "96cff783357c785ea1ba8a1e61f923364e29f2bd",
+      "4ece87efb0ddb477565a90917538cd6497ce708f",
+      "587d1cf720950dbb7f9b4afb527d2d4898574c7f",
+      "c7fa4447b831e2320b7d07e451bbef63dbf28cf3",
+      "17608c11422bc1bea8c8c2e2032c41cd4ac57a7a"
+    ],
+    "upstream_patch_represented_sample": [
+      "1f6a1f0028e1d5bcf1a3621f53ad1e16b6398ad0",
+      "612321631faa9021379e62d467626e52154d3983",
+      "4b35836ba42a59a669699197573a969431b4df44",
+      "3baafea380ec18a6179fe3e82d742557d66389e4"
+    ],
+    "local_patch_unique_sample": [
+      "7a2bcf75a59e4b7d8da3d9efb067ee3d4b51bb43",
+      "196cc967c3f005686f865ed48343e20e8c1baab2",
+      "3889597f305ca49c51706b401071d5815280c6f0",
+      "856c1c7472ff9adc78dd6ac53b63b651620ee759",
+      "36db6132720024f83cf3be18f0dd5c6390c59363",
+      "11999b59078e8b5cd147203cc43c8fc5172eb398",
+      "0134a66fe419b2c283a109acb802d62368c30029",
+      "b43ab8966414a986b57ec22b97770b7cab898d7f",
+      "a0b4d93b716826d910609ba1920717c593bd1b97",
+      "85388f6d81f3b11187dc171145fda503cd1c7667",
+      "a561062d61718c4bab058604a7b5f41a41392be5",
+      "96d3d5e858b5873fa0ae2d6a98f17824358a67f0",
+      "7c19c81067b8f503efe27664d74aca0fc2005b37",
+      "2d1688a1666e6c01513b945173f5b416f5a4dcb3",
+      "82c8c85faf1111417edd16ec94ce0e37395ec897",
+      "6b8d35e195cfea68ed5adcf27c52df273db01875",
+      "a80db057f53da5272655b5da1b8182d885b489e9",
+      "e1191e6cac51324be767eae6c1c8e97336bda018",
+      "d7694db691baff7d8f6c8e6c5264b1617587c09b",
+      "42a7d078a49f6783a97db73a2984534db528e153"
+    ],
+    "local_patch_equivalent_sample": [
+      "b1d41bf1859700455bc89c420a0efd12dec5950b"
+    ],
+    "intentional_divergence_items": 3,
+    "intentional_divergence_covered_files": 10
+  },
+  "intentional_divergence": [
+    {
+      "id": "ultra-contextlattice-memory-plugin",
+      "status": "approved",
+      "workstream": "WS3",
+      "summary": "Keep ContextLattice native memory plugin and provider discovery in the Rust agent runtime.",
+      "matched_files": 2,
+      "matched_sample": [
+        "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
+        "crates/hermes-agent/src/memory_plugins/mod.rs"
+      ]
+    },
+    {
+      "id": "ultra-webhook-queue-backends",
+      "status": "approved",
+      "workstream": "WS7",
+      "summary": "Preserve webhook-driven sync queue worker architecture with sqlite, SQS, and Kafka support.",
+      "matched_files": 4,
+      "matched_sample": [
+        "docs/upstream-webhook-sync.md",
+        "scripts/run-upstream-webhook-listener.sh",
+        "scripts/run-upstream-webhook-worker.sh",
+        "scripts/upstream_webhook_sync.py"
+      ]
+    },
+    {
+      "id": "ultra-launchd-webhook-lifecycle",
+      "status": "approved",
+      "workstream": "WS7",
+      "summary": "Preserve launchd-based interactive dev lifecycle management for webhook listener and worker.",
+      "matched_files": 4,
+      "matched_sample": [
+        "scripts/install-upstream-webhook-launchd.sh",
+        "scripts/setup-upstream-webhook-launchd.sh",
+        "scripts/status-upstream-webhook-launchd.sh",
+        "scripts/uninstall-upstream-webhook-launchd.sh"
+      ]
     }
   ]
 }
