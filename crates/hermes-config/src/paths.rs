@@ -181,7 +181,10 @@ mod tests {
         std::env::remove_var("HERMES_HOME");
         std::env::set_var("HERMES_AGENT_ULTRA_HOME", "/tmp/test-hermes-ultra");
         assert_eq!(hermes_home(), PathBuf::from("/tmp/test-hermes-ultra"));
-        assert_eq!(config_path(), PathBuf::from("/tmp/test-hermes-ultra/config.yaml"));
+        assert_eq!(
+            config_path(),
+            PathBuf::from("/tmp/test-hermes-ultra/config.yaml")
+        );
         std::env::remove_var("HERMES_AGENT_ULTRA_HOME");
 
         // Restore

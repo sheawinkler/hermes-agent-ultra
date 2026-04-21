@@ -6264,7 +6264,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tests/agent/__init__.py",
         "tests/agent/test_context_compressor.py",
@@ -6278,8 +6278,8 @@
         "tests/tools/test_session_search.py"
       ],
       "files_touched": 10,
-      "notes": "",
-      "owner": "",
+      "notes": "Ported via Rust contract tests for process_registry behavior in crates/hermes-tools/tests/contract_process_registry_and_clarify.rs and expanded process_registry handler capabilities.",
+      "owner": "sheawinkler",
       "sha": "ffbdd7fcce12f460f3cb1a14459abf74486abc38",
       "subject": "test: add unit tests for 8 modules (batch 2)",
       "target_ticket": 20,
@@ -6793,13 +6793,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tests/tools/test_clarify_tool.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "Ported via clarify tool behavior hardening (question validation, choices normalization/max limit) and Rust contract/unit tests.",
+      "owner": "sheawinkler",
       "sha": "df8a62d018519e878ee866e117fc1969e64e7e9a",
       "subject": "test(tools): add unit tests for clarify_tool.py",
       "target_ticket": 20,
@@ -68572,7 +68572,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     }
   ],
-  "generated_at_utc": "2026-04-21T16:25:18.443542+00:00",
+  "generated_at_utc": "2026-04-21T16:52:38.130423+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -68580,7 +68580,8 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4509
+      "pending": 4507,
+      "ported": 2
     },
     "by_target_ticket": {
       "20": 1607,
