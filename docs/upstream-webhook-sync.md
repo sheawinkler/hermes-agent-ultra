@@ -121,6 +121,26 @@ python3 scripts/upstream_webhook_sync.py worker \
 
 ## launchd Deployment (Recommended on macOS)
 
+Single-command guided setup (recommended):
+
+```bash
+bash scripts/setup-upstream-webhook-launchd.sh
+```
+
+This command will:
+
+- scaffold/update launchd plist files and env file
+- show what is already configured (with secret masking)
+- prompt for missing critical values in interactive terminals
+- load/start listener + worker and print final status/log tails
+
+Non-interactive examples:
+
+```bash
+bash scripts/setup-upstream-webhook-launchd.sh --show-only
+bash scripts/setup-upstream-webhook-launchd.sh --set GITHUB_WEBHOOK_SECRET=your_secret_here
+```
+
 Install user agents:
 
 ```bash
