@@ -765,7 +765,7 @@ pub async fn handle_cli_chat(
     preload_skill: Option<String>,
     yolo: bool,
 ) -> Result<(), hermes_core::AgentError> {
-    use crate::runtime_tool_wiring::wire_cron_scheduler_backend;
+    use crate::runtime_tool_wiring::{wire_cron_scheduler_backend, wire_stdio_clarify_backend};
     use hermes_config::load_config;
     use hermes_core::MessageRole;
     use hermes_cron::cron_scheduler_for_data_dir;
@@ -795,6 +795,7 @@ pub async fn handle_cli_chat(
     let skill_provider: Arc<dyn hermes_core::SkillProvider> =
         Arc::new(SkillManager::new(skill_store));
     hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
+    wire_stdio_clarify_backend(&tool_registry);
     let cron_data_dir = hermes_config::cron_dir();
     std::fs::create_dir_all(&cron_data_dir)
         .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
@@ -4204,6 +4205,7 @@ pub async fn handle_cli_acp(action: Option<String>) -> Result<(), hermes_core::A
             let skill_provider: Arc<dyn hermes_core::SkillProvider> =
                 Arc::new(hermes_skills::SkillManager::new(skill_store));
             hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
+            crate::runtime_tool_wiring::wire_stdio_clarify_backend(&tool_registry);
             let cron_data_dir = hermes_config::cron_dir();
             std::fs::create_dir_all(&cron_data_dir)
                 .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;

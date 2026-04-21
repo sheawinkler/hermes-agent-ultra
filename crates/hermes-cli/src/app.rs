@@ -28,7 +28,7 @@ use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_tools::ToolRegistry;
 
 use crate::cli::Cli;
-use crate::runtime_tool_wiring::wire_cron_scheduler_backend;
+use crate::runtime_tool_wiring::{wire_cron_scheduler_backend, wire_stdio_clarify_backend};
 use crate::tui::StreamHandle;
 
 // ---------------------------------------------------------------------------
@@ -132,6 +132,7 @@ impl App {
         let skill_provider: Arc<dyn hermes_core::SkillProvider> =
             Arc::new(SkillManager::new(skill_store));
         hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
+        wire_stdio_clarify_backend(&tool_registry);
         let cron_data_dir = cron_dir();
         std::fs::create_dir_all(&cron_data_dir)
             .map_err(|e| AgentError::Io(format!("cron dir {}: {}", cron_data_dir.display(), e)))?;

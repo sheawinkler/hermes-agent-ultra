@@ -16,6 +16,22 @@ fn e2e_cli_gateway_status_command_runs() {
 }
 
 #[test]
+fn e2e_cli_tools_list_shows_registered_tools() {
+    let mut cmd = Command::cargo_bin("hermes").expect("binary exists");
+    cmd.args(["tools", "list"]);
+    let out = cmd.assert().success().get_output().stdout.clone();
+    let text = std::str::from_utf8(&out).expect("utf8");
+    assert!(
+        text.contains("send_message"),
+        "expected send_message in tools list: {text:?}"
+    );
+    assert!(
+        text.contains("clarify"),
+        "expected clarify in tools list: {text:?}"
+    );
+}
+
+#[test]
 fn e2e_cli_config_set_persists_model_to_yaml() {
     let dir = tempfile::tempdir().expect("tempdir");
     let mut cmd = Command::cargo_bin("hermes").expect("binary exists");
