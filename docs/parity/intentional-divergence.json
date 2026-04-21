@@ -5,6 +5,11 @@
       "status": "approved",
       "workstream": "WS3",
       "summary": "Keep ContextLattice native memory plugin and provider discovery in the Rust agent runtime.",
+      "owner": "sheawinkler",
+      "ticket": 23,
+      "last_reviewed": "2026-04-21",
+      "review_date": "2026-07-21",
+      "rationale": "This is an intentional Rust-native enhancement that improves memory orchestration and does not replace or remove upstream behavior.",
       "path_prefixes": [
         "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
         "crates/hermes-agent/src/memory_plugins/mod.rs"
@@ -15,6 +20,11 @@
       "status": "approved",
       "workstream": "WS7",
       "summary": "Preserve webhook-driven sync queue worker architecture with sqlite, SQS, and Kafka support.",
+      "owner": "sheawinkler",
+      "ticket": 26,
+      "last_reviewed": "2026-04-21",
+      "review_date": "2026-07-21",
+      "rationale": "Queue backend plurality (sqlite/SQS/Kafka) is an ultra reliability extension for upstream sync maintenance and does not reduce upstream parity scope.",
       "path_prefixes": [
         "scripts/upstream_webhook_sync.py",
         "scripts/run-upstream-webhook-listener.sh",
@@ -27,6 +37,11 @@
       "status": "approved",
       "workstream": "WS7",
       "summary": "Preserve launchd-based interactive dev lifecycle management for webhook listener and worker.",
+      "owner": "sheawinkler",
+      "ticket": 26,
+      "last_reviewed": "2026-04-21",
+      "review_date": "2026-07-21",
+      "rationale": "launchd lifecycle is a macOS operational hardening layer for development upkeep and is intentionally additive.",
       "path_prefixes": [
         "scripts/install-upstream-webhook-launchd.sh",
         "scripts/setup-upstream-webhook-launchd.sh",
@@ -39,6 +54,11 @@
       "status": "approved",
       "workstream": "WS4",
       "summary": "Track upstream skills and optional-skills catalogs via parity audits while keeping Rust runtime skill loading externalized (no direct Python skill-tree vendoring).",
+      "owner": "sheawinkler",
+      "ticket": 21,
+      "last_reviewed": "2026-04-21",
+      "review_date": "2026-06-30",
+      "rationale": "Skills parity is delivered by catalog governance and runtime contract equivalence rather than vendoring Python implementation trees in a Rust-first repo.",
       "path_prefixes": [
         "skills/",
         "optional-skills/"
@@ -49,6 +69,11 @@
       "status": "approved",
       "workstream": "WS5",
       "summary": "Treat Rust CLI/TUI and gateway as primary UX surface; upstream web/ui-tui trees are tracked as intentional divergence unless explicitly ported.",
+      "owner": "sheawinkler",
+      "ticket": 22,
+      "last_reviewed": "2026-04-21",
+      "review_date": "2026-06-30",
+      "rationale": "User-facing runtime parity is provided via Rust CLI/TUI/gateway. Web/ui-tui trees remain tracked and auditable, but not auto-vendored.",
       "path_prefixes": [
         "web/",
         "ui-tui/",
