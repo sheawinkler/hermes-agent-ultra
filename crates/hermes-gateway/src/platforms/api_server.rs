@@ -5,7 +5,7 @@
 //! interact with the Hermes Agent gateway.
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -34,10 +34,65 @@ pub struct ApiServerConfig {
 }
 
 fn default_host() -> String {
-    "0.0.0.0".to_string()
+    "127.0.0.1".to_string()
 }
 fn default_port() -> u16 {
     8090
+}
+
+fn ip_is_network_accessible(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(v4) => !v4.is_loopback(),
+        IpAddr::V6(v6) => {
+            if v6.is_loopback() {
+                return false;
+            }
+            if let Some(mapped) = v6.to_ipv4_mapped() {
+                return !mapped.is_loopback();
+            }
+            true
+        }
+    }
+}
+
+fn is_network_accessible_with_lookup<F>(host: &str, lookup: F) -> bool
+where
+    F: Fn(&str) -> std::io::Result<Vec<IpAddr>>,
+{
+    let trimmed = host.trim();
+    let candidate = trimmed
+        .strip_prefix('[')
+        .and_then(|v| v.strip_suffix(']'))
+        .unwrap_or(trimmed);
+    if candidate.is_empty() {
+        return true;
+    }
+
+    if let Ok(ip) = candidate.parse::<IpAddr>() {
+        return ip_is_network_accessible(ip);
+    }
+
+    match lookup(candidate) {
+        Ok(ips) => {
+            if ips.is_empty() {
+                return true;
+            }
+            ips.into_iter().any(ip_is_network_accessible)
+        }
+        Err(_) => true,
+    }
+}
+
+fn is_network_accessible(host: &str) -> bool {
+    is_network_accessible_with_lookup(host, |candidate| {
+        (candidate, 0_u16)
+            .to_socket_addrs()
+            .map(|iter| iter.map(|addr| addr.ip()).collect())
+    })
+}
+
+fn requires_auth_token_for_bind(host: &str, auth_token: Option<&str>) -> bool {
+    is_network_accessible(host) && auth_token.unwrap_or_default().trim().is_empty()
 }
 
 impl Default for ApiServerConfig {
@@ -271,6 +326,13 @@ impl PlatformAdapter for ApiServerAdapter {
             "API server adapter starting on {}:{}",
             self.config.host, self.config.port
         );
+
+        if requires_auth_token_for_bind(&self.config.host, self.config.auth_token.as_deref()) {
+            return Err(GatewayError::Auth(format!(
+                "Refusing to bind API server to '{}' without auth token. Set api_server.auth_token (or API_SERVER_KEY) or bind to loopback.",
+                self.config.host
+            )));
+        }
 
         let addr: SocketAddr = format!("{}:{}", self.config.host, self.config.port)
             .parse()
@@ -829,5 +891,52 @@ mod tests {
             },
         ];
         assert!(build_prompt_from_messages(&msgs).is_none());
+    }
+
+    #[test]
+    fn network_accessibility_classifies_ip_binds() {
+        assert!(!is_network_accessible("127.0.0.1"));
+        assert!(!is_network_accessible("::1"));
+        assert!(!is_network_accessible("::ffff:127.0.0.1"));
+        assert!(is_network_accessible("0.0.0.0"));
+        assert!(is_network_accessible("::"));
+        assert!(is_network_accessible("10.0.0.1"));
+        assert!(is_network_accessible("::ffff:0.0.0.0"));
+    }
+
+    #[test]
+    fn network_accessibility_hostname_resolution_is_fail_closed() {
+        assert!(!is_network_accessible_with_lookup("localhost", |_| {
+            Ok(vec!["127.0.0.1".parse().expect("loopback should parse")])
+        }));
+
+        assert!(is_network_accessible_with_lookup(
+            "dual-stack.local",
+            |_| {
+                Ok(vec![
+                    "127.0.0.1".parse().expect("loopback should parse"),
+                    "10.0.0.7".parse().expect("private ip should parse"),
+                ])
+            }
+        ));
+
+        assert!(is_network_accessible_with_lookup(
+            "nonexistent.invalid",
+            |_| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "resolution failed",
+                ))
+            }
+        ));
+    }
+
+    #[test]
+    fn bind_guard_requires_token_only_for_network_accessible_hosts() {
+        assert!(!requires_auth_token_for_bind("127.0.0.1", None));
+        assert!(!requires_auth_token_for_bind("::1", Some(" ")));
+        assert!(requires_auth_token_for_bind("0.0.0.0", None));
+        assert!(requires_auth_token_for_bind("::", Some("")));
+        assert!(!requires_auth_token_for_bind("0.0.0.0", Some("sk-test")));
     }
 }

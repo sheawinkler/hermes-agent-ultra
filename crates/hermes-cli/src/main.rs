@@ -1911,14 +1911,15 @@ async fn configure_platform_basic_prompts(
             set_extra_string_if_nonempty(p, "path", &path);
         }
         "api_server" => {
-            let host = prompt_line("API server host (default 0.0.0.0): ").await?;
+            let host = prompt_line("API server host (default 127.0.0.1): ").await?;
             set_extra_string_if_nonempty(p, "host", &host);
             let port = prompt_line("API server port (default 8090): ").await?;
             if let Ok(v) = port.trim().parse::<u16>() {
                 p.extra
                     .insert("port".to_string(), serde_json::Value::from(v));
             }
-            let token = prompt_line("API server auth_token (optional): ").await?;
+            let token =
+                prompt_line("API server auth_token (required for non-loopback host): ").await?;
             set_extra_string_if_nonempty(p, "auth_token", &token);
         }
         _ => {}
@@ -2342,7 +2343,7 @@ fn gateway_requirement_issues(config: &hermes_config::GatewayConfig) -> Vec<Stri
 
 fn build_api_server_config(platform_cfg: &PlatformConfig) -> ApiServerConfig {
     ApiServerConfig {
-        host: extra_string(platform_cfg, "host").unwrap_or_else(|| "0.0.0.0".to_string()),
+        host: extra_string(platform_cfg, "host").unwrap_or_else(|| "127.0.0.1".to_string()),
         port: extra_u16(platform_cfg, "port", 8090),
         auth_token: platform_token_or_extra(platform_cfg)
             .or_else(|| extra_string(platform_cfg, "auth_token")),
@@ -6390,6 +6391,41 @@ mod tests {
             DmManager::with_pair_behavior(),
             hermes_gateway::gateway::GatewayConfig::default(),
         ))
+    }
+
+    #[test]
+    fn api_server_config_defaults_to_loopback() {
+        let platform = PlatformConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        let cfg = build_api_server_config(&platform);
+        assert_eq!(cfg.host, "127.0.0.1");
+        assert_eq!(cfg.port, 8090);
+        assert_eq!(cfg.auth_token, None);
+    }
+
+    #[test]
+    fn api_server_config_honors_overrides_and_token_precedence() {
+        let mut platform = PlatformConfig {
+            enabled: true,
+            token: Some("platform-token".to_string()),
+            ..Default::default()
+        };
+        platform
+            .extra
+            .insert("host".to_string(), serde_json::json!("0.0.0.0"));
+        platform
+            .extra
+            .insert("port".to_string(), serde_json::json!(9123));
+        platform
+            .extra
+            .insert("auth_token".to_string(), serde_json::json!("extra-token"));
+
+        let cfg = build_api_server_config(&platform);
+        assert_eq!(cfg.host, "0.0.0.0");
+        assert_eq!(cfg.port, 9123);
+        assert_eq!(cfg.auth_token.as_deref(), Some("platform-token"));
     }
 
     #[test]
