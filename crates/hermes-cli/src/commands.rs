@@ -765,8 +765,10 @@ pub async fn handle_cli_chat(
     preload_skill: Option<String>,
     yolo: bool,
 ) -> Result<(), hermes_core::AgentError> {
+    use crate::runtime_tool_wiring::wire_cron_scheduler_backend;
     use hermes_config::load_config;
     use hermes_core::MessageRole;
+    use hermes_cron::cron_scheduler_for_data_dir;
     use hermes_environments::LocalBackend;
     use hermes_skills::{FileSkillStore, SkillManager};
     use hermes_tools::ToolRegistry;
@@ -793,6 +795,16 @@ pub async fn handle_cli_chat(
     let skill_provider: Arc<dyn hermes_core::SkillProvider> =
         Arc::new(SkillManager::new(skill_store));
     hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
+    let cron_data_dir = hermes_config::cron_dir();
+    std::fs::create_dir_all(&cron_data_dir)
+        .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+    let cron_scheduler = Arc::new(cron_scheduler_for_data_dir(cron_data_dir));
+    cron_scheduler
+        .load_persisted_jobs()
+        .await
+        .map_err(|e| hermes_core::AgentError::Config(format!("cron load: {e}")))?;
+    cron_scheduler.start().await;
+    wire_cron_scheduler_backend(&tool_registry, cron_scheduler);
     let agent_tool_registry = Arc::new(crate::app::bridge_tool_registry(&tool_registry));
 
     let agent_config = crate::app::build_agent_config(&config, &current_model);
@@ -4192,6 +4204,16 @@ pub async fn handle_cli_acp(action: Option<String>) -> Result<(), hermes_core::A
             let skill_provider: Arc<dyn hermes_core::SkillProvider> =
                 Arc::new(hermes_skills::SkillManager::new(skill_store));
             hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
+            let cron_data_dir = hermes_config::cron_dir();
+            std::fs::create_dir_all(&cron_data_dir)
+                .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+            let cron_scheduler = Arc::new(hermes_cron::cron_scheduler_for_data_dir(cron_data_dir));
+            cron_scheduler
+                .load_persisted_jobs()
+                .await
+                .map_err(|e| hermes_core::AgentError::Config(format!("cron load: {e}")))?;
+            cron_scheduler.start().await;
+            crate::runtime_tool_wiring::wire_cron_scheduler_backend(&tool_registry, cron_scheduler);
 
             let prompt_executor = Arc::new(CliAcpPromptExecutor {
                 config: Arc::new(config.clone()),
