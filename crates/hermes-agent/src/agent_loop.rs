@@ -650,8 +650,19 @@ pub enum ErrorClass {
 
 fn classify_error(err: &str) -> ErrorClass {
     let lower = err.to_lowercase();
+    let model_not_found = lower.contains("model not found")
+        || lower.contains("invalid model")
+        || lower.contains("no such model")
+        || lower.contains("unknown model");
+
     if lower.contains("rate limit") || lower.contains("429") || lower.contains("too many") {
         ErrorClass::RateLimit
+    } else if lower.contains("404") || lower.contains("not found") {
+        if model_not_found {
+            ErrorClass::Fatal
+        } else {
+            ErrorClass::Retryable
+        }
     } else if lower.contains("context length")
         || lower.contains("maximum context")
         || lower.contains("token limit")
@@ -4692,6 +4703,27 @@ mod tests {
         let msgs = vec![Message::assistant("Nothing to save.")];
         let out = summarize_background_review_result(&msgs);
         assert!(out.is_none());
+    }
+
+    #[test]
+    fn classify_error_404_generic_is_retryable() {
+        assert_eq!(classify_error("HTTP 404 Not Found"), ErrorClass::Retryable);
+        assert_eq!(
+            classify_error("gateway returned not found"),
+            ErrorClass::Retryable
+        );
+    }
+
+    #[test]
+    fn classify_error_404_model_not_found_is_fatal() {
+        assert_eq!(
+            classify_error("404 model not found: foo/bar"),
+            ErrorClass::Fatal
+        );
+        assert_eq!(
+            classify_error("invalid model: gpt-unknown"),
+            ErrorClass::Fatal
+        );
     }
 
     #[test]
