@@ -70026,14 +70026,14 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "hermes_cli/env_loader.py",
         "tests/hermes_cli/test_env_loader.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in b9b6ee8e (sanitize project .env before fallback load in Rust config loader)",
+      "owner": "codex_gpt5",
       "sha": "83cb9a03ee59fc4336a465dac9a79e736bb6c803",
       "subject": "fix(cli): ensure project .env is sanitized before loading",
       "target_ticket": 20,
@@ -70087,7 +70087,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tests/tools/test_file_operations.py",
         "tests/tools/test_file_operations_edge_cases.py",
@@ -70096,8 +70096,8 @@
         "tools/file_tools.py"
       ],
       "files_touched": 5,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in ded528b9 (Rust file tool pagination normalization + files pagination)",
+      "owner": "codex_gpt5",
       "sha": "40619b393fd997cde206557dcf6599d113ca2cf9",
       "subject": "tools: normalize file tool pagination bounds",
       "target_ticket": 20,
@@ -70870,7 +70870,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     }
   ],
-  "generated_at_utc": "2026-04-22T22:10:58.151466+00:00",
+  "generated_at_utc": "2026-04-22T22:23:25.620880+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -70878,8 +70878,8 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 67,
-      "ported": 66,
+      "pending": 65,
+      "ported": 68,
       "superseded": 4521
     },
     "by_target_ticket": {

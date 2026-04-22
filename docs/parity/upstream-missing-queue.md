@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-22T22:10:58.151466+00:00`
+Generated: `2026-04-22T22:23:25.620880+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `4654`.
 
@@ -16,8 +16,8 @@ Generated: `2026-04-22T22:10:58.151466+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 67 |
-| ported | 66 |
+| pending | 65 |
+| ported | 68 |
 | superseded | 4521 |
 
 ## First 100 Pending Commits
@@ -35,11 +35,9 @@ Generated: `2026-04-22T22:10:58.151466+00:00`
 | `b66644f0ecce` | #23 | feat(hindsight): richer session-scoped retain metadata |
 | `ba7e8b0df9ee` | #26 | chore(release): map Abner email to Abnertheforeman |
 | `cf55c738e79b` | #23 | refactor(qqbot): migrate qr onboard flow to sync + consolidate into onboard.py |
-| `83cb9a03ee59` | #20 | fix(cli): ensure project .env is sanitized before loading |
 | `be11a75eaec4` | #26 | chore(release): map hharry11 email to GitHub handle |
 | `5fb143169b4e` | #20 | feat(dashboard): track real API call count per session |
 | `3e652f75b27b` | #20 | fix(plugins+nous): auto-coerce memory plugins; actionable Nous 401 diagnostic (#14005) |
-| `40619b393fd9` | #20 | tools: normalize file tool pagination bounds |
 | `77e04a29d574` | #20 | fix(error_classifier): don't classify generic 404 as model_not_found (#14013) |
 | `2efb0eea211a` | #26 | fix(anthropic_adapter): preserve reasoning_content on assistant tool-call messages for Kimi /coding |
 | `97a536057ddf` | #26 | chore(release): add hiddenpuppy to AUTHOR_MAP |
