@@ -133,6 +133,33 @@ fn resolve_path(input: &str) -> Result<PathBuf, AgentError> {
     Ok(PathBuf::from(input))
 }
 
+const SUBPROCESS_ENV_BLOCKLIST_EXACT: &[&str] = &[
+    "HERMES_ENABLE_NOUS_MANAGED_TOOLS",
+    "HERMES_POLICY_ADMIN_TOKEN",
+];
+
+const SUBPROCESS_ENV_BLOCKLIST_PREFIXES: &[&str] = &[
+    "TOOL_GATEWAY_",
+    "HERMES_MANAGED_TOOL_GATEWAY_",
+    "HERMES_GATEWAY_",
+    "HERMES_HTTP_",
+];
+
+fn should_strip_subprocess_env(key: &str) -> bool {
+    SUBPROCESS_ENV_BLOCKLIST_EXACT.contains(&key)
+        || SUBPROCESS_ENV_BLOCKLIST_PREFIXES
+            .iter()
+            .any(|prefix| key.starts_with(prefix))
+}
+
+fn scrub_subprocess_env(cmd: &mut TokioCommand) {
+    for (key, _) in std::env::vars() {
+        if should_strip_subprocess_env(&key) {
+            cmd.env_remove(key);
+        }
+    }
+}
+
 impl Default for LocalBackend {
     fn default() -> Self {
         Self::new(120, 1_048_576)
@@ -167,6 +194,7 @@ impl TerminalBackend for LocalBackend {
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .stdin(Stdio::null());
+                scrub_subprocess_env(&mut pty_cmd);
 
                 if let Some(dir) = workdir {
                     pty_cmd.current_dir(resolve_path(dir)?);
@@ -216,6 +244,7 @@ impl TerminalBackend for LocalBackend {
             .arg(command)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        scrub_subprocess_env(&mut cmd);
 
         if let Some(dir) = workdir {
             cmd.current_dir(resolve_path(dir)?);
@@ -512,5 +541,28 @@ mod tests {
         let expanded = td.path().join("nested/path/test.txt");
         let content = std::fs::read_to_string(&expanded).unwrap();
         assert_eq!(content, "ok");
+    }
+
+    #[tokio::test]
+    async fn test_execute_command_strips_gateway_env_vars() {
+        let _token_guard = EnvGuard::set("TOOL_GATEWAY_USER_TOKEN", "should-not-leak");
+        let _managed_guard = EnvGuard::set("HERMES_ENABLE_NOUS_MANAGED_TOOLS", "1");
+        let _http_guard = EnvGuard::set("HERMES_HTTP_API_KEY", "secret-http-key");
+        let _safe_guard = EnvGuard::set("SAFE_PASSTHRU_TEST", "ok");
+        let backend = LocalBackend::default();
+
+        let output = backend
+            .execute_command(
+                "printf '%s|%s|%s|%s' \"${TOOL_GATEWAY_USER_TOKEN:-}\" \"${HERMES_ENABLE_NOUS_MANAGED_TOOLS:-}\" \"${HERMES_HTTP_API_KEY:-}\" \"${SAFE_PASSTHRU_TEST:-}\"",
+                None,
+                None,
+                false,
+                false,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(output.stdout, "|||ok");
     }
 }
