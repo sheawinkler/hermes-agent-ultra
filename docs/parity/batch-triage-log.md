@@ -51,3 +51,25 @@
     - `docs/parity/upstream-missing-queue.md`
     - `docs/parity/global-parity-proof.json`
     - `docs/parity/global-parity-proof.md`
+
+## 2026-04-22 batch-05 (`@` reference security parity + worktree triage)
+- Scope: WG1 context reference hardening and adjacent queue triage.
+- Upstream commits:
+  - `2d8fad8230d1535d7a0e76c11adee7030f3ebaf3`
+    `fix(context): restrict @ references to safe workspace paths`
+    - Rust parity commit: `154903e7`
+    - Implementation:
+      - Added `crates/hermes-agent/src/context_references.rs`
+      - Workspace confinement (`allowed_root` defaults to current cwd)
+      - Sensitive path denylist for home and Hermes credential/internal paths
+      - Integrated preprocessor into `AgentLoop::run` for user messages
+      - Added focused regression tests for workspace/sensitive-path behavior
+  - `12bc86d9c92e602ded6f81fa34d7deb6175e5896`
+    `fix: prevent path traversal in .worktreeinclude file processing`
+    - Disposition: `superseded`
+    - Rationale: no `.worktreeinclude` parser/update processing surface exists in the Rust workspace (`rg` scan across crates showed no implementation path to patch).
+- Verification:
+  - `cargo test -p hermes-agent context_references::`
+- Queue/proof refresh:
+  - `docs/parity/upstream-missing-queue.{json,md}`
+  - `docs/parity/global-parity-proof.{json,md}`
