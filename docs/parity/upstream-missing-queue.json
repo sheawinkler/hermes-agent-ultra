@@ -7455,12 +7455,12 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tools/skills_guard.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "ported-rust-2026-04-22: commit a7b9c617 hardened prompt-injection regexes in crates/hermes-skills/src/guard.rs (multi-word bypass coverage)",
       "owner": "codex",
       "sha": "4ea29978fc6778bc5641ed422261366a91d42961",
       "subject": "fix(security): catch multi-word prompt injection in skills_guard",
@@ -9592,12 +9592,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tools/skills_guard.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "ported-rust-2026-04-22: commit a7b9c617 includes disregard multi-word prompt-injection guard hardening",
       "owner": "codex",
       "sha": "ba214e43c86e138b4e1572d3f10a3b259d185fc5",
       "subject": "fix(security): apply same multi-word bypass fix to disregard pattern",
@@ -9605,12 +9605,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tools/skills_guard.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "ported-rust-2026-04-22: commit a7b9c617 systematically hardens additional prompt-injection multi-word patterns",
       "owner": "codex",
       "sha": "021f62cb0ce3818fcc458fa2436304b50363d950",
       "subject": "fix(security): patch multi-word bypass in 8 more injection patterns",
@@ -69414,9 +69414,23 @@
       "subject": "docs: document delegation width + depth knobs (#13745)",
       "target_ticket": 22,
       "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "website/package.json",
+        "website/scripts/prebuild.mjs"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "964b44410700f6802661d5b0dec25192ac227cf5",
+      "subject": "fix(website): run skill extraction automatically on npm run build/start (#13747)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
     }
   ],
-  "generated_at_utc": "2026-04-22T01:00:41.187714+00:00",
+  "generated_at_utc": "2026-04-22T01:04:27.646962+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69424,19 +69438,19 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4186,
-      "ported": 20,
+      "pending": 4184,
+      "ported": 23,
       "superseded": 352
     },
     "by_target_ticket": {
       "20": 1622,
       "21": 199,
-      "22": 516,
+      "22": 517,
       "23": 507,
       "24": 64,
       "25": 152,
       "26": 1498
     },
-    "total_commits": 4558
+    "total_commits": 4559
   }
 }

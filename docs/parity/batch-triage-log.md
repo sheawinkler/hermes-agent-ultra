@@ -103,3 +103,28 @@
 - Queue/proof refresh:
   - `docs/parity/upstream-missing-queue.{json,md}`
   - `docs/parity/global-parity-proof.{json,md}`
+
+## 2026-04-22 batch-07 (skills_guard multi-word injection bypass parity)
+- Scope: WG1 security fixes for prompt-injection regex bypasses in `skills_guard`.
+- Upstream commits ported:
+  - `4ea29978fc6778bc5641ed422261366a91d42961`
+    `fix(security): catch multi-word prompt injection in skills_guard`
+  - `ba214e43c86e138b4e1572d3f10a3b259d185fc5`
+    `fix(security): apply same multi-word bypass fix to disregard pattern`
+  - `021f62cb0ce3818fcc458fa2436304b50363d950`
+    `fix(security): patch multi-word bypass in 8 more injection patterns`
+  - Rust parity commit: `a7b9c617`
+- Implementation (Rust):
+  - `crates/hermes-skills/src/guard.rs`
+  - Added hardened multi-word prompt-injection / exfiltration patterns to the built-in dangerous-pattern set, including:
+    - `ignore ... instructions`
+    - `disregard ... rules/instructions`
+    - role hijack and fake-update patterns
+    - filter-removal directives
+    - conversation/context exfiltration requests
+  - Added focused regression tests for multi-word bypass variants.
+- Verification:
+  - `cargo test -p hermes-skills guard:: -- --nocapture`
+- Queue/proof refresh:
+  - `docs/parity/upstream-missing-queue.{json,md}`
+  - `docs/parity/global-parity-proof.{json,md}`
