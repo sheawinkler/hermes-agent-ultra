@@ -13933,12 +13933,12 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "AGENTS.md"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "cf9482984e49c865519696dbce4121ed8b30e9a3",
       "subject": "docs: condense AGENTS.md from 927 to 242 lines",
@@ -13946,14 +13946,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/config.py",
         "run_agent.py",
         "tests/test_fallback_model.py"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "5785bd327266ee239be39b5a9e727dd7264a13b0",
       "subject": "feat: add openai-codex as fallback provider",
@@ -13961,7 +13961,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py",
         "gateway/run.py",
@@ -13969,7 +13969,7 @@
         "tests/test_quick_commands.py"
       ],
       "files_touched": 4,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "1404f846a70d8802b0545fa65d8b69c3532c879b",
       "subject": "feat(cli,gateway): add user-defined quick commands that bypass agent loop",
@@ -13977,14 +13977,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/config.py",
         "run_agent.py",
         "tests/test_fallback_model.py"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "35d57ed752f250e008490a3bc7f11072d8efa2c7",
       "subject": "refactor: unified OAuth/API-key credential resolution for fallback",
@@ -13992,13 +13992,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/tools_config.py",
         "scripts/install.sh"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG6-packaging-install-docs; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "a130aa81657d637ac3ef19c49255a859eee79964",
       "subject": "fix: first-time setup skips API key prompts + install.sh sudo on WSL",
@@ -14006,12 +14006,12 @@
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/setup.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "e6c829384e3bc06a2a9e9cababf2e74283548123",
       "subject": "fix: setup wizard shows 60 as default max iterations, should be 90",
@@ -14019,12 +14019,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/tools_config.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "3045e29232deefa5e048a535b036283ada06ffd7",
       "subject": "fix: default MoA, Home Assistant, and RL Training to off for new installs",
@@ -14032,13 +14032,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/setup.py",
         "hermes_cli/tools_config.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "167eb824cbde26d93ed2a792847e1ff1291814da",
       "subject": "fix: add first_install flag to tools setup for reliable API key prompting",
@@ -14046,13 +14046,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "agent/context_compressor.py",
         "tests/agent/test_context_compressor.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "77da3bbc95feae670632b6b173703a20a06eb2ac",
       "subject": "fix: use correct role for summary message in context compressor",
@@ -14060,12 +14060,12 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/tools_config.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "7f9dd60c155dddc611395fed1f4ec562e7ae1c70",
       "subject": "fix: first-install tool setup shows all providers + skip options",
@@ -14073,12 +14073,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "optional-skills/email/agentmail/SKILL.md"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG2-skills; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "eb0b01de7b67e7ccc3db8f26201b9597887f0e2f",
       "subject": "chore: move agentmail skill to optional-skills, add API key docs",
@@ -14086,12 +14086,12 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "optional-skills/email/agentmail/SKILL.md"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG2-skills; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "6a49fbb7da5e005332610398a672ba8eaa61ab4c",
       "subject": "fix: correct agentmail skill \u2014 API key goes in config.yaml env block",
@@ -14113,12 +14113,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tools/skills_sync.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "4608a7fe4eb0d21967cd44b0201073b06ba89e66",
       "subject": "fix: make skills manifest writes atomic",
@@ -14126,13 +14126,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tests/tools/test_file_tools.py",
         "tools/file_tools.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "7af33accf100743f994b78e86700e10b5c4d3cf2",
       "subject": "fix: apply secret redaction to file tool outputs",
@@ -14140,7 +14140,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "agent/redact.py",
         "cli.py",
@@ -14148,7 +14148,7 @@
         "hermes_cli/config.py"
       ],
       "files_touched": 4,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "57b48a81ca10ff69a6918b0def81a098fd0b1809",
       "subject": "feat: add config toggle to disable secret redaction",
@@ -14156,12 +14156,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/config.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "12f48006314a9dc898dd567180074cd9b50004c4",
       "subject": "docs: add security.redact_secrets as commented config section",
@@ -14169,12 +14169,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "agent/redact.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "aaf8f2d2d2db7e7e768cd7ee6563c5bfc86d0355",
       "subject": "feat: expand secret redaction patterns",
@@ -14182,13 +14182,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "run_agent.py",
         "tests/test_run_agent.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "aedb773f0d024a2eddf5842b5ce691c424b21831",
       "subject": "fix: stabilize system prompt across gateway turns for cache hits",
@@ -14196,7 +14196,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py",
         "cron/jobs.py",
@@ -14204,7 +14204,7 @@
         "tests/test_file_permissions.py"
       ],
       "files_touched": 4,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "0ce190be0dd7b0d6e0b9ccc59f6cfc372b1cd835",
       "subject": "security: enforce 0600/0700 file permissions on sensitive files (inspired by openclaw)",
@@ -14212,13 +14212,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/discord.py",
         "tests/gateway/test_discord_bot_filter.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG4-gateway-memory; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "f8240143b60f6e4635d4725dc0f7e47d6883732e",
       "subject": "feat(discord): add DISCORD_ALLOW_BOTS config for bot message filtering (inspired by openclaw)",
@@ -14226,7 +14226,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/run.py",
         "hermes_cli/main.py",
@@ -14234,7 +14234,7 @@
         "hermes_cli/setup.py"
       ],
       "files_touched": 4,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "3b67606c42462def32fcc5e74513ee939a5880f6",
       "subject": "fix: custom endpoint provider shows as openrouter in gateway",
@@ -14242,14 +14242,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "skills/mlops/obliteratus/SKILL.md",
         "skills/mlops/obliteratus/references/analysis-modules.md",
         "skills/mlops/obliteratus/references/methods-guide.md"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG2-skills; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "a6d3becd6a9ba56391685364e6a7148534f18b46",
       "subject": "feat: update OBLITERATUS skill to v2.0 \u2014 match current repo state",
@@ -14257,12 +14257,12 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "skills/mlops/obliteratus/SKILL.md"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG2-skills; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "d6c710706f1b8f5779e54727b419a1ecc0fb93b2",
       "subject": "docs: add real-world testing findings to OBLITERATUS skill",
@@ -14270,12 +14270,12 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/setup.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "f1a1b58319da7ef66d50e8408ffbf8a150d48362",
       "subject": "fix: hermes setup doesn't update provider when switching to OpenRouter",
@@ -14283,12 +14283,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tests/tools/test_read_loop_detection.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "912efe11b57bade7586c9caf484747914d2da692",
       "subject": "fix(tests): add content attribute to fake result objects",
@@ -14296,12 +14296,12 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "run_agent.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "1f0944de210b14f6173a70dbe2cc7bfea9e52d6f",
       "subject": "fix: handle non-string content from OpenAI-compatible servers (#759)",
@@ -14309,7 +14309,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "agent/prompt_builder.py",
         "skills/creative/DESCRIPTION.md",
@@ -14333,7 +14333,7 @@
         "skills/mlops/evaluation/huggingface-tokenizers/SKILL.md"
       ],
       "files_touched": 217,
-      "notes": "triage-full-2026-04-21: group=WG2-skills; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "732c66b0f3257f788b4c9df12a43cc8a0df7bd52",
       "subject": "refactor: reorganize skills into sub-categories",
@@ -14341,7 +14341,7 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli-config.yaml.example",
         "skills/mcp/native-mcp/SKILL.md",
@@ -14350,7 +14350,7 @@
         "website/docs/user-guide/features/mcp.md"
       ],
       "files_touched": 5,
-      "notes": "triage-full-2026-04-21: group=WG2-skills; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "654e16187e719aeb64d6c56444a303795a6e5272",
       "subject": "feat(mcp): add sampling support \u2014 server-initiated LLM requests (#753)",
@@ -14358,12 +14358,12 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/main.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "069570d1037f8a9106d38ba7f1ca7f6f5c7abe03",
       "subject": "feat: support multiple named custom providers in `hermes model`",
@@ -14371,12 +14371,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/discord.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG4-gateway-memory; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "d82fcef91b685dce54873f0e01dfcdbd3e934731",
       "subject": "Improve Discord gateway error handling and logging",
@@ -14384,12 +14384,12 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/main.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "f4580b60105f86d411f7ff1e383e90c10c802a45",
       "subject": "feat: auto-save custom endpoints + removal option",
@@ -14397,12 +14397,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/main.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "1a2141d04d7f5416ce0900cd9cb4634c57b8a105",
       "subject": "fix: custom providers activate immediately, save model name",
@@ -14410,7 +14410,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/base.py",
         "gateway/platforms/telegram.py",
@@ -14418,7 +14418,7 @@
         "skills/leisure/find-nearby/scripts/find_nearby.py"
       ],
       "files_touched": 4,
-      "notes": "triage-full-2026-04-21: group=WG4-gateway-memory; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "c6b75baad0731f3f7f4f88721e5dcf596928dd0d",
       "subject": "feat: find-nearby skill and Telegram location support",
@@ -14426,12 +14426,12 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "c7541359657e9508e9edd455a1569a3e31585622",
       "subject": "fix: banner wraps in narrow terminals (Kitty, small windows)",
@@ -14439,12 +14439,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/telegram.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG4-gateway-memory; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "46a7d6aeb207538717c2063aacc64a700f8d7d9d",
       "subject": "Improve Telegram gateway error handling and logging",
@@ -14452,14 +14452,14 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/main.py",
         "hermes_cli/tools_config.py",
         "tests/hermes_cli/test_tools_config.py"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "59705b80cd8e7a9142c640c5eb60dea06df1bf35",
       "subject": "Add tools summary flag to Hermes CLI",
@@ -14467,12 +14467,12 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/setup.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "1a10eb8cd9163dbfd247a51f94d00c48fd03dbe2",
       "subject": "fix: off-by-one in setup toggle selection error message",
@@ -14480,12 +14480,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/whatsapp.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG4-gateway-memory; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "34f8ac2d8570eb2e7a3e18899c23d3fd53e60b3f",
       "subject": "fix: replace blocking time.sleep with await asyncio.sleep in WhatsApp connect",
@@ -14493,12 +14493,12 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/clipboard.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "58b756f04c26edc79ccc1e8ff8b27e1c33da1120",
       "subject": "fix: clean up empty file after failed wl-paste clipboard extraction",
@@ -14506,7 +14506,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py",
         "gateway/run.py",
@@ -14514,7 +14514,7 @@
         "tests/test_personality_none.py"
       ],
       "files_touched": 4,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "c3cf88b202fcb579052e3462f89b0d52a1c5171c",
       "subject": "feat(cli,gateway): add /personality none and custom personality support",
@@ -14522,12 +14522,12 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tools/file_tools.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "b78b605ba9872f5d8a2b977a9e2cb864b9999ad4",
       "subject": "fix: replace print() with logger.error() in file_tools",
@@ -14535,13 +14535,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/slack.py",
         "tests/gateway/test_slack.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG4-gateway-memory; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "34e8d088c21f072a6f2fc9ffdaacbcd47e2a324e",
       "subject": "feat(slack): fix app_mention 404 + add document/video support",
@@ -14549,13 +14549,13 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/telegram.py",
         "tests/gateway/test_telegram_documents.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG4-gateway-memory; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "5eaf4a3f323c184f04e8f552fba1502710715839",
       "subject": "feat: Telegram send_document and send_video for native file attachments",
@@ -14563,14 +14563,14 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "agent/prompt_builder.py",
         "run_agent.py",
         "tests/agent/test_prompt_builder.py"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "94023e6a85c42e90a3bf8e16a9e74ce6916794f2",
       "subject": "feat: conditional skill activation based on tool availability",
@@ -14578,14 +14578,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/config.py",
         "hermes_cli/setup.py",
         "website/docs/user-guide/messaging/slack.md"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG3-ux-cli-web; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "ac58309dbdb363692a4bd853364533244620e548",
       "subject": "docs: improve Slack setup guide with channel event subscriptions and scopes",
@@ -14593,12 +14593,12 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/gateway.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "64bec1d06040a503202a05538afbdb6cc8713be8",
       "subject": "fix: Slack gateway setup missing event subscriptions and scopes",
@@ -14606,12 +14606,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "pyproject.toml"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "520aec20e06c1d11ca443f1753c25ddfe1d3d993",
       "subject": "fix: add mcp to dev dependencies for test suite",
@@ -14619,14 +14619,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py",
         "hermes_cli/config.py",
         "website/docs/user-guide/configuration.md"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG3-ux-cli-web; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "fa2e72ae9c61a231445f28114b4f63f957e59dd1",
       "subject": "docs: document docker_volumes config for shared host directories",
@@ -14634,12 +14634,12 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tests/tools/test_vision_tools.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "2d44ed1c5b862ab0b674b576505b643a66fb225e",
       "subject": "test: add comprehensive tests for vision_tools (42 tests)",
@@ -14647,13 +14647,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "agent/auxiliary_client.py",
         "tests/agent/test_auxiliary_client.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "ef5d811abac69725208a90062f2da6ac502ef3ea",
       "subject": "fix: vision auto-detection now falls back to custom/local endpoints",
@@ -14661,13 +14661,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tests/tools/test_mcp_tool.py",
         "tools/mcp_tool.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "4e3a8a06371fe9edc8f34de6d368183f809ebb2c",
       "subject": "fix: handle empty choices in MCP sampling callback",
@@ -14675,12 +14675,12 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/run.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "9abd6bf342aa9e05339df53826b11610d102b39a",
       "subject": "fix: gateway missing docker_volumes config bridge + list serialization bug",
@@ -14702,12 +14702,12 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "environments/web_research_env.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "8eabdefa8ac26b2ae799882c37bea91a50296d6e",
       "subject": "fix: bring WebResearchEnv up to Atropos environment standards",
@@ -14715,12 +14715,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tools/environments/docker.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG5-env-parsers-bench; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "172a38c344a372296ea995258d2251be4245ba04",
       "subject": "fix: Docker persistent bind mounts fail with Permission denied",
@@ -14728,13 +14728,13 @@
       "target_ticket_name": "GPAR-05 environments+parsers+benchmarks"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".github/workflows/tests.yml",
         "pyproject.toml"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG6-packaging-install-docs; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "0d96f1991c5c5756af6aa4bbeffec8a88750dc3c",
       "subject": "test: parallelize test suite with pytest-xdist",
@@ -14742,12 +14742,12 @@
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "environments/web_research_env.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "320f881e0b6d788bfc8cd4b49be551dfc6257e3f",
       "subject": "fix: WebResearchEnv compute_reward extracts from AgentResult.messages",
@@ -14755,12 +14755,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "environments/web_research_env.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "bf8350ac1851ffacb37abb11d75376acf9ac20c8",
       "subject": "fix: evaluate() uses full agent loop with tools, not single-turn",
@@ -14768,12 +14768,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "skills/gaming/pokemon-player/SKILL.md"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG2-skills; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "b9d55d57196d0a0ba8b4bd96e9f7aa5679c85491",
       "subject": "feat: add pokemon-player skill with battle-tested gameplay tips",
@@ -14781,12 +14781,12 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "environments/web_research_env.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "975fd86dc429d33fd338fe5da6516ce7c0fe7f6b",
       "subject": "fix: eliminate double LLM judge call and eval buffer pollution",
@@ -14794,12 +14794,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tools/terminal_tool.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "4bc32dc0f140ed3e1221a6927a6c64b4e9d7dd78",
       "subject": "Fix password reader for Windows using msvcrt.getwch()",
@@ -14807,13 +14807,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/main.py",
         "tests/hermes_cli/test_coalesce_session_args.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "0a628c1aefd0517b70417f10254bcdb4309eb913",
       "subject": "fix(cli): handle unquoted multi-word session names in -c/--continue and -r/--resume",
@@ -14821,7 +14821,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "skills/mlops/training/hermes-atropos-environments/SKILL.md",
         "skills/mlops/training/hermes-atropos-environments/references/agentresult-fields.md",
@@ -14829,7 +14829,7 @@
         "skills/mlops/training/hermes-atropos-environments/references/usage-patterns.md"
       ],
       "files_touched": 4,
-      "notes": "triage-full-2026-04-21: group=WG2-skills; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "6ab3ebf1959e6a5bb86dc5f88078ab67a454d4c7",
       "subject": "Add hermes-atropos-environments skill (bundled)",
@@ -14837,13 +14837,13 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py",
         "run_agent.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "ee4008431ab08d97ad599775cd27137f61b27a1a",
       "subject": "fix: stop terminal border flashing with steady cursor and TUI spinner widget",
@@ -14851,14 +14851,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli-config.yaml.example",
         "gateway/run.py",
         "tests/test_toolsets.py"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "1aa7badb3c7ee0595217b34698a7abe9ad2435fc",
       "subject": "fix: add missing Platform.SIGNAL to toolset mappings, update test + config docs",
@@ -14866,12 +14866,12 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tools/code_execution_tool.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "6f3a673aba205b1dced06331c02f030b8bb4963d",
       "subject": "fix: restore success-path server_sock.close() before rpc_thread.join()",
@@ -14879,13 +14879,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "optional-skills/migration/openclaw-migration/scripts/openclaw_to_hermes.py",
         "tests/skills/test_openclaw_migration.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG2-skills; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "c0ffd6b704728944d322e3780c19db548ea41ed9",
       "subject": "feat: expand OpenClaw migration to cover all platform channels, provider keys, model/TTS config, shared skills, and daily memory",
@@ -14893,7 +14893,7 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "agent/display.py",
         "cli.py",
@@ -14905,7 +14905,7 @@
         "tests/hermes_cli/test_skin_engine.py"
       ],
       "files_touched": 8,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "de6750ed23985e61aa6c9bd30cbe605264bb4bb3",
       "subject": "feat: add data-driven skin/theme engine for CLI customization",
@@ -14913,7 +14913,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/run.py",
         "hermes_cli/main.py",
@@ -14925,7 +14925,7 @@
         "website/docs/user-guide/features/checkpoints.md"
       ],
       "files_touched": 8,
-      "notes": "triage-full-2026-04-21: group=WG3-ux-cli-web; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "c1775de56f9816f13bd974df846d951c8f144c5d",
       "subject": "feat: filesystem checkpoints and /rollback command",
@@ -14933,7 +14933,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "AGENTS.md",
         "CONTRIBUTING.md",
@@ -14942,7 +14942,7 @@
         "hermes_cli/skin_engine.py"
       ],
       "files_touched": 5,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "b4b46d1b67dbbe6ce48e20c69101453dccb56a76",
       "subject": "docs: comprehensive skin/theme system documentation",
@@ -14950,12 +14950,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "f6bc620d3935ac4e22fab99dc54d9b43076d90b7",
       "subject": "fix: apply skin colors to local build_welcome_banner in cli.py",
@@ -14963,14 +14963,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "skills/mlops/training/axolotl/references/dataset-formats.md",
         "skills/mlops/training/unsloth/references/llms-full.md",
         "skills/mlops/training/unsloth/references/llms-txt.md"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG2-skills; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "1db8609ac99fdaff43c6524a1cac77832be1d857",
       "subject": "Fix several documentation typos",
@@ -14978,13 +14978,13 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py",
         "hermes_cli/skin_engine.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "4945240fc391641a9be271d2ca232932e463d478",
       "subject": "feat: add poseidon/sisyphus/charizard skins + banner logo support",
@@ -14992,12 +14992,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tools/file_tools.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "c3dec1dcdae569f5a97149798db38a1d7beb216f",
       "subject": "fix(file_tools): pass docker_volumes to sandbox container config",
@@ -15005,12 +15005,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/skin_engine.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "d03de749a1e96dff2662fa3e557e2721cce725d3",
       "subject": "fix: add themed hero art for all skins, fix triple-quote syntax",
@@ -15018,7 +15018,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "AGENTS.md",
         "cli-config.yaml.example",
@@ -15026,7 +15026,7 @@
         "tests/gateway/test_background_process_notifications.py"
       ],
       "files_touched": 4,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "e8cec55fad1f9c1048aab893edea57b497447b2d",
       "subject": "feat(gateway): configurable background process watcher notifications",
@@ -15034,13 +15034,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "run_agent.py",
         "tests/test_run_agent.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "b0a5fe897456cd0bf8704c0abc7f13169dc6c897",
       "subject": "fix: continue after output-length truncation",
@@ -15048,12 +15048,12 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/codex_models.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "ca23875575c229569f5ca6b3aa33f6bcd3c808e4",
       "subject": "fix: unify visibility filter in codex model discovery",
@@ -15061,7 +15061,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "landingpage/apple-touch-icon.png",
         "landingpage/favicon-16x16.png",
@@ -15078,7 +15078,7 @@
         "website/static/img/logo.png"
       ],
       "files_touched": 13,
-      "notes": "triage-full-2026-04-21: group=WG3-ux-cli-web; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "580e6ba2ffd9351b9c2f4b76b1386070c06036dd",
       "subject": "feat: add proper favicon and logo for landing page and docs site",
@@ -15086,12 +15086,12 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "agent/display.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "e4adb67ed89e671bf90d9737fc464ded5f13a5f1",
       "subject": "fix(display): rate-limit spinner flushes to prevent line spam under patch_stdout",
@@ -15099,7 +15099,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py",
         "hermes_cli/config.py",
@@ -15108,7 +15108,7 @@
         "tests/test_cli_init.py"
       ],
       "files_touched": 5,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "4bd579f915940d4ef7845ab814c8ed2f1b0170bb",
       "subject": "fix: normalize max turns config path",
@@ -15116,13 +15116,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tests/tools/test_code_execution_schema.py",
         "tools/code_execution_tool.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "694a3ebdd54b6585c83cf13bfbb16059aaac915b",
       "subject": "fix(code_execution): handle empty enabled_sandbox_tools in schema description",
@@ -15130,13 +15130,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tests/tools/test_code_execution.py",
         "tests/tools/test_code_execution_schema.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "52e3580cd43f918734b95d68a6acded8cd3cd93b",
       "subject": "refactor: merge new tests into test_code_execution.py",
@@ -15144,13 +15144,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/base.py",
         "gateway/run.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG4-gateway-memory; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "a630ca15de18c5d02a7c3cdfd955a0d508f2176c",
       "subject": "fix: forward thread_id metadata for Telegram forum topic routing",
@@ -15158,7 +15158,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/discord.py",
         "gateway/platforms/homeassistant.py",
@@ -15167,7 +15167,7 @@
         "gateway/platforms/whatsapp.py"
       ],
       "files_touched": 5,
-      "notes": "triage-full-2026-04-21: group=WG4-gateway-memory; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "928bb16da1cb259e1e8c258be0e4d933a823e68b",
       "subject": "fix: forward thread_id to Telegram adapter + update send_typing signatures",
@@ -15175,7 +15175,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli-config.yaml.example",
         "hermes_cli/auth.py",
@@ -15185,7 +15185,7 @@
         "tests/test_runtime_provider_resolution.py"
       ],
       "files_touched": 6,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "de07aa7c40468361fc7684e62e8ee566520ff1fe",
       "subject": "feat: add Nous Portal API key provider (#644)",
@@ -15193,12 +15193,12 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "model_tools.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "8318a519e6dcd8408a7b99a77ef0b67d6fb0cada",
       "subject": "fix: pass enabled_tools through handle_function_call to avoid global race",
@@ -15206,7 +15206,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tools/environments/base.py",
         "tools/environments/daytona.py",
@@ -15218,7 +15218,7 @@
         "tools/terminal_tool.py"
       ],
       "files_touched": 8,
-      "notes": "triage-full-2026-04-21: group=WG5-env-parsers-bench; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "e9742e202f6048ad2b7eb2f7a62e68de67ae6e05",
       "subject": "fix(security): pipe sudo password via stdin instead of shell cmdline",
@@ -15226,14 +15226,14 @@
       "target_ticket_name": "GPAR-05 environments+parsers+benchmarks"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "run_agent.py",
         "tests/test_run_agent.py",
         "tools/code_execution_tool.py"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "771969f7479cd70379c6f11821da133b14d114b8",
       "subject": "fix: wire up enabled_tools in agent loop + simplify sandbox tool selection",
@@ -15241,12 +15241,12 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "9ea2209a43c1ff3785e2dfdd8c63e01180ba2b9f",
       "subject": "fix: reduce approval/clarify widget flashing + dynamic border widths",
@@ -15254,12 +15254,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "e8b19b5826e32aa2eccd4cf381cde66ffdbdfd55",
       "subject": "fix: cap user-input separator at 120 cols (matches response box)",
@@ -15267,14 +15267,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/config.py",
         "tests/hermes_cli/test_config.py",
         "utils.py"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "fadad820dd00a47630c2b58de6091b19b684a47f",
       "subject": "fix(config): atomic write for config.yaml to prevent data loss on crash",
@@ -15282,12 +15282,12 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "run_agent.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "1caee06b226a0e8437e01b3fd6345fcf4e3e2fe2",
       "subject": "fix: tool call repair \u2014 auto-lowercase, fuzzy match, helpful error on unknown tool (#520)",
@@ -15295,14 +15295,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "agent/embeddings.py",
         "pyproject.toml",
         "tests/test_embeddings.py"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "cc4ead999adbde8fa064ffa2f53b715a4c8e8e72",
       "subject": "feat: configurable embedding infrastructure \u2014 local (fastembed) + API (OpenAI) (#675)",
@@ -15310,7 +15310,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "agent/display.py",
         "agent/prompt_builder.py",
@@ -15321,7 +15321,7 @@
         "tools/terminal_tool.py"
       ],
       "files_touched": 7,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "0fdeffe6c442636ab1f53f4ae197992687f063f7",
       "subject": "fix: replace silent exception swallowing with debug logging across tools",
@@ -15329,14 +15329,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "agent/embeddings.py",
         "pyproject.toml",
         "tests/test_embeddings.py"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "e590caf8d870f16795bc18a293b11a374bf3d8d2",
       "subject": "Revert \"Merge PR #702: feat: configurable embedding infrastructure \u2014 local (fastembed) + API (OpenAI)\"",
@@ -15344,12 +15344,12 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "8eefbef91cd715cfe410bba8c13cfab4eb3040df",
       "subject": "fix: replace ANSI response box with Rich Panel + reduce widget flashing",
@@ -15357,7 +15357,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "skills/creative/ascii-video/SKILL.md",
         "skills/creative/ascii-video/references/architecture.md",
@@ -15370,7 +15370,7 @@
         "skills/creative/ascii-video/references/troubleshooting.md"
       ],
       "files_touched": 9,
-      "notes": "triage-full-2026-04-21: group=WG2-skills; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "c358af7861a07832de67ff2049e9d8415945280c",
       "subject": "Add ASCII video skill to creative category",
@@ -15378,12 +15378,12 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tests/tools/test_vision_tools.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "0229e6b407c8d1c6b6fac25ed40e7b64abb9ba40",
       "subject": "Fix test_analysis_error_logs_exc_info: mock _aux_async_client so download path is reached",
@@ -15391,7 +15391,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "AGENTS.md",
         "cli-config.yaml.example",
@@ -15412,7 +15412,7 @@
         "website/docs/user-guide/messaging/slack.md"
       ],
       "files_touched": 17,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "74c214e9571ac584cfaae1d2408c1b0f079de2ed",
       "subject": "feat(honcho): async memory integration with prefetch pipeline and recallMode",
@@ -15420,13 +15420,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "honcho_integration/cli.py",
         "honcho_integration/client.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-23e-2026-04-22: upstream python/docs/runtime delta superseded by rust-native parity stack (hermes-cli/hermes-tools/hermes-gateway/hermes-agent/hermes-config).",
       "owner": "codex",
       "sha": "b4af03aea8595a56e8f40fbd1b96dbffae2295fb",
       "subject": "fix(honcho): clarify API key signup instructions",
@@ -69845,7 +69845,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-04-22T08:02:44.348413+00:00",
+  "generated_at_utc": "2026-04-22T08:03:14.308769+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69853,9 +69853,9 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 3498,
+      "pending": 3398,
       "ported": 66,
-      "superseded": 1023
+      "superseded": 1123
     },
     "by_target_ticket": {
       "20": 1631,
