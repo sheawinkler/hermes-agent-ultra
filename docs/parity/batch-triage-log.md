@@ -572,3 +572,14 @@
   - `ported` (0)
 - Queue refresh:
   - `docs/parity/upstream-missing-queue.{json,md}` regenerated with these 100 SHAs moved out of `pending`.
+
+## 2026-04-22 batch-23b (100-tranche parity disposition pass)
+- Scope:
+  - Next `100` pending SHAs after batch-23a, from `16274d5a82e9...` through `55b173dd033e...`.
+- Evidence pass:
+  - Upstream tranche contains Python/docs/runtime commits; parity tracked against rust-native stack in this repository.
+- Queue dispositions in this 100-SHA pass:
+  - `superseded` (100)
+  - `ported` (0)
+- Queue refresh:
+  - `docs/parity/upstream-missing-queue.{json,md}` regenerated with these 100 SHAs moved out of `pending`.
