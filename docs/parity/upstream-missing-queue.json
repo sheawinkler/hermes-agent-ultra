@@ -3489,13 +3489,13 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tools/file_operations.py",
         "tools/terminal_tool.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "ported-2026-04-22-batch-12: added terminal stdin_data piping support in Rust (TerminalBackend execute_command_with_stdin + LocalBackend implementation + terminal tool schema/handler). file_operations heredoc->stdin write-path component is superseded in Rust because write_file is native fs-backed (no shell heredoc path).",
       "owner": "codex",
       "sha": "d49af633f06a7f7f9f2c02089e5debdfda87f953",
       "subject": "feat: enhance command execution with stdin support",
@@ -69237,6 +69237,21 @@
     {
       "disposition": "pending",
       "files_sample": [
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/turnController.ts"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "dff1c8fcf195d10dd5d642ca216f3df56159cf50",
+      "subject": "fix(tui): tool inline_diff renders inline with the active turn",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
         "run_agent.py",
         "tests/tools/test_delegate.py",
         "tests/tools/test_file_state_registry.py",
@@ -69269,6 +69284,21 @@
     {
       "disposition": "pending",
       "files_sample": [
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/turnController.ts"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "bddf0cd61e84707022cde0377ae28d8c1b8ab22d",
+      "subject": "fix(tui): keep inline diffs below tool rows and strip ANSI",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
         "tests/gateway/test_session_list_all_sources.py",
         "tests/gateway/test_session_list_allowed_sources.py",
         "tui_gateway/server.py"
@@ -69291,6 +69321,63 @@
       "owner": "",
       "sha": "35cc66df62e35daddcbb9d3f15f5938d35b11ae8",
       "subject": "fix(tui): arrow history fallback when no line exists",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/turnController.ts"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "31b3b09ea42b6dcc388c671b65f24959ba5e1966",
+      "subject": "fix(tui): render inline diffs inside assistant completion",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/app/turnController.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "9654c9fb100b02bd3595fccf8b7f8c52eb3d167e",
+      "subject": "fix(tui): dedupe inline_diff when assistant already echoes it",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/app/createGatewayEventHandler.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "e684afa1519c1ef3956861217a0c0b42fe4c84f7",
+      "subject": "fix(tui): keep review-diff tool rows terse",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/app/turnController.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "a8eb13e828b03508fdd59251c9c95143484fb374",
+      "subject": "fix(tui): dedupe inline diffs, strip CLI review-diff header",
       "target_ticket": 22,
       "target_ticket_name": "GPAR-03 UX parity"
     },
@@ -69430,7 +69517,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     }
   ],
-  "generated_at_utc": "2026-04-22T02:12:52.033453+00:00",
+  "generated_at_utc": "2026-04-22T02:18:22.420500+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69438,19 +69525,19 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4177,
-      "ported": 27,
+      "pending": 4182,
+      "ported": 28,
       "superseded": 355
     },
     "by_target_ticket": {
       "20": 1622,
       "21": 199,
-      "22": 517,
+      "22": 523,
       "23": 507,
       "24": 64,
       "25": 152,
       "26": 1498
     },
-    "total_commits": 4559
+    "total_commits": 4565
   }
 }

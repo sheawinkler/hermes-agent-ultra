@@ -562,6 +562,170 @@ impl TerminalBackend for LocalBackend {
         }
     }
 
+    async fn execute_command_with_stdin(
+        &self,
+        command: &str,
+        timeout: Option<u64>,
+        workdir: Option<&str>,
+        background: bool,
+        pty: bool,
+        stdin_data: Option<&str>,
+    ) -> Result<CommandOutput, AgentError> {
+        let Some(stdin_data) = stdin_data else {
+            return self
+                .execute_command(command, timeout, workdir, background, pty)
+                .await;
+        };
+
+        if background {
+            let started = self
+                .execute_command(command, timeout, workdir, true, pty)
+                .await?;
+            let session_id = serde_json::from_str::<Value>(&started.stdout)
+                .ok()
+                .and_then(|v| {
+                    v.get("session_id")
+                        .and_then(Value::as_str)
+                        .map(ToString::to_string)
+                });
+            if let Some(session_id) = session_id {
+                let _ = self.write_process_stdin(&session_id, stdin_data).await?;
+                let _ = self.close_process_stdin(&session_id).await?;
+            }
+            return Ok(started);
+        }
+
+        let timeout_secs = timeout.unwrap_or(self.default_timeout);
+        let stdin_owned = stdin_data.to_string();
+        if pty {
+            #[cfg(unix)]
+            {
+                let mut pty_cmd = TokioCommand::new("script");
+                pty_cmd
+                    .arg("-q")
+                    .arg("/dev/null")
+                    .arg("-c")
+                    .arg(command)
+                    .stdout(Stdio::piped())
+                    .stderr(Stdio::piped())
+                    .stdin(Stdio::piped());
+                scrub_subprocess_env(&mut pty_cmd);
+
+                if let Some(dir) = workdir {
+                    pty_cmd.current_dir(resolve_path(dir)?);
+                }
+
+                let result =
+                    tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
+                        let mut child = pty_cmd.spawn().map_err(|e| {
+                            AgentError::Io(format!("Failed to spawn PTY command: {}", e))
+                        })?;
+                        if let Some(mut stdin) = child.stdin.take() {
+                            stdin.write_all(stdin_owned.as_bytes()).await.map_err(|e| {
+                                AgentError::Io(format!("Failed to write PTY stdin: {e}"))
+                            })?;
+                            stdin.flush().await.map_err(|e| {
+                                AgentError::Io(format!("Failed to flush PTY stdin: {e}"))
+                            })?;
+                        }
+
+                        let output = child.wait_with_output().await.map_err(|e| {
+                            AgentError::Io(format!("Failed to wait for PTY command: {}", e))
+                        })?;
+                        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+                        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+                        Ok(CommandOutput {
+                            exit_code: output.status.code().unwrap_or(-1),
+                            stdout: if stdout.len() > self.max_output_size {
+                                stdout[..self.max_output_size].to_string()
+                            } else {
+                                stdout
+                            },
+                            stderr: if stderr.len() > self.max_output_size {
+                                stderr[..self.max_output_size].to_string()
+                            } else {
+                                stderr
+                            },
+                        })
+                    })
+                    .await;
+
+                return match result {
+                    Ok(Ok(output)) => Ok(output),
+                    Ok(Err(e)) => Err(e),
+                    Err(_) => Err(AgentError::Timeout(format!(
+                        "PTY command timed out after {} seconds",
+                        timeout_secs
+                    ))),
+                };
+            }
+
+            #[cfg(not(unix))]
+            {
+                tracing::warn!(
+                    "PTY mode is not supported on this platform; using standard shell execution"
+                );
+            }
+        }
+
+        let mut cmd = TokioCommand::new("sh");
+        cmd.arg("-c")
+            .arg(command)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .stdin(Stdio::piped());
+        scrub_subprocess_env(&mut cmd);
+        if let Some(dir) = workdir {
+            cmd.current_dir(resolve_path(dir)?);
+        }
+
+        let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
+            let mut child = cmd
+                .spawn()
+                .map_err(|e| AgentError::Io(format!("Failed to spawn command: {}", e)))?;
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin
+                    .write_all(stdin_owned.as_bytes())
+                    .await
+                    .map_err(|e| AgentError::Io(format!("Failed to write stdin: {e}")))?;
+                stdin
+                    .flush()
+                    .await
+                    .map_err(|e| AgentError::Io(format!("Failed to flush stdin: {e}")))?;
+            }
+
+            let output = child
+                .wait_with_output()
+                .await
+                .map_err(|e| AgentError::Io(format!("Failed to wait for command: {}", e)))?;
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            Ok(CommandOutput {
+                exit_code: output.status.code().unwrap_or(-1),
+                stdout: if stdout.len() > self.max_output_size {
+                    stdout[..self.max_output_size].to_string()
+                } else {
+                    stdout
+                },
+                stderr: if stderr.len() > self.max_output_size {
+                    stderr[..self.max_output_size].to_string()
+                } else {
+                    stderr
+                },
+            })
+        })
+        .await;
+
+        match result {
+            Ok(Ok(output)) => Ok(output),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(AgentError::Timeout(format!(
+                "Command timed out after {} seconds",
+                timeout_secs
+            ))),
+        }
+    }
+
     async fn read_file(
         &self,
         path: &str,
@@ -891,6 +1055,17 @@ mod tests {
             .unwrap();
         assert_eq!(output.exit_code, 0);
         assert!(output.stdout.trim().contains("hello"));
+    }
+
+    #[tokio::test]
+    async fn test_execute_command_with_stdin_data() {
+        let backend = LocalBackend::default();
+        let output = backend
+            .execute_command_with_stdin("cat", None, None, false, false, Some("hello stdin"))
+            .await
+            .unwrap();
+        assert_eq!(output.exit_code, 0);
+        assert!(output.stdout.contains("hello stdin"));
     }
 
     #[tokio::test]
