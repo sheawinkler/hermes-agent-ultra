@@ -620,3 +620,14 @@
   - `pending` (0 within selected tranche set)
 - Queue refresh:
   - `docs/parity/upstream-missing-queue.{json,md}` regenerated with these 100 SHAs moved out of `pending`.
+
+## 2026-04-22 batch-24a (500-tranche parity disposition pass)
+- Scope:
+  - User-directed bulk classification tranche with  pending SHAs, from  through .
+- Classification mode:
+  -  by directive for upstream Python/docs/runtime queue items against this rust-native repository.
+- Queue dispositions in this tranche:
+  -  (500)
+  -  (0)
+- Queue refresh:
+  -  regenerated with this tranche removed from .
