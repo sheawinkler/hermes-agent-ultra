@@ -303,6 +303,12 @@ def build_status(upstream_ref: str) -> tuple[dict, str]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate WS2-WS8 workstream status artifacts.")
+    parser.add_argument(
+        "--repo-root",
+        default=".",
+        type=Path,
+        help="Repository root path",
+    )
     parser.add_argument("--upstream-ref", default="upstream/main")
     parser.add_argument("--upstream-remote", default="upstream")
     parser.add_argument(
@@ -318,17 +324,22 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    global REPO_ROOT
+    REPO_ROOT = args.repo_root.resolve()
+
     ensure_remote(args.upstream_remote, args.upstream_url)
     if not args.no_fetch:
         run_git(["fetch", args.upstream_remote, "--prune"])
 
     summary, md = build_status(args.upstream_ref)
-    args.out_json.parent.mkdir(parents=True, exist_ok=True)
-    args.out_md.parent.mkdir(parents=True, exist_ok=True)
-    args.out_json.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    args.out_md.write_text(md, encoding="utf-8")
-    print(f"Wrote {args.out_json}")
-    print(f"Wrote {args.out_md}")
+    out_json = (REPO_ROOT / args.out_json).resolve()
+    out_md = (REPO_ROOT / args.out_md).resolve()
+    out_json.parent.mkdir(parents=True, exist_ok=True)
+    out_md.parent.mkdir(parents=True, exist_ok=True)
+    out_json.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    out_md.write_text(md, encoding="utf-8")
+    print(f"Wrote {out_json}")
+    print(f"Wrote {out_md}")
     return 0
 
 
