@@ -12,6 +12,15 @@ pub fn hydrate_env_from_config(config: &GatewayConfig) -> usize {
     applied += set_if_absent("HERMES_PERSONALITY", config.personality.as_deref());
     applied += set_if_absent_owned("HERMES_MAX_TURNS", config.max_turns.to_string());
     applied += set_if_absent("HERMES_SYSTEM_PROMPT", config.system_prompt.as_deref());
+    applied += set_if_absent_owned(
+        "HERMES_ALLOW_PRIVATE_URLS",
+        if config.security.allow_private_urls {
+            "true"
+        } else {
+            "false"
+        }
+        .to_string(),
+    );
 
     for (platform_name, platform_cfg) in &config.platforms {
         let platform_prefix = normalize_env_component(platform_name);

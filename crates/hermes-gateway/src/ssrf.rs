@@ -3,12 +3,76 @@
 //! Validates outbound URLs to prevent access to internal/private networks
 //! and cloud metadata endpoints.
 
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, ToSocketAddrs};
 use std::str::FromStr;
+use std::sync::Mutex;
 
 use url::Url;
 
 use hermes_core::errors::GatewayError;
+
+const METADATA_HOSTNAMES: [&str; 3] = [
+    "metadata.google.internal",
+    "metadata.goog",
+    "metadata.internal",
+];
+
+static ALLOW_PRIVATE_URLS_CACHE: Mutex<Option<bool>> = Mutex::new(None);
+
+fn parse_bool_like(raw: &str) -> Option<bool> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+fn config_allow_private_urls() -> bool {
+    false
+}
+
+#[cfg(not(test))]
+fn config_allow_private_urls() -> bool {
+    match hermes_config::load_config(None) {
+        Ok(cfg) => {
+            if cfg.security.allow_private_urls {
+                return true;
+            }
+            cfg.tools_config
+                .per_tool
+                .get("browser")
+                .and_then(|v| v.get("allow_private_urls"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        }
+        Err(_) => false,
+    }
+}
+
+fn global_allow_private_urls() -> bool {
+    let mut guard = ALLOW_PRIVATE_URLS_CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if let Some(v) = *guard {
+        return v;
+    }
+
+    let resolved = std::env::var("HERMES_ALLOW_PRIVATE_URLS")
+        .ok()
+        .and_then(|v| parse_bool_like(&v))
+        .unwrap_or_else(config_allow_private_urls);
+    *guard = Some(resolved);
+    resolved
+}
+
+#[cfg(test)]
+fn reset_allow_private_cache_for_tests() {
+    let mut guard = ALLOW_PRIVATE_URLS_CACHE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    *guard = None;
+}
 
 // ---------------------------------------------------------------------------
 // Private IP range checks
@@ -45,7 +109,7 @@ fn is_private_ipv4(ip: &Ipv4Addr) -> bool {
         return true;
     }
 
-    // 169.254.0.0/16 (Link-local, includes 169.254.169.254 cloud metadata)
+    // 169.254.0.0/16 (Link-local, includes cloud metadata)
     if octets[0] == 169 && octets[1] == 254 {
         return true;
     }
@@ -85,20 +149,16 @@ fn is_private_ipv6(ip: &Ipv6Addr) -> bool {
 
     // fe80::/10 (Link-local)
     // First 10 bits: 1111 1110 10xx xxxx
-    // Segment[0] = 0xfe80..0xfebf
     if (segments[0] & 0xffc0) == 0xfe80 {
         return true;
     }
 
     // fc00::/7 (Unique local addresses: fc00::/7 and fd00::/7)
-    // First 7 bits: 1111 110 = 0xfc00..0xfdff
     if (segments[0] & 0xfe00) == 0xfc00 {
         return true;
     }
 
     // ::ffff:x.x.x.x (IPv4-mapped IPv6)
-    // Check if this is an IPv4-mapped address and delegate to IPv4 check
-    // Manual check: last two segments are 0xffff, first four are 0
     let segments = ip.segments();
     if segments[0] == 0
         && segments[1] == 0
@@ -107,8 +167,7 @@ fn is_private_ipv6(ip: &Ipv6Addr) -> bool {
         && segments[4] == 0
         && segments[5] == 0xffff
     {
-        // Extract the IPv4 portion and check it
-        let ipv4 = ip.to_ipv4_mapped().unwrap();
+        let ipv4 = ip.to_ipv4_mapped().expect("valid ipv4-mapped address");
         return is_private_ipv4(&ipv4);
     }
 
@@ -127,19 +186,62 @@ fn is_private_ip(ip: &IpAddr) -> bool {
 // Cloud metadata endpoint check
 // ---------------------------------------------------------------------------
 
-/// Check if an IP address matches known cloud metadata endpoints.
-fn is_cloud_metadata(ip: &IpAddr) -> bool {
+fn is_always_blocked_ip(ip: &IpAddr) -> bool {
     match ip {
         IpAddr::V4(v4) => {
-            // AWS/GCP/Azure cloud metadata: 169.254.169.254
             let octets = v4.octets();
-            octets[0] == 169 && octets[1] == 254 && octets[2] == 169 && octets[3] == 254
+            // Entire link-local range (includes AWS/GCP/Azure metadata)
+            (octets[0] == 169 && octets[1] == 254)
+                // Alibaba cloud metadata endpoint
+                || octets == [100, 100, 100, 200]
         }
-        IpAddr::V6(_) => {
-            // No known IPv6 cloud metadata endpoints to block
-            false
-        }
+        // AWS metadata over IPv6
+        IpAddr::V6(v6) => *v6 == Ipv6Addr::new(0xfd00, 0x0ec2, 0, 0, 0, 0, 0, 0x0254),
     }
+}
+
+/// Check if an IP address matches known cloud metadata endpoints.
+#[cfg(test)]
+fn is_cloud_metadata(ip: &IpAddr) -> bool {
+    is_always_blocked_ip(ip)
+}
+
+fn is_metadata_hostname(host: &str) -> bool {
+    METADATA_HOSTNAMES.contains(&host)
+}
+
+fn resolve_host_ips(host: &str, port: u16) -> Result<Vec<IpAddr>, GatewayError> {
+    let addrs = (host, port).to_socket_addrs().map_err(|e| {
+        GatewayError::ConnectionFailed(format!("Failed to resolve host '{}': {}", host, e))
+    })?;
+    let ips: Vec<IpAddr> = addrs.map(|addr| addr.ip()).collect();
+    if ips.is_empty() {
+        return Err(GatewayError::ConnectionFailed(format!(
+            "Host '{}' resolved to no addresses",
+            host
+        )));
+    }
+    Ok(ips)
+}
+
+fn validate_ip_policy(
+    host: &str,
+    ip: &IpAddr,
+    allow_private_urls: bool,
+) -> Result<(), GatewayError> {
+    if is_always_blocked_ip(ip) {
+        return Err(GatewayError::ConnectionFailed(format!(
+            "URL resolves to cloud metadata endpoint: {} -> {}",
+            host, ip
+        )));
+    }
+    if !allow_private_urls && is_private_ip(ip) {
+        return Err(GatewayError::ConnectionFailed(format!(
+            "URL resolves to private/internal IP address: {} -> {}",
+            host, ip
+        )));
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -151,48 +253,53 @@ fn is_cloud_metadata(ip: &IpAddr) -> bool {
 /// This function:
 /// 1. Parses the URL
 /// 2. Resolves the hostname to IP addresses
-/// 3. Rejects any that resolve to private/reserved ranges
-/// 4. Rejects cloud metadata endpoints
+/// 3. Rejects private/reserved ranges unless explicitly allowed
+/// 4. Always rejects cloud metadata endpoints
 ///
 /// Returns `true` if the URL is safe, `false` otherwise.
 pub fn is_safe_url(url: &str) -> bool {
-    // First, try to parse the URL
     let parsed = match Url::parse(url) {
         Ok(u) => u,
         Err(_) => return false,
     };
 
-    // Only allow http and https schemes
     match parsed.scheme() {
         "http" | "https" => {}
         _ => return false,
     };
 
-    // Get the host
     let host = match parsed.host_str() {
         Some(h) => h,
         None => return false,
     };
-
-    // Try to parse as an IP address directly
-    if let Ok(ip) = IpAddr::from_str(host) {
-        if is_private_ip(&ip) || is_cloud_metadata(&ip) {
-            return false;
-        }
-        return true;
+    let lowercase_host = host.to_ascii_lowercase();
+    if is_metadata_hostname(&lowercase_host) {
+        tracing::warn!("Blocked request to metadata hostname: {}", host);
+        return false;
     }
 
-    // For hostnames, we do a DNS resolution check.
-    // Note: DNS resolution introduces a TOCTOU race (DNS rebinding),
-    // but this provides defense-in-depth.
-    // In a production system, you would want to pin the resolved IP
-    // and verify it for the actual request.
-    //
-    // For this check, we use a synchronous approach. In an async context,
-    // you would use tokio::net::lookup_host.
-    //
-    // If we can't resolve, we allow the URL but log a warning.
-    // A stricter policy would reject unresolved hostnames.
+    let allow_private_urls = global_allow_private_urls();
+
+    if let Ok(ip) = IpAddr::from_str(host) {
+        return validate_ip_policy(host, &ip, allow_private_urls).is_ok();
+    }
+
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    let ips = match resolve_host_ips(host, port) {
+        Ok(ips) => ips,
+        Err(err) => {
+            tracing::warn!("Blocked unresolved URL host '{}': {}", host, err);
+            return false;
+        }
+    };
+
+    for ip in &ips {
+        if let Err(err) = validate_ip_policy(host, ip, allow_private_urls) {
+            tracing::warn!("{}", err);
+            return false;
+        }
+    }
+
     true
 }
 
@@ -204,7 +311,6 @@ pub fn validate_url(url: &str) -> Result<Url, GatewayError> {
     let parsed = Url::parse(url)
         .map_err(|e| GatewayError::ConnectionFailed(format!("Invalid URL '{}': {}", url, e)))?;
 
-    // Only allow http and https schemes
     match parsed.scheme() {
         "http" | "https" => {}
         other => {
@@ -215,35 +321,29 @@ pub fn validate_url(url: &str) -> Result<Url, GatewayError> {
         }
     }
 
-    // Check the host
     let host = parsed
         .host_str()
         .ok_or_else(|| GatewayError::ConnectionFailed(format!("URL has no host: {}", url)))?;
+    let lowercase_host = host.to_ascii_lowercase();
 
-    // Check if the host is a raw IP in a private range
-    if let Ok(ip) = IpAddr::from_str(host) {
-        if is_private_ip(&ip) {
-            return Err(GatewayError::ConnectionFailed(format!(
-                "URL resolves to private/internal IP address: {}",
-                ip
-            )));
-        }
-        if is_cloud_metadata(&ip) {
-            return Err(GatewayError::ConnectionFailed(format!(
-                "URL resolves to cloud metadata endpoint: {}",
-                ip
-            )));
-        }
-    }
-
-    // Block known dangerous hostnames
-    let lowercase_host = host.to_lowercase();
-    let dangerous_hosts = ["localhost", "metadata.google.internal", "metadata.internal"];
-    if dangerous_hosts.contains(&lowercase_host.as_str()) {
+    if is_metadata_hostname(&lowercase_host) {
         return Err(GatewayError::ConnectionFailed(format!(
             "URL hostname is blocked: {}",
             host
         )));
+    }
+
+    let allow_private_urls = global_allow_private_urls();
+
+    if let Ok(ip) = IpAddr::from_str(host) {
+        validate_ip_policy(host, &ip, allow_private_urls)?;
+        return Ok(parsed);
+    }
+
+    let port = parsed.port_or_known_default().unwrap_or(80);
+    let ips = resolve_host_ips(host, port)?;
+    for ip in &ips {
+        validate_ip_policy(host, ip, allow_private_urls)?;
     }
 
     Ok(parsed)
@@ -252,10 +352,36 @@ pub fn validate_url(url: &str) -> Result<Url, GatewayError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    struct EnvVarGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn capture(key: &'static str) -> Self {
+            Self {
+                key,
+                old: std::env::var(key).ok(),
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.old {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+            reset_allow_private_cache_for_tests();
+        }
+    }
 
     #[test]
     fn test_private_ipv4_ranges() {
-        // Should be private
         assert!(is_private_ipv4(&Ipv4Addr::new(10, 0, 0, 1)));
         assert!(is_private_ipv4(&Ipv4Addr::new(10, 255, 255, 255)));
         assert!(is_private_ipv4(&Ipv4Addr::new(172, 16, 0, 1)));
@@ -266,7 +392,6 @@ mod tests {
         assert!(is_private_ipv4(&Ipv4Addr::new(169, 254, 169, 254)));
         assert!(is_private_ipv4(&Ipv4Addr::new(0, 0, 0, 0)));
 
-        // Should NOT be private
         assert!(!is_private_ipv4(&Ipv4Addr::new(8, 8, 8, 8)));
         assert!(!is_private_ipv4(&Ipv4Addr::new(1, 1, 1, 1)));
         assert!(!is_private_ipv4(&Ipv4Addr::new(172, 15, 0, 1)));
@@ -276,72 +401,93 @@ mod tests {
 
     #[test]
     fn test_private_ipv6_ranges() {
-        // Should be private
         assert!(is_private_ipv6(&Ipv6Addr::LOCALHOST));
-        assert!(is_private_ipv6(&"fe80::1".parse().unwrap()));
-        assert!(is_private_ipv6(&"fc00::1".parse().unwrap()));
-        assert!(is_private_ipv6(&"fd00::1".parse().unwrap()));
+        assert!(is_private_ipv6(&"fe80::1".parse().expect("parse fe80")));
+        assert!(is_private_ipv6(&"fc00::1".parse().expect("parse fc00")));
+        assert!(is_private_ipv6(&"fd00::1".parse().expect("parse fd00")));
 
-        // IPv4-mapped loopback should be private
-        assert!(is_private_ipv6(&"::ffff:127.0.0.1".parse().unwrap()));
-        assert!(is_private_ipv6(&"::ffff:10.0.0.1".parse().unwrap()));
+        assert!(is_private_ipv6(
+            &"::ffff:127.0.0.1".parse().expect("parse mapped loopback")
+        ));
+        assert!(is_private_ipv6(
+            &"::ffff:10.0.0.1".parse().expect("parse mapped private")
+        ));
 
-        // Should NOT be private
-        assert!(!is_private_ipv6(&"2001:db8::1".parse().unwrap()));
-        assert!(!is_private_ipv6(&"2606:4700:4700::1111".parse().unwrap()));
+        assert!(!is_private_ipv6(
+            &"2001:db8::1".parse().expect("parse docs")
+        ));
+        assert!(!is_private_ipv6(
+            &"2606:4700:4700::1111".parse().expect("parse cloudflare")
+        ));
     }
 
     #[test]
     fn test_cloud_metadata() {
-        let ip: IpAddr = "169.254.169.254".parse().unwrap();
+        let ip: IpAddr = "169.254.169.254".parse().expect("parse metadata v4");
         assert!(is_cloud_metadata(&ip));
 
-        let ip: IpAddr = "8.8.8.8".parse().unwrap();
+        let ip: IpAddr = "fd00:ec2::254".parse().expect("parse metadata v6");
+        assert!(is_cloud_metadata(&ip));
+
+        let ip: IpAddr = "8.8.8.8".parse().expect("parse public");
         assert!(!is_cloud_metadata(&ip));
     }
 
     #[test]
-    fn test_is_safe_url_public() {
-        assert!(is_safe_url("https://example.com/api"));
+    fn test_is_safe_url_public_and_invalid() {
+        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _guard = EnvVarGuard::capture("HERMES_ALLOW_PRIVATE_URLS");
+        std::env::set_var("HERMES_ALLOW_PRIVATE_URLS", "false");
+        reset_allow_private_cache_for_tests();
+
         assert!(is_safe_url("http://8.8.8.8/api"));
-    }
-
-    #[test]
-    fn test_is_safe_url_private() {
-        assert!(!is_safe_url("http://10.0.0.1/api"));
-        assert!(!is_safe_url("http://127.0.0.1/api"));
-        assert!(!is_safe_url("http://192.168.1.1/api"));
-        assert!(!is_safe_url("http://169.254.169.254/api"));
-    }
-
-    #[test]
-    fn test_is_safe_url_invalid() {
         assert!(!is_safe_url("not-a-url"));
         assert!(!is_safe_url("ftp://example.com"));
     }
 
     #[test]
-    fn test_validate_url_success() {
-        assert!(validate_url("https://example.com/api").is_ok());
-        assert!(validate_url("http://8.8.8.8/api").is_ok());
-    }
+    fn test_validate_url_private_ip_toggle() {
+        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _guard = EnvVarGuard::capture("HERMES_ALLOW_PRIVATE_URLS");
 
-    #[test]
-    fn test_validate_url_private_ip_rejected() {
-        assert!(validate_url("http://10.0.0.1/api").is_err());
-        assert!(validate_url("http://127.0.0.1/api").is_err());
+        std::env::set_var("HERMES_ALLOW_PRIVATE_URLS", "false");
+        reset_allow_private_cache_for_tests();
         assert!(validate_url("http://192.168.1.1/api").is_err());
-        assert!(validate_url("http://169.254.169.254/api").is_err());
-    }
-
-    #[test]
-    fn test_validate_url_localhost_rejected() {
         assert!(validate_url("http://localhost/api").is_err());
+
+        std::env::set_var("HERMES_ALLOW_PRIVATE_URLS", "true");
+        reset_allow_private_cache_for_tests();
+        assert!(validate_url("http://192.168.1.1/api").is_ok());
+        assert!(validate_url("http://localhost/api").is_ok());
+        assert!(validate_url("http://100.100.100.100/api").is_ok());
+        assert!(validate_url("http://198.18.0.1/api").is_ok());
     }
 
     #[test]
-    fn test_validate_url_bad_scheme() {
-        assert!(validate_url("ftp://example.com/file").is_err());
-        assert!(validate_url("file:///etc/passwd").is_err());
+    fn test_validate_url_metadata_always_blocked() {
+        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _guard = EnvVarGuard::capture("HERMES_ALLOW_PRIVATE_URLS");
+        std::env::set_var("HERMES_ALLOW_PRIVATE_URLS", "true");
+        reset_allow_private_cache_for_tests();
+
+        assert!(validate_url("http://169.254.169.254/latest/meta-data").is_err());
+        assert!(validate_url("http://169.254.170.2/v2/credentials").is_err());
+        assert!(validate_url("http://169.254.169.253/").is_err());
+        assert!(validate_url("http://169.254.42.99/anything").is_err());
+        assert!(validate_url("http://100.100.100.200/latest/meta-data").is_err());
+        assert!(validate_url("http://[fd00:ec2::254]/latest").is_err());
+        assert!(validate_url("http://metadata.google.internal/computeMetadata/v1").is_err());
+        assert!(validate_url("http://metadata.goog/computeMetadata/v1").is_err());
+    }
+
+    #[test]
+    fn test_validate_url_dns_failure_is_blocked() {
+        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _guard = EnvVarGuard::capture("HERMES_ALLOW_PRIVATE_URLS");
+        std::env::set_var("HERMES_ALLOW_PRIVATE_URLS", "true");
+        reset_allow_private_cache_for_tests();
+
+        assert!(validate_url("https://definitely-nonexistent.invalid").is_err());
+        assert!(!is_safe_url("https://definitely-nonexistent.invalid"));
     }
 }

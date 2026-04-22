@@ -77,6 +77,10 @@ pub struct GatewayConfig {
     #[serde(default)]
     pub approval: ApprovalConfig,
 
+    /// Security policy toggles.
+    #[serde(default)]
+    pub security: SecurityConfig,
+
     /// Skills enable/disable configuration.
     #[serde(default)]
     pub skills: SkillsSettings,
@@ -120,6 +124,7 @@ impl Default for GatewayConfig {
             smart_model_routing: SmartModelRoutingConfig::default(),
             proxy: None,
             approval: ApprovalConfig::default(),
+            security: SecurityConfig::default(),
             skills: SkillsSettings::default(),
             tools_config: ToolsSettings::default(),
             mcp_servers: Vec::new(),
@@ -438,6 +443,26 @@ impl Default for ApprovalConfig {
     }
 }
 
+/// Security toggles aligned with Python config shape.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SecurityConfig {
+    /// Allow private/internal URL resolution globally.
+    ///
+    /// This is intended for constrained network environments (for example
+    /// TUN-mode proxies or split-tunnel VPNs) where public hosts resolve to
+    /// RFC1918/CGNAT/benchmark ranges.
+    #[serde(default)]
+    pub allow_private_urls: bool,
+}
+
+impl Default for SecurityConfig {
+    fn default() -> Self {
+        Self {
+            allow_private_urls: false,
+        }
+    }
+}
+
 /// Skills configuration.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct SkillsSettings {
@@ -557,6 +582,12 @@ mod tests {
         assert!(!a.enabled);
         assert!(!a.require_approval);
         assert!(a.dangerous_commands.is_empty());
+    }
+
+    #[test]
+    fn security_config_default() {
+        let s = SecurityConfig::default();
+        assert!(!s.allow_private_urls);
     }
 
     #[test]
