@@ -8483,13 +8483,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tests/tools/test_skill_view_traversal.py",
         "tools/skills_tool.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "ported-rust-2026-04-22: commit 250ad94a added skill_view file_path support with traversal + boundary/symlink guards and regression tests",
       "owner": "codex",
       "sha": "1cb2311bad5d10ce7de66f6c0ac5e91956a3ce34",
       "subject": "fix(security): block path traversal in skill_view file_path (fixes #220)",
@@ -9423,13 +9423,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tests/tools/test_skill_view_path_check.py",
         "tools/skills_tool.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "superseded-2026-04-22: windows/path-separator follow-up covered by Rust path-component + strip_prefix containment checks in commit 250ad94a",
       "owner": "codex",
       "sha": "e86f391cacfeadfdcd19e153b5373f2d2f1cd727",
       "subject": "fix: use os.sep in skill_view path boundary check for Windows compatibility",
@@ -9565,13 +9565,13 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tests/tools/test_skill_view_path_check.py",
         "tools/skills_tool.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "superseded-2026-04-22: Path.is_relative_to-style containment semantics covered by Rust strip_prefix containment checks in commit 250ad94a",
       "owner": "codex",
       "sha": "79871c20833059444a27f1e23cd7df056a389158",
       "subject": "refactor: use Path.is_relative_to() for skill_view boundary check",
@@ -69164,9 +69164,259 @@
       "subject": "feat(llm-wiki): port provenance markers, source hashing, and quality signals from llm-wiki-compiler (#13700)",
       "target_ticket": 21,
       "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/markdown.test.ts",
+        "ui-tui/src/components/markdown.tsx"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "43eb1153e9c280beaa26081490a8dc9103c250a0",
+      "subject": "fix(tui): don't swallow Kimi/Qwen ~! ~? kaomoji as subscript spans",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/markdown.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "b97b4c4981e85a82ecb8a17a175c5a1c45675061",
+      "subject": "refactor(tui): clean markdown.tsx per KISS/DRY",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/gateway/test_session_list_all_sources.py",
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "0dfb7b8a0dcbb309015e15efcb090acc76e17573",
+      "subject": "fix(tui): /resume picker shows telegram/discord/etc sessions",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/textInputLineNav.test.ts",
+        "ui-tui/src/components/textInput.tsx"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "d30f6ac44eda33c964b1edf9b53c0eb7288b3c41",
+      "subject": "fix(tui): up-arrow inside a multi-line buffer moves cursor, not history",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/createSlashHandler.test.ts",
+        "ui-tui/src/app/slash/commands/core.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "723a9cfb1e82c9d4fc69893c002ec483eb780cfb",
+      "subject": "fix(tui): /history shows the TUI's own transcript, scrollable",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "run_agent.py",
+        "tests/tools/test_delegate.py",
+        "tests/tools/test_file_state_registry.py",
+        "tools/delegate_tool.py",
+        "tools/file_state.py",
+        "tools/file_tools.py"
+      ],
+      "files_touched": 6,
+      "notes": "",
+      "owner": "",
+      "sha": "9c9d9b7ddf703f2d8174aeab58d653ac25506af8",
+      "subject": "feat(delegate): cross-agent file state coordination for concurrent subagents (#13718)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/components/textInput.tsx"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "95fd023eeb8c9051732c3daacf174a7311d6acb4",
+      "subject": "fix(tui): only cycle history at input boundaries on arrows",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/gateway/test_session_list_all_sources.py",
+        "tests/gateway/test_session_list_allowed_sources.py",
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "bd046220b3c11af96c681331f72b24315279e2da",
+      "subject": "fix(tui): narrow /resume sources to human adapters",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/app/useInputHandlers.ts"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "35cc66df62e35daddcbb9d3f15f5938d35b11ae8",
+      "subject": "fix(tui): arrow history fallback when no line exists",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/config.py",
+        "tests/tools/test_tts_max_text_length.py",
+        "tools/tts_tool.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "8f167e8791ab852e26d3e9980e348284666444cd",
+      "subject": "fix(tts): use per-provider input-character caps instead of global 4000 (#13743)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/creative/baoyu-comic/SKILL.md",
+        "skills/creative/baoyu-comic/references/analysis-framework.md",
+        "skills/creative/baoyu-comic/references/art-styles/chalk.md",
+        "skills/creative/baoyu-comic/references/art-styles/ink-brush.md",
+        "skills/creative/baoyu-comic/references/art-styles/ligne-claire.md",
+        "skills/creative/baoyu-comic/references/art-styles/manga.md",
+        "skills/creative/baoyu-comic/references/art-styles/minimalist.md",
+        "skills/creative/baoyu-comic/references/art-styles/realistic.md",
+        "skills/creative/baoyu-comic/references/auto-selection.md",
+        "skills/creative/baoyu-comic/references/base-prompt.md",
+        "skills/creative/baoyu-comic/references/character-template.md",
+        "skills/creative/baoyu-comic/references/config/first-time-setup.md",
+        "skills/creative/baoyu-comic/references/config/preferences-schema.md",
+        "skills/creative/baoyu-comic/references/config/watermark-guide.md",
+        "skills/creative/baoyu-comic/references/layouts/cinematic.md",
+        "skills/creative/baoyu-comic/references/layouts/dense.md",
+        "skills/creative/baoyu-comic/references/layouts/four-panel.md",
+        "skills/creative/baoyu-comic/references/layouts/mixed.md",
+        "skills/creative/baoyu-comic/references/layouts/splash.md",
+        "skills/creative/baoyu-comic/references/layouts/standard.md"
+      ],
+      "files_touched": 38,
+      "notes": "",
+      "owner": "",
+      "sha": "be7dcf362858d828a2f0f76ac5a89203b541d7b9",
+      "subject": "feat(skills): add baoyu-comic skill",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/creative/baoyu-comic/PORT_NOTES.md",
+        "skills/creative/baoyu-comic/SKILL.md",
+        "skills/creative/baoyu-comic/references/analysis-framework.md",
+        "skills/creative/baoyu-comic/references/auto-selection.md",
+        "skills/creative/baoyu-comic/references/config/first-time-setup.md",
+        "skills/creative/baoyu-comic/references/config/preferences-schema.md",
+        "skills/creative/baoyu-comic/references/config/watermark-guide.md",
+        "skills/creative/baoyu-comic/references/ohmsha-guide.md",
+        "skills/creative/baoyu-comic/references/partial-workflows.md",
+        "skills/creative/baoyu-comic/references/presets/concept-story.md",
+        "skills/creative/baoyu-comic/references/presets/four-panel.md",
+        "skills/creative/baoyu-comic/references/presets/ohmsha.md",
+        "skills/creative/baoyu-comic/references/presets/shoujo.md",
+        "skills/creative/baoyu-comic/references/presets/wuxia.md",
+        "skills/creative/baoyu-comic/references/workflow.md"
+      ],
+      "files_touched": 15,
+      "notes": "",
+      "owner": "",
+      "sha": "a8beba82d00121ade75cacadb6344aa161704670",
+      "subject": "refactor(skills): adapt baoyu-comic for Hermes",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/creative/baoyu-comic/PORT_NOTES.md",
+        "skills/creative/baoyu-comic/SKILL.md",
+        "skills/creative/baoyu-comic/references/partial-workflows.md",
+        "skills/creative/baoyu-comic/references/workflow.md",
+        "skills/creative/baoyu-comic/scripts/merge-to-pdf.ts"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "fe025425cbcc3d38048b28f2e4fa476187473bfd",
+      "subject": "fix(skills): address baoyu-comic PR review",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/creative/baoyu-comic/PORT_NOTES.md",
+        "skills/creative/baoyu-comic/SKILL.md",
+        "skills/creative/baoyu-comic/references/workflow.md"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "83a7a005aa867a1a379664965e3adb796d977c54",
+      "subject": "fix(skills): clarify baoyu-comic character sheet role",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "website/docs/reference/environment-variables.md",
+        "website/docs/user-guide/configuration.md",
+        "website/docs/user-guide/features/delegation.md"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "bf73ced4f524028572859d90bc05e2bf40ad0717",
+      "subject": "docs: document delegation width + depth knobs (#13745)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
     }
   ],
-  "generated_at_utc": "2026-04-22T00:47:23.184051+00:00",
+  "generated_at_utc": "2026-04-22T01:00:41.187714+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69174,19 +69424,19 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4174,
-      "ported": 19,
-      "superseded": 350
+      "pending": 4186,
+      "ported": 20,
+      "superseded": 352
     },
     "by_target_ticket": {
-      "20": 1618,
-      "21": 195,
-      "22": 509,
+      "20": 1622,
+      "21": 199,
+      "22": 516,
       "23": 507,
       "24": 64,
       "25": 152,
       "26": 1498
     },
-    "total_commits": 4543
+    "total_commits": 4558
   }
 }
