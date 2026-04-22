@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-22T07:57:04.000898+00:00`
+Generated: `2026-04-22T07:57:46.842527+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `4587`.
 
@@ -16,64 +16,14 @@ Generated: `2026-04-22T07:57:04.000898+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 3948 |
+| pending | 3898 |
 | ported | 66 |
-| superseded | 573 |
+| superseded | 623 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `b281ecd50ad4` | #26 | Fix: rending issue on /skills command |
-| `0cce536fb2c0` | #26 | fix: fileops on mac |
-| `588cdacd49e1` | #26 | feat(session): implement session reset policy for messaging platforms |
-| `8aa531c7faea` | #26 | fix(gateway): Pass session_db to AIAgent, fixing session_search error |
-| `19abbfff9653` | #21 | feat(ocr-and-documents): add OCR and document extraction skills |
-| `26a6da27fa72` | #21 | feat(research): add arXiv search skill and documentation |
-| `2ff54ae6b35d` | #26 | fix(gateway): Remove session_db from AIAgent instantiation to prevent errors |
-| `fec5d59fb3dd` | #26 | feat(gateway): integrate pairing store and event hook system |
-| `c77f3da0ceab` | #26 | Cherry-pick 6 bug fixes from PR #76 and update documentation |
-| `445d2646a96e` | #21 | Enhance arXiv integration: Add BibTeX generation, ID versioning, and withdrawn paper handling. Update search script to display version information alongside arXiv IDs. |
-| `5007a122b273` | #26 | fix(terminal): enhance error logging in cleanup functions with exception info |
-| `2ddda5da8940` | #21 | Create DESCRIPTION.md |
-| `f9e05218caf6` | #21 | Create SKILL.md |
-| `2595d81733eb` | #21 | feat: Add Superpowers software development skills |
-| `fbb1923fad18` | #23 | fix(security): patch path traversal, size bypass, and prompt injection in document processing |
-| `79bd65034c92` | #20 | fix(agent): handle 413 payload-too-large via compression instead of aborting |
-| `f7677ed275e9` | #24 | feat: add docker_volumes config for custom volume mounts |
-| `e09ef6b8bc7d` | #26 | feat(gateway): improve model command handling by resolving current model from environment and config file |
-| `c92bdd878538` | #26 | fix(cli): improve spinner line clearing to prevent garbled output with prompt_toolkit |
-| `8c1f5efcaba6` | #26 | feat(cli): add toolset API key validation and improve checklist display |
-| `4f3cb98e5e1c` | #26 | feat(cli): implement platform-specific toolset selection with improved user interface |
-| `66d9983d46c0` | #26 | Fix memory tool entry parsing when content contains section sign |
-| `07fcb94bc0d9` | #26 | fix(gateway): sync /model and /personality with CLI config.yaml pattern |
-| `f14ff3e0417b` | #24 | feat(cli): use user's login shell for command execution to ensure environment consistency |
-| `fb7df099e0fd` | #24 | feat(cli): add shell noise filtering and improve command execution with interactive login shell |
-| `518826e70c6b` | #25 | fix(docs): standardize terminology and CLI formatting |
-| `de0829cec330` | #26 | fix(cli): increase max iterations for child agents and extend API call timeout for improved reliability |
-| `0c0a2eb0a279` | #20 | fix(agent): fail fast on Anthropic native base URLs |
-| `19f28a633a9e` | #20 | fix(agent): enhance 413 error handling and improve conversation history management in tests |
-| `50cb4d5fc7e4` | #20 | fix(agent): update error message for unsupported Anthropic API endpoints to clarify usage of OpenRouter |
-| `b7f099beed37` | #25 | feat: add Honcho integration for cross-session user modeling |
-| `1d7ce5e063ff` | #26 | feat: integrate honcho-ai package and enhance tool progress callback in delegate_tool |
-| `4d8689c10cba` | #26 | feat: add honcho-ai package to dependencies and update extras in uv.lock |
-| `0862fa96fdd2` | #21 | refactor(domain-intel): streamline documentation and add CLI tool for domain intelligence operations |
-| `de5a88bd976a` | #25 | refactor: migrate tool progress configuration from environment variables to config.yaml |
-| `1e463a8e39a8` | #26 | fix: strip <think> blocks from final response to users |
-| `35655298e691` | #20 | fix(gateway): prevent TTS voice messages from accumulating across turns |
-| `f213620c8bea` | #25 | fix(install): ignore commented lines when checking for existing PATH configuration |
-| `c36b256de56a` | #20 | feat: add Home Assistant integration (REST tools + WebSocket gateway) |
-| `b32c642af3cf` | #20 | test: add HA integration tests with fake in-process server |
-| `2390728cc38b` | #23 | fix: resolve 4 bugs found in HA integration code review |
-| `6366177118ec` | #26 | refactor: update context compression configuration to use config.yaml and improve model handling |
-| `dfd50ceccd8f` | #20 | fix: preserve Gemini thought_signature in tool call messages |
-| `46506769f1e3` | #20 | test: add unit tests for 5 security/logic-critical modules (batch 4) |
-| `08250a53a120` | #20 | fix: skills hub dedup prefers higher trust levels + 43 tests |
-| `9769e07cd5e5` | #20 | test: add 25 unit tests for trajectory_compressor |
-| `1ddf8c26f50d` | #25 | refactor(cli): update max turns configuration precedence and enhance documentation |
-| `2205b22409f2` | #26 | fix(headers): update X-OpenRouter-Categories to include 'productivity' |
-| `8e0c48e6d25b` | #25 | feat(skills): implement dynamic skill slash commands for CLI and gateway |
-| `7b23dbfe6841` | #23 | feat(animation): add support for sending animated GIFs in BasePlatformAdapter and TelegramAdapter |
 | `10085041cfc1` | #21 | feat: add ascii-art skill for creative text banners and art |
 | `ec97f9ad1af2` | #21 | feat(skills): add Solana blockchain skill (converted from tool) |
 | `6cbb8f3a0c8a` | #26 | fix: align _apply_delete comment with actual behavior |
@@ -124,4 +74,54 @@ Generated: `2026-04-22T07:57:04.000898+00:00`
 | `7a0b37712ff2` | #26 | fix(agent): strip finish_reason from assistant messages to fix Mistral 422 errors (#253) |
 | `1ad930cbd061` | #26 | fix(delegate_tool): increase DEFAULT_MAX_ITERATIONS from 25 to 50 to enhance processing capabilities |
 | `14396e3fe777` | #26 | fix(delegate_tool): update max_iterations default from 25 to 50 for improved task handling |
+| `6bf3aad62ec6` | #25 | fix(delegate_tool): update max_iterations in documentation and example config to reflect default value of 50 |
+| `b1bf11b0fed1` | #26 | fix(setup): handle TerminalMenu init failures with safe fallback |
+| `e265006fd6c9` | #20 | test: add coverage for chat_topic in SessionSource and session context prompt |
+| `d2ec5aaacf7c` | #26 | fix(registry): preserve full traceback on tool dispatch errors |
+| `866fd9476bf3` | #25 | fix(docker): remove --read-only and allow exec on /tmp for package installs |
+| `c574a4d0862c` | #26 | fix(batch_runner): log traceback when worker raises during imap_unordered |
+| `afb680b50dc2` | #20 | fix(cli): fix max_turns comment and test for correct priority order |
+| `25c65bc99eea` | #20 | fix(agent): handle None content in context compressor (fixes #211) |
+| `33ab5cec825f` | #26 | fix: handle None message content across codebase (fixes #276) |
+| `234b67f5fd7d` | #20 | fix: mock time in retry exhaustion tests to prevent backoff sleep |
+| `fd335a4e26eb` | #26 | fix: add missing dangerous command patterns in approval.py |
+| `ca5525bcd7df` | #20 | fix(tests): isolate HERMES_HOME in tests and adjust log directory for debug session |
+| `8c48bb080fb6` | #26 | refactor: remove unnecessary single-element loop in disk usage calc |
+| `7862e7010cbd` | #20 | test: add additional multiline bypass tests for find patterns |
+| `3c13feed4c39` | #26 | feat: show detailed tool call args in gateway based on config |
+| `b603b6e1c973` | #26 | fix(cli): throttle UI invalidate to prevent terminal blinking on SSH |
+| `6789084ec0bc` | #20 | Fix ClawHub Skills Hub adapter for updated API |
+| `3c252ae44b52` | #20 | feat: add MCP (Model Context Protocol) client support |
+| `0eb0bec74cac` | #26 | feat(gateway): add MCP server shutdown on gateway exit |
+| `aa2ecaef29fd` | #20 | fix: resolve orphan subprocess leak on MCP server shutdown |
+| `593c549bc466` | #26 | fix: make discover_mcp_tools idempotent to prevent duplicate connections |
+| `151e8d896ca2` | #20 | fix(tests): isolate discover_mcp_tools tests from global _servers state |
+| `11a2ecb936d6` | #20 | fix: resolve thread safety issues and shutdown deadlock in MCP client |
+| `358839626370` | #23 | feat(whatsapp): native media sending — images, videos, documents |
+| `11615014a4ec` | #20 | fix: eliminate shell noise from terminal output with fence markers |
+| `60532361583b` | #20 | fix: prioritize OPENROUTER_API_KEY over OPENAI_API_KEY |
+| `ee541c84f19b` | #26 | fix(cron): close lock_fd on failed flock to prevent fd leak |
+| `ac6d747fa610` | #26 | Make batch_runner checkpoint incremental and atomic |
+| `5fa3e24b7620` | #26 | Make process_registry checkpoint writes atomic |
+| `c6b3b8c84722` | #26 | docs: add VISION.md brainstorming/roadmap doc |
+| `14b0ad95c6ae` | #25 | docs: enhance WhatsApp setup instructions and introduce mode selection |
+| `64ff8f065b1f` | #20 | feat(mcp): add HTTP transport, reconnection, security hardening |
+| `63f5e14c6993` | #21 | docs: add comprehensive MCP documentation and examples |
+| `60effcfc4427` | #20 | fix(mcp): parallel discovery, user-visible logging, config validation |
+| `7df14227a957` | #20 | feat(mcp): banner integration, /reload-mcp command, resources & prompts |
+| `eec31b008910` | #26 | fix(mcp): /reload-mcp now updates agent tools + injects history message |
+| `3ead3401e0b0` | #26 | fix(mcp): persist updated tools to session log immediately after reload |
+| `de59d91add14` | #25 | feat: Windows native support via Git Bash |
+| `daedec6957df` | #23 | fix: Telegram adapter crash on Windows when library not installed (#304) |
+| `84e45b5c402c` | #26 | feat: tabbed platform installer on landing page |
+| `bdf475851025` | #26 | fix: show uv error on Python install failure, add fallback detection |
+| `cdf5375b9a00` | #26 | fix: PowerShell NativeCommandError on git stderr output |
+| `f08ad94d4d8a` | #20 | fix: correct typo 'Grup' -> 'Group' in test section headers |
+| `245c76651285` | #26 | fix: remove 2>&1 from git commands in PowerShell installer |
+| `5f29e7b63c7d` | #21 | fix: rename misspelled directory 'fouth-edition' to 'fourth-edition' |
+| `a718aed1be1b` | #21 | fix: rename misspelled directory 'fouth-edition' to 'fourth-edition' |
+| `4cc431afabe8` | #26 | fix: setup wizard skipping provider selection on fresh install |
+| `8b520f98485b` | #21 | fix: rename misspelled directory 'fouth-edition' to 'fourth-edition' |
+| `d10108f8caf5` | #21 | fix: rename misspelled directory 'fouth-edition' to 'fourth-edition' |
+| `5749f5809c49` | #26 | fix: explicit UTF-8 encoding for .env file operations (Windows only) |
 
