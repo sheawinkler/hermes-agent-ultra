@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-22T01:29:13.505547+00:00`
+Generated: `2026-04-22T01:35:51.028997+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `4559`.
 
@@ -16,9 +16,9 @@ Generated: `2026-04-22T01:29:13.505547+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 4183 |
-| ported | 24 |
-| superseded | 352 |
+| pending | 4179 |
+| ported | 25 |
+| superseded | 355 |
 
 ## First 100 Pending Commits
 
@@ -96,7 +96,6 @@ Generated: `2026-04-22T01:29:13.505547+00:00`
 | `3191a9ba11d4` | #23 | feat: add new conversation command and enhance command handling |
 | `d49af633f06a` | #26 | feat: enhance command execution with stdin support |
 | `057d3e1810a2` | #26 | feat: enhance search functionality in ShellFileOperations |
-| `d070b8698d39` | #26 | fix: escape file glob patterns in ShellFileOperations |
 | `4d5f29c74ca9` | #25 | feat: introduce skill management tool for agent-created skills and skills migration to ~/.hermes |
 | `9350e26e681e` | #26 | feat: introduce clarifying questions tool for interactive user engagement |
 | `748f0b2b5fc1` | #26 | feat: enhance clarify tool with configurable timeout and countdown display |
@@ -124,4 +123,5 @@ Generated: `2026-04-22T01:29:13.505547+00:00`
 | `6903c4605ceb` | #26 | chore: update package-lock.json with new dependencies and version upgrades |
 | `3dfc0a9679d6` | #21 | feat: add PPTX editing and creation skills with comprehensive documentation |
 | `7283b9f6cf0c` | #26 | feat: extend browser session management with improved thread safety and timeout configuration |
+| `a54a27595bf4` | #26 | fix: update browser command connection instructions to prevent session conflicts |
 

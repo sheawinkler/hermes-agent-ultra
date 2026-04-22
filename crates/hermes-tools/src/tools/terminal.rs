@@ -2,7 +2,9 @@
 
 use async_trait::async_trait;
 use indexmap::IndexMap;
+use regex::Regex;
 use serde_json::{json, Value};
+use std::sync::OnceLock;
 
 use hermes_core::{
     tool_schema, CommandOutput, JsonSchema, TerminalBackend, ToolError, ToolHandler, ToolSchema,
@@ -64,9 +66,11 @@ impl ToolHandler for TerminalHandler {
 
         let pty = params.get("pty").and_then(|v| v.as_bool()).unwrap_or(false);
 
+        let transformed_command = transform_sudo_command(command);
+
         match self
             .backend
-            .execute_command(command, timeout, workdir, background, pty)
+            .execute_command(&transformed_command, timeout, workdir, background, pty)
             .await
         {
             Ok(output) => Ok(format_command_output(&output)),
@@ -141,6 +145,33 @@ fn format_command_output(output: &CommandOutput) -> String {
         result = format!("[exit code: {}]", output.exit_code);
     }
     result
+}
+
+fn sudo_word_regex() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"\bsudo\b").expect("valid sudo regex"))
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+fn transform_sudo_command_with_password(command: &str, sudo_password: Option<&str>) -> String {
+    let Some(password) = sudo_password.filter(|v| !v.is_empty()) else {
+        return command.to_string();
+    };
+    if !sudo_word_regex().is_match(command) {
+        return command.to_string();
+    }
+    let replacement = format!("echo {} | sudo -S -p ''", shell_quote(password));
+    sudo_word_regex()
+        .replace_all(command, replacement.as_str())
+        .into_owned()
+}
+
+fn transform_sudo_command(command: &str) -> String {
+    let sudo_password = std::env::var("SUDO_PASSWORD").ok();
+    transform_sudo_command_with_password(command, sudo_password.as_deref())
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +376,27 @@ mod tests {
             .await
             .unwrap();
         assert!(result.contains("echo hello"));
+    }
+
+    #[test]
+    fn test_transform_sudo_command_quotes_password() {
+        let transformed =
+            transform_sudo_command_with_password("sudo apt install curl", Some("pa'ss$(whoami)"));
+        assert!(transformed.contains("echo 'pa'\"'\"'ss$(whoami)' | sudo -S -p ''"));
+        assert!(transformed.ends_with(" apt install curl"));
+    }
+
+    #[test]
+    fn test_transform_sudo_command_without_password_is_unchanged() {
+        let transformed = transform_sudo_command_with_password("sudo apt update", None);
+        assert_eq!(transformed, "sudo apt update");
+    }
+
+    #[test]
+    fn test_transform_sudo_command_with_non_sudo_is_unchanged() {
+        let transformed =
+            transform_sudo_command_with_password("echo hello", Some("secret-password"));
+        assert_eq!(transformed, "echo hello");
     }
 
     #[test]

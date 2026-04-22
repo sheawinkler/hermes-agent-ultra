@@ -3516,12 +3516,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tools/file_operations.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "superseded in Rust architecture: file search/filtering is native Rust regex/glob matching without shell argument expansion.",
       "owner": "codex",
       "sha": "d070b8698d39ecbbb5c617aeec50756566946faf",
       "subject": "fix: escape file glob patterns in ShellFileOperations",
@@ -6300,12 +6300,12 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tools/terminal_tool.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "ported in Rust: terminal tool now safely transforms sudo commands using shell-quoted SUDO_PASSWORD piping (no shell injection on password content).",
       "owner": "codex",
       "sha": "25e260bb3a00102590a09d8e0b3758e3b7647fd1",
       "subject": "fix(security): prevent shell injection in sudo password piping",
@@ -7001,12 +7001,12 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tools/process_registry.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "superseded in Rust architecture: process_registry is metadata-only (no shell bg_command construction path to quote).",
       "owner": "codex",
       "sha": "e5f719a33bfe2705d40c5b4948cd301c0a5b8811",
       "subject": "fix(process): escape single quotes in spawn_via_env bg_command",
@@ -7212,12 +7212,12 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tools/process_registry.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "superseded in Rust architecture: process_registry does not build `nohup bash -c` command strings; quoting issue not present.",
       "owner": "codex",
       "sha": "66a5bc64db92996f86674e5d4d5fc71ccb08dc3e",
       "subject": "fix(process): use shlex to safely quote commands in bg_command for improved security",
@@ -69430,7 +69430,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     }
   ],
-  "generated_at_utc": "2026-04-22T01:29:13.505547+00:00",
+  "generated_at_utc": "2026-04-22T01:35:51.028997+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69438,9 +69438,9 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4183,
-      "ported": 24,
-      "superseded": 352
+      "pending": 4179,
+      "ported": 25,
+      "superseded": 355
     },
     "by_target_ticket": {
       "20": 1622,

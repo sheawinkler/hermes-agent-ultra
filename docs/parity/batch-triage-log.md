@@ -153,3 +153,37 @@
 - Queue/proof refresh:
   - `docs/parity/upstream-missing-queue.{json,md}`
   - `docs/parity/global-parity-proof.{json,md}`
+
+## 2026-04-22 batch-09 (sudo quoting parity + process/file triage)
+- Scope: WG7 security parity around terminal/process/file shell-quoting commits.
+- Upstream commits triaged:
+  - `25e260bb3a00102590a09d8e0b3758e3b7647fd1`
+    `fix(security): prevent shell injection in sudo password piping`
+    - Disposition: `ported`
+    - Rust implementation:
+      - `crates/hermes-tools/src/tools/terminal.rs`
+      - Added secure sudo transform path:
+        - reads `SUDO_PASSWORD` when set
+        - shell-quotes password safely (`'...'"'"'...'` style)
+        - rewrites `sudo` token to `echo <quoted> | sudo -S -p ''` before backend execution
+      - Added regression tests for:
+        - quoting with single quotes and shell metacharacters in password
+        - unchanged command when password missing
+        - unchanged command when no `sudo` token
+  - `e5f719a33bfe2705d40c5b4948cd301c0a5b8811`
+    `fix(process): escape single quotes in spawn_via_env bg_command`
+    - Disposition: `superseded`
+    - Rationale: Rust `process_registry` is metadata-only and does not build shell `bg_command` strings.
+  - `66a5bc64db92996f86674e5d4d5fc71ccb08dc3e`
+    `fix(process): use shlex to safely quote commands in bg_command`
+    - Disposition: `superseded`
+    - Rationale: same architecture reason as above (no `nohup bash -c` string assembly in Rust process registry path).
+  - `d070b8698d39ecbbb5c617aeec50756566946faf`
+    `fix: escape file glob patterns in ShellFileOperations`
+    - Disposition: `superseded`
+    - Rationale: Rust file operations use native regex/glob matching without shell argument expansion.
+- Verification:
+  - `cargo test -p hermes-tools tools::terminal -- --nocapture`
+- Queue/proof refresh:
+  - `docs/parity/upstream-missing-queue.{json,md}`
+  - `docs/parity/global-parity-proof.{json,md}`
