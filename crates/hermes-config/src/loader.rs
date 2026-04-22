@@ -32,14 +32,31 @@ fn io_to_config_error(e: std::io::Error) -> ConfigError {
 // load_dotenv
 // ---------------------------------------------------------------------------
 
-/// Load variables from `$HERMES_HOME/.env` into the process environment.
+/// Load user and project dotenv files into the process environment.
 ///
-/// Only sets a variable if it is not already present in the environment,
-/// so real env vars always win. Supports `#` comments, blank lines, and
-/// optional single/double quoting of values.
+/// Behavior mirrors Python parity:
+/// - `$HERMES_HOME/.env` overrides stale shell-exported values.
+/// - `./.env` is sanitized and loaded as a fallback source.
+/// - When user env exists, project env only fills missing keys.
 pub fn load_dotenv() {
     let env_file = paths::env_path();
-    let contents = match std::fs::read_to_string(&env_file) {
+    let project_env = std::env::current_dir().ok().map(|p| p.join(".env"));
+
+    if env_file.exists() {
+        sanitize_env_file_if_needed(&env_file);
+        // User env should override stale shell exports.
+        load_dotenv_file(&env_file, true);
+    }
+
+    if let Some(project_env) = project_env.filter(|p| p.exists()) {
+        sanitize_env_file_if_needed(&project_env);
+        // Project env only fills gaps when user env exists; otherwise it can override.
+        load_dotenv_file(&project_env, !env_file.exists());
+    }
+}
+
+fn load_dotenv_file(path: &Path, override_existing: bool) {
+    let contents = match std::fs::read_to_string(path) {
         Ok(c) => c,
         Err(_) => return,
     };
@@ -54,14 +71,88 @@ pub fn load_dotenv() {
             if key.is_empty() {
                 continue;
             }
-            let value = value.trim();
-            let value = strip_quotes(value);
-            if std::env::var(key).is_err() {
-                // SAFETY: called once at startup before multi-threading.
+            let value = strip_quotes(value.trim());
+            if override_existing || std::env::var(key).is_err() {
+                // SAFETY: called during startup/config loading.
                 unsafe { std::env::set_var(key, value) };
             }
         }
     }
+}
+
+fn sanitize_env_file_if_needed(path: &Path) {
+    let Ok(original) = std::fs::read_to_string(path) else {
+        return;
+    };
+    let sanitized = sanitize_env_lines(&original);
+    if sanitized != original {
+        let _ = std::fs::write(path, sanitized);
+    }
+}
+
+fn sanitize_env_lines(contents: &str) -> String {
+    let mut out: Vec<String> = Vec::new();
+    for line in contents.lines() {
+        out.extend(split_concatenated_assignments(line));
+    }
+    let mut sanitized = out.join("\n");
+    if contents.ends_with('\n') {
+        sanitized.push('\n');
+    }
+    sanitized
+}
+
+fn split_concatenated_assignments(line: &str) -> Vec<String> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return vec![line.to_string()];
+    }
+
+    let mut segments = Vec::new();
+    let mut current = trimmed.to_string();
+    loop {
+        let Some((key, value)) = current.split_once('=') else {
+            segments.push(current);
+            break;
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            segments.push(current);
+            break;
+        }
+        if let Some(split_idx) = find_embedded_assignment_start(value) {
+            let left = value[..split_idx].trim_end();
+            segments.push(format!("{key}={left}"));
+            current = value[split_idx..].trim_start().to_string();
+            continue;
+        }
+        segments.push(format!("{key}={}", value.trim()));
+        break;
+    }
+    segments
+}
+
+fn find_embedded_assignment_start(value: &str) -> Option<usize> {
+    let bytes = value.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i].is_ascii_uppercase() {
+            let mut j = i + 1;
+            while j < bytes.len()
+                && (bytes[j].is_ascii_uppercase() || bytes[j].is_ascii_digit() || bytes[j] == b'_')
+            {
+                j += 1;
+            }
+            if j < bytes.len() && bytes[j] == b'=' {
+                let key = &value[i..j];
+                if key.len() >= 4 && key.contains('_') {
+                    return Some(i);
+                }
+            }
+        }
+        i += 1;
+    }
+    None
 }
 
 fn strip_quotes(s: &str) -> &str {
@@ -668,6 +759,9 @@ pub fn validate_config(config: &GatewayConfig) -> Result<(), ConfigError> {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn validate_valid_config() {
@@ -773,5 +867,96 @@ mod tests {
             user_config_field_display(&c, "llm.openai.args").unwrap(),
             "--stdio,--model,gpt-4o-mini"
         );
+    }
+
+    #[test]
+    fn sanitize_env_lines_splits_concatenated_assignments() {
+        let raw = "TELEGRAM_BOT_TOKEN=12345ANTHROPIC_API_KEY=sk-ant-test\n";
+        let sanitized = sanitize_env_lines(raw);
+        assert_eq!(
+            sanitized,
+            "TELEGRAM_BOT_TOKEN=12345\nANTHROPIC_API_KEY=sk-ant-test\n"
+        );
+    }
+
+    #[test]
+    fn load_dotenv_file_sanitizes_project_env_before_loading() {
+        use tempfile::tempdir;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let project = tempdir().expect("project tempdir");
+        let project_env = project.path().join(".env");
+
+        std::fs::write(
+            &project_env,
+            "TELEGRAM_BOT_TOKEN=abc123ANTHROPIC_API_KEY=sk-ant-test\n",
+        )
+        .expect("write project env");
+
+        // SAFETY: test process serializes env mutation via ENV_LOCK.
+        unsafe {
+            std::env::set_var("TELEGRAM_BOT_TOKEN", "stale");
+            std::env::remove_var("ANTHROPIC_API_KEY");
+        }
+
+        sanitize_env_file_if_needed(&project_env);
+        load_dotenv_file(&project_env, true);
+
+        assert_eq!(
+            std::env::var("TELEGRAM_BOT_TOKEN").ok().as_deref(),
+            Some("abc123")
+        );
+        assert_eq!(
+            std::env::var("ANTHROPIC_API_KEY").ok().as_deref(),
+            Some("sk-ant-test")
+        );
+        let rewritten = std::fs::read_to_string(&project_env).expect("read sanitized env");
+        assert!(rewritten.contains("\nANTHROPIC_API_KEY="));
+
+        // SAFETY: test process serializes env mutation via ENV_LOCK.
+        unsafe {
+            std::env::remove_var("TELEGRAM_BOT_TOKEN");
+            std::env::remove_var("ANTHROPIC_API_KEY");
+        }
+    }
+
+    #[test]
+    fn project_env_only_fills_missing_when_user_env_loaded() {
+        use tempfile::tempdir;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().expect("tempdir");
+        let user_env = dir.path().join("user.env");
+        let project_env = dir.path().join("project.env");
+        std::fs::write(&user_env, "OPENAI_API_KEY=user-key\n").expect("write user env");
+        std::fs::write(
+            &project_env,
+            "OPENAI_API_KEY=project-key\nEXA_API_KEY=exa-key\n",
+        )
+        .expect("write project env");
+
+        // SAFETY: test process serializes env mutation via ENV_LOCK.
+        unsafe {
+            std::env::remove_var("OPENAI_API_KEY");
+            std::env::remove_var("EXA_API_KEY");
+        }
+
+        load_dotenv_file(&user_env, true);
+        load_dotenv_file(&project_env, false);
+
+        assert_eq!(
+            std::env::var("OPENAI_API_KEY").ok().as_deref(),
+            Some("user-key")
+        );
+        assert_eq!(
+            std::env::var("EXA_API_KEY").ok().as_deref(),
+            Some("exa-key")
+        );
+
+        // SAFETY: test process serializes env mutation via ENV_LOCK.
+        unsafe {
+            std::env::remove_var("OPENAI_API_KEY");
+            std::env::remove_var("EXA_API_KEY");
+        }
     }
 }
