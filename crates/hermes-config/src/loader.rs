@@ -262,7 +262,7 @@ pub fn load_user_config_file(path: &Path) -> Result<GatewayConfig, ConfigError> 
     }
 }
 
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, llm.<provider>.api_key|base_url|model|command|args|oauth_token_url|oauth_client_id, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, llm.<provider>.api_key|api_key_env|base_url|model|command|args|oauth_token_url|oauth_client_id, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
 
 fn mask_secret(s: &str) -> String {
     if s.is_empty() {
@@ -378,6 +378,7 @@ fn apply_user_config_patch_dotted(
                 .or_insert_with(LlmProviderConfig::default);
             match *field {
                 "api_key" => entry.api_key = Some(value.to_string()),
+                "api_key_env" => entry.api_key_env = Some(value.to_string()),
                 "base_url" => entry.base_url = Some(value.to_string()),
                 "model" => entry.model = Some(value.to_string()),
                 "command" => entry.command = Some(value.to_string()),
@@ -392,7 +393,7 @@ fn apply_user_config_patch_dotted(
                 "oauth_client_id" => entry.oauth_client_id = Some(value.to_string()),
                 other => {
                     return Err(ConfigError::NotFound(format!(
-                        "unknown llm field: llm.{}.{} (supported: api_key, base_url, model, command, args, oauth_token_url, oauth_client_id)",
+                        "unknown llm field: llm.{}.{} (supported: api_key, api_key_env, base_url, model, command, args, oauth_token_url, oauth_client_id)",
                         provider, other
                     )));
                 }

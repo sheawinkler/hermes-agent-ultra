@@ -173,6 +173,8 @@ pub struct RuntimeProviderConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key_env: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
     /// Optional external process command for provider runtimes (Python parity metadata).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1301,6 +1303,18 @@ impl AgentLoop {
                     }
                 } else if !trimmed.is_empty() {
                     return Some(trimmed.to_string());
+                }
+            }
+            if let Some(env_name) = cfg
+                .api_key_env
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                if let Ok(v) = std::env::var(env_name) {
+                    if !v.trim().is_empty() {
+                        return Some(v);
+                    }
                 }
             }
         }
@@ -5097,6 +5111,7 @@ mod tests {
             "openai".to_string(),
             RuntimeProviderConfig {
                 api_key: Some("sk-test-key".to_string()),
+                api_key_env: None,
                 base_url: None,
                 command: None,
                 args: Vec::new(),
@@ -5176,6 +5191,7 @@ mod tests {
             "openai".to_string(),
             RuntimeProviderConfig {
                 api_key: Some("sk-test-key".to_string()),
+                api_key_env: None,
                 base_url: Some("https://api.openai.com/v1".to_string()),
                 command: Some("copilot-language-server".to_string()),
                 args: vec![
@@ -5255,6 +5271,7 @@ mod tests {
             "codex".to_string(),
             RuntimeProviderConfig {
                 api_key: Some("sk-test-key".to_string()),
+                api_key_env: None,
                 base_url: Some("https://api.openai.com/v1".to_string()),
                 command: None,
                 args: Vec::new(),
@@ -5342,6 +5359,7 @@ mod tests {
             "qwen-oauth".to_string(),
             RuntimeProviderConfig {
                 api_key: Some("sk-qwen-oauth".to_string()),
+                api_key_env: None,
                 base_url: Some("https://dashscope.aliyuncs.com/compatible-mode/v1".to_string()),
                 command: None,
                 args: Vec::new(),
@@ -5443,6 +5461,7 @@ mod tests {
             "openai-codex".to_string(),
             RuntimeProviderConfig {
                 api_key: None,
+                api_key_env: None,
                 base_url: None,
                 command: None,
                 args: Vec::new(),
@@ -5752,6 +5771,7 @@ mod tests {
             "copilot-acp".to_string(),
             RuntimeProviderConfig {
                 api_key: None,
+                api_key_env: None,
                 base_url: Some("acp://copilot".to_string()),
                 command: Some("definitely-not-installed-copilot-cli".to_string()),
                 args: vec!["--acp".to_string(), "--stdio".to_string()],
@@ -5830,6 +5850,7 @@ mod tests {
             "copilot-acp".to_string(),
             RuntimeProviderConfig {
                 api_key: None,
+                api_key_env: None,
                 base_url: Some("acp+tcp://127.0.0.1:8765".to_string()),
                 command: Some("definitely-not-installed-copilot-cli".to_string()),
                 args: vec!["--acp".to_string(), "--stdio".to_string()],
@@ -6272,6 +6293,7 @@ mod tests {
             "qwen-oauth".to_string(),
             RuntimeProviderConfig {
                 api_key: None,
+                api_key_env: None,
                 base_url: None,
                 command: None,
                 args: Vec::new(),
@@ -6285,6 +6307,7 @@ mod tests {
             "custom-oauth".to_string(),
             RuntimeProviderConfig {
                 api_key: None,
+                api_key_env: None,
                 base_url: None,
                 command: None,
                 args: Vec::new(),
@@ -6318,5 +6341,71 @@ mod tests {
 
         std::env::remove_var("HERMES_QWEN_OAUTH_TOKEN_URL");
         std::env::remove_var("HERMES_QWEN_OAUTH_CLIENT_ID");
+    }
+
+    #[test]
+    fn test_runtime_provider_api_key_env_is_resolved() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let mut runtime_providers = HashMap::new();
+        runtime_providers.insert(
+            "custom".to_string(),
+            RuntimeProviderConfig {
+                api_key: None,
+                api_key_env: Some("MY_FALLBACK_KEY".to_string()),
+                base_url: None,
+                command: None,
+                args: Vec::new(),
+                oauth_token_url: None,
+                oauth_client_id: None,
+            },
+        );
+
+        let config = AgentConfig {
+            runtime_providers,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+
+        std::env::set_var("MY_FALLBACK_KEY", "env-secret");
+        let resolved = agent.resolve_runtime_api_key("custom", None, None);
+        assert_eq!(resolved.as_deref(), Some("env-secret"));
+        std::env::remove_var("MY_FALLBACK_KEY");
     }
 }

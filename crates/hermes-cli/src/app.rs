@@ -444,6 +444,8 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hermes_config::LlmProviderConfig;
+    use std::collections::HashMap;
 
     #[test]
     fn test_session_info_serialization() {
@@ -458,6 +460,28 @@ mod tests {
         let back: SessionInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(back.session_id, "test-123");
         assert_eq!(back.model, "gpt-4o");
+    }
+
+    #[test]
+    fn test_build_agent_config_maps_runtime_provider_api_key_env() {
+        let mut cfg = GatewayConfig::default();
+        let mut providers = HashMap::new();
+        providers.insert(
+            "custom".to_string(),
+            LlmProviderConfig {
+                api_key: None,
+                api_key_env: Some("MY_FALLBACK_KEY".to_string()),
+                ..LlmProviderConfig::default()
+            },
+        );
+        cfg.llm_providers = providers;
+
+        let agent_cfg = build_agent_config(&cfg, "custom:some-model");
+        let runtime = agent_cfg
+            .runtime_providers
+            .get("custom")
+            .expect("runtime provider should exist");
+        assert_eq!(runtime.api_key_env.as_deref(), Some("MY_FALLBACK_KEY"));
     }
 }
 
@@ -504,6 +528,7 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
                     name.clone(),
                     hermes_agent::agent_loop::RuntimeProviderConfig {
                         api_key: cfg.api_key.clone(),
+                        api_key_env: cfg.api_key_env.clone(),
                         base_url: cfg.base_url.clone(),
                         command: cfg.command.clone(),
                         args: cfg.args.clone(),
@@ -563,6 +588,17 @@ fn parse_model_string(model: &str) -> (&str, &str) {
     model.split_once(':').unwrap_or(("openai", model))
 }
 
+fn resolve_api_key_literal_or_env_ref(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(env_ref) = trimmed.strip_prefix("${").and_then(|s| s.strip_suffix('}')) {
+        return std::env::var(env_ref).ok().filter(|v| !v.trim().is_empty());
+    }
+    Some(trimmed.to_string())
+}
+
 /// Resolve API key / token for a named LLM provider from well-known environment variables.
 pub fn provider_api_key_from_env(provider: &str) -> Option<String> {
     match provider {
@@ -602,7 +638,16 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
     let provider_config = config.llm_providers.get(provider_name);
 
     let api_key = provider_config
-        .and_then(|c| c.api_key.clone())
+        .and_then(|c| c.api_key.as_deref())
+        .and_then(resolve_api_key_literal_or_env_ref)
+        .or_else(|| {
+            provider_config
+                .and_then(|c| c.api_key_env.as_deref())
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+                .and_then(|name| std::env::var(name).ok())
+                .filter(|v| !v.trim().is_empty())
+        })
         .or_else(|| provider_api_key_from_env(provider_name));
 
     let api_key = match api_key {

@@ -222,6 +222,10 @@ pub struct LlmProviderConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
 
+    /// Environment variable name that stores the API key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_key_env: Option<String>,
+
     /// Base URL for the provider API.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
@@ -273,6 +277,7 @@ impl Default for LlmProviderConfig {
     fn default() -> Self {
         Self {
             api_key: None,
+            api_key_env: None,
             base_url: None,
             command: None,
             args: Vec::new(),
