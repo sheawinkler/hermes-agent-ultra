@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-22T07:57:46.842527+00:00`
+Generated: `2026-04-22T08:01:15.807500+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `4587`.
 
@@ -16,112 +16,112 @@ Generated: `2026-04-22T07:57:46.842527+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 3898 |
+| pending | 3798 |
 | ported | 66 |
-| superseded | 623 |
+| superseded | 723 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `10085041cfc1` | #21 | feat: add ascii-art skill for creative text banners and art |
-| `ec97f9ad1af2` | #21 | feat(skills): add Solana blockchain skill (converted from tool) |
-| `6cbb8f3a0c8a` | #26 | fix: align _apply_delete comment with actual behavior |
-| `b7f8a17c24b6` | #20 | fix(gateway): persist transcript changes in /retry, /undo and fix /reset |
-| `3f58e47c6391` | #23 | fix: guard POSIX-only process functions for Windows compatibility |
-| `c33f8d381b87` | #20 | fix: correct off-by-one in retry exhaustion checks |
-| `7f1f4c224817` | #20 | fix(tools): preserve empty content in ReadResult.to_dict() |
-| `de101a82028a` | #20 | fix(agent): strip _flush_sentinel from API messages |
-| `e87859e82c3c` | #20 | fix(agent): copy conversation_history to avoid mutating caller's list |
-| `f7300a858e3d` | #20 | fix(tools): use task-specific glob pattern in disk usage calculation |
-| `bf52468a913e` | #26 | fix(gateway): improve MEDIA tag handling to prevent duplication across turns |
-| `7f7643cf632c` | #25 | feat(hooks): introduce event hooks system for lifecycle management |
-| `500f0eab4a0a` | #20 | refactor(cli): Finalize OpenAI Codex Integration with OAuth |
-| `95b0610f36a6` | #26 | refactor(cli, auth): Add Codex/OpenAI OAuth Support - finalized |
-| `70dfec9638ad` | #20 | test(redact): add sensitive text redaction |
-| `a7c2b9e28093` | #26 | fix(display): enhance memory error detection for tool failures |
-| `23d0b7af6a57` | #26 | feat(logging): implement persistent error logging for tool failures |
-| `1db559829485` | #20 | feat(tests): add live integration tests for file operations and shell noise filtering |
-| `dd69f16c3e06` | #20 | feat(gateway): expose subagent tool calls and thinking to user (fixes #169) (#186) |
-| `4ec386cc724f` | #20 | fix(display): use spaces instead of ANSI \033[K in print_above() for prompt_toolkit compat |
-| `41d8a802268d` | #20 | fix(display): fix subagent progress tree-view visual nits |
-| `ed0e860abb09` | #20 | fix(honcho): auto-enable when API key is present |
-| `30efc263ffca` | #26 | feat(cli): add /compress command for manual conversation context compression |
-| `177be32b7f91` | #26 | feat(cli): add /usage command to display session token usage |
-| `93f5fd80b8b0` | #26 | feat(gateway): add /compress and /usage commands for conversation management |
-| `54147474d3f3` | #23 | feat(gateway): include Discord channel topic in session context |
-| `3b745633e4f5` | #20 | test: add unit tests for 8 untested modules (batch 3) (#191) |
-| `11f5c1ecf016` | #20 | fix(tests): use bare @pytest.mark.asyncio for hook emit tests |
-| `440d33eec403` | #26 | Improve error handling and type hints in session_search_tool |
-| `196a13f3dcb4` | #26 | Improve error handling and validation in transcription_tools |
-| `834e25a662ab` | #26 | feat(batch_runner): enhance prompt processing with optional container image support |
-| `dda9f3e734c2` | #26 | fix(process_registry): ensure unbuffered output for subprocesses |
-| `c84d5ce738be` | #26 | refactor(terminal_tool): clarify foreground and background process usage |
-| `92da8e7e6244` | #26 | feat(agent): enhance reasoning handling and configuration |
-| `72963e9ccbd1` | #25 | fix(install): prevent interactive prompts during non-interactive installs |
-| `75a92a3f82b1` | #26 | refactor(cli): improve header formatting and description truncation |
-| `8bc2de4ab696` | #20 | feat(provider-routing): add OpenRouter provider routing configuration |
-| `c2d8d1728545` | #21 | feat(skills): add DuckDuckGo search skill as Firecrawl fallback |
-| `5e598a588f6c` | #20 | refactor(auth): transition Codex OAuth tokens to Hermes auth store |
-| `e5893075f9b5` | #20 | feat(agent): add summary handling for reasoning items |
-| `7b38afc179d6` | #26 | fix(auth): handle session expiration and re-authentication in Nous Portal |
-| `5e5e0efc6088` | #20 | Fix nous refresh token rotation failure in case where api key mint/retrieval fails |
-| `47289ba6f133` | #26 | feat(agent): include system prompt in agent status output |
-| `0512ada793b3` | #26 | feat(agent): include tools in agent status output |
-| `698b35933e4f` | #26 | fix: /retry, /undo, /compress, and /reset gateway commands (#210) |
-| `45d132d098a5` | #26 | fix(agent): remove preview truncation in assistant message output |
-| `e2b8740fcf54` | #26 | fix: load_cli_config() now carries over non-default config keys |
-| `7a0b37712ff2` | #26 | fix(agent): strip finish_reason from assistant messages to fix Mistral 422 errors (#253) |
-| `1ad930cbd061` | #26 | fix(delegate_tool): increase DEFAULT_MAX_ITERATIONS from 25 to 50 to enhance processing capabilities |
-| `14396e3fe777` | #26 | fix(delegate_tool): update max_iterations default from 25 to 50 for improved task handling |
-| `6bf3aad62ec6` | #25 | fix(delegate_tool): update max_iterations in documentation and example config to reflect default value of 50 |
-| `b1bf11b0fed1` | #26 | fix(setup): handle TerminalMenu init failures with safe fallback |
-| `e265006fd6c9` | #20 | test: add coverage for chat_topic in SessionSource and session context prompt |
-| `d2ec5aaacf7c` | #26 | fix(registry): preserve full traceback on tool dispatch errors |
-| `866fd9476bf3` | #25 | fix(docker): remove --read-only and allow exec on /tmp for package installs |
-| `c574a4d0862c` | #26 | fix(batch_runner): log traceback when worker raises during imap_unordered |
-| `afb680b50dc2` | #20 | fix(cli): fix max_turns comment and test for correct priority order |
-| `25c65bc99eea` | #20 | fix(agent): handle None content in context compressor (fixes #211) |
-| `33ab5cec825f` | #26 | fix: handle None message content across codebase (fixes #276) |
-| `234b67f5fd7d` | #20 | fix: mock time in retry exhaustion tests to prevent backoff sleep |
-| `fd335a4e26eb` | #26 | fix: add missing dangerous command patterns in approval.py |
-| `ca5525bcd7df` | #20 | fix(tests): isolate HERMES_HOME in tests and adjust log directory for debug session |
-| `8c48bb080fb6` | #26 | refactor: remove unnecessary single-element loop in disk usage calc |
-| `7862e7010cbd` | #20 | test: add additional multiline bypass tests for find patterns |
-| `3c13feed4c39` | #26 | feat: show detailed tool call args in gateway based on config |
-| `b603b6e1c973` | #26 | fix(cli): throttle UI invalidate to prevent terminal blinking on SSH |
-| `6789084ec0bc` | #20 | Fix ClawHub Skills Hub adapter for updated API |
-| `3c252ae44b52` | #20 | feat: add MCP (Model Context Protocol) client support |
-| `0eb0bec74cac` | #26 | feat(gateway): add MCP server shutdown on gateway exit |
-| `aa2ecaef29fd` | #20 | fix: resolve orphan subprocess leak on MCP server shutdown |
-| `593c549bc466` | #26 | fix: make discover_mcp_tools idempotent to prevent duplicate connections |
-| `151e8d896ca2` | #20 | fix(tests): isolate discover_mcp_tools tests from global _servers state |
-| `11a2ecb936d6` | #20 | fix: resolve thread safety issues and shutdown deadlock in MCP client |
-| `358839626370` | #23 | feat(whatsapp): native media sending — images, videos, documents |
-| `11615014a4ec` | #20 | fix: eliminate shell noise from terminal output with fence markers |
-| `60532361583b` | #20 | fix: prioritize OPENROUTER_API_KEY over OPENAI_API_KEY |
-| `ee541c84f19b` | #26 | fix(cron): close lock_fd on failed flock to prevent fd leak |
-| `ac6d747fa610` | #26 | Make batch_runner checkpoint incremental and atomic |
-| `5fa3e24b7620` | #26 | Make process_registry checkpoint writes atomic |
-| `c6b3b8c84722` | #26 | docs: add VISION.md brainstorming/roadmap doc |
-| `14b0ad95c6ae` | #25 | docs: enhance WhatsApp setup instructions and introduce mode selection |
-| `64ff8f065b1f` | #20 | feat(mcp): add HTTP transport, reconnection, security hardening |
-| `63f5e14c6993` | #21 | docs: add comprehensive MCP documentation and examples |
-| `60effcfc4427` | #20 | fix(mcp): parallel discovery, user-visible logging, config validation |
-| `7df14227a957` | #20 | feat(mcp): banner integration, /reload-mcp command, resources & prompts |
-| `eec31b008910` | #26 | fix(mcp): /reload-mcp now updates agent tools + injects history message |
-| `3ead3401e0b0` | #26 | fix(mcp): persist updated tools to session log immediately after reload |
-| `de59d91add14` | #25 | feat: Windows native support via Git Bash |
-| `daedec6957df` | #23 | fix: Telegram adapter crash on Windows when library not installed (#304) |
-| `84e45b5c402c` | #26 | feat: tabbed platform installer on landing page |
-| `bdf475851025` | #26 | fix: show uv error on Python install failure, add fallback detection |
-| `cdf5375b9a00` | #26 | fix: PowerShell NativeCommandError on git stderr output |
-| `f08ad94d4d8a` | #20 | fix: correct typo 'Grup' -> 'Group' in test section headers |
-| `245c76651285` | #26 | fix: remove 2>&1 from git commands in PowerShell installer |
-| `5f29e7b63c7d` | #21 | fix: rename misspelled directory 'fouth-edition' to 'fourth-edition' |
-| `a718aed1be1b` | #21 | fix: rename misspelled directory 'fouth-edition' to 'fourth-edition' |
-| `4cc431afabe8` | #26 | fix: setup wizard skipping provider selection on fresh install |
-| `8b520f98485b` | #21 | fix: rename misspelled directory 'fouth-edition' to 'fourth-edition' |
-| `d10108f8caf5` | #21 | fix: rename misspelled directory 'fouth-edition' to 'fourth-edition' |
-| `5749f5809c49` | #26 | fix: explicit UTF-8 encoding for .env file operations (Windows only) |
+| `16274d5a82e9` | #26 | fix: Windows git 'unable to write loose object' + venv pip path |
+| `ddae1aa2e97c` | #26 | fix: install.ps1 exits entire PowerShell window when run via iex |
+| `1900e5238b3e` | #26 | fix: git clone fails on Windows with 'copy-fd: Invalid argument' |
+| `83fa442c1bf7` | #26 | fix: use env vars for git windows.appendAtomically on Windows |
+| `c9afbbac0b49` | #26 | feat: install to %LOCALAPPDATA%\hermes on Windows |
+| `354af6cceedb` | #26 | chore: remove unnecessary migration code from install.ps1 |
+| `4766b3cdb9d0` | #26 | fix: fall back to ZIP download when git clone fails on Windows |
+| `535b46f8130c` | #26 | feat: ZIP-based update fallback for Windows |
+| `f084538cb9ae` | #26 | Move vision items to GitHub issues (#314, #315) |
+| `54909b0282e0` | #26 | fix(setup): improve shell config detection for PATH setup |
+| `4f5ffb890959` | #26 | fix: NoneType not iterable error when summarizing at max iterations |
+| `de0af4df6616` | #21 | refactor: enhance software-development skills with Hermes integration |
+| `a1c25046a978` | #20 | fix(timezone): add timezone-aware clock across agent, cron, and execute_code |
+| `ffec21236d21` | #23 | feat: enhance Home Assistant integration with service discovery and setup |
+| `6a51fd23dfc8` | #21 | feat: add AgentMail skill for agent-owned email inboxes (#329) |
+| `73f2998d48be` | #25 | fix: update setup wizard logic to handle terminal availability |
+| `fa3d7b3d0348` | #26 | feat: add interactive setup for messaging platforms in gateway CLI |
+| `1754bdf1e875` | #25 | docs: update AGENTS.md, README.md, and messaging.md to include interactive setup for messaging platforms |
+| `fafb9c23bf76` | #26 | fix: strip emoji characters from menu choices in interactive setup |
+| `556a132f2db3` | #26 | refactor: update platform status function to return plain-text strings |
+| `b7821b6dc1b6` | #26 | enhance: improve gateway setup messaging and service installation prompts |
+| `95e3f4b0017c` | #26 | refactor: enhance gateway service setup messaging and installation prompts |
+| `1538be45de27` | #25 | fix: improve gateway setup messaging for non-interactive environments |
+| `e39de2e75289` | #20 | fix(gateway): match _quick_key to _generate_session_key for WhatsApp DMs |
+| `d8f10fa51576` | #26 | feat: implement allowlist feature for user access in gateway setup |
+| `152e0800e627` | #26 | feat: add detailed setup instructions for Telegram, Discord, and Slack platforms |
+| `f90a627f9afd` | #26 | fix(gateway): add missing UTF-8 encoding to file I/O preventing crashes on Windows |
+| `87a16ad2e522` | #20 | fix(session): use database session count for has_any_sessions (#351) |
+| `7f9777a0b045` | #26 | feat: add container resource configuration prompts in setup wizard |
+| `3db3d6036836` | #20 | refactor: extract build_session_key() as single source of truth |
+| `0ea6c343259a` | #24 | feat: add OpenThoughts-TBLite evaluation environment and configuration files |
+| `ee7fde653149` | #24 | feat: add OpenThoughts-TBLite evaluation script |
+| `c45aeb45b127` | #23 | fix(whatsapp): wait for connected status and log bridge output |
+| `8d2d8cc728a0` | #26 | refactor: add exception handling and docstring to has_any_sessions |
+| `70a0a5ff4a20` | #20 | fix: exclude current session from session_search results |
+| `4805be011960` | #20 | fix: prevent --force from overriding dangerous verdict in should_allow_install |
+| `34badeb19c80` | #23 | fix(whatsapp): initialize data variable and close log handle on error paths |
+| `d3504f84aff4` | #20 | fix(gateway): use filtered history length for transcript message extraction |
+| `b2a9f6beaa5a` | #26 | feat: enable up/down arrow history navigation in CLI |
+| `e9ab711b667e` | #26 | Fix context overrun crash with local LLM backends (fixes #348) |
+| `093acd72dd2e` | #20 | fix: catch exceptions from check_fn in is_toolset_available() |
+| `8311e8984bb6` | #20 | fix: preflight context compression + error handler ordering for model switches |
+| `4c7232941210` | #26 | feat: add backend validation for required binaries in setup wizard |
+| `6f4941616d9a` | #26 | fix(gateway): include history_offset in error return path |
+| `ff3a47915627` | #26 | fix: coerce session_id and data to string in process tool handler |
+| `3e2ed18ad0dd` | #26 | fix: fallback to main model endpoint when auxiliary summary client fails |
+| `405c7e08beb8` | #21 | feat: enhance ascii-art skill with pyfiglet and asciiart.eu search |
+| `0dba3027c119` | #21 | feat: expand ascii-art skill with cowsay, boxes, toilet, image-to-ascii |
+| `11a5a6472900` | #21 | feat: add emojicombos.com as primary ASCII art search source |
+| `41adca4e772c` | #26 | fix: strip internal fields from API messages in _handle_max_iterations |
+| `141b12bd39be` | #26 | refactor: clean up type hints and docstrings in session_search_tool |
+| `d0d9897e81f0` | #26 | refactor: clean up transcription_tools after PR #262 merge |
+| `078e2e4b19ef` | #26 | fix(cli): Ctrl+C clears input buffer before exiting |
+| `2af2f148ab3f` | #21 | refactor: rewrite duckduckgo-search skill for accuracy and usability |
+| `3221818b6e55` | #26 | fix: respect OPENAI_BASE_URL when resolving API key priority |
+| `d400fb8b2310` | #25 | feat: add /update slash command for gateway platforms |
+| `7d47e3b77696` | #26 | fix: pass stable task_id in CLI and gateway to preserve sandbox state across turns |
+| `ca3337259561` | #26 | fix: pass task_id to _create_environment as well, to prevent cross-session state mixing |
+| `11a7c6b11208` | #20 | fix: update mock agent signature to accept task_id after PR #419 |
+| `b4b426c69d82` | #20 | test: add coverage for tee, process substitution, and full-path rm patterns |
+| `a1767fd69c90` | #23 | feat(whatsapp): consolidate tool progress into single editable message |
+| `1708dcd2b243` | #23 | feat: implement edit_message() for Telegram/Discord/Slack and fix fallback regression |
+| `7d79ce92ac22` | #26 | Improve type hints and error diagnostics in vision_tools |
+| `ada3713e777c` | #22 | feat: add documentation website (Docusaurus) |
+| `82cb1752d95e` | #23 | fix(whatsapp): replace Linux-only fuser with cross-platform port cleanup |
+| `87f4e4cb9b6c` | #26 | chore: remove Windows install options from landing page |
+| `93d93fdea459` | #26 | feat: add gateway setup wizard and update steps to landing page |
+| `15561ec425a7` | #26 | feat: add WebResearchEnv RL environment for multi-step web research |
+| `e25ad79d5d85` | #20 | fix: use _max_tokens_param in max-iterations retry path |
+| `30ff3959242d` | #26 | feat: add issue and PR templates |
+| `c4e520fd6e55` | #26 | docs: add documentation & housekeeping checklist to PR template |
+| `56dc9277d724` | #25 | ci: add test workflow for PRs and main branch |
+| `d92266d7c048` | #25 | ci: pin tests to Python 3.11 only |
+| `938499ddfbd3` | #26 | fix: add missing empty-content guard after think-block stripping in retry path |
+| `71c0cd00e56f` | #21 | docs: fix spelling of 'publicly' |
+| `16cb6d1a6e87` | #26 | fix(gateway): return response from /retry handler instead of discarding it |
+| `e36c8cd49a34` | #24 | fix: add missing re.DOTALL flag to DeepSeek V3 tool call parser |
+| `1e312c6582e9` | #24 | feat(environments): add Daytona cloud sandbox backend |
+| `c43451a50b5c` | #26 | feat(terminal): integrate Daytona backend into tool pipeline |
+| `690b8bb56341` | #26 | feat(cli): add Daytona config mapping and env var sync |
+| `df61054a8490` | #26 | feat(cli): add Daytona to setup wizard, doctor, and status display |
+| `435530018b14` | #24 | fix(daytona): resolve cwd by detecting home directory inside the sandbox |
+| `ea2f7ef2f6a2` | #26 | docs(config): add Daytona disk limit hint and fix default cwd in example |
+| `36214d14db03` | #26 | fix(cli): use correct visibility filter string in codex API model fetch |
+| `d5efb82c7c54` | #20 | test(daytona): add unit and integration tests for Daytona backend |
+| `ad57bf1e4bea` | #26 | fix(cli): use correct dict key for codex auth file path in status output |
+| `1faa9648d3bb` | #24 | chore(daytona): cap the disk size to current maximum on daytona sandboxes |
+| `577da79a472c` | #20 | fix(daytona): make disk cap visible and use SDK enum for sandbox state |
+| `5279540bb4f1` | #26 | fix(daytona): add missing config mappings in gateway, CLI defaults, and config display |
+| `3a41079fac7e` | #26 | fix(daytona): add optional dependency group to pyproject.toml |
+| `4f1464b3af7d` | #24 | fix(daytona): default disk to 10GB to match platform limit |
+| `efc7a7b95707` | #20 | fix(daytona): don't guess /root on cwd probe failure, keep constructor default; update tests to reflect this |
+| `14a11d24b4b5` | #26 | fix: handle None args in build_tool_preview |
+| `a6499b610760` | #20 | fix(daytona): use shell timeout wrapper instead of broken SDK exec timeout |
+| `48e65631f641` | #26 | Fix auth store file lock for Windows (msvcrt) with reentrancy support |
+| `dcba291d45d9` | #26 | Use pywinpty instead of ptyprocess on Windows for PTY support |
+| `81986022b7bd` | #26 | Add explicit encoding="utf-8" to all config/data file open() calls |
+| `d7d10b14cd51` | #22 | feat(tools): add support for self-hosted firecrawl |
+| `9079a2781421` | #26 | fix: prompt box and response box span full terminal width on wide screens |
+| `55b173dd033e` | #26 | refactor: move shutil import to module level |
 
