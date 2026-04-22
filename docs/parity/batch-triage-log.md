@@ -424,3 +424,32 @@
   - `bash -n scripts/install.sh`
 - Queue refresh:
   - `docs/parity/upstream-missing-queue.{json,md}` regenerated with these 10 SHAs moved out of `pending`.
+
+## 2026-04-22 batch-20 (10-tranche parity pass: image delivery + queue dispositioning)
+- Scope: next 10 pending upstream SHAs after batch-19:
+  - `8fb44608bfe48733cf5c02009c5839cab8a524a6`
+  - `abe925e21260a1b593bda0c021fc93ebf8b38723`
+  - `ada0b4f131baf95034ecb125ac36cec847eb6a0b`
+  - `07501bef14bff9358e07dee2b56a6be87378d6b8`
+  - `fc792a4be9279495ff0c2a75e95e3ae3c65e1b23`
+  - `389ac5e017ed4d963ce7a596451a03b96427c8f0`
+  - `a291cc99cf704f1a84dc4795b0b8099b90750d03`
+  - `1b7bc299f373771706698b813f38c2043bf6bcd7`
+  - `f23856df8ef21f051b6735150240b15af7590fc2`
+  - `f5be6177b2314b9703850b4059680adf0d197877`
+- Rust implementation commits (chronological):
+  - `56df3b42` parity(ada0b4f1): native inline image delivery for gateway responses.
+    - Added `PlatformAdapter::send_image_url` with plain-text fallback.
+    - Added inline markdown/HTML image extraction in gateway send path.
+    - Added native image URL send implementations for Telegram (`sendPhoto` by URL) and Discord (image embed).
+    - Added helper and gateway tests for extraction + routing behavior.
+- Verification (targeted):
+  - `cargo test -p hermes-gateway gateway_send_message_extracts_inline_images -- --nocapture`
+  - `cargo test -p hermes-gateway test_extract_inline_images_markdown_and_html -- --nocapture`
+  - `cargo test -p hermes-gateway test_extract_inline_images_keeps_non_image_html -- --nocapture`
+  - `cargo test -p hermes-core --lib -- --nocapture`
+- Queue dispositions:
+  - `ported`: `abe925e2`, `ada0b4f1`, `389ac5e0`, `a291cc99`, `f5be6177`
+  - `superseded`: `8fb44608`, `07501bef`, `fc792a4b`, `1b7bc299`, `f23856df`
+- Queue refresh:
+  - `docs/parity/upstream-missing-queue.{json,md}` regenerated with these 10 SHAs moved out of `pending`.

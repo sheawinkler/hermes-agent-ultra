@@ -1,39 +1,29 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-22T06:06:02.281808+00:00`
+Generated: `2026-04-22T06:20:19.707790+00:00`
 
-- Range: `main..upstream/main`; total commits tracked: `4579`.
+- Range: `main..upstream/main`; total commits tracked: `4587`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 1627 |
+| #20 | GPAR-01 tests+CI parity | 1631 |
 | #21 | GPAR-02 skills parity | 200 |
-| #22 | GPAR-03 UX parity | 523 |
+| #22 | GPAR-03 UX parity | 525 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 507 |
 | #24 | GPAR-05 environments+parsers+benchmarks | 64 |
 | #25 | GPAR-06 packaging/docs/install parity | 152 |
-| #26 | GPAR-07 upstream queue backfill | 1506 |
+| #26 | GPAR-07 upstream queue backfill | 1508 |
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 4180 |
-| ported | 44 |
-| superseded | 355 |
+| pending | 4178 |
+| ported | 49 |
+| superseded | 360 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `8fb44608bfe4` | #21 | Update SKILL.md and related references to implement container binding for labeled shapes and arrows in Excalidraw |
-| `abe925e21260` | #26 | Update hermes-discord toolset to enable full terminal access with safety checks |
-| `ada0b4f131ba` | #23 | Enhance image handling in platform adapters |
-| `07501bef14bf` | #26 | Add Project_notes.md — centralized status tracker for all side projects |
-| `fc792a4be927` | #26 | Update Project_notes.md: grailed-embedding-search status and TODOs (June 2025) |
-| `389ac5e017ed` | #26 | pass extrabody for agentloop to ban and allowlist providers on openrouter, control thinking, etc |
-| `a291cc99cf70` | #26 | more extra kwarg support for provider selection etc on openrouter in agent rl envs and evals |
-| `1b7bc299f373` | #24 | Enhance TerminalBench2 environment with task filtering due to incompat with modal and logging improvements |
-| `f23856df8ef2` | #26 | Add kill_modal script to manage Modal applications and better handling of file and terminal tools |
-| `f5be6177b231` | #23 | Add Text-to-Speech (TTS) functionality with multiple providers |
 | `ed010752dd1f` | #26 | Update .env.example to use new Docker, Singularity, and Modal images for Python 3.11 with Node.js 20 support |
 | `586b0a7047ea` | #26 | Add Text-to-Speech (TTS) support with Edge TTS and ElevenLabs integration |
 | `ff9ea6c4b1c6` | #26 | Enhance TTS tool to support platform-specific audio formats |
@@ -124,4 +114,14 @@ Generated: `2026-04-22T06:06:02.281808+00:00`
 | `7cb6427dea43` | #25 | refactor: streamline cron job handling and update CLI commands |
 | `61349398828b` | #25 | refactor: deduplicate toolsets, unify async bridging, fix approval race condition, harden security |
 | `08ff1c1aa8a4` | #26 | More major refactor/tech debt removal! |
+| `9018e9dd70ce` | #26 | refactor: update tool registration and documentation |
+| `9123cfb5dd4d` | #24 | Refactor Terminal and AIAgent cleanup |
+| `51b95236f976` | #26 | refactor: move model metadata functions to agent/model_metadata.py |
+| `b1f55e3ee578` | #25 | refactor: reorganize agent and CLI structure for improved clarity |
+| `ededaaa87410` | #23 | Hermes Agent UX Improvements |
+| `f072801f3862` | #26 | refactor: remove unused compression model variable in AIAgent |
+| `e223b4ac096b` | #26 | Enhance agent guidance with memory and session search tools |
+| `250b2ca01adf` | #26 | fix: update MEMORY_GUIDANCE for clarity |
+| `df2ec585f1d3` | #26 | fix: clarify MEMORY_GUIDANCE phrasing |
+| `3c6750f37b28` | #26 | feat: enhance memory management features in AIAgent and CLI |
 

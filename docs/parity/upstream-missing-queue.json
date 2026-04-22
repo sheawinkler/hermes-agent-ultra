@@ -2410,14 +2410,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "skills/diagramming/excalidraw/SKILL.md",
         "skills/diagramming/excalidraw/references/dark-mode.md",
         "skills/diagramming/excalidraw/references/examples.md"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG2-skills; action=implement",
+      "notes": "batch-20-2026-04-22: skill-doc update for optional python skill pack; superseded in rust-only parity stream",
       "owner": "codex",
       "sha": "8fb44608bfe48733cf5c02009c5839cab8a524a6",
       "subject": "Update SKILL.md and related references to implement container binding for labeled shapes and arrows in Excalidraw",
@@ -2425,12 +2425,12 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "toolsets.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-20-2026-04-22: already present; hermes-discord toolset inherits full terminal/file/web/vision/cron from hermes-telegram preset",
       "owner": "codex",
       "sha": "abe925e21260a1b593bda0c021fc93ebf8b38723",
       "subject": "Update hermes-discord toolset to enable full terminal access with safety checks",
@@ -2438,7 +2438,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "gateway/platforms/base.py",
         "gateway/platforms/discord.py",
@@ -2446,7 +2446,7 @@
         "model_tools.py"
       ],
       "files_touched": 4,
-      "notes": "triage-full-2026-04-21: group=WG4-gateway-memory; action=implement",
+      "notes": "batch-20-2026-04-22: ported via 56df3b42 (gateway inline image extraction + native Telegram/Discord image URL delivery)",
       "owner": "codex",
       "sha": "ada0b4f131baf95034ecb125ac36cec847eb6a0b",
       "subject": "Enhance image handling in platform adapters",
@@ -2467,12 +2467,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "Project_notes.md"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-20-2026-04-22: Project_notes.md side-project tracker; non-product and superseded for rust parity scope",
       "owner": "codex",
       "sha": "07501bef14bff9358e07dee2b56a6be87378d6b8",
       "subject": "Add Project_notes.md \u2014 centralized status tracker for all side projects",
@@ -2480,12 +2480,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "Project_notes.md"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-20-2026-04-22: Project_notes.md update; non-product and superseded for rust parity scope",
       "owner": "codex",
       "sha": "fc792a4be9279495ff0c2a75e95e3ae3c65e1b23",
       "subject": "Update Project_notes.md: grailed-embedding-search status and TODOs (June 2025)",
@@ -2493,12 +2493,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "environments/agent_loop.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-20-2026-04-22: already present; extra_body provider controls are wired in rust agent_loop/provider stack",
       "owner": "codex",
       "sha": "389ac5e017ed4d963ce7a596451a03b96427c8f0",
       "subject": "pass extrabody for agentloop to ban and allowlist providers on openrouter, control thinking, etc",
@@ -2506,12 +2506,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "environments/hermes_base_env.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-20-2026-04-22: already present; provider extra kwargs/extra_body path implemented in rust environment+provider layers",
       "owner": "codex",
       "sha": "a291cc99cf704f1a84dc4795b0b8099b90750d03",
       "subject": "more extra kwarg support for provider selection etc on openrouter in agent rl envs and evals",
@@ -2519,12 +2519,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "environments/benchmarks/terminalbench_2/terminalbench2_env.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG5-env-parsers-bench; action=implement",
+      "notes": "batch-20-2026-04-22: python TerminalBench2 env-only change superseded by rust-native environments/training structure",
       "owner": "codex",
       "sha": "1b7bc299f373771706698b813f38c2043bf6bcd7",
       "subject": "Enhance TerminalBench2 environment with task filtering due to incompat with modal and logging improvements",
@@ -2532,14 +2532,14 @@
       "target_ticket_name": "GPAR-05 environments+parsers+benchmarks"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "scripts/kill_modal.sh",
         "tools/file_tools.py",
         "tools/terminal_tool.py"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-20-2026-04-22: python kill_modal + tool tweaks superseded by rust modal/managed_modal backends",
       "owner": "codex",
       "sha": "f23856df8ef21f051b6735150240b15af7590fc2",
       "subject": "Add kill_modal script to manage Modal applications and better handling of file and terminal tools",
@@ -2547,7 +2547,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "README.md",
         "cli.py",
@@ -2569,7 +2569,7 @@
         "toolsets.py"
       ],
       "files_touched": 18,
-      "notes": "triage-full-2026-04-21: group=WG4-gateway-memory; action=implement",
+      "notes": "batch-20-2026-04-22: TTS multi-provider, SOUL support, and approvals already present in rust runtime; image path completed in 56df3b42",
       "owner": "codex",
       "sha": "f5be6177b2314b9703850b4059680adf0d197877",
       "subject": "Add Text-to-Speech (TTS) functionality with multiple providers",
@@ -69719,9 +69719,133 @@
       "subject": "feat(aux): use Portal /api/nous/recommended-models for auxiliary models",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/transports/__init__.py",
+        "agent/transports/chat_completions.py",
+        "run_agent.py",
+        "tests/agent/transports/test_chat_completions.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "83d86ce3442d688282c182ac282610c067e65056",
+      "subject": "feat: add ChatCompletionsTransport + wire all default paths",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/thinking.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "76ad697dcb277bc468e2249e1a11eb6686406c4d",
+      "subject": "fix(tui): don't force-open Activity on every error",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/app/createGatewayEventHandler.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "572e27c93f348e93b3abb0d813e0efe9ebcad36f",
+      "subject": "fix(tui): demote gateway log-noise from Activity to info tone",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/transports/__init__.py",
+        "agent/transports/bedrock.py",
+        "run_agent.py",
+        "tests/agent/transports/test_bedrock_transport.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "57411fca240e4172b9f79414ad065a996c5da4e6",
+      "subject": "feat: add BedrockTransport + wire all Bedrock transport paths",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/models.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "7b79e0f4c9f05e335830b321ea6b8a3ea171f7af",
+      "subject": "chore(models): drop 3 models from nous portal recommended list (#13822)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/anthropic_adapter.py",
+        "tests/agent/test_kimi_coding_anthropic_thinking.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "410f33a728bbe97b4853e6f411c8a1d835d7de9c",
+      "subject": "fix(kimi): don't send Anthropic thinking to api.kimi.com/coding (#13826)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/models.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "d1acf177737bc8ded22a973acfdddf56dbd5680a",
+      "subject": "feat(models): add minimax/minimax-m2.5:free to OpenRouter catalog (#13836)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/image_gen_provider.py",
+        "agent/image_gen_registry.py",
+        "hermes_cli/plugins.py",
+        "hermes_cli/setup.py",
+        "hermes_cli/tools_config.py",
+        "plugins/image_gen/openai/__init__.py",
+        "plugins/image_gen/openai/plugin.yaml",
+        "tests/agent/test_image_gen_registry.py",
+        "tests/hermes_cli/test_image_gen_picker.py",
+        "tests/hermes_cli/test_plugin_scanner_recursion.py",
+        "tests/plugins/image_gen/__init__.py",
+        "tests/plugins/image_gen/test_openai_provider.py",
+        "tools/image_generation_tool.py"
+      ],
+      "files_touched": 13,
+      "notes": "",
+      "owner": "",
+      "sha": "ff9752410a8dba62f1b246aeed9142893c75b4ba",
+      "subject": "feat(plugins): pluggable image_gen backends + OpenAI provider (#13799)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-04-22T06:06:02.281808+00:00",
+  "generated_at_utc": "2026-04-22T06:20:19.707790+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69729,19 +69853,19 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4180,
-      "ported": 44,
-      "superseded": 355
+      "pending": 4178,
+      "ported": 49,
+      "superseded": 360
     },
     "by_target_ticket": {
-      "20": 1627,
+      "20": 1631,
       "21": 200,
-      "22": 523,
+      "22": 525,
       "23": 507,
       "24": 64,
       "25": 152,
-      "26": 1506
+      "26": 1508
     },
-    "total_commits": 4579
+    "total_commits": 4587
   }
 }
