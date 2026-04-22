@@ -686,3 +686,14 @@
   -  (0)
 - Queue refresh:
   -  regenerated with this tranche removed from .
+
+## 2026-04-22 batch-24g (398-tranche parity disposition pass)
+- Scope:
+  - User-directed bulk classification tranche with  pending SHAs, from  through .
+- Classification mode:
+  -  by directive for upstream Python/docs/runtime queue items against this rust-native repository.
+- Queue dispositions in this tranche:
+  -  (398)
+  -  (0)
+- Queue refresh:
+  -  regenerated with this tranche removed from .
