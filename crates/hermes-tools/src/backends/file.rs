@@ -517,7 +517,13 @@ impl SearchBackend for LocalSearchBackend {
         }
     }
 
-    async fn search_files(&self, pattern: &str, path: &str) -> Result<String, ToolError> {
+    async fn search_files(
+        &self,
+        pattern: &str,
+        path: &str,
+        max_results: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<String, ToolError> {
         let mut results: Vec<Value> = Vec::new();
         let base = std::path::Path::new(path);
 
@@ -530,10 +536,16 @@ impl SearchBackend for LocalSearchBackend {
 
         Self::search_dir_names(pattern, base, &mut results).await;
 
+        let max = max_results.unwrap_or(50);
+        let offset = offset.unwrap_or(0);
+        let total = results.len();
+        let page: Vec<Value> = results.into_iter().skip(offset).take(max).collect();
+
         Ok(json!({
-            "files": results,
-            "total": results.len(),
+            "files": page,
+            "total": total,
             "pattern": pattern,
+            "truncated": total > offset.saturating_add(max),
         })
         .to_string())
     }
@@ -833,5 +845,24 @@ mod tests {
         assert!(lines.contains(&2));
         assert!(lines.contains(&3));
         assert!(lines.contains(&4));
+    }
+
+    #[tokio::test]
+    async fn search_files_supports_offset_and_limit() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        std::fs::write(root.join("alpha.txt"), "a").expect("write alpha");
+        std::fs::write(root.join("beta.txt"), "b").expect("write beta");
+        std::fs::write(root.join("gamma.txt"), "c").expect("write gamma");
+
+        let backend = LocalSearchBackend::new();
+        let out = backend
+            .search_files("*.txt", root.to_str().expect("path str"), Some(1), Some(1))
+            .await
+            .expect("search files");
+        let parsed: Value = serde_json::from_str(&out).expect("json");
+        assert_eq!(parsed["total"], 3);
+        assert_eq!(parsed["truncated"], true);
+        assert_eq!(parsed["files"].as_array().expect("files array").len(), 1);
     }
 }
