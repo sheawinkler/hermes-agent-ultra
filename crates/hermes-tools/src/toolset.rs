@@ -235,6 +235,7 @@ impl ToolsetManager {
                 "file",
                 "browser",
                 "vision",
+                "image_gen",
                 "skills",
                 "memory",
                 "todo",
@@ -528,6 +529,10 @@ mod tests {
             assert!(
                 tools.contains(&"terminal".to_string()),
                 "preset {preset} should include terminal"
+            );
+            assert!(
+                tools.contains(&"image_generate".to_string()),
+                "preset {preset} should include image_generate"
             );
         }
     }
