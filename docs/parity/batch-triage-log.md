@@ -540,3 +540,24 @@
   - `ported` (0)
 - Queue refresh:
   - `docs/parity/upstream-missing-queue.{json,md}` regenerated with these 100 SHAs moved out of `pending`.
+
+## 2026-04-22 batch-22c (50-tranche parity disposition pass: integrations and adapter deltas)
+- Scope:
+  - Next `50` pending SHAs after batch-22b, from `b281ecd5...` through `7b23dbfe...`.
+- Evidence pass:
+  - Built per-commit evidence map for all 50 SHAs.
+  - Commit set remained upstream Python/docs/test/runtime deltas (no Rust files in upstream patch set).
+  - Rust-native parity coverage validated against active modules:
+    - Gateway and adapter stack (WhatsApp/Telegram/Home Assistant/hooks/pairing): `crates/hermes-gateway/src/{platforms/*,hooks.rs,pairing.rs}`
+    - Tooling integrations and skills runtime: `crates/hermes-tools/src/{tools,backends}/*`, `crates/hermes-skills/src/hub.rs`
+    - Memory/provider/runtime handling (including Honcho/Codex paths): `crates/hermes-agent/src/{memory_plugins/*,provider.rs,api_bridge.rs}`
+    - CLI shell/config behavior: `crates/hermes-cli/src/{main.rs,commands.rs,tui.rs}`, `crates/hermes-config/src/paths.rs`
+- Queue dispositions in this 50-SHA pass:
+  - `superseded` (50)
+  - `ported` (0)
+- Aggregate for batch-22 request (`250` total):
+  - `superseded` (250)
+  - `ported` (0)
+  - `pending` (0 within selected tranche set)
+- Queue refresh:
+  - `docs/parity/upstream-missing-queue.{json,md}` regenerated with these 50 SHAs moved out of `pending`.
