@@ -240,6 +240,7 @@ impl ToolsetManager {
                 "memory",
                 "todo",
                 "clarify",
+                "cronjob",
                 "messaging",
             ]
             .into_iter()
@@ -533,6 +534,10 @@ mod tests {
             assert!(
                 tools.contains(&"image_generate".to_string()),
                 "preset {preset} should include image_generate"
+            );
+            assert!(
+                tools.contains(&"cronjob".to_string()),
+                "preset {preset} should include cronjob"
             );
         }
     }
