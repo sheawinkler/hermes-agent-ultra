@@ -153,6 +153,10 @@ pub struct AgentLoopBehaviorConfig {
     pub memory_nudge_interval: u32,
     #[serde(default = "default_agent_skill_nudge_interval")]
     pub skill_creation_nudge_interval: u32,
+    /// Skip auto-injected workspace/personal context files (SOUL.md, AGENTS.md, etc.).
+    /// Useful for batch-style runs where personalized instructions would pollute trajectories.
+    #[serde(default = "default_agent_skip_context_files")]
+    pub skip_context_files: bool,
     /// When true (default), spawn the extra LLM pass for memory/skill review — Python has no master off-switch.
     #[serde(default = "default_agent_background_review_enabled")]
     pub background_review_enabled: bool,
@@ -166,6 +170,10 @@ fn default_agent_skill_nudge_interval() -> u32 {
     10
 }
 
+fn default_agent_skip_context_files() -> bool {
+    false
+}
+
 fn default_agent_background_review_enabled() -> bool {
     true
 }
@@ -175,6 +183,7 @@ impl Default for AgentLoopBehaviorConfig {
         Self {
             memory_nudge_interval: default_agent_memory_nudge_interval(),
             skill_creation_nudge_interval: default_agent_skill_nudge_interval(),
+            skip_context_files: default_agent_skip_context_files(),
             background_review_enabled: default_agent_background_review_enabled(),
         }
     }

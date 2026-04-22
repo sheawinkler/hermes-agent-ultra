@@ -623,6 +623,10 @@ impl IntoResponse for HttpError {
 
 pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
     let provider_from_model = model.split_once(':').map(|(p, _)| p.to_string());
+    let skip_context_files_env = std::env::var("HERMES_SKIP_CONTEXT_FILES")
+        .ok()
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
     AgentConfig {
         max_turns: config.max_turns,
         budget: config.budget.clone(),
@@ -632,6 +636,7 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         hermes_home: config.home_dir.clone(),
         provider: provider_from_model,
         stream: config.streaming.enabled,
+        skip_context_files: config.agent.skip_context_files || skip_context_files_env,
         platform: Some("http".to_string()),
         pass_session_id: true,
         runtime_providers: config
