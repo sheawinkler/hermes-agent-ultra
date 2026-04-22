@@ -234,8 +234,9 @@ def main() -> int:
     for row in rows:
         if row["disposition"] != "pending":
             continue
+        subject_escaped = row["subject"].replace("|", "\\|")
         md.append(
-            f"| `{row['sha'][:12]}` | #{row['target_ticket']} | {row['subject'].replace('|', '\\|')} |"
+            f"| `{row['sha'][:12]}` | #{row['target_ticket']} | {subject_escaped} |"
         )
         pending_count += 1
         if pending_count >= 100:
