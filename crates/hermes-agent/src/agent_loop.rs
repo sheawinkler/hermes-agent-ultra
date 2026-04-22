@@ -2686,6 +2686,13 @@ impl AgentLoop {
                     ctx.add_message(r.message.clone());
                     continue;
                 }
+                // Accept explicit stop/end-turn responses even when assistant text is empty.
+                // Anthropic can return this shape after trivial tool side-effects.
+                if !Self::assistant_has_reasoning(&r.message)
+                    && r.finish_reason.as_deref() == Some("stop")
+                {
+                    break r;
+                }
                 if !Self::assistant_has_reasoning(&r.message)
                     && inner_empty < self.config.empty_content_max_retries
                 {
@@ -3432,6 +3439,13 @@ impl AgentLoop {
                     );
                     ctx.add_message(r.message.clone());
                     continue;
+                }
+                // Accept explicit stop/end-turn responses even when assistant text is empty.
+                // Anthropic can return this shape after trivial tool side-effects.
+                if !Self::assistant_has_reasoning(&r.message)
+                    && r.finish_reason.as_deref() == Some("stop")
+                {
+                    break r;
                 }
                 if !Self::assistant_has_reasoning(&r.message)
                     && inner_empty < self.config.empty_content_max_retries
@@ -4852,11 +4866,16 @@ mod tests {
                 } else {
                     Message::assistant("ok")
                 };
+                let finish_reason = if *n == 1 {
+                    None
+                } else {
+                    Some("stop".to_string())
+                };
                 Ok(hermes_core::LlmResponse {
                     message: msg,
                     usage: None,
                     model: "dummy".into(),
-                    finish_reason: Some("stop".into()),
+                    finish_reason,
                 })
             }
 
@@ -4901,6 +4920,79 @@ mod tests {
         assert!(result.is_ok());
         let rows = captured.lock().expect("captured lock");
         assert!(rows.iter().any(|(kind, msg)| {
+            kind == "lifecycle" && msg.contains("Empty assistant response — retrying")
+        }));
+    }
+
+    #[tokio::test]
+    async fn empty_stop_response_is_accepted_without_retry() {
+        use futures::stream::BoxStream;
+
+        #[derive(Default)]
+        struct EmptyStopProvider {
+            calls: std::sync::Mutex<u32>,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for EmptyStopProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                let mut n = self.calls.lock().expect("calls lock");
+                *n += 1;
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant(""),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let captured = Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
+        let cap_ref = captured.clone();
+        let callbacks = AgentCallbacks {
+            status_callback: Some(Arc::new(move |kind, msg| {
+                cap_ref
+                    .lock()
+                    .expect("status callback lock")
+                    .push((kind.to_string(), msg.to_string()));
+            })),
+            ..Default::default()
+        };
+
+        let provider = Arc::new(EmptyStopProvider::default());
+        let cfg = AgentConfig {
+            max_turns: 1,
+            empty_content_max_retries: 3,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider.clone())
+            .with_callbacks(callbacks);
+
+        let result = agent.run(vec![Message::user("hello")], None).await;
+        assert!(result.is_ok());
+        assert_eq!(*provider.calls.lock().expect("calls lock"), 1);
+        let rows = captured.lock().expect("captured lock");
+        assert!(!rows.iter().any(|(kind, msg)| {
             kind == "lifecycle" && msg.contains("Empty assistant response — retrying")
         }));
     }
