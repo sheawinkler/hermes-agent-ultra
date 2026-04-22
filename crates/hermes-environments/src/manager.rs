@@ -26,6 +26,7 @@ use crate::singularity::SingularityBackend;
 /// for command execution and file operations regardless of backend type.
 pub struct BackendManager {
     current_backend: Arc<dyn TerminalBackend>,
+    active_backend_type: TerminalBackendType,
     config: TerminalConfig,
 }
 
@@ -36,66 +37,91 @@ impl BackendManager {
     /// If the selected backend type is not available (e.g. compiled without
     /// the corresponding feature), falls back to [`LocalBackend`].
     pub fn new(config: TerminalConfig) -> Self {
-        let backend: Arc<dyn TerminalBackend> = Self::create_backend(&config);
+        let (backend, active_backend_type) = Self::create_backend(&config);
         Self {
             current_backend: backend,
+            active_backend_type,
             config,
         }
     }
 
     /// Create the appropriate backend based on configuration.
-    fn create_backend(config: &TerminalConfig) -> Arc<dyn TerminalBackend> {
+    fn create_backend(config: &TerminalConfig) -> (Arc<dyn TerminalBackend>, TerminalBackendType) {
         match config.backend {
-            TerminalBackendType::Local => {
-                Arc::new(LocalBackend::new(config.timeout, config.max_output_size))
-            }
+            TerminalBackendType::Local => (
+                Arc::new(LocalBackend::new(config.timeout, config.max_output_size)),
+                TerminalBackendType::Local,
+            ),
             #[cfg(feature = "docker")]
-            TerminalBackendType::Docker => Arc::new(DockerBackend::new(
-                None,
-                None,
-                config.timeout,
-                config.max_output_size,
-            )),
+            TerminalBackendType::Docker => (
+                Arc::new(DockerBackend::new(
+                    None,
+                    None,
+                    config.timeout,
+                    config.max_output_size,
+                )),
+                TerminalBackendType::Docker,
+            ),
             #[cfg(feature = "ssh")]
-            TerminalBackendType::Ssh => Arc::new(SshBackend::new(
-                "localhost".to_string(),
-                22,
-                None,
-                None,
-                config.timeout,
-                config.max_output_size,
-            )),
+            TerminalBackendType::Ssh => (
+                Arc::new(SshBackend::new(
+                    "localhost".to_string(),
+                    22,
+                    None,
+                    None,
+                    config.timeout,
+                    config.max_output_size,
+                )),
+                TerminalBackendType::Ssh,
+            ),
             #[cfg(feature = "daytona")]
-            TerminalBackendType::Daytona => Arc::new(DaytonaBackend::new(
-                None,
-                None,
-                None,
-                config.timeout,
-                config.max_output_size,
-            )),
+            TerminalBackendType::Daytona => (
+                Arc::new(DaytonaBackend::new(
+                    None,
+                    None,
+                    None,
+                    config.timeout,
+                    config.max_output_size,
+                )),
+                TerminalBackendType::Daytona,
+            ),
             #[cfg(feature = "modal")]
-            TerminalBackendType::Modal => Arc::new(ModalBackend::new(
-                None,
-                None,
-                config.timeout,
-                config.max_output_size,
-            )),
+            TerminalBackendType::Modal => (
+                Arc::new(ModalBackend::new(
+                    None,
+                    None,
+                    config.timeout,
+                    config.max_output_size,
+                )),
+                TerminalBackendType::Modal,
+            ),
             #[cfg(feature = "singularity")]
-            TerminalBackendType::Singularity => Arc::new(SingularityBackend::new(
-                None,
-                None,
-                config.timeout,
-                config.max_output_size,
-            )),
+            TerminalBackendType::Singularity => (
+                Arc::new(SingularityBackend::new(
+                    None,
+                    None,
+                    config.timeout,
+                    config.max_output_size,
+                )),
+                TerminalBackendType::Singularity,
+            ),
             #[allow(unreachable_patterns)]
             _ => {
                 tracing::warn!(
                     "Backend type {:?} not available (feature not enabled); falling back to local",
                     config.backend
                 );
-                Arc::new(LocalBackend::new(config.timeout, config.max_output_size))
+                (
+                    Arc::new(LocalBackend::new(config.timeout, config.max_output_size)),
+                    TerminalBackendType::Local,
+                )
             }
         }
+    }
+
+    /// Clone the currently selected backend.
+    pub fn terminal_backend(&self) -> Arc<dyn TerminalBackend> {
+        self.current_backend.clone()
     }
 
     /// Execute a command through the active backend.
@@ -160,7 +186,9 @@ impl BackendManager {
         }
 
         self.config.backend = backend_type;
-        self.current_backend = Self::create_backend(&self.config);
+        let (backend, active_backend_type) = Self::create_backend(&self.config);
+        self.current_backend = backend;
+        self.active_backend_type = active_backend_type;
         Ok(())
     }
 
@@ -171,6 +199,42 @@ impl BackendManager {
 
     /// Get the current backend type.
     pub fn backend_type(&self) -> TerminalBackendType {
+        self.active_backend_type
+    }
+
+    /// Get the configured backend type from the provided config.
+    pub fn configured_backend_type(&self) -> TerminalBackendType {
         self.config.backend
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hermes_config::TerminalConfig;
+
+    #[test]
+    fn local_backend_selected_from_default_config() {
+        let manager = BackendManager::new(TerminalConfig::default());
+        assert_eq!(manager.backend_type(), TerminalBackendType::Local);
+        assert_eq!(
+            manager.configured_backend_type(),
+            TerminalBackendType::Local
+        );
+    }
+
+    #[cfg(not(feature = "docker"))]
+    #[test]
+    fn unavailable_backend_falls_back_to_local_but_keeps_configured_type() {
+        let cfg = TerminalConfig {
+            backend: TerminalBackendType::Docker,
+            ..TerminalConfig::default()
+        };
+        let manager = BackendManager::new(cfg);
+        assert_eq!(manager.backend_type(), TerminalBackendType::Local);
+        assert_eq!(
+            manager.configured_backend_type(),
+            TerminalBackendType::Docker
+        );
     }
 }

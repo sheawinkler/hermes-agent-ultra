@@ -128,3 +128,28 @@
 - Queue/proof refresh:
   - `docs/parity/upstream-missing-queue.{json,md}`
   - `docs/parity/global-parity-proof.{json,md}`
+
+## 2026-04-22 batch-08 (runtime terminal backend selection parity)
+- Scope: WG7 runtime backfill — remove forced local terminal backend wiring in Rust CLI runtime paths.
+- Upstream commit ported:
+  - `c33feb6dc9d4401e8e5f55b026f17e8665e290e2`
+    `Fix host CWD leaking into non-local terminal backends`
+    - Disposition: `ported`
+- Implementation (Rust):
+  - `crates/hermes-environments/src/manager.rs`
+    - Track `active_backend_type` separately from configured backend.
+    - Return selected runtime backend via `terminal_backend()`.
+    - Added tests for default-local selection and unavailable-backend fallback behavior.
+  - `crates/hermes-cli/src/terminal_backend.rs`
+    - New shared helper to build runtime terminal backend from `GatewayConfig.terminal` via `BackendManager`.
+  - Runtime callsites migrated off hardcoded `LocalBackend::default()`:
+    - `crates/hermes-cli/src/app.rs`
+    - `crates/hermes-cli/src/main.rs`
+    - `crates/hermes-cli/src/commands.rs`
+    - `crates/hermes-cli/src/lib.rs` (module export)
+- Verification:
+  - `cargo test -p hermes-environments manager:: -- --nocapture`
+  - `cargo test -p hermes-cli terminal_backend:: -- --nocapture`
+- Queue/proof refresh:
+  - `docs/parity/upstream-missing-queue.{json,md}`
+  - `docs/parity/global-parity-proof.{json,md}`

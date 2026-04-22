@@ -17,6 +17,7 @@ use hermes_cli::config_env::hydrate_env_from_config;
 use hermes_cli::runtime_tool_wiring::{
     wire_cron_scheduler_backend, wire_gateway_clarify_backend, wire_gateway_messaging_backend,
 };
+use hermes_cli::terminal_backend::build_terminal_backend;
 use hermes_cli::App;
 use hermes_config::{
     apply_user_config_patch, gateway_pid_path_in, hermes_home, load_config, load_user_config_file,
@@ -30,7 +31,6 @@ use hermes_cron::{
     cron_scheduler_for_data_dir, CronCompletionEvent, CronError, CronRunner, CronScheduler,
     FileJobPersistence,
 };
-use hermes_environments::LocalBackend;
 use hermes_gateway::gateway::GatewayConfig as RuntimeGatewayConfig;
 use hermes_gateway::gateway::IncomingMessage as GatewayIncomingMessage;
 use hermes_gateway::hooks::HookRegistry;
@@ -360,8 +360,10 @@ async fn run_tools(
     platform: Option<String>,
     summary: bool,
 ) -> Result<(), AgentError> {
+    let runtime_config =
+        load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;
     let registry = Arc::new(hermes_tools::ToolRegistry::new());
-    let terminal_backend: Arc<dyn hermes_core::TerminalBackend> = Arc::new(LocalBackend::default());
+    let terminal_backend = build_terminal_backend(&runtime_config);
     let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
     let skill_provider: Arc<dyn hermes_core::SkillProvider> =
         Arc::new(SkillManager::new(skill_store));
@@ -1093,8 +1095,7 @@ async fn run_gateway(
                 .await;
 
             let tool_registry = Arc::new(ToolRegistry::new());
-            let terminal_backend: Arc<dyn hermes_core::TerminalBackend> =
-                Arc::new(LocalBackend::default());
+            let terminal_backend = build_terminal_backend(&config);
             let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
             let skill_provider: Arc<dyn hermes_core::SkillProvider> =
                 Arc::new(SkillManager::new(skill_store));
@@ -4265,7 +4266,7 @@ fn build_live_cron_scheduler(cli: &Cli, data_dir: &Path) -> Result<CronScheduler
     let provider = build_provider(&config, &current_model);
 
     let tool_registry = Arc::new(ToolRegistry::new());
-    let terminal_backend: Arc<dyn hermes_core::TerminalBackend> = Arc::new(LocalBackend::default());
+    let terminal_backend = build_terminal_backend(&config);
     let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
     let skill_provider: Arc<dyn hermes_core::SkillProvider> =
         Arc::new(SkillManager::new(skill_store));

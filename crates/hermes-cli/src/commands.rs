@@ -766,10 +766,10 @@ pub async fn handle_cli_chat(
     yolo: bool,
 ) -> Result<(), hermes_core::AgentError> {
     use crate::runtime_tool_wiring::{wire_cron_scheduler_backend, wire_stdio_clarify_backend};
+    use crate::terminal_backend::build_terminal_backend;
     use hermes_config::load_config;
     use hermes_core::MessageRole;
     use hermes_cron::cron_scheduler_for_data_dir;
-    use hermes_environments::LocalBackend;
     use hermes_skills::{FileSkillStore, SkillManager};
     use hermes_tools::ToolRegistry;
 
@@ -790,7 +790,7 @@ pub async fn handle_cli_chat(
     let current_model = config.model.clone().unwrap_or_else(|| "gpt-4o".to_string());
 
     let tool_registry = Arc::new(ToolRegistry::new());
-    let terminal_backend: Arc<dyn hermes_core::TerminalBackend> = Arc::new(LocalBackend::default());
+    let terminal_backend = build_terminal_backend(&config);
     let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
     let skill_provider: Arc<dyn hermes_core::SkillProvider> =
         Arc::new(SkillManager::new(skill_store));
@@ -2923,15 +2923,15 @@ pub async fn handle_cli_mcp(
             }
         }
         "serve" => {
-            use hermes_environments::LocalBackend;
             use hermes_skills::{FileSkillStore, SkillManager};
             use hermes_tools::ToolRegistry;
 
             eprintln!("Starting Hermes as MCP server on stdio...");
 
+            let config = hermes_config::load_config(None)
+                .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
             let tool_registry = Arc::new(ToolRegistry::new());
-            let terminal_backend: Arc<dyn hermes_core::TerminalBackend> =
-                Arc::new(LocalBackend::default());
+            let terminal_backend = crate::terminal_backend::build_terminal_backend(&config);
             let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
             let skill_provider: Arc<dyn hermes_core::SkillProvider> =
                 Arc::new(SkillManager::new(skill_store));
@@ -4452,8 +4452,7 @@ pub async fn handle_cli_acp(action: Option<String>) -> Result<(), hermes_core::A
             );
 
             let tool_registry = Arc::new(hermes_tools::ToolRegistry::new());
-            let terminal_backend: Arc<dyn hermes_core::TerminalBackend> =
-                Arc::new(hermes_environments::LocalBackend::default());
+            let terminal_backend = crate::terminal_backend::build_terminal_backend(&config);
             let skill_store = Arc::new(hermes_skills::FileSkillStore::new(
                 hermes_skills::FileSkillStore::default_dir(),
             ));

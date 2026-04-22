@@ -23,12 +23,12 @@ use hermes_agent::{AgentConfig, AgentLoop, InterruptController};
 use hermes_config::{cron_dir, hermes_home as hermes_home_dir, load_config, GatewayConfig};
 use hermes_core::{AgentError, LlmProvider};
 use hermes_cron::cron_scheduler_for_data_dir;
-use hermes_environments::LocalBackend;
 use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_tools::ToolRegistry;
 
 use crate::cli::Cli;
 use crate::runtime_tool_wiring::{wire_cron_scheduler_backend, wire_stdio_clarify_backend};
+use crate::terminal_backend::build_terminal_backend;
 use crate::tui::StreamHandle;
 
 // ---------------------------------------------------------------------------
@@ -126,8 +126,7 @@ impl App {
         let current_personality = config.personality.clone();
 
         let tool_registry = Arc::new(ToolRegistry::new());
-        let terminal_backend: Arc<dyn hermes_core::TerminalBackend> =
-            Arc::new(LocalBackend::default());
+        let terminal_backend = build_terminal_backend(&config);
         let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
         let skill_provider: Arc<dyn hermes_core::SkillProvider> =
             Arc::new(SkillManager::new(skill_store));

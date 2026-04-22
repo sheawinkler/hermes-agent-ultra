@@ -2849,14 +2849,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "cli.py",
         "tools/file_operations.py",
         "tools/terminal_tool.py"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "ported in Rust: runtime terminal backend wiring now derives from config.terminal via BackendManager (removes forced LocalBackend path)",
       "owner": "codex",
       "sha": "c33feb6dc9d4401e8e5f55b026f17e8665e290e2",
       "subject": "Fix host CWD leaking into non-local terminal backends",
@@ -69430,7 +69430,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     }
   ],
-  "generated_at_utc": "2026-04-22T01:04:27.646962+00:00",
+  "generated_at_utc": "2026-04-22T01:29:13.505547+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69438,8 +69438,8 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4184,
-      "ported": 23,
+      "pending": 4183,
+      "ported": 24,
       "superseded": 352
     },
     "by_target_ticket": {

@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-22T01:04:27.646962+00:00`
+Generated: `2026-04-22T01:29:13.505547+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `4559`.
 
@@ -16,8 +16,8 @@ Generated: `2026-04-22T01:04:27.646962+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 4184 |
-| ported | 23 |
+| pending | 4183 |
+| ported | 24 |
 | superseded | 352 |
 
 ## First 100 Pending Commits
@@ -54,7 +54,6 @@ Generated: `2026-04-22T01:04:27.646962+00:00`
 | `01a3a6ab0d2d` | #26 | Implement cleanup guard to prevent multiple executions on exit |
 | `8117d0adabe3` | #26 | Refactor file operations and environment management in file_tools and terminal_tool |
 | `2c7deb41f6f7` | #26 | Fix Modal backend not working from CLI |
-| `c33feb6dc9d4` | #26 | Fix host CWD leaking into non-local terminal backends |
 | `a7609c97be5f` | #26 | Update docs to match backend key rename and CWD behavior |
 | `48b5cfd0851e` | #26 | Add skip_context_files option to AIAgent for batch processing |
 | `061fa7090720` | #25 | Add background process management with process tool, wait, PTY, and stdin support |
@@ -124,4 +123,5 @@ Generated: `2026-04-22T01:04:27.646962+00:00`
 | `5b3f708fcb44` | #26 | feat: enhance stale daemon cleanup and improve error logging in browser tool |
 | `6903c4605ceb` | #26 | chore: update package-lock.json with new dependencies and version upgrades |
 | `3dfc0a9679d6` | #21 | feat: add PPTX editing and creation skills with comprehensive documentation |
+| `7283b9f6cf0c` | #26 | feat: extend browser session management with improved thread safety and timeout configuration |
 
