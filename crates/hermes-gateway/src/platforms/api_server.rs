@@ -442,12 +442,31 @@ impl PlatformAdapter for ApiServerAdapter {
         self.send_message(chat_id, &msg, None).await
     }
 
+    async fn send_image_url(
+        &self,
+        chat_id: &str,
+        image_url: &str,
+        caption: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        let marker = image_marker_message(image_url, caption);
+        self.send_message(chat_id, &marker, Some(ParseMode::Plain))
+            .await
+    }
+
     fn is_running(&self) -> bool {
         self.base.is_running()
     }
     fn platform_name(&self) -> &str {
         "api-server"
     }
+}
+
+fn image_marker_message(image_url: &str, caption: Option<&str>) -> String {
+    let mut marker = format!("[image] {image_url}");
+    if let Some(cap) = caption.map(str::trim).filter(|s| !s.is_empty()) {
+        marker.push_str(&format!(" | caption={cap}"));
+    }
+    marker
 }
 
 // ---------------------------------------------------------------------------
@@ -938,5 +957,20 @@ mod tests {
         assert!(requires_auth_token_for_bind("0.0.0.0", None));
         assert!(requires_auth_token_for_bind("::", Some("")));
         assert!(!requires_auth_token_for_bind("0.0.0.0", Some("sk-test")));
+    }
+
+    #[test]
+    fn image_marker_message_with_caption() {
+        let marker = image_marker_message("https://cdn.example.com/a.png", Some("Diagram"));
+        assert_eq!(
+            marker,
+            "[image] https://cdn.example.com/a.png | caption=Diagram"
+        );
+    }
+
+    #[test]
+    fn image_marker_message_without_caption() {
+        let marker = image_marker_message("https://cdn.example.com/a.png", Some("   "));
+        assert_eq!(marker, "[image] https://cdn.example.com/a.png");
     }
 }
