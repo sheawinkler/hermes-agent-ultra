@@ -1,5 +1,6 @@
 //! Local terminal backend – executes commands on the same host.
 
+use std::path::PathBuf;
 use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 
@@ -27,6 +28,109 @@ impl LocalBackend {
             background_processes: Arc::new(Mutex::new(Vec::new())),
         }
     }
+}
+
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+}
+
+fn current_username() -> Option<String> {
+    std::env::var("USER")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| {
+            std::env::var("LOGNAME")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+        })
+        .or_else(|| {
+            std::env::var("USERNAME")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+        })
+}
+
+fn is_valid_unix_username(username: &str) -> bool {
+    !username.is_empty()
+        && username
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-'))
+}
+
+#[cfg(unix)]
+fn lookup_home_for_username(username: &str) -> Option<PathBuf> {
+    if current_username().as_deref() == Some(username) {
+        return home_dir();
+    }
+    let passwd = std::fs::read_to_string("/etc/passwd").ok()?;
+    for line in passwd.lines() {
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let mut parts = line.split(':');
+        let user = parts.next()?;
+        let _passwd = parts.next()?;
+        let _uid = parts.next()?;
+        let _gid = parts.next()?;
+        let _gecos = parts.next()?;
+        let home = parts.next()?;
+        if user == username && !home.is_empty() {
+            return Some(PathBuf::from(home));
+        }
+    }
+    None
+}
+
+#[cfg(not(unix))]
+fn lookup_home_for_username(username: &str) -> Option<PathBuf> {
+    if current_username().as_deref() == Some(username) {
+        return home_dir();
+    }
+    None
+}
+
+fn resolve_path(input: &str) -> Result<PathBuf, AgentError> {
+    if !input.starts_with('~') {
+        return Ok(PathBuf::from(input));
+    }
+
+    let rest = &input[1..];
+    if rest.is_empty() {
+        return home_dir().ok_or_else(|| AgentError::Io("Failed to resolve home dir".into()));
+    }
+
+    if rest.starts_with('/') {
+        let home = home_dir().ok_or_else(|| AgentError::Io("Failed to resolve home dir".into()))?;
+        let suffix = rest.trim_start_matches('/');
+        return Ok(if suffix.is_empty() {
+            home
+        } else {
+            home.join(suffix)
+        });
+    }
+
+    // ~username or ~username/path. For security, only allow traditional
+    // username characters so malicious payloads cannot pass through.
+    let (username, suffix) = match rest.find('/') {
+        Some(idx) => (&rest[..idx], &rest[idx + 1..]),
+        None => (rest, ""),
+    };
+
+    if !is_valid_unix_username(username) {
+        return Ok(PathBuf::from(input));
+    }
+
+    if let Some(home) = lookup_home_for_username(username) {
+        return Ok(if suffix.is_empty() {
+            home
+        } else {
+            home.join(suffix)
+        });
+    }
+
+    Ok(PathBuf::from(input))
 }
 
 impl Default for LocalBackend {
@@ -65,7 +169,7 @@ impl TerminalBackend for LocalBackend {
                     .stdin(Stdio::null());
 
                 if let Some(dir) = workdir {
-                    pty_cmd.current_dir(dir);
+                    pty_cmd.current_dir(resolve_path(dir)?);
                 }
 
                 let result =
@@ -114,7 +218,7 @@ impl TerminalBackend for LocalBackend {
             .stderr(Stdio::piped());
 
         if let Some(dir) = workdir {
-            cmd.current_dir(dir);
+            cmd.current_dir(resolve_path(dir)?);
         }
 
         if background {
@@ -198,7 +302,8 @@ impl TerminalBackend for LocalBackend {
         offset: Option<u64>,
         limit: Option<u64>,
     ) -> Result<String, AgentError> {
-        let content = tokio::fs::read_to_string(path)
+        let resolved = resolve_path(path)?;
+        let content = tokio::fs::read_to_string(&resolved)
             .await
             .map_err(|e| AgentError::Io(format!("Failed to read file '{}': {}", path, e)))?;
 
@@ -220,8 +325,10 @@ impl TerminalBackend for LocalBackend {
     }
 
     async fn write_file(&self, path: &str, content: &str) -> Result<(), AgentError> {
+        let resolved = resolve_path(path)?;
+
         // Ensure parent directory exists
-        if let Some(parent) = std::path::Path::new(path).parent() {
+        if let Some(parent) = resolved.parent() {
             if !parent.as_os_str().is_empty() {
                 tokio::fs::create_dir_all(parent).await.map_err(|e| {
                     AgentError::Io(format!(
@@ -232,7 +339,7 @@ impl TerminalBackend for LocalBackend {
             }
         }
 
-        tokio::fs::write(path, content)
+        tokio::fs::write(&resolved, content)
             .await
             .map_err(|e| AgentError::Io(format!("Failed to write file '{}': {}", path, e)))?;
 
@@ -240,7 +347,8 @@ impl TerminalBackend for LocalBackend {
     }
 
     async fn file_exists(&self, path: &str) -> Result<bool, AgentError> {
-        match tokio::fs::metadata(path).await {
+        let resolved = resolve_path(path)?;
+        match tokio::fs::metadata(&resolved).await {
             Ok(_) => Ok(true),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
             Err(e) => Err(AgentError::Io(format!(
@@ -254,7 +362,31 @@ impl TerminalBackend for LocalBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write as IoWrite;
+    use std::ffi::OsString;
+    use std::path::Path;
+    use tempfile::tempdir;
+
+    struct EnvGuard {
+        key: &'static str,
+        original: Option<OsString>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let original = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(v) => std::env::set_var(self.key, v),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
 
     #[tokio::test]
     async fn test_execute_command_echo() {
@@ -345,5 +477,40 @@ mod tests {
             .file_exists("/tmp/hermes_nonexistent_test_file_xyz")
             .await
             .unwrap());
+    }
+
+    #[test]
+    fn test_resolve_path_rejects_tilde_injection() {
+        let malicious = "~; echo PWNED > /tmp/hermes_local_backend_injection";
+        let resolved = resolve_path(malicious).unwrap();
+        assert_eq!(resolved, Path::new(malicious));
+        assert!(!Path::new("/tmp/hermes_local_backend_injection").exists());
+    }
+
+    #[test]
+    fn test_resolve_path_expands_tilde_username_with_suffix() {
+        let Some(user) = current_username() else {
+            return;
+        };
+        let Some(home) = home_dir() else {
+            return;
+        };
+
+        let resolved = resolve_path(&format!("~{user}/workspace/file.txt")).unwrap();
+        assert!(resolved.starts_with(&home));
+        assert!(resolved.ends_with("workspace/file.txt"));
+    }
+
+    #[tokio::test]
+    async fn test_write_file_expands_tilde_home() {
+        let td = tempdir().unwrap();
+        let _home_guard = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
+        let backend = LocalBackend::default();
+        let file = "~/nested/path/test.txt";
+
+        backend.write_file(file, "ok").await.unwrap();
+        let expanded = td.path().join("nested/path/test.txt");
+        let content = std::fs::read_to_string(&expanded).unwrap();
+        assert_eq!(content, "ok");
     }
 }
