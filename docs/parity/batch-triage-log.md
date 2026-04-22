@@ -775,3 +775,37 @@
     - Added helper tests for filename inference and fallback text formatting.
 - Verification (targeted):
   - `cargo test -p hermes-gateway --features feishu platforms::feishu::tests:: -- --nocapture`
+
+## 2026-04-22 impl-06 (multi-adapter image-url parity expansion)
+- Scope:
+  - Continue adapter parity batch by porting native image URL behavior to additional adapters in FP-RUST-03B/03C scope.
+- Rust implementation commits (chronological):
+  - `1a0dd04d` feat(gateway): add signal and email image-url parity paths.
+    - `signal`:
+      - Added `send_image_url` override with:
+        - `file://` local-path support
+        - remote image download + temp-file attachment send via existing `send_file`
+        - fallback to text send (`caption + URL`) on download/upload failure
+      - Added helper regression tests for filename inference and fallback text.
+    - `email`:
+      - Added `send_image_url` override aligned with upstream body semantics: `Image: <url>` with optional caption prefix.
+      - Added helper regression tests for body formatting.
+  - `8c1fa50d` feat(gateway): add native image-url parity for wecom/weixin/bluebubbles.
+    - `bluebubbles`, `wecom`, `weixin`:
+      - Added `send_image_url` overrides with:
+        - `file://` local-path support
+        - remote image download to temp file
+        - native upload/send via existing adapter `send_file` paths
+        - fallback text send on failure
+      - Added helper regression tests for filename inference and fallback text.
+- Verification (targeted):
+  - `cargo test -p hermes-gateway --features signal platforms::signal::tests:: -- --nocapture`
+  - `cargo test -p hermes-gateway --features email platforms::email::tests:: -- --nocapture`
+  - `cargo test -p hermes-gateway --features bluebubbles platforms::bluebubbles::tests:: -- --nocapture`
+  - `cargo test -p hermes-gateway --features wecom platforms::wecom::tests:: -- --nocapture`
+  - `cargo test -p hermes-gateway --features weixin weixin_image_url_tests:: -- --nocapture`
+  - `cargo test -p hermes-gateway --features whatsapp platforms::whatsapp::tests:: -- --nocapture`
+  - `cargo test -p hermes-gateway --features signal platforms::signal::tests:: -- --nocapture`
+  - `cargo test -p hermes-gateway --features sms platforms::sms::tests:: -- --nocapture`
+  - `cargo test -p hermes-gateway --features email platforms::email::tests:: -- --nocapture`
+  - `cargo test -p hermes-gateway --features webhook platforms::webhook::tests:: -- --nocapture`
