@@ -623,77 +623,82 @@
 
 ## 2026-04-22 batch-24a (500-tranche parity disposition pass)
 - Scope:
-  - User-directed bulk classification tranche with  pending SHAs, from  through .
+  - User-directed bulk classification tranche with `500` pending SHAs, from `6782249df935...` through `352980311b3a...`.
 - Classification mode:
-  -  by directive for upstream Python/docs/runtime queue items against this rust-native repository.
+  - `superseded` by directive for upstream Python/docs/runtime queue items against this rust-native repository.
 - Queue dispositions in this tranche:
-  -  (500)
-  -  (0)
+  - `superseded` (500)
+  - `ported` (0)
 - Queue refresh:
-  -  regenerated with this tranche removed from .
+  - `docs/parity/upstream-missing-queue.{json,md}` regenerated with this tranche removed from `pending`.
 
 ## 2026-04-22 batch-24b (500-tranche parity disposition pass)
 - Scope:
-  - User-directed bulk classification tranche with  pending SHAs, from  through .
+  - User-directed bulk classification tranche with `500` pending SHAs, from `b72f522e30fb...` through `c511e087e048...`.
 - Classification mode:
-  -  by directive for upstream Python/docs/runtime queue items against this rust-native repository.
+  - `superseded` by directive for upstream Python/docs/runtime queue items against this rust-native repository.
 - Queue dispositions in this tranche:
-  -  (500)
-  -  (0)
+  - `superseded` (500)
+  - `ported` (0)
 - Queue refresh:
-  -  regenerated with this tranche removed from .
+  - `docs/parity/upstream-missing-queue.{json,md}` regenerated with this tranche removed from `pending`.
 
 ## 2026-04-22 batch-24c (500-tranche parity disposition pass)
 - Scope:
-  - User-directed bulk classification tranche with  pending SHAs, from  through .
+  - User-directed bulk classification tranche with `500` pending SHAs, from `0426bb745f0c...` through `8545343cba26...`.
 - Classification mode:
-  -  by directive for upstream Python/docs/runtime queue items against this rust-native repository.
+  - `superseded` by directive for upstream Python/docs/runtime queue items against this rust-native repository.
 - Queue dispositions in this tranche:
-  -  (500)
-  -  (0)
+  - `superseded` (500)
+  - `ported` (0)
 - Queue refresh:
-  -  regenerated with this tranche removed from .
+  - `docs/parity/upstream-missing-queue.{json,md}` regenerated with this tranche removed from `pending`.
 
 ## 2026-04-22 batch-24d (500-tranche parity disposition pass)
 - Scope:
-  - User-directed bulk classification tranche with  pending SHAs, from  through .
+  - User-directed bulk classification tranche with `500` pending SHAs, from `ed4a605696b5...` through `f4c708603573...`.
 - Classification mode:
-  -  by directive for upstream Python/docs/runtime queue items against this rust-native repository.
+  - `superseded` by directive for upstream Python/docs/runtime queue items against this rust-native repository.
 - Queue dispositions in this tranche:
-  -  (500)
-  -  (0)
+  - `superseded` (500)
+  - `ported` (0)
 - Queue refresh:
-  -  regenerated with this tranche removed from .
+  - `docs/parity/upstream-missing-queue.{json,md}` regenerated with this tranche removed from `pending`.
 
 ## 2026-04-22 batch-24e (500-tranche parity disposition pass)
 - Scope:
-  - User-directed bulk classification tranche with  pending SHAs, from  through .
+  - User-directed bulk classification tranche with `500` pending SHAs, from `714809634f1c...` through `4b2a1a4337a0...`.
 - Classification mode:
-  -  by directive for upstream Python/docs/runtime queue items against this rust-native repository.
+  - `superseded` by directive for upstream Python/docs/runtime queue items against this rust-native repository.
 - Queue dispositions in this tranche:
-  -  (500)
-  -  (0)
+  - `superseded` (500)
+  - `ported` (0)
 - Queue refresh:
-  -  regenerated with this tranche removed from .
+  - `docs/parity/upstream-missing-queue.{json,md}` regenerated with this tranche removed from `pending`.
 
 ## 2026-04-22 batch-24f (500-tranche parity disposition pass)
 - Scope:
-  - User-directed bulk classification tranche with  pending SHAs, from  through .
+  - User-directed bulk classification tranche with `500` pending SHAs, from `fc6cb5b970f0...` through `361675018f43...`.
 - Classification mode:
-  -  by directive for upstream Python/docs/runtime queue items against this rust-native repository.
+  - `superseded` by directive for upstream Python/docs/runtime queue items against this rust-native repository.
 - Queue dispositions in this tranche:
-  -  (500)
-  -  (0)
+  - `superseded` (500)
+  - `ported` (0)
 - Queue refresh:
-  -  regenerated with this tranche removed from .
+  - `docs/parity/upstream-missing-queue.{json,md}` regenerated with this tranche removed from `pending`.
 
 ## 2026-04-22 batch-24g (398-tranche parity disposition pass)
 - Scope:
-  - User-directed bulk classification tranche with  pending SHAs, from  through .
+  - User-directed bulk classification tranche with `398` pending SHAs, from `cd59af17cc09...` through `ff9752410a8d...`.
 - Classification mode:
-  -  by directive for upstream Python/docs/runtime queue items against this rust-native repository.
+  - `superseded` by directive for upstream Python/docs/runtime queue items against this rust-native repository.
 - Queue dispositions in this tranche:
-  -  (398)
-  -  (0)
+  - `superseded` (398)
+  - `ported` (0)
+- Aggregate for batch-24 request (`3398` total):
+  - `superseded` (3398)
+  - `ported` (0)
+  - `pending` (0 within selected tranche set)
 - Queue refresh:
-  -  regenerated with this tranche removed from .
+  - `docs/parity/upstream-missing-queue.{json,md}` regenerated with this tranche removed from `pending`.
+
