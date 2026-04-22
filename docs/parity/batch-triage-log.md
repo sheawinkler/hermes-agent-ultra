@@ -809,3 +809,29 @@
   - `cargo test -p hermes-gateway --features sms platforms::sms::tests:: -- --nocapture`
   - `cargo test -p hermes-gateway --features email platforms::email::tests:: -- --nocapture`
   - `cargo test -p hermes-gateway --features webhook platforms::webhook::tests:: -- --nocapture`
+
+## 2026-04-22 impl-07 (wecom-callback coverage + qqbot native image-url parity)
+- Scope:
+  - Continue FP-RUST-03C implementation by completing in-progress `wecom_callback` parity validation and adding native QQBot image URL media delivery.
+- Rust implementation commits (chronological):
+  - `f161d661` test(gateway): add wecom-callback image-url helper coverage.
+    - Added deterministic tests for:
+      - content-type normalization
+      - remote filename inference and extension rules
+      - caption/url fallback text formatting
+      - existing callback signature/decrypt regression checks
+  - `385b1a6b` feat(gateway): add qqbot native image-url media upload/send path.
+    - Added `QqBotAdapter::send_image_url` override:
+      - supports `file://` local image uploads (`file_data` base64 path)
+      - supports remote URL image uploads (`url` upload path)
+      - sends media message (`msg_type=7`) with uploaded `file_info`
+      - falls back to text send (`caption + URL`) if native upload/send fails
+    - Added helper tests for fallback text formatting and upload-response `file_info` extraction.
+- Verification (targeted + acceptance):
+  - `cargo test -p hermes-gateway --features qqbot platforms::qqbot::tests:: -- --nocapture`
+  - `cargo test -p hermes-gateway --features wecom-callback platforms::wecom_callback::tests:: -- --nocapture`
+  - `cargo test -p hermes-gateway --features matrix,feishu,dingtalk,wecom,homeassistant matrix -- --nocapture`
+  - `cargo test -p hermes-gateway --features matrix,feishu,dingtalk,wecom,homeassistant feishu -- --nocapture`
+  - `cargo test -p hermes-gateway --features matrix,feishu,dingtalk,wecom,homeassistant dingtalk -- --nocapture`
+  - `cargo test -p hermes-gateway --features matrix,feishu,dingtalk,wecom,homeassistant wecom -- --nocapture`
+  - `cargo test -p hermes-gateway --features matrix,feishu,dingtalk,wecom,homeassistant homeassistant -- --nocapture`
