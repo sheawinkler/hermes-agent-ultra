@@ -3172,7 +3172,7 @@ fn secret_provider_aliases(provider: &str) -> Vec<String> {
 
 fn provider_env_var(provider: &str) -> Option<&'static str> {
     match normalize_secret_provider(provider).as_str() {
-        "openai" => Some("OPENAI_API_KEY"),
+        "openai" => Some("HERMES_OPENAI_API_KEY"),
         "anthropic" => Some("ANTHROPIC_API_KEY"),
         "openrouter" => Some("OPENROUTER_API_KEY"),
         "qwen" => Some("DASHSCOPE_API_KEY"),
@@ -3265,6 +3265,7 @@ async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentE
     }
     let store = FileTokenStore::new(path).await?;
     let env_bindings = [
+        ("HERMES_OPENAI_API_KEY", "openai"),
         ("OPENAI_API_KEY", "openai"),
         ("ANTHROPIC_API_KEY", "anthropic"),
         ("OPENROUTER_API_KEY", "openrouter"),
@@ -5257,10 +5258,12 @@ async fn run_setup() -> Result<(), AgentError> {
     maybe_import_legacy_env(&mut reader, &env_path)?;
 
     // 2. Prompt for API key
-    let has_env_openai_key = read_env_key(&env_path, "OPENAI_API_KEY").is_some();
+    let has_env_openai_key = read_env_key(&env_path, "HERMES_OPENAI_API_KEY")
+        .is_some()
+        || read_env_key(&env_path, "OPENAI_API_KEY").is_some();
     if has_env_openai_key {
         print!(
-            "\nOpenAI API key (leave blank to keep OPENAI_API_KEY from {}): ",
+            "\nOpenAI API key (leave blank to keep HERMES_OPENAI_API_KEY/OPENAI_API_KEY from {}): ",
             env_path.display()
         );
     } else {
@@ -5354,12 +5357,12 @@ async fn run_setup() -> Result<(), AgentError> {
         provider.api_key = Some(api_key.clone());
     } else if stored_openai_secret_in_vault {
         println!(
-            "  ✓ Stored OPENAI_API_KEY in encrypted vault: {}",
+            "  ✓ Stored HERMES_OPENAI_API_KEY in encrypted vault: {}",
             config_dir.join("auth").join("tokens.json").display()
         );
     } else if has_env_openai_key {
         println!(
-            "  ✓ Keeping OPENAI_API_KEY from {} for runtime auth",
+            "  ✓ Keeping HERMES_OPENAI_API_KEY/OPENAI_API_KEY from {} for runtime auth",
             env_path.display()
         );
     }
@@ -5411,7 +5414,6 @@ async fn run_doctor(cli: Cli) -> Result<(), AgentError> {
 
     // Check API keys via environment
     let api_checks = [
-        ("OPENAI_API_KEY", "OpenAI"),
         ("ANTHROPIC_API_KEY", "Anthropic"),
         ("OPENROUTER_API_KEY", "OpenRouter"),
         ("EXA_API_KEY", "Exa (web search)"),
@@ -5419,6 +5421,18 @@ async fn run_doctor(cli: Cli) -> Result<(), AgentError> {
     ];
 
     println!("\nAPI Keys:");
+    print!("  OpenAI (HERMES_OPENAI_API_KEY/OPENAI_API_KEY)... ");
+    let has_openai_key = std::env::var("HERMES_OPENAI_API_KEY")
+        .ok()
+        .is_some_and(|v| !v.trim().is_empty())
+        || std::env::var("OPENAI_API_KEY")
+            .ok()
+            .is_some_and(|v| !v.trim().is_empty());
+    if has_openai_key {
+        println!("✓");
+    } else {
+        println!("✗ (not set)");
+    }
     for (env_var, name) in &api_checks {
         print!("  {} ({})... ", name, env_var);
         if std::env::var(env_var).is_ok() {

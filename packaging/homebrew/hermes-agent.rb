@@ -26,7 +26,7 @@ class HermesAgent < Formula
       Hermes Agent has been installed.
 
       Set your API key before running:
-        export OPENAI_API_KEY="sk-..."
+        export HERMES_OPENAI_API_KEY="sk-..."
 
       Data is stored in:
         #{var}/hermes

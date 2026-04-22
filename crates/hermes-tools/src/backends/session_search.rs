@@ -205,6 +205,7 @@ impl SqliteSessionSearchBackend {
 
         let mut api_key = std::env::var("HERMES_SESSION_SEARCH_SUMMARY_API_KEY")
             .ok()
+            .or_else(|| std::env::var("HERMES_OPENAI_API_KEY").ok())
             .or_else(|| std::env::var("OPENAI_API_KEY").ok())
             .unwrap_or_default();
         if api_key.trim().is_empty() && base_url.to_lowercase().contains("openrouter.ai") {

@@ -187,14 +187,17 @@ pub fn has_direct_modal_credentials() -> bool {
 // OpenAI audio key fallback
 // ---------------------------------------------------------------------------
 
-/// Prefer the dedicated voice-tools key; fall back to the generic OpenAI
-/// key. Mirrors Python's `resolve_openai_audio_api_key()`.
+/// Prefer the dedicated voice-tools key; then `HERMES_OPENAI_API_KEY`; then
+/// legacy `OPENAI_API_KEY`.
 pub fn resolve_openai_audio_api_key() -> String {
     let voice = std::env::var("VOICE_TOOLS_OPENAI_KEY").unwrap_or_default();
     if !voice.trim().is_empty() {
         return voice.trim().to_string();
     }
-    std::env::var("OPENAI_API_KEY")
+    std::env::var("HERMES_OPENAI_API_KEY")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| std::env::var("OPENAI_API_KEY").ok())
         .unwrap_or_default()
         .trim()
         .to_string()
@@ -309,13 +312,21 @@ mod tests {
 
     #[test]
     fn openai_audio_key_prefers_voice_override() {
-        let _g = EnvGuard::new(&["VOICE_TOOLS_OPENAI_KEY", "OPENAI_API_KEY"]);
+        let _g = EnvGuard::new(&[
+            "VOICE_TOOLS_OPENAI_KEY",
+            "HERMES_OPENAI_API_KEY",
+            "OPENAI_API_KEY",
+        ]);
 
         std::env::set_var("VOICE_TOOLS_OPENAI_KEY", "voice-key");
+        std::env::set_var("HERMES_OPENAI_API_KEY", "hermes-key");
         std::env::set_var("OPENAI_API_KEY", "main-key");
         assert_eq!(resolve_openai_audio_api_key(), "voice-key");
 
         std::env::remove_var("VOICE_TOOLS_OPENAI_KEY");
+        assert_eq!(resolve_openai_audio_api_key(), "hermes-key");
+
+        std::env::remove_var("HERMES_OPENAI_API_KEY");
         assert_eq!(resolve_openai_audio_api_key(), "main-key");
 
         std::env::remove_var("OPENAI_API_KEY");
