@@ -8,11 +8,40 @@ CANONICAL_BIN_NAME="${CANONICAL_BIN_NAME:-hermes-agent-ultra}"
 LEGACY_BIN_NAME="${LEGACY_BIN_NAME:-hermes}"
 RELEASE_BIN_BASENAME="${RELEASE_BIN_BASENAME:-hermes}"
 
+if [[ "${VERSION}" == "--help" || "${VERSION}" == "-h" ]]; then
+  cat <<'EOF'
+Usage: scripts/install.sh [version]
+
+Install hermes-agent-ultra from GitHub Releases.
+
+Arguments:
+  version                Release tag to install (default: latest)
+
+Environment variables:
+  REPO                   GitHub repo slug (default: sheawinkler/hermes-agent-ultra)
+  INSTALL_DIR            Destination bin directory (default: $HOME/.local/bin)
+  CANONICAL_BIN_NAME     Installed binary name (default: hermes-agent-ultra)
+  LEGACY_BIN_NAME        Compatibility alias symlink name (default: hermes)
+  RELEASE_BIN_BASENAME   Tarball executable basename (default: hermes)
+  HERMES_HOME            Hermes config dir for SOUL.md bootstrap (default: $HOME/.hermes)
+EOF
+  exit 0
+fi
+
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
     echo "Missing required command: $1" >&2
     exit 1
   }
+}
+
+release_url() {
+  local asset="$1"
+  if [[ "$VERSION" == "latest" ]]; then
+    echo "https://github.com/${REPO}/releases/latest/download/${asset}"
+  else
+    echo "https://github.com/${REPO}/releases/download/${VERSION}/${asset}"
+  fi
 }
 
 detect_target() {
@@ -40,31 +69,57 @@ need_cmd tar
 need_cmd install
 
 TARGET="$(detect_target)"
-ASSET="${RELEASE_BIN_BASENAME}-${TARGET}.tar.gz"
-
-if [[ "$VERSION" == "latest" ]]; then
-  URL="https://github.com/${REPO}/releases/latest/download/${ASSET}"
-else
-  URL="https://github.com/${REPO}/releases/download/${VERSION}/${ASSET}"
+ASSET_CANDIDATES=("${RELEASE_BIN_BASENAME}-${TARGET}.tar.gz")
+if [[ "$TARGET" == "macos-aarch64" ]]; then
+  ASSET_CANDIDATES+=("${RELEASE_BIN_BASENAME}-macos-arm64.tar.gz")
+elif [[ "$TARGET" == "linux-aarch64" ]]; then
+  ASSET_CANDIDATES+=("${RELEASE_BIN_BASENAME}-linux-arm64.tar.gz")
 fi
 
-echo "Installing ${CANONICAL_BIN_NAME} from ${URL}"
 mkdir -p "${INSTALL_DIR}"
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-curl -fsSL "${URL}" -o "${TMP_DIR}/${RELEASE_BIN_BASENAME}.tar.gz"
-tar -xzf "${TMP_DIR}/${RELEASE_BIN_BASENAME}.tar.gz" -C "${TMP_DIR}"
-
 SOURCE_BIN=""
-for candidate in "${CANONICAL_BIN_NAME}" "${RELEASE_BIN_BASENAME}" "${LEGACY_BIN_NAME}"; do
-  if [[ -f "${TMP_DIR}/${candidate}" ]]; then
-    SOURCE_BIN="${TMP_DIR}/${candidate}"
+DOWNLOADED_ASSET=""
+for asset in "${ASSET_CANDIDATES[@]}"; do
+  URL="$(release_url "${asset}")"
+  echo "Installing ${CANONICAL_BIN_NAME} from ${URL}"
+  if curl -fsSL "${URL}" -o "${TMP_DIR}/${RELEASE_BIN_BASENAME}.tar.gz"; then
+    DOWNLOADED_ASSET="${asset}"
     break
   fi
 done
+
+if [[ -n "${DOWNLOADED_ASSET}" ]]; then
+  tar -xzf "${TMP_DIR}/${RELEASE_BIN_BASENAME}.tar.gz" -C "${TMP_DIR}"
+  for candidate in "${CANONICAL_BIN_NAME}" "${RELEASE_BIN_BASENAME}" "${LEGACY_BIN_NAME}"; do
+    if [[ -f "${TMP_DIR}/${candidate}" ]]; then
+      SOURCE_BIN="${TMP_DIR}/${candidate}"
+      break
+    fi
+  done
+fi
+
 if [[ -z "${SOURCE_BIN}" ]]; then
-  echo "No executable binary found in release archive (${ASSET})." >&2
+  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  SOURCE_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+  if [[ -f "${SOURCE_ROOT}/Cargo.toml" ]] && command -v cargo >/dev/null 2>&1; then
+    echo "Release asset not available for target (${TARGET}); building from source at ${SOURCE_ROOT}"
+    (
+      cd "${SOURCE_ROOT}"
+      cargo build --release -p hermes-cli --bin "${CANONICAL_BIN_NAME}"
+    )
+    SOURCE_BIN="${SOURCE_ROOT}/target/release/${CANONICAL_BIN_NAME}"
+  else
+    echo "No executable release asset found for target (${TARGET}) in repo ${REPO}." >&2
+    echo "Tried assets: ${ASSET_CANDIDATES[*]}" >&2
+    exit 1
+  fi
+fi
+
+if [[ ! -f "${SOURCE_BIN}" ]]; then
+  echo "Built binary not found at expected path: ${SOURCE_BIN}" >&2
   exit 1
 fi
 
