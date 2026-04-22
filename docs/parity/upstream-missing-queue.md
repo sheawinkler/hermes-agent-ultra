@@ -1,23 +1,23 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-22T23:33:37.374283+00:00`
+Generated: `2026-04-22T23:38:29.810603+00:00`
 
-- Range: `main..upstream/main`; total commits tracked: `4654`.
+- Range: `main..upstream/main`; total commits tracked: `4659`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 1654 |
+| #20 | GPAR-01 tests+CI parity | 1655 |
 | #21 | GPAR-02 skills parity | 201 |
 | #22 | GPAR-03 UX parity | 551 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 514 |
 | #24 | GPAR-05 environments+parsers+benchmarks | 64 |
 | #25 | GPAR-06 packaging/docs/install parity | 152 |
-| #26 | GPAR-07 upstream queue backfill | 1518 |
+| #26 | GPAR-07 upstream queue backfill | 1522 |
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 55 |
-| ported | 71 |
+| pending | 59 |
+| ported | 72 |
 | superseded | 4528 |
 
 ## First 100 Pending Commits
@@ -69,7 +69,6 @@ Generated: `2026-04-22T23:33:37.374283+00:00`
 | `b641639e425b` | #20 | fix(debug): distinguish empty-log from missing-log in report placeholder |
 | `ea67e49574b0` | #20 | fix(streaming): silent retry when stream dies mid tool-call (#14151) |
 | `e0d698cfb351` | #22 | fix(tui): yolo toggle only reports on/off for strict '0'/'1' values |
-| `b49a1b71a738` | #20 | fix(agent): accept empty content with stop_reason=end_turn as valid anthropic response |
 | `8410ac05a9cc` | #22 | fix(tui): tab title shows cwd + waiting-for-input marker |
 | `103c71ac36c6` | #22 | refactor(tui): /clean pass on tui-polish — data tables, tighter title |
 | `4107538da830` | #22 | style(debug): add missing blank line between LogSnapshot and helpers |
@@ -79,4 +78,9 @@ Generated: `2026-04-22T23:33:37.374283+00:00`
 | `6513138f2684` | #20 | fix(agent): recognize Tailscale CGNAT (100.64.0.0/10) as local for Ollama timeouts |
 | `1e8254e59962` | #20 | fix(agent): guard context compressor against structured message content |
 | `83efea661f83` | #22 | fix(tui): address copilot round 3 on #14145 |
+| `c96a548bde1b` | #26 | feat(models): add xiaomi/mimo-v2.5-pro and mimo-v2.5 to openrouter + nous (#14184) |
+| `51ca57599466` | #20 | feat(gateway): expose plugin slash commands natively on all platforms + decision-capable command hook |
+| `66d2d7090e76` | #26 | fix(model_metadata): add gemma-4 and gemma4 context length entries |
+| `3c54ceb3cafe` | #26 | chore(release): add AUTHOR_MAP entry for Feranmi10 |
+| `284e084bcc06` | #26 | perf(browser): upgrade agent-browser 0.13 -> 0.26, wire daemon idle timeout |
 

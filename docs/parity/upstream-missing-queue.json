@@ -70669,14 +70669,14 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "agent/transports/anthropic.py",
         "tests/agent/transports/test_transport.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in f0105a57 (accept empty stop/end-turn assistant responses without retry churn)",
+      "owner": "codex",
       "sha": "b49a1b71a738c3521396462283790cfd36d5534b",
       "subject": "fix(agent): accept empty content with stop_reason=end_turn as valid anthropic response",
       "target_ticket": 20,
@@ -70868,9 +70868,87 @@
       "subject": "fix(tui): address copilot round 3 on #14145",
       "target_ticket": 22,
       "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/model_metadata.py",
+        "hermes_cli/models.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "c96a548bde1b347797a77cee5b41fd2daa570eb4",
+      "subject": "feat(models): add xiaomi/mimo-v2.5-pro and mimo-v2.5 to openrouter + nous (#14184)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/hooks.py",
+        "gateway/platforms/discord.py",
+        "gateway/run.py",
+        "hermes_cli/commands.py",
+        "hermes_cli/plugins.py",
+        "scripts/release.py",
+        "tests/gateway/test_discord_slash_commands.py",
+        "tests/gateway/test_hooks.py",
+        "tests/gateway/test_unknown_command.py",
+        "tests/hermes_cli/test_commands.py",
+        "tests/hermes_cli/test_plugins.py"
+      ],
+      "files_touched": 11,
+      "notes": "",
+      "owner": "",
+      "sha": "51ca5759946666aeeced20b0f731f3fac630b39b",
+      "subject": "feat(gateway): expose plugin slash commands natively on all platforms + decision-capable command hook",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/model_metadata.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "66d2d7090e76c9fec04481aac40e8b36ec1fa64c",
+      "subject": "fix(model_metadata): add gemma-4 and gemma4 context length entries",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "3c54ceb3cafe6f9ce830155346409d716eee2266",
+      "subject": "chore(release): add AUTHOR_MAP entry for Feranmi10",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "package-lock.json",
+        "package.json",
+        "tools/browser_tool.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "284e084bcc06decc5c1eab0855731cdf7169c38f",
+      "subject": "perf(browser): upgrade agent-browser 0.13 -> 0.26, wire daemon idle timeout",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
     }
   ],
-  "generated_at_utc": "2026-04-22T23:33:37.374283+00:00",
+  "generated_at_utc": "2026-04-22T23:38:29.810603+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -70878,19 +70956,19 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 55,
-      "ported": 71,
+      "pending": 59,
+      "ported": 72,
       "superseded": 4528
     },
     "by_target_ticket": {
-      "20": 1654,
+      "20": 1655,
       "21": 201,
       "22": 551,
       "23": 514,
       "24": 64,
       "25": 152,
-      "26": 1518
+      "26": 1522
     },
-    "total_commits": 4654
+    "total_commits": 4659
   }
 }
