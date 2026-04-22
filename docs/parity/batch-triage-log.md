@@ -702,3 +702,17 @@
 - Queue refresh:
   - `docs/parity/upstream-missing-queue.{json,md}` regenerated with this tranche removed from `pending`.
 
+## 2026-04-22 impl-01 (native image URL delivery expansion)
+- Scope:
+  - Begin post-classification implementation work with concrete gateway runtime parity improvements.
+- Rust implementation commits (chronological):
+  - `433d7260` feat(gateway): add native image-url delivery for Slack and WhatsApp.
+    - Slack: override `send_image_url` to post Block Kit image blocks via `chat.postMessage`.
+    - WhatsApp: override `send_image_url` to send Cloud API `image.link` media instead of plain-text URL fallback.
+  - `2dd17fc3` test(gateway): cover WhatsApp link-media payload builder.
+    - Refactored WhatsApp link-media payload construction into a helper with deterministic unit coverage.
+- Verification (targeted):
+  - `cargo test -p hermes-gateway --features slack,whatsapp platforms::slack::tests::slack_image_url_blocks_with_caption -- --nocapture`
+  - `cargo test -p hermes-gateway --features slack,whatsapp platforms::slack::tests::slack_image_url_blocks_without_caption -- --nocapture`
+  - `cargo test -p hermes-gateway --features slack,whatsapp platforms::whatsapp::tests::build_link_media_body_with_caption -- --nocapture`
+  - `cargo test -p hermes-gateway --features slack,whatsapp platforms::whatsapp::tests::build_link_media_body_omits_blank_caption -- --nocapture`
