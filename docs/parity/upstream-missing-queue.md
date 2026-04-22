@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-22T08:13:55.932060+00:00`
+Generated: `2026-04-22T08:13:57.883869+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `4587`.
 
@@ -16,112 +16,112 @@ Generated: `2026-04-22T08:13:55.932060+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 1898 |
+| pending | 1398 |
 | ported | 66 |
-| superseded | 2623 |
+| superseded | 3123 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `ed4a605696b5` | #26 | docs: update docstring to mention Fireworks strict validation |
-| `65952ac00c66` | #20 | Honor provider reset windows in pooled credential failover |
-| `4437354198dc` | #20 | Preserve numeric credential labels in auth removal |
-| `441ec4880291` | #26 | style: use module-level re import instead of local import re as _re |
-| `0c54da8aafd9` | #23 | feat(gateway): live-stream /update output + interactive prompt buttons (#5180) |
-| `cb63b5f381a9` | #21 | feat(skills): add popular-web-designs skill with 54 website design systems (#5194) |
-| `4976a8b0668f` | #26 | feat: /model command — models.dev primary database + --provider flag (#5181) |
-| `d932980c1a7d` | #21 | Add gitnexus-explorer optional skill (#5208) |
-| `51ed7dc2f399` | #20 | feat: save oversized tool results to file instead of destructive truncation (#5210) |
-| `e899d6a05d59` | #26 | fix: increase default HERMES_AGENT_TIMEOUT from 10min to 30min |
-| `35d280d0bdc1` | #20 | feat: coerce tool call arguments to match JSON Schema types (#5265) |
-| `70f798043b65` | #20 | fix: Ollama Cloud auth, /model switch persistence, and alias tab completion |
-| `914f7461dc1b` | #20 | fix: add missing shutil import for Matrix E2EE setup |
-| `9d7c288d8699` | #23 | fix(matrix): add filesize to nio.upload() for Synapse compatibility |
-| `b65e67545a49` | #23 | fix(gateway): stop Matrix/Mattermost reconnect on permanent auth failures |
-| `bec02f3731f4` | #23 | fix(matrix): handle encrypted media events and cache decrypted attachments |
-| `36e046e843c7` | #26 | fix(gateway): MIME type fallback for Matrix document uploads |
-| `c100ad874c34` | #23 | fix(matrix): E2EE cron delivery via live adapter + HTML formatting + origin fallback |
-| `20b4060dbfac` | #26 | fix: web_extract fast-fail on scrape timeout + summarizer resilience |
-| `534511bebbb1` | #23 | feat(matrix): Tier 1 enhancement — reactions, read receipts, rich formatting, room management |
-| `a0a1b86c2edc` | #20 | fix: accept reasoning-only responses without retries — set content to "(empty)" (#5278) |
-| `54cb311f4017` | #26 | fix: suppress false 'Unknown toolsets' warning for MCP server names (#5279) |
-| `daa4a5acdd20` | #26 | feat: add docs links to setup wizard sections (#5283) |
-| `5ff514ec7958` | #26 | fix(security): remove full traceback from cron error output to prevent info leakage |
-| `7f853ba7b6ea` | #26 | fix: use logger.exception to preserve traceback in logs and drop unused import |
-| `507b63f86b14` | #23 | fix(api-server): pass fallback_model to AIAgent (#4954) |
-| `4df2fca2f03e` | #26 | fix(gateway): cap memory flush retries at 3 to prevent infinite loop |
-| `6df0f07ff3e9` | #23 | fix: /status command bypasses active-session guard during agent run (#5046) |
-| `abf1be564b28` | #26 | fix(deps): include telegram webhook extra in messaging installs (#4915) |
-| `aab74b582cbe` | #20 | fix(gateway): replace deprecated launchctl start/stop with kickstart/kill |
-| `74ff62f5ac80` | #20 | fix(gateway): use kickstart -k for atomic launchd restart |
-| `1d2e34c7ebd4` | #20 | Prevent Telegram polling handoffs and flood-control send failures |
-| `afccbf253c36` | #20 | fix: resolve listed messaging targets consistently |
-| `4a75aec4335f` | #20 | fix(gateway): resolve Telegram's underscored /commands to skill/plugin keys |
-| `e8053e8b937a` | #20 | fix(gateway): surface unknown /commands instead of leaking them to the LLM |
-| `6a6ae9a5c36a` | #26 | fix(gateway): correct misleading log text for unknown /commands |
-| `0c95e91059c1` | #23 | fix: follow-up fixes for salvaged PRs |
-| `6ee90a7cf6ad` | #20 | fix: hermes auth remove now clears env-seeded credentials permanently (#5285) |
-| `914a7db44825` | #26 | fix(acp): rename AuthMethod to AuthMethodAgent for agent-client-protocol 0.9.0 |
-| `fcdd5447e2ee` | #20 | fix: keep ACP stdout protocol-clean |
-| `c71b1d197f44` | #20 | fix(acp): advertise slash commands via ACP protocol |
-| `e167ad8f6195` | #26 | feat(delegate): add acp_command/acp_args override to delegate_task |
-| `cc2b56b26a9f` | #20 | feat(api): structured run events via /v1/runs SSE endpoint |
-| `c6793d6fc3d2` | #23 | fix(gateway): wrap cron helpers with staticmethod to prevent self-binding |
-| `ef3bd3b276cd` | #26 | security(approval): fix privilege escalation in gateway once-approval logic |
-| `1ebc9324173d` | #26 | fix(security): validate cron deliver platform name to prevent env var enumeration |
-| `71a4582bf807` | #26 | fix(security): hoist platform allowlist to module scope as frozenset |
-| `567bc7994849` | #26 | fix: clean up cron platform allowlist — add homeassistant, fix import, improve placement |
-| `12724e629529` | #22 | feat: progressive subdirectory hint discovery (#5291) |
-| `c02c3dc723ae` | #23 | fix(honcho): plugin drift overhaul -- observation config, chunking, setup wizard, docs, dead code cleanup |
-| `dd8a42bf7d46` | #23 | feat(plugins): plugin CLI registration system — decouple plugin commands from core |
-| `b074b0b13a4f` | #20 | test: add plugin CLI registration tests |
-| `0f813c422cdc` | #23 | fix(plugins): only register CLI commands for the active memory provider |
-| `583d9f959791` | #23 | fix(honcho): migration guard for observation mode default change |
-| `66d0fa177894` | #23 | fix: avoid unnecessary Discord members intent on startup |
-| `8d5226753f10` | #20 | fix: add missing ButtonStyle.grey to discord mock for test compatibility |
-| `b63fb03f3f63` | #26 | feat(browser): add JS evaluation via browser_console expression parameter (#5303) |
-| `4494fba14043` | #20 | feat: OSV malware check for MCP extension packages (#5305) |
-| `7409715947a7` | #26 | fix: link subagent sessions to parent and hide from session list |
-| `9d885b266c84` | #21 | feat(skills): add manim-video skill for mathematical and technical animations |
-| `f116c5907177` | #22 | tui: inherit Python-side rendering via gateway bridge |
-| `4c7d5ec778b7` | #26 | tui: add tui arg |
-| `256349346600` | #26 | fix: improve timeout debug logging and user-facing diagnostics (#5370) |
-| `e9ddfee4fd89` | #20 | fix(plugins): reject plugin names that resolve to the plugins root |
-| `fc15f56fc451` | #26 | feat: warn users when loading non-agentic Hermes LLM models (#5378) |
-| `fec58ad99e1a` | #26 | fix(gateway): replace wall-clock agent timeout with inactivity-based timeout (#5389) |
-| `89c812d1d283` | #23 | feat: shared thread sessions by default — multi-user thread support (#5391) |
-| `447ec076a4fa` | #21 | docs(manim-video): expand references with comprehensive Manim CE and 3b1b patterns |
-| `b26e7fd43a5f` | #21 | fix(manim-video): recommend monospace fonts — proportional fonts have broken kerning in Pango |
-| `0efe7dace751` | #20 | feat: add GPT/Codex execution discipline guidance for tool persistence (#5414) |
-| `0365f6202cff` | #20 | feat: show model pricing for OpenRouter and Nous Portal providers |
-| `3962bc84b797` | #26 | show cache pricing as well (if supported) |
-| `38d844601139` | #20 | feat: implement MCP OAuth 2.1 PKCE client support (#5420) |
-| `95a044a2e08d` | #21 | feat(research-paper-writing): fill coverage gaps and integrate patterns from AI-Scientist, GPT-Researcher |
-| `aa56df090f7b` | #26 | fix: allow env var overrides for Nous portal/inference URLs (#5419) |
-| `ab086a320bd3` | #26 | chore: remove qwen-3.6 free from nous portal model list |
-| `786970925e82` | #20 | fix(cli): add missing subprocess.run() timeouts in gateway CLI (#5424) |
-| `9ca954a27417` | #20 | fix: mem0 API v2 compat, prefetch context fencing, secret redaction (#5423) |
-| `dce5f51c7c43` | #20 | feat: config structure validation — detect malformed YAML at startup (#5426) |
-| `9e820dda3791` | #20 | Add request-scoped plugin lifecycle hooks |
-| `f530ef1835f4` | #20 | feat(plugins): pre_api_request/post_api_request with narrow payloads |
-| `38bcaa1e86df` | #20 | chore: remove langfuse doc, smoketest script, and installed-plugin test |
-| `dc9c3cac875d` | #26 | chore: remove redundant local import of normalize_usage |
-| `d6ef7fdf9229` | #20 | fix(cron): replace wall-clock timeout with inactivity-based timeout (#5440) |
-| `89db3aeb2caa` | #20 | fix(cron): add delivery guidance to cron prompt — stop send_message thrashing (#5444) |
-| `9c96f669a151` | #20 | feat: centralized logging, instrumentation, hermes logs CLI, gateway noise fix (#5430) |
-| `a2a9ad743148` | #20 | fix: hermes update kills freshly-restarted gateway service |
-| `d3d5b895f65e` | #20 | refactor: simplify _get_service_pids — dedupe systemd scopes, fix self-import, harden launchd parsing |
-| `6c12999b8c2a` | #26 | fix: bridge tool-calls in copilot-acp adapter |
-| `6df4860271e9` | #23 | fix(retaindb): fix API routes, add write queue, dialectic, agent model, file tools |
-| `ea8ec27023db` | #23 | fix(retaindb): make project optional, default to 'default' project |
-| `574759077067` | #23 | fix: follow-up improvements for salvaged PR #5456 |
-| `6f1cb46df982` | #23 | fix: register /queue, /background, /btw as native Discord slash commands (#5477) |
-| `79aeaa97e6d3` | #26 | fix: re-order providers,Quick Install, subscription polling |
-| `85973e0082fa` | #26 | fix(nous): don't use OAuth access_token as inference API key |
-| `6dfab3550100` | #20 | feat(providers): add Google AI Studio (Gemini) as a first-class provider |
-| `cc7136b1ac8e` | #20 | fix: update Gemini model catalog + wire models.dev as live model source |
-| `a912cd456880` | #21 | docs(manim-video): add 5 new reference files — design thinking, updaters, paper explainer, decorations, production quality |
-| `582dbbbbf7c4` | #20 | feat: add grok to TOOL_USE_ENFORCEMENT_MODELS for direct xAI usage (#5595) |
-| `f77be22c6506` | #20 | Fix #5211: Preserve dots in OpenCode Go model names |
+| `714809634f1c` | #23 | fix(security): prevent SSRF redirect bypass in Slack adapter |
+| `7663c98c1ebd` | #23 | fix: make safe_url_for_log public, add SSRF redirect guards to base.py cache helpers |
+| `d7164603dae7` | #20 | feat(auth): add is_provider_explicitly_configured() helper |
+| `f3fb3eded483` | #20 | fix(auth): gate Claude Code credential seeding behind explicit provider config |
+| `419b719c2b2f` | #20 | fix(auth): make 'auth remove' for claude_code prevent re-seeding |
+| `5a1cce53e4b2` | #20 | fix(auxiliary): skip anthropic in fallback chain when not explicitly configured |
+| `aedf6c7964fc` | #20 | security(approval): close 4 pattern gaps found by source-grounded audit |
+| `26299270323b` | #23 | fix(feishu): wrap image bytes in BytesIO before uploading to lark SDK |
+| `e376a9b2c957` | #23 | feat(telegram): support custom base_url for credential proxy |
+| `74e883ca3777` | #20 | fix(cli): make /status show gateway-style session status |
+| `cc12ab829015` | #23 | fix(matrix): remove eyes reaction on processing complete |
+| `58413c411f08` | #20 | test: update Matrix reaction tests for new _send_reaction return type |
+| `21bb2547c604` | #23 | fix(matrix): log redact failures and add missing reaction test cases |
+| `76a1e6e0fe50` | #23 | feat(discord): add channel_skill_bindings for auto-loading skills per channel |
+| `49da1ff1b130` | #20 | test(discord): add tests for channel_skill_bindings resolution |
+| `f3ae1d765d75` | #26 | fix: flush stdin after curses/terminal menus to prevent escape sequence leakage (#7167) |
+| `6d2fa038377e` | #26 | fix: UTF-8 config encoding, pairing hint, credential_pool key, header normalization (#7174) |
+| `0e315a6f02e9` | #23 | fix(telegram): use valid reaction emojis for processing completion (#7175) |
+| `5fc5ced9725a` | #20 | fix: add Alibaba/DashScope rate-limit pattern to error classifier |
+| `fd3e855d589f` | #20 | fix: pass config_context_length to switch_model context compressor |
+| `49bba1096e54` | #20 | fix: opencode-go missing from /model list and improve HERMES_OVERLAYS credential check |
+| `0cdf5232aee0` | #26 | fix: always show model selection menu for custom providers |
+| `e3b395e17d9f` | #20 | test: add regression tests for custom provider model switching |
+| `1662b7f82a2a` | #20 | fix(test): correct mock target for fetch_api_models in custom provider tests |
+| `fd5cc6e1b471` | #20 | fix(model): normalize native provider-prefixed model ids |
+| `b730c2955af4` | #20 | fix(model): normalize direct provider ids in auxiliary routing |
+| `916fbf362cc3` | #20 | fix(model): tighten direct-provider fallback normalization |
+| `4a65c9cd08cc` | #20 | fix: profile paths broken in Docker — profiles go to /root/.hermes instead of mounted volume (#7170) |
+| `5b63bf7f9a2a` | #23 | feat(gateway): add native Weixin/WeChat support via iLink Bot API |
+| `be4f049f46e4` | #22 | fix: salvage follow-ups for Weixin adapter (#6747) |
+| `7cec784b64f5` | #22 | fix: complete Weixin platform parity audit — 16 missing integration points |
+| `5b8beb0ead2f` | #20 | fix(gateway): handle provider command without config |
+| `970192f1838d` | #20 | feat(gateway): add fast mode support to gateway chats |
+| `7e60b092746b` | #20 | fix: add _session_model_overrides to test runner fixture |
+| `f72faf191c80` | #20 | fix: fall back to default certs when CA bundle path doesn't exist (#7352) |
+| `a093eb47f75d` | #20 | fix: propagate child activity to parent during delegate_task (#7295) |
+| `7e28b7b5d518` | #26 | fix: parallelize skills browse/search to prevent hanging (#7301) |
+| `71036a7a759a` | #20 | fix: handle UnicodeEncodeError with ASCII codec (#6843) |
+| `2c99b4e79b4e` | #20 | fix(unicode): sanitize surrogate metadata and allow two-pass retry |
+| `c6e1add6f118` | #20 | fix(agent): preserve quoted @file references with spaces |
+| `37a1c757164c` | #20 | fix(browser): hardening — dead code, caching, scroll perf, security, thread safety |
+| `360b21ce956b` | #23 | fix(gateway): reject file paths in get_command() + file-drop tests (#7356) |
+| `0bea60351049` | #26 | fix: handle NoneType request_overrides in fast_mode check (#7350) |
+| `f83e86d826e1` | #26 | feat(cli): restore live per-tool elapsed timer in TUI spinner (#7359) |
+| `4fb42d01937b` | #20 | fix: per-profile subprocess HOME isolation (#4426) (#7357) |
+| `6c115440fde0` | #26 | fix(delegate): sync self.base_url with client_kwargs after credential resolution |
+| `7ccdb7436451` | #20 | fix(delegate): make max_concurrent_children configurable + error on excess |
+| `363d5d57bee7` | #20 | test: update schema assertion after maxItems removal |
+| `f07b35acbae4` | #26 | fix: use raw docstring to suppress invalid escape sequence warning |
+| `8bcb8b8e8754` | #20 | feat(providers): add native xAI provider |
+| `03f23f10e1ef` | #23 | feat: multi-agent Discord filtering — skip messages addressed to other bots |
+| `496e378b1027` | #20 | fix: resolve overlay provider slug mismatch in /model picker (#7373) |
+| `ea81aa2eec8c` | #20 | fix: guard api_kwargs in except handler to prevent UnboundLocalError (#7376) |
+| `2b0912ab1899` | #25 | fix(install): handle Playwright deps correctly on non-apt systems |
+| `8254b820ec8c` | #24 | fix(docker): --init for zombie reaping + sleep infinity for idle-based lifetime |
+| `e1167c5c079e` | #26 | fix(deps): add socks extra to httpx for SOCKS proxy support |
+| `e8f16f743229` | #26 | fix(docker): add missing skins/plans/workspace dirs to entrypoint |
+| `d8cd7974d86c` | #23 | fix(feishu): register group chat member event handlers |
+| `3e24ba1656e8` | #22 | feat(matrix): add MATRIX_DM_MENTION_THREADS env var |
+| `6f63ba9c8f76` | #20 | fix(mcp): fall back when SIGKILL is unavailable |
+| `c1f832a61025` | #26 | fix(tools): guard against ValueError on int() env var and header parsing |
+| `475cbce775b8` | #20 | fix(aux): honor api_mode for custom auxiliary endpoints |
+| `0e939af7c204` | #20 | fix(patch): harden V4A patch parser and fuzzy match — 9 correctness bugs |
+| `a4fc38c5b1ce` | #20 | test: remove dead TestResolveForcedProvider tests (function doesn't exist on main) |
+| `c5ab76052892` | #26 | fix(cron): missing field init, unnecessary save, and shutdown cleanup |
+| `5b42aecfa765` | #26 | feat(agent): add AIAgent.close() for subprocess cleanup |
+| `fbe28352e49e` | #26 | fix(gateway): call agent.close() on session end to prevent zombies |
+| `672cc80915ce` | #26 | fix(delegate): close child agent after delegation completes |
+| `8414f418565c` | #20 | test: add zombie process cleanup tests |
+| `f00dd3169f20` | #26 | fix(gateway): guard _agent_cache_lock access in reset handler |
+| `9555a0cf3149` | #26 | fix(gateway): look up expired agents in _agent_cache, add global kill_all |
+| `7033dbf5d640` | #20 | test(e2e): add Discord e2e integration tests |
+| `79565630b0de` | #20 | refactor(e2e): unify Telegram and Discord e2e tests into parametrized platform fixtures |
+| `dab5ec824554` | #20 | test(e2e): add Slack to parametrized e2e platform tests |
+| `e8034e2f6adf` | #20 | fix(gateway): replace os.environ session state with contextvars for concurrency safety |
+| `baddb6f7174c` | #26 | fix(gateway): derive channel directory platforms from enum instead of hardcoded list (#7450) |
+| `9a0c44f908b1` | #20 | fix(nix): gate matrix extra to Linux in [all] profile (#7461) |
+| `992422910cc7` | #23 | fix(api): send tool progress as custom SSE event to prevent model corruption (#6972) |
+| `842e669a1344` | #20 | fix: activate fallback provider on repeated empty responses + user-visible status (#7505) |
+| `fe7e6c156cf3` | #26 | feat: add ContextEngine ABC, refactor ContextCompressor to inherit from it |
+| `92382fb00eba` | #20 | feat: wire context engine plugin slot into agent and plugin system |
+| `5d8dd622bc71` | #26 | feat: wire context engine tools, session lifecycle, and tool dispatch |
+| `3fe693817689` | #26 | fix: robust context engine interface — config selection, plugin discovery, ABC completeness |
+| `436dfd5ab5a1` | #20 | fix: no auto-activation + unified hermes plugins UI with provider categories |
+| `bff64858f971` | #24 | perf(daytona): bulk upload files in single HTTP call |
+| `ac30abd89e45` | #26 | fix(config): bridge container resource settings to env vars |
+| `223a0623ee16` | #24 | fix(daytona): use logger.warning instead of warnings.warn for disk cap |
+| `97bb64dbbff8` | #20 | test(file_sync): add tests for bulk_upload_fn callback |
+| `830040f937e5` | #24 | fix: remove unused BulkUploadFn import from daytona.py |
+| `a8fd7257b173` | #20 | feat(gateway): WSL-aware gateway with smart systemd detection (#7510) |
+| `1850747172c5` | #20 | refactor(matrix): swap matrix-nio for mautrix-python dependency |
+| `8053d48c8df8` | #23 | refactor(matrix): rewrite adapter from matrix-nio to mautrix-python |
+| `417e28f9415b` | #20 | test(matrix): update all test mocks for mautrix-python API |
+| `d5be23aed7de` | #22 | docs(matrix): update all references from matrix-nio to mautrix |
+| `1f3f1200423a` | #23 | fix(matrix): persist E2EE crypto store and fix decrypted event dedup |
+| `bc8b93812c0a` | #23 | refactor(matrix): simplify adapter after code review |
+| `5d3332dbba55` | #23 | fix(matrix): close leaked sessions on connect failure + HMAC-sign pickle store |
+| `be06db71d78f` | #23 | fix(matrix): ignore m.notice messages to prevent bot-to-bot loops |
+| `be9198f1e16a` | #20 | fix: guard mautrix imports for gateway-safe fallback + fix test isolation |
+| `718e8ad6fa6f` | #20 | feat(delegation): add configurable reasoning_effort for subagents |
 
