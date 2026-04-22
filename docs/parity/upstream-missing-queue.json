@@ -2577,12 +2577,12 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".env.example"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: python .env image tag refresh superseded by rust-native environments and managed gateway config surface",
       "owner": "codex",
       "sha": "ed010752dd1f9862b75b17977dbe4b98c0663352",
       "subject": "Update .env.example to use new Docker, Singularity, and Modal images for Python 3.11 with Node.js 20 support",
@@ -2618,7 +2618,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "docs/messaging.md",
         "docs/tools.md",
@@ -2626,7 +2626,7 @@
         "pyproject.toml"
       ],
       "files_touched": 4,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: edge-tts python dependency path intentionally replaced by rust-native multi-provider TTS (openai/elevenlabs/minimax)",
       "owner": "codex",
       "sha": "586b0a7047ea7d9ea81bcd44496fb9e2136de50d",
       "subject": "Add Text-to-Speech (TTS) support with Edge TTS and ElevenLabs integration",
@@ -2634,12 +2634,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tools/tts_tool.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: platform-specific audio/media routing present in rust gateway adapters (voice/audio/file dispatch by extension)",
       "owner": "codex",
       "sha": "ff9ea6c4b1c69ebe450a6128e8f76d39162565ac",
       "subject": "Enhance TTS tool to support platform-specific audio formats",
@@ -2647,7 +2647,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "README.md",
         "docs/messaging.md",
@@ -2655,7 +2655,7 @@
         "scripts/install.sh"
       ],
       "files_touched": 4,
-      "notes": "triage-full-2026-04-21: group=WG6-packaging-install-docs; action=implement",
+      "notes": "batch-21-2026-04-22: python install/docs updates superseded by rust installer/docs flow and current TTS runtime behavior",
       "owner": "codex",
       "sha": "eb49936a60aaf6c57483d01138a86fe1ac5445d1",
       "subject": "Update documentation and installation scripts for TTS audio formats",
@@ -2663,7 +2663,7 @@
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "gateway/platforms/base.py",
         "gateway/platforms/discord.py",
@@ -2674,7 +2674,7 @@
         "tools/vision_tools.py"
       ],
       "files_touched": 7,
-      "notes": "triage-full-2026-04-21: group=WG4-gateway-memory; action=implement",
+      "notes": "batch-21-2026-04-22: ported via 56df3b42 (inline image extraction + native image URL delivery for Telegram/Discord) with existing vision/image stack",
       "owner": "codex",
       "sha": "5404a8fcd8a575a9c82bc77a5f090d4fd545f8c1",
       "subject": "Enhance image handling and analysis capabilities across platforms",
@@ -2682,7 +2682,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         ".env.example",
         "AGENTS.md",
@@ -2706,7 +2706,7 @@
         "scripts/install.ps1"
       ],
       "files_touched": 23,
-      "notes": "triage-full-2026-04-21: group=WG4-gateway-memory; action=implement",
+      "notes": "batch-21-2026-04-22: messaging parity already present across rust gateway (STT/transcription, stickers, discord/slack adapters, pairing store, hooks)",
       "owner": "codex",
       "sha": "69aa35a51c3db85002892e2fab889287bf170dda",
       "subject": "Add messaging platform enhancements: STT, stickers, Discord UX, Slack, pairing, hooks",
@@ -2714,12 +2714,12 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/config.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: python prompt text refinement superseded by rust setup/config UX and typed config pipeline",
       "owner": "codex",
       "sha": "2f34e6fd3017f8eb32bad073c9b68b9c28553a4c",
       "subject": "Update OpenAI configuration prompts for clarity and detail",
@@ -2727,12 +2727,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "hermes_cli/config.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: config migration/import and setup preservation behavior already implemented in rust setup flow",
       "owner": "codex",
       "sha": "e0c9d495ef7764c656c5fc55faefd8464353cce9",
       "subject": "Refine configuration migration process to improve user experience",
@@ -2740,12 +2740,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/config.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: python config refactor commit superseded by rust typed config loader/validator architecture",
       "owner": "codex",
       "sha": "dd5fe334f3b4c516e8150ca2c92c226803411e86",
       "subject": "Refactor configuration handling to improve user experience",
@@ -2753,12 +2753,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "gateway/run.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: agent response/transcript/session handling covered by rust gateway stream/session persistence stack",
       "owner": "codex",
       "sha": "0f58dfdea4e2b9371a4ebe5f569aeec069454b71",
       "subject": "Enhance agent response handling and transcript logging",
@@ -2794,12 +2794,12 @@
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "hermes_cli/doctor.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: ported via 0c50f306; doctor now checks Node.js and agent-browser (optional) and no browserbase SDK gate",
       "owner": "codex",
       "sha": "45a8098d3afe181b281f4fc908199852a11b1299",
       "subject": "Remove browserbase SDK check and add Node.js and agent-browser validation in doctor script",
@@ -2807,13 +2807,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py",
         "tools/terminal_tool.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: python exit cleanup guard superseded by rust process/session lifecycle management in environments + process registry",
       "owner": "codex",
       "sha": "01a3a6ab0d2d8e0e8644f85ff2c650d2cecd0821",
       "subject": "Implement cleanup guard to prevent multiple executions on exit",
@@ -2821,13 +2821,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "tools/file_tools.py",
         "tools/terminal_tool.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: python file/terminal refactor superseded by rust terminal backend + file backend implementations",
       "owner": "codex",
       "sha": "8117d0adabe39e47973eaff9290a4340b92f63ba",
       "subject": "Refactor file operations and environment management in file_tools and terminal_tool",
@@ -2835,13 +2835,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "cli.py",
         "hermes_cli/status.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: modal backend support is present in rust CLI via modal and managed_modal backends",
       "owner": "codex",
       "sha": "2c7deb41f6f7274c803b108b49c1da0e590099bc",
       "subject": "Fix Modal backend not working from CLI",
@@ -2864,14 +2864,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         ".env.example",
         "AGENTS.md",
         "cli-config.yaml.example"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: python docs/config text update superseded by current rust docs/config/env naming baseline",
       "owner": "codex",
       "sha": "a7609c97be5f03c881e75973f5bf1e405f8d1511",
       "subject": "Update docs to match backend key rename and CWD behavior",
@@ -2934,12 +2934,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tools/process_registry.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: stdin write path is type-safe in rust and writes byte buffers via data.as_bytes() in local/process backend",
       "owner": "codex",
       "sha": "ec59d71e6083cdddfd0092dfbdd62d5077ba0633",
       "subject": "Update PTY write handling in ProcessRegistry to ensure data is encoded as bytes before writing. This change improves compatibility with string inputs and clarifies the expected data type in comments.",
@@ -2973,12 +2973,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "Project_notes.md"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: Project_notes.md cleanup commit is non-product and superseded in rust parity stream",
       "owner": "codex",
       "sha": "d0f82e6dcca634e191cead913d222c3e6fcf7819",
       "subject": "Removing random project notes doc",
@@ -2986,7 +2986,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "TODO.md",
         "environments/agent_loop.py",
@@ -2997,7 +2997,7 @@
         "toolsets.py"
       ],
       "files_touched": 7,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: todo tool implemented in rust (tool + backend + registry/toolset wiring)",
       "owner": "codex",
       "sha": "e184f5ab3a51a9f9874d6d161788a844fcc43f74",
       "subject": "Add todo tool for agent task planning and management",
@@ -3032,12 +3032,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "run_agent.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: python CLI output formatting refactor superseded by rust CLI/TUI rendering stack",
       "owner": "codex",
       "sha": "a7f52911e1c61d632d000b5279a6f95a0fda7996",
       "subject": "Refactor CLI output formatting in AIAgent",
@@ -3045,12 +3045,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: python CLI prompt/layout refactor superseded by rust TUI input architecture",
       "owner": "codex",
       "sha": "dfa3c6265c7ed73b29d3d956409210051cc19514",
       "subject": "Refactor CLI input prompt and layout in HermesCLI",
@@ -3058,12 +3058,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: python dynamic prompt/layout refactor superseded by rust TUI implementation",
       "owner": "codex",
       "sha": "54cbf30c1430eff14cf8e79a4224ef2a6b1aa23d",
       "subject": "Refactor dynamic prompt and layout in HermesCLI",
@@ -3071,13 +3071,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "cli.py",
         "run_agent.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: autocomplete + multiline input behavior is implemented in rust TUI command input flow",
       "owner": "codex",
       "sha": "d7cef744ecc99bf10064729f2a92368e9c15c7f4",
       "subject": "Add autocomplete and multiline support in HermesCLI input",
@@ -3085,12 +3085,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "cli.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: multiline input handling enhancements covered by rust TUI input model",
       "owner": "codex",
       "sha": "d9a8e421a4a272a6030e7a76bb5300edd6bb292c",
       "subject": "Enhance multiline input handling in HermesCLI",
@@ -3098,12 +3098,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "cli.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: multiline input updates already represented in rust CLI/TUI state handling",
       "owner": "codex",
       "sha": "41608beb3585676032f7f6305a64f213339692f1",
       "subject": "Update multiline input handling in HermesCLI",
@@ -3111,12 +3111,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: python multiline instructions text update superseded by rust help/UI copy",
       "owner": "codex",
       "sha": "50ef18644ba56e642d37d2930075c34bb5fc8afc",
       "subject": "Update multiline input instructions in HermesCLI",
@@ -3124,12 +3124,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "cli.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: floating completion menu equivalent is implemented in rust TUI completions panel",
       "owner": "codex",
       "sha": "225ae32e7affa679ead636021c49d640ac919f6c",
       "subject": "Enhance CLI layout with floating completion menu",
@@ -3137,7 +3137,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "AGENTS.md",
         "README.md",
@@ -3148,7 +3148,7 @@
         "toolsets.py"
       ],
       "files_touched": 7,
-      "notes": "triage-full-2026-04-21: group=WG6-packaging-install-docs; action=implement",
+      "notes": "batch-21-2026-04-22: todo + CLI feature set already present in rust tool and CLI surfaces",
       "owner": "codex",
       "sha": "9e85408c7bfd6024754709800ab762402d1a2816",
       "subject": "Add todo tool for task management and enhance CLI features",
@@ -3171,7 +3171,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         ".env.example",
         ".gitignore",
@@ -3195,7 +3195,7 @@
         "skills/mlops/audiocraft/SKILL.md"
       ],
       "files_touched": 59,
-      "notes": "triage-full-2026-04-21: group=WG2-skills; action=implement",
+      "notes": "batch-21-2026-04-22: Skills Hub search/install/manage flow implemented in rust CLI + hermes-skills hub client",
       "owner": "codex",
       "sha": "14e59706b732164dda260f1899ade74a86a8352a",
       "subject": "Add Skills Hub \u2014 universal skill search, install, and management from online registries",
@@ -3203,12 +3203,12 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "hermes_cli/skills_hub.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-21-2026-04-22: skills hub install/resolve flows include name/version handling and confirmation paths in rust commands",
       "owner": "codex",
       "sha": "655303f2f1e0afac0dab45b714db88cc197da561",
       "subject": "Add skill name resolution and enhanced install confirmation in Skills Hub",
@@ -3216,7 +3216,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "README.md",
         "TODO.md",
@@ -3239,7 +3239,7 @@
         "toolsets.py"
       ],
       "files_touched": 19,
-      "notes": "triage-full-2026-04-21: group=WG6-packaging-install-docs; action=implement",
+      "notes": "batch-21-2026-04-22: persistent memory + SQLite session store implemented in rust session persistence and session_search backend",
       "owner": "codex",
       "sha": "440c244cac71f0764e00ea85ab87ae0a2d18fe61",
       "subject": "feat: add persistent memory system + SQLite session store",
@@ -69845,7 +69845,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-04-22T06:20:19.707790+00:00",
+  "generated_at_utc": "2026-04-22T06:27:44.061590+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69853,9 +69853,9 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4178,
-      "ported": 49,
-      "superseded": 360
+      "pending": 4148,
+      "ported": 66,
+      "superseded": 373
     },
     "by_target_ticket": {
       "20": 1631,

@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-22T06:20:19.707790+00:00`
+Generated: `2026-04-22T06:27:44.061590+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `4587`.
 
@@ -16,44 +16,14 @@ Generated: `2026-04-22T06:20:19.707790+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 4178 |
-| ported | 49 |
-| superseded | 360 |
+| pending | 4148 |
+| ported | 66 |
+| superseded | 373 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `ed010752dd1f` | #26 | Update .env.example to use new Docker, Singularity, and Modal images for Python 3.11 with Node.js 20 support |
-| `586b0a7047ea` | #26 | Add Text-to-Speech (TTS) support with Edge TTS and ElevenLabs integration |
-| `ff9ea6c4b1c6` | #26 | Enhance TTS tool to support platform-specific audio formats |
-| `eb49936a60aa` | #25 | Update documentation and installation scripts for TTS audio formats |
-| `5404a8fcd8a5` | #23 | Enhance image handling and analysis capabilities across platforms |
-| `69aa35a51c3d` | #23 | Add messaging platform enhancements: STT, stickers, Discord UX, Slack, pairing, hooks |
-| `2f34e6fd3017` | #26 | Update OpenAI configuration prompts for clarity and detail |
-| `e0c9d495ef77` | #26 | Refine configuration migration process to improve user experience |
-| `dd5fe334f3b4` | #26 | Refactor configuration handling to improve user experience |
-| `0f58dfdea4e2` | #26 | Enhance agent response handling and transcript logging |
-| `45a8098d3afe` | #26 | Remove browserbase SDK check and add Node.js and agent-browser validation in doctor script |
-| `01a3a6ab0d2d` | #26 | Implement cleanup guard to prevent multiple executions on exit |
-| `8117d0adabe3` | #26 | Refactor file operations and environment management in file_tools and terminal_tool |
-| `2c7deb41f6f7` | #26 | Fix Modal backend not working from CLI |
-| `a7609c97be5f` | #26 | Update docs to match backend key rename and CWD behavior |
-| `ec59d71e6083` | #26 | Update PTY write handling in ProcessRegistry to ensure data is encoded as bytes before writing. This change improves compatibility with string inputs and clarifies the expected data type in comments. |
-| `d0f82e6dcca6` | #26 | Removing random project notes doc |
-| `e184f5ab3a51` | #26 | Add todo tool for agent task planning and management |
-| `a7f52911e1c6` | #26 | Refactor CLI output formatting in AIAgent |
-| `dfa3c6265c7e` | #26 | Refactor CLI input prompt and layout in HermesCLI |
-| `54cbf30c1430` | #26 | Refactor dynamic prompt and layout in HermesCLI |
-| `d7cef744ecc9` | #26 | Add autocomplete and multiline support in HermesCLI input |
-| `d9a8e421a4a2` | #26 | Enhance multiline input handling in HermesCLI |
-| `41608beb3585` | #26 | Update multiline input handling in HermesCLI |
-| `50ef18644ba5` | #26 | Update multiline input instructions in HermesCLI |
-| `225ae32e7aff` | #26 | Enhance CLI layout with floating completion menu |
-| `9e85408c7bfd` | #25 | Add todo tool for task management and enhance CLI features |
-| `14e59706b732` | #21 | Add Skills Hub — universal skill search, install, and management from online registries |
-| `655303f2f1e0` | #26 | Add skill name resolution and enhanced install confirmation in Skills Hub |
-| `440c244cac71` | #25 | feat: add persistent memory system + SQLite session store |
 | `56ee8a5cc68a` | #26 | refactor: remove 'read' action from memory tool and agent logging |
 | `a4bc6f73d77d` | #26 | refactor: simplify CLI layout by integrating inline completions |
 | `ac0a70b3698a` | #26 | feat: enhance input area height adjustment in CLI |
@@ -124,4 +94,34 @@ Generated: `2026-04-22T06:20:19.707790+00:00`
 | `250b2ca01adf` | #26 | fix: update MEMORY_GUIDANCE for clarity |
 | `df2ec585f1d3` | #26 | fix: clarify MEMORY_GUIDANCE phrasing |
 | `3c6750f37b28` | #26 | feat: enhance memory management features in AIAgent and CLI |
+| `db23f51bc63a` | #26 | feat: introduce skills management features in AIAgent and CLI |
+| `e1604b2b4abc` | #26 | feat: enhance user authorization checks in GatewayRunner |
+| `6037b6a5abff` | #26 | Fix session saving to DB with full conversation history (not just user/assistant messages without tool calls) |
+| `16d0aa7b4d01` | #26 | feat: enhance job delivery mechanism in scheduler |
+| `e0ed44388f16` | #26 | fix: improve error messaging for chat ID and home channel configuration |
+| `08e4dc256372` | #26 | feat: implement channel directory and message mirroring for cross-platform communication |
+| `c7857dc1d406` | #26 | feat: enhance AIAgent's tool usage nudges and content handling |
+| `90af34bc8336` | #24 | feat: enhance interrupt handling and container resource configuration |
+| `d8a369e19405` | #20 | refactor: update API key checks in WebToolsTester |
+| `8fedbf87d92e` | #20 | feat: add cleanup utility for test artifacts in checkpoint resumption tests |
+| `d18c753b3ce0` | #26 | refactor: streamline scratchpad handling in AIAgent |
+| `38db6e936660` | #26 | fix: correct toolset ID mapping in welcome banner |
+| `4f9f5f70e397` | #26 | fix: handle missing toolset IDs in welcome banner |
+| `224c900532b3` | #26 | refactor: update session loading method in SessionStore |
+| `79f88317385d` | #26 | refactor: improve message source tagging in GatewayRunner |
+| `674a6f96d36d` | #23 | feat: unify set-home command naming across platforms |
+| `b3bf21db565f` | #26 | refactor: update environment variable configuration and add multi-select checklist for tool setup |
+| `6447a6020cad` | #25 | feat: add Node.js installation support to the setup script |
+| `4d1f2ea5228b` | #26 | refactor: remove unused multi_select_cursor_brackets_style in prompt_checklist function |
+| `0858ee2f2701` | #26 | refactor: rename HERMES_OPENAI_API_KEY to VOICE_TOOLS_OPENAI_KEY |
+| `cefe038a8718` | #26 | refactor: enhance environment variable configuration and setup wizard |
+| `0edfc7fa49aa` | #26 | refactor: update tool progress environment variable defaults and improve setup wizard prompts |
+| `f209a92b7ec1` | #26 | refactor: enhance setup wizard for messaging platform configuration |
+| `98e3a26b2a2d` | #26 | refactor: update user prompt in setup wizard for item selection |
+| `a9d16c40c7d8` | #26 | refactor: streamline API key prompt in setup wizard |
+| `b103bb4c8bc0` | #26 | feat: add interactive tool configuration command |
+| `d802db4de07b` | #26 | refactor: improve tool configuration prompts for clarity |
+| `7a6d4666a2e7` | #26 | refactor: clarify user prompts in checklist interfaces |
+| `75d251b81a26` | #26 | feat: add API key requirement checks for toolsets |
+| `54dd1b3038fe` | #25 | feat: enhance README and update API client initialization |
 
