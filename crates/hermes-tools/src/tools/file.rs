@@ -11,6 +11,52 @@ use std::sync::Arc;
 
 use crate::credential_guard::CredentialGuard;
 
+const DEFAULT_READ_OFFSET: i64 = 1;
+const DEFAULT_READ_LIMIT: i64 = 500;
+const MAX_READ_LIMIT: i64 = 2000;
+const DEFAULT_SEARCH_OFFSET: i64 = 0;
+const DEFAULT_SEARCH_LIMIT: i64 = 50;
+
+fn parse_int_param(raw: Option<&Value>, default: i64) -> i64 {
+    let Some(v) = raw else {
+        return default;
+    };
+    if let Some(i) = v.as_i64() {
+        return i;
+    }
+    if let Some(u) = v.as_u64() {
+        return i64::try_from(u).unwrap_or(i64::MAX);
+    }
+    if let Some(s) = v.as_str() {
+        return s.trim().parse::<i64>().unwrap_or(default);
+    }
+    default
+}
+
+fn normalize_read_pagination(
+    offset_raw: Option<&Value>,
+    limit_raw: Option<&Value>,
+) -> (Option<u64>, Option<u64>) {
+    let offset = offset_raw.map(|_| {
+        let normalized = parse_int_param(offset_raw, DEFAULT_READ_OFFSET).max(1);
+        // Tool schema is 1-indexed while backend slicing is 0-indexed.
+        normalized.saturating_sub(1) as u64
+    });
+    let limit = limit_raw
+        .map(|_| parse_int_param(limit_raw, DEFAULT_READ_LIMIT).clamp(1, MAX_READ_LIMIT) as u64);
+    (offset, limit)
+}
+
+fn normalize_search_pagination(
+    offset_raw: Option<&Value>,
+    limit_raw: Option<&Value>,
+) -> (Option<usize>, Option<usize>) {
+    let offset =
+        offset_raw.map(|_| parse_int_param(offset_raw, DEFAULT_SEARCH_OFFSET).max(0) as usize);
+    let limit = limit_raw.map(|_| parse_int_param(limit_raw, DEFAULT_SEARCH_LIMIT).max(1) as usize);
+    (offset, limit)
+}
+
 // ---------------------------------------------------------------------------
 // ReadFileHandler
 // ---------------------------------------------------------------------------
@@ -36,9 +82,7 @@ impl ToolHandler for ReadFileHandler {
 
         CredentialGuard::new().check_read_access(Path::new(path))?;
 
-        let offset = params.get("offset").and_then(|v| v.as_u64());
-
-        let limit = params.get("limit").and_then(|v| v.as_u64());
+        let (offset, limit) = normalize_read_pagination(params.get("offset"), params.get("limit"));
 
         self.backend
             .read_file(path, offset, limit)
@@ -258,7 +302,13 @@ pub trait SearchBackend: Send + Sync {
     ) -> Result<String, ToolError>;
 
     /// Search files by name (glob pattern).
-    async fn search_files(&self, pattern: &str, path: &str) -> Result<String, ToolError>;
+    async fn search_files(
+        &self,
+        pattern: &str,
+        path: &str,
+        max_results: Option<usize>,
+        offset: Option<usize>,
+    ) -> Result<String, ToolError>;
 }
 
 /// Tool for searching files by content or filename.
@@ -289,14 +339,8 @@ impl ToolHandler for SearchFilesHandler {
 
         let file_glob = params.get("file_glob").and_then(|v| v.as_str());
 
-        let max_results = params
-            .get("limit")
-            .and_then(|v| v.as_u64())
-            .map(|n| n as usize);
-        let offset = params
-            .get("offset")
-            .and_then(|v| v.as_u64())
-            .map(|n| n as usize);
+        let (offset, max_results) =
+            normalize_search_pagination(params.get("offset"), params.get("limit"));
         let output_mode = params.get("output_mode").and_then(|v| v.as_str());
         let context = params
             .get("context")
@@ -317,7 +361,11 @@ impl ToolHandler for SearchFilesHandler {
                     )
                     .await
             }
-            "files" => self.backend.search_files(pattern, path).await,
+            "files" => {
+                self.backend
+                    .search_files(pattern, path, max_results, offset)
+                    .await
+            }
             other => Err(ToolError::InvalidParams(format!(
                 "Unknown target: '{}'. Use 'content' or 'files'.",
                 other
@@ -463,5 +511,39 @@ mod tests {
         let handler = WriteFileHandler::new(Arc::new(MockBackend));
         let schema = handler.schema();
         assert_eq!(schema.name, "write_file");
+    }
+
+    #[test]
+    fn read_pagination_normalizes_invalid_values() {
+        let (offset, limit) = normalize_read_pagination(Some(&json!(0)), Some(&json!(0)));
+        assert_eq!(offset, Some(0));
+        assert_eq!(limit, Some(1));
+
+        let (offset, limit) = normalize_read_pagination(Some(&json!(-10)), Some(&json!(-5)));
+        assert_eq!(offset, Some(0));
+        assert_eq!(limit, Some(1));
+
+        let (offset, limit) = normalize_read_pagination(Some(&json!("bad")), Some(&json!("bad")));
+        assert_eq!(offset, Some(0));
+        assert_eq!(limit, Some(500));
+
+        let (offset, limit) = normalize_read_pagination(Some(&json!(2)), Some(&json!(999_999)));
+        assert_eq!(offset, Some(1));
+        assert_eq!(limit, Some(2000));
+    }
+
+    #[test]
+    fn search_pagination_normalizes_invalid_values() {
+        let (offset, limit) = normalize_search_pagination(Some(&json!(-10)), Some(&json!(-5)));
+        assert_eq!(offset, Some(0));
+        assert_eq!(limit, Some(1));
+
+        let (offset, limit) = normalize_search_pagination(Some(&json!("bad")), Some(&json!("bad")));
+        assert_eq!(offset, Some(0));
+        assert_eq!(limit, Some(50));
+
+        let (offset, limit) = normalize_search_pagination(Some(&json!(3)), Some(&json!(0)));
+        assert_eq!(offset, Some(3));
+        assert_eq!(limit, Some(1));
     }
 }
