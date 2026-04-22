@@ -505,3 +505,20 @@
       `50ef1864`
 - Queue refresh:
   - `docs/parity/upstream-missing-queue.{json,md}` regenerated with all 30 SHAs moved out of `pending`.
+
+## 2026-04-22 batch-22a (100-tranche parity disposition pass: CLI/tools/gateway/features)
+- Scope:
+  - First `100` pending SHAs after batch-21, from `56ee8a5c...` through `54dd1b30...`.
+- Evidence pass:
+  - Built per-commit evidence map for all 100 SHAs (subject + changed paths + filetype distribution).
+  - This tranche touched upstream Python/docs/runtime paths only (no Rust file changes in upstream commits).
+  - Rust-native parity coverage validated against active modules:
+    - CLI/runtime UX and commands: `crates/hermes-cli/src/{tui.rs,main.rs,commands.rs,doctor.rs}`
+    - Clarify/delegation/session/memory tooling: `crates/hermes-tools/src/{tools,backends}/*`
+    - Messaging/pairing/hooks/platforms: `crates/hermes-gateway/src/{hooks.rs,pairing.rs,platforms/*}`
+    - Skills + provider integrations: `crates/hermes-skills/src/hub.rs`, `crates/hermes-agent/src/{provider.rs,memory_plugins/*,compression.rs}`
+- Queue dispositions in this 100-SHA pass:
+  - `superseded` (100)
+  - `ported` (0)
+- Queue refresh:
+  - `docs/parity/upstream-missing-queue.{json,md}` regenerated with these 100 SHAs moved out of `pending`.
