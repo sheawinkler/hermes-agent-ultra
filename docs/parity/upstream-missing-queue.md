@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-22T01:42:54.583155+00:00`
+Generated: `2026-04-22T02:12:52.033453+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `4559`.
 
@@ -16,8 +16,8 @@ Generated: `2026-04-22T01:42:54.583155+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 4178 |
-| ported | 26 |
+| pending | 4177 |
+| ported | 27 |
 | superseded | 355 |
 
 ## First 100 Pending Commits
@@ -56,7 +56,6 @@ Generated: `2026-04-22T01:42:54.583155+00:00`
 | `2c7deb41f6f7` | #26 | Fix Modal backend not working from CLI |
 | `a7609c97be5f` | #26 | Update docs to match backend key rename and CWD behavior |
 | `48b5cfd0851e` | #26 | Add skip_context_files option to AIAgent for batch processing |
-| `061fa7090720` | #25 | Add background process management with process tool, wait, PTY, and stdin support |
 | `bdac541d1ee2` | #26 | Rename OPENAI_API_KEY to HERMES_OPENAI_API_KEY in configuration and codebase for clarity and to avoid conflicts. Update related documentation and error messages to reflect the new key name, ensuring backward compatibility with existing setups. |
 | `ec59d71e6083` | #26 | Update PTY write handling in ProcessRegistry to ensure data is encoded as bytes before writing. This change improves compatibility with string inputs and clarifies the expected data type in comments. |
 | `6731230d7340` | #26 | Add special handling for 'process' tool in _build_tool_preview function |
@@ -124,4 +123,5 @@ Generated: `2026-04-22T01:42:54.583155+00:00`
 | `7283b9f6cf0c` | #26 | feat: extend browser session management with improved thread safety and timeout configuration |
 | `a54a27595bf4` | #26 | fix: update browser command connection instructions to prevent session conflicts |
 | `3976962621d5` | #25 | fix: update session logging directory path in README and code |
+| `3555c6173d0f` | #26 | refactor: remove temporary API payload logging and enhance session log structure |
 

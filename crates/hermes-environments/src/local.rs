@@ -1,13 +1,44 @@
 //! Local terminal backend – executes commands on the same host.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
+use serde_json::{json, Value};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tokio::process::ChildStdin;
 use tokio::process::Command as TokioCommand;
+use tokio::sync::Mutex as AsyncMutex;
 
 use hermes_core::{AgentError, CommandOutput, TerminalBackend};
+
+const PROCESS_OUTPUT_WINDOW_CHARS: usize = 200_000;
+const PROCESS_PREVIEW_CHARS: usize = 1_000;
+const PROCESS_WAIT_OUTPUT_CHARS: usize = 2_000;
+const PROCESS_LOG_DEFAULT_LINES: usize = 200;
+
+static NEXT_PROCESS_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Clone)]
+struct ProcessSession {
+    id: String,
+    command: String,
+    pid: Option<u32>,
+    started_at: u64,
+    status: Arc<Mutex<ProcessStatus>>,
+    output: Arc<Mutex<String>>,
+    stdin: Arc<AsyncMutex<Option<ChildStdin>>>,
+}
+
+#[derive(Clone, Default)]
+struct ProcessStatus {
+    exited: bool,
+    exit_code: Option<i32>,
+}
 
 /// A [`TerminalBackend`] that runs commands on the local machine.
 pub struct LocalBackend {
@@ -15,8 +46,8 @@ pub struct LocalBackend {
     default_timeout: u64,
     /// Maximum output size in bytes before truncation.
     max_output_size: usize,
-    /// Background processes tracked by PID for potential later interaction.
-    background_processes: Arc<Mutex<Vec<u32>>>,
+    /// Background processes tracked by session id for lifecycle operations.
+    background_processes: Arc<Mutex<HashMap<String, ProcessSession>>>,
 }
 
 impl LocalBackend {
@@ -25,7 +56,146 @@ impl LocalBackend {
         Self {
             default_timeout,
             max_output_size,
-            background_processes: Arc::new(Mutex::new(Vec::new())),
+            background_processes: Arc::new(Mutex::new(HashMap::new())),
+        }
+    }
+
+    fn next_process_session_id() -> String {
+        format!(
+            "proc_{:012x}",
+            NEXT_PROCESS_ID.fetch_add(1, Ordering::Relaxed)
+        )
+    }
+
+    fn now_unix_ts() -> u64 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    }
+
+    fn max_process_output_chars(&self) -> usize {
+        self.max_output_size.max(PROCESS_OUTPUT_WINDOW_CHARS)
+    }
+
+    fn slice_to_tail_chars(input: &str, keep: usize) -> String {
+        if input.len() <= keep {
+            return input.to_string();
+        }
+        let mut start = input.len() - keep;
+        while start < input.len() && !input.is_char_boundary(start) {
+            start += 1;
+        }
+        input[start..].to_string()
+    }
+
+    fn append_output(output: &Arc<Mutex<String>>, text: &str, max_chars: usize) {
+        let mut guard = output.lock().unwrap_or_else(|e| e.into_inner());
+        guard.push_str(text);
+        if guard.len() > max_chars {
+            let trimmed = Self::slice_to_tail_chars(&guard, max_chars);
+            *guard = trimmed;
+        }
+    }
+
+    fn read_status_snapshot(session: &ProcessSession) -> ProcessStatus {
+        session
+            .status
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    fn read_output_snapshot(session: &ProcessSession) -> String {
+        session
+            .output
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    fn process_summary(session: &ProcessSession) -> Value {
+        let status = Self::read_status_snapshot(session);
+        let output = Self::read_output_snapshot(session);
+        let uptime = Self::now_unix_ts().saturating_sub(session.started_at);
+        let mut summary = json!({
+            "session_id": session.id.clone(),
+            "command": session.command.clone(),
+            "pid": session.pid,
+            "started_at": session.started_at,
+            "uptime_seconds": uptime,
+            "status": if status.exited { "exited" } else { "running" },
+            "output_preview": Self::slice_to_tail_chars(&output, PROCESS_PREVIEW_CHARS),
+        });
+        if status.exited {
+            summary["exit_code"] = json!(status.exit_code);
+        }
+        summary
+    }
+
+    fn get_session(&self, session_id: &str) -> Option<ProcessSession> {
+        self.background_processes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(session_id)
+            .cloned()
+    }
+
+    async fn read_stream_to_buffer<R>(
+        mut stream: R,
+        output: Arc<Mutex<String>>,
+        max_output_chars: usize,
+    ) where
+        R: AsyncRead + Unpin,
+    {
+        let mut chunk = [0_u8; 4096];
+        loop {
+            match stream.read(&mut chunk).await {
+                Ok(0) => break,
+                Ok(read) => {
+                    let text = String::from_utf8_lossy(&chunk[..read]).to_string();
+                    Self::append_output(&output, &text, max_output_chars);
+                }
+                Err(err) => {
+                    let note = format!("\n[stream read error: {err}]");
+                    Self::append_output(&output, &note, max_output_chars);
+                    break;
+                }
+            }
+        }
+    }
+
+    fn terminate_pid(pid: u32) -> Result<(), AgentError> {
+        #[cfg(unix)]
+        {
+            let status = std::process::Command::new("kill")
+                .arg("-TERM")
+                .arg(pid.to_string())
+                .status()
+                .map_err(|e| AgentError::Io(format!("Failed to invoke kill for pid {pid}: {e}")))?;
+            if status.success() {
+                Ok(())
+            } else {
+                Err(AgentError::Io(format!(
+                    "Failed to terminate pid {pid} (exit status: {status})"
+                )))
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let status = std::process::Command::new("taskkill")
+                .args(["/PID", &pid.to_string(), "/T", "/F"])
+                .status()
+                .map_err(|e| {
+                    AgentError::Io(format!("Failed to invoke taskkill for pid {pid}: {e}"))
+                })?;
+            if status.success() {
+                Ok(())
+            } else {
+                Err(AgentError::Io(format!(
+                    "Failed to terminate pid {pid} (exit status: {status})"
+                )))
+            }
         }
     }
 }
@@ -178,7 +348,7 @@ impl TerminalBackend for LocalBackend {
     ) -> Result<CommandOutput, AgentError> {
         let timeout_secs = timeout.unwrap_or(self.default_timeout);
 
-        if pty {
+        if pty && !background {
             // PTY mode: allocate a pseudo-terminal for interactive commands.
             // Uses `script` command (available on macOS/Linux) to wrap the
             // command in a PTY, which makes programs behave as if connected
@@ -239,11 +409,28 @@ impl TerminalBackend for LocalBackend {
             }
         }
 
-        let mut cmd = TokioCommand::new("sh");
-        cmd.arg("-c")
-            .arg(command)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        let mut cmd = if pty {
+            #[cfg(unix)]
+            {
+                let mut pty_cmd = TokioCommand::new("script");
+                pty_cmd.arg("-q").arg("/dev/null").arg("-c").arg(command);
+                pty_cmd
+            }
+            #[cfg(not(unix))]
+            {
+                tracing::warn!(
+                    "PTY mode is not supported on this platform; using standard shell execution"
+                );
+                let mut shell_cmd = TokioCommand::new("sh");
+                shell_cmd.arg("-c").arg(command);
+                shell_cmd
+            }
+        } else {
+            let mut shell_cmd = TokioCommand::new("sh");
+            shell_cmd.arg("-c").arg(command);
+            shell_cmd
+        };
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
         scrub_subprocess_env(&mut cmd);
 
         if let Some(dir) = workdir {
@@ -251,29 +438,79 @@ impl TerminalBackend for LocalBackend {
         }
 
         if background {
-            // In background mode, detach the process and return immediately.
+            // In background mode, keep stdin pipe open for process(write/submit).
+            cmd.stdin(Stdio::piped());
+        } else if pty {
             cmd.stdin(Stdio::null());
         }
 
         let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
-            let child = cmd
+            let mut child = cmd
                 .spawn()
                 .map_err(|e| AgentError::Io(format!("Failed to spawn command: {}", e)))?;
 
-            // In background mode, track the PID and return immediately.
+            // In background mode, track the process session and return immediately.
             if background {
-                if let Some(id) = child.id() {
-                    self.background_processes
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .push(id);
+                let session_id = Self::next_process_session_id();
+                let pid = child.id();
+                let output = Arc::new(Mutex::new(String::new()));
+                let status = Arc::new(Mutex::new(ProcessStatus::default()));
+                let stdin = Arc::new(AsyncMutex::new(child.stdin.take()));
+                let max_output_chars = self.max_process_output_chars();
+                let session = ProcessSession {
+                    id: session_id.clone(),
+                    command: command.to_string(),
+                    pid,
+                    started_at: Self::now_unix_ts(),
+                    status: status.clone(),
+                    output: output.clone(),
+                    stdin,
+                };
+                self.background_processes
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .insert(session_id.clone(), session);
+
+                if let Some(stdout) = child.stdout.take() {
+                    let output = output.clone();
+                    tokio::spawn(async move {
+                        Self::read_stream_to_buffer(stdout, output, max_output_chars).await;
+                    });
                 }
+                if let Some(stderr) = child.stderr.take() {
+                    let output = output.clone();
+                    tokio::spawn(async move {
+                        Self::read_stream_to_buffer(stderr, output, max_output_chars).await;
+                    });
+                }
+
+                tokio::spawn(async move {
+                    match child.wait().await {
+                        Ok(exit) => {
+                            let mut guard = status.lock().unwrap_or_else(|e| e.into_inner());
+                            guard.exited = true;
+                            guard.exit_code = exit.code();
+                        }
+                        Err(err) => {
+                            let mut guard = status.lock().unwrap_or_else(|e| e.into_inner());
+                            guard.exited = true;
+                            guard.exit_code = Some(-1);
+                            let note = format!("\n[wait error: {err}]");
+                            Self::append_output(&output, &note, max_output_chars);
+                        }
+                    }
+                });
+
+                let started = json!({
+                    "output": "Background process started",
+                    "session_id": session_id,
+                    "pid": pid,
+                    "exit_code": 0,
+                    "error": Value::Null
+                });
                 return Ok(CommandOutput {
                     exit_code: 0,
-                    stdout: format!(
-                        "Process started in background (pid: {})",
-                        child.id().unwrap_or(0)
-                    ),
+                    stdout: started.to_string(),
                     stderr: String::new(),
                 });
             }
@@ -384,6 +621,234 @@ impl TerminalBackend for LocalBackend {
                 "Failed to check file existence '{}': {}",
                 path, e
             ))),
+        }
+    }
+
+    async fn list_processes(&self) -> Result<Value, AgentError> {
+        let sessions = self
+            .background_processes
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+
+        let mut entries = sessions
+            .iter()
+            .map(Self::process_summary)
+            .collect::<Vec<Value>>();
+        entries.sort_by_key(|v| {
+            std::cmp::Reverse(v.get("started_at").and_then(Value::as_u64).unwrap_or(0))
+        });
+
+        Ok(json!({
+            "status": "ok",
+            "count": entries.len(),
+            "sessions": entries
+        }))
+    }
+
+    async fn poll_process(&self, session_id: &str) -> Result<Value, AgentError> {
+        let Some(session) = self.get_session(session_id) else {
+            return Ok(json!({
+                "status": "not_found",
+                "error": format!("No process with ID {session_id}")
+            }));
+        };
+        Ok(Self::process_summary(&session))
+    }
+
+    async fn read_process_log(
+        &self,
+        session_id: &str,
+        offset: Option<u64>,
+        limit: Option<u64>,
+    ) -> Result<Value, AgentError> {
+        let Some(session) = self.get_session(session_id) else {
+            return Ok(json!({
+                "status": "not_found",
+                "error": format!("No process with ID {session_id}")
+            }));
+        };
+        let status = Self::read_status_snapshot(&session);
+        let output = Self::read_output_snapshot(&session);
+        let lines = output.lines().collect::<Vec<_>>();
+        let total_lines = lines.len();
+        let limit = limit
+            .map(|v| v as usize)
+            .unwrap_or(PROCESS_LOG_DEFAULT_LINES)
+            .max(1);
+        let selected = if offset.unwrap_or(0) == 0 {
+            lines
+                .get(total_lines.saturating_sub(limit)..total_lines)
+                .unwrap_or(&[])
+                .to_vec()
+        } else {
+            let start = (offset.unwrap_or(0) as usize).min(total_lines);
+            let end = (start + limit).min(total_lines);
+            lines.get(start..end).unwrap_or(&[]).to_vec()
+        };
+
+        Ok(json!({
+            "session_id": session.id.clone(),
+            "status": if status.exited { "exited" } else { "running" },
+            "output": selected.join("\n"),
+            "total_lines": total_lines,
+            "showing": format!("{} lines", selected.len())
+        }))
+    }
+
+    async fn wait_process(
+        &self,
+        session_id: &str,
+        timeout: Option<u64>,
+    ) -> Result<Value, AgentError> {
+        let Some(session) = self.get_session(session_id) else {
+            return Ok(json!({
+                "status": "not_found",
+                "error": format!("No process with ID {session_id}")
+            }));
+        };
+
+        let max_timeout = self.default_timeout;
+        let requested_timeout = timeout.unwrap_or(max_timeout);
+        let effective_timeout = requested_timeout.min(max_timeout);
+        let timeout_note = if requested_timeout > max_timeout {
+            Some(format!(
+                "Requested wait of {requested_timeout}s was clamped to configured limit of {max_timeout}s"
+            ))
+        } else {
+            None
+        };
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(effective_timeout);
+        loop {
+            let status = Self::read_status_snapshot(&session);
+            let output = Self::read_output_snapshot(&session);
+            if status.exited {
+                let mut result = json!({
+                    "status": "exited",
+                    "exit_code": status.exit_code,
+                    "output": Self::slice_to_tail_chars(&output, PROCESS_WAIT_OUTPUT_CHARS),
+                });
+                if let Some(note) = &timeout_note {
+                    result["timeout_note"] = json!(note);
+                }
+                return Ok(result);
+            }
+            if std::time::Instant::now() >= deadline {
+                let mut result = json!({
+                    "status": "timeout",
+                    "output": Self::slice_to_tail_chars(&output, PROCESS_PREVIEW_CHARS),
+                });
+                if let Some(note) = timeout_note.clone() {
+                    result["timeout_note"] = json!(note);
+                } else {
+                    result["timeout_note"] = json!(format!(
+                        "Waited {effective_timeout}s, process still running"
+                    ));
+                }
+                return Ok(result);
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        }
+    }
+
+    async fn kill_process(&self, session_id: &str) -> Result<Value, AgentError> {
+        let Some(session) = self.get_session(session_id) else {
+            return Ok(json!({
+                "status": "not_found",
+                "error": format!("No process with ID {session_id}")
+            }));
+        };
+        let status = Self::read_status_snapshot(&session);
+        if status.exited {
+            return Ok(json!({
+                "status": "already_exited",
+                "exit_code": status.exit_code
+            }));
+        }
+        let pid = session.pid.ok_or_else(|| {
+            AgentError::Io(format!(
+                "Cannot terminate process {session_id}: missing pid"
+            ))
+        })?;
+        Self::terminate_pid(pid)?;
+
+        {
+            let mut guard = session.status.lock().unwrap_or_else(|e| e.into_inner());
+            guard.exited = true;
+            guard.exit_code = Some(-15);
+        }
+        let _ = session.stdin.lock().await.take();
+        Ok(json!({
+            "status": "killed",
+            "session_id": session.id.clone()
+        }))
+    }
+
+    async fn write_process_stdin(&self, session_id: &str, data: &str) -> Result<Value, AgentError> {
+        let Some(session) = self.get_session(session_id) else {
+            return Ok(json!({
+                "status": "not_found",
+                "error": format!("No process with ID {session_id}")
+            }));
+        };
+        let status = Self::read_status_snapshot(&session);
+        if status.exited {
+            return Ok(json!({
+                "status": "already_exited",
+                "error": "Process has already finished"
+            }));
+        }
+        let mut stdin_guard = session.stdin.lock().await;
+        let Some(stdin) = stdin_guard.as_mut() else {
+            return Ok(json!({
+                "status": "error",
+                "error": "Process stdin not available (stdin closed)"
+            }));
+        };
+        stdin
+            .write_all(data.as_bytes())
+            .await
+            .map_err(|e| AgentError::Io(format!("Failed writing stdin for {session_id}: {e}")))?;
+        stdin
+            .flush()
+            .await
+            .map_err(|e| AgentError::Io(format!("Failed flushing stdin for {session_id}: {e}")))?;
+        Ok(json!({
+            "status": "ok",
+            "bytes_written": data.len()
+        }))
+    }
+
+    async fn submit_process_stdin(
+        &self,
+        session_id: &str,
+        data: &str,
+    ) -> Result<Value, AgentError> {
+        self.write_process_stdin(session_id, &format!("{data}\n"))
+            .await
+    }
+
+    async fn close_process_stdin(&self, session_id: &str) -> Result<Value, AgentError> {
+        let Some(session) = self.get_session(session_id) else {
+            return Ok(json!({
+                "status": "not_found",
+                "error": format!("No process with ID {session_id}")
+            }));
+        };
+        let mut stdin_guard = session.stdin.lock().await;
+        if stdin_guard.take().is_some() {
+            Ok(json!({
+                "status": "ok",
+                "closed": true
+            }))
+        } else {
+            Ok(json!({
+                "status": "ok",
+                "closed": false
+            }))
         }
     }
 }
@@ -564,5 +1029,53 @@ mod tests {
 
         assert_eq!(output.exit_code, 0);
         assert_eq!(output.stdout, "|||ok");
+    }
+
+    #[tokio::test]
+    async fn test_background_process_lifecycle_with_stdin() {
+        let backend = LocalBackend::new(10, 1_048_576);
+        let started = backend
+            .execute_command("cat", None, None, true, false)
+            .await
+            .unwrap();
+        assert_eq!(started.exit_code, 0);
+        let payload: Value = serde_json::from_str(&started.stdout).expect("valid start payload");
+        let session_id = payload
+            .get("session_id")
+            .and_then(Value::as_str)
+            .expect("session_id")
+            .to_string();
+
+        let write = backend
+            .write_process_stdin(&session_id, "hello from stdin\n")
+            .await
+            .unwrap();
+        assert_eq!(write["status"], "ok");
+
+        let close = backend.close_process_stdin(&session_id).await.unwrap();
+        assert_eq!(close["status"], "ok");
+
+        let wait = backend.wait_process(&session_id, Some(5)).await.unwrap();
+        assert_eq!(wait["status"], "exited");
+        assert!(wait["output"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("hello from stdin"));
+    }
+
+    #[tokio::test]
+    async fn test_background_process_not_found_contract() {
+        let backend = LocalBackend::default();
+        let poll = backend.poll_process("proc_missing").await.unwrap();
+        assert_eq!(poll["status"], "not_found");
+
+        let log = backend
+            .read_process_log("proc_missing", None, None)
+            .await
+            .unwrap();
+        assert_eq!(log["status"], "not_found");
+
+        let kill = backend.kill_process("proc_missing").await.unwrap();
+        assert_eq!(kill["status"], "not_found");
     }
 }

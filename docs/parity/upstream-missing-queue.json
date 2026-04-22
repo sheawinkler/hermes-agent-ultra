@@ -2893,7 +2893,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "AGENTS.md",
         "README.md",
@@ -2909,7 +2909,7 @@
         "toolsets.py"
       ],
       "files_touched": 12,
-      "notes": "triage-full-2026-04-21: group=WG6-packaging-install-docs; action=implement",
+      "notes": "ported-2026-04-22-batch-11: rust-native process session parity via TerminalBackend lifecycle APIs, LocalBackend background session manager, and registered process tool adapter (list/poll/log/wait/kill/write/submit/close).",
       "owner": "codex",
       "sha": "061fa7090720f4631b58ec0e760ca9236b198946",
       "subject": "Add background process management with process tool, wait, PTY, and stdin support",
@@ -69430,7 +69430,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     }
   ],
-  "generated_at_utc": "2026-04-22T01:42:54.583155+00:00",
+  "generated_at_utc": "2026-04-22T02:12:52.033453+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69438,8 +69438,8 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4178,
-      "ported": 26,
+      "pending": 4177,
+      "ported": 27,
       "superseded": 355
     },
     "by_target_ticket": {

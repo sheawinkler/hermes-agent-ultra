@@ -174,6 +174,38 @@ fn transform_sudo_command(command: &str) -> String {
     transform_sudo_command_with_password(command, sudo_password.as_deref())
 }
 
+fn coerce_string_param(params: &Value, key: &str) -> Option<String> {
+    match params.get(key) {
+        Some(Value::String(s)) => Some(s.clone()),
+        Some(Value::Number(n)) => Some(n.to_string()),
+        Some(Value::Bool(b)) => Some(b.to_string()),
+        Some(Value::Null) | None => None,
+        Some(other) => Some(other.to_string()),
+    }
+}
+
+fn process_id_param(params: &Value) -> Result<String, ToolError> {
+    coerce_string_param(params, "session_id")
+        .or_else(|| coerce_string_param(params, "pid"))
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| {
+            ToolError::InvalidParams("Missing 'session_id' parameter (or deprecated 'pid')".into())
+        })
+}
+
+fn process_data_param_with_alias(params: &Value, alias: &str) -> Result<String, ToolError> {
+    coerce_string_param(params, "data")
+        .or_else(|| coerce_string_param(params, alias))
+        .ok_or_else(|| {
+            ToolError::InvalidParams(format!("Missing 'data' parameter (or alias '{}')", alias))
+        })
+}
+
+fn process_data_param(params: &Value) -> Result<String, ToolError> {
+    process_data_param_with_alias(params, "input")
+}
+
 // ---------------------------------------------------------------------------
 // ProcessHandler
 // ---------------------------------------------------------------------------
@@ -184,17 +216,28 @@ pub trait ProcessBackend: Send + Sync {
     /// List all background processes.
     async fn list_processes(&self) -> Result<String, ToolError>;
     /// Poll a process for output (non-blocking).
-    async fn poll_process(&self, pid: &str) -> Result<String, ToolError>;
+    async fn poll_process(&self, session_id: &str) -> Result<String, ToolError>;
+    /// Read process output logs.
+    async fn read_process_log(
+        &self,
+        session_id: &str,
+        offset: Option<u64>,
+        limit: Option<u64>,
+    ) -> Result<String, ToolError>;
     /// Wait for a process to complete and return its full output.
-    async fn wait_process(&self, pid: &str, timeout: Option<u64>) -> Result<String, ToolError>;
+    async fn wait_process(
+        &self,
+        session_id: &str,
+        timeout: Option<u64>,
+    ) -> Result<String, ToolError>;
     /// Kill a background process.
-    async fn kill_process(&self, pid: &str) -> Result<String, ToolError>;
+    async fn kill_process(&self, session_id: &str) -> Result<String, ToolError>;
     /// Write stdin to a running process.
-    async fn write_stdin(&self, pid: &str, data: &str) -> Result<String, ToolError>;
+    async fn write_stdin(&self, session_id: &str, data: &str) -> Result<String, ToolError>;
     /// Submit input to a process and get output.
-    async fn submit_process(&self, pid: &str, input: &str) -> Result<String, ToolError>;
+    async fn submit_process(&self, session_id: &str, input: &str) -> Result<String, ToolError>;
     /// Close stdin of a process.
-    async fn close_process(&self, pid: &str) -> Result<String, ToolError>;
+    async fn close_process(&self, session_id: &str) -> Result<String, ToolError>;
 }
 
 /// Tool for managing background processes.
@@ -205,6 +248,93 @@ pub struct ProcessHandler {
 impl ProcessHandler {
     pub fn new(backend: std::sync::Arc<dyn ProcessBackend>) -> Self {
         Self { backend }
+    }
+}
+
+/// Adapter that forwards process operations through `TerminalBackend`.
+pub struct TerminalProcessBackendAdapter {
+    backend: std::sync::Arc<dyn TerminalBackend>,
+}
+
+impl TerminalProcessBackendAdapter {
+    pub fn new(backend: std::sync::Arc<dyn TerminalBackend>) -> Self {
+        Self { backend }
+    }
+}
+
+#[async_trait]
+impl ProcessBackend for TerminalProcessBackendAdapter {
+    async fn list_processes(&self) -> Result<String, ToolError> {
+        self.backend
+            .list_processes()
+            .await
+            .map(|v| v.to_string())
+            .map_err(|e| ToolError::ExecutionFailed(e.to_string()))
+    }
+
+    async fn poll_process(&self, session_id: &str) -> Result<String, ToolError> {
+        self.backend
+            .poll_process(session_id)
+            .await
+            .map(|v| v.to_string())
+            .map_err(|e| ToolError::ExecutionFailed(e.to_string()))
+    }
+
+    async fn read_process_log(
+        &self,
+        session_id: &str,
+        offset: Option<u64>,
+        limit: Option<u64>,
+    ) -> Result<String, ToolError> {
+        self.backend
+            .read_process_log(session_id, offset, limit)
+            .await
+            .map(|v| v.to_string())
+            .map_err(|e| ToolError::ExecutionFailed(e.to_string()))
+    }
+
+    async fn wait_process(
+        &self,
+        session_id: &str,
+        timeout: Option<u64>,
+    ) -> Result<String, ToolError> {
+        self.backend
+            .wait_process(session_id, timeout)
+            .await
+            .map(|v| v.to_string())
+            .map_err(|e| ToolError::ExecutionFailed(e.to_string()))
+    }
+
+    async fn kill_process(&self, session_id: &str) -> Result<String, ToolError> {
+        self.backend
+            .kill_process(session_id)
+            .await
+            .map(|v| v.to_string())
+            .map_err(|e| ToolError::ExecutionFailed(e.to_string()))
+    }
+
+    async fn write_stdin(&self, session_id: &str, data: &str) -> Result<String, ToolError> {
+        self.backend
+            .write_process_stdin(session_id, data)
+            .await
+            .map(|v| v.to_string())
+            .map_err(|e| ToolError::ExecutionFailed(e.to_string()))
+    }
+
+    async fn submit_process(&self, session_id: &str, input: &str) -> Result<String, ToolError> {
+        self.backend
+            .submit_process_stdin(session_id, input)
+            .await
+            .map(|v| v.to_string())
+            .map_err(|e| ToolError::ExecutionFailed(e.to_string()))
+    }
+
+    async fn close_process(&self, session_id: &str) -> Result<String, ToolError> {
+        self.backend
+            .close_process_stdin(session_id)
+            .await
+            .map(|v| v.to_string())
+            .map_err(|e| ToolError::ExecutionFailed(e.to_string()))
     }
 }
 
@@ -219,55 +349,39 @@ impl ToolHandler for ProcessHandler {
         match action {
             "list" => self.backend.list_processes().await,
             "poll" => {
-                let pid = params
-                    .get("pid")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidParams("Missing 'pid' parameter".into()))?;
-                self.backend.poll_process(pid).await
+                let session_id = process_id_param(&params)?;
+                self.backend.poll_process(&session_id).await
+            }
+            "log" => {
+                let session_id = process_id_param(&params)?;
+                let offset = params.get("offset").and_then(|v| v.as_u64());
+                let limit = params.get("limit").and_then(|v| v.as_u64());
+                self.backend
+                    .read_process_log(&session_id, offset, limit)
+                    .await
             }
             "wait" => {
-                let pid = params
-                    .get("pid")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidParams("Missing 'pid' parameter".into()))?;
+                let session_id = process_id_param(&params)?;
                 let timeout = params.get("timeout").and_then(|v| v.as_u64());
-                self.backend.wait_process(pid, timeout).await
+                self.backend.wait_process(&session_id, timeout).await
             }
             "kill" => {
-                let pid = params
-                    .get("pid")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidParams("Missing 'pid' parameter".into()))?;
-                self.backend.kill_process(pid).await
+                let session_id = process_id_param(&params)?;
+                self.backend.kill_process(&session_id).await
             }
             "write" => {
-                let pid = params
-                    .get("pid")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidParams("Missing 'pid' parameter".into()))?;
-                let data = params
-                    .get("data")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidParams("Missing 'data' parameter".into()))?;
-                self.backend.write_stdin(pid, data).await
+                let session_id = process_id_param(&params)?;
+                let data = process_data_param(&params)?;
+                self.backend.write_stdin(&session_id, &data).await
             }
             "submit" => {
-                let pid = params
-                    .get("pid")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidParams("Missing 'pid' parameter".into()))?;
-                let input = params
-                    .get("input")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidParams("Missing 'input' parameter".into()))?;
-                self.backend.submit_process(pid, input).await
+                let session_id = process_id_param(&params)?;
+                let input = process_data_param_with_alias(&params, "input")?;
+                self.backend.submit_process(&session_id, &input).await
             }
             "close" => {
-                let pid = params
-                    .get("pid")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidParams("Missing 'pid' parameter".into()))?;
-                self.backend.close_process(pid).await
+                let session_id = process_id_param(&params)?;
+                self.backend.close_process(&session_id).await
             }
             other => Err(ToolError::InvalidParams(format!(
                 "Unknown action: {}",
@@ -282,42 +396,63 @@ impl ToolHandler for ProcessHandler {
             "action".into(),
             json!({
                 "type": "string",
-                "description": "Action to perform: list, poll, wait, kill, write, submit, close",
-                "enum": ["list", "poll", "wait", "kill", "write", "submit", "close"]
+                "description": "Action to perform: list, poll, log, wait, kill, write, submit, close",
+                "enum": ["list", "poll", "log", "wait", "kill", "write", "submit", "close"]
+            }),
+        );
+        props.insert(
+            "session_id".into(),
+            json!({
+                "type": "string",
+                "description": "Process session identifier returned from terminal(background=true)"
             }),
         );
         props.insert(
             "pid".into(),
             json!({
                 "type": "string",
-                "description": "Process ID (required for all actions except 'list')"
+                "description": "Deprecated alias for session_id"
             }),
         );
         props.insert(
             "timeout".into(),
             json!({
                 "type": "integer",
-                "description": "Timeout in milliseconds for 'wait' action"
+                "description": "Timeout in seconds for 'wait' action"
+            }),
+        );
+        props.insert(
+            "offset".into(),
+            json!({
+                "type": "integer",
+                "description": "Starting line offset for 'log' action"
+            }),
+        );
+        props.insert(
+            "limit".into(),
+            json!({
+                "type": "integer",
+                "description": "Maximum lines to return for 'log' action"
             }),
         );
         props.insert(
             "data".into(),
             json!({
                 "type": "string",
-                "description": "Data to write to process stdin (for 'write' action)"
+                "description": "Data to write/submit to process stdin (for 'write' and 'submit')"
             }),
         );
         props.insert(
             "input".into(),
             json!({
                 "type": "string",
-                "description": "Input to submit to the process (for 'submit' action)"
+                "description": "Alias for data when using 'submit'"
             }),
         );
 
         tool_schema(
             "process",
-            "Manage background processes: list, poll output, wait for completion, kill, write to stdin, or close.",
+            "Manage background process sessions: list, poll, read logs, wait, kill, write/submit stdin, or close stdin.",
             JsonSchema::object(props, vec!["action".into()]),
         )
     }
@@ -361,6 +496,58 @@ mod tests {
         }
     }
 
+    struct MockProcessBackend;
+
+    #[async_trait]
+    impl ProcessBackend for MockProcessBackend {
+        async fn list_processes(&self) -> Result<String, ToolError> {
+            Ok(json!({"status":"ok","count":1}).to_string())
+        }
+
+        async fn poll_process(&self, session_id: &str) -> Result<String, ToolError> {
+            Ok(json!({"status":"running","session_id":session_id}).to_string())
+        }
+
+        async fn read_process_log(
+            &self,
+            session_id: &str,
+            offset: Option<u64>,
+            limit: Option<u64>,
+        ) -> Result<String, ToolError> {
+            Ok(json!({
+                "status":"running",
+                "session_id": session_id,
+                "offset": offset,
+                "limit": limit
+            })
+            .to_string())
+        }
+
+        async fn wait_process(
+            &self,
+            session_id: &str,
+            timeout: Option<u64>,
+        ) -> Result<String, ToolError> {
+            Ok(json!({"status":"exited","session_id":session_id,"timeout":timeout}).to_string())
+        }
+
+        async fn kill_process(&self, session_id: &str) -> Result<String, ToolError> {
+            Ok(json!({"status":"killed","session_id":session_id}).to_string())
+        }
+
+        async fn write_stdin(&self, session_id: &str, data: &str) -> Result<String, ToolError> {
+            Ok(json!({"status":"ok","session_id":session_id,"data":data}).to_string())
+        }
+
+        async fn submit_process(&self, session_id: &str, input: &str) -> Result<String, ToolError> {
+            Ok(json!({"status":"ok","session_id":session_id,"input":input}).to_string())
+        }
+
+        async fn close_process(&self, session_id: &str) -> Result<String, ToolError> {
+            Ok(json!({"status":"ok","session_id":session_id,"closed":true}).to_string())
+        }
+    }
+
     #[tokio::test]
     async fn test_terminal_handler_schema() {
         let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
@@ -376,6 +563,34 @@ mod tests {
             .await
             .unwrap();
         assert!(result.contains("echo hello"));
+    }
+
+    #[tokio::test]
+    async fn test_process_handler_uses_session_id_and_log_action() {
+        let handler = ProcessHandler::new(std::sync::Arc::new(MockProcessBackend));
+        let poll_result = handler
+            .execute(json!({"action":"poll","session_id":"proc_123"}))
+            .await
+            .unwrap();
+        assert!(poll_result.contains("\"session_id\":\"proc_123\""));
+
+        let log_result = handler
+            .execute(json!({"action":"log","session_id":"proc_123","offset":10,"limit":50}))
+            .await
+            .unwrap();
+        assert!(log_result.contains("\"offset\":10"));
+        assert!(log_result.contains("\"limit\":50"));
+    }
+
+    #[tokio::test]
+    async fn test_process_handler_coerces_non_string_args() {
+        let handler = ProcessHandler::new(std::sync::Arc::new(MockProcessBackend));
+        let write_result = handler
+            .execute(json!({"action":"write","session_id":123,"data":456}))
+            .await
+            .unwrap();
+        assert!(write_result.contains("\"session_id\":\"123\""));
+        assert!(write_result.contains("\"data\":\"456\""));
     }
 
     #[test]

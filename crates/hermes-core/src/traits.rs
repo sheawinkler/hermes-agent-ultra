@@ -132,6 +132,78 @@ pub trait TerminalBackend: Send + Sync {
 
     /// Check whether a file exists at the given path.
     async fn file_exists(&self, path: &str) -> Result<bool, AgentError>;
+
+    /// List tracked background process sessions.
+    async fn list_processes(&self) -> Result<Value, AgentError> {
+        Err(AgentError::ToolExecution(
+            "Background process management is not supported by this terminal backend".into(),
+        ))
+    }
+
+    /// Poll status/output preview for a tracked background process session.
+    async fn poll_process(&self, _session_id: &str) -> Result<Value, AgentError> {
+        Err(AgentError::ToolExecution(
+            "Background process polling is not supported by this terminal backend".into(),
+        ))
+    }
+
+    /// Read output log lines for a tracked background process session.
+    async fn read_process_log(
+        &self,
+        _session_id: &str,
+        _offset: Option<u64>,
+        _limit: Option<u64>,
+    ) -> Result<Value, AgentError> {
+        Err(AgentError::ToolExecution(
+            "Background process log reads are not supported by this terminal backend".into(),
+        ))
+    }
+
+    /// Wait for a tracked background process session to finish.
+    async fn wait_process(
+        &self,
+        _session_id: &str,
+        _timeout: Option<u64>,
+    ) -> Result<Value, AgentError> {
+        Err(AgentError::ToolExecution(
+            "Background process waiting is not supported by this terminal backend".into(),
+        ))
+    }
+
+    /// Terminate a tracked background process session.
+    async fn kill_process(&self, _session_id: &str) -> Result<Value, AgentError> {
+        Err(AgentError::ToolExecution(
+            "Background process termination is not supported by this terminal backend".into(),
+        ))
+    }
+
+    /// Write raw bytes to background process stdin.
+    async fn write_process_stdin(
+        &self,
+        _session_id: &str,
+        _data: &str,
+    ) -> Result<Value, AgentError> {
+        Err(AgentError::ToolExecution(
+            "Background process stdin writes are not supported by this terminal backend".into(),
+        ))
+    }
+
+    /// Submit stdin plus newline to a background process.
+    async fn submit_process_stdin(
+        &self,
+        session_id: &str,
+        data: &str,
+    ) -> Result<Value, AgentError> {
+        self.write_process_stdin(session_id, &format!("{data}\n"))
+            .await
+    }
+
+    /// Close stdin for a background process.
+    async fn close_process_stdin(&self, _session_id: &str) -> Result<Value, AgentError> {
+        Err(AgentError::ToolExecution(
+            "Background process stdin close is not supported by this terminal backend".into(),
+        ))
+    }
 }
 
 // ---------------------------------------------------------------------------

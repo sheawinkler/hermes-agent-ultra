@@ -78,6 +78,15 @@ pub fn register_builtin_tools(
         "💻",
         vec![],
     );
+    reg(
+        registry,
+        "terminal",
+        Arc::new(crate::tools::terminal::ProcessHandler::new(Arc::new(
+            crate::tools::terminal::TerminalProcessBackendAdapter::new(terminal_backend.clone()),
+        ))),
+        "🧵",
+        vec![],
+    );
 
     // -- File tools ----------------------------------------------------------
     reg(

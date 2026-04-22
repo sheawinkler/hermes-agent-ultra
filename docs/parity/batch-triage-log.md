@@ -215,3 +215,35 @@
 - Queue/proof refresh:
   - `docs/parity/upstream-missing-queue.{json,md}`
   - `docs/parity/global-parity-proof.{json,md}`
+
+## 2026-04-22 batch-11 (process tool + background session parity)
+- Scope: WG6/WG7 parity for upstream background process management (`process` tool, wait/poll/log lifecycle, PTY + stdin interaction support).
+- Upstream commit ported:
+  - `061fa7090720f4631b58ec0e760ca9236b198946`
+    `Add background process management with process tool, wait, PTY, and stdin support`
+    - Disposition: `ported`
+- Implementation (Rust):
+  - `crates/hermes-core/src/traits.rs`
+    - Extended `TerminalBackend` with default process lifecycle APIs:
+      - `list_processes`, `poll_process`, `read_process_log`, `wait_process`, `kill_process`, `write_process_stdin`, `submit_process_stdin`, `close_process_stdin`.
+  - `crates/hermes-environments/src/local.rs`
+    - Replaced PID-only background tracking with full session registry (`proc_*` IDs).
+    - Added rolling output buffers, stdout/stderr async readers, wait-state tracking, and stdin pipe management.
+    - `execute_command(background=true)` now returns structured JSON with `session_id` and `pid`.
+    - Added process lifecycle implementations: list/poll/log/wait/kill/write/submit/close.
+    - Added PTY-compatible background spawn path and focused lifecycle tests.
+  - `crates/hermes-tools/src/tools/terminal.rs`
+    - Added terminal-backed process adapter (`TerminalProcessBackendAdapter`) to bridge tool calls into backend lifecycle APIs.
+    - Upgraded `process` tool schema/handler:
+      - supports `session_id` (with deprecated `pid` alias)
+      - adds `log` action (`offset`/`limit`)
+      - supports string coercion for robustness (`session_id`/`data`).
+  - `crates/hermes-tools/src/register_builtins.rs`
+    - Registered `process` tool in built-ins using the new terminal adapter (previously only `process_registry` metadata tool was registered).
+- Verification:
+  - `cargo test -p hermes-environments local:: -- --nocapture`
+  - `cargo test -p hermes-tools tools::terminal -- --nocapture`
+  - `cargo test -p hermes-tools toolset:: -- --nocapture`
+- Queue/proof refresh:
+  - `docs/parity/upstream-missing-queue.{json,md}`
+  - `docs/parity/global-parity-proof.{json,md}`
