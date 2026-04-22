@@ -34,3 +34,20 @@
 - Resulting disposition totals:
   - `pending=4175`, `ported=12`, `superseded=349`, `total=4536`
 
+## 2026-04-22 batch-04 (WG1 security hardening parity)
+- Scope: targeted WG1 security commits mapped to Rust local backend paths and subprocess environment handling.
+- Upstream commits ported:
+  - `5212644861ffefe2a51b259692da564cf0d4aab7`
+    `fix(security): prevent shell injection in tilde-username path expansion`
+    - Rust parity commit: `7146ba1c`
+  - `b177b4abad1dffd60bc2e1527af8917d1ed7442f`
+    `fix(security): block gateway and tool env vars in subprocesses`
+    - Rust parity commit: `a6206a37`
+- Verification:
+  - `cargo test -p hermes-environments local::tests::`
+- Queue update:
+  - Both SHAs marked `ported` in `docs/parity/upstream-missing-queue.json`.
+  - Regenerated:
+    - `docs/parity/upstream-missing-queue.md`
+    - `docs/parity/global-parity-proof.json`
+    - `docs/parity/global-parity-proof.md`
