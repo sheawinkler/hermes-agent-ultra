@@ -79,6 +79,21 @@ if [[ ! -x "${INSTALL_DIR}/${CANONICAL_BIN_NAME}" ]]; then
   exit 1
 fi
 
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
+mkdir -p "${HERMES_HOME}"
+if [[ ! -f "${HERMES_HOME}/SOUL.md" ]]; then
+  cat > "${HERMES_HOME}/SOUL.md" <<'SOUL_EOF'
+# Hermes Agent Persona
+
+<!--
+Customize this file to control how Hermes communicates.
+This file is loaded every message; no restart needed.
+Delete this file (or leave it empty) to use the default personality.
+-->
+SOUL_EOF
+  echo "Created ${HERMES_HOME}/SOUL.md (edit to customize personality)."
+fi
+
 if command -v "${CANONICAL_BIN_NAME}" >/dev/null 2>&1; then
   echo "Detected on PATH: $(command -v "${CANONICAL_BIN_NAME}")"
   if command -v "${LEGACY_BIN_NAME}" >/dev/null 2>&1; then

@@ -5382,6 +5382,15 @@ async fn run_setup() -> Result<(), AgentError> {
         println!("  ✓ Created default profile");
     }
 
+    // 7. Ensure SOUL.md exists so users can customize persona immediately.
+    let soul_path = config_dir.join("SOUL.md");
+    if !soul_path.exists() {
+        let soul_template = "# Hermes Agent Persona\n\n<!--\nCustomize this file to control how Hermes communicates.\nThis file is loaded every message; no restart needed.\nDelete this file (or leave it empty) to use the default personality.\n-->\n";
+        std::fs::write(&soul_path, soul_template)
+            .map_err(|e| AgentError::Io(format!("Failed to write SOUL.md: {}", e)))?;
+        println!("  ✓ Created SOUL.md");
+    }
+
     println!(
         "\nSetup complete! Run `hermes-agent-ultra` (or `hermes`) to start an interactive session."
     );
@@ -5412,7 +5421,46 @@ async fn run_doctor(cli: Cli) -> Result<(), AgentError> {
         println!("✗ (run `hermes setup`)");
     }
 
+    let env_path = config_dir.join(".env");
+    print!("~/.hermes/.env... ");
+    if env_path.exists() {
+        println!("✓");
+    } else {
+        let project_env = std::env::current_dir()
+            .ok()
+            .map(|p| p.join(".env"))
+            .filter(|p| p.exists());
+        if let Some(p) = project_env {
+            println!("✓ (using fallback {})", p.display());
+        } else {
+            println!("✗ (run `hermes setup`)");
+        }
+    }
+
+    // Check SOUL.md persona file
+    let soul_path = config_dir.join("SOUL.md");
+    print!("SOUL.md persona file... ");
+    if soul_path.exists() {
+        println!("✓");
+    } else {
+        println!("✗ (will be created by `hermes setup` or installer)");
+    }
+
     // Check API keys via environment
+    let env_file = config_dir.join(".env");
+    let project_env_file = std::env::current_dir().ok().map(|p| p.join(".env"));
+    let has_key = |key: &str| -> bool {
+        std::env::var(key).ok().is_some_and(|v| !v.trim().is_empty())
+            || read_env_key(&env_file, key)
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false)
+            || project_env_file
+                .as_ref()
+                .and_then(|p| read_env_key(p, key))
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false)
+    };
+
     let api_checks = [
         ("ANTHROPIC_API_KEY", "Anthropic"),
         ("OPENROUTER_API_KEY", "OpenRouter"),
@@ -5422,12 +5470,7 @@ async fn run_doctor(cli: Cli) -> Result<(), AgentError> {
 
     println!("\nAPI Keys:");
     print!("  OpenAI (HERMES_OPENAI_API_KEY/OPENAI_API_KEY)... ");
-    let has_openai_key = std::env::var("HERMES_OPENAI_API_KEY")
-        .ok()
-        .is_some_and(|v| !v.trim().is_empty())
-        || std::env::var("OPENAI_API_KEY")
-            .ok()
-            .is_some_and(|v| !v.trim().is_empty());
+    let has_openai_key = has_key("HERMES_OPENAI_API_KEY") || has_key("OPENAI_API_KEY");
     if has_openai_key {
         println!("✓");
     } else {
@@ -5435,7 +5478,7 @@ async fn run_doctor(cli: Cli) -> Result<(), AgentError> {
     }
     for (env_var, name) in &api_checks {
         print!("  {} ({})... ", name, env_var);
-        if std::env::var(env_var).is_ok() {
+        if has_key(env_var) {
             println!("✓");
         } else {
             println!("✗ (not set)");
