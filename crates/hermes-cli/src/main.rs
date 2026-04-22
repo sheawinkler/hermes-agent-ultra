@@ -5258,8 +5258,7 @@ async fn run_setup() -> Result<(), AgentError> {
     maybe_import_legacy_env(&mut reader, &env_path)?;
 
     // 2. Prompt for API key
-    let has_env_openai_key = read_env_key(&env_path, "HERMES_OPENAI_API_KEY")
-        .is_some()
+    let has_env_openai_key = read_env_key(&env_path, "HERMES_OPENAI_API_KEY").is_some()
         || read_env_key(&env_path, "OPENAI_API_KEY").is_some();
     if has_env_openai_key {
         print!(
@@ -5450,7 +5449,9 @@ async fn run_doctor(cli: Cli) -> Result<(), AgentError> {
     let env_file = config_dir.join(".env");
     let project_env_file = std::env::current_dir().ok().map(|p| p.join(".env"));
     let has_key = |key: &str| -> bool {
-        std::env::var(key).ok().is_some_and(|v| !v.trim().is_empty())
+        std::env::var(key)
+            .ok()
+            .is_some_and(|v| !v.trim().is_empty())
             || read_env_key(&env_file, key)
                 .map(|v| !v.trim().is_empty())
                 .unwrap_or(false)
@@ -5487,9 +5488,15 @@ async fn run_doctor(cli: Cli) -> Result<(), AgentError> {
 
     // Check external tools
     println!("\nExternal tools:");
-    let tool_checks = [("docker", "Docker"), ("ssh", "SSH"), ("git", "Git")];
+    let tool_checks = [
+        ("docker", "Docker", false),
+        ("ssh", "SSH", false),
+        ("git", "Git", false),
+        ("node", "Node.js", true),
+        ("agent-browser", "agent-browser", true),
+    ];
 
-    for (cmd, name) in &tool_checks {
+    for (cmd, name, optional) in &tool_checks {
         print!("  {}... ", name);
         match tokio::process::Command::new("which")
             .arg(cmd)
@@ -5497,6 +5504,7 @@ async fn run_doctor(cli: Cli) -> Result<(), AgentError> {
             .await
         {
             Ok(output) if output.status.success() => println!("✓"),
+            _ if *optional => println!("(optional, not found)"),
             _ => println!("✗ (not found)"),
         }
     }
