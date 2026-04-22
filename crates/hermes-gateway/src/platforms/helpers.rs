@@ -4,6 +4,13 @@
 
 use regex::Regex;
 
+/// Image reference extracted from generated markdown / HTML.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlineImageRef {
+    pub url: String,
+    pub alt_text: Option<String>,
+}
+
 /// Split a long message into chunks that respect word and sentence boundaries.
 ///
 /// Prefers breaking at sentence endings (`. `, `! `, `? `), then at newlines,
@@ -111,6 +118,87 @@ pub fn extract_markdown_images(text: &str) -> (String, Vec<String>) {
         .join(" ")
         .trim()
         .to_string();
+    (cleaned, images)
+}
+
+fn looks_like_image_url(url: &str) -> bool {
+    let lower = url.trim().to_ascii_lowercase();
+    if lower.contains("fal.media")
+        || lower.contains("fal-cdn")
+        || lower.contains("replicate.delivery")
+    {
+        return true;
+    }
+    let base = lower.split('?').next().unwrap_or(lower.as_str());
+    [
+        ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".avif", ".heic", ".heif",
+        ".tiff", ".tif",
+    ]
+    .iter()
+    .any(|ext| base.ends_with(ext))
+}
+
+/// Extract inline images from markdown and HTML.
+///
+/// Supports:
+/// - Markdown images: `![alt](https://...)`
+/// - HTML images: `<img src="https://...">`
+///
+/// Returns `(cleaned_text, images)` where matched image tags are removed from
+/// the text and captured in `images`.
+pub fn extract_inline_images(text: &str) -> (String, Vec<InlineImageRef>) {
+    let md_re = Regex::new(r"!\[([^\]]*)\]\((https?://[^\s)]+)\)").expect("valid regex");
+    let html_re =
+        Regex::new(r#"<img[^>]*\bsrc=["']?(https?://[^"' >]+)["']?[^>]*>"#).expect("valid regex");
+
+    let mut images: Vec<InlineImageRef> = Vec::new();
+
+    let without_md = md_re
+        .replace_all(text, |caps: &regex::Captures| {
+            let url = caps.get(2).map(|m| m.as_str().trim()).unwrap_or_default();
+            let alt = caps
+                .get(1)
+                .map(|m| m.as_str().trim())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
+            if looks_like_image_url(url) {
+                images.push(InlineImageRef {
+                    url: url.to_string(),
+                    alt_text: alt,
+                });
+                "".to_string()
+            } else {
+                caps.get(0)
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or_default()
+            }
+        })
+        .to_string();
+
+    let without_html = html_re
+        .replace_all(&without_md, |caps: &regex::Captures| {
+            let url = caps.get(1).map(|m| m.as_str().trim()).unwrap_or_default();
+            if looks_like_image_url(url) {
+                images.push(InlineImageRef {
+                    url: url.to_string(),
+                    alt_text: None,
+                });
+                "".to_string()
+            } else {
+                caps.get(0)
+                    .map(|m| m.as_str().to_string())
+                    .unwrap_or_default()
+            }
+        })
+        .to_string();
+
+    let cleaned = without_html
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .trim()
+        .to_string();
+
     (cleaned, images)
 }
 
@@ -242,6 +330,26 @@ mod tests {
         assert_eq!(images[0], "https://i/1.png");
         assert_eq!(images[1], "https://i/2.jpg");
         assert_eq!(cleaned, "A B C");
+    }
+
+    #[test]
+    fn test_extract_inline_images_markdown_and_html() {
+        let text = "Start ![chart](https://cdn.example.com/a.png) and <img src=\"https://fal.media/b/c\"> end";
+        let (cleaned, images) = extract_inline_images(text);
+        assert_eq!(cleaned, "Start and end");
+        assert_eq!(images.len(), 2);
+        assert_eq!(images[0].url, "https://cdn.example.com/a.png");
+        assert_eq!(images[0].alt_text.as_deref(), Some("chart"));
+        assert_eq!(images[1].url, "https://fal.media/b/c");
+        assert_eq!(images[1].alt_text, None);
+    }
+
+    #[test]
+    fn test_extract_inline_images_keeps_non_image_html() {
+        let text = "A <img src=\"https://example.com/not-image\"> B";
+        let (cleaned, images) = extract_inline_images(text);
+        assert_eq!(images.len(), 0);
+        assert_eq!(cleaned, "A <img src=\"https://example.com/not-image\"> B");
     }
 
     #[test]

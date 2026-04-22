@@ -1164,6 +1164,25 @@ impl PlatformAdapter for TelegramAdapter {
         Ok(())
     }
 
+    async fn send_image_url(
+        &self,
+        chat_id: &str,
+        image_url: &str,
+        caption: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        let mut body = serde_json::json!({
+            "chat_id": chat_id,
+            "photo": image_url,
+        });
+        if let Some(cap) = caption.map(str::trim).filter(|s| !s.is_empty()) {
+            let truncated: String = cap.chars().take(1024).collect();
+            body["caption"] = serde_json::Value::String(truncated);
+        }
+        let url = format!("{}/sendPhoto", self.api_base);
+        let _resp: TelegramResponse<SentMessage> = self.post_json(&url, &body).await?;
+        Ok(())
+    }
+
     fn is_running(&self) -> bool {
         self.base.is_running()
     }

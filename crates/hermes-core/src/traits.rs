@@ -95,6 +95,25 @@ pub trait PlatformAdapter: Send + Sync {
         caption: Option<&str>,
     ) -> Result<(), GatewayError>;
 
+    /// Send an image by URL using native platform capabilities when possible.
+    ///
+    /// Default behavior mirrors Python parity fallback: send as plain text
+    /// (optionally prefixed by caption) when the platform has no native URL
+    /// image path.
+    async fn send_image_url(
+        &self,
+        chat_id: &str,
+        image_url: &str,
+        caption: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        let content = match caption.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(c) => format!("{c}\n{image_url}"),
+            None => image_url.to_string(),
+        };
+        self.send_message(chat_id, &content, Some(ParseMode::Plain))
+            .await
+    }
+
     /// Check whether the adapter is currently running.
     fn is_running(&self) -> bool;
 

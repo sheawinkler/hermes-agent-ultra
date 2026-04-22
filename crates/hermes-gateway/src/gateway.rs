@@ -24,6 +24,7 @@ use crate::background::{BackgroundTaskManager, TaskStatus};
 use crate::commands::{handle_command, GatewayCommandResult};
 use crate::dm::{DmDecision, DmManager};
 use crate::hooks::{HookEvent, HookRegistry};
+use crate::platforms::helpers::extract_inline_images;
 use crate::session::SessionManager;
 use crate::stream::{StreamConfig, StreamManager};
 
@@ -1590,7 +1591,41 @@ impl Gateway {
         let adapter = self.get_adapter(platform).await.ok_or_else(|| {
             GatewayError::Platform(format!("No adapter registered for platform: {}", platform))
         })?;
-        adapter.send_message(chat_id, text, parse_mode).await
+        let (cleaned, images) = extract_inline_images(text);
+        if images.is_empty() {
+            return adapter.send_message(chat_id, text, parse_mode).await;
+        }
+
+        if !cleaned.is_empty() {
+            adapter
+                .send_message(chat_id, &cleaned, parse_mode.clone())
+                .await?;
+        }
+
+        for image in images {
+            if let Err(err) = adapter
+                .send_image_url(chat_id, &image.url, image.alt_text.as_deref())
+                .await
+            {
+                warn!(
+                    platform = platform,
+                    chat_id = chat_id,
+                    image_url = %image.url,
+                    error = %err,
+                    "native image send failed; falling back to plain URL message"
+                );
+
+                let fallback = match image.alt_text.as_deref().map(str::trim) {
+                    Some(caption) if !caption.is_empty() => format!("{caption}\n{}", image.url),
+                    _ => image.url.clone(),
+                };
+                adapter
+                    .send_message(chat_id, &fallback, Some(ParseMode::Plain))
+                    .await?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Edit an existing message on a specific platform chat.
@@ -1863,6 +1898,23 @@ mod tests {
             Ok(())
         }
 
+        async fn send_image_url(
+            &self,
+            chat_id: &str,
+            image_url: &str,
+            caption: Option<&str>,
+        ) -> Result<(), GatewayError> {
+            let mut marker = format!("[image] {image_url}");
+            if let Some(cap) = caption.map(str::trim).filter(|s| !s.is_empty()) {
+                marker.push_str(&format!(" | caption={cap}"));
+            }
+            self.messages
+                .lock()
+                .unwrap()
+                .push((chat_id.to_string(), marker));
+            Ok(())
+        }
+
         fn is_running(&self) -> bool {
             true
         }
@@ -1887,6 +1939,36 @@ mod tests {
         let gw = Gateway::with_defaults(session_mgr, GatewayConfig::default());
 
         assert!(gw.adapter_names().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn gateway_send_message_extracts_inline_images() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let gw = Gateway::with_defaults(session_mgr, GatewayConfig::default());
+        gw.register_adapter("test", adapter).await;
+
+        gw.send_message(
+            "test",
+            "chat1",
+            "Here ![diagram](https://cdn.example.com/x.png) and <img src=\"https://fal.media/abc\"> done",
+            Some(ParseMode::Markdown),
+        )
+        .await
+        .expect("send should succeed");
+
+        let sent = sent.lock().unwrap();
+        assert_eq!(sent.len(), 3);
+        assert_eq!(sent[0].0, "chat1");
+        assert_eq!(sent[0].1, "Here and done");
+        assert_eq!(
+            sent[1].1,
+            "[image] https://cdn.example.com/x.png | caption=diagram"
+        );
+        assert_eq!(sent[2].1, "[image] https://fal.media/abc");
     }
 
     #[tokio::test]

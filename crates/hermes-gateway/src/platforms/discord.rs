@@ -1447,6 +1447,20 @@ impl PlatformAdapter for DiscordAdapter {
         Ok(())
     }
 
+    async fn send_image_url(
+        &self,
+        chat_id: &str,
+        image_url: &str,
+        caption: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        let mut embed = DiscordEmbed::new();
+        embed.image = Some(EmbedMedia {
+            url: image_url.to_string(),
+        });
+        self.send_embed(chat_id, caption, &[embed]).await?;
+        Ok(())
+    }
+
     fn is_running(&self) -> bool {
         self.base.is_running()
     }
