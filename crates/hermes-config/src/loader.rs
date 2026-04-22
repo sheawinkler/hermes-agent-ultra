@@ -519,7 +519,8 @@ pub fn load_from_json(path: &Path) -> Result<GatewayConfig, ConfigError> {
 ///   HERMES_LLM_API_KEY     -> all llm_providers[*].api_key
 ///   HERMES_BUDGET_MAX_RESULT_CHARS -> config.budget.max_result_size_chars
 ///   HERMES_BUDGET_MAX_AGGREGATE_CHARS -> config.budget.max_aggregate_chars
-///   OPENAI_API_KEY             -> llm_providers["openai"].api_key
+///   HERMES_OPENAI_API_KEY      -> llm_providers["openai"].api_key
+///   OPENAI_API_KEY             -> llm_providers["openai"].api_key (legacy fallback)
 ///   ANTHROPIC_API_KEY          -> llm_providers["anthropic"].api_key
 ///   OPENROUTER_API_KEY         -> llm_providers["openrouter"].api_key
 ///   DASHSCOPE_API_KEY          -> llm_providers["qwen"].api_key
@@ -579,9 +580,20 @@ pub fn apply_env_overrides(config: &mut GatewayConfig) {
         }
     }
 
-    // Provider-specific API keys
+    // Provider-specific API keys (prefer HERMES_OPENAI_API_KEY over legacy OPENAI_API_KEY).
+    let openai_env = std::env::var("HERMES_OPENAI_API_KEY")
+        .ok()
+        .or_else(|| std::env::var("OPENAI_API_KEY").ok());
+    if let Some(v) = openai_env {
+        if !v.trim().is_empty() {
+            config
+                .llm_providers
+                .entry("openai".to_string())
+                .or_insert_with(LlmProviderConfig::default)
+                .api_key = Some(v);
+        }
+    }
     for (env_var, provider_name) in [
-        ("OPENAI_API_KEY", "openai"),
         ("ANTHROPIC_API_KEY", "anthropic"),
         ("OPENROUTER_API_KEY", "openrouter"),
         ("DASHSCOPE_API_KEY", "qwen"),

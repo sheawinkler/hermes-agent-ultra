@@ -41,8 +41,8 @@ pub struct AuxiliaryWiringSummary {
 ///
 /// * `OPENROUTER_API_KEY` → registers an `openrouter` candidate
 /// * `ANTHROPIC_API_KEY` → registers an `anthropic` candidate
-/// * `OPENAI_API_KEY` (+ optional `OPENAI_BASE_URL`) → registers a `custom`
-///   candidate
+/// * `HERMES_OPENAI_API_KEY` (+ optional `OPENAI_BASE_URL`) → registers a
+///   `custom` candidate (`OPENAI_API_KEY` kept as legacy fallback)
 /// * `ZAI_API_KEY`, `KIMI_API_KEY`, `MINIMAX_API_KEY`, `GEMINI_API_KEY` →
 ///   register direct-key candidates (OpenAI-compatible base URLs)
 ///
@@ -77,10 +77,15 @@ pub fn build_default_auxiliary_client(
         summary.skipped.push("openrouter (no key)".into());
     }
 
-    // Custom OpenAI-compatible endpoint (covers OPENAI_API_KEY + custom base
-    // URLs). We mark it `Custom` rather than the OpenAI source so that the
-    // chain dedup logic doesn't collide with explicitly-named providers.
-    if let Ok(key) = std::env::var("OPENAI_API_KEY") {
+    // Custom OpenAI-compatible endpoint (covers HERMES_OPENAI_API_KEY and
+    // legacy OPENAI_API_KEY + custom base URLs). We mark it `Custom` rather
+    // than the OpenAI source so that the chain dedup logic doesn't collide
+    // with explicitly-named providers.
+    if let Some(key) = std::env::var("HERMES_OPENAI_API_KEY")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+    {
         if !key.trim().is_empty() {
             let base_url = std::env::var("OPENAI_BASE_URL")
                 .ok()
@@ -193,6 +198,7 @@ mod tests {
 
     const KEYS: &[&str] = &[
         "OPENROUTER_API_KEY",
+        "HERMES_OPENAI_API_KEY",
         "OPENAI_API_KEY",
         "OPENAI_BASE_URL",
         "OPENAI_AUXILIARY_MODEL",
@@ -256,7 +262,8 @@ mod tests {
 
         // Scenario 3: full chain, deterministic order.
         std::env::set_var("OPENROUTER_API_KEY", "sk-or");
-        std::env::set_var("OPENAI_API_KEY", "sk-oa");
+        std::env::set_var("HERMES_OPENAI_API_KEY", "sk-hermes-oa");
+        std::env::set_var("OPENAI_API_KEY", "sk-oa-legacy");
         std::env::set_var("ANTHROPIC_API_KEY", "sk-an");
         std::env::set_var("ZAI_API_KEY", "z");
         {

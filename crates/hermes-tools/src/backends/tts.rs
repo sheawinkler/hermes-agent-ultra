@@ -99,7 +99,8 @@ impl MultiTtsBackend {
     async fn openai_tts(&self, text: &str, voice: &str) -> Result<String, ToolError> {
         // Resolve transport in priority order:
         // 1. Managed Nous gateway (HERMES_ENABLE_NOUS_MANAGED_TOOLS + Nous token)
-        // 2. Direct OpenAI with VOICE_TOOLS_OPENAI_KEY override or OPENAI_API_KEY
+        // 2. Direct OpenAI with VOICE_TOOLS_OPENAI_KEY override, then
+        //    HERMES_OPENAI_API_KEY, then legacy OPENAI_API_KEY.
         let managed = resolve_managed_tool_gateway("openai-audio", ResolveOptions::default());
         let (endpoint, bearer, transport) = match managed {
             Some(cfg) => Self::openai_audio_managed_endpoint(&cfg),
@@ -107,8 +108,8 @@ impl MultiTtsBackend {
                 let key = resolve_openai_audio_api_key();
                 if key.is_empty() {
                     return Err(ToolError::ExecutionFailed(
-                        "OPENAI_API_KEY (or VOICE_TOOLS_OPENAI_KEY) not set, and no managed \
-                         openai-audio gateway is configured."
+                        "HERMES_OPENAI_API_KEY (or OPENAI_API_KEY / VOICE_TOOLS_OPENAI_KEY) \
+                         not set, and no managed openai-audio gateway is configured."
                             .into(),
                     ));
                 }
@@ -234,8 +235,8 @@ impl TtsBackend for MultiTtsBackend {
             }
             "edge_tts" | "edge-tts" | "neutts" => Err(ToolError::InvalidParams(format!(
                 "{resolved_provider} is not supported in hermes-agent-rust (zero-Python). \
-                 Use provider='openai' (OPENAI_API_KEY), 'elevenlabs' (ELEVENLABS_API_KEY), \
-                 or 'minimax' (MINIMAX_API_KEY)."
+                 Use provider='openai' (HERMES_OPENAI_API_KEY or OPENAI_API_KEY), \
+                 'elevenlabs' (ELEVENLABS_API_KEY), or 'minimax' (MINIMAX_API_KEY)."
             ))),
             other => Err(ToolError::InvalidParams(format!(
                 "Unknown TTS provider: '{other}'. Use 'openai', 'elevenlabs', or 'minimax'.",

@@ -3484,14 +3484,19 @@ pub async fn handle_cli_login(provider: Option<String>) -> Result<(), hermes_cor
 
     match provider.as_str() {
         "openai" => {
-            let env_key = std::env::var("OPENAI_API_KEY").ok();
+            let env_key = std::env::var("HERMES_OPENAI_API_KEY")
+                .ok()
+                .or_else(|| std::env::var("OPENAI_API_KEY").ok());
             if let Some(key) = env_key {
                 let masked = if key.len() > 8 {
                     format!("{}...{}", &key[..4], &key[key.len() - 4..])
                 } else {
                     "****".to_string()
                 };
-                println!("Found OPENAI_API_KEY in environment: {}", masked);
+                println!(
+                    "Found HERMES_OPENAI_API_KEY/OPENAI_API_KEY in environment: {}",
+                    masked
+                );
                 let cred_file = creds_dir.join("openai.json");
                 let cred = serde_json::json!({
                     "provider": "openai",
@@ -3506,8 +3511,8 @@ pub async fn handle_cli_login(provider: Option<String>) -> Result<(), hermes_cor
                 .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
                 println!("Credential reference stored at {}", cred_file.display());
             } else {
-                println!("No OPENAI_API_KEY found in environment.");
-                println!("Set it with: export OPENAI_API_KEY=sk-...");
+                println!("No HERMES_OPENAI_API_KEY/OPENAI_API_KEY found in environment.");
+                println!("Set it with: export HERMES_OPENAI_API_KEY=sk-...");
                 println!("Or use: hermes config set openai_api_key <key>");
             }
         }

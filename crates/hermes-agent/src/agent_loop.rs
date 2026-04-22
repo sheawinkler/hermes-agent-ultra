@@ -1293,8 +1293,14 @@ impl AgentLoop {
                 }
             }
         }
+        if matches!(provider, "openai" | "codex" | "openai-codex") {
+            return std::env::var("HERMES_OPENAI_API_KEY")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+                .filter(|v| !v.trim().is_empty());
+        }
         let env_var = match provider {
-            "openai" | "codex" | "openai-codex" => "OPENAI_API_KEY",
             "anthropic" => "ANTHROPIC_API_KEY",
             "openrouter" => "OPENROUTER_API_KEY",
             "qwen" | "qwen-oauth" => "DASHSCOPE_API_KEY",

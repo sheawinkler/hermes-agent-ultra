@@ -305,8 +305,15 @@ impl VoiceManager {
         audio_data: &[u8],
         format: &str,
     ) -> Result<String, AgentError> {
-        let api_key = std::env::var("OPENAI_API_KEY")
-            .map_err(|_| AgentError::Config("OPENAI_API_KEY not set for Whisper STT".into()))?;
+        let api_key = std::env::var("HERMES_OPENAI_API_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+            .ok_or_else(|| {
+                AgentError::Config(
+                    "HERMES_OPENAI_API_KEY (or OPENAI_API_KEY) not set for Whisper STT".into(),
+                )
+            })?;
 
         let client = reqwest::Client::new();
         let part = reqwest::multipart::Part::bytes(audio_data.to_vec())
@@ -465,8 +472,15 @@ impl VoiceManager {
     }
 
     async fn tts_openai(&self, text: &str) -> Result<Vec<u8>, AgentError> {
-        let api_key = std::env::var("OPENAI_API_KEY")
-            .map_err(|_| AgentError::Config("OPENAI_API_KEY not set for TTS".into()))?;
+        let api_key = std::env::var("HERMES_OPENAI_API_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+            .ok_or_else(|| {
+                AgentError::Config(
+                    "HERMES_OPENAI_API_KEY (or OPENAI_API_KEY) not set for TTS".into(),
+                )
+            })?;
 
         let client = reqwest::Client::new();
         let body = serde_json::json!({

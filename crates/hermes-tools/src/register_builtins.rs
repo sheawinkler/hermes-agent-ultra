@@ -143,7 +143,7 @@ pub fn register_builtin_tools(
                 backend,
             ))),
             "👁️",
-            vec!["OPENAI_API_KEY".into()],
+            vec!["HERMES_OPENAI_API_KEY".into(), "OPENAI_API_KEY".into()],
         );
     }
 
@@ -471,7 +471,7 @@ pub fn register_builtin_tools(
         "voice",
         Arc::new(crate::tools::transcription::TranscriptionHandler),
         "🎙️",
-        vec!["OPENAI_API_KEY".into()],
+        vec!["HERMES_OPENAI_API_KEY".into(), "OPENAI_API_KEY".into()],
     );
 
     // -- Voice mode ----------------------------------------------------------

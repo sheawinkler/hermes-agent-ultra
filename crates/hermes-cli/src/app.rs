@@ -565,18 +565,35 @@ fn parse_model_string(model: &str) -> (&str, &str) {
 
 /// Resolve API key / token for a named LLM provider from well-known environment variables.
 pub fn provider_api_key_from_env(provider: &str) -> Option<String> {
-    let var = match provider {
-        "openai" => "OPENAI_API_KEY",
-        "anthropic" => "ANTHROPIC_API_KEY",
-        "openrouter" => "OPENROUTER_API_KEY",
-        "qwen" => "DASHSCOPE_API_KEY",
-        "kimi" | "moonshot" => "MOONSHOT_API_KEY",
-        "minimax" => "MINIMAX_API_KEY",
-        "nous" => "NOUS_API_KEY",
-        "copilot" => "GITHUB_COPILOT_TOKEN",
-        _ => return None,
-    };
-    std::env::var(var).ok().filter(|s| !s.is_empty())
+    match provider {
+        "openai" => std::env::var("HERMES_OPENAI_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+            .filter(|s| !s.trim().is_empty()),
+        "anthropic" => std::env::var("ANTHROPIC_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
+        "openrouter" => std::env::var("OPENROUTER_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
+        "qwen" => std::env::var("DASHSCOPE_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
+        "kimi" | "moonshot" => std::env::var("MOONSHOT_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
+        "minimax" => std::env::var("MINIMAX_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
+        "nous" => std::env::var("NOUS_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
+        "copilot" => std::env::var("GITHUB_COPILOT_TOKEN")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
+        _ => None,
+    }
 }
 
 pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvider> {

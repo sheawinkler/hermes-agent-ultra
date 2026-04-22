@@ -138,7 +138,7 @@ File operations, terminal, browser, code execution, web search, vision, image ge
 The built-in `memory` tool follows Python parity semantics: `action=add|replace|remove`, `target=memory|user`, with `old_text` substring matching for replace/remove updates.
 Built-in store limits also match Python defaults: `memory` ≈ 2200 chars and `user` ≈ 1375 chars.
 The built-in `session_search` now supports Python-style dual mode: recent-session browse when `query` is omitted, and keyword search with optional `role_filter` plus `limit` capped at 5.
-`session_search` can run per-session LLM summaries when auxiliary credentials are available (`HERMES_SESSION_SEARCH_SUMMARY_API_KEY` or `OPENAI_API_KEY`; optional base/model overrides).
+`session_search` can run per-session LLM summaries when auxiliary credentials are available (`HERMES_SESSION_SEARCH_SUMMARY_API_KEY`, `HERMES_OPENAI_API_KEY`, or legacy `OPENAI_API_KEY`; optional base/model overrides).
 
 ### 8 Memory Plugins
 

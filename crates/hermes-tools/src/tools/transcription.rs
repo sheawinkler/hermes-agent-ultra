@@ -8,7 +8,8 @@
 //!    is routed through `{gateway}/audio/transcriptions` with a Nous
 //!    `Bearer` header.
 //! 2. **Direct**: otherwise, falls back to `VOICE_TOOLS_OPENAI_KEY`,
-//!    then `OPENAI_API_KEY`, calling `https://api.openai.com/v1/audio/...`.
+//!    then `HERMES_OPENAI_API_KEY`, then legacy `OPENAI_API_KEY`,
+//!    calling `https://api.openai.com/v1/audio/...`.
 //!
 //! The output JSON includes `transport: "managed" | "direct"` for
 //! observability.
@@ -87,7 +88,8 @@ impl ToolHandler for TranscriptionHandler {
             .ok_or_else(|| {
                 ToolError::ExecutionFailed(
                     "Whisper transcription requires either VOICE_TOOLS_OPENAI_KEY / \
-                     OPENAI_API_KEY for direct mode, or a Nous-managed openai-audio gateway."
+                     HERMES_OPENAI_API_KEY (or OPENAI_API_KEY) for direct mode, or a \
+                     Nous-managed openai-audio gateway."
                         .into(),
                 )
             })?;
@@ -151,7 +153,7 @@ impl ToolHandler for TranscriptionHandler {
         tool_schema(
             "transcription",
             "Transcribe audio into text via OpenAI Whisper. Honors VOICE_TOOLS_OPENAI_KEY / \
-             OPENAI_API_KEY for direct mode and routes through Nous-managed openai-audio \
+             HERMES_OPENAI_API_KEY (or OPENAI_API_KEY) for direct mode and routes through Nous-managed openai-audio \
              gateway when HERMES_ENABLE_NOUS_MANAGED_TOOLS is enabled.",
             JsonSchema::object(props, vec!["audio_path".into()]),
         )
@@ -175,6 +177,7 @@ mod tests {
             let tmp = tempfile::tempdir().unwrap();
             let keys = [
                 "HERMES_HOME",
+                "HERMES_OPENAI_API_KEY",
                 "OPENAI_API_KEY",
                 "VOICE_TOOLS_OPENAI_KEY",
                 "HERMES_ENABLE_NOUS_MANAGED_TOOLS",
@@ -277,7 +280,8 @@ mod tests {
             .await
             .unwrap_err();
         let s = err.to_string();
-        assert!(s.contains("VOICE_TOOLS_OPENAI_KEY") || s.contains("OPENAI_API_KEY"));
+        assert!(s.contains("VOICE_TOOLS_OPENAI_KEY"));
+        assert!(s.contains("HERMES_OPENAI_API_KEY") || s.contains("OPENAI_API_KEY"));
         assert!(s.contains("openai-audio gateway"));
     }
 
@@ -296,6 +300,7 @@ mod tests {
         let s = h.schema();
         let desc = serde_json::to_string(&s).unwrap();
         assert!(desc.contains("VOICE_TOOLS_OPENAI_KEY"));
+        assert!(desc.contains("HERMES_OPENAI_API_KEY"));
         assert!(desc.contains("HERMES_ENABLE_NOUS_MANAGED_TOOLS"));
     }
 }

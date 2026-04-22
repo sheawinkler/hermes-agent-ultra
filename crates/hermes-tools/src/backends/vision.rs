@@ -26,8 +26,15 @@ impl OpenAiVisionBackend {
     }
 
     pub fn from_env() -> Result<Self, ToolError> {
-        let api_key = std::env::var("OPENAI_API_KEY")
-            .map_err(|_| ToolError::ExecutionFailed("OPENAI_API_KEY not set".into()))?;
+        let api_key = std::env::var("HERMES_OPENAI_API_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| std::env::var("OPENAI_API_KEY").ok())
+            .ok_or_else(|| {
+                ToolError::ExecutionFailed(
+                    "HERMES_OPENAI_API_KEY (or OPENAI_API_KEY) not set".into(),
+                )
+            })?;
         let base_url = std::env::var("OPENAI_BASE_URL")
             .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
         let model = std::env::var("VISION_MODEL").unwrap_or_else(|_| "gpt-4o".to_string());
