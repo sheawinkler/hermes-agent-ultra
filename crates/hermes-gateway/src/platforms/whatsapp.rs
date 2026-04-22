@@ -307,17 +307,7 @@ impl WhatsAppAdapter {
             .ok_or_else(|| GatewayError::SendFailed("phone_number_id not configured".into()))?;
 
         let url = format!("{}/{}/messages", WHATSAPP_API_BASE, phone_id);
-        let mut media_obj = serde_json::json!({ "link": media_url });
-        if let Some(cap) = caption {
-            media_obj["caption"] = serde_json::Value::String(cap.to_string());
-        }
-
-        let body = serde_json::json!({
-            "messaging_product": "whatsapp",
-            "to": to,
-            "type": media_type,
-            media_type: media_obj
-        });
+        let body = build_link_media_body(to, media_type, media_url, caption);
 
         let resp = self
             .client
@@ -336,6 +326,60 @@ impl WhatsAppAdapter {
             )));
         }
         Ok(())
+    }
+}
+
+fn build_link_media_body(
+    to: &str,
+    media_type: &str,
+    media_url: &str,
+    caption: Option<&str>,
+) -> serde_json::Value {
+    let mut media_obj = serde_json::json!({ "link": media_url });
+    if let Some(cap) = caption.map(str::trim).filter(|s| !s.is_empty()) {
+        media_obj["caption"] = serde_json::Value::String(cap.to_string());
+    }
+
+    serde_json::json!({
+        "messaging_product": "whatsapp",
+        "to": to,
+        "type": media_type,
+        media_type: media_obj
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_link_media_body;
+
+    #[test]
+    fn build_link_media_body_with_caption() {
+        let body = build_link_media_body(
+            "15551234567",
+            "image",
+            "https://example.com/preview.png",
+            Some("Status update"),
+        );
+
+        assert_eq!(body["messaging_product"], "whatsapp");
+        assert_eq!(body["to"], "15551234567");
+        assert_eq!(body["type"], "image");
+        assert_eq!(body["image"]["link"], "https://example.com/preview.png");
+        assert_eq!(body["image"]["caption"], "Status update");
+    }
+
+    #[test]
+    fn build_link_media_body_omits_blank_caption() {
+        let body = build_link_media_body(
+            "15551234567",
+            "image",
+            "https://example.com/preview.png",
+            Some("   "),
+        );
+
+        assert_eq!(body["type"], "image");
+        assert_eq!(body["image"]["link"], "https://example.com/preview.png");
+        assert!(body["image"]["caption"].is_null());
     }
 }
 
