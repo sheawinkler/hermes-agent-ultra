@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-22T08:13:53.944760+00:00`
+Generated: `2026-04-22T08:13:55.932060+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `4587`.
 
@@ -16,112 +16,112 @@ Generated: `2026-04-22T08:13:53.944760+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 2398 |
+| pending | 1898 |
 | ported | 66 |
-| superseded | 2123 |
+| superseded | 2623 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `0426bb745f0c` | #20 | fix: reset default SOUL.md to baseline identity text (#3159) |
-| `26bfdc22b4d8` | #21 | feat: add godmode jailbreaking skill + docs (#3157) |
-| `4a56e2cd88c3` | #26 | fix(display): show tool progress for substantive tools, not just "preparing" |
-| `9989e579da21` | #26 | fix: add request timeouts to send_message_tool HTTP calls (#3162) |
-| `43af094ae34d` | #26 | fix(agent): include tool tokens in preflight estimate, guard context probe persistence (#3164) |
-| `36af1f3baf3f` | #23 | feat(telegram): Private Chat Topics with functional skill binding (#2598) |
-| `c6fe75e99bc6` | #20 | fix(gateway): fingerprint full auth token in agent cache signature (#3247) |
-| `2c719f0701b9` | #26 | fix(auth): migrate OAuth token refresh to platform.claude.com with fallback (#3246) |
-| `62f8aa9b03ef` | #20 | fix: MCP toolset resolution for runtime and config (#3252) |
-| `b7b3294c4a92` | #20 | fix(skills): preserve trust for skills-sh identifiers + reduce resolution churn (#3251) |
-| `3a7907b27816` | #26 | fix(security): prevent zip-slip path traversal in self-update (#3250) |
-| `b81d49dc450a` | #20 | fix(state): SQLite concurrency hardening + session transcript integrity (#3249) |
-| `a8e02c7d4929` | #20 | fix: align Nous Portal model slugs with OpenRouter naming (#3253) |
-| `76ed15dd4dec` | #20 | fix(security): normalize input before dangerous command detection (#3260) |
-| `e9e7fb06835d` | #20 | fix(gateway): track background task references in GatewayRunner (#3254) |
-| `41ee207a5ea6` | #20 | fix: catch KeyboardInterrupt in exit cleanup handlers (#3257) |
-| `db241ae6cef5` | #20 | feat(sessions): add --source flag for third-party session isolation (#3255) |
-| `3a86328847e4` | #23 | fix(gateway): add request timeouts to HA, Email, Mattermost, SMS adapters (#3258) |
-| `243ee67529ff` | #23 | fix: store asyncio task references to prevent GC mid-execution (#3267) |
-| `72250b5f62f4` | #22 | feat: config-gated /verbose command for messaging gateway (#3262) |
-| `e5d14445efd5` | #20 | fix(security): restrict subagent toolsets to parent's enabled set (#3269) |
-| `6610c377baef` | #23 | fix(telegram): self-reschedule reconnect when start_polling fails (#3268) |
-| `95dc9aaa7563` | #20 | feat: add managed tool gateway and Nous subscription support |
-| `148f46620f52` | #23 | fix(matrix): add backoff for SyncError in sync loop (#3280) |
-| `bdccdd67a1c3` | #20 | fix: OpenClaw migration overwrites defaults and setup wizard skips imported sections (#3282) |
-| `716e616d28ce` | #20 | fix(tui): status bar duplicates and degrades during long sessions (#3291) |
-| `bde45f5a2adf` | #23 | fix(gateway): retry transient send failures and notify user on exhaustion (#3288) |
-| `08fa326bb059` | #26 | feat(gateway): deliver background review notifications to user chat (#3293) |
-| `0375b2a0d720` | #20 | fix(gateway): silence background agent terminal output (#3297) |
-| `2d232c999115` | #20 | feat(cli): configurable busy input mode + fix /queue always working (#3298) |
-| `3c57eaf7442b` | #26 | fix: YAML boolean handling for tool_progress config (#3300) |
-| `18d28c63a795` | #23 | fix: add explicit hermes-api-server toolset for API server platform (#3304) |
-| `60fdb58ce471` | #20 | fix(agent): update context compressor limits after fallback activation (#3305) |
-| `f008ee1019b3` | #20 | fix(session): preserve reasoning fields in rewrite_transcript (#3311) |
-| `ad764d351351` | #26 | fix(auxiliary): catch ImportError from build_anthropic_client in vision auto-detection (#3312) |
-| `005786c55db8` | #20 | fix(gateway): include per-platform ALLOW_ALL and SIGNAL_GROUP in startup allowlist check (#3313) |
-| `1519c4d477a1` | #26 | fix(session): add /resume CLI handler, session log truncation guard, reopen_session API (#3315) |
-| `a8df7f996404` | #20 | fix: gateway token double-counting with cached agents (#3306) |
-| `867eefdd9fa7` | #23 | fix(signal): track SSE keepalive comments as connection activity (#3316) |
-| `22cfad157b8e` | #20 | fix: gateway token double-counting — use absolute set instead of increment (#3317) |
-| `03396627a633` | #20 | fix(ci): pin acp <0.9 and update retry-exhaust test (#3320) |
-| `3f95e741a77d` | #23 | fix: validate empty user messages to prevent Anthropic API 400 errors (#3322) |
-| `58ca875e191e` | #20 | feat(gateway): surface session config on /new, /reset, and auto-reset (#3321) |
-| `a2847ea7f0a6` | #23 | fix(gateway): add media download retry to Mattermost, Slack, and base cache (#3323) |
-| `b8b1f24fd755` | #20 | fix: handle addition-only hunks in V4A patch parser (#3325) |
-| `be416cdfa94e` | #20 | fix: guard config.get() against YAML null values to prevent AttributeError (#3377) |
-| `75fcbc44ce89` | #20 | feat(telegram): auto-discover fallback IPs via DoH when api.telegram.org is unreachable (#3376) |
-| `915df02bbf19` | #26 | fix(streaming): stale stream detector race causing spurious RemoteProtocolError |
-| `b7bcae49c639` | #26 | fix: SQLite WAL write-lock contention causing 15-20s TUI freeze (#3385) |
-| `41d9d0807847` | #23 | fix(telegram): fall back to no thread_id on 'Message thread not found' (#3390) |
-| `5a1e2a307ae4` | #20 | perf(ttft): salvage easy-win startup optimizations from #3346 (#3395) |
-| `eb2127c1dccc` | #20 | fix(cron): prevent recurring job re-fire on gateway crash/restart loop (#3396) |
-| `e0dbbdb2c946` | #20 | fix: eliminate 'Event loop is closed' / 'Press ENTER to continue' during idle (#3398) |
-| `8ecd7aed2c3b` | #20 | fix: prevent reasoning box from rendering 3x during tool-calling loops (#3405) |
-| `cc4514076b89` | #26 | feat(nix): add suffix PATHs during nix build for more agent-friendliness (#3274) |
-| `5127567d5dfc` | #20 | perf(ttft): cache skills prompt with shared skill_utils module (salvage #3366) (#3421) |
-| `f57ebf52e9bc` | #23 | fix(api-server): cancel orphaned agent + true interrupt on SSE disconnect (salvage #3399) (#3427) |
-| `fd8c465e423c` | #22 | feat: add Hugging Face as a first-class inference provider (#3419) |
-| `fb46a90098e0` | #20 | fix: increase API timeout default from 900s to 1800s for slow-thinking models (#3431) |
-| `6f11ff53ad2b` | #20 | fix(anthropic): use model-native output limits instead of hardcoded 16K (#3426) |
-| `e4e04c200541` | #20 | fix: make tirith block verdicts approvable instead of hard-blocking (#3428) |
-| `ab09f6b568a6` | #20 | feat: curate HF model picker with OpenRouter analogues (#3440) |
-| `658692799dbb` | #20 | fix: guard aux LLM calls against None content + reasoning fallback + retry (salvage #3389) (#3449) |
-| `8fdfc4b00c16` | #20 | fix(agent): detect thinking-budget exhaustion on truncation, skip useless retries (#3444) |
-| `b6b87dedd4ac` | #26 | fix: discover plugins before reading plugin toolsets in tools_config (#3457) |
-| `83043e9aa836` | #26 | fix: add timeout to subprocess calls in context_references (#3469) |
-| `388fa5293d90` | #26 | fix(matrix): add missing matrix entry in PLATFORMS dict (#3473) |
-| `03f24c1edd87` | #26 | fix: session_search fallback preview on summarization failure (salvage #3413) (#3478) |
-| `15cfd2082083` | #20 | fix: cap context pressure percentage at 100% in display (#3480) |
-| `09796b183b50` | #20 | fix: alibaba provider default endpoint and model list (#3484) |
-| `290c71a707e1` | #20 | fix(gateway): scope progress thread fallback to Slack only (salvage #3414) (#3488) |
-| `6ed974044499` | #23 | fix: prevent unbounded growth of _seen_uids in EmailAdapter (#3490) |
-| `9d4b3e5470fb` | #20 | fix: harden hermes update against diverged history, non-main branches, and gateway edge cases (salvage #3489) (#3492) |
-| `831e8ba0e5d9` | #20 | feat: tool-use enforcement + strip budget warnings from history (#3528) |
-| `e295a2215acd` | #20 | fix(gateway): include user-local bin paths in systemd unit PATH (#3527) |
-| `80a899a8e290` | #20 | fix: enable fine-grained tool streaming for Claude/OpenRouter + retry SSE errors (#3497) |
-| `d313a3b7d752` | #26 | fix: auto-repair jobs.json with invalid control characters (#3537) |
-| `411e3c153989` | #23 | fix(api-server): allow Idempotency-Key in CORS headers (#3530) |
-| `455bf2e853a6` | #22 | feat: activate plugin lifecycle hooks (pre/post_llm_call, session start/end) (#3542) |
-| `735ca9dfb20a` | #20 | refactor: replace swe-rex with native Modal SDK for Modal backend (#3538) |
-| `df6ce848e9d1` | #20 | fix(provider): remove MiniMax /v1→/anthropic auto-correction to allow user override (#3553) |
-| `be3929263392` | #26 | fix(cli): guard .strip() against None values from YAML config (#3552) |
-| `be322efdf2a0` | #23 | fix(matrix): harden e2ee access-token handling (#3562) |
-| `393929831e02` | #20 | fix(gateway): preserve transcript on /compress and hygiene compression (salvage #3516) (#3556) |
-| `901494d72892` | #20 | feat: make tool-use enforcement configurable via agent.tool_use_enforcement (#3551) |
-| `1d0a11936863` | #26 | fix(display): show reasoning before response when tool calls suppress content (#3566) |
-| `558cc14ad91e` | #26 | chore: release v0.5.0 (v2026.3.28) (#3568) |
-| `33c89e52ec37` | #23 | fix(whatsapp): add **kwargs to media sending methods to accept metadata (#3571) |
-| `09ebf8b2526f` | #23 | feat(api-server): add /v1/health alias for OpenAI compatibility (#3572) |
-| `327373289101` | #23 | fix(api-server): add CORS headers to streaming SSE responses (#3573) |
-| `c0aa06f300e5` | #20 | fix(test): update streaming test to match PR #3566 behavior change (#3574) |
-| `e97c0cb578ed` | #23 | fix: replace hardcoded ~/.hermes paths with get_hermes_home() for profile support |
-| `49a49983e4e2` | #23 | feat(api-server): add Access-Control-Max-Age to CORS preflight responses (#3580) |
-| `df1bf0a20903` | #23 | feat(api-server): add basic security headers (#3576) |
-| `d6b4fa2e9f35` | #23 | fix: strip @botname from commands so /new@TigerNanoBot resolves correctly (#3581) |
-| `ba3bbf5b5376` | #20 | fix: add missing mattermost/matrix/dingtalk toolsets + platform consistency tests (salvage #3512) (#3583) |
-| `924857c3e374` | #20 | fix: prevent tool name/arg concatenation for Ollama-compatible endpoints (#3582) |
-| `2dd286c1624c` | #26 | fix: write models.dev disk cache atomically (#3588) |
-| `6893c3befca7` | #22 | fix(gateway): inject PATH + VIRTUAL_ENV into launchd plist for macOS service (#3585) |
-| `d7c41f3cef59` | #23 | fix(telegram): honor proxy env vars in fallback transport (salvage #3411) (#3591) |
+| `ed4a605696b5` | #26 | docs: update docstring to mention Fireworks strict validation |
+| `65952ac00c66` | #20 | Honor provider reset windows in pooled credential failover |
+| `4437354198dc` | #20 | Preserve numeric credential labels in auth removal |
+| `441ec4880291` | #26 | style: use module-level re import instead of local import re as _re |
+| `0c54da8aafd9` | #23 | feat(gateway): live-stream /update output + interactive prompt buttons (#5180) |
+| `cb63b5f381a9` | #21 | feat(skills): add popular-web-designs skill with 54 website design systems (#5194) |
+| `4976a8b0668f` | #26 | feat: /model command — models.dev primary database + --provider flag (#5181) |
+| `d932980c1a7d` | #21 | Add gitnexus-explorer optional skill (#5208) |
+| `51ed7dc2f399` | #20 | feat: save oversized tool results to file instead of destructive truncation (#5210) |
+| `e899d6a05d59` | #26 | fix: increase default HERMES_AGENT_TIMEOUT from 10min to 30min |
+| `35d280d0bdc1` | #20 | feat: coerce tool call arguments to match JSON Schema types (#5265) |
+| `70f798043b65` | #20 | fix: Ollama Cloud auth, /model switch persistence, and alias tab completion |
+| `914f7461dc1b` | #20 | fix: add missing shutil import for Matrix E2EE setup |
+| `9d7c288d8699` | #23 | fix(matrix): add filesize to nio.upload() for Synapse compatibility |
+| `b65e67545a49` | #23 | fix(gateway): stop Matrix/Mattermost reconnect on permanent auth failures |
+| `bec02f3731f4` | #23 | fix(matrix): handle encrypted media events and cache decrypted attachments |
+| `36e046e843c7` | #26 | fix(gateway): MIME type fallback for Matrix document uploads |
+| `c100ad874c34` | #23 | fix(matrix): E2EE cron delivery via live adapter + HTML formatting + origin fallback |
+| `20b4060dbfac` | #26 | fix: web_extract fast-fail on scrape timeout + summarizer resilience |
+| `534511bebbb1` | #23 | feat(matrix): Tier 1 enhancement — reactions, read receipts, rich formatting, room management |
+| `a0a1b86c2edc` | #20 | fix: accept reasoning-only responses without retries — set content to "(empty)" (#5278) |
+| `54cb311f4017` | #26 | fix: suppress false 'Unknown toolsets' warning for MCP server names (#5279) |
+| `daa4a5acdd20` | #26 | feat: add docs links to setup wizard sections (#5283) |
+| `5ff514ec7958` | #26 | fix(security): remove full traceback from cron error output to prevent info leakage |
+| `7f853ba7b6ea` | #26 | fix: use logger.exception to preserve traceback in logs and drop unused import |
+| `507b63f86b14` | #23 | fix(api-server): pass fallback_model to AIAgent (#4954) |
+| `4df2fca2f03e` | #26 | fix(gateway): cap memory flush retries at 3 to prevent infinite loop |
+| `6df0f07ff3e9` | #23 | fix: /status command bypasses active-session guard during agent run (#5046) |
+| `abf1be564b28` | #26 | fix(deps): include telegram webhook extra in messaging installs (#4915) |
+| `aab74b582cbe` | #20 | fix(gateway): replace deprecated launchctl start/stop with kickstart/kill |
+| `74ff62f5ac80` | #20 | fix(gateway): use kickstart -k for atomic launchd restart |
+| `1d2e34c7ebd4` | #20 | Prevent Telegram polling handoffs and flood-control send failures |
+| `afccbf253c36` | #20 | fix: resolve listed messaging targets consistently |
+| `4a75aec4335f` | #20 | fix(gateway): resolve Telegram's underscored /commands to skill/plugin keys |
+| `e8053e8b937a` | #20 | fix(gateway): surface unknown /commands instead of leaking them to the LLM |
+| `6a6ae9a5c36a` | #26 | fix(gateway): correct misleading log text for unknown /commands |
+| `0c95e91059c1` | #23 | fix: follow-up fixes for salvaged PRs |
+| `6ee90a7cf6ad` | #20 | fix: hermes auth remove now clears env-seeded credentials permanently (#5285) |
+| `914a7db44825` | #26 | fix(acp): rename AuthMethod to AuthMethodAgent for agent-client-protocol 0.9.0 |
+| `fcdd5447e2ee` | #20 | fix: keep ACP stdout protocol-clean |
+| `c71b1d197f44` | #20 | fix(acp): advertise slash commands via ACP protocol |
+| `e167ad8f6195` | #26 | feat(delegate): add acp_command/acp_args override to delegate_task |
+| `cc2b56b26a9f` | #20 | feat(api): structured run events via /v1/runs SSE endpoint |
+| `c6793d6fc3d2` | #23 | fix(gateway): wrap cron helpers with staticmethod to prevent self-binding |
+| `ef3bd3b276cd` | #26 | security(approval): fix privilege escalation in gateway once-approval logic |
+| `1ebc9324173d` | #26 | fix(security): validate cron deliver platform name to prevent env var enumeration |
+| `71a4582bf807` | #26 | fix(security): hoist platform allowlist to module scope as frozenset |
+| `567bc7994849` | #26 | fix: clean up cron platform allowlist — add homeassistant, fix import, improve placement |
+| `12724e629529` | #22 | feat: progressive subdirectory hint discovery (#5291) |
+| `c02c3dc723ae` | #23 | fix(honcho): plugin drift overhaul -- observation config, chunking, setup wizard, docs, dead code cleanup |
+| `dd8a42bf7d46` | #23 | feat(plugins): plugin CLI registration system — decouple plugin commands from core |
+| `b074b0b13a4f` | #20 | test: add plugin CLI registration tests |
+| `0f813c422cdc` | #23 | fix(plugins): only register CLI commands for the active memory provider |
+| `583d9f959791` | #23 | fix(honcho): migration guard for observation mode default change |
+| `66d0fa177894` | #23 | fix: avoid unnecessary Discord members intent on startup |
+| `8d5226753f10` | #20 | fix: add missing ButtonStyle.grey to discord mock for test compatibility |
+| `b63fb03f3f63` | #26 | feat(browser): add JS evaluation via browser_console expression parameter (#5303) |
+| `4494fba14043` | #20 | feat: OSV malware check for MCP extension packages (#5305) |
+| `7409715947a7` | #26 | fix: link subagent sessions to parent and hide from session list |
+| `9d885b266c84` | #21 | feat(skills): add manim-video skill for mathematical and technical animations |
+| `f116c5907177` | #22 | tui: inherit Python-side rendering via gateway bridge |
+| `4c7d5ec778b7` | #26 | tui: add tui arg |
+| `256349346600` | #26 | fix: improve timeout debug logging and user-facing diagnostics (#5370) |
+| `e9ddfee4fd89` | #20 | fix(plugins): reject plugin names that resolve to the plugins root |
+| `fc15f56fc451` | #26 | feat: warn users when loading non-agentic Hermes LLM models (#5378) |
+| `fec58ad99e1a` | #26 | fix(gateway): replace wall-clock agent timeout with inactivity-based timeout (#5389) |
+| `89c812d1d283` | #23 | feat: shared thread sessions by default — multi-user thread support (#5391) |
+| `447ec076a4fa` | #21 | docs(manim-video): expand references with comprehensive Manim CE and 3b1b patterns |
+| `b26e7fd43a5f` | #21 | fix(manim-video): recommend monospace fonts — proportional fonts have broken kerning in Pango |
+| `0efe7dace751` | #20 | feat: add GPT/Codex execution discipline guidance for tool persistence (#5414) |
+| `0365f6202cff` | #20 | feat: show model pricing for OpenRouter and Nous Portal providers |
+| `3962bc84b797` | #26 | show cache pricing as well (if supported) |
+| `38d844601139` | #20 | feat: implement MCP OAuth 2.1 PKCE client support (#5420) |
+| `95a044a2e08d` | #21 | feat(research-paper-writing): fill coverage gaps and integrate patterns from AI-Scientist, GPT-Researcher |
+| `aa56df090f7b` | #26 | fix: allow env var overrides for Nous portal/inference URLs (#5419) |
+| `ab086a320bd3` | #26 | chore: remove qwen-3.6 free from nous portal model list |
+| `786970925e82` | #20 | fix(cli): add missing subprocess.run() timeouts in gateway CLI (#5424) |
+| `9ca954a27417` | #20 | fix: mem0 API v2 compat, prefetch context fencing, secret redaction (#5423) |
+| `dce5f51c7c43` | #20 | feat: config structure validation — detect malformed YAML at startup (#5426) |
+| `9e820dda3791` | #20 | Add request-scoped plugin lifecycle hooks |
+| `f530ef1835f4` | #20 | feat(plugins): pre_api_request/post_api_request with narrow payloads |
+| `38bcaa1e86df` | #20 | chore: remove langfuse doc, smoketest script, and installed-plugin test |
+| `dc9c3cac875d` | #26 | chore: remove redundant local import of normalize_usage |
+| `d6ef7fdf9229` | #20 | fix(cron): replace wall-clock timeout with inactivity-based timeout (#5440) |
+| `89db3aeb2caa` | #20 | fix(cron): add delivery guidance to cron prompt — stop send_message thrashing (#5444) |
+| `9c96f669a151` | #20 | feat: centralized logging, instrumentation, hermes logs CLI, gateway noise fix (#5430) |
+| `a2a9ad743148` | #20 | fix: hermes update kills freshly-restarted gateway service |
+| `d3d5b895f65e` | #20 | refactor: simplify _get_service_pids — dedupe systemd scopes, fix self-import, harden launchd parsing |
+| `6c12999b8c2a` | #26 | fix: bridge tool-calls in copilot-acp adapter |
+| `6df4860271e9` | #23 | fix(retaindb): fix API routes, add write queue, dialectic, agent model, file tools |
+| `ea8ec27023db` | #23 | fix(retaindb): make project optional, default to 'default' project |
+| `574759077067` | #23 | fix: follow-up improvements for salvaged PR #5456 |
+| `6f1cb46df982` | #23 | fix: register /queue, /background, /btw as native Discord slash commands (#5477) |
+| `79aeaa97e6d3` | #26 | fix: re-order providers,Quick Install, subscription polling |
+| `85973e0082fa` | #26 | fix(nous): don't use OAuth access_token as inference API key |
+| `6dfab3550100` | #20 | feat(providers): add Google AI Studio (Gemini) as a first-class provider |
+| `cc7136b1ac8e` | #20 | fix: update Gemini model catalog + wire models.dev as live model source |
+| `a912cd456880` | #21 | docs(manim-video): add 5 new reference files — design thinking, updaters, paper explainer, decorations, production quality |
+| `582dbbbbf7c4` | #20 | feat: add grok to TOOL_USE_ENFORCEMENT_MODELS for direct xAI usage (#5595) |
+| `f77be22c6506` | #20 | Fix #5211: Preserve dots in OpenCode Go model names |
 
