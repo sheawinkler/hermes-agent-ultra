@@ -70104,14 +70104,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "agent/error_classifier.py",
         "tests/agent/test_error_classifier.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in 9c67f4e5 (fix(agent): classify model-not-found 404s as fatal)",
+      "owner": "codex",
       "sha": "77e04a29d5742e50add9c0d84a396e1eee3c4356",
       "subject": "fix(error_classifier): don't classify generic 404 as model_not_found (#14013)",
       "target_ticket": 20,
@@ -70744,43 +70744,43 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "hermes_cli/config.py",
         "tests/tools/test_url_safety.py",
         "tools/url_safety.py"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in 6428f786 (security.allow_private_urls + metadata hard-block in Rust SSRF)",
+      "owner": "codex",
       "sha": "d6ed35d047642663bd3535f3b9fc0bd417c89475",
       "subject": "feat(security): add global toggle to allow private/internal URL resolution",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "model_tools.py",
         "tests/test_model_tools_async_bridge.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "python model_tools ThreadPoolExecutor timeout shutdown path is not used in Rust runtime architecture",
+      "owner": "codex",
       "sha": "76c454914a7c341bcff4b92da9b7d048d4e3b9ae",
       "subject": "fix(core): ensure non-blocking executor shutdown on async timeout",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "run_agent.py",
         "tests/run_agent/test_provider_fallback.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in 5f5dd6d9 (runtime provider api_key_env fallback resolution)",
+      "owner": "codex",
       "sha": "4ac1c959b250605ccd92db60e4706e051eb4a557",
       "subject": "fix(agent): resolve fallback provider key_env secrets",
       "target_ticket": 20,
@@ -70870,7 +70870,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     }
   ],
-  "generated_at_utc": "2026-04-22T22:25:32.359101+00:00",
+  "generated_at_utc": "2026-04-22T23:33:37.374283+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -70878,9 +70878,9 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 59,
-      "ported": 68,
-      "superseded": 4527
+      "pending": 55,
+      "ported": 71,
+      "superseded": 4528
     },
     "by_target_ticket": {
       "20": 1654,

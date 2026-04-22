@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-22T22:25:32.359101+00:00`
+Generated: `2026-04-22T23:33:37.374283+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `4654`.
 
@@ -16,9 +16,9 @@ Generated: `2026-04-22T22:25:32.359101+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 59 |
-| ported | 68 |
-| superseded | 4527 |
+| pending | 55 |
+| ported | 71 |
+| superseded | 4528 |
 
 ## First 100 Pending Commits
 
@@ -35,7 +35,6 @@ Generated: `2026-04-22T22:25:32.359101+00:00`
 | `cf55c738e79b` | #23 | refactor(qqbot): migrate qr onboard flow to sync + consolidate into onboard.py |
 | `5fb143169b4e` | #20 | feat(dashboard): track real API call count per session |
 | `3e652f75b27b` | #20 | fix(plugins+nous): auto-coerce memory plugins; actionable Nous 401 diagnostic (#14005) |
-| `77e04a29d574` | #20 | fix(error_classifier): don't classify generic 404 as model_not_found (#14013) |
 | `2efb0eea211a` | #26 | fix(anthropic_adapter): preserve reasoning_content on assistant tool-call messages for Kimi /coding |
 | `04e039f687b8` | #26 | fix: Kimi /coding thinking block survival + empty reasoning_content + block ordering |
 | `7785654ad5cc` | #22 | feat(tui): subagent spawn observability overlay |
@@ -75,9 +74,6 @@ Generated: `2026-04-22T22:25:32.359101+00:00`
 | `103c71ac36c6` | #22 | refactor(tui): /clean pass on tui-polish — data tables, tighter title |
 | `4107538da830` | #22 | style(debug): add missing blank line between LogSnapshot and helpers |
 | `ea9ddecc72d1` | #22 | fix(tui): route Ctrl+K and Ctrl+W through macOS readline fallback |
-| `d6ed35d04764` | #20 | feat(security): add global toggle to allow private/internal URL resolution |
-| `76c454914a7c` | #20 | fix(core): ensure non-blocking executor shutdown on async timeout |
-| `4ac1c959b250` | #20 | fix(agent): resolve fallback provider key_env secrets |
 | `e86acad8f1a5` | #23 | feat(feishu): preserve @mention context on inbound messages |
 | `44a16c5d9d54` | #20 | guard terminal_tool import-time env parsing |
 | `6513138f2684` | #20 | fix(agent): recognize Tailscale CGNAT (100.64.0.0/10) as local for Ollama timeouts |
