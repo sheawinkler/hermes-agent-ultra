@@ -73,3 +73,33 @@
 - Queue/proof refresh:
   - `docs/parity/upstream-missing-queue.{json,md}`
   - `docs/parity/global-parity-proof.{json,md}`
+
+## 2026-04-22 batch-06 (skill_view file-path traversal parity)
+- Scope: WG1 `skill_view` file-path security and behavior parity.
+- Upstream commits triaged:
+  - `1cb2311bad5d10ce7de66f6c0ac5e91956a3ce34`
+    `fix(security): block path traversal in skill_view file_path (fixes #220)`
+    - Disposition: `ported`
+    - Rust parity commit: `250ad94a`
+  - `e86f391cacfeadfdcd19e153b5373f2d2f1cd727`
+    `fix: use os.sep in skill_view path boundary check for Windows compatibility`
+    - Disposition: `superseded` (covered by Rust path-component + `strip_prefix` containment checks in `250ad94a`)
+  - `79871c20833059444a27f1e23cd7df056a389158`
+    `refactor: use Path.is_relative_to() for skill_view boundary check`
+    - Disposition: `superseded` (same containment semantics covered in `250ad94a`)
+- Implementation (Rust):
+  - `crates/hermes-tools/src/tools/skills.rs`
+  - Added `skill_view.file_path` support with:
+    - fast traversal-component rejection (`..`, absolute/prefix roots)
+    - containment validation against skill root boundary (including symlink escape)
+    - file discovery hints (`available_files`) for not-found targets
+    - binary-file fallback payload
+  - Added tests for:
+    - valid in-skill file read
+    - `..` traversal rejection
+    - symlink escape blocking
+- Verification:
+  - `cargo test -p hermes-tools tools::skills -- --nocapture`
+- Queue/proof refresh:
+  - `docs/parity/upstream-missing-queue.{json,md}`
+  - `docs/parity/global-parity-proof.{json,md}`
