@@ -119,6 +119,28 @@ pub trait TerminalBackend: Send + Sync {
         pty: bool,
     ) -> Result<CommandOutput, AgentError>;
 
+    /// Execute a command with optional stdin payload piping support.
+    ///
+    /// Backends that do not support stdin piping can keep the default
+    /// behavior, which rejects non-empty `stdin_data`.
+    async fn execute_command_with_stdin(
+        &self,
+        command: &str,
+        timeout: Option<u64>,
+        workdir: Option<&str>,
+        background: bool,
+        pty: bool,
+        stdin_data: Option<&str>,
+    ) -> Result<CommandOutput, AgentError> {
+        if stdin_data.is_some() {
+            return Err(AgentError::ToolExecution(
+                "stdin_data is not supported by this terminal backend".into(),
+            ));
+        }
+        self.execute_command(command, timeout, workdir, background, pty)
+            .await
+    }
+
     /// Read a file's contents (with optional offset and line limit).
     async fn read_file(
         &self,

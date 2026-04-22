@@ -247,3 +247,30 @@
 - Queue/proof refresh:
   - `docs/parity/upstream-missing-queue.{json,md}`
   - `docs/parity/global-parity-proof.{json,md}`
+
+## 2026-04-22 batch-12 (stdin_data terminal execution parity)
+- Scope: adjacent upstream parity for stdin piping support in command execution.
+- Upstream commit ported:
+  - `d49af633f06a7f7f9f2c02089e5debdfda87f953`
+    `feat: enhance command execution with stdin support`
+    - Disposition: `ported`
+- Implementation (Rust):
+  - `crates/hermes-core/src/traits.rs`
+    - Added `execute_command_with_stdin(...)` default method on `TerminalBackend`.
+  - `crates/hermes-tools/src/tools/terminal.rs`
+    - Terminal tool now accepts optional `stdin_data` and routes via backend `execute_command_with_stdin`.
+    - Added regression test for `stdin_data` execution path.
+  - `crates/hermes-environments/src/local.rs`
+    - Implemented `execute_command_with_stdin` for local backend:
+      - foreground shell command stdin piping
+      - background command bootstrap stdin write+close support
+      - PTY foreground stdin piping path
+    - Added regression test validating stdin piping (`cat` + payload).
+- Superseded sub-part (architecture):
+  - Upstream shell file-ops heredoc replacement is not directly applicable in Rust because file writes are native (`write_file` backend) rather than shell heredoc command construction.
+- Verification:
+  - `cargo test -p hermes-environments local:: -- --nocapture`
+  - `cargo test -p hermes-tools tools::terminal -- --nocapture`
+- Queue/proof refresh:
+  - `docs/parity/upstream-missing-queue.{json,md}`
+  - `docs/parity/global-parity-proof.{json,md}`

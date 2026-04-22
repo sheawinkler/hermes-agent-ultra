@@ -65,12 +65,20 @@ impl ToolHandler for TerminalHandler {
             .unwrap_or(false);
 
         let pty = params.get("pty").and_then(|v| v.as_bool()).unwrap_or(false);
+        let stdin_data = params.get("stdin_data").and_then(|v| v.as_str());
 
         let transformed_command = transform_sudo_command(command);
 
         match self
             .backend
-            .execute_command(&transformed_command, timeout, workdir, background, pty)
+            .execute_command_with_stdin(
+                &transformed_command,
+                timeout,
+                workdir,
+                background,
+                pty,
+                stdin_data,
+            )
             .await
         {
             Ok(output) => Ok(format_command_output(&output)),
@@ -115,6 +123,13 @@ impl ToolHandler for TerminalHandler {
                 "type": "boolean",
                 "description": "Run command in PTY mode for interactive programs (default: false)",
                 "default": false
+            }),
+        );
+        props.insert(
+            "stdin_data".into(),
+            json!({
+                "type": "string",
+                "description": "Optional data piped to command stdin. Use this for large payloads instead of embedding content directly in the command."
             }),
         );
 
@@ -480,6 +495,21 @@ mod tests {
                 stderr: String::new(),
             })
         }
+        async fn execute_command_with_stdin(
+            &self,
+            cmd: &str,
+            _timeout: Option<u64>,
+            _workdir: Option<&str>,
+            _background: bool,
+            _pty: bool,
+            stdin_data: Option<&str>,
+        ) -> Result<CommandOutput, AgentError> {
+            Ok(CommandOutput {
+                exit_code: 0,
+                stdout: format!("output of: {} / stdin={}", cmd, stdin_data.unwrap_or("")),
+                stderr: String::new(),
+            })
+        }
         async fn read_file(
             &self,
             _path: &str,
@@ -563,6 +593,16 @@ mod tests {
             .await
             .unwrap();
         assert!(result.contains("echo hello"));
+    }
+
+    #[tokio::test]
+    async fn test_terminal_handler_execute_with_stdin_data() {
+        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
+        let result = handler
+            .execute(json!({"command": "cat", "stdin_data": "abc123"}))
+            .await
+            .unwrap();
+        assert!(result.contains("stdin=abc123"));
     }
 
     #[tokio::test]

@@ -1,14 +1,14 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-22T02:12:52.033453+00:00`
+Generated: `2026-04-22T02:18:22.420500+00:00`
 
-- Range: `main..upstream/main`; total commits tracked: `4559`.
+- Range: `main..upstream/main`; total commits tracked: `4565`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
 | #20 | GPAR-01 tests+CI parity | 1622 |
 | #21 | GPAR-02 skills parity | 199 |
-| #22 | GPAR-03 UX parity | 517 |
+| #22 | GPAR-03 UX parity | 523 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 507 |
 | #24 | GPAR-05 environments+parsers+benchmarks | 64 |
 | #25 | GPAR-06 packaging/docs/install parity | 152 |
@@ -16,8 +16,8 @@ Generated: `2026-04-22T02:12:52.033453+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 4177 |
-| ported | 27 |
+| pending | 4182 |
+| ported | 28 |
 | superseded | 355 |
 
 ## First 100 Pending Commits
@@ -93,7 +93,6 @@ Generated: `2026-04-22T02:12:52.033453+00:00`
 | `59cb0cecb214` | #25 | feat: add messaging gateway startup functionality |
 | `53e13fe1f12c` | #26 | feat: add Slack and WhatsApp setup prompts in setup wizard |
 | `3191a9ba11d4` | #23 | feat: add new conversation command and enhance command handling |
-| `d49af633f06a` | #26 | feat: enhance command execution with stdin support |
 | `4d5f29c74ca9` | #25 | feat: introduce skill management tool for agent-created skills and skills migration to ~/.hermes |
 | `9350e26e681e` | #26 | feat: introduce clarifying questions tool for interactive user engagement |
 | `748f0b2b5fc1` | #26 | feat: enhance clarify tool with configurable timeout and countdown display |
@@ -124,4 +123,5 @@ Generated: `2026-04-22T02:12:52.033453+00:00`
 | `a54a27595bf4` | #26 | fix: update browser command connection instructions to prevent session conflicts |
 | `3976962621d5` | #25 | fix: update session logging directory path in README and code |
 | `3555c6173d0f` | #26 | refactor: remove temporary API payload logging and enhance session log structure |
+| `b6247b71b5a7` | #26 | refactor: update tool descriptions for clarity and conciseness |
 
