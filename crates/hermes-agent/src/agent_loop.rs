@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use hermes_auth::{exchange_refresh_token, OAuth2Endpoints};
+use hermes_intelligence::get_model_context_length;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::task::JoinSet;
@@ -32,6 +33,7 @@ use crate::context::{
     SystemPromptBuilder,
 };
 use crate::context_files::{load_hermes_context_files, load_workspace_context};
+use crate::context_references::preprocess_context_references_async;
 use crate::credential_pool::CredentialPool;
 use crate::interrupt::InterruptController;
 use crate::memory_manager::MemoryManager;
@@ -2393,6 +2395,21 @@ impl AgentLoop {
             }
         }
         strip_budget_warnings_from_messages(&mut messages);
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let context_length = get_model_context_length(&self.config.model);
+        for msg in messages.iter_mut() {
+            if msg.role != MessageRole::User {
+                continue;
+            }
+            let Some(content) = msg.content.clone() else {
+                continue;
+            };
+            let result =
+                preprocess_context_references_async(&content, &cwd, context_length, None).await;
+            if result.expanded && result.message != content {
+                msg.content = Some(result.message);
+            }
+        }
 
         let task_hint = messages
             .iter()

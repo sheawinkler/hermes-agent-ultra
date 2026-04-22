@@ -11,6 +11,7 @@ pub mod budget;
 pub mod compression;
 pub mod context;
 pub mod context_files;
+pub mod context_references;
 pub mod credential_pool;
 pub mod fallback;
 pub mod honcho_provider;
@@ -82,6 +83,10 @@ pub use session_persistence::{leading_system_prompt_for_persist, SessionPersiste
 
 // Re-export context files
 pub use context_files::{load_hermes_context_files, load_workspace_context, scan_context_content};
+pub use context_references::{
+    parse_context_references, preprocess_context_references_async, ContextReference,
+    ContextReferenceResult,
+};
 
 // Re-export subdirectory hints
 pub use subdirectory_hints::{generate_project_hints, SubdirectoryHintTracker};
