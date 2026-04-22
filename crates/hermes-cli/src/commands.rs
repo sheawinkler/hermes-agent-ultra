@@ -807,6 +807,8 @@ pub async fn handle_cli_chat(
         .map_err(|e| hermes_core::AgentError::Config(format!("cron load: {e}")))?;
     cron_scheduler.start().await;
     wire_cron_scheduler_backend(&tool_registry, cron_scheduler);
+    let tool_schemas =
+        crate::platform_toolsets::resolve_platform_tool_schemas(&config, "cli", &tool_registry);
     let agent_tool_registry = Arc::new(crate::app::bridge_tool_registry(&tool_registry));
 
     let agent_config = crate::app::build_agent_config(&config, &current_model);
@@ -846,7 +848,7 @@ pub async fn handle_cli_chat(
     match query {
         Some(q) => {
             let messages = vec![hermes_core::Message::user(&q)];
-            let result = agent.run(messages, None).await?;
+            let result = agent.run(messages, Some(tool_schemas)).await?;
 
             let reply = result
                 .messages
@@ -4417,6 +4419,7 @@ fn acp_history_to_messages(
 struct CliAcpPromptExecutor {
     config: Arc<hermes_config::GatewayConfig>,
     tool_registry: Arc<hermes_tools::ToolRegistry>,
+    tool_schemas: Vec<hermes_core::ToolSchema>,
 }
 
 #[async_trait::async_trait]
@@ -4441,7 +4444,10 @@ impl hermes_acp::AcpPromptExecutor for CliAcpPromptExecutor {
         let agent = hermes_agent::AgentLoop::new(agent_config, agent_tools, provider);
         let messages = acp_history_to_messages(history, user_text);
 
-        let result = agent.run(messages, None).await.map_err(|e| e.to_string())?;
+        let result = agent
+            .run(messages, Some(self.tool_schemas.clone()))
+            .await
+            .map_err(|e| e.to_string())?;
         let response_text = result
             .messages
             .iter()
@@ -4500,10 +4506,16 @@ pub async fn handle_cli_acp(action: Option<String>) -> Result<(), hermes_core::A
                 .map_err(|e| hermes_core::AgentError::Config(format!("cron load: {e}")))?;
             cron_scheduler.start().await;
             crate::runtime_tool_wiring::wire_cron_scheduler_backend(&tool_registry, cron_scheduler);
+            let tool_schemas = crate::platform_toolsets::resolve_platform_tool_schemas(
+                &config,
+                "cli",
+                &tool_registry,
+            );
 
             let prompt_executor = Arc::new(CliAcpPromptExecutor {
                 config: Arc::new(config.clone()),
                 tool_registry,
+                tool_schemas,
             });
 
             let session_manager = Arc::new(hermes_acp::SessionManager::new());

@@ -14,6 +14,7 @@ use hermes_cli::app::{
 };
 use hermes_cli::cli::{Cli, CliCommand};
 use hermes_cli::config_env::hydrate_env_from_config;
+use hermes_cli::platform_toolsets::resolve_platform_tool_schemas;
 use hermes_cli::runtime_tool_wiring::{
     wire_cron_scheduler_backend, wire_gateway_clarify_backend, wire_gateway_messaging_backend,
 };
@@ -1138,6 +1139,11 @@ async fn run_gateway(
                             config.model.as_deref().unwrap_or("gpt-4o"),
                             &ctx,
                         );
+                        let tool_schemas = resolve_platform_tool_schemas(
+                            config.as_ref(),
+                            &ctx.platform,
+                            &runtime_tools,
+                        );
                         let platform_for_review = ctx.platform.clone();
                         let chat_for_review = ctx.chat_id.clone();
                         let deferred_queue = ctx.deferred_post_delivery_messages.clone();
@@ -1283,7 +1289,7 @@ async fn run_gateway(
                             build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools)
                                 .with_callbacks(callbacks);
                         let result = agent
-                            .run(messages, None)
+                            .run(messages, Some(tool_schemas))
                             .await
                             .map_err(|e| hermes_gateway::GatewayError::Platform(e.to_string()))?;
                         let home = ctx
@@ -1336,6 +1342,11 @@ async fn run_gateway(
                         let effective_model = resolve_model_for_gateway(
                             config.model.as_deref().unwrap_or("gpt-4o"),
                             &ctx,
+                        );
+                        let tool_schemas = resolve_platform_tool_schemas(
+                            config.as_ref(),
+                            &ctx.platform,
+                            &runtime_tools,
                         );
                         let platform_for_review = ctx.platform.clone();
                         let chat_for_review = ctx.chat_id.clone();
@@ -1522,7 +1533,7 @@ async fn run_gateway(
                             });
 
                         let result = agent
-                            .run_stream(messages, None, Some(stream_cb))
+                            .run_stream(messages, Some(tool_schemas), Some(stream_cb))
                             .await
                             .map_err(|e| hermes_gateway::GatewayError::Platform(e.to_string()))?;
                         let home = ctx

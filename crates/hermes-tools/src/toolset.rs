@@ -245,6 +245,27 @@ impl ToolsetManager {
             .map(String::from)
             .collect(),
         ));
+        self.register(Toolset::with_includes(
+            "hermes-discord",
+            vec!["hermes-telegram"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+        ));
+        self.register(Toolset::with_includes(
+            "hermes-whatsapp",
+            vec!["hermes-telegram"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+        ));
+        self.register(Toolset::with_includes(
+            "hermes-slack",
+            vec!["hermes-telegram"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+        ));
     }
 
     /// Register a toolset.
@@ -488,5 +509,26 @@ mod tests {
         assert!(tools.contains(&"web_search".to_string()));
         assert!(tools.contains(&"terminal".to_string()));
         assert!(tools.contains(&"read_file".to_string()));
+    }
+
+    #[test]
+    fn test_messaging_platform_presets_present() {
+        let manager = ToolsetManager::new(empty_registry());
+        for preset in [
+            "hermes-telegram",
+            "hermes-discord",
+            "hermes-whatsapp",
+            "hermes-slack",
+        ] {
+            let tools = manager.resolve_toolset_unfiltered(preset).unwrap();
+            assert!(
+                tools.contains(&"send_message".to_string()),
+                "preset {preset} should include send_message"
+            );
+            assert!(
+                tools.contains(&"terminal".to_string()),
+                "preset {preset} should include terminal"
+            );
+        }
     }
 }

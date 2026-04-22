@@ -21,6 +21,7 @@ use hermes_agent::providers_extra::{
 use hermes_agent::sub_agent_orchestrator::SubAgentOrchestrator;
 use hermes_agent::{AgentConfig, AgentLoop, InterruptController};
 use hermes_config::{cron_dir, hermes_home as hermes_home_dir, load_config, GatewayConfig};
+use hermes_core::ToolSchema;
 use hermes_core::{AgentError, LlmProvider};
 use hermes_cron::cron_scheduler_for_data_dir;
 use hermes_skills::{FileSkillStore, SkillManager};
@@ -45,6 +46,9 @@ pub struct App {
 
     /// The tool registry (shared with the agent).
     pub tool_registry: Arc<ToolRegistry>,
+
+    /// Active tool schemas exposed to the model for this runtime.
+    pub tool_schemas: Vec<ToolSchema>,
 
     /// Conversation messages for the current session.
     pub messages: Vec<hermes_core::Message>,
@@ -143,6 +147,8 @@ impl App {
         cron_scheduler.start().await;
         wire_cron_scheduler_backend(&tool_registry, cron_scheduler);
         let agent_tool_registry = Arc::new(bridge_tool_registry(&tool_registry));
+        let tool_schemas =
+            crate::platform_toolsets::resolve_platform_tool_schemas(&config, "cli", &tool_registry);
 
         let agent_config = build_agent_config(&config, &current_model);
         let provider = build_provider(&config, &current_model);
@@ -156,6 +162,7 @@ impl App {
             config: Arc::new(config),
             agent,
             tool_registry,
+            tool_schemas,
             messages: Vec::new(),
             session_id: Uuid::new_v4().to_string(),
             running: true,
@@ -346,9 +353,13 @@ impl App {
                         h.send_chunk(chunk);
                     }) as Box<dyn Fn(hermes_core::StreamChunk) + Send + Sync>
                 });
-            self.agent.run_stream(messages, None, stream_cb).await
+            self.agent
+                .run_stream(messages, Some(self.tool_schemas.clone()), stream_cb)
+                .await
         } else {
-            self.agent.run(messages, None).await
+            self.agent
+                .run(messages, Some(self.tool_schemas.clone()))
+                .await
         };
 
         match result {

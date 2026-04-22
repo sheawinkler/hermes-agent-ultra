@@ -116,6 +116,7 @@ fn arb_gateway_config() -> impl Strategy<Value = GatewayConfig> {
                 tools: vec!["bash".into(), "read".into()],
                 budget: BudgetConfig::default(),
                 platforms: HashMap::new(),
+                platform_toolsets: hermes_config::config::default_platform_toolsets(),
                 session,
                 streaming,
                 terminal: TerminalConfig::default(),

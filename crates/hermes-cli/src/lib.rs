@@ -26,6 +26,7 @@ pub mod lumio;
 pub mod mcp_config;
 pub mod model_switch;
 pub mod pairing_store;
+pub mod platform_toolsets;
 pub mod profiles;
 pub mod providers;
 pub mod runtime_tool_wiring;

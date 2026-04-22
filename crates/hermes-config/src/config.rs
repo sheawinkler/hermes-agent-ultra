@@ -45,6 +45,10 @@ pub struct GatewayConfig {
     #[serde(default)]
     pub platforms: HashMap<String, PlatformConfig>,
 
+    /// Per-platform toolset selection (e.g. cli/hermes-cli, telegram/hermes-telegram).
+    #[serde(default = "default_platform_toolsets")]
+    pub platform_toolsets: HashMap<String, Vec<String>>,
+
     /// Session management settings.
     #[serde(default)]
     pub session: SessionConfig,
@@ -108,6 +112,7 @@ impl Default for GatewayConfig {
             tools: default_tools(),
             budget: BudgetConfig::default(),
             platforms: HashMap::new(),
+            platform_toolsets: default_platform_toolsets(),
             session: SessionConfig::default(),
             streaming: StreamingConfig::default(),
             terminal: TerminalConfig::default(),
@@ -123,6 +128,17 @@ impl Default for GatewayConfig {
             home_dir: None,
         }
     }
+}
+
+/// Default platform-to-toolset mapping, aligned with Python gateway defaults.
+pub fn default_platform_toolsets() -> HashMap<String, Vec<String>> {
+    let mut map = HashMap::new();
+    map.insert("cli".to_string(), vec!["hermes-cli".to_string()]);
+    map.insert("telegram".to_string(), vec!["hermes-telegram".to_string()]);
+    map.insert("discord".to_string(), vec!["hermes-discord".to_string()]);
+    map.insert("whatsapp".to_string(), vec!["hermes-whatsapp".to_string()]);
+    map.insert("slack".to_string(), vec!["hermes-slack".to_string()]);
+    map
 }
 
 // ---------------------------------------------------------------------------
@@ -492,6 +508,20 @@ mod tests {
         assert!(!cfg.tools.is_empty());
         assert!(cfg.model.is_none());
         assert!(cfg.proxy.is_none());
+        assert_eq!(
+            cfg.platform_toolsets
+                .get("cli")
+                .cloned()
+                .unwrap_or_default(),
+            vec!["hermes-cli".to_string()]
+        );
+        assert_eq!(
+            cfg.platform_toolsets
+                .get("telegram")
+                .cloned()
+                .unwrap_or_default(),
+            vec!["hermes-telegram".to_string()]
+        );
     }
 
     #[test]
