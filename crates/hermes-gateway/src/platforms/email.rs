@@ -103,6 +103,20 @@ impl EmailAdapter {
     }
 }
 
+fn image_email_body(image_url: &str, caption: Option<&str>) -> String {
+    let mut text = caption
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("")
+        .to_string();
+    if !text.is_empty() {
+        text.push_str("\n\n");
+    }
+    text.push_str("Image: ");
+    text.push_str(image_url);
+    text
+}
+
 #[async_trait]
 impl PlatformAdapter for EmailAdapter {
     async fn start(&self) -> Result<(), GatewayError> {
@@ -210,6 +224,17 @@ impl PlatformAdapter for EmailAdapter {
         })
         .await
         .map_err(|e| GatewayError::SendFailed(format!("Email task join error: {e}")))?
+    }
+
+    async fn send_image_url(
+        &self,
+        chat_id: &str,
+        image_url: &str,
+        caption: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        let body = image_email_body(image_url, caption);
+        self.send_message(chat_id, &body, Some(ParseMode::Plain))
+            .await
     }
 
     fn is_running(&self) -> bool {
@@ -549,4 +574,21 @@ fn base64_encode_lines(data: &[u8]) -> String {
         }
     }
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_email_body_with_caption() {
+        let body = image_email_body("https://cdn.example.com/a.png", Some("Diagram"));
+        assert_eq!(body, "Diagram\n\nImage: https://cdn.example.com/a.png");
+    }
+
+    #[test]
+    fn image_email_body_without_caption() {
+        let body = image_email_body("https://cdn.example.com/a.png", Some("  "));
+        assert_eq!(body, "Image: https://cdn.example.com/a.png");
+    }
 }
