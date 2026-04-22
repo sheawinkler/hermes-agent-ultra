@@ -385,3 +385,42 @@
     - This preserves unrelated existing settings (including `platform_toolsets`) instead of rewriting the file from scratch.
 - Verification:
   - `cargo test -p hermes-cli platform_toolsets::tests:: -- --nocapture`
+
+## 2026-04-22 batch-19 (10-tranche runtime/config parity sweep)
+- Scope: WG4/WG6/WG7 parity sweep for selected upstream commits:
+  - `153cd5bb44efa020c468d9e9e0b788d104d9c235`
+  - `137ce05324d07489a1e7e8a71d81b4b6473f37f0`
+  - `79b62497d1ca3ecb17abd5ab505b0d1ffc37cd3c`
+  - `3099a2f53c856f670ad0059a1d3a2c13f2c0a2c4`
+  - `84718d183abb3a44d6e7ab886f7268c41bca8a70`
+  - `48b5cfd0851e8f330ab7f7a0c158a709e68deb39`
+  - `60812ae0418d12b6baec52659fc6ec05eaaed272`
+  - `bdac541d1ee20aa8545d908a01e18c65b8e319de`
+  - `3191a9ba11d4922dd0283a26442905dd04ed55ae`
+  - `c2d5f7bf2619d34c4812e817faba278cd836f243`
+- Rust implementation commits (chronological):
+  - `03505403` parity(137ce053): include image generation in messaging toolsets.
+  - `60f33ada` parity(79b62497): enable cronjob tools in messaging presets.
+  - `40963017` parity(48b5cfd0): add `skip_context_files` across runtime and cron.
+  - `da85cee0` parity(bdac541d): prefer `HERMES_OPENAI_API_KEY` with legacy fallback.
+  - `8c979d56` parity(c2d5f7bf): normalize session timestamp formatting.
+  - `1e2e5c1e` parity(60812ae0): doctor/setup/install `SOUL.md` and env checks.
+- Verified-as-already-present in Rust head (marked `ported` in queue):
+  - `153cd5bb` skills discovery/tool prompt parity.
+  - `3099a2f5` active system prompt timestamp injection.
+  - `84718d18` platform-specific formatting hints + identity wiring.
+  - `3191a9ba` `/new` and extended command handling in gateway/CLI.
+- Verification (targeted):
+  - `cargo test -p hermes-tools toolset::tests::test_messaging_platform_presets_present -- --nocapture`
+  - `cargo test -p hermes-agent test_agent_config_default -- --nocapture`
+  - `cargo test -p hermes-cron test_filtered_tool_schemas_excludes_cronjob -- --nocapture`
+  - `cargo test -p hermes-config openai_audio_key_prefers_voice_override -- --nocapture`
+  - `cargo test -p hermes-agent build_default_auxiliary_client_scenarios -- --nocapture`
+  - `cargo test -p hermes-tools resolve_endpoint_uses_voice_key_first_in_direct_mode -- --nocapture`
+  - `cargo test -p hermes-tools schema_advertises_managed_routing -- --nocapture`
+  - `cargo test -p hermes-gateway voice::tests::test_voice_state_join_leave -- --nocapture`
+  - `cargo test -p hermes-cli cli::tests::cli_parse_default -- --nocapture`
+  - `cargo test -p hermes-cli cli::tests::cli_parse_doctor -- --nocapture`
+  - `bash -n scripts/install.sh`
+- Queue refresh:
+  - `docs/parity/upstream-missing-queue.{json,md}` regenerated with these 10 SHAs moved out of `pending`.
