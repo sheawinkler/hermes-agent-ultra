@@ -187,3 +187,31 @@
 - Queue/proof refresh:
   - `docs/parity/upstream-missing-queue.{json,md}`
   - `docs/parity/global-parity-proof.{json,md}`
+
+## 2026-04-22 batch-10 (search_files parity: output modes/pagination/context)
+- Scope: WG7 parity for ShellFileOperations search behavior enhancements.
+- Upstream commit ported:
+  - `057d3e1810a2177f1b31495d36759f5ff358a1d6`
+    `feat: enhance search functionality in ShellFileOperations`
+    - Disposition: `ported`
+- Implementation (Rust):
+  - `crates/hermes-tools/src/tools/file.rs`
+    - Extended `search_content` backend contract and tool schema with:
+      - `offset` (pagination start)
+      - `output_mode` (`content` / `files_only` / `count`)
+      - `context` (surrounding lines)
+  - `crates/hermes-tools/src/backends/file.rs`
+    - Implemented new search behavior in `LocalSearchBackend`:
+      - content mode pagination with stable `total` + `truncated`
+      - files-only mode returning paged unique file list
+      - count mode returning per-file match counts
+      - context mode that includes surrounding lines around matches
+      - internal fetch window to preserve total-before-slice behavior
+    - Added regression tests for:
+      - output modes + pagination
+      - context line inclusion
+- Verification:
+  - `cargo test -p hermes-tools backends::file -- --nocapture`
+- Queue/proof refresh:
+  - `docs/parity/upstream-missing-queue.{json,md}`
+  - `docs/parity/global-parity-proof.{json,md}`

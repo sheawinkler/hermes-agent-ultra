@@ -3503,12 +3503,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tools/file_operations.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "ported in Rust: search_files/search_content now support output_mode(files_only/count/content), offset pagination, and context-line expansion with consistent totals.",
       "owner": "codex",
       "sha": "057d3e1810a2177f1b31495d36759f5ff358a1d6",
       "subject": "feat: enhance search functionality in ShellFileOperations",
@@ -69430,7 +69430,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     }
   ],
-  "generated_at_utc": "2026-04-22T01:35:51.028997+00:00",
+  "generated_at_utc": "2026-04-22T01:42:54.583155+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69438,8 +69438,8 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4179,
-      "ported": 25,
+      "pending": 4178,
+      "ported": 26,
       "superseded": 355
     },
     "by_target_ticket": {

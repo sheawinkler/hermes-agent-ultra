@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use regex::Regex;
 use serde_json::{json, Value};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use crate::tools::file::{PatchBackend, SearchBackend};
 use hermes_core::ToolError;
@@ -439,12 +440,27 @@ impl SearchBackend for LocalSearchBackend {
         path: &str,
         file_glob: Option<&str>,
         max_results: Option<usize>,
+        offset: Option<usize>,
+        output_mode: Option<&str>,
+        context: Option<usize>,
     ) -> Result<String, ToolError> {
         let re = Regex::new(pattern)
             .map_err(|e| ToolError::InvalidParams(format!("Invalid regex pattern: {}", e)))?;
 
         let max = max_results.unwrap_or(50);
-        let mut results: Vec<Value> = Vec::new();
+        let offset = offset.unwrap_or(0);
+        let output_mode = output_mode.unwrap_or("content");
+        let context = context.unwrap_or(0);
+        let fetch_limit = if context > 0 {
+            max.saturating_add(offset).saturating_add(200)
+        } else {
+            max.saturating_add(offset)
+        };
+
+        let mut matches: Vec<Value> = Vec::new();
+        let mut files: Vec<String> = Vec::new();
+        let mut seen_files: HashSet<String> = HashSet::new();
+        let mut counts: BTreeMap<String, usize> = BTreeMap::new();
 
         let path = std::path::Path::new(path);
         if !path.exists() {
@@ -454,14 +470,51 @@ impl SearchBackend for LocalSearchBackend {
             )));
         }
 
-        Self::search_dir_content(&re, path, file_glob, max, &mut results).await;
+        Self::search_dir_content(
+            &re,
+            path,
+            file_glob,
+            context,
+            fetch_limit,
+            &mut matches,
+            &mut files,
+            &mut seen_files,
+            &mut counts,
+        )
+        .await;
 
-        Ok(json!({
-            "matches": results,
-            "total": results.len(),
-            "pattern": pattern,
-        })
-        .to_string())
+        match output_mode {
+            "files_only" => {
+                let total = files.len();
+                let page: Vec<String> = files.into_iter().skip(offset).take(max).collect();
+                Ok(json!({
+                    "files": page,
+                    "total": total,
+                    "pattern": pattern,
+                })
+                .to_string())
+            }
+            "count" => {
+                let total_count: usize = counts.values().sum();
+                Ok(json!({
+                    "counts": counts,
+                    "total": total_count,
+                    "pattern": pattern,
+                })
+                .to_string())
+            }
+            _ => {
+                let total = matches.len();
+                let page: Vec<Value> = matches.into_iter().skip(offset).take(max).collect();
+                Ok(json!({
+                    "matches": page,
+                    "total": total,
+                    "pattern": pattern,
+                    "truncated": total > offset.saturating_add(max),
+                })
+                .to_string())
+            }
+        }
     }
 
     async fn search_files(&self, pattern: &str, path: &str) -> Result<String, ToolError> {
@@ -493,21 +546,41 @@ impl LocalSearchBackend {
         re: &Regex,
         dir: &std::path::Path,
         file_glob: Option<&str>,
-        max: usize,
-        results: &mut Vec<Value>,
+        context: usize,
+        fetch_limit: usize,
+        matches: &mut Vec<Value>,
+        files: &mut Vec<String>,
+        seen_files: &mut HashSet<String>,
+        counts: &mut BTreeMap<String, usize>,
     ) {
-        Self::search_dir_content_depth(re, dir, file_glob, max, results, 0).await;
+        Self::search_dir_content_depth(
+            re,
+            dir,
+            file_glob,
+            context,
+            fetch_limit,
+            matches,
+            files,
+            seen_files,
+            counts,
+            0,
+        )
+        .await;
     }
 
     async fn search_dir_content_depth(
         re: &Regex,
         dir: &std::path::Path,
         file_glob: Option<&str>,
-        max: usize,
-        results: &mut Vec<Value>,
+        context: usize,
+        fetch_limit: usize,
+        matches: &mut Vec<Value>,
+        files: &mut Vec<String>,
+        seen_files: &mut HashSet<String>,
+        counts: &mut BTreeMap<String, usize>,
         depth: u32,
     ) {
-        if results.len() >= max || depth >= MAX_SEARCH_DEPTH {
+        if matches.len() >= fetch_limit || depth >= MAX_SEARCH_DEPTH {
             return;
         }
 
@@ -518,7 +591,7 @@ impl LocalSearchBackend {
 
         let mut entries = entries;
         while let Ok(Some(entry)) = entries.next_entry().await {
-            if results.len() >= max {
+            if matches.len() >= fetch_limit {
                 break;
             }
 
@@ -538,8 +611,12 @@ impl LocalSearchBackend {
                     re,
                     &path,
                     file_glob,
-                    max,
-                    results,
+                    context,
+                    fetch_limit,
+                    matches,
+                    files,
+                    seen_files,
+                    counts,
                     depth + 1,
                 ))
                 .await;
@@ -553,17 +630,48 @@ impl LocalSearchBackend {
 
                 // Try to read as text
                 if let Ok(content) = tokio::fs::read_to_string(&path).await {
-                    for (line_num, line) in content.lines().enumerate() {
-                        if results.len() >= max {
+                    let lines: Vec<&str> = content.lines().collect();
+                    let mut match_indices: Vec<usize> = Vec::new();
+                    for (line_idx, line) in lines.iter().enumerate() {
+                        if re.is_match(line) {
+                            match_indices.push(line_idx);
+                        }
+                    }
+
+                    if match_indices.is_empty() {
+                        continue;
+                    }
+
+                    let path_str = path.display().to_string();
+                    if seen_files.insert(path_str.clone()) {
+                        files.push(path_str.clone());
+                    }
+                    *counts.entry(path_str.clone()).or_insert(0) += match_indices.len();
+
+                    let mut selected_indices = BTreeSet::new();
+                    if context > 0 {
+                        for idx in match_indices {
+                            let start = idx.saturating_sub(context);
+                            let end = (idx + context).min(lines.len().saturating_sub(1));
+                            for i in start..=end {
+                                selected_indices.insert(i);
+                            }
+                        }
+                    } else {
+                        for idx in match_indices {
+                            selected_indices.insert(idx);
+                        }
+                    }
+
+                    for line_idx in selected_indices {
+                        if matches.len() >= fetch_limit {
                             break;
                         }
-                        if re.is_match(line) {
-                            results.push(json!({
-                                "file": path.display().to_string(),
-                                "line": line_num + 1,
-                                "content": line.chars().take(500).collect::<String>(),
-                            }));
-                        }
+                        matches.push(json!({
+                            "file": path_str.clone(),
+                            "line": line_idx + 1,
+                            "content": lines[line_idx].chars().take(500).collect::<String>(),
+                        }));
                     }
                 }
             }
@@ -627,5 +735,103 @@ impl LocalSearchBackend {
         Regex::new(&format!("^{}$", re_pattern))
             .map(|re| re.is_match(name))
             .unwrap_or(false)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn search_content_supports_offset_and_output_modes() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        std::fs::write(root.join("a.txt"), "alpha\nneedle one\nneedle two\nomega\n")
+            .expect("write a.txt");
+        std::fs::write(root.join("b.txt"), "needle three\nbeta\n").expect("write b.txt");
+
+        let backend = LocalSearchBackend::new();
+
+        let content = backend
+            .search_content(
+                "needle",
+                root.to_str().expect("path str"),
+                Some("*.txt"),
+                Some(2),
+                Some(1),
+                Some("content"),
+                Some(0),
+            )
+            .await
+            .expect("content search");
+        let parsed: Value = serde_json::from_str(&content).expect("json");
+        assert_eq!(parsed["total"], 3);
+        assert_eq!(
+            parsed["matches"].as_array().expect("matches array").len(),
+            2
+        );
+
+        let files_only = backend
+            .search_content(
+                "needle",
+                root.to_str().expect("path str"),
+                Some("*.txt"),
+                Some(10),
+                Some(0),
+                Some("files_only"),
+                Some(0),
+            )
+            .await
+            .expect("files_only search");
+        let parsed: Value = serde_json::from_str(&files_only).expect("json");
+        assert_eq!(parsed["total"], 2);
+        assert_eq!(parsed["files"].as_array().expect("files array").len(), 2);
+
+        let counts = backend
+            .search_content(
+                "needle",
+                root.to_str().expect("path str"),
+                Some("*.txt"),
+                Some(10),
+                Some(0),
+                Some("count"),
+                Some(0),
+            )
+            .await
+            .expect("count search");
+        let parsed: Value = serde_json::from_str(&counts).expect("json");
+        assert_eq!(parsed["total"], 3);
+    }
+
+    #[tokio::test]
+    async fn search_content_context_includes_surrounding_lines() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        std::fs::write(root.join("ctx.txt"), "line1\nline2\nneedle\nline4\nline5\n")
+            .expect("write ctx.txt");
+
+        let backend = LocalSearchBackend::new();
+        let content = backend
+            .search_content(
+                "needle",
+                root.to_str().expect("path str"),
+                Some("*.txt"),
+                Some(10),
+                Some(0),
+                Some("content"),
+                Some(1),
+            )
+            .await
+            .expect("context search");
+        let parsed: Value = serde_json::from_str(&content).expect("json");
+        let lines: Vec<i64> = parsed["matches"]
+            .as_array()
+            .expect("matches")
+            .iter()
+            .filter_map(|m| m["line"].as_i64())
+            .collect();
+        assert!(lines.contains(&2));
+        assert!(lines.contains(&3));
+        assert!(lines.contains(&4));
     }
 }

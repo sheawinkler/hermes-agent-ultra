@@ -252,6 +252,9 @@ pub trait SearchBackend: Send + Sync {
         path: &str,
         file_glob: Option<&str>,
         max_results: Option<usize>,
+        offset: Option<usize>,
+        output_mode: Option<&str>,
+        context: Option<usize>,
     ) -> Result<String, ToolError>;
 
     /// Search files by name (glob pattern).
@@ -290,11 +293,28 @@ impl ToolHandler for SearchFilesHandler {
             .get("limit")
             .and_then(|v| v.as_u64())
             .map(|n| n as usize);
+        let offset = params
+            .get("offset")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize);
+        let output_mode = params.get("output_mode").and_then(|v| v.as_str());
+        let context = params
+            .get("context")
+            .and_then(|v| v.as_u64())
+            .map(|n| n as usize);
 
         match target {
             "content" => {
                 self.backend
-                    .search_content(pattern, path, file_glob, max_results)
+                    .search_content(
+                        pattern,
+                        path,
+                        file_glob,
+                        max_results,
+                        offset,
+                        output_mode,
+                        context,
+                    )
                     .await
             }
             "files" => self.backend.search_files(pattern, path).await,
@@ -341,6 +361,29 @@ impl ToolHandler for SearchFilesHandler {
                 "description": "Maximum number of results to return"
             }),
         );
+        props.insert(
+            "offset".into(),
+            json!({
+                "type": "integer",
+                "description": "Starting index for paginated search results"
+            }),
+        );
+        props.insert(
+            "output_mode".into(),
+            json!({
+                "type": "string",
+                "description": "Search output format when target='content'",
+                "enum": ["content", "files_only", "count"],
+                "default": "content"
+            }),
+        );
+        props.insert(
+            "context".into(),
+            json!({
+                "type": "integer",
+                "description": "Include this many surrounding lines around each content match"
+            }),
+        );
 
         tool_schema(
             "search_files",
@@ -380,7 +423,7 @@ mod tests {
         ) -> Result<String, AgentError> {
             Ok(format!("contents of {}", path))
         }
-        async fn write_file(&self, path: &str, _content: &str) -> Result<(), AgentError> {
+        async fn write_file(&self, _path: &str, _content: &str) -> Result<(), AgentError> {
             Ok(())
         }
         async fn file_exists(&self, _path: &str) -> Result<bool, AgentError> {
