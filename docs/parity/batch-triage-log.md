@@ -274,3 +274,24 @@
 - Queue/proof refresh:
   - `docs/parity/upstream-missing-queue.{json,md}`
   - `docs/parity/global-parity-proof.{json,md}`
+
+## 2026-04-22 batch-13 (tool preview parity + process-specific previews)
+- Scope: parity tranche for tool-call preview rendering.
+- Upstream commit ported:
+  - `6731230d7340b5ae093454f0dbf06ff7b86e32b3`
+    `Add special handling for 'process' tool in _build_tool_preview function`
+    - Disposition: `ported`
+- Implementation (Rust):
+  - Added shared preview module: `crates/hermes-cli/src/tool_preview.rs`
+    - process preview supports `action`, `session_id`/`pid`, `data`/`input`, and `wait timeout`
+    - added preview support for `todo`, `send_message`, and `rl_*` calls
+    - added emoji map for gateway/CLI consumers
+  - Integrated preview rendering into TUI message tool-call lines:
+    - `crates/hermes-cli/src/tui.rs`
+    - now displays `[Tool: <emoji> <name> <preview>]`
+  - Exported module from `crates/hermes-cli/src/lib.rs`.
+- Verification:
+  - `cargo test -p hermes-cli tool_preview:: -- --nocapture`
+- Queue/proof refresh:
+  - `docs/parity/upstream-missing-queue.{json,md}`
+  - `docs/parity/global-parity-proof.{json,md}`

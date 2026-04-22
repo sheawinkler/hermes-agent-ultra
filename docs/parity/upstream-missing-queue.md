@@ -1,23 +1,23 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-22T02:18:22.420500+00:00`
+Generated: `2026-04-22T02:54:33.671063+00:00`
 
-- Range: `main..upstream/main`; total commits tracked: `4565`.
+- Range: `main..upstream/main`; total commits tracked: `4576`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 1622 |
-| #21 | GPAR-02 skills parity | 199 |
+| #20 | GPAR-01 tests+CI parity | 1625 |
+| #21 | GPAR-02 skills parity | 200 |
 | #22 | GPAR-03 UX parity | 523 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 507 |
 | #24 | GPAR-05 environments+parsers+benchmarks | 64 |
 | #25 | GPAR-06 packaging/docs/install parity | 152 |
-| #26 | GPAR-07 upstream queue backfill | 1498 |
+| #26 | GPAR-07 upstream queue backfill | 1505 |
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 4182 |
-| ported | 28 |
+| pending | 4192 |
+| ported | 29 |
 | superseded | 355 |
 
 ## First 100 Pending Commits
@@ -58,7 +58,6 @@ Generated: `2026-04-22T02:18:22.420500+00:00`
 | `48b5cfd0851e` | #26 | Add skip_context_files option to AIAgent for batch processing |
 | `bdac541d1ee2` | #26 | Rename OPENAI_API_KEY to HERMES_OPENAI_API_KEY in configuration and codebase for clarity and to avoid conflicts. Update related documentation and error messages to reflect the new key name, ensuring backward compatibility with existing setups. |
 | `ec59d71e6083` | #26 | Update PTY write handling in ProcessRegistry to ensure data is encoded as bytes before writing. This change improves compatibility with string inputs and clarifies the expected data type in comments. |
-| `6731230d7340` | #26 | Add special handling for 'process' tool in _build_tool_preview function |
 | `d0f82e6dcca6` | #26 | Removing random project notes doc |
 | `e184f5ab3a51` | #26 | Add todo tool for agent task planning and management |
 | `3b615b0f7a89` | #26 | Enhance tool previews in AIAgent and GatewayRunner |
@@ -124,4 +123,5 @@ Generated: `2026-04-22T02:18:22.420500+00:00`
 | `3976962621d5` | #25 | fix: update session logging directory path in README and code |
 | `3555c6173d0f` | #26 | refactor: remove temporary API payload logging and enhance session log structure |
 | `b6247b71b5a7` | #26 | refactor: update tool descriptions for clarity and conciseness |
+| `a885d2f24029` | #26 | refactor: implement structured logging across multiple modules |
 

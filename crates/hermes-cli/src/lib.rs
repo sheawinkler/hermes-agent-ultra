@@ -34,6 +34,7 @@ pub mod skills_config;
 pub mod skin_engine;
 pub mod terminal_backend;
 pub mod theme;
+pub mod tool_preview;
 pub mod tools_config;
 pub mod tui;
 pub mod update;

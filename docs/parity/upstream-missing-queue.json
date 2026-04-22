@@ -2947,12 +2947,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "run_agent.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "ported-2026-04-22-batch-13: added shared Rust tool preview helper with process-specific action/session/data/timeout rendering and integrated preview display into TUI tool call lines.",
       "owner": "codex",
       "sha": "6731230d7340b5ae093454f0dbf06ff7b86e32b3",
       "subject": "Add special handling for 'process' tool in _build_tool_preview function",
@@ -69515,9 +69515,166 @@
       "subject": "fix(website): run skill extraction automatically on npm run build/start (#13747)",
       "target_ticket": 22,
       "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/creative/baoyu-comic/SKILL.md",
+        "skills/creative/baoyu-comic/references/workflow.md"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "0a1e85dd0d5e79cc2759acf8e7cd1d7f2779135f",
+      "subject": "fix(skills/baoyu-comic): absolute curl paths + clarify-timeout handling (#13775)",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/prompt_builder.py",
+        "tests/agent/test_prompt_builder.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "84449d9afee5bede1058a49a28fb0d4b80fbbc5f",
+      "subject": "fix(prompt): tell CLI agents not to emit MEDIA:/path tags (#13766)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/anthropic_adapter.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "de181dfd22faeef0ae5402eff5ab8488f02b0ebf",
+      "subject": "fix: add User-Agent claude-code/0.1.0 for Kimi /coding endpoint",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/runtime_provider.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "fd403854b9c88e52bcd08ed1585b70826608c9b3",
+      "subject": "fix: auto-detect anthropic_messages mode for Kimi /coding/v1 endpoints",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/auth.py",
+        "hermes_cli/runtime_provider.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "bad5471409a53bbc0d764176b62b7acf321c43ef",
+      "subject": "fix(kimi-coding): add KIMI_CODING_API_KEY fallback + api_mode detection for /coding endpoint",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tools/delegate_tool.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "46d680125e3d29af439491ed9a0b03b8e4559653",
+      "subject": "fix(kimi-coding): set anthropic_messages api_mode for /coding endpoint",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/auxiliary_client.py",
+        "hermes_cli/auth.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "2a026eb76279f84cc48f00c44002d4b95da950eb",
+      "subject": "fix: Update Kimi Coding API endpoint and User-Agent",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/model_switch.py",
+        "hermes_cli/providers.py",
+        "run_agent.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "6caf8bd994b53a3cd5f0390fbad41b9abfef276f",
+      "subject": "fix: Enhance Kimi Coding API mode detection and User-Agent",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/auth.py",
+        "hermes_cli/doctor.py",
+        "tests/hermes_cli/test_api_key_providers.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "b2ba351380001ba5766764700dfd570dbd843a2c",
+      "subject": "fix(kimi): reconcile sk-kimi- routing with Anthropic SDK URL semantics",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "09dd5eb6a5a7e8ff37380f8220a24a216cec2842",
+      "subject": "chore(release): map xiaoqiang243 personal email in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/transports/__init__.py",
+        "agent/transports/codex.py",
+        "run_agent.py",
+        "tests/agent/transports/test_codex_transport.py",
+        "tests/run_agent/test_provider_parity.py",
+        "tests/run_agent/test_run_agent.py",
+        "tests/run_agent/test_run_agent_codex_responses.py"
+      ],
+      "files_touched": 7,
+      "notes": "",
+      "owner": "",
+      "sha": "c832ebd67cac031cc4176af24c3f7a7d66ae04e7",
+      "subject": "feat: add ResponsesApiTransport + wire all Codex transport paths",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-04-22T02:18:22.420500+00:00",
+  "generated_at_utc": "2026-04-22T02:54:33.671063+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69525,19 +69682,19 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4182,
-      "ported": 28,
+      "pending": 4192,
+      "ported": 29,
       "superseded": 355
     },
     "by_target_ticket": {
-      "20": 1622,
-      "21": 199,
+      "20": 1625,
+      "21": 200,
       "22": 523,
       "23": 507,
       "24": 64,
       "25": 152,
-      "26": 1498
+      "26": 1505
     },
-    "total_commits": 4565
+    "total_commits": 4576
   }
 }

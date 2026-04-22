@@ -29,6 +29,7 @@ use hermes_core::{AgentError, StreamChunk};
 use crate::app::App;
 use crate::commands;
 use crate::theme::Theme;
+use crate::tool_preview::{build_tool_preview_from_value, tool_emoji};
 
 // ---------------------------------------------------------------------------
 // Event
@@ -674,10 +675,18 @@ fn render_messages(
                 // Show tool calls if present
                 if let Some(ref tool_calls) = msg.tool_calls {
                     for tc in tool_calls {
-                        lines.push(Line::from(Span::styled(
-                            format!("  [Tool: {}]", tc.function.name),
-                            styles.tool_call,
-                        )));
+                        let args =
+                            serde_json::from_str::<serde_json::Value>(&tc.function.arguments)
+                                .unwrap_or_else(|_| serde_json::Value::Null);
+                        let preview = build_tool_preview_from_value(&tc.function.name, &args, 40)
+                            .unwrap_or_default();
+                        let emoji = tool_emoji(&tc.function.name);
+                        let label = if preview.is_empty() {
+                            format!("  [Tool: {emoji} {}]", tc.function.name)
+                        } else {
+                            format!("  [Tool: {emoji} {} {preview}]", tc.function.name)
+                        };
+                        lines.push(Line::from(Span::styled(label, styles.tool_call)));
                     }
                 }
             }
