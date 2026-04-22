@@ -1,23 +1,23 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-22T02:59:24.694230+00:00`
+Generated: `2026-04-22T03:46:23.596820+00:00`
 
-- Range: `main..upstream/main`; total commits tracked: `4576`.
+- Range: `main..upstream/main`; total commits tracked: `4579`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 1625 |
+| #20 | GPAR-01 tests+CI parity | 1627 |
 | #21 | GPAR-02 skills parity | 200 |
 | #22 | GPAR-03 UX parity | 523 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 507 |
 | #24 | GPAR-05 environments+parsers+benchmarks | 64 |
 | #25 | GPAR-06 packaging/docs/install parity | 152 |
-| #26 | GPAR-07 upstream queue backfill | 1505 |
+| #26 | GPAR-07 upstream queue backfill | 1506 |
 
 | Disposition | Commit Count |
 | --- | ---: |
 | pending | 4190 |
-| ported | 31 |
+| ported | 34 |
 | superseded | 355 |
 
 ## First 100 Pending Commits
@@ -48,7 +48,6 @@ Generated: `2026-04-22T02:59:24.694230+00:00`
 | `e0c9d495ef77` | #26 | Refine configuration migration process to improve user experience |
 | `dd5fe334f3b4` | #26 | Refactor configuration handling to improve user experience |
 | `0f58dfdea4e2` | #26 | Enhance agent response handling and transcript logging |
-| `635bec06cbb2` | #26 | Update tool definitions handling in GatewayRunner |
 | `60812ae0418d` | #25 | Enhance configuration checks and persona file creation in doctor and install scripts |
 | `45a8098d3afe` | #26 | Remove browserbase SDK check and add Node.js and agent-browser validation in doctor script |
 | `01a3a6ab0d2d` | #26 | Implement cleanup guard to prevent multiple executions on exit |
@@ -69,7 +68,6 @@ Generated: `2026-04-22T02:59:24.694230+00:00`
 | `50ef18644ba5` | #26 | Update multiline input instructions in HermesCLI |
 | `225ae32e7aff` | #26 | Enhance CLI layout with floating completion menu |
 | `9e85408c7bfd` | #25 | Add todo tool for task management and enhance CLI features |
-| `d59e93d5e9c6` | #26 | Enhance platform toolset configuration and CLI toolset handling |
 | `14e59706b732` | #21 | Add Skills Hub — universal skill search, install, and management from online registries |
 | `655303f2f1e0` | #26 | Add skill name resolution and enhanced install confirmation in Skills Hub |
 | `440c244cac71` | #25 | feat: add persistent memory system + SQLite session store |
@@ -124,4 +122,6 @@ Generated: `2026-04-22T02:59:24.694230+00:00`
 | `a885d2f24029` | #26 | refactor: implement structured logging across multiple modules |
 | `cbff1b818c30` | #20 | refactor: remove obsolete Nous API test scripts |
 | `748fd3db8858` | #23 | refactor: enhance error handling with structured logging across multiple modules |
+| `7ee7221af11f` | #26 | refactor: consolidate debug logging across tools with shared DebugSession class |
+| `ecb430effeca` | #23 | refactor: enhance API interaction and message handling in AIAgent |
 

@@ -335,3 +335,53 @@
 - Queue/proof refresh:
   - `docs/parity/upstream-missing-queue.{json,md}`
   - `docs/parity/global-parity-proof.{json,md}`
+
+## 2026-04-22 batch-16 (platform toolset configuration parity)
+- Scope: WG4/WG7 parity for platform-specific toolset configuration and runtime enforcement.
+- Upstream commit ported:
+  - `d59e93d5e9c6878a5aa614e75a63f0da8cac71f3`
+    `Enhance platform toolset configuration and CLI toolset handling`
+    - Disposition: `ported`
+- Implementation (Rust):
+  - `crates/hermes-config/src/config.rs`
+    - Added `platform_toolsets` to top-level `GatewayConfig`.
+    - Added default mapping (`cli`, `telegram`, `discord`, `whatsapp`, `slack`) aligned to preset toolsets.
+  - `crates/hermes-tools/src/toolset.rs`
+    - Added preset aliases: `hermes-discord`, `hermes-whatsapp`, `hermes-slack` (mapped to telegram preset behavior).
+  - `crates/hermes-cli/src/platform_toolsets.rs` (new)
+    - Added platform key normalization, configured/default toolset resolution, and schema filtering helpers.
+  - Runtime integration:
+    - `crates/hermes-cli/src/main.rs` (gateway handlers now pass platform-filtered tool schemas to agent run calls)
+    - `crates/hermes-cli/src/app.rs` (interactive CLI uses configured `cli` platform toolset schemas)
+    - `crates/hermes-cli/src/commands.rs` (`chat` and `acp` paths pass filtered tool schemas)
+- Verification:
+  - `cargo test -p hermes-config config::tests::gateway_config_default -- --nocapture`
+  - `cargo test -p hermes-tools toolset::tests:: -- --nocapture`
+  - `cargo test -p hermes-cli platform_toolsets::tests:: -- --nocapture`
+
+## 2026-04-22 batch-17 (gateway tool-definition metadata parity)
+- Scope: WG4/WG7 parity for runner-level tool definition reporting.
+- Upstream commit ported:
+  - `635bec06cbb22cae75fb5fffbe7729861dd0e719`
+    `Update tool definitions handling in GatewayRunner`
+    - Disposition: `ported`
+- Implementation (Rust):
+  - `crates/hermes-cli/src/main.rs`
+    - Gateway message and streaming handlers now emit `agent:tool_definitions` hook events per turn.
+    - Hook payload includes `platform`, `chat_id`, `user_id`, `session_id`, `streaming`, and compact effective tool definitions (name + description) for the active turn.
+    - Uses the same resolved per-platform tool schema set passed to the agent.
+- Verification:
+  - `cargo test -p hermes-cli platform_toolsets::tests:: -- --nocapture`
+
+## 2026-04-22 batch-18 (setup/config preservation parity)
+- Scope: WG6 setup durability parity for platform toolset persistence.
+- Upstream commit ported:
+  - `37c3dcf551a2d06b28f11eda196bd73bbacf3f41`
+    `fix: setup wizard overwrites platform_toolsets saved by tools_command`
+    - Disposition: `ported`
+- Implementation (Rust):
+  - `crates/hermes-cli/src/main.rs`
+    - `run_setup` now loads existing `config.yaml` into a mutable config object, overlays setup-selected fields (`model`, `personality`, `max_turns`, optional OpenAI provider key), validates, and writes YAML.
+    - This preserves unrelated existing settings (including `platform_toolsets`) instead of rewriting the file from scratch.
+- Verification:
+  - `cargo test -p hermes-cli platform_toolsets::tests:: -- --nocapture`

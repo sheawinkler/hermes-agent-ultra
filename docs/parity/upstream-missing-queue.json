@@ -2766,7 +2766,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "gateway/run.py"
       ],
@@ -3156,7 +3156,7 @@
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "cli-config.yaml.example",
         "cli.py",
@@ -14099,7 +14099,7 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "hermes_cli/setup.py",
         "hermes_cli/tools_config.py"
@@ -69672,9 +69672,56 @@
       "subject": "feat: add ResponsesApiTransport + wire all Codex transport paths",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py",
+        "tools/delegate_tool.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "dd8ab40556cc25e7e70e730ff3eaca803cc93550",
+      "subject": "fix(delegation): add hard timeout and stale detection for subagent execution (#13770)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/auth.py",
+        "hermes_cli/main.py",
+        "hermes_cli/models.py",
+        "tests/hermes_cli/test_auth_nous_provider.py",
+        "tests/hermes_cli/test_models.py"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "c22f4a76deb6087774b4911a959e058f921f31e9",
+      "subject": "remove Nous Portal free-model allowlist",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/auxiliary_client.py",
+        "hermes_cli/models.py",
+        "tests/agent/test_auxiliary_client.py",
+        "tests/hermes_cli/test_models.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "29693f9d8e51cffb8077f2db5a52e31031219480",
+      "subject": "feat(aux): use Portal /api/nous/recommended-models for auxiliary models",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-04-22T02:59:24.694230+00:00",
+  "generated_at_utc": "2026-04-22T03:46:23.596820+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69683,18 +69730,18 @@
   "summary": {
     "by_disposition": {
       "pending": 4190,
-      "ported": 31,
+      "ported": 34,
       "superseded": 355
     },
     "by_target_ticket": {
-      "20": 1625,
+      "20": 1627,
       "21": 200,
       "22": 523,
       "23": 507,
       "24": 64,
       "25": 152,
-      "26": 1505
+      "26": 1506
     },
-    "total_commits": 4576
+    "total_commits": 4579
   }
 }
