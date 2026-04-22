@@ -252,12 +252,31 @@ impl PlatformAdapter for WebhookAdapter {
         self.send_message(chat_id, &text, None).await
     }
 
+    async fn send_image_url(
+        &self,
+        chat_id: &str,
+        image_url: &str,
+        caption: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        let marker = image_marker_message(image_url, caption);
+        self.send_message(chat_id, &marker, Some(ParseMode::Plain))
+            .await
+    }
+
     fn is_running(&self) -> bool {
         self.base.is_running()
     }
     fn platform_name(&self) -> &str {
         "webhook"
     }
+}
+
+fn image_marker_message(image_url: &str, caption: Option<&str>) -> String {
+    let mut marker = format!("[image] {image_url}");
+    if let Some(cap) = caption.map(str::trim).filter(|s| !s.is_empty()) {
+        marker.push_str(&format!(" | caption={cap}"));
+    }
+    marker
 }
 
 // ---------------------------------------------------------------------------
@@ -386,5 +405,20 @@ mod tests {
         let sig = format!("sha256={}", sign(secret, body));
         let tampered = br#"{"chat_id":"c1","text":"bye"}"#;
         assert!(!WebhookAdapter::verify_signature(secret, tampered, &sig));
+    }
+
+    #[test]
+    fn image_marker_message_with_caption() {
+        let marker = image_marker_message("https://cdn.example.com/a.png", Some("Diagram"));
+        assert_eq!(
+            marker,
+            "[image] https://cdn.example.com/a.png | caption=Diagram"
+        );
+    }
+
+    #[test]
+    fn image_marker_message_without_caption() {
+        let marker = image_marker_message("https://cdn.example.com/a.png", Some("   "));
+        assert_eq!(marker, "[image] https://cdn.example.com/a.png");
     }
 }
