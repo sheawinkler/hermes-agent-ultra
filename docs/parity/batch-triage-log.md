@@ -522,3 +522,21 @@
   - `ported` (0)
 - Queue refresh:
   - `docs/parity/upstream-missing-queue.{json,md}` regenerated with these 100 SHAs moved out of `pending`.
+
+## 2026-04-22 batch-22b (100-tranche parity disposition pass: provider/auth/install/security/features)
+- Scope:
+  - Next `100` pending SHAs after batch-22a, from `a1838271...` through `b267e340...`.
+- Evidence pass:
+  - Built per-commit evidence map for all 100 SHAs.
+  - Commit set remained upstream Python/docs/test/runtime deltas (no Rust files in upstream patch set).
+  - Rust-native parity coverage validated against active modules:
+    - Providers/auth/codex/openrouter routing: `crates/hermes-agent/src/{provider.rs,api_bridge.rs,oauth.rs}`, `crates/hermes-cli/src/providers.rs`
+    - Memory/session/compression/honcho: `crates/hermes-agent/src/{memory_plugins/*,session_persistence.rs,compression.rs}`
+    - Messaging and adapter runtime: `crates/hermes-gateway/src/{platforms/*,hooks.rs,pairing.rs}`
+    - CLI install/doctor/config wiring: `scripts/install.sh`, `crates/hermes-cli/src/{doctor.rs,commands.rs,main.rs}`, `crates/hermes-config/src/paths.rs`
+    - Security/file operation guardrails: `crates/hermes-tools/src/backends/file.rs`
+- Queue dispositions in this 100-SHA pass:
+  - `superseded` (100)
+  - `ported` (0)
+- Queue refresh:
+  - `docs/parity/upstream-missing-queue.{json,md}` regenerated with these 100 SHAs moved out of `pending`.
