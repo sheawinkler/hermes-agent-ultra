@@ -1,6 +1,7 @@
 //! Real session search backend using rusqlite with FTS5.
 
 use async_trait::async_trait;
+use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 use rusqlite::Connection;
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -180,6 +181,36 @@ impl SqliteSessionSearchBackend {
             ""
         };
         format!("{prefix}{body}{suffix}")
+    }
+
+    fn format_timestamp(ts: Option<&str>) -> String {
+        let Some(raw) = ts.map(str::trim).filter(|s| !s.is_empty()) else {
+            return "unknown".to_string();
+        };
+
+        let format_human = |dt: DateTime<Local>| -> String {
+            dt.format("%B %d, %Y at %I:%M %p").to_string()
+        };
+
+        if let Ok(seconds) = raw.parse::<f64>() {
+            let sec = seconds.trunc() as i64;
+            let nanos = ((seconds.fract().abs()) * 1_000_000_000_f64).round() as u32;
+            if let Some(dt_utc) = Utc.timestamp_opt(sec, nanos).single() {
+                return format_human(dt_utc.with_timezone(&Local));
+            }
+        }
+
+        if let Ok(dt) = DateTime::parse_from_rfc3339(raw) {
+            return format_human(dt.with_timezone(&Local));
+        }
+
+        if let Ok(naive) = NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S") {
+            if let Some(local) = Local.from_local_datetime(&naive).single() {
+                return format_human(local);
+            }
+        }
+
+        raw.to_string()
     }
 
     fn summary_client_from_env() -> Option<SessionSummaryClient> {
@@ -603,7 +634,7 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
                     tasks.push(SummaryTask {
                         session_id: resolved_session_id,
                         source,
-                        when: started_at,
+                        when: Some(Self::format_timestamp(started_at.as_deref())),
                         model,
                         conversation_text: transcript,
                     });
@@ -693,5 +724,29 @@ impl SessionSearchBackend for SqliteSessionSearchBackend {
             "sessions_searched": sessions_searched,
         })
         .to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SqliteSessionSearchBackend;
+
+    #[test]
+    fn format_timestamp_handles_none() {
+        assert_eq!(SqliteSessionSearchBackend::format_timestamp(None), "unknown");
+    }
+
+    #[test]
+    fn format_timestamp_handles_unix_number() {
+        let out = SqliteSessionSearchBackend::format_timestamp(Some("1700000000"));
+        assert!(out.contains("2023") || out.contains("2024"));
+        assert!(out.contains(" at "));
+    }
+
+    #[test]
+    fn format_timestamp_handles_rfc3339() {
+        let out = SqliteSessionSearchBackend::format_timestamp(Some("2026-01-02T03:04:05Z"));
+        assert!(out.contains("2026"));
+        assert!(out.contains(" at "));
     }
 }
