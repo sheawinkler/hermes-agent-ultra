@@ -716,3 +716,62 @@
   - `cargo test -p hermes-gateway --features slack,whatsapp platforms::slack::tests::slack_image_url_blocks_without_caption -- --nocapture`
   - `cargo test -p hermes-gateway --features slack,whatsapp platforms::whatsapp::tests::build_link_media_body_with_caption -- --nocapture`
   - `cargo test -p hermes-gateway --features slack,whatsapp platforms::whatsapp::tests::build_link_media_body_omits_blank_caption -- --nocapture`
+
+## 2026-04-22 impl-02 (api-server/webhook image marker parity)
+- Scope:
+  - Add explicit image URL marker handling for internal adapters that intentionally queue text payloads.
+- Rust implementation commits (chronological):
+  - `54d5d43f` feat(gateway): add image-url markers for api-server and webhook adapters.
+    - `api_server`: `send_image_url` now emits deterministic marker payload (`[image] <url> | caption=<...>` when present).
+    - `webhook`: same marker strategy, preserving parse-mode plain-text behavior for downstream consumers.
+    - Added unit tests for caption/no-caption marker formatting in both adapters.
+- Verification (targeted):
+  - `cargo test -p hermes-gateway --features api-server,webhook platforms::api_server::tests::image_marker_message_with_caption -- --nocapture`
+  - `cargo test -p hermes-gateway --features api-server,webhook platforms::api_server::tests::image_marker_message_without_caption -- --nocapture`
+  - `cargo test -p hermes-gateway --features api-server,webhook platforms::webhook::tests::image_marker_message_with_caption -- --nocapture`
+  - `cargo test -p hermes-gateway --features api-server,webhook platforms::webhook::tests::image_marker_message_without_caption -- --nocapture`
+
+## 2026-04-22 impl-03 (matrix native remote image upload/send parity)
+- Scope:
+  - Port upstream Matrix behavior where remote image URLs are downloaded and sent as native Matrix media events instead of URL text fallback.
+- Rust implementation commits (chronological):
+  - `344e1a80` feat(gateway): add native matrix image-url upload/send path.
+    - Added `MatrixAdapter::send_image_url` override:
+      - downloads remote image bytes via adapter HTTP client
+      - infers filename/content-type
+      - uploads to Matrix media store (`mxc://`)
+      - sends `m.image` media event with optional caption body
+    - Added safe fallback-to-text path when download fails.
+    - Added helper tests for filename and MIME normalization logic.
+- Verification (targeted):
+  - `cargo test -p hermes-gateway --features matrix platforms::matrix::tests:: -- --nocapture`
+
+## 2026-04-22 impl-04 (mattermost native remote image upload parity)
+- Scope:
+  - Port upstream Mattermost URL-image behavior to native upload flow with resilient fallback.
+- Rust implementation commits (chronological):
+  - `1f06c539` feat(gateway): add native mattermost image-url upload flow.
+    - Added `MattermostAdapter::send_image_url` override:
+      - downloads remote image
+      - writes temporary image file
+      - reuses existing `send_file` upload/post path
+      - removes temporary file after attempt
+    - Added fallback to plain text (`caption + URL`) when download/upload path fails.
+    - Added helper tests for filename inference and fallback text formatting.
+- Verification (targeted):
+  - `cargo test -p hermes-gateway --features mattermost platforms::mattermost::tests:: -- --nocapture`
+
+## 2026-04-22 impl-05 (feishu native remote image upload parity)
+- Scope:
+  - Port upstream Feishu remote-image behavior to native image upload + message rendering flow.
+- Rust implementation commits (chronological):
+  - `c65dc2b3` feat(gateway): add native feishu image-url delivery path.
+    - Added `FeishuAdapter::send_image_url` override:
+      - downloads remote image bytes
+      - uploads to Feishu image store to obtain `image_key`
+      - sends native image by key
+      - when caption is present, sends a rich `post` message containing the image block and caption text
+    - Added fallback to plain text when URL download fails.
+    - Added helper tests for filename inference and fallback text formatting.
+- Verification (targeted):
+  - `cargo test -p hermes-gateway --features feishu platforms::feishu::tests:: -- --nocapture`
