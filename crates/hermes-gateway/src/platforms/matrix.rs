@@ -596,6 +596,74 @@ pub fn mxc_to_http(homeserver_url: &str, mxc_uri: &str) -> Option<String> {
     ))
 }
 
+fn normalized_image_content_type(content_type: Option<&str>) -> Option<String> {
+    let normalized = content_type?
+        .split(';')
+        .next()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?
+        .to_ascii_lowercase();
+    if normalized.starts_with("image/") {
+        Some(normalized)
+    } else {
+        None
+    }
+}
+
+fn image_extension_from_content_type(content_type: Option<&str>) -> Option<&'static str> {
+    let normalized = normalized_image_content_type(content_type)?;
+    match normalized.as_str() {
+        "image/jpeg" => Some("jpg"),
+        "image/png" => Some("png"),
+        "image/gif" => Some("gif"),
+        "image/webp" => Some("webp"),
+        "image/bmp" => Some("bmp"),
+        "image/tiff" => Some("tiff"),
+        "image/svg+xml" => Some("svg"),
+        "image/heic" => Some("heic"),
+        "image/heif" => Some("heif"),
+        "image/avif" => Some("avif"),
+        _ => None,
+    }
+}
+
+fn remote_image_file_name(image_url: &str, content_type: Option<&str>) -> String {
+    let stripped = image_url
+        .split('#')
+        .next()
+        .unwrap_or(image_url)
+        .split('?')
+        .next()
+        .unwrap_or(image_url)
+        .trim_end_matches('/');
+    let base = stripped.rsplit('/').next().unwrap_or("").trim();
+    let mut file_name = if base.is_empty() {
+        "image".to_string()
+    } else {
+        base.to_string()
+    };
+
+    let has_extension = std::path::Path::new(&file_name)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some();
+
+    if !has_extension {
+        let ext = image_extension_from_content_type(content_type).unwrap_or("png");
+        file_name.push('.');
+        file_name.push_str(ext);
+    }
+
+    file_name
+}
+
+fn image_fallback_text(image_url: &str, caption: Option<&str>) -> String {
+    match caption.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(c) => format!("{c}\n{image_url}"),
+        None => image_url.to_string(),
+    }
+}
+
 // ---------------------------------------------------------------------------
 // MatrixConfig
 // ---------------------------------------------------------------------------
@@ -2443,6 +2511,69 @@ impl PlatformAdapter for MatrixAdapter {
         Ok(())
     }
 
+    async fn send_image_url(
+        &self,
+        chat_id: &str,
+        image_url: &str,
+        caption: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        let downloaded = async {
+            let resp = self
+                .client
+                .get(image_url)
+                .send()
+                .await
+                .map_err(|e| format!("request failed: {e}"))?;
+            if !resp.status().is_success() {
+                return Err(format!("status {}", resp.status()));
+            }
+
+            let content_type = resp
+                .headers()
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|h| h.to_str().ok())
+                .map(|s| s.to_string());
+            let file_bytes = resp
+                .bytes()
+                .await
+                .map_err(|e| format!("read body failed: {e}"))?
+                .to_vec();
+            if file_bytes.is_empty() {
+                return Err("empty body".to_string());
+            }
+            Ok((file_bytes, content_type))
+        }
+        .await;
+
+        let (file_bytes, content_type) = match downloaded {
+            Ok(result) => result,
+            Err(err) => {
+                warn!(
+                    image_url = %image_url,
+                    error = %err,
+                    "Matrix image-url download failed; falling back to text"
+                );
+                let fallback = image_fallback_text(image_url, caption);
+                return self
+                    .send_message(chat_id, &fallback, Some(ParseMode::Plain))
+                    .await;
+            }
+        };
+
+        let file_name = remote_image_file_name(image_url, content_type.as_deref());
+        let ext = std::path::Path::new(&file_name)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("png");
+        let mime = normalized_image_content_type(content_type.as_deref())
+            .unwrap_or_else(|| mime_from_extension(ext).to_string());
+        let size = file_bytes.len();
+        let mxc_uri = self.upload_media(file_bytes, &file_name, &mime).await?;
+        self.send_media_message(chat_id, &mxc_uri, &file_name, &mime, size, caption)
+            .await?;
+        Ok(())
+    }
+
     fn is_running(&self) -> bool {
         self.base.is_running()
     }
@@ -2507,6 +2638,31 @@ mod tests {
             url,
             Some("https://matrix.org/_matrix/media/v3/download/matrix.org/xyz".to_string())
         );
+    }
+
+    #[test]
+    fn remote_image_file_name_keeps_existing_extension() {
+        let file_name = remote_image_file_name(
+            "https://cdn.example.com/path/diagram.jpeg?token=abc",
+            Some("image/jpeg"),
+        );
+        assert_eq!(file_name, "diagram.jpeg");
+    }
+
+    #[test]
+    fn remote_image_file_name_uses_content_type_extension_hint() {
+        let file_name =
+            remote_image_file_name("https://cdn.example.com/path/diagram", Some("image/webp"));
+        assert_eq!(file_name, "diagram.webp");
+    }
+
+    #[test]
+    fn normalized_image_content_type_strips_params() {
+        assert_eq!(
+            normalized_image_content_type(Some("image/png; charset=binary")).as_deref(),
+            Some("image/png")
+        );
+        assert_eq!(normalized_image_content_type(Some("text/plain")), None);
     }
 
     #[tokio::test]
