@@ -1135,6 +1135,18 @@ impl PlatformAdapter for SlackAdapter {
         self.upload_file(chat_id, file_path, caption, None).await
     }
 
+    async fn send_image_url(
+        &self,
+        chat_id: &str,
+        image_url: &str,
+        caption: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        let (blocks, fallback_text) = slack_image_url_blocks(image_url, caption);
+        self.post_blocks(chat_id, &blocks, &fallback_text, None)
+            .await?;
+        Ok(())
+    }
+
     fn is_running(&self) -> bool {
         self.base.is_running()
     }
@@ -1175,6 +1187,27 @@ fn split_message(text: &str, max_len: usize) -> Vec<String> {
     }
 
     chunks
+}
+
+fn slack_image_url_blocks(image_url: &str, caption: Option<&str>) -> (serde_json::Value, String) {
+    let caption = caption.map(str::trim).filter(|s| !s.is_empty());
+    let mut blocks = Vec::new();
+
+    if let Some(text) = caption {
+        blocks.push(serde_json::json!({
+            "type": "section",
+            "text": { "type": "mrkdwn", "text": text }
+        }));
+    }
+
+    blocks.push(serde_json::json!({
+        "type": "image",
+        "image_url": image_url,
+        "alt_text": caption.unwrap_or("image")
+    }));
+
+    let fallback = caption.unwrap_or(image_url).to_string();
+    (serde_json::Value::Array(blocks), fallback)
 }
 
 #[cfg(test)]
@@ -1456,6 +1489,30 @@ mod tests {
         assert_eq!(arr[2]["type"], "section");
         assert_eq!(arr[3]["type"], "actions");
         assert_eq!(arr[4]["type"], "context");
+    }
+
+    #[test]
+    fn slack_image_url_blocks_with_caption() {
+        let (blocks, fallback) =
+            slack_image_url_blocks("https://example.com/hero.png", Some("Release snapshot"));
+        assert_eq!(fallback, "Release snapshot");
+        let arr = blocks.as_array().expect("blocks array");
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0]["type"], "section");
+        assert_eq!(arr[1]["type"], "image");
+        assert_eq!(arr[1]["image_url"], "https://example.com/hero.png");
+        assert_eq!(arr[1]["alt_text"], "Release snapshot");
+    }
+
+    #[test]
+    fn slack_image_url_blocks_without_caption() {
+        let (blocks, fallback) =
+            slack_image_url_blocks("https://example.com/hero.png", Some("   "));
+        assert_eq!(fallback, "https://example.com/hero.png");
+        let arr = blocks.as_array().expect("blocks array");
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["type"], "image");
+        assert_eq!(arr[0]["alt_text"], "image");
     }
 
     #[test]

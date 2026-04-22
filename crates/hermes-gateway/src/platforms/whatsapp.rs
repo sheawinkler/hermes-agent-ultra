@@ -470,6 +470,15 @@ impl PlatformAdapter for WhatsAppAdapter {
         Ok(())
     }
 
+    async fn send_image_url(
+        &self,
+        chat_id: &str,
+        image_url: &str,
+        caption: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        self.send_media(chat_id, "image", image_url, caption).await
+    }
+
     fn is_running(&self) -> bool {
         self.base.is_running()
     }
