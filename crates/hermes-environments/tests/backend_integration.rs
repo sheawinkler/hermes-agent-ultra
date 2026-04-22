@@ -57,9 +57,19 @@ async fn local_execute_background() {
         .execute_command("sleep 60", None, None, true, false)
         .await
         .unwrap();
-    // Background mode returns immediately with PID info
+    // Background mode returns immediately with structured session metadata.
     assert_eq!(output.exit_code, 0);
-    assert!(output.stdout.contains("background"));
+    let payload: serde_json::Value =
+        serde_json::from_str(&output.stdout).expect("background mode should return json payload");
+    assert_eq!(payload.get("exit_code").and_then(|v| v.as_i64()), Some(0));
+    assert_eq!(
+        payload.get("output").and_then(|v| v.as_str()),
+        Some("Background process started")
+    );
+    assert!(payload
+        .get("session_id")
+        .and_then(|v| v.as_str())
+        .is_some_and(|s| !s.is_empty()));
 }
 
 #[tokio::test]
