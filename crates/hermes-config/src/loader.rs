@@ -262,7 +262,7 @@ pub fn load_user_config_file(path: &Path) -> Result<GatewayConfig, ConfigError> 
     }
 }
 
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, llm.<provider>.api_key|base_url|model|command|args|oauth_token_url|oauth_client_id, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, llm.<provider>.api_key|base_url|model|command|args|oauth_token_url|oauth_client_id, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
 
 fn mask_secret(s: &str) -> String {
     if s.is_empty() {
@@ -356,6 +356,20 @@ fn apply_user_config_patch_dotted(
         ["proxy", "socks"] | ["proxy", "socks_proxy"] => {
             let proxy = config.proxy.get_or_insert_with(ProxyConfig::default);
             proxy.socks_proxy = Some(value.to_string());
+        }
+        ["security", "allow_private_urls"] => {
+            let normalized = value.trim().to_ascii_lowercase();
+            let parsed = match normalized.as_str() {
+                "1" | "true" | "yes" | "on" => true,
+                "0" | "false" | "no" | "off" => false,
+                _ => {
+                    return Err(ConfigError::ValidationError(format!(
+                        "security.allow_private_urls must be a boolean: {}",
+                        value
+                    )));
+                }
+            };
+            config.security.allow_private_urls = parsed;
         }
         ["llm", provider, field] => {
             let entry = config
@@ -642,6 +656,14 @@ pub fn apply_env_overrides(config: &mut GatewayConfig) {
     }
     if let Ok(v) = std::env::var("HERMES_SYSTEM_PROMPT") {
         config.system_prompt = Some(v);
+    }
+    if let Ok(v) = std::env::var("HERMES_ALLOW_PRIVATE_URLS") {
+        let normalized = v.trim().to_ascii_lowercase();
+        match normalized.as_str() {
+            "1" | "true" | "yes" | "on" => config.security.allow_private_urls = true,
+            "0" | "false" | "no" | "off" => config.security.allow_private_urls = false,
+            _ => tracing::warn!("HERMES_ALLOW_PRIVATE_URLS is not a valid bool-like value: {v}"),
+        }
     }
     if let Ok(v) = std::env::var("HERMES_PROXY_HTTP") {
         let proxy = config
