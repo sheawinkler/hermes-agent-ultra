@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-22T22:23:25.620880+00:00`
+Generated: `2026-04-22T22:25:32.359101+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `4654`.
 
@@ -16,16 +16,15 @@ Generated: `2026-04-22T22:23:25.620880+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 65 |
+| pending | 59 |
 | ported | 68 |
-| superseded | 4521 |
+| superseded | 4527 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
 | `c6b1ef4e5881` | #20 | feat: add Step Plan provider support (salvage #6005) |
-| `30ec12970b10` | #26 | fix(packaging): include agent.* sub-packages in pyproject.toml |
 | `a7d78d3bfd81` | #20 | fix: preserve reasoning_content on Kimi replay |
 | `d166716c65ea` | #21 | feat(optional-skills): add page-agent skill under new web-development category (#13976) |
 | `8bcd77a9c2e8` | #23 | feat(wecom): add QR scan flow and interactive setup wizard for bot credentials |
@@ -33,21 +32,17 @@ Generated: `2026-04-22T22:23:25.620880+00:00`
 | `b43524ecabc3` | #23 | fix(wecom): visible poll progress + clearer no-bot-info failure + docstring note |
 | `b8663813b667` | #20 | feat(state): auto-prune old sessions + VACUUM state.db at startup (#13861) |
 | `b66644f0ecce` | #23 | feat(hindsight): richer session-scoped retain metadata |
-| `ba7e8b0df9ee` | #26 | chore(release): map Abner email to Abnertheforeman |
 | `cf55c738e79b` | #23 | refactor(qqbot): migrate qr onboard flow to sync + consolidate into onboard.py |
-| `be11a75eaec4` | #26 | chore(release): map hharry11 email to GitHub handle |
 | `5fb143169b4e` | #20 | feat(dashboard): track real API call count per session |
 | `3e652f75b27b` | #20 | fix(plugins+nous): auto-coerce memory plugins; actionable Nous 401 diagnostic (#14005) |
 | `77e04a29d574` | #20 | fix(error_classifier): don't classify generic 404 as model_not_found (#14013) |
 | `2efb0eea211a` | #26 | fix(anthropic_adapter): preserve reasoning_content on assistant tool-call messages for Kimi /coding |
-| `97a536057ddf` | #26 | chore(release): add hiddenpuppy to AUTHOR_MAP |
 | `04e039f687b8` | #26 | fix: Kimi /coding thinking block survival + empty reasoning_content + block ordering |
 | `7785654ad5cc` | #22 | feat(tui): subagent spawn observability overlay |
 | `06ebe34b4005` | #22 | fix(tui): repair useInput handler in agents overlay |
 | `f06adcc1ae0c` | #22 | chore(tui): drop unreachable return + prettier pass |
 | `70a33708e7c9` | #23 | fix(gateway/slack): align reaction lifecycle with Discord/Telegram pattern |
 | `1f216ecbb479` | #23 | feat(gateway/slack): add SLACK_REACTIONS env toggle for reaction lifecycle |
-| `5e8262da26a6` | #26 | chore: add rnijhara to AUTHOR_MAP |
 | `dee51c160764` | #22 | fix(tui): address Copilot review on #14045 |
 | `82197a87dcac` | #22 | style(tui): breathing room around status glyphs in agents overlay |
 | `eda400d8a58c` | #22 | chore: uptick |
@@ -86,7 +81,6 @@ Generated: `2026-04-22T22:23:25.620880+00:00`
 | `e86acad8f1a5` | #23 | feat(feishu): preserve @mention context on inbound messages |
 | `44a16c5d9d54` | #20 | guard terminal_tool import-time env parsing |
 | `6513138f2684` | #20 | fix(agent): recognize Tailscale CGNAT (100.64.0.0/10) as local for Ollama timeouts |
-| `2e5ddf9d2e8c` | #26 | chore(release): add AUTHOR_MAP entry for ismell0992-afk |
 | `1e8254e59962` | #20 | fix(agent): guard context compressor against structured message content |
 | `83efea661f83` | #22 | fix(tui): address copilot round 3 on #14145 |
 

@@ -69874,13 +69874,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "pyproject.toml"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "superseded: upstream pyproject packaging fix does not apply to Rust-only workspace packaging",
+      "owner": "codex_gpt5",
       "sha": "30ec12970b10d8efd55f509fb7da33d5d8614b74",
       "subject": "fix(packaging): include agent.* sub-packages in pyproject.toml",
       "target_ticket": 26,
@@ -69998,13 +69998,13 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "superseded: upstream scripts/release.py AUTHOR_MAP maintenance is Python-release-only",
+      "owner": "codex_gpt5",
       "sha": "ba7e8b0df9ee6f5a8285108f82867a08bb787426",
       "subject": "chore(release): map Abner email to Abnertheforeman",
       "target_ticket": 26,
@@ -70040,13 +70040,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "superseded: upstream scripts/release.py AUTHOR_MAP maintenance is Python-release-only",
+      "owner": "codex_gpt5",
       "sha": "be11a75eaec4ec0ad28f0ed815a4dccbb7d4e51a",
       "subject": "chore(release): map hharry11 email to GitHub handle",
       "target_ticket": 26,
@@ -70131,13 +70131,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "superseded: upstream scripts/release.py AUTHOR_MAP maintenance is Python-release-only",
+      "owner": "codex_gpt5",
       "sha": "97a536057ddfca495e5a3c44569cc9e67dccb856",
       "subject": "chore(release): add hiddenpuppy to AUTHOR_MAP",
       "target_ticket": 26,
@@ -70246,13 +70246,13 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "superseded: upstream scripts/release.py AUTHOR_MAP maintenance is Python-release-only",
+      "owner": "codex_gpt5",
       "sha": "5e8262da26a63872bfeca808a54fcdc9baff2751",
       "subject": "chore: add rnijhara to AUTHOR_MAP",
       "target_ticket": 26,
@@ -70829,13 +70829,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "superseded: upstream scripts/release.py AUTHOR_MAP maintenance is Python-release-only",
+      "owner": "codex_gpt5",
       "sha": "2e5ddf9d2e8c5cb13780d534892ed7116623c2f3",
       "subject": "chore(release): add AUTHOR_MAP entry for ismell0992-afk",
       "target_ticket": 26,
@@ -70870,7 +70870,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     }
   ],
-  "generated_at_utc": "2026-04-22T22:23:25.620880+00:00",
+  "generated_at_utc": "2026-04-22T22:25:32.359101+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -70878,9 +70878,9 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 65,
+      "pending": 59,
       "ported": 68,
-      "superseded": 4521
+      "superseded": 4527
     },
     "by_target_ticket": {
       "20": 1654,
