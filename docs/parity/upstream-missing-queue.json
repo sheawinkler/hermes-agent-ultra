@@ -14688,13 +14688,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tests/tools/test_file_tools_live.py",
         "tools/file_operations.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "ported-2026-04-22: rust parity in LocalBackend path resolver (commit 7146ba1c)",
       "owner": "codex",
       "sha": "5212644861ffefe2a51b259692da564cf0d4aab7",
       "subject": "fix(security): prevent shell injection in tilde-username path expansion",
@@ -22569,7 +22569,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tests/tools/test_local_env_blocklist.py",
         "tests/tools/test_process_registry.py",
@@ -22577,7 +22577,7 @@
         "tools/process_registry.py"
       ],
       "files_touched": 4,
-      "notes": "triage-full-2026-04-21: group=WG1-tests-ci; action=implement",
+      "notes": "ported-2026-04-22: rust parity in LocalBackend subprocess env scrubber (commit a6206a37)",
       "owner": "codex",
       "sha": "b177b4abad1dffd60bc2e1527af8917d1ed7442f",
       "subject": "fix(security): block gateway and tool env vars in subprocesses",
@@ -69166,7 +69166,7 @@
       "target_ticket_name": "GPAR-02 skills parity"
     }
   ],
-  "generated_at_utc": "2026-04-21T23:47:43.144133+00:00",
+  "generated_at_utc": "2026-04-22T00:27:14.610296+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69174,8 +69174,8 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4178,
-      "ported": 16,
+      "pending": 4176,
+      "ported": 18,
       "superseded": 349
     },
     "by_target_ticket": {
