@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-22T03:46:23.596820+00:00`
+Generated: `2026-04-22T06:06:02.281808+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `4579`.
 
@@ -16,19 +16,17 @@ Generated: `2026-04-22T03:46:23.596820+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 4190 |
-| ported | 34 |
+| pending | 4180 |
+| ported | 44 |
 | superseded | 355 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `153cd5bb44ef` | #26 | Refactor skills tool integration and enhance system prompt |
 | `8fb44608bfe4` | #21 | Update SKILL.md and related references to implement container binding for labeled shapes and arrows in Excalidraw |
 | `abe925e21260` | #26 | Update hermes-discord toolset to enable full terminal access with safety checks |
 | `ada0b4f131ba` | #23 | Enhance image handling in platform adapters |
-| `137ce05324d0` | #26 | Add image generation tool to toolsets for messaging platforms |
 | `07501bef14bf` | #26 | Add Project_notes.md — centralized status tracker for all side projects |
 | `fc792a4be927` | #26 | Update Project_notes.md: grailed-embedding-search status and TODOs (June 2025) |
 | `389ac5e017ed` | #26 | pass extrabody for agentloop to ban and allowlist providers on openrouter, control thinking, etc |
@@ -37,8 +35,6 @@ Generated: `2026-04-22T03:46:23.596820+00:00`
 | `f23856df8ef2` | #26 | Add kill_modal script to manage Modal applications and better handling of file and terminal tools |
 | `f5be6177b231` | #23 | Add Text-to-Speech (TTS) functionality with multiple providers |
 | `ed010752dd1f` | #26 | Update .env.example to use new Docker, Singularity, and Modal images for Python 3.11 with Node.js 20 support |
-| `3099a2f53c85` | #26 | Add timestamp to active system prompt in AIAgent |
-| `84718d183abb` | #26 | Add platform-specific formatting hints and identity for AIAgent |
 | `586b0a7047ea` | #26 | Add Text-to-Speech (TTS) support with Edge TTS and ElevenLabs integration |
 | `ff9ea6c4b1c6` | #26 | Enhance TTS tool to support platform-specific audio formats |
 | `eb49936a60aa` | #25 | Update documentation and installation scripts for TTS audio formats |
@@ -48,14 +44,11 @@ Generated: `2026-04-22T03:46:23.596820+00:00`
 | `e0c9d495ef77` | #26 | Refine configuration migration process to improve user experience |
 | `dd5fe334f3b4` | #26 | Refactor configuration handling to improve user experience |
 | `0f58dfdea4e2` | #26 | Enhance agent response handling and transcript logging |
-| `60812ae0418d` | #25 | Enhance configuration checks and persona file creation in doctor and install scripts |
 | `45a8098d3afe` | #26 | Remove browserbase SDK check and add Node.js and agent-browser validation in doctor script |
 | `01a3a6ab0d2d` | #26 | Implement cleanup guard to prevent multiple executions on exit |
 | `8117d0adabe3` | #26 | Refactor file operations and environment management in file_tools and terminal_tool |
 | `2c7deb41f6f7` | #26 | Fix Modal backend not working from CLI |
 | `a7609c97be5f` | #26 | Update docs to match backend key rename and CWD behavior |
-| `48b5cfd0851e` | #26 | Add skip_context_files option to AIAgent for batch processing |
-| `bdac541d1ee2` | #26 | Rename OPENAI_API_KEY to HERMES_OPENAI_API_KEY in configuration and codebase for clarity and to avoid conflicts. Update related documentation and error messages to reflect the new key name, ensuring backward compatibility with existing setups. |
 | `ec59d71e6083` | #26 | Update PTY write handling in ProcessRegistry to ensure data is encoded as bytes before writing. This change improves compatibility with string inputs and clarifies the expected data type in comments. |
 | `d0f82e6dcca6` | #26 | Removing random project notes doc |
 | `e184f5ab3a51` | #26 | Add todo tool for agent task planning and management |
@@ -87,7 +80,6 @@ Generated: `2026-04-22T03:46:23.596820+00:00`
 | `b88e441a076a` | #26 | feat: implement cross-channel messaging functionality |
 | `59cb0cecb214` | #25 | feat: add messaging gateway startup functionality |
 | `53e13fe1f12c` | #26 | feat: add Slack and WhatsApp setup prompts in setup wizard |
-| `3191a9ba11d4` | #23 | feat: add new conversation command and enhance command handling |
 | `4d5f29c74ca9` | #25 | feat: introduce skill management tool for agent-created skills and skills migration to ~/.hermes |
 | `9350e26e681e` | #26 | feat: introduce clarifying questions tool for interactive user engagement |
 | `748f0b2b5fc1` | #26 | feat: enhance clarify tool with configurable timeout and countdown display |
@@ -124,4 +116,12 @@ Generated: `2026-04-22T03:46:23.596820+00:00`
 | `748fd3db8858` | #23 | refactor: enhance error handling with structured logging across multiple modules |
 | `7ee7221af11f` | #26 | refactor: consolidate debug logging across tools with shared DebugSession class |
 | `ecb430effeca` | #23 | refactor: enhance API interaction and message handling in AIAgent |
+| `c98ee9852594` | #26 | feat: implement interactive prompts for sudo password and command approval in CLI |
+| `bff37075f61e` | #26 | feat: enhance CLI input handling with password masking and placeholder text |
+| `5c2926102bf8` | #26 | fix: improve placeholder handling and hint height in CLI |
+| `8f6788474b0d` | #26 | feat: enhance logging in AIAgent for quiet mode |
+| `0729ef7353c1` | #26 | fix: refine environment creation condition in terminal_tool |
+| `7cb6427dea43` | #25 | refactor: streamline cron job handling and update CLI commands |
+| `61349398828b` | #25 | refactor: deduplicate toolsets, unify async bridging, fix approval race condition, harden security |
+| `08ff1c1aa8a4` | #26 | More major refactor/tech debt removal! |
 

@@ -2394,7 +2394,7 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "model_tools.py",
         "run_agent.py",
@@ -2402,7 +2402,7 @@
         "toolsets.py"
       ],
       "files_touched": 4,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-17 verification: already present in rust head (skills categories removed; compact skill prompt index in crates/hermes-agent/src/agent_loop.rs).",
       "owner": "codex",
       "sha": "153cd5bb44efa020c468d9e9e0b788d104d9c235",
       "subject": "Refactor skills tool integration and enhance system prompt",
@@ -2454,12 +2454,12 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "toolsets.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-17: rust parity in crates/hermes-tools/src/toolset.rs (commit 03505403) adds image_generate to messaging presets.",
       "owner": "codex",
       "sha": "137ce05324d07489a1e7e8a71d81b4b6473f37f0",
       "subject": "Add image generation tool to toolsets for messaging platforms",
@@ -2590,12 +2590,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "run_agent.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-17 verification: already present in rust head (timestamp block injected via SystemPromptBuilder::with_timestamp in agent loop).",
       "owner": "codex",
       "sha": "3099a2f53c856f670ad0059a1d3a2c13f2c0a2c4",
       "subject": "Add timestamp to active system prompt in AIAgent",
@@ -2603,14 +2603,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "cli.py",
         "gateway/run.py",
         "run_agent.py"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-17 verification: already present in rust head (platform-specific hinting + default identity in agent prompt construction).",
       "owner": "codex",
       "sha": "84718d183abb3a44d6e7ab886f7268c41bca8a70",
       "subject": "Add platform-specific formatting hints and identity for AIAgent",
@@ -2779,14 +2779,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "hermes_cli/doctor.py",
         "scripts/install.ps1",
         "scripts/install.sh"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG6-packaging-install-docs; action=implement",
+      "notes": "batch-17: rust parity in setup/doctor/install (commit 1e2e5c1e) adds SOUL.md creation/checks and env-file-aware doctor checks.",
       "owner": "codex",
       "sha": "60812ae0418d12b6baec52659fc6ec05eaaed272",
       "subject": "Enhance configuration checks and persona file creation in doctor and install scripts",
@@ -2879,13 +2879,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "batch_runner.py",
         "run_agent.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-17: rust parity in AgentConfig/builders/cron runner (commit 40963017) adds skip_context_files control and propagation.",
       "owner": "codex",
       "sha": "48b5cfd0851e8f330ab7f7a0c158a709e68deb39",
       "subject": "Add skip_context_files option to AIAgent for batch processing",
@@ -2917,7 +2917,7 @@
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         ".env.example",
         "gateway/run.py",
@@ -2926,7 +2926,7 @@
         "tools/tts_tool.py"
       ],
       "files_touched": 5,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-17: rust parity in config/cli/tools/gateway (commit da85cee0) prefers HERMES_OPENAI_API_KEY with OPENAI_API_KEY fallback.",
       "owner": "codex",
       "sha": "bdac541d1ee20aa8545d908a01e18c65b8e319de",
       "subject": "Rename OPENAI_API_KEY to HERMES_OPENAI_API_KEY in configuration and codebase for clarity and to avoid conflicts. Update related documentation and error messages to reflect the new key name, ensuring backward compatibility with existing setups.",
@@ -3472,7 +3472,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "cli.py",
         "gateway/platforms/discord.py",
@@ -3481,7 +3481,7 @@
         "gateway/run.py"
       ],
       "files_touched": 5,
-      "notes": "triage-full-2026-04-21: group=WG4-gateway-memory; action=implement",
+      "notes": "batch-17 verification: already present in rust head (/new + help/model/personality/retry/undo command handling across gateway/cli).",
       "owner": "codex",
       "sha": "3191a9ba11d4922dd0283a26442905dd04ed55ae",
       "subject": "feat: add new conversation command and enhance command handling",
@@ -4290,14 +4290,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "model_tools.py",
         "tools/cronjob_tools.py",
         "toolsets.py"
       ],
       "files_touched": 3,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-17: rust parity in crates/hermes-tools/src/toolset.rs (commit 60f33ada) adds cronjob tools to messaging presets.",
       "owner": "codex",
       "sha": "79b62497d1ca3ecb17abd5ab505b0d1ffc37cd3c",
       "subject": "enable cronjobs in messaging platforms",
@@ -4525,12 +4525,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tools/session_search_tool.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "batch-17: rust parity in session search backend (commit 8c979d56) adds human-readable timestamp normalization.",
       "owner": "codex",
       "sha": "c2d5f7bf2619d34c4812e817faba278cd836f243",
       "subject": "feat: add timestamp formatting function for session metadata",
@@ -69721,7 +69721,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-04-22T03:46:23.596820+00:00",
+  "generated_at_utc": "2026-04-22T06:06:02.281808+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69729,8 +69729,8 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4190,
-      "ported": 34,
+      "pending": 4180,
+      "ported": 44,
       "superseded": 355
     },
     "by_target_ticket": {
