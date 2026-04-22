@@ -453,3 +453,55 @@
   - `superseded`: `8fb44608`, `07501bef`, `fc792a4b`, `1b7bc299`, `f23856df`
 - Queue refresh:
   - `docs/parity/upstream-missing-queue.{json,md}` regenerated with these 10 SHAs moved out of `pending`.
+
+## 2026-04-22 batch-21 (30-tranche parity pass: TTS/messaging/CLI/config queue slice)
+- Scope: next 30 pending upstream SHAs after batch-20:
+  - `ed010752dd1f9862b75b17977dbe4b98c0663352`
+  - `586b0a7047ea7d9ea81bcd44496fb9e2136de50d`
+  - `ff9ea6c4b1c69ebe450a6128e8f76d39162565ac`
+  - `eb49936a60aaf6c57483d01138a86fe1ac5445d1`
+  - `5404a8fcd8a575a9c82bc77a5f090d4fd545f8c1`
+  - `69aa35a51c3db85002892e2fab889287bf170dda`
+  - `2f34e6fd3017f8eb32bad073c9b68b9c28553a4c`
+  - `e0c9d495ef7764c656c5fc55faefd8464353cce9`
+  - `dd5fe334f3b4c516e8150ca2c92c226803411e86`
+  - `0f58dfdea4e2b9371a4ebe5f569aeec069454b71`
+  - `45a8098d3afe181b281f4fc908199852a11b1299`
+  - `01a3a6ab0d2d8e0e8644f85ff2c650d2cecd0821`
+  - `8117d0adabe39e47973eaff9290a4340b92f63ba`
+  - `2c7deb41f6f7274c803b108b49c1da0e590099bc`
+  - `a7609c97be5f03c881e75973f5bf1e405f8d1511`
+  - `ec59d71e6083cdddfd0092dfbdd62d5077ba0633`
+  - `d0f82e6dcca634e191cead913d222c3e6fcf7819`
+  - `e184f5ab3a51a9f9874d6d161788a844fcc43f74`
+  - `a7f52911e1c61d632d000b5279a6f95a0fda7996`
+  - `dfa3c6265c7ed73b29d3d956409210051cc19514`
+  - `54cbf30c1430eff14cf8e79a4224ef2a6b1aa23d`
+  - `d7cef744ecc99bf10064729f2a92368e9c15c7f4`
+  - `d9a8e421a4a272a6030e7a76bb5300edd6bb292c`
+  - `41608beb3585676032f7f6305a64f213339692f1`
+  - `50ef18644ba56e642d37d2930075c34bb5fc8afc`
+  - `225ae32e7affa679ead636021c49d640ac919f6c`
+  - `9e85408c7bfd6024754709800ab762402d1a2816`
+  - `14e59706b732164dda260f1899ade74a86a8352a`
+  - `655303f2f1e0afac0dab45b714db88cc197da561`
+  - `440c244cac71f0764e00ea85ab87ae0a2d18fe61`
+- Rust implementation commits (chronological):
+  - `0c50f306` parity(45a8098d): extend `hermes doctor` checks with Node.js and `agent-browser` (optional) validation.
+- Verified existing parity coverage used for tranche dispositioning:
+  - `56df3b42` (batch-20): inline image extraction + native image delivery across gateway response path.
+  - Existing rust modules for: TTS stack, platform media routing, messaging adapters/hooks/pairing, todo tool, skills hub, sqlite session persistence/search, and modal backend support.
+- Verification (targeted):
+  - `cargo test -p hermes-cli cli::tests::cli_parse_doctor -- --nocapture`
+  - `cargo test -p hermes-cli cli::tests::cli_parse_default -- --nocapture`
+- Queue dispositions in this 30-SHA pass:
+  - `ported` (17):
+    - `ff9ea6c4`, `5404a8fc`, `69aa35a5`, `e0c9d495`, `0f58dfde`, `45a8098d`,
+      `2c7deb41`, `ec59d71e`, `e184f5ab`, `d7cef744`, `d9a8e421`, `41608beb`,
+      `225ae32e`, `9e85408c`, `14e59706`, `655303f2`, `440c244c`
+  - `superseded` (13):
+    - `ed010752`, `586b0a70`, `eb49936a`, `2f34e6fd`, `dd5fe334`, `01a3a6ab`,
+      `8117d0ad`, `a7609c97`, `d0f82e6d`, `a7f52911`, `dfa3c626`, `54cbf30c`,
+      `50ef1864`
+- Queue refresh:
+  - `docs/parity/upstream-missing-queue.{json,md}` regenerated with all 30 SHAs moved out of `pending`.
