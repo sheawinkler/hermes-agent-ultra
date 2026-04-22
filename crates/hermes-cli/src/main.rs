@@ -14,7 +14,7 @@ use hermes_cli::app::{
 };
 use hermes_cli::cli::{Cli, CliCommand};
 use hermes_cli::config_env::hydrate_env_from_config;
-use hermes_cli::platform_toolsets::resolve_platform_tool_schemas;
+use hermes_cli::platform_toolsets::{resolve_platform_tool_schemas, tool_definition_summary};
 use hermes_cli::runtime_tool_wiring::{
     wire_cron_scheduler_backend, wire_gateway_clarify_backend, wire_gateway_messaging_backend,
 };
@@ -1144,6 +1144,20 @@ async fn run_gateway(
                             &ctx.platform,
                             &runtime_tools,
                         );
+                        let tool_defs = tool_definition_summary(&tool_schemas);
+                        gateway_for_review
+                            .emit_hook_event(
+                                "agent:tool_definitions",
+                                serde_json::json!({
+                                    "platform": ctx.platform,
+                                    "chat_id": ctx.chat_id,
+                                    "user_id": ctx.user_id,
+                                    "session_id": ctx.session_key,
+                                    "streaming": false,
+                                    "tools": tool_defs
+                                }),
+                            )
+                            .await;
                         let platform_for_review = ctx.platform.clone();
                         let chat_for_review = ctx.chat_id.clone();
                         let deferred_queue = ctx.deferred_post_delivery_messages.clone();
@@ -1348,6 +1362,20 @@ async fn run_gateway(
                             &ctx.platform,
                             &runtime_tools,
                         );
+                        let tool_defs = tool_definition_summary(&tool_schemas);
+                        gateway_for_review
+                            .emit_hook_event(
+                                "agent:tool_definitions",
+                                serde_json::json!({
+                                    "platform": ctx.platform,
+                                    "chat_id": ctx.chat_id,
+                                    "user_id": ctx.user_id,
+                                    "session_id": ctx.session_key,
+                                    "streaming": true,
+                                    "tools": tool_defs
+                                }),
+                            )
+                            .await;
                         let platform_for_review = ctx.platform.clone();
                         let chat_for_review = ctx.chat_id.clone();
                         let deferred_queue = ctx.deferred_post_delivery_messages.clone();
