@@ -5338,15 +5338,20 @@ async fn run_setup() -> Result<(), AgentError> {
         }
     }
 
-    let mut config_content = String::from("# Hermes Agent Configuration\n\n");
-    config_content.push_str(&format!("model: {}\n", model));
-    config_content.push_str(&format!("personality: {}\n", personality));
-    config_content.push_str("max_turns: 50\n\n");
+    // Preserve existing fields (including platform_toolsets) instead of
+    // rewriting config.yaml from scratch.
+    let mut disk =
+        load_user_config_file(&config_path).map_err(|e| AgentError::Config(e.to_string()))?;
+    disk.model = Some(model.to_string());
+    disk.personality = Some(personality.to_string());
+    disk.max_turns = 50;
 
     if !api_key.is_empty() && !stored_openai_secret_in_vault {
-        config_content.push_str("llm_providers:\n");
-        config_content.push_str("  openai:\n");
-        config_content.push_str(&format!("    api_key: {}\n", api_key));
+        let provider = disk
+            .llm_providers
+            .entry("openai".to_string())
+            .or_insert_with(hermes_config::LlmProviderConfig::default);
+        provider.api_key = Some(api_key.clone());
     } else if stored_openai_secret_in_vault {
         println!(
             "  ✓ Stored OPENAI_API_KEY in encrypted vault: {}",
@@ -5358,9 +5363,8 @@ async fn run_setup() -> Result<(), AgentError> {
             env_path.display()
         );
     }
-
-    std::fs::write(&config_path, &config_content)
-        .map_err(|e| AgentError::Io(format!("Failed to write config: {}", e)))?;
+    validate_config(&disk).map_err(|e| AgentError::Config(e.to_string()))?;
+    save_config_yaml(&config_path, &disk).map_err(|e| AgentError::Config(e.to_string()))?;
     println!("\n  ✓ Wrote config.yaml");
 
     // 6. Write default profile
