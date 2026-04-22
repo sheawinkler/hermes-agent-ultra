@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-22T02:54:33.671063+00:00`
+Generated: `2026-04-22T02:57:09.844284+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `4576`.
 
@@ -16,8 +16,8 @@ Generated: `2026-04-22T02:54:33.671063+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 4192 |
-| ported | 29 |
+| pending | 4191 |
+| ported | 30 |
 | superseded | 355 |
 
 ## First 100 Pending Commits
@@ -60,7 +60,6 @@ Generated: `2026-04-22T02:54:33.671063+00:00`
 | `ec59d71e6083` | #26 | Update PTY write handling in ProcessRegistry to ensure data is encoded as bytes before writing. This change improves compatibility with string inputs and clarifies the expected data type in comments. |
 | `d0f82e6dcca6` | #26 | Removing random project notes doc |
 | `e184f5ab3a51` | #26 | Add todo tool for agent task planning and management |
-| `3b615b0f7a89` | #26 | Enhance tool previews in AIAgent and GatewayRunner |
 | `1e316145724d` | #26 | Refactor tool activity messages in AIAgent for improved CLI output |
 | `a7f52911e1c6` | #26 | Refactor CLI output formatting in AIAgent |
 | `dfa3c6265c7e` | #26 | Refactor CLI input prompt and layout in HermesCLI |
@@ -124,4 +123,5 @@ Generated: `2026-04-22T02:54:33.671063+00:00`
 | `3555c6173d0f` | #26 | refactor: remove temporary API payload logging and enhance session log structure |
 | `b6247b71b5a7` | #26 | refactor: update tool descriptions for clarity and conciseness |
 | `a885d2f24029` | #26 | refactor: implement structured logging across multiple modules |
+| `cbff1b818c30` | #20 | refactor: remove obsolete Nous API test scripts |
 

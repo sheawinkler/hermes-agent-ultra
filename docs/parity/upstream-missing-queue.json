@@ -3005,13 +3005,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "gateway/run.py",
         "run_agent.py"
       ],
       "files_touched": 2,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "ported-2026-04-22-batch-14: gateway runtime now captures on_tool_start previews + emoji metadata in agent:step hook payloads using shared tool preview formatter.",
       "owner": "codex",
       "sha": "3b615b0f7a89c909f2724eae3cd6e96383e0cae9",
       "subject": "Enhance tool previews in AIAgent and GatewayRunner",
@@ -69674,7 +69674,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-04-22T02:54:33.671063+00:00",
+  "generated_at_utc": "2026-04-22T02:57:09.844284+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69682,8 +69682,8 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4192,
-      "ported": 29,
+      "pending": 4191,
+      "ported": 30,
       "superseded": 355
     },
     "by_target_ticket": {

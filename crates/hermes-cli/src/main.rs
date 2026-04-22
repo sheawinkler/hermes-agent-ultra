@@ -18,6 +18,7 @@ use hermes_cli::runtime_tool_wiring::{
     wire_cron_scheduler_backend, wire_gateway_clarify_backend, wire_gateway_messaging_backend,
 };
 use hermes_cli::terminal_backend::build_terminal_backend;
+use hermes_cli::tool_preview::{build_tool_preview_from_value, tool_emoji};
 use hermes_cli::App;
 use hermes_config::{
     apply_user_config_patch, gateway_pid_path_in, hermes_home, load_config, load_user_config_file,
@@ -1201,12 +1202,31 @@ async fn run_gateway(
                             });
                         });
                         let tool_events = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+                        let tool_events_for_start = tool_events.clone();
+                        let on_tool_start: Box<dyn Fn(&str, &serde_json::Value) + Send + Sync> =
+                            Box::new(move |name: &str, args: &serde_json::Value| {
+                                let preview = build_tool_preview_from_value(name, args, 60)
+                                    .unwrap_or_default();
+                                let mut event = serde_json::json!({
+                                    "phase": "start",
+                                    "name": name,
+                                    "emoji": tool_emoji(name)
+                                });
+                                if !preview.is_empty() {
+                                    event["preview"] = serde_json::json!(preview);
+                                }
+                                if let Ok(mut guard) = tool_events_for_start.lock() {
+                                    guard.push(event);
+                                }
+                            });
                         let tool_events_for_complete = tool_events.clone();
                         let on_tool_complete: Box<dyn Fn(&str, &str) + Send + Sync> =
                             Box::new(move |name: &str, result: &str| {
                                 if let Ok(mut guard) = tool_events_for_complete.lock() {
                                     guard.push(serde_json::json!({
+                                        "phase": "complete",
                                         "name": name,
+                                        "emoji": tool_emoji(name),
                                         "result": truncate_hook_tool_result(result)
                                     }));
                                 }
@@ -1254,6 +1274,7 @@ async fn run_gateway(
                         let callbacks = AgentCallbacks {
                             background_review_callback: Some(review_cb),
                             status_callback: Some(status_cb),
+                            on_tool_start: Some(on_tool_start),
                             on_tool_complete: Some(on_tool_complete),
                             on_step_complete: Some(on_step_complete),
                             ..Default::default()
@@ -1380,12 +1401,31 @@ async fn run_gateway(
                             });
                         });
                         let tool_events = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+                        let tool_events_for_start = tool_events.clone();
+                        let on_tool_start: Box<dyn Fn(&str, &serde_json::Value) + Send + Sync> =
+                            Box::new(move |name: &str, args: &serde_json::Value| {
+                                let preview = build_tool_preview_from_value(name, args, 60)
+                                    .unwrap_or_default();
+                                let mut event = serde_json::json!({
+                                    "phase": "start",
+                                    "name": name,
+                                    "emoji": tool_emoji(name)
+                                });
+                                if !preview.is_empty() {
+                                    event["preview"] = serde_json::json!(preview);
+                                }
+                                if let Ok(mut guard) = tool_events_for_start.lock() {
+                                    guard.push(event);
+                                }
+                            });
                         let tool_events_for_complete = tool_events.clone();
                         let on_tool_complete: Box<dyn Fn(&str, &str) + Send + Sync> =
                             Box::new(move |name: &str, result: &str| {
                                 if let Ok(mut guard) = tool_events_for_complete.lock() {
                                     guard.push(serde_json::json!({
+                                        "phase": "complete",
                                         "name": name,
+                                        "emoji": tool_emoji(name),
                                         "result": truncate_hook_tool_result(result)
                                     }));
                                 }
@@ -1433,6 +1473,7 @@ async fn run_gateway(
                         let callbacks = AgentCallbacks {
                             background_review_callback: Some(review_cb),
                             status_callback: Some(status_cb),
+                            on_tool_start: Some(on_tool_start),
                             on_tool_complete: Some(on_tool_complete),
                             on_step_complete: Some(on_step_complete),
                             ..Default::default()

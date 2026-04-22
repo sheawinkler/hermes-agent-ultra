@@ -295,3 +295,25 @@
 - Queue/proof refresh:
   - `docs/parity/upstream-missing-queue.{json,md}`
   - `docs/parity/global-parity-proof.{json,md}`
+
+## 2026-04-22 batch-14 (gateway tool preview parity)
+- Scope: parity tranche for GatewayRunner tool preview/emoji progress metadata.
+- Upstream commit ported:
+  - `3b615b0f7a89c909f2724eae3cd6e96383e0cae9`
+    `Enhance tool previews in AIAgent and GatewayRunner`
+    - Disposition: `ported`
+- Implementation (Rust):
+  - `crates/hermes-cli/src/main.rs`
+    - Added `on_tool_start` callback wiring (non-stream + stream gateway paths).
+    - `agent:step` hook `tools` payload now records start-phase preview entries:
+      - `phase` (`start`/`complete`)
+      - `name`
+      - `emoji`
+      - `preview` (on start, when available)
+      - `result` (on complete, truncated)
+    - Reused shared formatter from `crates/hermes-cli/src/tool_preview.rs`.
+- Verification:
+  - `cargo test -p hermes-cli tool_preview:: -- --nocapture`
+- Queue/proof refresh:
+  - `docs/parity/upstream-missing-queue.{json,md}`
+  - `docs/parity/global-parity-proof.{json,md}`
