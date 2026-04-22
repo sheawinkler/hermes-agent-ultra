@@ -69843,9 +69843,1034 @@
       "subject": "feat(plugins): pluggable image_gen backends + OpenAI provider (#13799)",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/auxiliary_client.py",
+        "agent/model_metadata.py",
+        "agent/models_dev.py",
+        "hermes_cli/auth.py",
+        "hermes_cli/config.py",
+        "hermes_cli/doctor.py",
+        "hermes_cli/main.py",
+        "hermes_cli/model_switch.py",
+        "hermes_cli/models.py",
+        "hermes_cli/providers.py",
+        "hermes_cli/setup.py",
+        "hermes_cli/status.py",
+        "tests/agent/test_model_metadata.py",
+        "tests/agent/test_models_dev.py",
+        "tests/hermes_cli/test_api_key_providers.py",
+        "tests/hermes_cli/test_model_provider_persistence.py",
+        "tests/hermes_cli/test_model_validation.py"
+      ],
+      "files_touched": 17,
+      "notes": "",
+      "owner": "",
+      "sha": "c6b1ef4e5881f42d6c5168e111bf915716f09c51",
+      "subject": "feat: add Step Plan provider support (salvage #6005)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "pyproject.toml"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "30ec12970b10d8efd55f509fb7da33d5d8614b74",
+      "subject": "fix(packaging): include agent.* sub-packages in pyproject.toml",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/run.py",
+        "gateway/session.py",
+        "hermes_state.py",
+        "run_agent.py",
+        "tests/gateway/test_session.py",
+        "tests/run_agent/test_run_agent.py",
+        "tests/test_hermes_state.py"
+      ],
+      "files_touched": 7,
+      "notes": "",
+      "owner": "",
+      "sha": "a7d78d3bfd811d2713c837bf29ca8031ba538409",
+      "subject": "fix: preserve reasoning_content on Kimi replay",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "optional-skills/web-development/DESCRIPTION.md",
+        "optional-skills/web-development/page-agent/SKILL.md"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "d166716c65ea0949026bdbd6d747c8aa59901721",
+      "subject": "feat(optional-skills): add page-agent skill under new web-development category (#13976)",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/wecom.py",
+        "hermes_cli/gateway.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "8bcd77a9c2e8ca22e02db1025739fa3b88f54bdf",
+      "subject": "feat(wecom): add QR scan flow and interactive setup wizard for bot credentials",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "website/docs/user-guide/messaging/wecom.md"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "3f60a907e1d34eab64bda9c67d073c4523e651e0",
+      "subject": "docs(wecom): document QR scan-to-create setup flow",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/wecom.py",
+        "scripts/release.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "b43524ecabc387703276b9f810b07bb3ee5fa1a5",
+      "subject": "fix(wecom): visible poll progress + clearer no-bot-info failure + docstring note",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py",
+        "gateway/run.py",
+        "hermes_cli/config.py",
+        "hermes_state.py",
+        "tests/test_hermes_state.py",
+        "website/docs/user-guide/sessions.md"
+      ],
+      "files_touched": 6,
+      "notes": "",
+      "owner": "",
+      "sha": "b8663813b667f32c4b4f30c3ee6caa0c9ebe4078",
+      "subject": "feat(state): auto-prune old sessions + VACUUM state.db at startup (#13861)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/run.py",
+        "plugins/memory/hindsight/README.md",
+        "plugins/memory/hindsight/__init__.py",
+        "run_agent.py",
+        "tests/agent/test_memory_user_id.py",
+        "tests/plugins/memory/test_hindsight_provider.py",
+        "website/docs/user-guide/features/memory-providers.md"
+      ],
+      "files_touched": 7,
+      "notes": "",
+      "owner": "",
+      "sha": "b66644f0ecced3b89fb5788dcd39bf13b5336ec2",
+      "subject": "feat(hindsight): richer session-scoped retain metadata",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "ba7e8b0df9ee6f5a8285108f82867a08bb787426",
+      "subject": "chore(release): map Abner email to Abnertheforeman",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/qqbot/__init__.py",
+        "gateway/platforms/qqbot/onboard.py",
+        "hermes_cli/gateway.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "cf55c738e79bf1a9ae809d11bcab695e83f4e248",
+      "subject": "refactor(qqbot): migrate qr onboard flow to sync + consolidate into onboard.py",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/env_loader.py",
+        "tests/hermes_cli/test_env_loader.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "83cb9a03ee59fc4336a465dac9a79e736bb6c803",
+      "subject": "fix(cli): ensure project .env is sanitized before loading",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "be11a75eaec4ec0ad28f0ed815a4dccbb7d4e51a",
+      "subject": "chore(release): map hharry11 email to GitHub handle",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/web_server.py",
+        "hermes_state.py",
+        "run_agent.py",
+        "tests/hermes_cli/test_web_server.py",
+        "tests/test_hermes_state.py",
+        "web/src/lib/api.ts",
+        "web/src/pages/AnalyticsPage.tsx"
+      ],
+      "files_touched": 7,
+      "notes": "",
+      "owner": "",
+      "sha": "5fb143169b4ef3a3ad9b74d2d7c871ab7e5e27ca",
+      "subject": "feat(dashboard): track real API call count per session",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/plugins.py",
+        "run_agent.py",
+        "tests/hermes_cli/test_plugins.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "3e652f75b27baef94dbf9dc13ec16c49271f37a4",
+      "subject": "fix(plugins+nous): auto-coerce memory plugins; actionable Nous 401 diagnostic (#14005)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/tools/test_file_operations.py",
+        "tests/tools/test_file_operations_edge_cases.py",
+        "tests/tools/test_file_tools.py",
+        "tools/file_operations.py",
+        "tools/file_tools.py"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "40619b393fd997cde206557dcf6599d113ca2cf9",
+      "subject": "tools: normalize file tool pagination bounds",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/error_classifier.py",
+        "tests/agent/test_error_classifier.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "77e04a29d5742e50add9c0d84a396e1eee3c4356",
+      "subject": "fix(error_classifier): don't classify generic 404 as model_not_found (#14013)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/anthropic_adapter.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "2efb0eea211ae214019dac64be5b81002b942483",
+      "subject": "fix(anthropic_adapter): preserve reasoning_content on assistant tool-call messages for Kimi /coding",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "97a536057ddfca495e5a3c44569cc9e67dccb856",
+      "subject": "chore(release): add hiddenpuppy to AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/anthropic_adapter.py",
+        "scripts/release.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "04e039f687b84aba07919f55b8597d263dd58435",
+      "subject": "fix: Kimi /coding thinking block survival + empty reasoning_content + block ordering",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tools/delegate_tool.py",
+        "tui_gateway/server.py",
+        "ui-tui/src/__tests__/subagentTree.test.ts",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/delegationStore.ts",
+        "ui-tui/src/app/interfaces.ts",
+        "ui-tui/src/app/overlayStore.ts",
+        "ui-tui/src/app/slash/commands/ops.ts",
+        "ui-tui/src/app/spawnHistoryStore.ts",
+        "ui-tui/src/app/turnController.ts",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/components/agentsOverlay.tsx",
+        "ui-tui/src/components/appChrome.tsx",
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/components/thinking.tsx",
+        "ui-tui/src/gatewayTypes.ts",
+        "ui-tui/src/lib/subagentTree.ts",
+        "ui-tui/src/theme.ts",
+        "ui-tui/src/types.ts"
+      ],
+      "files_touched": 19,
+      "notes": "",
+      "owner": "",
+      "sha": "7785654ad5cc3d9e2fec3cdf2ccb0fe88c4280a9",
+      "subject": "feat(tui): subagent spawn observability overlay",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/agentsOverlay.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "06ebe34b40059653dba9fc5eef3d37eca7d41229",
+      "subject": "fix(tui): repair useInput handler in agents overlay",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/slash/commands/ops.ts",
+        "ui-tui/src/components/agentsOverlay.tsx"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "f06adcc1ae0cdfe9a72fabd25f63852b0c3dc626",
+      "subject": "chore(tui): drop unreachable return + prettier pass",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/slack.py",
+        "tests/gateway/test_slack.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "70a33708e7c9d870af5bd7bac1b7e99064bdd84b",
+      "subject": "fix(gateway/slack): align reaction lifecycle with Discord/Telegram pattern",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/config.py",
+        "gateway/platforms/slack.py",
+        "tests/gateway/test_slack.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "1f216ecbb4797035362891e584039fc386ec247f",
+      "subject": "feat(gateway/slack): add SLACK_REACTIONS env toggle for reaction lifecycle",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "5e8262da26a63872bfeca808a54fcdc9baff2751",
+      "subject": "chore: add rnijhara to AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tools/delegate_tool.py",
+        "tui_gateway/server.py",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/components/appChrome.tsx"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "dee51c1607640e7a9496fbfd4985b5807b10b77f",
+      "subject": "fix(tui): address Copilot review on #14045",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/agentsOverlay.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "82197a87dcacfef6e17ac423b39f40a3fc124367",
+      "subject": "style(tui): breathing room around status glyphs in agents overlay",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tui_gateway/server.py",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/turnController.ts",
+        "ui-tui/src/components/agentsOverlay.tsx",
+        "ui-tui/src/components/textInput.tsx"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "eda400d8a58c8d6261dd752010cc0e0e90663f44",
+      "subject": "chore: uptick",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tools/delegate_tool.py",
+        "ui-tui/src/app/createGatewayEventHandler.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "7eae504d158b5cdbc519684d6c5ce64f1fbdb079",
+      "subject": "fix(tui): address Copilot round-2 on #14045",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/agentsOverlay.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "9e1f606f7f9298ace79c4a39948f8f67102770aa",
+      "subject": "fix: scroll in agents detail view",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/subagentTree.test.ts",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/components/agentsOverlay.tsx",
+        "ui-tui/src/lib/subagentTree.ts"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "5b0741e986c9f28d3cb9c16d0c6953fcf1857e87",
+      "subject": "refactor(tui): consolidate agents overlay \u2014 share duration/root helpers via lib",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/debug.py",
+        "tests/hermes_cli/test_debug.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "fc3862bdd637ef53e82628c9d931d9cbff853fc6",
+      "subject": "fix(debug): snapshot logs once for debug share",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/debug.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "921133cfa56a2e289a1cf09e87b382a6ea0885f8",
+      "subject": "fix(debug): preserve full line at truncation boundary and cap memory",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/run.py",
+        "hermes_cli/debug.py",
+        "tests/gateway/test_debug_command.py",
+        "tests/hermes_cli/test_debug.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "61d0a99c11cda30f7a3f58c41693f82bcf1435cf",
+      "subject": "fix(debug): sweep expired pending pastes on slash debug paths",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py",
+        "tests/hermes_cli/test_debug.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "8dc936f10ecfd4d7c0200522e48374f885c7e024",
+      "subject": "chore: add taosiyuan163 to AUTHOR_MAP, add truncation boundary tests",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/debug.py",
+        "tests/hermes_cli/test_debug.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "de849c410da9dc39bde6b81709cef89a04d64f38",
+      "subject": "refactor(debug): remove dead _read_log_tail/_read_full_log wrappers",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/skin_engine.py",
+        "tests/hermes_cli/test_skin_engine.py",
+        "tests/test_cli_skin_integration.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "c3232171882235bd3cdd0125b1b1ee9748bfe501",
+      "subject": "fix: make CLI status bar skin-aware",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/skin_engine.py",
+        "tests/hermes_cli/test_skin_engine.py",
+        "tests/test_cli_skin_integration.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "81a504a4a0f3c99ff9411a0a549f4adf9af93312",
+      "subject": "fix: align status bar skin tests with upstream main",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/skin_engine.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "88564ad8bc7518f2c67bbbc63b758adcac5f8dca",
+      "subject": "fix(skins): don't inherit status_bar_* into light-mode skins",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/components/Text.tsx",
+        "ui-tui/packages/hermes-ink/src/ink/render-node-to-output.ts",
+        "ui-tui/packages/hermes-ink/src/ink/styles.ts",
+        "ui-tui/packages/hermes-ink/src/ink/wrap-text.ts",
+        "ui-tui/src/__tests__/textInputWrap.test.ts",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/components/textInput.tsx"
+      ],
+      "files_touched": 8,
+      "notes": "",
+      "owner": "",
+      "sha": "7027ce42efd2849c62146daf813ab04911ee14bd",
+      "subject": "fix(tui): blitz closeout \u2014 input wrap parity, shift-tab yolo, bottom statusline",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tui_gateway/server.py",
+        "ui-tui/src/__tests__/useConfigSync.test.ts",
+        "ui-tui/src/app/interfaces.ts",
+        "ui-tui/src/app/slash/commands/core.ts",
+        "ui-tui/src/app/uiStore.ts",
+        "ui-tui/src/app/useConfigSync.ts",
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/gatewayTypes.ts"
+      ],
+      "files_touched": 8,
+      "notes": "",
+      "owner": "",
+      "sha": "d55a17bd824ce3ce309eb7cecdad9406cdf5b107",
+      "subject": "refactor(tui): statusbar as 4-mode position (on|off|bottom|top)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tui_gateway/server.py",
+        "ui-tui/src/__tests__/useConfigSync.test.ts",
+        "ui-tui/src/app/interfaces.ts",
+        "ui-tui/src/app/slash/commands/core.ts",
+        "ui-tui/src/app/uiStore.ts",
+        "ui-tui/src/app/useConfigSync.ts",
+        "ui-tui/src/components/appLayout.tsx"
+      ],
+      "files_touched": 7,
+      "notes": "",
+      "owner": "",
+      "sha": "ea32364c965534642077653f3a82720ce48d90c6",
+      "subject": "fix(tui): /statusbar top = inline above input, not row 0 of the screen",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/appChrome.tsx",
+        "ui-tui/src/components/appLayout.tsx"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "408fc893e93c29e90069f5c455a6abd5c5c9594e",
+      "subject": "fix(tui): tighten composer \u2014 status sits directly above input, overlays anchor to input",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/appChrome.tsx",
+        "ui-tui/src/components/appLayout.tsx"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "a7cc903bf58bef1de6e70f9aa19ec5c4c89567fa",
+      "subject": "fix(tui): breathing room above the composer cluster, status tight to input",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/content/hotkeys.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "88993a468f307614a8eff721c5635061896d7084",
+      "subject": "fix(tui): input wrap width mismatch \u2014 last letter no longer flickers",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/appChrome.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "1e8cfa909219a19ba491be2e388166e7ae904fdd",
+      "subject": "fix(tui): idle good-vibes heart no longer blanks the input's last cell",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tui_gateway/server.py",
+        "ui-tui/packages/hermes-ink/src/ink/wrap-text.ts",
+        "ui-tui/src/app/slash/commands/core.ts",
+        "ui-tui/src/app/useConfigSync.ts",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/components/appChrome.tsx",
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/components/textInput.tsx"
+      ],
+      "files_touched": 8,
+      "notes": "",
+      "owner": "",
+      "sha": "48f2ac33528ee68561ecc685a649c15cb0adc148",
+      "subject": "refactor(tui): /clean pass on blitz closeout \u2014 trim comments, flatten logic",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/test_tui_gateway_server.py",
+        "tui_gateway/server.py",
+        "ui-tui/src/__tests__/useConfigSync.test.ts",
+        "ui-tui/src/app/useConfigSync.ts",
+        "ui-tui/src/app/useInputHandlers.ts"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "6fb98f343a7b315ddba4589a8942ba5b5a9c5ab1",
+      "subject": "fix(tui): address copilot review on #14103",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/components/AlternateScreen.tsx",
+        "ui-tui/src/bootBanner.ts",
+        "ui-tui/src/entry.tsx"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "3ef6992edf2b7f09a2b91976b5e5647e1ca77a47",
+      "subject": "fix(tui): drop main-screen banner flash, widen alt-screen clear on entry",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/debug.py",
+        "tests/hermes_cli/test_debug.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "b641639e425bfd26dbe3edbd113d8749384cbf40",
+      "subject": "fix(debug): distinguish empty-log from missing-log in report placeholder",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "run_agent.py",
+        "tests/run_agent/test_streaming.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "ea67e49574b0b3c4252cd5ae8472e78c7f2d1d80",
+      "subject": "fix(streaming): silent retry when stream dies mid tool-call (#14151)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/app/useInputHandlers.ts"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "e0d698cfb351780ee62e16abfe52a0d6a87cd707",
+      "subject": "fix(tui): yolo toggle only reports on/off for strict '0'/'1' values",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/transports/anthropic.py",
+        "tests/agent/transports/test_transport.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "b49a1b71a738c3521396462283790cfd36d5534b",
+      "subject": "fix(agent): accept empty content with stop_reason=end_turn as valid anthropic response",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/app/useMainApp.ts"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "8410ac05a9cccee981aebf649233064df528e752",
+      "subject": "fix(tui): tab title shows cwd + waiting-for-input marker",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tui_gateway/server.py",
+        "ui-tui/src/app/useConfigSync.ts",
+        "ui-tui/src/app/useMainApp.ts"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "103c71ac36c6ebbf929ecf52daaef02350296c09",
+      "subject": "refactor(tui): /clean pass on tui-polish \u2014 data tables, tighter title",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/debug.py",
+        "ui-tui/src/__tests__/subagentTree.test.ts",
+        "ui-tui/src/app/useConfigSync.ts",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/components/appChrome.tsx"
+      ],
+      "files_touched": 6,
+      "notes": "",
+      "owner": "",
+      "sha": "4107538da8304066892e11dbb26388ca65c679f6",
+      "subject": "style(debug): add missing blank line between LogSnapshot and helpers",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/platform.test.ts",
+        "ui-tui/src/components/textInput.tsx",
+        "ui-tui/src/lib/platform.ts"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "ea9ddecc72d1f2996abd957f226cb63af29138f2",
+      "subject": "fix(tui): route Ctrl+K and Ctrl+W through macOS readline fallback",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/config.py",
+        "tests/tools/test_url_safety.py",
+        "tools/url_safety.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "d6ed35d047642663bd3535f3b9fc0bd417c89475",
+      "subject": "feat(security): add global toggle to allow private/internal URL resolution",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "model_tools.py",
+        "tests/test_model_tools_async_bridge.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "76c454914a7c341bcff4b92da9b7d048d4e3b9ae",
+      "subject": "fix(core): ensure non-blocking executor shutdown on async timeout",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "run_agent.py",
+        "tests/run_agent/test_provider_fallback.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "4ac1c959b250605ccd92db60e4706e051eb4a557",
+      "subject": "fix(agent): resolve fallback provider key_env secrets",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/feishu.py",
+        "tests/gateway/test_feishu.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "e86acad8f1a55603079715aafd6fc533c8846324",
+      "subject": "feat(feishu): preserve @mention context on inbound messages",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/tools/test_parse_env_var.py",
+        "tools/terminal_tool.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "44a16c5d9d54f2537ad3cc75421ff98f0ea8836d",
+      "subject": "guard terminal_tool import-time env parsing",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/model_metadata.py",
+        "tests/agent/test_local_stream_timeout.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "6513138f26841ab89d132e67959eef4e8b5fb8b5",
+      "subject": "fix(agent): recognize Tailscale CGNAT (100.64.0.0/10) as local for Ollama timeouts",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "2e5ddf9d2e8c5cb13780d534892ed7116623c2f3",
+      "subject": "chore(release): add AUTHOR_MAP entry for ismell0992-afk",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/context_compressor.py",
+        "tests/agent/test_context_compressor.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "1e8254e599620055c26fa974c2ee7b85630bd2cb",
+      "subject": "fix(agent): guard context compressor against structured message content",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/components/appLayout.tsx"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "83efea661f83519921556fc9945388118f04a154",
+      "subject": "fix(tui): address copilot round 3 on #14145",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
     }
   ],
-  "generated_at_utc": "2026-04-22T08:14:04.514412+00:00",
+  "generated_at_utc": "2026-04-22T22:10:58.151466+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69853,18 +70878,19 @@
   },
   "summary": {
     "by_disposition": {
+      "pending": 67,
       "ported": 66,
       "superseded": 4521
     },
     "by_target_ticket": {
-      "20": 1631,
-      "21": 200,
-      "22": 525,
-      "23": 507,
+      "20": 1654,
+      "21": 201,
+      "22": 551,
+      "23": 514,
       "24": 64,
       "25": 152,
-      "26": 1508
+      "26": 1518
     },
-    "total_commits": 4587
+    "total_commits": 4654
   }
 }
