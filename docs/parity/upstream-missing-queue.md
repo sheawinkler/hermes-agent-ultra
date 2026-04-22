@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-22T08:02:14.246078+00:00`
+Generated: `2026-04-22T08:02:44.348413+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `4587`.
 
@@ -16,112 +16,112 @@ Generated: `2026-04-22T08:02:14.246078+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 3598 |
+| pending | 3498 |
 | ported | 66 |
-| superseded | 923 |
+| superseded | 1023 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `c6df39955ccf` | #24 | fix: limit concurrent Modal sandbox creations to avoid deadlocks |
-| `86eed141afdc` | #20 | fix: rebuild compressed payload before retry |
-| `7e36468511c8` | #26 | fix: /clear command broken inside TUI (patch_stdout interference) |
-| `9ee4fe41fe42` | #26 | Fix image_generate 'Event loop is closed' in gateway |
-| `313d522b6162` | #21 | feat: add Polymarket prediction market skill (read-only) |
-| `4447e7d71afa` | #20 | fix: add Kimi Code API support (api.kimi.com/coding/v1) |
-| `3830bbda41e2` | #26 | fix: include url in web_extract trimmed results & fix docs |
-| `fcde9be10d56` | #20 | fix: keep tool-call output runs intact during compression |
-| `c7b6f423c713` | #20 | feat: auto-compress pathologically large gateway sessions (#628) |
-| `bf048c8aecf0` | #21 | feat: add qmd optional skill — local knowledge base search |
-| `8d719b180aea` | #20 | feat: git worktree isolation for parallel CLI sessions (--worktree / -w) |
-| `4be783446af8` | #22 | fix: wire worktree flag into hermes CLI entry point + docs + tests |
-| `5684c681216e` | #23 | Add logger.info/error for image extraction and delivery debugging |
-| `542faf225fcc` | #23 | Fix Telegram image delivery for large (>5MB) images |
-| `a68036756853` | #26 | fix tmux menus |
-| `b8c3bc78417c` | #23 | feat: browser screenshot sharing via MEDIA: on all messaging platforms |
-| `19b6f81ee78b` | #20 | fix: allow Anthropic API URLs as custom OpenAI-compatible endpoints |
-| `f2105102763d` | #21 | feat: add prerequisites field to skill spec — hide skills with unmet dependencies |
-| `d507f593d08b` | #26 | fix: respect config.yaml cwd in gateway, add sandbox_dir config option |
-| `daa1f542f9ab` | #24 | fix: enhance shell detection in local environment configuration |
-| `b10ff835663e` | #24 | fix: enhance PATH handling in local environment |
-| `b383cafc440b` | #24 | refactor: rename and enhance shell detection in local environment |
-| `bfa27d0a68de` | #20 | fix(cli): unify slash command autocomplete registry |
-| `0df7df52f397` | #20 | test: expand slash command autocomplete coverage (PR #645 follow-up) |
-| `b8120df860bb` | #21 | Revert "feat: skill prerequisites — hide skills with unmet runtime dependencies" |
-| `d518f40e8bf1` | #26 | fix: improve browser command environment setup |
-| `932d59646683` | #25 | feat: enhance systemd unit and install script for browser dependencies |
-| `9d3a44e0e870` | #20 | fix: validate /model values before saving |
-| `90fa9e54ca0a` | #20 | fix: guard validate_requested_model + expand test coverage (PR #649 follow-up) |
-| `7b1f40dd009d` | #26 | Improve error handling and logging in code execution tool |
-| `77f47768dde5` | #20 | fix: improve /history message display |
-| `245d1743592b` | #20 | feat: validate /model against live API instead of hardcoded lists |
-| `8c734f2f2767` | #20 | fix: remove OpenRouter '/' format enforcement — let API probe be the authority |
-| `4a09ae298573` | #20 | chore: remove dead module stubs from test_cli_init.py |
-| `66d3e6a0c2c3` | #20 | feat: provider switching via /model + enhanced model display |
-| `132e5ec179f5` | #26 | fix: resolve 'auto' provider in /model display + update gateway handler |
-| `f824c104298e` | #26 | feat: enhance config migration with new environment variable tracking |
-| `7ad6fc8a408c` | #26 | fix: gateway /model also needs normalize_provider for 'auto' resolution |
-| `34792dd907df` | #26 | fix: resolve 'auto' provider properly via credential detection |
-| `666f2dd4868a` | #20 | feat: /provider command + fix gateway bugs + harden parse_model_input |
-| `d07d867718a1` | #20 | Fix empty tool selection persistence |
-| `a23bcb81ceb5` | #22 | fix: improve /model user feedback + update docs |
-| `cf810c2950fd` | #20 | fix: pre-process CLI clipboard images through vision tool instead of raw embedding |
-| `333e4abe3032` | #20 | fix: Initialize Skills Hub on list |
-| `9eee529a7fec` | #20 | fix: detect and warn on file re-read loops after context compression |
-| `e28dc13cd5d3` | #26 | fix: store and close log file handles in rl_training_tool |
-| `7891050e06b5` | #26 | fix: use Path.read_text() instead of open() in browser_tool |
-| `e2fe1373f31f` | #20 | fix: escalate read/search blocking, track search loops, filter completed todos |
-| `081079da629c` | #26 | fix(setup): correct import of get_codex_model_ids in setup wizard |
-| `67421ed74f2e` | #20 | fix: update test_non_empty_has_markers to match todo filtering behavior |
-| `ceefe367562f` | #26 | docs: clarify Telegram token regex constraint |
-| `d0f84c096406` | #20 | fix: log exceptions instead of silently swallowing in cron scheduler |
-| `0c3253a4859c` | #20 | fix: mock asyncio.run in mirror test to prevent event loop destruction |
-| `4d53b7ccaa0d` | #26 | Add OpenRouter app attribution headers to skills_guard and trajectory_compressor |
-| `60b6abefd98f` | #20 | feat: session naming with unique titles, auto-lineage, rich listing, resume by name |
-| `4fdd6c0dac1a` | #20 | fix: harden session title system + add /title to gateway |
-| `34b4fe495e7b` | #20 | fix: add title validation — sanitize, length limit, control char stripping |
-| `2b8856865339` | #22 | docs: add session naming documentation across all doc files |
-| `7791174cedd5` | #20 | feat: add --fuck-it-ship-it flag to bypass dangerous command approvals |
-| `3fb8938cd35c` | #20 | fix: search_files now reports error for non-existent paths instead of silent empty results |
-| `95b1130485a2` | #20 | fix: normalize incompatible models when provider resolves to Codex |
-| `26bb56b77546` | #20 | feat: add /resume command to gateway for switching to named sessions |
-| `a5461e07bf4c` | #23 | feat: register title, resume, and other missing commands with platform menus |
-| `a7f9721785af` | #23 | feat: register remaining commands with platform menus |
-| `1f1caa836abe` | #26 | fix: error out when hermes -w is used outside a git repo |
-| `c0520223fda4` | #20 | fix: clipboard BMP conversion file loss and broken test |
-| `97b1c76b1430` | #20 | test: add regression test for #712 (setup wizard codex import) |
-| `20c6573e0aa4` | #26 | docs: comprehensive AGENTS.md audit and corrections |
-| `ecac6321c420` | #20 | feat: interactive session browser with search filtering (#718) |
-| `4f0402ed3a51` | #20 | chore: remove all NOUS_API_KEY references |
-| `3aded1d4e5e9` | #20 | feat: display previous messages when resuming a session in CLI |
-| `491605cfea39` | #20 | feat: add high-value tool result hints for patch and search_files (#722) |
-| `cf63b2471f8e` | #22 | docs: add resume history display to sessions, CLI, config, and AGENTS docs |
-| `d9f373654b4a` | #20 | feat: enhance auxiliary model configuration and environment variable handling |
-| `5ae0b731d011` | #20 | fix: harden auxiliary model config — gateway bridge, vision safety, tests |
-| `192501528f87` | #26 | docs: add Auxiliary Model Configuration section to AGENTS.md |
-| `7c30ac21412c` | #21 | fix: overhaul ascii-art skill with working sources (#662) |
-| `ae4a674c8430` | #20 | feat: add 'openai' as auxiliary provider option |
-| `f996d7950b7a` | #20 | fix: trust user-selected models with OpenAI Codex provider |
-| `71e81728ac5c` | #20 | feat: Codex OAuth vision support + multimodal content adapter |
-| `2d1a1c1c4755` | #20 | refactor: remove redundant 'openai' auxiliary provider, clean up docs |
-| `99f758217538` | #21 | chore: move Solana skill to optional-skills/ |
-| `2394e18729b0` | #26 | fix: add context to interruption messages for model awareness |
-| `7185a66b9662` | #21 | feat: enhance Solana skill with USD pricing, token names, smart wallet output |
-| `2036c22f8846` | #26 | fix: macOS browser/code-exec socket path exceeds Unix limit (#374) |
-| `37752ff1ac5e` | #22 | feat: bell_on_complete — terminal bell when agent finishes |
-| `4d7d9d971556` | #26 | fix: add diagnostic logging to browser tool for errors.log |
-| `763c6d104d02` | #20 | fix: unify gateway session hygiene with agent compression config |
-| `24f549a6929a` | #23 | feat: add Signal messenger gateway platform (#405) |
-| `161436cfdd94` | #20 | feat: simple fallback model for provider resilience |
-| `0c4cff352a05` | #22 | docs: add Signal messenger documentation across all doc surfaces |
-| `4cfb66bac263` | #26 | docs: list all supported fallback providers with env var names |
-| `b3765c28d0ac` | #20 | fix: restrict fallback providers to actual hermes providers |
-| `b7d6eae64c16` | #22 | fix: Signal adapter parity pass — integration gaps, clawdbot features, env var simplification |
-| `7241e8784a0e` | #20 | feat: hermes skills — enable/disable individual skills and categories (#642) |
-| `fcd899f88819` | #23 | docs: add platform integration checklist for new gateway adapters |
-| `3b312d45c5f6` | #26 | fix: show fallback_model as commented-out YAML example in config |
-| `a8bf414f4a86` | #21 | feat: browser console/errors tool, annotated screenshots, auto-recording, and dogfood QA skill |
-| `3ffaac00dd05` | #22 | feat: bell_on_complete — terminal bell when agent finishes |
-| `67275641f848` | #20 | fix: unify gateway session hygiene with agent compression config |
+| `cf9482984e49` | #26 | docs: condense AGENTS.md from 927 to 242 lines |
+| `5785bd327266` | #20 | feat: add openai-codex as fallback provider |
+| `1404f846a70d` | #20 | feat(cli,gateway): add user-defined quick commands that bypass agent loop |
+| `35d57ed752f2` | #20 | refactor: unified OAuth/API-key credential resolution for fallback |
+| `a130aa81657d` | #25 | fix: first-time setup skips API key prompts + install.sh sudo on WSL |
+| `e6c829384e3b` | #26 | fix: setup wizard shows 60 as default max iterations, should be 90 |
+| `3045e29232de` | #26 | fix: default MoA, Home Assistant, and RL Training to off for new installs |
+| `167eb824cbde` | #26 | fix: add first_install flag to tools setup for reliable API key prompting |
+| `77da3bbc95fe` | #20 | fix: use correct role for summary message in context compressor |
+| `7f9dd60c155d` | #26 | fix: first-install tool setup shows all providers + skip options |
+| `eb0b01de7b67` | #21 | chore: move agentmail skill to optional-skills, add API key docs |
+| `6a49fbb7da5e` | #21 | fix: correct agentmail skill — API key goes in config.yaml env block |
+| `4608a7fe4eb0` | #26 | fix: make skills manifest writes atomic |
+| `7af33accf100` | #20 | fix: apply secret redaction to file tool outputs |
+| `57b48a81ca10` | #26 | feat: add config toggle to disable secret redaction |
+| `12f48006314a` | #26 | docs: add security.redact_secrets as commented config section |
+| `aaf8f2d2d2db` | #26 | feat: expand secret redaction patterns |
+| `aedb773f0d02` | #20 | fix: stabilize system prompt across gateway turns for cache hits |
+| `0ce190be0dd7` | #20 | security: enforce 0600/0700 file permissions on sensitive files (inspired by openclaw) |
+| `f8240143b60f` | #23 | feat(discord): add DISCORD_ALLOW_BOTS config for bot message filtering (inspired by openclaw) |
+| `3b67606c4246` | #26 | fix: custom endpoint provider shows as openrouter in gateway |
+| `a6d3becd6a9b` | #21 | feat: update OBLITERATUS skill to v2.0 — match current repo state |
+| `d6c710706f1b` | #21 | docs: add real-world testing findings to OBLITERATUS skill |
+| `f1a1b58319da` | #26 | fix: hermes setup doesn't update provider when switching to OpenRouter |
+| `912efe11b57b` | #20 | fix(tests): add content attribute to fake result objects |
+| `1f0944de210b` | #26 | fix: handle non-string content from OpenAI-compatible servers (#759) |
+| `732c66b0f325` | #21 | refactor: reorganize skills into sub-categories |
+| `654e16187e71` | #21 | feat(mcp): add sampling support — server-initiated LLM requests (#753) |
+| `069570d1037f` | #26 | feat: support multiple named custom providers in `hermes model` |
+| `d82fcef91b68` | #23 | Improve Discord gateway error handling and logging |
+| `f4580b60105f` | #26 | feat: auto-save custom endpoints + removal option |
+| `1a2141d04d7f` | #26 | fix: custom providers activate immediately, save model name |
+| `c6b75baad073` | #23 | feat: find-nearby skill and Telegram location support |
+| `c7541359657e` | #26 | fix: banner wraps in narrow terminals (Kitty, small windows) |
+| `46a7d6aeb207` | #23 | Improve Telegram gateway error handling and logging |
+| `59705b80cd8e` | #20 | Add tools summary flag to Hermes CLI |
+| `1a10eb8cd916` | #26 | fix: off-by-one in setup toggle selection error message |
+| `34f8ac2d8570` | #23 | fix: replace blocking time.sleep with await asyncio.sleep in WhatsApp connect |
+| `58b756f04c26` | #26 | fix: clean up empty file after failed wl-paste clipboard extraction |
+| `c3cf88b202fc` | #20 | feat(cli,gateway): add /personality none and custom personality support |
+| `b78b605ba987` | #26 | fix: replace print() with logger.error() in file_tools |
+| `34e8d088c21f` | #23 | feat(slack): fix app_mention 404 + add document/video support |
+| `5eaf4a3f323c` | #23 | feat: Telegram send_document and send_video for native file attachments |
+| `94023e6a85c4` | #20 | feat: conditional skill activation based on tool availability |
+| `ac58309dbdb3` | #22 | docs: improve Slack setup guide with channel event subscriptions and scopes |
+| `64bec1d06040` | #26 | fix: Slack gateway setup missing event subscriptions and scopes |
+| `520aec20e06c` | #26 | fix: add mcp to dev dependencies for test suite |
+| `fa2e72ae9c61` | #22 | docs: document docker_volumes config for shared host directories |
+| `2d44ed1c5b86` | #20 | test: add comprehensive tests for vision_tools (42 tests) |
+| `ef5d811abac6` | #20 | fix: vision auto-detection now falls back to custom/local endpoints |
+| `4e3a8a06371f` | #20 | fix: handle empty choices in MCP sampling callback |
+| `9abd6bf342aa` | #26 | fix: gateway missing docker_volumes config bridge + list serialization bug |
+| `8eabdefa8ac2` | #26 | fix: bring WebResearchEnv up to Atropos environment standards |
+| `172a38c344a3` | #24 | fix: Docker persistent bind mounts fail with Permission denied |
+| `0d96f1991c5c` | #25 | test: parallelize test suite with pytest-xdist |
+| `320f881e0b6d` | #26 | fix: WebResearchEnv compute_reward extracts from AgentResult.messages |
+| `bf8350ac1851` | #26 | fix: evaluate() uses full agent loop with tools, not single-turn |
+| `b9d55d57196d` | #21 | feat: add pokemon-player skill with battle-tested gameplay tips |
+| `975fd86dc429` | #26 | fix: eliminate double LLM judge call and eval buffer pollution |
+| `4bc32dc0f140` | #26 | Fix password reader for Windows using msvcrt.getwch() |
+| `0a628c1aefd0` | #20 | fix(cli): handle unquoted multi-word session names in -c/--continue and -r/--resume |
+| `6ab3ebf1959e` | #21 | Add hermes-atropos-environments skill (bundled) |
+| `ee4008431ab0` | #26 | fix: stop terminal border flashing with steady cursor and TUI spinner widget |
+| `1aa7badb3c7e` | #20 | fix: add missing Platform.SIGNAL to toolset mappings, update test + config docs |
+| `6f3a673aba20` | #26 | fix: restore success-path server_sock.close() before rpc_thread.join() |
+| `c0ffd6b70472` | #21 | feat: expand OpenClaw migration to cover all platform channels, provider keys, model/TTS config, shared skills, and daily memory |
+| `de6750ed2398` | #20 | feat: add data-driven skin/theme engine for CLI customization |
+| `c1775de56f98` | #22 | feat: filesystem checkpoints and /rollback command |
+| `b4b46d1b67db` | #26 | docs: comprehensive skin/theme system documentation |
+| `f6bc620d3935` | #26 | fix: apply skin colors to local build_welcome_banner in cli.py |
+| `1db8609ac99f` | #21 | Fix several documentation typos |
+| `4945240fc391` | #26 | feat: add poseidon/sisyphus/charizard skins + banner logo support |
+| `c3dec1dcdae5` | #26 | fix(file_tools): pass docker_volumes to sandbox container config |
+| `d03de749a1e9` | #26 | fix: add themed hero art for all skins, fix triple-quote syntax |
+| `e8cec55fad1f` | #20 | feat(gateway): configurable background process watcher notifications |
+| `b0a5fe897456` | #20 | fix: continue after output-length truncation |
+| `ca23875575c2` | #26 | fix: unify visibility filter in codex model discovery |
+| `580e6ba2ffd9` | #22 | feat: add proper favicon and logo for landing page and docs site |
+| `e4adb67ed89e` | #26 | fix(display): rate-limit spinner flushes to prevent line spam under patch_stdout |
+| `4bd579f91594` | #20 | fix: normalize max turns config path |
+| `694a3ebdd54b` | #20 | fix(code_execution): handle empty enabled_sandbox_tools in schema description |
+| `52e3580cd43f` | #20 | refactor: merge new tests into test_code_execution.py |
+| `a630ca15de18` | #23 | fix: forward thread_id metadata for Telegram forum topic routing |
+| `928bb16da1cb` | #23 | fix: forward thread_id to Telegram adapter + update send_typing signatures |
+| `de07aa7c4046` | #20 | feat: add Nous Portal API key provider (#644) |
+| `8318a519e6dc` | #26 | fix: pass enabled_tools through handle_function_call to avoid global race |
+| `e9742e202f60` | #24 | fix(security): pipe sudo password via stdin instead of shell cmdline |
+| `771969f7479c` | #20 | fix: wire up enabled_tools in agent loop + simplify sandbox tool selection |
+| `9ea2209a43c1` | #26 | fix: reduce approval/clarify widget flashing + dynamic border widths |
+| `e8b19b5826e3` | #26 | fix: cap user-input separator at 120 cols (matches response box) |
+| `fadad820dd00` | #20 | fix(config): atomic write for config.yaml to prevent data loss on crash |
+| `1caee06b226a` | #26 | fix: tool call repair — auto-lowercase, fuzzy match, helpful error on unknown tool (#520) |
+| `cc4ead999adb` | #20 | feat: configurable embedding infrastructure — local (fastembed) + API (OpenAI) (#675) |
+| `0fdeffe6c442` | #26 | fix: replace silent exception swallowing with debug logging across tools |
+| `e590caf8d870` | #20 | Revert "Merge PR #702: feat: configurable embedding infrastructure — local (fastembed) + API (OpenAI)" |
+| `8eefbef91cd7` | #26 | fix: replace ANSI response box with Rich Panel + reduce widget flashing |
+| `c358af7861a0` | #21 | Add ASCII video skill to creative category |
+| `0229e6b407c8` | #20 | Fix test_analysis_error_logs_exc_info: mock _aux_async_client so download path is reached |
+| `74c214e9571a` | #20 | feat(honcho): async memory integration with prefetch pipeline and recallMode |
+| `b4af03aea859` | #26 | fix(honcho): clarify API key signup instructions |
 
