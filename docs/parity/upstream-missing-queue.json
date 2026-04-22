@@ -3019,12 +3019,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "run_agent.py"
       ],
       "files_touched": 1,
-      "notes": "triage-full-2026-04-21: group=WG7-runtime-backfill; action=implement",
+      "notes": "ported-2026-04-22-batch-15: CLI chat path now emits aligned tool activity start/complete lines with emoji + argument previews via shared formatter.",
       "owner": "codex",
       "sha": "1e316145724da4897f72c3f57b0cbcffb05b64e3",
       "subject": "Refactor tool activity messages in AIAgent for improved CLI output",
@@ -69674,7 +69674,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-04-22T02:57:09.844284+00:00",
+  "generated_at_utc": "2026-04-22T02:59:24.694230+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -69682,8 +69682,8 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 4191,
-      "ported": 30,
+      "pending": 4190,
+      "ported": 31,
       "superseded": 355
     },
     "by_target_ticket": {

@@ -317,3 +317,21 @@
 - Queue/proof refresh:
   - `docs/parity/upstream-missing-queue.{json,md}`
   - `docs/parity/global-parity-proof.{json,md}`
+
+## 2026-04-22 batch-15 (CLI tool activity output parity)
+- Scope: parity tranche for improved CLI tool activity lines.
+- Upstream commit ported:
+  - `1e316145724da4897f72c3f57b0cbcffb05b64e3`
+    `Refactor tool activity messages in AIAgent for improved CLI output`
+    - Disposition: `ported`
+- Implementation (Rust):
+  - `crates/hermes-cli/src/commands.rs`
+    - `handle_cli_chat` now wires `AgentCallbacks` for:
+      - `on_tool_start`: prints aligned activity line with emoji + formatted preview
+      - `on_tool_complete`: prints completion line with truncated result summary
+    - Uses shared formatter from `crates/hermes-cli/src/tool_preview.rs` for consistency across CLI/TUI/gateway.
+- Verification:
+  - `cargo test -p hermes-cli tool_preview:: -- --nocapture`
+- Queue/proof refresh:
+  - `docs/parity/upstream-missing-queue.{json,md}`
+  - `docs/parity/global-parity-proof.{json,md}`

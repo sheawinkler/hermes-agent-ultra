@@ -767,6 +767,7 @@ pub async fn handle_cli_chat(
 ) -> Result<(), hermes_core::AgentError> {
     use crate::runtime_tool_wiring::{wire_cron_scheduler_backend, wire_stdio_clarify_backend};
     use crate::terminal_backend::build_terminal_backend;
+    use crate::tool_preview::{build_tool_preview_from_value, tool_emoji};
     use hermes_config::load_config;
     use hermes_core::MessageRole;
     use hermes_cron::cron_scheduler_for_data_dir;
@@ -811,7 +812,36 @@ pub async fn handle_cli_chat(
     let agent_config = crate::app::build_agent_config(&config, &current_model);
     let provider = crate::app::build_provider(&config, &current_model);
 
-    let agent = hermes_agent::AgentLoop::new(agent_config, agent_tool_registry, provider);
+    let on_tool_start: Box<dyn Fn(&str, &serde_json::Value) + Send + Sync> =
+        Box::new(move |name: &str, args: &serde_json::Value| {
+            let emoji = tool_emoji(name);
+            let preview = build_tool_preview_from_value(name, args, 56).unwrap_or_default();
+            if preview.is_empty() {
+                println!("┊ {emoji} {name}");
+            } else {
+                println!("┊ {emoji} {name:<16} {preview}");
+            }
+        });
+    let on_tool_complete: Box<dyn Fn(&str, &str) + Send + Sync> =
+        Box::new(move |name: &str, result: &str| {
+            let mut snippet: String = result.trim().chars().take(96).collect();
+            if result.trim().chars().count() > 96 {
+                snippet.push_str("...");
+            }
+            let emoji = tool_emoji(name);
+            if snippet.is_empty() {
+                println!("┊ {emoji} {name:<16} done");
+            } else {
+                println!("┊ {emoji} {name:<16} done: {snippet}");
+            }
+        });
+    let callbacks = hermes_agent::AgentCallbacks {
+        on_tool_start: Some(on_tool_start),
+        on_tool_complete: Some(on_tool_complete),
+        ..Default::default()
+    };
+    let agent = hermes_agent::AgentLoop::new(agent_config, agent_tool_registry, provider)
+        .with_callbacks(callbacks);
 
     match query {
         Some(q) => {
