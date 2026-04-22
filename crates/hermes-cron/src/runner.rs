@@ -90,6 +90,9 @@ impl CronRunner {
 
         // Build agent config from job settings
         let mut config = AgentConfig::default();
+        // Scheduled/background runs should avoid user/workspace context injection
+        // so job trajectories stay deterministic and non-user-specific.
+        config.skip_context_files = true;
         if let Some(ref model_cfg) = job.model {
             if let Some(ref model) = model_cfg.model {
                 config.model = model.clone();

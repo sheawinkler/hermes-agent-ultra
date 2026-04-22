@@ -471,12 +471,17 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         .ok()
         .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
         .unwrap_or(false);
+    let skip_context_files_env = std::env::var("HERMES_SKIP_CONTEXT_FILES")
+        .ok()
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
+        .unwrap_or(false);
     let hermes_home = config
         .home_dir
         .as_ref()
         .map(std::path::PathBuf::from)
         .unwrap_or_else(hermes_config::hermes_home);
     let skip_memory = skip_memory_env || hermes_home.join(".memory_disabled").exists();
+    let skip_context_files = config.agent.skip_context_files || skip_context_files_env;
 
     AgentConfig {
         max_turns: config.max_turns,
@@ -488,6 +493,7 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         provider: provider_from_model,
         stream: config.streaming.enabled,
         skip_memory,
+        skip_context_files,
         platform: Some("cli".to_string()),
         pass_session_id: true,
         runtime_providers: config

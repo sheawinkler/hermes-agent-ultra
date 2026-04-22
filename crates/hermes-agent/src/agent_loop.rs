@@ -317,6 +317,11 @@ pub struct AgentConfig {
     #[serde(default)]
     pub skip_memory: bool,
 
+    /// Skip auto-injection of workspace/personal context files in system prompt
+    /// assembly (SOUL.md, AGENTS.md, etc.).
+    #[serde(default)]
+    pub skip_context_files: bool,
+
     /// Optional cheap-vs-strong per-turn routing.
     #[serde(default)]
     pub smart_model_routing: SmartModelRoutingConfig,
@@ -546,6 +551,7 @@ impl Default for AgentConfig {
             session_id: None,
             hermes_home: None,
             skip_memory: false,
+            skip_context_files: false,
             smart_model_routing: SmartModelRoutingConfig::default(),
             provider: None,
             platform: None,
@@ -1188,6 +1194,9 @@ impl AgentLoop {
     }
 
     fn context_files_prompt(&self) -> Option<String> {
+        if self.config.skip_context_files {
+            return None;
+        }
         let cwd = std::env::var("TERMINAL_CWD")
             .ok()
             .map(std::path::PathBuf::from)
@@ -4660,6 +4669,7 @@ mod tests {
         assert_eq!(config.retry.max_retries, 3);
         assert!(config.session_id.is_none());
         assert!(!config.skip_memory);
+        assert!(!config.skip_context_files);
         assert!(config.platform.is_none());
         assert!(!config.pass_session_id);
         assert!(config.max_cost_usd.is_none());
