@@ -792,10 +792,24 @@ impl AnthropicProvider {
         }
     }
 
+    fn is_kimi_coding_endpoint(base_url: Option<&str>) -> bool {
+        let Some(url) = base_url else {
+            return false;
+        };
+        let lower = url.to_lowercase();
+        lower.contains("api.kimi.com")
+            || lower.contains("moonshot.ai")
+            || lower.contains("moonshot.cn")
+    }
+
     /// Convert internal messages to Anthropic format, extracting system message.
-    fn convert_messages(messages: &[Message]) -> (Option<String>, Vec<Value>) {
+    fn convert_messages(
+        messages: &[Message],
+        base_url: Option<&str>,
+    ) -> (Option<String>, Vec<Value>) {
         let mut system_text: Option<String> = None;
         let mut anthropic_messages: Vec<Value> = Vec::new();
+        let is_kimi_endpoint = Self::is_kimi_coding_endpoint(base_url);
 
         for msg in messages {
             match msg.role {
@@ -823,6 +837,20 @@ impl AnthropicProvider {
                 }
                 MessageRole::Assistant => {
                     let mut content_blocks = Vec::new();
+                    if is_kimi_endpoint
+                        && msg
+                            .tool_calls
+                            .as_ref()
+                            .is_some_and(|calls| !calls.is_empty())
+                        && msg.reasoning_content.is_some()
+                    {
+                        let thinking = msg.reasoning_content.as_deref().unwrap_or("");
+                        // Kimi /coding expects assistant tool-call replay messages
+                        // to include reasoning_content semantics; preserve it as
+                        // a thinking block before any text/tool_use blocks.
+                        content_blocks
+                            .push(serde_json::json!({"type": "thinking", "thinking": thinking}));
+                    }
                     if let Some(ref text) = msg.content {
                         if !text.is_empty() {
                             content_blocks.push(serde_json::json!({"type": "text", "text": text}));
@@ -883,6 +911,7 @@ impl AnthropicProvider {
     /// Parse an Anthropic Messages API response into LlmResponse.
     fn parse_response(json: &Value) -> Result<LlmResponse, AgentError> {
         let mut content_text = String::new();
+        let mut reasoning_content = String::new();
         let mut tool_calls: Vec<ToolCall> = Vec::new();
 
         if let Some(content_arr) = json.get("content").and_then(|c| c.as_array()) {
@@ -915,6 +944,14 @@ impl AnthropicProvider {
                             id,
                             function: FunctionCall { name, arguments },
                         });
+                    }
+                    "thinking" => {
+                        if let Some(thinking) = block.get("thinking").and_then(|t| t.as_str()) {
+                            if !reasoning_content.is_empty() {
+                                reasoning_content.push('\n');
+                            }
+                            reasoning_content.push_str(thinking);
+                        }
                     }
                     _ => {}
                 }
@@ -957,7 +994,11 @@ impl AnthropicProvider {
             },
             tool_call_id: None,
             name: None,
-            reasoning_content: None,
+            reasoning_content: if reasoning_content.is_empty() {
+                None
+            } else {
+                Some(reasoning_content)
+            },
             cache_control: None,
         };
 
@@ -985,7 +1026,8 @@ impl LlmProvider for AnthropicProvider {
 
         let effective_model = model.unwrap_or(&self.model);
         let api_key = self.effective_api_key();
-        let (system_text, anthropic_messages) = Self::convert_messages(messages);
+        let (system_text, anthropic_messages) =
+            Self::convert_messages(messages, Some(self.base_url.as_str()));
 
         let mut body = serde_json::json!({
             "model": effective_model,
@@ -1056,7 +1098,10 @@ impl LlmProvider for AnthropicProvider {
 
             let effective_model = model.as_deref().unwrap_or(&provider.model);
             let api_key = provider.effective_api_key();
-            let (system_text, anthropic_messages) = AnthropicProvider::convert_messages(&messages);
+            let (system_text, anthropic_messages) = AnthropicProvider::convert_messages(
+                &messages,
+                Some(provider.base_url.as_str()),
+            );
 
             let mut body = serde_json::json!({
                 "model": effective_model,
@@ -1203,6 +1248,23 @@ impl LlmProvider for AnthropicProvider {
                                         finish_reason: None,
                                         usage: None,
                                     });
+                                }
+                                "thinking_delta" => {
+                                    if let Some(thinking) =
+                                        delta.get("thinking").and_then(|t| t.as_str())
+                                    {
+                                        yield Ok(StreamChunk {
+                                            delta: Some(StreamDelta {
+                                                content: None,
+                                                tool_calls: None,
+                                                extra: Some(
+                                                    serde_json::json!({"thinking": thinking}),
+                                                ),
+                                            }),
+                                            finish_reason: None,
+                                            usage: None,
+                                        });
+                                    }
                                 }
                                 _ => {}
                             }
@@ -1759,7 +1821,7 @@ mod tests {
             Message::user("Hello"),
             Message::assistant("Hi there!"),
         ];
-        let (system, msgs) = AnthropicProvider::convert_messages(&messages);
+        let (system, msgs) = AnthropicProvider::convert_messages(&messages, None);
         assert_eq!(system.as_deref(), Some("You are helpful"));
         assert_eq!(msgs.len(), 2); // user + assistant, system extracted
         assert_eq!(msgs[0]["role"], "user");
@@ -1788,7 +1850,7 @@ mod tests {
             },
             Message::tool_result("tc_1", "file contents here"),
         ];
-        let (system, msgs) = AnthropicProvider::convert_messages(&messages);
+        let (system, msgs) = AnthropicProvider::convert_messages(&messages, None);
         assert_eq!(system.as_deref(), Some("System"));
         assert_eq!(msgs.len(), 3); // user, assistant with tool_use, user with tool_result
                                    // Assistant message should have tool_use block
@@ -1799,6 +1861,78 @@ mod tests {
         let tool_content = msgs[2]["content"].as_array().unwrap();
         assert_eq!(tool_content[0]["type"], "tool_result");
         assert_eq!(tool_content[0]["tool_use_id"], "tc_1");
+    }
+
+    #[test]
+    fn test_anthropic_convert_messages_kimi_tool_replay_preserves_reasoning_content() {
+        let messages = vec![Message {
+            role: MessageRole::Assistant,
+            content: None,
+            tool_calls: Some(vec![ToolCall {
+                id: "tc_kimi".to_string(),
+                function: FunctionCall {
+                    name: "terminal".to_string(),
+                    arguments: r#"{"command":"date"}"#.to_string(),
+                },
+            }]),
+            tool_call_id: None,
+            name: None,
+            reasoning_content: Some("provider scratchpad".to_string()),
+            cache_control: None,
+        }];
+        let (_, msgs) =
+            AnthropicProvider::convert_messages(&messages, Some("https://api.kimi.com/coding/v1"));
+        let content = msgs[0]["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "thinking");
+        assert_eq!(content[0]["thinking"], "provider scratchpad");
+        assert_eq!(content[1]["type"], "tool_use");
+    }
+
+    #[test]
+    fn test_anthropic_convert_messages_kimi_accepts_empty_reasoning_content() {
+        let messages = vec![Message {
+            role: MessageRole::Assistant,
+            content: None,
+            tool_calls: Some(vec![ToolCall {
+                id: "tc_empty".to_string(),
+                function: FunctionCall {
+                    name: "terminal".to_string(),
+                    arguments: r#"{"command":"ls"}"#.to_string(),
+                },
+            }]),
+            tool_call_id: None,
+            name: None,
+            reasoning_content: Some(String::new()),
+            cache_control: None,
+        }];
+        let (_, msgs) =
+            AnthropicProvider::convert_messages(&messages, Some("https://api.moonshot.ai/v1"));
+        let content = msgs[0]["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "thinking");
+        assert_eq!(content[0]["thinking"], "");
+    }
+
+    #[test]
+    fn test_anthropic_convert_messages_non_kimi_skips_thinking_block() {
+        let messages = vec![Message {
+            role: MessageRole::Assistant,
+            content: None,
+            tool_calls: Some(vec![ToolCall {
+                id: "tc_other".to_string(),
+                function: FunctionCall {
+                    name: "terminal".to_string(),
+                    arguments: r#"{"command":"pwd"}"#.to_string(),
+                },
+            }]),
+            tool_call_id: None,
+            name: None,
+            reasoning_content: Some("scratchpad".to_string()),
+            cache_control: None,
+        }];
+        let (_, msgs) =
+            AnthropicProvider::convert_messages(&messages, Some("https://api.anthropic.com"));
+        let content = msgs[0]["content"].as_array().unwrap();
+        assert_eq!(content[0]["type"], "tool_use");
     }
 
     #[test]
@@ -1819,6 +1953,25 @@ mod tests {
         assert_eq!(resp.finish_reason.as_deref(), Some("stop"));
         assert_eq!(resp.usage.as_ref().unwrap().prompt_tokens, 100);
         assert_eq!(resp.usage.as_ref().unwrap().completion_tokens, 50);
+    }
+
+    #[test]
+    fn test_anthropic_parse_response_preserves_thinking_as_reasoning_content() {
+        let json = serde_json::json!({
+            "content": [
+                {"type": "thinking", "thinking": "step 1"},
+                {"type": "text", "text": "answer"}
+            ],
+            "model": "claude-3-5-sonnet-20241022",
+            "stop_reason": "end_turn",
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5
+            }
+        });
+        let resp = AnthropicProvider::parse_response(&json).unwrap();
+        assert_eq!(resp.message.content.as_deref(), Some("answer"));
+        assert_eq!(resp.message.reasoning_content.as_deref(), Some("step 1"));
     }
 
     #[test]
