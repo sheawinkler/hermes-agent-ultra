@@ -4,7 +4,7 @@
 
 A production-grade Rust rewrite of [Hermes Agent](https://github.com/NousResearch/hermes-agent) — the self-improving AI agent by [Nous Research](https://nousresearch.com).
 
-**84,000+ lines of Rust · 16 crates · 641 tests · 17 platform adapters · 30 tool backends · 8 memory plugins · 6 cross-platform release targets**
+**commit-level feature parity with NousResearch**
 
 ---
 
