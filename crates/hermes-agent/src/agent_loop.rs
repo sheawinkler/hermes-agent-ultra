@@ -1431,6 +1431,13 @@ impl AgentLoop {
                 .or_else(|| std::env::var("OPENAI_API_KEY").ok())
                 .filter(|v| !v.trim().is_empty());
         }
+        if provider == "stepfun" {
+            return std::env::var("HERMES_STEPFUN_API_KEY")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .or_else(|| std::env::var("STEPFUN_API_KEY").ok())
+                .filter(|v| !v.trim().is_empty());
+        }
         let env_var = match provider {
             "anthropic" => "ANTHROPIC_API_KEY",
             "openrouter" => "OPENROUTER_API_KEY",
@@ -1473,6 +1480,8 @@ impl AgentLoop {
                     Some("https://api.openai.com/v1".to_string())
                 } else if provider == "qwen-oauth" {
                     Some("https://dashscope.aliyuncs.com/compatible-mode/v1".to_string())
+                } else if provider == "stepfun" {
+                    Some("https://api.stepfun.ai/step_plan/v1".to_string())
                 } else {
                     None
                 }
@@ -1818,6 +1827,11 @@ impl AgentLoop {
                     p = p.with_base_url(url);
                 }
                 Arc::new(p)
+            }
+            "stepfun" => {
+                let url = base_url
+                    .unwrap_or_else(|| "https://api.stepfun.ai/step_plan/v1".to_string());
+                Arc::new(GenericProvider::new(url, &api_key, model_name))
             }
             "nous" => {
                 let mut p = NousProvider::new(&api_key).with_model(model_name);
@@ -6007,6 +6021,80 @@ mod tests {
     }
 
     #[test]
+    fn test_runtime_provider_stepfun_build_supported() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let mut runtime_providers = HashMap::new();
+        runtime_providers.insert(
+            "stepfun".to_string(),
+            RuntimeProviderConfig {
+                api_key: Some("stepfun-test-key".to_string()),
+                api_key_env: None,
+                base_url: None,
+                command: None,
+                args: Vec::new(),
+                oauth_token_url: None,
+                oauth_client_id: None,
+            },
+        );
+
+        let config = AgentConfig {
+            model: "openai:gpt-4o".to_string(),
+            runtime_providers,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+
+        let built = agent.build_runtime_provider(
+            "stepfun",
+            "step-3.5-flash",
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        assert!(built.is_ok(), "stepfun runtime provider should build");
+    }
+
+    #[test]
     fn test_smart_model_routing_openai_codex_reads_auth_store_token() {
         use futures::stream::BoxStream;
         use std::time::{SystemTime, UNIX_EPOCH};
@@ -7017,5 +7105,61 @@ mod tests {
         let resolved = agent.resolve_runtime_api_key("custom", None, None);
         assert_eq!(resolved.as_deref(), Some("env-secret"));
         std::env::remove_var("MY_FALLBACK_KEY");
+    }
+
+    #[test]
+    fn test_runtime_provider_stepfun_env_key_and_base_url_defaults() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let config = AgentConfig::default();
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+
+        std::env::remove_var("HERMES_STEPFUN_API_KEY");
+        std::env::set_var("STEPFUN_API_KEY", "stepfun-secret");
+        let resolved = agent.resolve_runtime_api_key("stepfun", None, None);
+        assert_eq!(resolved.as_deref(), Some("stepfun-secret"));
+        std::env::remove_var("STEPFUN_API_KEY");
+
+        let base = agent.resolve_runtime_base_url("stepfun", None);
+        assert_eq!(
+            base.as_deref(),
+            Some("https://api.stepfun.ai/step_plan/v1")
+        );
     }
 }

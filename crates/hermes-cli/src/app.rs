@@ -516,6 +516,57 @@ mod tests {
             .expect("runtime provider should exist");
         assert_eq!(runtime.api_key_env.as_deref(), Some("MY_FALLBACK_KEY"));
     }
+
+    #[test]
+    fn test_build_agent_config_infers_provider_for_bare_model() {
+        let mut cfg = GatewayConfig::default();
+        cfg.model = Some("claude-opus-4-6".to_string());
+        cfg.llm_providers.insert(
+            "anthropic".to_string(),
+            LlmProviderConfig {
+                model: Some("claude-opus-4-6".to_string()),
+                ..LlmProviderConfig::default()
+            },
+        );
+
+        let agent_cfg = build_agent_config(&cfg, "claude-opus-4-6");
+        assert_eq!(agent_cfg.provider.as_deref(), Some("anthropic"));
+    }
+
+    #[test]
+    fn test_resolve_provider_and_model_uses_single_provider_fallback() {
+        let mut cfg = GatewayConfig::default();
+        cfg.llm_providers.insert(
+            "stepfun".to_string(),
+            LlmProviderConfig::default(),
+        );
+        let (provider, model) = resolve_provider_and_model(&cfg, "step-3.5-flash");
+        assert_eq!(provider, "stepfun");
+        assert_eq!(model, "step-3.5-flash");
+    }
+
+    #[test]
+    fn test_provider_api_key_from_env_supports_stepfun() {
+        let hermes_var = "HERMES_STEPFUN_API_KEY";
+        let stepfun_var = "STEPFUN_API_KEY";
+        std::env::remove_var(hermes_var);
+        std::env::remove_var(stepfun_var);
+
+        std::env::set_var(stepfun_var, "stepfun-direct");
+        assert_eq!(
+            provider_api_key_from_env("stepfun").as_deref(),
+            Some("stepfun-direct")
+        );
+
+        std::env::set_var(hermes_var, "stepfun-hermes");
+        assert_eq!(
+            provider_api_key_from_env("stepfun").as_deref(),
+            Some("stepfun-hermes")
+        );
+
+        std::env::remove_var(hermes_var);
+        std::env::remove_var(stepfun_var);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -523,7 +574,7 @@ mod tests {
 // ---------------------------------------------------------------------------
 
 pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
-    let provider_from_model = model.split_once(':').map(|(p, _)| p.to_string());
+    let (resolved_provider, _) = resolve_provider_and_model(config, model);
     let skip_memory_env = std::env::var("HERMES_SKIP_MEMORY")
         .ok()
         .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
@@ -547,7 +598,7 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         system_prompt: config.system_prompt.clone(),
         personality: config.personality.clone(),
         hermes_home: config.home_dir.clone(),
-        provider: provider_from_model,
+        provider: Some(resolved_provider),
         stream: config.streaming.enabled,
         skip_memory,
         skip_context_files,
@@ -617,8 +668,31 @@ pub fn bridge_tool_registry(tools: &ToolRegistry) -> AgentToolRegistry {
 // Helper: build LLM provider from config + model string
 // ---------------------------------------------------------------------------
 
-fn parse_model_string(model: &str) -> (&str, &str) {
-    model.split_once(':').unwrap_or(("openai", model))
+const STEPFUN_BASE_URL: &str = "https://api.stepfun.ai/step_plan/v1";
+
+fn resolve_provider_and_model(config: &GatewayConfig, model: &str) -> (String, String) {
+    let trimmed = model.trim();
+    if let Some((provider, model_name)) = trimmed.split_once(':') {
+        return (provider.trim().to_string(), model_name.trim().to_string());
+    }
+
+    if let Some((provider, _)) = config.llm_providers.iter().find(|(_, cfg)| {
+        cfg.model
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .is_some_and(|m| m == trimmed)
+    }) {
+        return (provider.to_string(), trimmed.to_string());
+    }
+
+    if config.llm_providers.len() == 1 {
+        if let Some((provider, _)) = config.llm_providers.iter().next() {
+            return (provider.to_string(), trimmed.to_string());
+        }
+    }
+
+    ("openai".to_string(), trimmed.to_string())
 }
 
 fn resolve_api_key_literal_or_env_ref(value: &str) -> Option<String> {
@@ -655,6 +729,11 @@ pub fn provider_api_key_from_env(provider: &str) -> Option<String> {
         "minimax" => std::env::var("MINIMAX_API_KEY")
             .ok()
             .filter(|s| !s.trim().is_empty()),
+        "stepfun" => std::env::var("HERMES_STEPFUN_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| std::env::var("STEPFUN_API_KEY").ok())
+            .filter(|s| !s.trim().is_empty()),
         "nous" => std::env::var("NOUS_API_KEY")
             .ok()
             .filter(|s| !s.trim().is_empty()),
@@ -666,9 +745,9 @@ pub fn provider_api_key_from_env(provider: &str) -> Option<String> {
 }
 
 pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvider> {
-    let (provider_name, model_name) = parse_model_string(model);
+    let (provider_name, model_name) = resolve_provider_and_model(config, model);
 
-    let provider_config = config.llm_providers.get(provider_name);
+    let provider_config = config.llm_providers.get(provider_name.as_str());
 
     let api_key = provider_config
         .and_then(|c| c.api_key.as_deref())
@@ -681,7 +760,7 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
                 .and_then(|name| std::env::var(name).ok())
                 .filter(|v| !v.trim().is_empty())
         })
-        .or_else(|| provider_api_key_from_env(provider_name));
+        .or_else(|| provider_api_key_from_env(provider_name.as_str()));
 
     let api_key = match api_key {
         Some(k) => k,
@@ -695,48 +774,52 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
 
     let base_url = provider_config.and_then(|c| c.base_url.clone());
 
-    match provider_name {
+    match provider_name.as_str() {
         "openai" => {
-            let mut p = OpenAiProvider::new(&api_key).with_model(model_name);
+            let mut p = OpenAiProvider::new(&api_key).with_model(model_name.as_str());
             if let Some(url) = base_url {
                 p = p.with_base_url(url);
             }
             Arc::new(p)
         }
         "anthropic" => {
-            let mut p = AnthropicProvider::new(&api_key).with_model(model_name);
+            let mut p = AnthropicProvider::new(&api_key).with_model(model_name.as_str());
             if let Some(url) = base_url {
                 p = p.with_base_url(url);
             }
             Arc::new(p)
         }
         "openrouter" => {
-            let p = OpenRouterProvider::new(&api_key).with_model(model_name);
+            let p = OpenRouterProvider::new(&api_key).with_model(model_name.as_str());
             Arc::new(p)
         }
         "qwen" => {
-            let mut p = QwenProvider::new(&api_key).with_model(model_name);
+            let mut p = QwenProvider::new(&api_key).with_model(model_name.as_str());
             if let Some(url) = base_url {
                 p = p.with_base_url(url);
             }
             Arc::new(p)
         }
         "kimi" | "moonshot" => {
-            let mut p = KimiProvider::new(&api_key).with_model(model_name);
+            let mut p = KimiProvider::new(&api_key).with_model(model_name.as_str());
             if let Some(url) = base_url {
                 p = p.with_base_url(url);
             }
             Arc::new(p)
         }
         "minimax" => {
-            let mut p = MiniMaxProvider::new(&api_key).with_model(model_name);
+            let mut p = MiniMaxProvider::new(&api_key).with_model(model_name.as_str());
             if let Some(url) = base_url {
                 p = p.with_base_url(url);
             }
             Arc::new(p)
         }
+        "stepfun" => {
+            let url = base_url.unwrap_or_else(|| STEPFUN_BASE_URL.to_string());
+            Arc::new(GenericProvider::new(url, &api_key, model_name.as_str()))
+        }
         "nous" => {
-            let mut p = NousProvider::new(&api_key).with_model(model_name);
+            let mut p = NousProvider::new(&api_key).with_model(model_name.as_str());
             if let Some(url) = base_url {
                 p = p.with_base_url(url);
             }
@@ -747,12 +830,12 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
                 base_url.unwrap_or_else(|| "https://api.github.com/copilot".to_string()),
                 &api_key,
             )
-            .with_model(model_name);
+            .with_model(model_name.as_str());
             Arc::new(p)
         }
         _ => {
             let url = base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-            Arc::new(GenericProvider::new(url, &api_key, model_name))
+            Arc::new(GenericProvider::new(url, &api_key, model_name.as_str()))
         }
     }
 }
