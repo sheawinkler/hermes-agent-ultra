@@ -2711,6 +2711,7 @@ async fn register_gateway_adapters(
                     token,
                     app_token: extra_string(platform_cfg, "app_token"),
                     socket_mode: extra_bool(platform_cfg, "socket_mode", false),
+                    reactions: extra_bool(platform_cfg, "reactions", true),
                     proxy: Default::default(),
                 };
                 match SlackAdapter::new(slack_cfg) {

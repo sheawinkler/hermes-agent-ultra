@@ -28,6 +28,10 @@ const SLACK_API_BASE: &str = "https://slack.com/api";
 /// Maximum message length for Slack (4000 characters for text blocks).
 const MAX_MESSAGE_LENGTH: usize = 4000;
 
+fn default_true() -> bool {
+    true
+}
+
 // ---------------------------------------------------------------------------
 // SlackConfig
 // ---------------------------------------------------------------------------
@@ -45,6 +49,10 @@ pub struct SlackConfig {
     /// Whether to use Socket Mode for receiving events.
     #[serde(default)]
     pub socket_mode: bool,
+
+    /// Whether reaction lifecycle updates are enabled.
+    #[serde(default = "default_true")]
+    pub reactions: bool,
 
     /// Proxy configuration for outbound requests.
     #[serde(default)]
@@ -675,6 +683,13 @@ impl SlackAdapter {
         &self.config
     }
 
+    fn reactions_enabled(&self) -> bool {
+        reactions_toggle_enabled(
+            std::env::var("SLACK_REACTIONS").ok().as_deref(),
+            self.config.reactions,
+        )
+    }
+
     // -----------------------------------------------------------------------
     // Web API: Sending messages
     // -----------------------------------------------------------------------
@@ -995,6 +1010,22 @@ impl SlackAdapter {
         Ok(())
     }
 
+    /// Remove the bot's own reaction from a message.
+    pub async fn remove_reaction(
+        &self,
+        channel: &str,
+        timestamp: &str,
+        name: &str,
+    ) -> Result<(), GatewayError> {
+        let body = serde_json::json!({
+            "channel": channel,
+            "timestamp": timestamp,
+            "name": name,
+        });
+        self.slack_post("reactions.remove", &body).await?;
+        Ok(())
+    }
+
     // -----------------------------------------------------------------------
     // Web API: Conversations
     // -----------------------------------------------------------------------
@@ -1147,6 +1178,30 @@ impl PlatformAdapter for SlackAdapter {
         Ok(())
     }
 
+    async fn add_reaction(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        emoji: &str,
+    ) -> Result<(), GatewayError> {
+        if !self.reactions_enabled() {
+            return Ok(());
+        }
+        SlackAdapter::add_reaction(self, chat_id, message_id, emoji).await
+    }
+
+    async fn remove_reaction(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        emoji: &str,
+    ) -> Result<(), GatewayError> {
+        if !self.reactions_enabled() {
+            return Ok(());
+        }
+        SlackAdapter::remove_reaction(self, chat_id, message_id, emoji).await
+    }
+
     fn is_running(&self) -> bool {
         self.base.is_running()
     }
@@ -1159,6 +1214,16 @@ impl PlatformAdapter for SlackAdapter {
 // ---------------------------------------------------------------------------
 // Utility functions
 // ---------------------------------------------------------------------------
+
+fn reactions_toggle_enabled(raw: Option<&str>, default_enabled: bool) -> bool {
+    match raw.map(str::trim).filter(|s| !s.is_empty()) {
+        Some(value) => {
+            let lowered = value.to_ascii_lowercase();
+            !matches!(lowered.as_str(), "false" | "0" | "no")
+        }
+        None => default_enabled,
+    }
+}
 
 /// Split a message into chunks that fit within the given max length.
 fn split_message(text: &str, max_len: usize) -> Vec<String> {
@@ -1513,6 +1578,16 @@ mod tests {
         assert_eq!(arr.len(), 1);
         assert_eq!(arr[0]["type"], "image");
         assert_eq!(arr[0]["alt_text"], "image");
+    }
+
+    #[test]
+    fn reactions_toggle_enabled_defaults_and_env_overrides() {
+        assert!(reactions_toggle_enabled(None, true));
+        assert!(!reactions_toggle_enabled(None, false));
+        assert!(reactions_toggle_enabled(Some("true"), false));
+        assert!(!reactions_toggle_enabled(Some("0"), true));
+        assert!(!reactions_toggle_enabled(Some("no"), true));
+        assert!(reactions_toggle_enabled(Some("1"), false));
     }
 
     #[test]
