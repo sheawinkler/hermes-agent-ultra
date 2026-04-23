@@ -63316,14 +63316,14 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tests/tui_gateway/test_make_agent_provider.py",
         "tui_gateway/server.py"
       ],
       "files_touched": 2,
       "notes": "ported via 5e15ed60 (provider resolution in build_agent_config + build_provider)",
-      "owner": "",
+      "owner": "codex",
       "sha": "9ed6eb0cca9377cd8f080fe0b721c189fe6b8cdf",
       "subject": "fix(tui): resolve runtime provider in _make_agent (#11884)",
       "target_ticket": 20,
@@ -69859,7 +69859,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "agent/auxiliary_client.py",
         "agent/model_metadata.py",
@@ -69881,7 +69881,7 @@
       ],
       "files_touched": 17,
       "notes": "ported via 5e15ed60 (StepFun provider support across CLI/auth/runtime)",
-      "owner": "",
+      "owner": "codex",
       "sha": "c6b1ef4e5881f42d6c5168e111bf915716f09c51",
       "subject": "feat: add Step Plan provider support (salvage #6005)",
       "target_ticket": 20,
@@ -70362,34 +70362,34 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "hermes_cli/debug.py",
         "tests/hermes_cli/test_debug.py"
       ],
       "files_touched": 2,
       "notes": "ported via 5e15ed60 (bounded debug log snapshot for reports)",
-      "owner": "",
+      "owner": "codex",
       "sha": "fc3862bdd637ef53e82628c9d931d9cbff853fc6",
       "subject": "fix(debug): snapshot logs once for debug share",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "hermes_cli/debug.py"
       ],
       "files_touched": 1,
       "notes": "ported via 5e15ed60 (truncation boundary preservation + memory cap tests)",
-      "owner": "",
+      "owner": "codex",
       "sha": "921133cfa56a2e289a1cf09e87b382a6ea0885f8",
       "subject": "fix(debug): preserve full line at truncation boundary and cap memory",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "gateway/run.py",
         "hermes_cli/debug.py",
@@ -70397,80 +70397,80 @@
         "tests/hermes_cli/test_debug.py"
       ],
       "files_touched": 4,
-      "notes": "",
-      "owner": "",
+      "notes": "ported via 5cce6dda (best-effort sweep of expired pending paste records before debug-share upload; offline-safe)",
+      "owner": "codex",
       "sha": "61d0a99c11cda30f7a3f58c41693f82bcf1435cf",
       "subject": "fix(debug): sweep expired pending pastes on slash debug paths",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "scripts/release.py",
         "tests/hermes_cli/test_debug.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "ported via 5e15ed60 (truncation-boundary and memory-cap snapshot tests added in rust)",
+      "owner": "codex",
       "sha": "8dc936f10ecfd4d7c0200522e48374f885c7e024",
       "subject": "chore: add taosiyuan163 to AUTHOR_MAP, add truncation boundary tests",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/debug.py",
         "tests/hermes_cli/test_debug.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "superseded in rust tree: no dead debug wrapper functions exist; snapshot API is already direct",
+      "owner": "codex",
       "sha": "de849c410da9dc39bde6b81709cef89a04d64f38",
       "subject": "refactor(debug): remove dead _read_log_tail/_read_full_log wrappers",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tests/test_tui_gateway_server.py",
         "tui_gateway/server.py"
       ],
       "files_touched": 2,
       "notes": "ported via 5e15ed60 (state.db auto-maintenance graceful degradation test)",
-      "owner": "",
+      "owner": "codex",
       "sha": "5dead0f2a08be2fed152e45141fcc7882f06261f",
       "subject": "fix(tui): degrade gracefully when state.db init fails",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "hermes_cli/skin_engine.py",
         "tests/hermes_cli/test_skin_engine.py",
         "tests/test_cli_skin_integration.py"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "ported via 5cce6dda (status bar rendering now uses active theme with status-bar palette overrides)",
+      "owner": "codex",
       "sha": "c3232171882235bd3cdd0125b1b1ee9748bfe501",
       "subject": "fix: make CLI status bar skin-aware",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "hermes_cli/skin_engine.py",
         "tests/hermes_cli/test_skin_engine.py",
         "tests/test_cli_skin_integration.py"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "ported via 5cce6dda (status-bar skin parity tests aligned with active-theme rendering path)",
+      "owner": "codex",
       "sha": "81a504a4a0f3c99ff9411a0a549f4adf9af93312",
       "subject": "fix: align status bar skin tests with upstream main",
       "target_ticket": 20,
@@ -70656,14 +70656,14 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "hermes_cli/debug.py",
         "tests/hermes_cli/test_debug.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "ported via 5cce6dda (debug snapshot now distinguishes missing file vs empty file placeholders)",
+      "owner": "codex",
       "sha": "b641639e425bfd26dbe3edbd113d8749384cbf40",
       "subject": "fix(debug): distinguish empty-log from missing-log in report placeholder",
       "target_ticket": 20,
@@ -72378,7 +72378,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     }
   ],
-  "generated_at_utc": "2026-04-23T06:35:28.710483+00:00",
+  "generated_at_utc": "2026-04-23T06:43:51.538395+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -72386,9 +72386,9 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 155,
-      "ported": 82,
-      "superseded": 4529
+      "pending": 144,
+      "ported": 92,
+      "superseded": 4530
     },
     "by_target_ticket": {
       "20": 1672,
