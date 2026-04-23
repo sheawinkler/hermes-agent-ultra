@@ -1033,3 +1033,14 @@
   - `bash -n scripts/install.sh`
   - `bash scripts/install.sh --help`
   - `python3 scripts/generate-upstream-snapshot-diff-map.py --repo-root .` (post-commit refresh; current summary `2700` entries)
+
+## 2026-04-23 impl-15 (optional-skill docs parity sync: page-agent)
+- Scope:
+  - Sync shared-modified upstream optional-skill docs for `page-agent` into this fork while preserving Rust runtime architecture.
+- Repo implementation:
+  - Updated:
+    - `optional-skills/web-development/DESCRIPTION.md`
+    - `optional-skills/web-development/page-agent/SKILL.md`
+  - Source: `upstream/main` file content sync.
+- Verification:
+  - Manual diff inspection against upstream showed the intended content replacement only.
