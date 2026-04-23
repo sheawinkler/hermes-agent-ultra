@@ -956,6 +956,7 @@ impl AnthropicProvider {
                         tool_calls.push(ToolCall {
                             id,
                             function: FunctionCall { name, arguments },
+                            extra_content: None,
                         });
                     }
                     "thinking" => {
@@ -1654,10 +1655,12 @@ fn parse_openai_response(json: &Value) -> Result<LlmResponse, AgentError> {
                         .and_then(|a| a.as_str())
                         .unwrap_or("{}")
                         .to_string();
+                    let extra_content = tc.get("extra_content").filter(|v| !v.is_null()).cloned();
 
                     Some(hermes_core::ToolCall {
                         id,
                         function: hermes_core::FunctionCall { name, arguments },
+                        extra_content,
                     })
                 })
                 .collect::<Vec<_>>()
@@ -1772,6 +1775,45 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_openai_response_with_tool_call_extra_content() {
+        let json = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [{
+                        "id": "call_123",
+                        "type": "function",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": "{\"path\": \"test.txt\"}"
+                        },
+                        "extra_content": {
+                            "google": {
+                                "thought_signature": "SIG_ABC123"
+                            }
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "model": "gemini-2.5-pro"
+        });
+        let resp = parse_openai_response(&json).unwrap();
+        let tc = resp.message.tool_calls.as_ref().unwrap();
+        assert_eq!(tc.len(), 1);
+        assert_eq!(tc[0].function.name, "read_file");
+        assert_eq!(
+            tc[0].extra_content,
+            Some(serde_json::json!({
+                "google": {
+                    "thought_signature": "SIG_ABC123"
+                }
+            }))
+        );
+    }
+
+    #[test]
     fn test_parse_sse_chunk_content() {
         let json = serde_json::json!({
             "choices": [{
@@ -1858,6 +1900,7 @@ mod tests {
                         name: "read_file".to_string(),
                         arguments: r#"{"path":"test.txt"}"#.to_string(),
                     },
+                    extra_content: None,
                 }]),
                 tool_call_id: None,
                 name: None,
@@ -1890,6 +1933,7 @@ mod tests {
                     name: "terminal".to_string(),
                     arguments: r#"{"command":"date"}"#.to_string(),
                 },
+                extra_content: None,
             }]),
             tool_call_id: None,
             name: None,
@@ -1915,6 +1959,7 @@ mod tests {
                     name: "terminal".to_string(),
                     arguments: r#"{"command":"ls"}"#.to_string(),
                 },
+                extra_content: None,
             }]),
             tool_call_id: None,
             name: None,
@@ -1939,6 +1984,7 @@ mod tests {
                     name: "terminal".to_string(),
                     arguments: r#"{"command":"pwd"}"#.to_string(),
                 },
+                extra_content: None,
             }]),
             tool_call_id: None,
             name: None,

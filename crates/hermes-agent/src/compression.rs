@@ -939,6 +939,7 @@ mod tests {
                     name: name.into(),
                     arguments: args.into(),
                 },
+                extra_content: None,
             }]),
             tool_call_id: None,
             name: None,

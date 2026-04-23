@@ -1068,3 +1068,34 @@
   - `python3 scripts/generate-upstream-patch-queue.py --max-commits 0 --no-fetch`
   - `python3 scripts/generate-global-parity-proof.py`
   - `python3 scripts/generate-workstream-status.py`
+
+## 2026-04-23 impl-17 (wecom mention-prefix + gemini toolcall extra_content parity)
+- Scope:
+  - Port upstream WeCom group-chat mention-prefix stripping so slash commands survive `@BotName` prefixes.
+  - Port upstream Gemini `ToolCall.extra_content` metadata passthrough so thought signatures round-trip in Rust transport/replay paths.
+  - Classify upstream cron non-dict guard commit against Rust cron architecture.
+- Rust implementation commits (chronological):
+  - `884e81da6` fix(parity): strip leading `@mention` in wecom callback group chats.
+    - `crates/hermes-gateway/src/platforms/wecom_callback.rs`
+    - Detects group callbacks via `ChatId`, strips leading mention prefix before command parsing, preserves group `chat_id`, and sets `is_dm=false` for group callbacks.
+    - Added helper tests for mention stripping behavior.
+  - `5013f2cfa` fix(parity): preserve `tool_call.extra_content` across Rust transport loop.
+    - Added `extra_content: Option<serde_json::Value>` to `hermes_core::ToolCall`.
+    - Wired parser propagation in:
+      - `crates/hermes-agent/src/provider.rs` (OpenAI-style tool call parsing)
+      - `crates/hermes-agent/src/api_bridge.rs` (Responses API parser)
+    - Updated tool-call constructors in runtime + tests/property generators to preserve compile safety.
+    - Added regression test `test_parse_openai_response_with_tool_call_extra_content`.
+- Upstream SHAs updated:
+  - `8b1ff55f5382052a5d98246659136e632af13697` → `ported`
+  - `f5af6520d0bfac5b17c9ce460a5a06bf3249972c` → `ported`
+  - `22afa066f838da5fcf1f1a0087524dd4fb99f7c5` → `ported` (superseded-by-design in Rust typed cron path; no dynamic dict `.get` failure class)
+- Verification:
+  - `cargo test -p hermes-gateway --features wecom-callback strip_group_mention_prefix -- --nocapture`
+  - `cargo check -q`
+  - `cargo test -p hermes-agent test_parse_openai_response_with_tool_call_extra_content -- --nocapture`
+  - `cargo test -p hermes-core test_round_trip_format -- --nocapture`
+  - `cargo test -p hermes-core --test prop_tool_call_parser prop_tool_call_roundtrip -- --nocapture`
+  - `python3 scripts/generate-upstream-patch-queue.py --repo-root . --no-fetch`
+  - `python3 scripts/generate-global-parity-proof.py --repo-root .`
+  - `python3 scripts/generate-workstream-status.py --repo-root .`

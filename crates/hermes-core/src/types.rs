@@ -50,6 +50,8 @@ pub struct ToolCall {
     pub id: String,
     #[serde(flatten)]
     pub function: FunctionCall,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub extra_content: Option<serde_json::Value>,
 }
 
 // ---------------------------------------------------------------------------

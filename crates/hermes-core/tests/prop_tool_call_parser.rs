@@ -31,6 +31,7 @@ fn arb_tool_call() -> impl Strategy<Value = ToolCall> {
     (arb_identifier(), arb_json_object()).prop_map(|(name, arguments)| ToolCall {
         id: format!("call_{name}"),
         function: FunctionCall { name, arguments },
+        extra_content: None,
     })
 }
 
