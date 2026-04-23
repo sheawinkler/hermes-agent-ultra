@@ -10,8 +10,8 @@ use std::collections::HashMap;
 
 use hermes_config::{
     AgentLoopBehaviorConfig, ApprovalConfig, DailyReset, GatewayConfig, IdleReset, PlatformConfig,
-    ProfileConfig, SecurityConfig, SessionConfig, SessionResetPolicy, SkillsSettings,
-    SmartModelRoutingConfig, StreamingConfig, TerminalConfig, ToolsSettings,
+    ProfileConfig, SecurityConfig, SessionConfig, SessionResetPolicy, SessionsMaintenanceConfig,
+    SkillsSettings, SmartModelRoutingConfig, StreamingConfig, TerminalConfig, ToolsSettings,
     UnauthorizedDmBehavior,
 };
 use hermes_core::BudgetConfig;
@@ -118,6 +118,7 @@ fn arb_gateway_config() -> impl Strategy<Value = GatewayConfig> {
                 platforms: HashMap::new(),
                 platform_toolsets: hermes_config::config::default_platform_toolsets(),
                 session,
+                sessions: SessionsMaintenanceConfig::default(),
                 streaming,
                 terminal: TerminalConfig::default(),
                 llm_providers: HashMap::new(),

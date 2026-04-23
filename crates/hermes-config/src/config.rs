@@ -53,6 +53,10 @@ pub struct GatewayConfig {
     #[serde(default)]
     pub session: SessionConfig,
 
+    /// Session persistence database maintenance (auto-prune + VACUUM).
+    #[serde(default)]
+    pub sessions: SessionsMaintenanceConfig,
+
     /// Streaming / progressive-output settings.
     #[serde(default)]
     pub streaming: StreamingConfig,
@@ -118,6 +122,7 @@ impl Default for GatewayConfig {
             platforms: HashMap::new(),
             platform_toolsets: default_platform_toolsets(),
             session: SessionConfig::default(),
+            sessions: SessionsMaintenanceConfig::default(),
             streaming: StreamingConfig::default(),
             terminal: TerminalConfig::default(),
             llm_providers: HashMap::new(),
@@ -133,6 +138,46 @@ impl Default for GatewayConfig {
             home_dir: None,
         }
     }
+}
+
+/// SQLite session persistence maintenance settings.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionsMaintenanceConfig {
+    /// Enable automatic prune/VACUUM sweeps at startup.
+    #[serde(default)]
+    pub auto_prune: bool,
+    /// Keep sessions updated within the last N days.
+    #[serde(default = "default_sessions_retention_days")]
+    pub retention_days: u32,
+    /// Run VACUUM after a prune pass that deleted at least one session.
+    #[serde(default = "default_sessions_vacuum_after_prune")]
+    pub vacuum_after_prune: bool,
+    /// Minimum interval between maintenance passes.
+    #[serde(default = "default_sessions_min_interval_hours")]
+    pub min_interval_hours: u32,
+}
+
+impl Default for SessionsMaintenanceConfig {
+    fn default() -> Self {
+        Self {
+            auto_prune: false,
+            retention_days: default_sessions_retention_days(),
+            vacuum_after_prune: default_sessions_vacuum_after_prune(),
+            min_interval_hours: default_sessions_min_interval_hours(),
+        }
+    }
+}
+
+fn default_sessions_retention_days() -> u32 {
+    90
+}
+
+fn default_sessions_vacuum_after_prune() -> bool {
+    true
+}
+
+fn default_sessions_min_interval_hours() -> u32 {
+    24
 }
 
 /// Default platform-to-toolset mapping, aligned with Python gateway defaults.

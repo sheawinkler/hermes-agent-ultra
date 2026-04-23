@@ -12,11 +12,11 @@ pub use security::PolicyGuardConfig;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::Path as FsPath;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use axum::body::Body;
 use axum::extract::ws::{Message as WsMessage, WebSocket};
 use axum::extract::{Path, State, WebSocketUpgrade};
 use axum::http::header;
@@ -132,6 +132,7 @@ pub struct HttpServerState {
 
 impl HttpServerState {
     pub async fn build(config: GatewayConfig) -> Result<Self, AgentError> {
+        run_sessions_db_auto_maintenance(&config);
         let runtime_gateway_config = RuntimeGatewayConfig {
             streaming_enabled: config.streaming.enabled,
             ..RuntimeGatewayConfig::default()
@@ -286,6 +287,34 @@ impl HttpServerState {
             gateway,
             outbound,
         })
+    }
+}
+
+fn run_sessions_db_auto_maintenance(config: &GatewayConfig) {
+    if !config.sessions.auto_prune {
+        return;
+    }
+    let home = config
+        .home_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(hermes_config::hermes_home);
+    let sp = SessionPersistence::new(home);
+    let result = sp.maybe_auto_prune_and_vacuum(
+        config.sessions.retention_days,
+        config.sessions.min_interval_hours,
+        config.sessions.vacuum_after_prune,
+    );
+    if let Some(err) = result.error {
+        tracing::debug!("sessions db auto-maintenance skipped: {}", err);
+    } else if !result.skipped && result.pruned > 0 {
+        tracing::info!(
+            "sessions db auto-maintenance pruned {} session(s){}",
+            result.pruned,
+            if result.vacuumed { " + vacuum" } else { "" }
+        );
     }
 }
 
@@ -647,6 +676,7 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
                     name.clone(),
                     hermes_agent::agent_loop::RuntimeProviderConfig {
                         api_key: cfg.api_key.clone(),
+                        api_key_env: cfg.api_key_env.clone(),
                         base_url: cfg.base_url.clone(),
                         command: cfg.command.clone(),
                         args: cfg.args.clone(),

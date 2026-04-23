@@ -8,7 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
-use chrono::Utc;
+use chrono::{Duration as ChronoDuration, Utc};
 use hermes_core::{AgentError, Message, MessageRole};
 
 // ---------------------------------------------------------------------------
@@ -46,6 +46,15 @@ pub struct SessionPersistence {
     sessions_dir: PathBuf,
     /// Directory for trajectory files.
     trajectories_dir: PathBuf,
+}
+
+/// Result of one startup auto-maintenance pass.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AutoMaintenanceResult {
+    pub skipped: bool,
+    pub pruned: u64,
+    pub vacuumed: bool,
+    pub error: Option<String>,
 }
 
 impl SessionPersistence {
@@ -133,7 +142,12 @@ impl SessionPersistence {
             CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
                 INSERT INTO messages_fts(rowid, content, session_id, role)
                 VALUES (new.id, new.content, new.session_id, new.role);
-            END;",
+            END;
+
+            CREATE TABLE IF NOT EXISTS state_meta (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            );",
         )
         .map_err(|e| AgentError::Io(format!("Failed to create tables: {e}")))?;
 
@@ -155,6 +169,152 @@ impl SessionPersistence {
         }
 
         Ok(())
+    }
+
+    /// Read a metadata key from `state_meta`.
+    pub fn get_meta(&self, key: &str) -> Result<Option<String>, AgentError> {
+        self.ensure_db()?;
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        let mut stmt = conn
+            .prepare("SELECT value FROM state_meta WHERE key = ?1")
+            .map_err(|e| AgentError::Io(format!("Failed to prepare meta query: {e}")))?;
+        match stmt.query_row(rusqlite::params![key], |row| row.get::<_, String>(0)) {
+            Ok(v) => Ok(Some(v)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(AgentError::Io(format!("Failed to read state_meta: {e}"))),
+        }
+    }
+
+    /// Upsert a metadata key in `state_meta`.
+    pub fn set_meta(&self, key: &str, value: &str) -> Result<(), AgentError> {
+        self.ensure_db()?;
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        conn.execute(
+            "INSERT INTO state_meta (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            rusqlite::params![key, value],
+        )
+        .map_err(|e| AgentError::Io(format!("Failed to upsert state_meta: {e}")))?;
+        Ok(())
+    }
+
+    /// Reclaim free pages in `sessions.db` after large prune operations.
+    pub fn vacuum(&self) -> Result<(), AgentError> {
+        self.ensure_db()?;
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+        conn.execute_batch("VACUUM")
+            .map_err(|e| AgentError::Io(format!("Failed to VACUUM sessions db: {e}")))?;
+        Ok(())
+    }
+
+    /// Delete sessions whose `updated_at` is older than the retention window.
+    ///
+    /// Returns the number of deleted sessions.
+    pub fn prune_sessions(&self, older_than_days: u32) -> Result<u64, AgentError> {
+        self.ensure_db()?;
+        let cutoff = (Utc::now() - ChronoDuration::days(older_than_days as i64)).to_rfc3339();
+        let conn = rusqlite::Connection::open(&self.db_path)
+            .map_err(|e| AgentError::Io(format!("Failed to open sessions db: {e}")))?;
+
+        let mut session_ids: Vec<String> = Vec::new();
+        {
+            let mut stmt = conn
+                .prepare("SELECT id FROM sessions WHERE updated_at < ?1")
+                .map_err(|e| AgentError::Io(format!("Failed to prepare prune query: {e}")))?;
+            let rows = stmt
+                .query_map(rusqlite::params![cutoff], |row| row.get::<_, String>(0))
+                .map_err(|e| AgentError::Io(format!("Failed to query stale sessions: {e}")))?;
+            for row in rows {
+                session_ids
+                    .push(row.map_err(|e| AgentError::Io(format!("Failed to read session id: {e}")))?);
+            }
+        }
+        if session_ids.is_empty() {
+            return Ok(0);
+        }
+
+        let tx = conn
+            .unchecked_transaction()
+            .map_err(|e| AgentError::Io(format!("Failed to open prune transaction: {e}")))?;
+        for sid in &session_ids {
+            tx.execute(
+                "DELETE FROM messages_fts WHERE session_id = ?1",
+                rusqlite::params![sid],
+            )
+            .map_err(|e| AgentError::Io(format!("Failed to delete messages_fts rows: {e}")))?;
+            tx.execute(
+                "DELETE FROM messages WHERE session_id = ?1",
+                rusqlite::params![sid],
+            )
+            .map_err(|e| AgentError::Io(format!("Failed to delete message rows: {e}")))?;
+            tx.execute("DELETE FROM sessions WHERE id = ?1", rusqlite::params![sid])
+                .map_err(|e| AgentError::Io(format!("Failed to delete session row: {e}")))?;
+        }
+        tx.commit()
+            .map_err(|e| AgentError::Io(format!("Failed to commit prune transaction: {e}")))?;
+        Ok(session_ids.len() as u64)
+    }
+
+    /// Opportunistic startup maintenance with interval gating via `state_meta`.
+    ///
+    /// Never propagates errors to callers.
+    pub fn maybe_auto_prune_and_vacuum(
+        &self,
+        retention_days: u32,
+        min_interval_hours: u32,
+        vacuum_after_prune: bool,
+    ) -> AutoMaintenanceResult {
+        let mut result = AutoMaintenanceResult {
+            skipped: false,
+            pruned: 0,
+            vacuumed: false,
+            error: None,
+        };
+
+        let now = Utc::now().timestamp() as f64;
+        let min_seconds = (min_interval_hours as f64) * 3600.0;
+
+        match self.get_meta("last_auto_prune") {
+            Ok(Some(last_raw)) => {
+                if let Ok(last_ts) = last_raw.parse::<f64>() {
+                    if now - last_ts < min_seconds {
+                        result.skipped = true;
+                        return result;
+                    }
+                }
+            }
+            Ok(None) => {}
+            Err(e) => {
+                result.error = Some(e.to_string());
+                return result;
+            }
+        }
+
+        match self.prune_sessions(retention_days) {
+            Ok(pruned) => {
+                result.pruned = pruned;
+                if vacuum_after_prune && pruned > 0 {
+                    match self.vacuum() {
+                        Ok(()) => result.vacuumed = true,
+                        Err(e) => tracing::warn!("sessions.db VACUUM failed: {}", e),
+                    }
+                }
+            }
+            Err(e) => {
+                result.error = Some(e.to_string());
+                return result;
+            }
+        }
+
+        if let Err(e) = self.set_meta("last_auto_prune", &now.to_string()) {
+            result.error = Some(e.to_string());
+            return result;
+        }
+
+        result
     }
 
     /// Persist a session's messages to SQLite.
@@ -411,6 +571,17 @@ impl SessionPersistence {
 mod tests {
     use super::*;
     use hermes_core::Message;
+    use rusqlite::params;
+
+    fn mark_session_old(sp: &SessionPersistence, session_id: &str, days_old: i64) {
+        let conn = rusqlite::Connection::open(&sp.db_path).expect("open db");
+        let ts = (Utc::now() - ChronoDuration::days(days_old)).to_rfc3339();
+        conn.execute(
+            "UPDATE sessions SET updated_at = ?1 WHERE id = ?2",
+            params![ts, session_id],
+        )
+        .expect("update updated_at");
+    }
 
     #[test]
     fn test_persist_and_load_session() {
@@ -571,5 +742,102 @@ mod tests {
 
         let loaded = sp.load_session("replace-test").unwrap();
         assert_eq!(loaded.len(), 3);
+    }
+
+    #[test]
+    fn test_state_meta_roundtrip() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        assert_eq!(sp.get_meta("nope").unwrap(), None);
+        sp.set_meta("k1", "v1").unwrap();
+        assert_eq!(sp.get_meta("k1").unwrap().as_deref(), Some("v1"));
+        sp.set_meta("k1", "v2").unwrap();
+        assert_eq!(sp.get_meta("k1").unwrap().as_deref(), Some("v2"));
+    }
+
+    #[test]
+    fn test_auto_maintenance_prunes_and_vacuums() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        let old_messages = vec![Message::user("old"), Message::assistant("done")];
+        let new_messages = vec![Message::user("fresh"), Message::assistant("ok")];
+
+        sp.persist_session("old-1", &old_messages, None, None, None, None)
+            .unwrap();
+        sp.persist_session("old-2", &old_messages, None, None, None, None)
+            .unwrap();
+        sp.persist_session("fresh-1", &new_messages, None, None, None, None)
+            .unwrap();
+        mark_session_old(&sp, "old-1", 100);
+        mark_session_old(&sp, "old-2", 100);
+
+        let result = sp.maybe_auto_prune_and_vacuum(90, 24, true);
+        assert!(!result.skipped);
+        assert_eq!(result.pruned, 2);
+        assert!(result.vacuumed);
+        assert!(result.error.is_none());
+
+        let conn = rusqlite::Connection::open(&sp.db_path).unwrap();
+        let remaining: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining, 1);
+    }
+
+    #[test]
+    fn test_auto_maintenance_respects_interval_marker() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        let messages = vec![Message::user("old"), Message::assistant("done")];
+
+        sp.persist_session("old-1", &messages, None, None, None, None)
+            .unwrap();
+        mark_session_old(&sp, "old-1", 100);
+        let first = sp.maybe_auto_prune_and_vacuum(90, 24, false);
+        assert!(!first.skipped);
+        assert_eq!(first.pruned, 1);
+
+        sp.persist_session("old-2", &messages, None, None, None, None)
+            .unwrap();
+        mark_session_old(&sp, "old-2", 100);
+        let second = sp.maybe_auto_prune_and_vacuum(90, 24, false);
+        assert!(second.skipped);
+        assert_eq!(second.pruned, 0);
+
+        let conn = rusqlite::Connection::open(&sp.db_path).unwrap();
+        let still_there: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sessions WHERE id='old-2'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(still_there, 1);
+    }
+
+    #[test]
+    fn test_auto_maintenance_no_prunable_rows_skips_vacuum() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        let messages = vec![Message::user("fresh"), Message::assistant("ok")];
+        sp.persist_session("fresh-1", &messages, None, None, None, None)
+            .unwrap();
+
+        let result = sp.maybe_auto_prune_and_vacuum(90, 24, true);
+        assert!(!result.skipped);
+        assert_eq!(result.pruned, 0);
+        assert!(!result.vacuumed);
+        assert!(sp.get_meta("last_auto_prune").unwrap().is_some());
+    }
+
+    #[test]
+    fn test_auto_maintenance_corrupt_marker_is_ignored() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sp = SessionPersistence::new(tmp.path());
+        let messages = vec![Message::user("old"), Message::assistant("done")];
+        sp.persist_session("old-1", &messages, None, None, None, None)
+            .unwrap();
+        mark_session_old(&sp, "old-1", 100);
+        sp.set_meta("last_auto_prune", "not-a-timestamp").unwrap();
+
+        let result = sp.maybe_auto_prune_and_vacuum(90, 24, false);
+        assert!(!result.skipped);
+        assert_eq!(result.pruned, 1);
     }
 }

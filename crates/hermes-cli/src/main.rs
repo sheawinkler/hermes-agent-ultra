@@ -24,7 +24,7 @@ use hermes_cli::App;
 use hermes_config::{
     apply_user_config_patch, gateway_pid_path_in, hermes_home, load_config, load_user_config_file,
     save_config_yaml, state_dir, user_config_field_display, validate_config, ConfigError,
-    PlatformConfig,
+    GatewayConfig, PlatformConfig,
 };
 use hermes_core::AgentError;
 use hermes_core::PlatformAdapter;
@@ -1021,6 +1021,7 @@ async fn run_gateway(
                 return Ok(());
             }
             println!("Starting Hermes Gateway...");
+            run_sessions_db_auto_maintenance(&config);
 
             // List enabled platforms
             let enabled: Vec<&String> = config
@@ -1738,6 +1739,34 @@ async fn run_gateway(
         }
     }
     Ok(())
+}
+
+fn run_sessions_db_auto_maintenance(config: &GatewayConfig) {
+    if !config.sessions.auto_prune {
+        return;
+    }
+    let home = config
+        .home_dir
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(hermes_home);
+    let sp = SessionPersistence::new(&home);
+    let result = sp.maybe_auto_prune_and_vacuum(
+        config.sessions.retention_days,
+        config.sessions.min_interval_hours,
+        config.sessions.vacuum_after_prune,
+    );
+    if let Some(err) = result.error {
+        tracing::debug!("sessions db auto-maintenance skipped: {}", err);
+    } else if !result.skipped && result.pruned > 0 {
+        tracing::info!(
+            "sessions db auto-maintenance pruned {} session(s){}",
+            result.pruned,
+            if result.vacuumed { " + vacuum" } else { "" }
+        );
+    }
 }
 
 async fn prompt_yes_no(question: &str, default_yes: bool) -> Result<bool, AgentError> {

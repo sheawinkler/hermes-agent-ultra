@@ -262,7 +262,7 @@ pub fn load_user_config_file(path: &Path) -> Result<GatewayConfig, ConfigError> 
     }
 }
 
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, llm.<provider>.api_key|api_key_env|base_url|model|command|args|oauth_token_url|oauth_client_id, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, llm.<provider>.api_key|api_key_env|base_url|model|command|args|oauth_token_url|oauth_client_id, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
 
 fn mask_secret(s: &str) -> String {
     if s.is_empty() {
@@ -370,6 +370,50 @@ fn apply_user_config_patch_dotted(
                 }
             };
             config.security.allow_private_urls = parsed;
+        }
+        ["sessions", "auto_prune"] => {
+            let normalized = value.trim().to_ascii_lowercase();
+            let parsed = match normalized.as_str() {
+                "1" | "true" | "yes" | "on" => true,
+                "0" | "false" | "no" | "off" => false,
+                _ => {
+                    return Err(ConfigError::ValidationError(format!(
+                        "sessions.auto_prune must be a boolean: {}",
+                        value
+                    )));
+                }
+            };
+            config.sessions.auto_prune = parsed;
+        }
+        ["sessions", "retention_days"] => {
+            config.sessions.retention_days = value.parse().map_err(|_| {
+                ConfigError::ValidationError(format!(
+                    "sessions.retention_days must be a non-negative integer: {}",
+                    value
+                ))
+            })?;
+        }
+        ["sessions", "vacuum_after_prune"] => {
+            let normalized = value.trim().to_ascii_lowercase();
+            let parsed = match normalized.as_str() {
+                "1" | "true" | "yes" | "on" => true,
+                "0" | "false" | "no" | "off" => false,
+                _ => {
+                    return Err(ConfigError::ValidationError(format!(
+                        "sessions.vacuum_after_prune must be a boolean: {}",
+                        value
+                    )));
+                }
+            };
+            config.sessions.vacuum_after_prune = parsed;
+        }
+        ["sessions", "min_interval_hours"] => {
+            config.sessions.min_interval_hours = value.parse().map_err(|_| {
+                ConfigError::ValidationError(format!(
+                    "sessions.min_interval_hours must be a non-negative integer: {}",
+                    value
+                ))
+            })?;
         }
         ["llm", provider, field] => {
             let entry = config
@@ -503,6 +547,12 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .unwrap_or_else(|| "(not set)".to_string())),
+        ["sessions", "auto_prune"] => Ok(config.sessions.auto_prune.to_string()),
+        ["sessions", "retention_days"] => Ok(config.sessions.retention_days.to_string()),
+        ["sessions", "vacuum_after_prune"] => {
+            Ok(config.sessions.vacuum_after_prune.to_string())
+        }
+        ["sessions", "min_interval_hours"] => Ok(config.sessions.min_interval_hours.to_string()),
         ["llm", provider, "api_key"] => Ok(
             match config
                 .llm_providers
@@ -854,6 +904,10 @@ mod tests {
         apply_user_config_patch(&mut c, "llm.openai.args", "--stdio,--model,gpt-4o-mini").unwrap();
         apply_user_config_patch(&mut c, "proxy.http", "http://127.0.0.1:8080").unwrap();
         apply_user_config_patch(&mut c, "budget.max_result_size_chars", "500").unwrap();
+        apply_user_config_patch(&mut c, "sessions.auto_prune", "true").unwrap();
+        apply_user_config_patch(&mut c, "sessions.retention_days", "30").unwrap();
+        apply_user_config_patch(&mut c, "sessions.vacuum_after_prune", "false").unwrap();
+        apply_user_config_patch(&mut c, "sessions.min_interval_hours", "12").unwrap();
         assert_eq!(
             c.llm_providers.get("openai").unwrap().api_key.as_deref(),
             Some("sk-test")
@@ -879,6 +933,10 @@ mod tests {
             Some("http://127.0.0.1:8080")
         );
         assert_eq!(c.budget.max_result_size_chars, 500);
+        assert!(c.sessions.auto_prune);
+        assert_eq!(c.sessions.retention_days, 30);
+        assert!(!c.sessions.vacuum_after_prune);
+        assert_eq!(c.sessions.min_interval_hours, 12);
         assert!(user_config_field_display(&c, "llm.openai.api_key")
             .unwrap()
             .starts_with("***"));
@@ -889,6 +947,14 @@ mod tests {
         assert_eq!(
             user_config_field_display(&c, "llm.openai.args").unwrap(),
             "--stdio,--model,gpt-4o-mini"
+        );
+        assert_eq!(
+            user_config_field_display(&c, "sessions.auto_prune").unwrap(),
+            "true"
+        );
+        assert_eq!(
+            user_config_field_display(&c, "sessions.retention_days").unwrap(),
+            "30"
         );
     }
 

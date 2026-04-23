@@ -4,6 +4,7 @@
 //! and conversation message history. It coordinates input handling,
 //! slash commands, and session management.
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use futures::StreamExt;
@@ -19,7 +20,7 @@ use hermes_agent::providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
 };
 use hermes_agent::sub_agent_orchestrator::SubAgentOrchestrator;
-use hermes_agent::{AgentConfig, AgentLoop, InterruptController};
+use hermes_agent::{AgentConfig, AgentLoop, InterruptController, SessionPersistence};
 use hermes_config::{cron_dir, hermes_home as hermes_home_dir, load_config, GatewayConfig};
 use hermes_core::ToolSchema;
 use hermes_core::{AgentError, LlmProvider};
@@ -124,6 +125,38 @@ impl App {
         }
         if let Some(ref personality) = cli.personality {
             config.personality = Some(personality.clone());
+        }
+
+        if config.sessions.auto_prune {
+            let resolved_home = config
+                .home_dir
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(PathBuf::from)
+                .or_else(|| {
+                    std::env::var("HERMES_HOME")
+                        .ok()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .map(PathBuf::from)
+                })
+                .unwrap_or_else(hermes_home_dir);
+            let sp = SessionPersistence::new(&resolved_home);
+            let maintenance = sp.maybe_auto_prune_and_vacuum(
+                config.sessions.retention_days,
+                config.sessions.min_interval_hours,
+                config.sessions.vacuum_after_prune,
+            );
+            if let Some(err) = maintenance.error {
+                tracing::debug!("sessions db auto-maintenance skipped: {}", err);
+            } else if !maintenance.skipped && maintenance.pruned > 0 {
+                tracing::info!(
+                    "sessions db auto-maintenance pruned {} session(s){}",
+                    maintenance.pruned,
+                    if maintenance.vacuumed { " + vacuum" } else { "" }
+                );
+            }
         }
 
         let current_model = config.model.clone().unwrap_or_else(|| "gpt-4o".to_string());
