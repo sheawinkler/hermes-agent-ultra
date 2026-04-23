@@ -881,3 +881,34 @@
   - `cargo test -p hermes-agent --no-run`
   - `python3 scripts/generate-upstream-patch-queue.py --max-commits 0`
   - `python3 scripts/generate-global-parity-proof.py --check-ci`
+
+## 2026-04-23 impl-09 (runtime provider + debug snapshot parity tranche)
+- Scope:
+  - Port upstream tranche of 5 functional commits around runtime provider resolution, StepFun support, state-db failure tolerance, and bounded debug-report log handling.
+- Rust implementation commits (chronological):
+  - `5e15ed60` feat(parity): add stepfun runtime support and bounded debug log snapshots.
+    - Added StepFun provider support across CLI/runtime provider resolution paths, auth alias/env mapping, and known-provider lists.
+    - Replaced bare-model provider parsing with config-aware provider/model resolution in CLI app wiring.
+    - Added bounded log snapshot capture for debug reports with truncation boundary preservation.
+    - Added regression tests for:
+      - provider inference for bare model names
+      - single-provider fallback resolution
+      - StepFun env key resolution and runtime default base URL
+      - debug snapshot truncation boundary safety + memory cap behavior
+      - startup state.db maintenance graceful degradation on invalid home path
+- Upstream SHAs moved to `ported`:
+  - `9ed6eb0c`
+  - `c6b1ef4e`
+  - `5dead0f2`
+  - `fc3862bd`
+  - `921133cf`
+- Verification (targeted + compile):
+  - `cargo test -p hermes-agent test_runtime_provider_stepfun -- --nocapture`
+  - `cargo test -p hermes-cli stepfun -- --nocapture`
+  - `cargo test -p hermes-cli test_build_agent_config_infers_provider_for_bare_model -- --nocapture`
+  - `cargo test -p hermes-cli capture_debug_log_snapshot -- --nocapture`
+  - `cargo test -p hermes-cli run_sessions_db_auto_maintenance_degrades_when_home_is_invalid -- --nocapture`
+  - `cargo test -p hermes-cli --no-run`
+  - `cargo test -p hermes-agent --no-run`
+  - `python3 scripts/generate-upstream-patch-queue.py --max-commits 0`
+  - `python3 scripts/generate-global-parity-proof.py --check-ci`

@@ -63322,7 +63322,7 @@
         "tui_gateway/server.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "ported via 5e15ed60 (provider resolution in build_agent_config + build_provider)",
       "owner": "",
       "sha": "9ed6eb0cca9377cd8f080fe0b721c189fe6b8cdf",
       "subject": "fix(tui): resolve runtime provider in _make_agent (#11884)",
@@ -69880,7 +69880,7 @@
         "tests/hermes_cli/test_model_validation.py"
       ],
       "files_touched": 17,
-      "notes": "",
+      "notes": "ported via 5e15ed60 (StepFun provider support across CLI/auth/runtime)",
       "owner": "",
       "sha": "c6b1ef4e5881f42d6c5168e111bf915716f09c51",
       "subject": "feat: add Step Plan provider support (salvage #6005)",
@@ -70368,7 +70368,7 @@
         "tests/hermes_cli/test_debug.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "ported via 5e15ed60 (bounded debug log snapshot for reports)",
       "owner": "",
       "sha": "fc3862bdd637ef53e82628c9d931d9cbff853fc6",
       "subject": "fix(debug): snapshot logs once for debug share",
@@ -70381,7 +70381,7 @@
         "hermes_cli/debug.py"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "ported via 5e15ed60 (truncation boundary preservation + memory cap tests)",
       "owner": "",
       "sha": "921133cfa56a2e289a1cf09e87b382a6ea0885f8",
       "subject": "fix(debug): preserve full line at truncation boundary and cap memory",
@@ -70439,7 +70439,7 @@
         "tui_gateway/server.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "ported via 5e15ed60 (state.db auto-maintenance graceful degradation test)",
       "owner": "",
       "sha": "5dead0f2a08be2fed152e45141fcc7882f06261f",
       "subject": "fix(tui): degrade gracefully when state.db init fails",
@@ -72378,7 +72378,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     }
   ],
-  "generated_at_utc": "2026-04-23T06:12:17.158592+00:00",
+  "generated_at_utc": "2026-04-23T06:35:28.710483+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
