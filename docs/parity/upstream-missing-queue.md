@@ -1,23 +1,23 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-23T01:28:45.462722+00:00`
+Generated: `2026-04-23T06:12:17.158592+00:00`
 
-- Range: `main..upstream/main`; total commits tracked: `4726`.
+- Range: `main..upstream/main`; total commits tracked: `4766`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 1669 |
-| #21 | GPAR-02 skills parity | 201 |
-| #22 | GPAR-03 UX parity | 552 |
-| #23 | GPAR-04 gateway/plugin-memory parity | 516 |
+| #20 | GPAR-01 tests+CI parity | 1672 |
+| #21 | GPAR-02 skills parity | 202 |
+| #22 | GPAR-03 UX parity | 557 |
+| #23 | GPAR-04 gateway/plugin-memory parity | 520 |
 | #24 | GPAR-05 environments+parsers+benchmarks | 66 |
 | #25 | GPAR-06 packaging/docs/install parity | 156 |
-| #26 | GPAR-07 upstream queue backfill | 1566 |
+| #26 | GPAR-07 upstream queue backfill | 1593 |
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 120 |
-| ported | 77 |
+| pending | 155 |
+| ported | 82 |
 | superseded | 4529 |
 
 ## First 100 Pending Commits
@@ -30,11 +30,9 @@ Generated: `2026-04-23T01:28:45.462722+00:00`
 | `8bcd77a9c2e8` | #23 | feat(wecom): add QR scan flow and interactive setup wizard for bot credentials |
 | `3f60a907e1d3` | #22 | docs(wecom): document QR scan-to-create setup flow |
 | `b43524ecabc3` | #23 | fix(wecom): visible poll progress + clearer no-bot-info failure + docstring note |
-| `b8663813b667` | #20 | feat(state): auto-prune old sessions + VACUUM state.db at startup (#13861) |
 | `b66644f0ecce` | #23 | feat(hindsight): richer session-scoped retain metadata |
 | `cf55c738e79b` | #23 | refactor(qqbot): migrate qr onboard flow to sync + consolidate into onboard.py |
 | `5fb143169b4e` | #20 | feat(dashboard): track real API call count per session |
-| `3e652f75b27b` | #20 | fix(plugins+nous): auto-coerce memory plugins; actionable Nous 401 diagnostic (#14005) |
 | `7785654ad5cc` | #22 | feat(tui): subagent spawn observability overlay |
 | `06ebe34b4005` | #22 | fix(tui): repair useInput handler in agents overlay |
 | `f06adcc1ae0c` | #22 | chore(tui): drop unreachable return + prettier pass |
@@ -102,14 +100,12 @@ Generated: `2026-04-23T01:28:45.462722+00:00`
 | `3e95963bde2a` | #26 | chore(release): map niyoh120 in AUTHOR_MAP |
 | `435d86ce36b6` | #24 | fix: use builtin cd in command wrapper to bypass shell aliases |
 | `75221db96796` | #26 | chore(release): map vrinek in AUTHOR_MAP |
-| `b9463e32c6e2` | #20 | fix(usage): read top-level Anthropic cache fields from OAI-compatible proxies |
 | `02aba4a728e2` | #26 | fix(skills): follow symlinks in iter_skill_index_files |
 | `6f629a04622d` | #26 | chore(release): map xandersbell in AUTHOR_MAP |
 | `5fbb69989da0` | #25 | fix(docker): add openssh-client for SSH terminal backend |
 | `c0100dde3553` | #26 | chore(release): map Somme4096 in AUTHOR_MAP |
 | `4009f2edd9bd` | #25 | feat(docker): add docker-cli to Docker image |
 | `b2593c8d4ec3` | #26 | chore(release): map brianclemens in AUTHOR_MAP |
-| `d74eaef5f984` | #20 | fix(error_classifier): retry mid-stream SSL/TLS alert errors as transport |
 | `96b0f3700117` | #26 | fix: separate browser_cdp into its own toolset |
 | `98e1396b1569` | #26 | chore(release): map yudaiyan in AUTHOR_MAP |
 | `3e96c87f371e` | #20 | fix(delegate): make MCP toolset inheritance configurable |
@@ -124,4 +120,8 @@ Generated: `2026-04-23T01:28:45.462722+00:00`
 | `e5114298f00d` | #26 | chore(release): map WuTianyi123 in AUTHOR_MAP |
 | `82cce3d26ca1` | #26 | fix: add base_url_env_var to Anthropic ProviderConfig |
 | `08089738d888` | #26 | chore(release): map li0near in AUTHOR_MAP |
+| `c03858733d7f` | #26 | fix: pass correct arguments in summary model fallback retry |
+| `8152de2a844f` | #26 | chore(release): map sicnuyudidi in AUTHOR_MAP |
+| `9bd15184256f` | #23 | fix(feishu): correct identity model docs and prefer tenant-scoped user_id |
+| `c345ec9a6384` | #20 | fix(display): strip standalone tool-call XML tags from visible text |
 

@@ -69975,7 +69975,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "cli.py",
         "gateway/run.py",
@@ -69985,7 +69985,7 @@
         "website/docs/user-guide/sessions.md"
       ],
       "files_touched": 6,
-      "notes": "",
+      "notes": "ported in 8d1ace46 (startup session DB auto-prune + VACUUM maintenance, config wiring, interval gating)",
       "owner": "",
       "sha": "b8663813b667f32c4b4f30c3ee6caa0c9ebe4078",
       "subject": "feat(state): auto-prune old sessions + VACUUM state.db at startup (#13861)",
@@ -70086,14 +70086,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "hermes_cli/plugins.py",
         "run_agent.py",
         "tests/hermes_cli/test_plugins.py"
       ],
       "files_touched": 3,
-      "notes": "",
+      "notes": "ported in cdd312b0 (memory plugin kind auto-coercion + actionable Nous 401 diagnostic with auth-path hints)",
       "owner": "",
       "sha": "3e652f75b27baef94dbf9dc13ec16c49271f37a4",
       "subject": "fix(plugins+nous): auto-coerce memory plugins; actionable Nous 401 diagnostic (#14005)",
@@ -71285,13 +71285,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "agent/usage_pricing.py",
         "tests/agent/test_usage_pricing.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "ported in 5e115d06 (usage normalization now falls back to top-level Anthropic cache fields when nested details missing)",
       "owner": "",
       "sha": "b9463e32c6e240636f7dda68aec8d74cc479b0c8",
       "subject": "fix(usage): read top-level Anthropic cache fields from OAI-compatible proxies",
@@ -71377,13 +71377,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "agent/error_classifier.py",
         "tests/agent/test_error_classifier.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "ported in d3d18b8b (SSL/TLS alert transport failures classified retryable in agent + intelligence classifier)",
       "owner": "",
       "sha": "d74eaef5f984755c29e35421e88982ff95003bc5",
       "subject": "fix(error_classifier): retry mid-stream SSL/TLS alert errors as transport",
@@ -71605,13 +71605,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "agent/anthropic_adapter.py",
         "tests/agent/test_anthropic_adapter.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "ported in af2fa884 (Anthropic max_tokens guard: non-positive -> model default fallback + regression tests)",
       "owner": "",
       "sha": "c9c6182839972959315c416026104f42ab49aac9",
       "subject": "fix(anthropic): guard max_tokens against non-positive values",
@@ -71846,9 +71846,539 @@
       "subject": "fix(gateway): also clear session-scoped approval state on /new",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/anthropic_adapter.py",
+        "agent/transports/anthropic.py",
+        "run_agent.py",
+        "tests/agent/test_anthropic_normalize_v2.py",
+        "tests/run_agent/test_run_agent_multimodal_prologue.py"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "d30ee2e545509a19ce67090c9ecf47d28a027bb2",
+      "subject": "refactor: unify transport dispatch + collapse normalize shims",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "run_agent.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "c78a188ddd13878a68ff9a88df05b4474d1f6450",
+      "subject": "refactor: invalidate transport cache when api_mode auto-upgrades to codex_responses",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/title_generator.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "f41031af3a68bbb3672af2393484f99f4ecba29f",
+      "subject": "fix: increase max_tokens for GLM 5.1 reasoning headroom",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "463fbf14181474addf81c545a84a936e4f24664f",
+      "subject": "chore(release): map iborazzi in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/research/llm-wiki/SKILL.md"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "9c5c8268c6e58d1610db70c1b6f5cb60e8e4e173",
+      "subject": "fix(skills): remove invalid llm-wiki related skill",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "520b8d90020f0c952213be6fb65ec95da80d2105",
+      "subject": "chore(release): map A-afflatus in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py",
+        "hermes_cli/main.py",
+        "tests/hermes_cli/test_ignore_user_config_flags.py",
+        "website/docs/reference/cli-commands.md"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "a2a8092e90a5d4ccf9d6d3c91b906cce07befabe",
+      "subject": "feat(cli): add --ignore-user-config and --ignore-rules flags",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/base.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "6209e85e7d10492d668f9fa50467e8c94a23cfac",
+      "subject": "feat: support document/archive extensions in MEDIA: tag extraction",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "effcbc8a6b73110cbea6596caac6b2a258ebb959",
+      "subject": "chore(release): map huangke19 in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "website/docs/user-guide/configuration.md"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "e038677ef69d1c948716b5812114b55202b41258",
+      "subject": "docs: add Exa web search backend setup guide and details",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "f9487ee8310c7f2c7e98ef777d7404ee0e9a2971",
+      "subject": "chore(release): map 10ishq in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "pyproject.toml"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "dce2b0dfa85a69f55fa2c0724ce29cbb4e5474ad",
+      "subject": "Add exclude-newer option for UV tool in pyproject.toml",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "30ad507a0f18097d28de9690a94d783535703f81",
+      "subject": "chore(release): map christopherwoodall in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        ".gitignore"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "82fbd4771a02b330bda658bd501f8fac92f52b57",
+      "subject": "Update .gitignore",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "ee54e20c29acdd278a4ced2fe49ba126934fccbd",
+      "subject": "chore(release): map zhang9w0v5 in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/discord.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "e371af1df2778ce3efedc97ac25e1fe9e030d342",
+      "subject": "Add config option to disable Discord slash commands",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "563ed0e61fd5bcfa8d523927af1e39e9e572aec7",
+      "subject": "chore(release): map fuleinist in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "plugins/image_gen/openai-codex/__init__.py",
+        "plugins/image_gen/openai-codex/plugin.yaml",
+        "tests/plugins/image_gen/test_openai_codex_provider.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "eda5ae5a5e25f855e672fd3592f3194c5d911894",
+      "subject": "feat(image_gen): add openai-codex plugin (gpt-image-2 via Codex OAuth) (#14317)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        ".dockerignore"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "85caa5d447edecab62f6a16b07c6869987a426fe",
+      "subject": "fix(docker): exclude runtime data/ from build context",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "a4877faf96d1024c3056bcc3673066f256749a5e",
+      "subject": "chore(release): map Llugaes in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/qqbot/adapter.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "ec7e92082d15074339c8e7449eebf7b8ede3bd4d",
+      "subject": "fix(qqbot): add backoff upper-bound check for QQCloseError reconnect path",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "bf039a92682f654424163137a5381126456f7915",
+      "subject": "chore(release): map fengtianyu88 in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tools/mcp_tool.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "b80b400141ebcc64b889d91f29826a88eef2f50a",
+      "subject": "fix(mcp): respect ssl_verify config for StreamableHTTP servers",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "f347315e0752f8deea0987e28c70ac135a4bb574",
+      "subject": "chore(release): map lmoncany in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tools/tirith_security.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "99af222ecf56c0eed0d3eb82903a6bf33b6ff7d5",
+      "subject": "fix(tirith): detect Android/Termux as Linux ABI-compatible",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "268a4aa1c1ad05867efc84f69d941c37b36c0ef8",
+      "subject": "chore(release): map fatinghenji in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/model_switch.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "5eefdd9c0234b39e246a782aeb4c968f5b51b6d5",
+      "subject": "fix: skip non-API-key auth providers in env-var credential detection",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "fa8f0c6fae3c86ec83dba0827f023dddcbfa5589",
+      "subject": "chore(release): map xinpengdr in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "website/docs/developer-guide/contributing.md"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "d6d9f1062954dccd8f32405932ada23159190b1f",
+      "subject": "Update Git requirement to include git-lfs extension",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "CONTRIBUTING.md"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "ed5f16323f65fac497117166b85c30bd83f6177d",
+      "subject": "Update Git requirement to include git-lfs extension",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "7f1c1aa4d9d7c3b7b08ec2b9ec5832a9c08a8776",
+      "subject": "chore(release): map mikewaters in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "CONTRIBUTING.md"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "2c53a3344d164b21dea74d37bb0aab8a1932208d",
+      "subject": "docs(contributing): align Node prerequisite with package engines",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "CONTRIBUTING.md",
+        "website/docs/developer-guide/contributing.md"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "dcb8c5c67a451e2e0995bd04e5a083c48e80c282",
+      "subject": "docs(contributing): align Node requirement in repo + docs site",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "74520392f20980d8631193670312993dedf4fc8a",
+      "subject": "chore(release): map WadydX in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "website/docs/integrations/providers.md"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "73533fc7284ef1cc51c672d300472a247fb49654",
+      "subject": "docs: add GMI Cloud to compatible providers list",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "400b5235b8a77a31a25c676b72327cc180b144fd",
+      "subject": "chore(release): map isaachuangGMICLOUD in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "website/docs/user-guide/features/fallback-providers.md"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "9357db2844d2b70262d1ad8bae985cb2d210035c",
+      "subject": "docs: fix fallback behavior description \u2014 it is per-turn, not per-session",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "e25c319fa39edf3122a2c808f9a585fdb079800f",
+      "subject": "chore(release): map hsy5571616 in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/base.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "2f48c58b85b81ef45e3e25bb1279494e67fa6021",
+      "subject": "fix: normalize iOS unicode dashes in slash command args",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "88b6eb9ad1be4c778c589218c7c759c4e0d31c7e",
+      "subject": "chore(release): map Nan93 in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
     }
   ],
-  "generated_at_utc": "2026-04-23T01:28:45.462722+00:00",
+  "generated_at_utc": "2026-04-23T06:12:17.158592+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -71856,19 +72386,19 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 120,
-      "ported": 77,
+      "pending": 155,
+      "ported": 82,
       "superseded": 4529
     },
     "by_target_ticket": {
-      "20": 1669,
-      "21": 201,
-      "22": 552,
-      "23": 516,
+      "20": 1672,
+      "21": 202,
+      "22": 557,
+      "23": 520,
       "24": 66,
       "25": 156,
-      "26": 1566
+      "26": 1593
     },
-    "total_commits": 4726
+    "total_commits": 4766
   }
 }

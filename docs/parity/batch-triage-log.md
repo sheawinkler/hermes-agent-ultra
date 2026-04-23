@@ -835,3 +835,49 @@
   - `cargo test -p hermes-gateway --features matrix,feishu,dingtalk,wecom,homeassistant dingtalk -- --nocapture`
   - `cargo test -p hermes-gateway --features matrix,feishu,dingtalk,wecom,homeassistant wecom -- --nocapture`
   - `cargo test -p hermes-gateway --features matrix,feishu,dingtalk,wecom,homeassistant homeassistant -- --nocapture`
+
+## 2026-04-23 impl-08 (agent/session/usage parity tranche)
+- Scope:
+  - Port upstream tranche of 5 functional commits affecting Anthropic provider safety, usage normalization, retry classification, state DB maintenance, and plugin/Nous diagnostics.
+- Rust implementation commits (chronological):
+  - `af2fa884` fix(anthropic): guard non-positive max tokens with model fallback parity.
+    - Added `AnthropicProvider::resolve_messages_max_tokens` and used it in non-stream + stream message paths.
+    - Treats `max_tokens=0` as invalid and falls back to model default output budget.
+    - Added unit coverage for positive/zero/none behavior.
+  - `5e115d06` fix(usage): honor top-level anthropic cache fields in chat-completions normalization.
+    - Added fallback from nested `prompt_tokens_details` to top-level `cache_read_input_tokens` and `cache_creation_input_tokens`.
+    - Added normalization tests covering fallback and nested-precedence behavior.
+  - `d3d18b8b` fix(error-classifier): classify SSL/TLS alert transport failures as retryable.
+    - Added SSL/TLS alert phrase detection in agent retry classifier.
+    - Added matching intelligence-layer classifier mapping for transport retry classification.
+    - Added regression tests for both tokenized and OpenSSL-style SSL alerts.
+  - `8d1ace46` feat(state): add startup sessions.db auto-prune/vacuum with interval gating.
+    - Added `state_meta` table + maintenance markers to session persistence.
+    - Added configurable startup auto-prune/vacuum controls in config + CLI + HTTP startup paths.
+    - Added persistence/maintenance regression tests and config patch loader coverage.
+  - `cdd312b0` fix(plugins+nous): auto-coerce memory plugin kind and add Nous 401 diagnostics.
+    - Plugin discovery now auto-marks memory-provider Python plugins as `exclusive` when manifest kind is absent.
+    - Added actionable Nous 401 diagnostics with auth path + operator next steps.
+    - Added plugin and diagnostic regression tests.
+- Upstream SHAs moved to `ported`:
+  - `c9c6182839972959315c416026104f42ab49aac9`
+  - `b9463e32c6e240636f7dda68aec8d74cc479b0c8`
+  - `d74eaef5f984755c29e35421e88982ff95003bc5`
+  - `b8663813b667f32c4b4f30c3ee6caa0c9ebe4078`
+  - `3e652f75b27baef94dbf9dc13ec16c49271f37a4`
+- Verification (targeted):
+  - `cargo test -p hermes-agent test_anthropic_resolve_messages_max_tokens -- --nocapture`
+  - `cargo test -p hermes-intelligence normalize_usage_openai -- --nocapture`
+  - `cargo test -p hermes-agent classify_error_ssl -- --nocapture`
+  - `cargo test -p hermes-intelligence classify_llm_api_ssl -- --nocapture`
+  - `cargo test -p hermes-agent session_persistence -- --nocapture`
+  - `cargo test -p hermes-config -- --nocapture`
+  - `cargo test -p hermes-config apply_patch_dotted_llm_proxy_budget -- --nocapture`
+  - `cargo test -p hermes-http --no-run`
+  - `cargo test -p hermes-cli --no-run`
+  - `cargo test -p hermes-agent test_discover_plugins_auto_coerces_memory_provider_kind -- --nocapture`
+  - `cargo test -p hermes-agent test_discover_plugins_explicit_standalone_not_overridden -- --nocapture`
+  - `cargo test -p hermes-agent maybe_nous_401_diagnostic -- --nocapture`
+  - `cargo test -p hermes-agent --no-run`
+  - `python3 scripts/generate-upstream-patch-queue.py --max-commits 0`
+  - `python3 scripts/generate-global-parity-proof.py --check-ci`
