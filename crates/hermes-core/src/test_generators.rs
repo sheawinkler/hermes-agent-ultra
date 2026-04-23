@@ -59,6 +59,7 @@ pub fn arb_tool_call() -> impl Strategy<Value = ToolCall> {
     (arb_identifier(), arb_function_call()).prop_map(|(id, function)| ToolCall {
         id: format!("call_{id}"),
         function,
+        extra_content: None,
     })
 }
 

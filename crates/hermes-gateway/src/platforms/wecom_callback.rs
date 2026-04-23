@@ -127,6 +127,19 @@ fn image_fallback_text(image_url: &str, caption: Option<&str>) -> String {
     }
 }
 
+fn strip_group_mention_prefix(text: &str) -> String {
+    let trimmed_start = text.trim_start();
+    if !trimmed_start.starts_with('@') {
+        return text.to_string();
+    }
+    let rest = trimmed_start
+        .char_indices()
+        .skip(1)
+        .find_map(|(idx, ch)| ch.is_whitespace().then_some(&trimmed_start[idx..]))
+        .unwrap_or("");
+    rest.trim().to_string()
+}
+
 pub struct WeComCallbackAdapter {
     base: BasePlatformAdapter,
     config: WeComCallbackConfig,
@@ -733,6 +746,8 @@ async fn handle_callback_request(
             }
             s.insert(msg_id.clone(), now);
         }
+        let chat_id = WeComCallbackAdapter::xml_tag(&xml, "ChatId").unwrap_or_default();
+        let is_group = !chat_id.trim().is_empty();
         let msg_type = WeComCallbackAdapter::xml_tag(&xml, "MsgType")
             .unwrap_or_default()
             .to_ascii_lowercase();
@@ -740,23 +755,34 @@ async fn handle_callback_request(
             .unwrap_or_default()
             .to_ascii_lowercase();
         let content = WeComCallbackAdapter::xml_tag(&xml, "Content").unwrap_or_default();
-        let text = if msg_type == "text" {
+        let mut text = if msg_type == "text" {
             content
         } else if msg_type == "event" && (event == "subscribe" || event == "enter_agent") {
             "/start".to_string()
         } else {
             "".to_string()
         };
+        if is_group && !text.is_empty() {
+            text = strip_group_mention_prefix(&text);
+        }
         if !text.is_empty() {
             if let Some(tx) = inbound_tx.read().await.clone() {
                 let _ = tx
                     .send(IncomingMessage {
                         platform: "wecom_callback".to_string(),
-                        chat_id: format!("{}:{}", app.corp_id, from_user.clone()),
+                        chat_id: format!(
+                            "{}:{}",
+                            app.corp_id,
+                            if is_group {
+                                chat_id.as_str()
+                            } else {
+                                from_user.as_str()
+                            }
+                        ),
                         user_id: from_user,
                         text,
                         message_id: Some(msg_id),
-                        is_dm: true,
+                        is_dm: !is_group,
                     })
                     .await;
             }
@@ -851,5 +877,31 @@ mod tests {
             image_fallback_text("https://example.com/plot.png", Some("   ")),
             "https://example.com/plot.png"
         );
+    }
+
+    #[test]
+    fn strip_group_mention_prefix_removes_leading_mention() {
+        assert_eq!(
+            strip_group_mention_prefix("@HermesBot /approve run-123"),
+            "/approve run-123"
+        );
+        assert_eq!(
+            strip_group_mention_prefix("   @HermesBot    /approve run-123"),
+            "/approve run-123"
+        );
+    }
+
+    #[test]
+    fn strip_group_mention_prefix_handles_mention_only() {
+        assert_eq!(strip_group_mention_prefix("@HermesBot"), "");
+    }
+
+    #[test]
+    fn strip_group_mention_prefix_keeps_non_mentions() {
+        assert_eq!(
+            strip_group_mention_prefix("/approve run-123"),
+            "/approve run-123"
+        );
+        assert_eq!(strip_group_mention_prefix("hello team"), "hello team");
     }
 }

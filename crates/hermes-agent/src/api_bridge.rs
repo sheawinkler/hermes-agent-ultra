@@ -188,9 +188,12 @@ impl CodexProvider {
                             .and_then(|a| a.as_str())
                             .unwrap_or("{}")
                             .to_string();
+                        let extra_content =
+                            item.get("extra_content").filter(|v| !v.is_null()).cloned();
                         tool_calls.push(ToolCall {
                             id,
                             function: FunctionCall { name, arguments },
+                            extra_content,
                         });
                     }
                     _ => {}
@@ -520,6 +523,7 @@ mod tests {
                         name: "read_file".to_string(),
                         arguments: r#"{"path":"test.txt"}"#.to_string(),
                     },
+                    extra_content: None,
                 }]),
                 tool_call_id: None,
                 name: None,

@@ -67,6 +67,7 @@ impl ToolCallParser for HermesToolCallParser {
                         name,
                         arguments: serde_json::Value::Object(args).to_string(),
                     },
+                    extra_content: None,
                 });
             }
         }
@@ -99,6 +100,7 @@ impl ToolCallParser for HermesToolCallParser {
                 calls.push(ToolCall {
                     id: next_call_id(),
                     function: FunctionCall { name, arguments },
+                    extra_content: None,
                 });
             }
         }
@@ -287,6 +289,7 @@ Hello! Let me search for that.
                 name: "read_file".to_string(),
                 arguments: r#"{"path":"/tmp/test.txt"}"#.to_string(),
             },
+            extra_content: None,
         }];
         let formatted = format_tool_calls(&calls);
         assert!(formatted.contains("<function_calls>"));

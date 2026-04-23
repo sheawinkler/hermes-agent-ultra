@@ -2572,6 +2572,7 @@ impl AgentLoop {
                                         name: String::new(),
                                         arguments: String::new(),
                                     },
+                                    extra_content: None,
                                 });
                             }
                             if let Some(ref id) = tcd.id {
@@ -6365,6 +6366,7 @@ mod tests {
                                 name: "skill_manage".to_string(),
                                 arguments: "{}".to_string(),
                             },
+                            extra_content: None,
                         }],
                     )
                 } else {
@@ -6648,6 +6650,7 @@ mod tests {
                     name: "read_file".into(),
                     arguments: r#"{"path":"a.txt"}"#.into(),
                 },
+                extra_content: None,
             },
             ToolCall {
                 id: "2".into(),
@@ -6655,6 +6658,7 @@ mod tests {
                     name: "read_file".into(),
                     arguments: r#"{"path":"a.txt"}"#.into(),
                 },
+                extra_content: None,
             },
             ToolCall {
                 id: "3".into(),
@@ -6662,6 +6666,7 @@ mod tests {
                     name: "read_file".into(),
                     arguments: r#"{"path":"b.txt"}"#.into(),
                 },
+                extra_content: None,
             },
         ];
         let deduped = AgentLoop::deduplicate_tool_calls(&calls);
@@ -6679,6 +6684,7 @@ mod tests {
                 arguments:
                     r#"{"action":"add","target":"user","content":"Prefers concise answers"}"#.into(),
             },
+            extra_content: None,
         };
         let event = AgentLoop::memory_write_event_from_tool_call(&tc).unwrap();
         assert_eq!(event.0, "add");
@@ -6695,6 +6701,7 @@ mod tests {
                 arguments: r#"{"action":"remove","target":"memory","old_text":"obsolete fact"}"#
                     .into(),
             },
+            extra_content: None,
         };
         let event = AgentLoop::memory_write_event_from_tool_call(&tc).unwrap();
         assert_eq!(event.0, "remove");
@@ -6752,6 +6759,7 @@ mod tests {
                 name: "session_search".into(),
                 arguments: r#"{"query":"previous issue","limit":3}"#.into(),
             },
+            extra_content: None,
         };
         agent.hydrate_session_search_args(&mut tc);
         let args: Value = serde_json::from_str(&tc.function.arguments).unwrap();
@@ -6811,6 +6819,7 @@ mod tests {
                 name: "session_search".into(),
                 arguments: r#"{"query":"abc","current_session_id":"sess-explicit"}"#.into(),
             },
+            extra_content: None,
         };
         agent.hydrate_session_search_args(&mut tc);
         let args: Value = serde_json::from_str(&tc.function.arguments).unwrap();

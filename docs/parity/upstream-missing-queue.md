@@ -1,20 +1,20 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-23T19:37:38.686298+00:00`
+Generated: `2026-04-23T20:06:09.016533+00:00`
 
-- Range: `main..upstream/main`; total commits tracked: `60`.
+- Range: `main..upstream/main`; total commits tracked: `74`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
 | #20 | GPAR-01 tests+CI parity | 16 |
-| #22 | GPAR-03 UX parity | 6 |
+| #22 | GPAR-03 UX parity | 20 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 4 |
 | #26 | GPAR-07 upstream queue backfill | 34 |
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 59 |
-| ported | 1 |
+| pending | 70 |
+| ported | 4 |
 
 ## First 100 Pending Commits
 
@@ -22,7 +22,6 @@ Generated: `2026-04-23T19:37:38.686298+00:00`
 | --- | ---: | --- |
 | `d8cc85dcdccf` | #20 | review(stt-xai): address cetej's nits |
 | `77f99c4ff445` | #26 | chore(release): map zhouxiaoya12 in AUTHOR_MAP |
-| `8b1ff55f5382` | #23 | fix(wecom): strip @mention prefix in group chats for slash command recognition |
 | `85cc12e2bd55` | #26 | chore(release): map roytian1217 in AUTHOR_MAP |
 | `92e4bbc201e6` | #22 | Update Docker guide with terminal command |
 | `fa47cbd45671` | #26 | chore(release): map minorgod in AUTHOR_MAP |
@@ -31,7 +30,6 @@ Generated: `2026-04-23T19:37:38.686298+00:00`
 | `e8cba18f77c2` | #26 | chore(release): map wenhao7 in AUTHOR_MAP |
 | `15efb410d035` | #26 | fix(nix): make working directory writable |
 | `5e76c650bbae` | #26 | chore(release): map yzx9 in AUTHOR_MAP |
-| `22afa066f838` | #26 | fix(cron): guard against non-dict result from run_conversation |
 | `1c532278ae70` | #26 | chore(release): map lvnilesh in AUTHOR_MAP |
 | `738d0900fddd` | #26 | refactor: migrate auxiliary_client Anthropic path to use transport |
 | `f4612785a485` | #20 | refactor: collapse normalize_anthropic_response to return NormalizedResponse directly |
@@ -76,7 +74,20 @@ Generated: `2026-04-23T19:37:38.686298+00:00`
 | `5651a73331a8` | #23 | fix(gateway): guard-match the finally-block _active_sessions delete |
 | `e3c008414075` | #20 | fix(skills-guard): allow agent-created dangerous verdicts without confirmation |
 | `ce089169d578` | #20 | feat(skills-guard): gate agent-created scanner on config.skills.guard_agent_created (default off) |
+| `bc9518f660c7` | #22 | fix(ui-tui): force full xterm.js alt-screen repaints |
+| `071bdb5a3f09` | #22 | Revert "fix(ui-tui): force full xterm.js alt-screen repaints" |
 | `82a0ed1afb3f` | #20 | feat: add Xiaomi MiMo v2.5-pro and v2.5 model support (#14635) |
+| `2e7546006697` | #22 | test(ui-tui): add log-update diff contract tests |
+| `f7e86577bc25` | #22 | fix(ui-tui): heal xterm.js resize-burst render drift |
+| `3e01de0b092c` | #22 | fix(ui-tui): preserve composer after resize-burst healing |
+| `60d1edc38a0e` | #22 | fix(ui-tui): keep bottom statusbar in composer layout |
 | `e91be4d7dcc2` | #26 | fix: resolve_alias prefers highest version + merges static catalog |
-| `f5af6520d0bf` | #20 | fix: add extra_content property to ToolCall for Gemini thought_signature (#14488) |
+| `7c4dd7d660f3` | #22 | refactor(ui-tui): collapse xterm.js resize settle dance |
+| `f28f07e98eda` | #22 | test(ui-tui): drop dead terminalReally from drift repro |
+| `1e445b2547c5` | #22 | fix(ui-tui): heal post-resize alt-screen drift |
+| `c8ff70fe03f5` | #22 | perf(ui-tui): freeze offscreen live tail during scroll |
+| `aa47812edfb9` | #22 | fix(ui-tui): clear sticky prompt when follow snaps to bottom |
+| `9a885fba31e5` | #22 | fix(ui-tui): hide stale sticky prompt when newer prompt is visible |
+| `9bf6e1cd6eee` | #22 | refactor(ui-tui): clean touched resize and sticky prompt paths |
+| `882278520ba9` | #22 | chore: uptick |
 
