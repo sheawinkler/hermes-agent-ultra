@@ -1,14 +1,32 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+is_termux() {
+  [[ -n "${TERMUX_VERSION:-}" ]] || [[ "${PREFIX:-}" == *"com.termux/files/usr"* ]]
+}
+
+default_install_dir() {
+  if is_termux && [[ -n "${PREFIX:-}" ]]; then
+    echo "${PREFIX}/bin"
+  else
+    echo "${HOME}/.local/bin"
+  fi
+}
+
 REPO="${REPO:-sheawinkler/hermes-agent-ultra}"
 VERSION="${VERSION:-latest}"
-INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
+INSTALL_DIR="${HERMES_INSTALL_DIR:-${INSTALL_DIR:-$(default_install_dir)}}"
+HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 CANONICAL_BIN_NAME="${CANONICAL_BIN_NAME:-hermes-agent-ultra}"
 LEGACY_BIN_NAME="${LEGACY_BIN_NAME:-hermes}"
 RELEASE_BIN_BASENAME="${RELEASE_BIN_BASENAME:-hermes}"
 RUN_SETUP_MODE="${RUN_SETUP_MODE:-auto}" # auto|always|never
 POSITIONAL_VERSION=""
+if [[ -t 0 ]]; then
+  IS_INTERACTIVE=true
+else
+  IS_INTERACTIVE=false
+fi
 
 show_help() {
   cat <<'EOF'
@@ -23,16 +41,19 @@ Options:
   --version TAG          Release tag to install (same as positional version)
   --setup                Run post-install setup flow without prompting
   --skip-setup           Skip post-install setup flow
+  --dir PATH             Install directory for binaries/symlink
+  --hermes-home PATH     Hermes home directory for SOUL.md bootstrap
   -h, --help             Show this help
 
 Environment variables:
   REPO                   GitHub repo slug (default: sheawinkler/hermes-agent-ultra)
-  INSTALL_DIR            Destination bin directory (default: $HOME/.local/bin)
+  HERMES_INSTALL_DIR     Destination bin directory (default: ~/.local/bin or $PREFIX/bin on Termux)
+  INSTALL_DIR            Destination bin directory (legacy alias, overridden by HERMES_INSTALL_DIR)
+  HERMES_HOME            Hermes config dir for SOUL.md bootstrap (default: $HOME/.hermes)
   CANONICAL_BIN_NAME     Installed binary name (default: hermes-agent-ultra)
   LEGACY_BIN_NAME        Compatibility alias symlink name (default: hermes)
   RELEASE_BIN_BASENAME   Tarball executable basename (default: hermes)
   RUN_SETUP_MODE         auto|always|never for setup flow (default: auto)
-  HERMES_HOME            Hermes config dir for SOUL.md bootstrap (default: $HOME/.hermes)
 EOF
 }
 
@@ -57,6 +78,22 @@ while [[ $# -gt 0 ]]; do
     --skip-setup)
       RUN_SETUP_MODE="never"
       shift
+      ;;
+    --dir)
+      if [[ $# -lt 2 ]]; then
+        echo "--dir requires a value" >&2
+        exit 1
+      fi
+      INSTALL_DIR="$2"
+      shift 2
+      ;;
+    --hermes-home)
+      if [[ $# -lt 2 ]]; then
+        echo "--hermes-home requires a value" >&2
+        exit 1
+      fi
+      HERMES_HOME="$2"
+      shift 2
       ;;
     --*)
       echo "Unknown option: $1" >&2
@@ -127,24 +164,32 @@ prompt_yes_no() {
   local question="$1"
   local default_yes="${2:-yes}"
   local answer=""
-  local suffix="[Y/n]"
-  if [[ "${default_yes}" != "yes" ]]; then
-    suffix="[y/N]"
+  local suffix
+  case "${default_yes}" in
+    [yY]|[yY][eE][sS]|[tT][rR][uU][eE]|1)
+      suffix="[Y/n]"
+      ;;
+    *)
+      suffix="[y/N]"
+      ;;
+  esac
+
+  if [[ "${IS_INTERACTIVE}" == "true" ]]; then
+    read -r -p "${question} ${suffix} " answer || answer=""
+  elif [[ -r /dev/tty && -w /dev/tty ]]; then
+    printf "%s %s " "${question}" "${suffix}" > /dev/tty
+    IFS= read -r answer < /dev/tty || answer=""
+  else
+    answer=""
   fi
 
-  if [[ ! -t 0 ]]; then
-    if [[ "${default_yes}" == "yes" ]]; then
-      return 0
-    fi
-    return 1
-  fi
-
-  read -r -p "${question} ${suffix} " answer || answer=""
   answer="${answer#"${answer%%[![:space:]]*}"}"
   answer="${answer%"${answer##*[![:space:]]}"}"
   if [[ -z "${answer}" ]]; then
-    [[ "${default_yes}" == "yes" ]]
-    return
+    case "${default_yes}" in
+      [yY]|[yY][eE][sS]|[tT][rR][uU][eE]|1) return 0 ;;
+      *) return 1 ;;
+    esac
   fi
   case "${answer}" in
     y|Y|yes|YES|Yes) return 0 ;;
@@ -249,7 +294,6 @@ if [[ ! -x "${INSTALL_DIR}/${CANONICAL_BIN_NAME}" ]]; then
   exit 1
 fi
 
-HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 mkdir -p "${HERMES_HOME}"
 if [[ ! -f "${HERMES_HOME}/SOUL.md" ]]; then
   cat > "${HERMES_HOME}/SOUL.md" <<'SOUL_EOF'
