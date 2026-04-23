@@ -674,6 +674,53 @@ fn has_ssl_transient_phrase(lower: &str) -> bool {
         || lower.contains("[ssl:")
 }
 
+fn maybe_nous_401_diagnostic(
+    provider_hint: &str,
+    err: &str,
+    hermes_home: Option<&str>,
+) -> Option<String> {
+    let provider = provider_hint.trim().to_ascii_lowercase();
+    if !provider.starts_with("nous") {
+        return None;
+    }
+    let lower = err.to_ascii_lowercase();
+    let is_auth_401 = lower.contains("401")
+        || lower.contains("unauthorized")
+        || lower.contains("authentication");
+    if !is_auth_401 {
+        return None;
+    }
+
+    let response = err.replace('\n', " ");
+    let response_snippet = if response.len() > 200 {
+        format!("{}...", &response[..200])
+    } else {
+        response
+    };
+    let auth_json = hermes_home
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join(".hermes-agent-ultra")
+        })
+        .join("auth.json");
+
+    Some(format!(
+        "Nous 401 — Portal authentication failed.\n\
+         Response: {response_snippet}\n\
+         Most likely: Portal OAuth expired, account out of credits, or agent key revoked.\n\
+         Troubleshooting:\n\
+           - Re-authenticate: hermes auth login nous\n\
+           - Check credits / billing: https://portal.nousresearch.com\n\
+           - Verify stored credentials: {}\n\
+           - Switch providers temporarily: /model <model> --provider openrouter",
+        auth_json.display()
+    ))
+}
+
 fn classify_error(err: &str) -> ErrorClass {
     let lower = err.to_lowercase();
     let model_not_found = lower.contains("model not found")
@@ -2147,6 +2194,13 @@ impl AgentLoop {
         let model = route
             .map(|r| r.model.as_str())
             .unwrap_or(self.config.model.as_str());
+        let route_provider_hint = route
+            .and_then(|r| r.provider.as_deref())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string);
+        let inferred_provider = self.extract_provider_and_model(model).0;
+        let active_provider = route_provider_hint.unwrap_or(inferred_provider);
         if let Some(rt) = route {
             if let Some(ref label) = rt.route_label {
                 tracing::debug!(%label, model = %rt.model, ?rt.signature, "smart model route");
@@ -2234,7 +2288,18 @@ impl AgentLoop {
                     );
 
                     match class {
-                        ErrorClass::Auth | ErrorClass::Fatal => {
+                        ErrorClass::Auth => {
+                            if let Some(diag) = maybe_nous_401_diagnostic(
+                                active_provider.as_str(),
+                                &err_str,
+                                self.config.hermes_home.as_deref(),
+                            ) {
+                                self.emit_status("lifecycle", &diag);
+                                return Err(AgentError::LlmApi(format!("{err_str}\n\n{diag}")));
+                            }
+                            return Err(AgentError::LlmApi(err_str));
+                        }
+                        ErrorClass::Fatal => {
                             return Err(AgentError::LlmApi(err_str));
                         }
                         ErrorClass::ContextOverflow => {
@@ -4909,6 +4974,36 @@ mod tests {
             classify_error("Server disconnected without sending a response"),
             ErrorClass::Retryable
         );
+    }
+
+    #[test]
+    fn maybe_nous_401_diagnostic_returns_hint_for_nous_auth_failures() {
+        let diag = maybe_nous_401_diagnostic(
+            "nous",
+            "HTTP 401 Unauthorized: token expired",
+            Some("/tmp/hermes-home"),
+        )
+        .expect("nous 401 should produce diagnostics");
+        assert!(diag.contains("Nous 401 — Portal authentication failed."));
+        assert!(diag.contains("hermes auth login nous"));
+        assert!(diag.contains("portal.nousresearch.com"));
+        assert!(diag.contains("/tmp/hermes-home/auth.json"));
+    }
+
+    #[test]
+    fn maybe_nous_401_diagnostic_ignores_non_nous_provider() {
+        let diag = maybe_nous_401_diagnostic(
+            "openrouter",
+            "HTTP 401 Unauthorized: token expired",
+            Some("/tmp/hermes-home"),
+        );
+        assert!(diag.is_none());
+    }
+
+    #[test]
+    fn maybe_nous_401_diagnostic_ignores_non_auth_errors() {
+        let diag = maybe_nous_401_diagnostic("nous", "HTTP 500 upstream timeout", None);
+        assert!(diag.is_none());
     }
 
     #[test]
