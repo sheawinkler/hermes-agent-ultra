@@ -69901,7 +69901,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "gateway/run.py",
         "gateway/session.py",
@@ -69912,7 +69912,7 @@
         "tests/test_hermes_state.py"
       ],
       "files_touched": 7,
-      "notes": "",
+      "notes": "ported in 8e9f280e (+ replay handling in f069d675): persisted reasoning_content in session DB with migration + load replay coverage",
       "owner": "",
       "sha": "a7d78d3bfd811d2713c837bf29ca8031ba538409",
       "subject": "fix: preserve reasoning_content on Kimi replay",
@@ -70132,12 +70132,12 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "agent/anthropic_adapter.py"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "ported in f069d675: Anthropic/Kimi conversion now injects thinking block from assistant reasoning_content on tool-call replay",
       "owner": "",
       "sha": "2efb0eea211ae214019dac64be5b81002b942483",
       "subject": "fix(anthropic_adapter): preserve reasoning_content on assistant tool-call messages for Kimi /coding",
@@ -70158,13 +70158,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "agent/anthropic_adapter.py",
         "scripts/release.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "ported in f069d675: Kimi replay keeps empty reasoning_content, prepends thinking block before tool_use; third-party signed-block strip path not applicable in Rust provider pipeline",
       "owner": "",
       "sha": "04e039f687b84aba07919f55b8597d263dd58435",
       "subject": "fix: Kimi /coding thinking block survival + empty reasoning_content + block ordering",
@@ -71818,9 +71818,37 @@
       "subject": "chore(release): map shushuzn in AUTHOR_MAP",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_session_boundary_security_state.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "050aabe2d408150cf2ec5b4a8af1c2699cb4d4ad",
+      "subject": "fix(gateway): reset approval and yolo state on session boundary",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_session_boundary_security_state.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "36730b90c4af0fcf51c6a0713b65d259050c5ca6",
+      "subject": "fix(gateway): also clear session-scoped approval state on /new",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-04-23T01:18:59.307001+00:00",
+  "generated_at_utc": "2026-04-23T01:28:45.462722+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -71828,12 +71856,12 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 121,
-      "ported": 74,
+      "pending": 120,
+      "ported": 77,
       "superseded": 4529
     },
     "by_target_ticket": {
-      "20": 1667,
+      "20": 1669,
       "21": 201,
       "22": 552,
       "23": 516,
@@ -71841,6 +71869,6 @@
       "25": 156,
       "26": 1566
     },
-    "total_commits": 4724
+    "total_commits": 4726
   }
 }

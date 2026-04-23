@@ -1,25 +1,25 @@
 {
-  "generated_at_utc": "2026-04-23T01:18:55.096793+00:00",
+  "generated_at_utc": "2026-04-23T01:28:40.929813+00:00",
   "refs": {
     "local_ref": "main",
-    "local_sha": "f716ce151dc9caeca724301b438191064b79baab",
+    "local_sha": "f069d675ced224d10a7d8eb3e242412bfad66c2d",
     "upstream_ref": "upstream/main",
-    "upstream_sha": "64c38cc4d02ce32f56c5328a8d18a8b49d209b1c",
+    "upstream_sha": "36730b90c4af0fcf51c6a0713b65d259050c5ca6",
     "merge_base": null
   },
   "summary": {
-    "commits_behind": 5450,
-    "commits_ahead": 229,
-    "upstream_patch_missing": 4720,
+    "commits_behind": 5452,
+    "commits_ahead": 233,
+    "upstream_patch_missing": 4722,
     "upstream_patch_represented": 4,
-    "local_patch_unique": 227,
-    "files_only_upstream": 2280,
+    "local_patch_unique": 231,
+    "files_only_upstream": 2281,
     "files_only_local": 404,
     "files_shared_identical": 0,
     "files_shared_different": 8,
-    "tree_files_changed": 2693,
-    "tree_insertions": 873309,
-    "tree_deletions": 218131
+    "tree_files_changed": 2694,
+    "tree_insertions": 873540,
+    "tree_deletions": 219253
   },
   "top_upstream_only": [
     {
@@ -28,7 +28,7 @@
     },
     {
       "path": "tests/gateway",
-      "count": 179
+      "count": 180
     },
     {
       "path": "tests/tools",
@@ -386,7 +386,7 @@
     },
     {
       "path": "tests/gateway",
-      "count": 179
+      "count": 180
     },
     {
       "path": "tests/tools",
@@ -708,7 +708,7 @@
       "workstream": "WS6",
       "issue": 10,
       "name": "Tests and CI parity",
-      "upstream_only": 732,
+      "upstream_only": 733,
       "shared_different": 0,
       "local_only": 3,
       "risk": "high",
@@ -776,9 +776,9 @@
     }
   ],
   "commit_mapping": {
-    "upstream_patch_missing": 4720,
+    "upstream_patch_missing": 4722,
     "upstream_patch_represented": 4,
-    "local_patch_unique": 227,
+    "local_patch_unique": 231,
     "local_patch_equivalent_to_upstream": 1,
     "upstream_patch_missing_sample": [
       "21d80ca68346dfdb8d3556015a723a9217f8566f",

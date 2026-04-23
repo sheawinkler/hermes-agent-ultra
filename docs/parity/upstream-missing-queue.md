@@ -1,12 +1,12 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-23T01:18:59.307001+00:00`
+Generated: `2026-04-23T01:28:45.462722+00:00`
 
-- Range: `main..upstream/main`; total commits tracked: `4724`.
+- Range: `main..upstream/main`; total commits tracked: `4726`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 1667 |
+| #20 | GPAR-01 tests+CI parity | 1669 |
 | #21 | GPAR-02 skills parity | 201 |
 | #22 | GPAR-03 UX parity | 552 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 516 |
@@ -16,8 +16,8 @@ Generated: `2026-04-23T01:18:59.307001+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 121 |
-| ported | 74 |
+| pending | 120 |
+| ported | 77 |
 | superseded | 4529 |
 
 ## First 100 Pending Commits
@@ -26,7 +26,6 @@ Generated: `2026-04-23T01:18:59.307001+00:00`
 | --- | ---: | --- |
 | `9ed6eb0cca93` | #20 | fix(tui): resolve runtime provider in _make_agent (#11884) |
 | `c6b1ef4e5881` | #20 | feat: add Step Plan provider support (salvage #6005) |
-| `a7d78d3bfd81` | #20 | fix: preserve reasoning_content on Kimi replay |
 | `d166716c65ea` | #21 | feat(optional-skills): add page-agent skill under new web-development category (#13976) |
 | `8bcd77a9c2e8` | #23 | feat(wecom): add QR scan flow and interactive setup wizard for bot credentials |
 | `3f60a907e1d3` | #22 | docs(wecom): document QR scan-to-create setup flow |
@@ -36,8 +35,6 @@ Generated: `2026-04-23T01:18:59.307001+00:00`
 | `cf55c738e79b` | #23 | refactor(qqbot): migrate qr onboard flow to sync + consolidate into onboard.py |
 | `5fb143169b4e` | #20 | feat(dashboard): track real API call count per session |
 | `3e652f75b27b` | #20 | fix(plugins+nous): auto-coerce memory plugins; actionable Nous 401 diagnostic (#14005) |
-| `2efb0eea211a` | #26 | fix(anthropic_adapter): preserve reasoning_content on assistant tool-call messages for Kimi /coding |
-| `04e039f687b8` | #26 | fix: Kimi /coding thinking block survival + empty reasoning_content + block ordering |
 | `7785654ad5cc` | #22 | feat(tui): subagent spawn observability overlay |
 | `06ebe34b4005` | #22 | fix(tui): repair useInput handler in agents overlay |
 | `f06adcc1ae0c` | #22 | chore(tui): drop unreachable return + prettier pass |
@@ -124,4 +121,7 @@ Generated: `2026-04-23T01:18:59.307001+00:00`
 | `8db5517b4cc7` | #25 | fix: add /opt/data/.local/bin to PATH in Docker image (Closes #13739) |
 | `9ea2d96d7355` | #26 | chore(release): map ms-alan in AUTHOR_MAP |
 | `4c1362884dcb` | #24 | fix(local): respect configured cwd in init_session() |
+| `e5114298f00d` | #26 | chore(release): map WuTianyi123 in AUTHOR_MAP |
+| `82cce3d26ca1` | #26 | fix: add base_url_env_var to Anthropic ProviderConfig |
+| `08089738d888` | #26 | chore(release): map li0near in AUTHOR_MAP |
 
