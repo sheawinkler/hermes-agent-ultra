@@ -1019,3 +1019,16 @@
     - `infra_surface=72`
 - Verification:
   - `python3 scripts/generate-upstream-snapshot-diff-map.py --repo-root .`
+
+## 2026-04-23 impl-14 (installer post-install setup parity hardening)
+- Scope:
+  - Port selective upstream installer UX behavior into the Rust release installer while preserving rust-binary install semantics.
+- Repo implementation:
+  - Updated `scripts/install.sh` with:
+    - option parsing for `--version`, `--setup`, `--skip-setup`, `--help`
+    - `RUN_SETUP_MODE=auto|always|never`
+    - post-install flow (`doctor`, `auth status`, optional interactive `setup`)
+    - prompt helper + non-interactive behavior handling
+- Verification:
+  - `bash -n scripts/install.sh`
+  - `bash scripts/install.sh --help`

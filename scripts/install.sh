@@ -2,20 +2,28 @@
 set -euo pipefail
 
 REPO="${REPO:-sheawinkler/hermes-agent-ultra}"
-VERSION="${1:-latest}"
+VERSION="${VERSION:-latest}"
 INSTALL_DIR="${INSTALL_DIR:-$HOME/.local/bin}"
 CANONICAL_BIN_NAME="${CANONICAL_BIN_NAME:-hermes-agent-ultra}"
 LEGACY_BIN_NAME="${LEGACY_BIN_NAME:-hermes}"
 RELEASE_BIN_BASENAME="${RELEASE_BIN_BASENAME:-hermes}"
+RUN_SETUP_MODE="${RUN_SETUP_MODE:-auto}" # auto|always|never
+POSITIONAL_VERSION=""
 
-if [[ "${VERSION}" == "--help" || "${VERSION}" == "-h" ]]; then
+show_help() {
   cat <<'EOF'
-Usage: scripts/install.sh [version]
+Usage: scripts/install.sh [version] [options]
 
 Install hermes-agent-ultra from GitHub Releases.
 
 Arguments:
   version                Release tag to install (default: latest)
+
+Options:
+  --version TAG          Release tag to install (same as positional version)
+  --setup                Run post-install setup flow without prompting
+  --skip-setup           Skip post-install setup flow
+  -h, --help             Show this help
 
 Environment variables:
   REPO                   GitHub repo slug (default: sheawinkler/hermes-agent-ultra)
@@ -23,10 +31,61 @@ Environment variables:
   CANONICAL_BIN_NAME     Installed binary name (default: hermes-agent-ultra)
   LEGACY_BIN_NAME        Compatibility alias symlink name (default: hermes)
   RELEASE_BIN_BASENAME   Tarball executable basename (default: hermes)
+  RUN_SETUP_MODE         auto|always|never for setup flow (default: auto)
   HERMES_HOME            Hermes config dir for SOUL.md bootstrap (default: $HOME/.hermes)
 EOF
-  exit 0
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      show_help
+      exit 0
+      ;;
+    --version)
+      if [[ $# -lt 2 ]]; then
+        echo "--version requires a value" >&2
+        exit 1
+      fi
+      VERSION="$2"
+      shift 2
+      ;;
+    --setup)
+      RUN_SETUP_MODE="always"
+      shift
+      ;;
+    --skip-setup)
+      RUN_SETUP_MODE="never"
+      shift
+      ;;
+    --*)
+      echo "Unknown option: $1" >&2
+      show_help
+      exit 1
+      ;;
+    *)
+      if [[ -n "${POSITIONAL_VERSION}" ]]; then
+        echo "Unexpected extra positional argument: $1" >&2
+        show_help
+        exit 1
+      fi
+      POSITIONAL_VERSION="$1"
+      shift
+      ;;
+  esac
+done
+
+if [[ -n "${POSITIONAL_VERSION}" ]]; then
+  VERSION="${POSITIONAL_VERSION}"
 fi
+
+case "${RUN_SETUP_MODE}" in
+  auto|always|never) ;;
+  *)
+    echo "Invalid RUN_SETUP_MODE: ${RUN_SETUP_MODE} (expected auto|always|never)" >&2
+    exit 1
+    ;;
+esac
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -62,6 +121,62 @@ detect_target() {
   esac
 
   echo "${os}-${arch}"
+}
+
+prompt_yes_no() {
+  local question="$1"
+  local default_yes="${2:-yes}"
+  local answer=""
+  local suffix="[Y/n]"
+  if [[ "${default_yes}" != "yes" ]]; then
+    suffix="[y/N]"
+  fi
+
+  if [[ ! -t 0 ]]; then
+    if [[ "${default_yes}" == "yes" ]]; then
+      return 0
+    fi
+    return 1
+  fi
+
+  read -r -p "${question} ${suffix} " answer || answer=""
+  answer="${answer#"${answer%%[![:space:]]*}"}"
+  answer="${answer%"${answer##*[![:space:]]}"}"
+  if [[ -z "${answer}" ]]; then
+    [[ "${default_yes}" == "yes" ]]
+    return
+  fi
+  case "${answer}" in
+    y|Y|yes|YES|Yes) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+run_post_install_flow() {
+  local bin_path="$1"
+
+  echo
+  echo "Running post-install verification..."
+  "${bin_path}" doctor || true
+
+  echo
+  echo "Current auth/platform status:"
+  "${bin_path}" auth status || true
+
+  if [[ -t 0 ]]; then
+    echo
+    if prompt_yes_no "Run interactive setup now?" "yes"; then
+      "${bin_path}" setup || true
+    else
+      echo "Skipped setup. Run this anytime:"
+      echo "  ${bin_path} setup"
+    fi
+  else
+    echo
+    echo "Interactive setup skipped (non-interactive shell)."
+    echo "Run later:"
+    echo "  ${bin_path} setup"
+  fi
 }
 
 need_cmd curl
@@ -162,4 +277,24 @@ else
   echo "zsh quick apply:"
   echo "  echo 'export PATH=\"${INSTALL_DIR}:\$PATH\"' >> ~/.zshrc && source ~/.zshrc"
   echo "  exec zsh -l"
+fi
+
+BIN_PATH="${INSTALL_DIR}/${CANONICAL_BIN_NAME}"
+if [[ -x "${BIN_PATH}" ]]; then
+  case "${RUN_SETUP_MODE}" in
+    always)
+      run_post_install_flow "${BIN_PATH}"
+      ;;
+    auto)
+      if prompt_yes_no "Run post-install setup flow (doctor + auth status + setup)?" "yes"; then
+        run_post_install_flow "${BIN_PATH}"
+      else
+        echo "Post-install setup skipped. Run later:"
+        echo "  ${BIN_PATH} setup"
+      fi
+      ;;
+    never)
+      echo "Post-install setup skipped (--skip-setup)."
+      ;;
+  esac
 fi
