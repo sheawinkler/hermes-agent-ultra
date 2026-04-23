@@ -690,6 +690,38 @@ fn classify_error(err: &str) -> ErrorClass {
     }
 }
 
+fn is_transient_stream_error(err: &AgentError) -> bool {
+    fn has_transient_phrase(msg: &str) -> bool {
+        let lower = msg.to_lowercase();
+        lower.contains("timeout")
+            || lower.contains("connection")
+            || lower.contains("remoteprotocol")
+            || lower.contains("remote protocol")
+            || lower.contains("network error")
+            || lower.contains("broken pipe")
+            || lower.contains("connection reset")
+            || lower.contains("connection closed")
+            || lower.contains("connection lost")
+            || lower.contains("upstream connect error")
+            || lower.contains("stream read error")
+    }
+
+    match err {
+        AgentError::Timeout(_) => true,
+        AgentError::LlmApi(msg)
+        | AgentError::Gateway(msg)
+        | AgentError::Io(msg)
+        | AgentError::ToolExecution(msg)
+        | AgentError::Config(msg)
+        | AgentError::AuthFailed(msg)
+        | AgentError::InvalidToolCall(msg) => has_transient_phrase(msg),
+        AgentError::RateLimited { .. } => true,
+        AgentError::Interrupted { .. }
+        | AgentError::MaxTurnsExceeded
+        | AgentError::ContextTooLong => false,
+    }
+}
+
 /// Compute jittered exponential backoff delay.
 fn jittered_backoff(attempt: u32, base_ms: u64, max_ms: u64) -> Duration {
     let exp = base_ms.saturating_mul(1u64 << attempt.min(10));
@@ -2272,146 +2304,218 @@ impl AgentLoop {
     ) -> Result<StreamCollectOutcome, AgentError> {
         let api_messages = self.messages_for_api_call(ctx);
         let default_extra_body = self.extra_body_for_api_mode(&self.config.api_mode);
-        let mut stream = if let Some(rt) = route {
-            let (provider_name, model_name) = self.extract_provider_and_model(active_model);
-            let mode = rt.api_mode.as_ref().unwrap_or(&self.config.api_mode);
-            let extra_body_for_call = self.extra_body_for_api_mode(mode);
-            let pool = self.credential_pool_for_route(rt);
-            match self.build_runtime_provider(
-                rt.provider.as_deref().unwrap_or(provider_name.as_str()),
-                model_name,
-                rt.base_url.as_deref(),
-                rt.api_key_env.as_deref(),
-                None,
-                Some(mode),
-                pool,
-            ) {
-                Ok(provider) => provider.chat_completion_stream(
+        let max_stream_retries = std::env::var("HERMES_STREAM_RETRIES")
+            .ok()
+            .and_then(|v| v.parse::<u32>().ok())
+            .map(|v| v.min(10))
+            .unwrap_or(2);
+
+        'stream_attempt: for stream_attempt in 0..=max_stream_retries {
+            let mut stream = if let Some(rt) = route {
+                let (provider_name, model_name) = self.extract_provider_and_model(active_model);
+                let mode = rt.api_mode.as_ref().unwrap_or(&self.config.api_mode);
+                let extra_body_for_call = self.extra_body_for_api_mode(mode);
+                let pool = self.credential_pool_for_route(rt);
+                match self.build_runtime_provider(
+                    rt.provider.as_deref().unwrap_or(provider_name.as_str()),
+                    model_name,
+                    rt.base_url.as_deref(),
+                    rt.api_key_env.as_deref(),
+                    None,
+                    Some(mode),
+                    pool,
+                ) {
+                    Ok(provider) => provider.chat_completion_stream(
+                        &api_messages,
+                        tool_schemas,
+                        self.config.max_tokens,
+                        self.config.temperature,
+                        Some(active_model),
+                        extra_body_for_call.as_ref(),
+                    ),
+                    Err(e) => {
+                        tracing::warn!(
+                            "Runtime route unavailable (reason={:?}) for stream, falling back to primary runtime: {}",
+                            rt.routing_reason,
+                            e
+                        );
+                        self.llm_provider.chat_completion_stream(
+                            &api_messages,
+                            tool_schemas,
+                            self.config.max_tokens,
+                            self.config.temperature,
+                            Some(self.config.model.as_str()),
+                            default_extra_body.as_ref(),
+                        )
+                    }
+                }
+            } else {
+                self.llm_provider.chat_completion_stream(
                     &api_messages,
                     tool_schemas,
                     self.config.max_tokens,
                     self.config.temperature,
                     Some(active_model),
-                    extra_body_for_call.as_ref(),
-                ),
-                Err(e) => {
-                    tracing::warn!(
-                        "Runtime route unavailable (reason={:?}) for stream, falling back to primary runtime: {}",
-                        rt.routing_reason,
-                        e
+                    default_extra_body.as_ref(),
+                )
+            };
+
+            let mut content = String::new();
+            let mut reasoning_content = String::new();
+            let mut tool_calls: Vec<ToolCall> = Vec::new();
+            let mut last_usage: Option<UsageStats> = None;
+            let mut finish_reason: Option<String> = None;
+            let mut deltas_were_sent = false;
+
+            while let Some(chunk_result) = stream.next().await {
+                if self.interrupt.take_interrupt_graceful().is_some() {
+                    let message = Self::assemble_stream_assistant_message(
+                        &content,
+                        &reasoning_content,
+                        &tool_calls,
                     );
-                    self.llm_provider.chat_completion_stream(
-                        &api_messages,
-                        tool_schemas,
-                        self.config.max_tokens,
-                        self.config.temperature,
-                        Some(self.config.model.as_str()),
-                        default_extra_body.as_ref(),
-                    )
+                    return Ok(StreamCollectOutcome::Interrupted(LlmResponse {
+                        message,
+                        usage: last_usage.clone(),
+                        model: active_model.to_string(),
+                        finish_reason: Some("interrupted".to_string()),
+                    }));
                 }
-            }
-        } else {
-            self.llm_provider.chat_completion_stream(
-                &api_messages,
-                tool_schemas,
-                self.config.max_tokens,
-                self.config.temperature,
-                Some(active_model),
-                default_extra_body.as_ref(),
-            )
-        };
 
-        let mut content = String::new();
-        let mut reasoning_content = String::new();
-        let mut tool_calls: Vec<ToolCall> = Vec::new();
-        let mut last_usage: Option<UsageStats> = None;
-        let mut finish_reason: Option<String> = None;
+                let chunk = match chunk_result {
+                    Ok(chunk) => chunk,
+                    Err(err) => {
+                        let partial_tool_in_flight = tool_calls.iter().any(|tc| {
+                            !tc.id.is_empty()
+                                || !tc.function.name.is_empty()
+                                || !tc.function.arguments.trim().is_empty()
+                        });
+                        let should_retry_for_partial_tool = deltas_were_sent
+                            && partial_tool_in_flight
+                            && is_transient_stream_error(&err)
+                            && stream_attempt < max_stream_retries;
+                        let should_retry_before_deltas = !deltas_were_sent
+                            && is_transient_stream_error(&err)
+                            && stream_attempt < max_stream_retries;
 
-        while let Some(chunk_result) = stream.next().await {
-            if self.interrupt.take_interrupt_graceful().is_some() {
-                let message = Self::assemble_stream_assistant_message(
-                    &content,
-                    &reasoning_content,
-                    &tool_calls,
-                );
-                return Ok(StreamCollectOutcome::Interrupted(LlmResponse {
-                    message,
-                    usage: last_usage.clone(),
-                    model: active_model.to_string(),
-                    finish_reason: Some("interrupted".to_string()),
-                }));
-            }
-            let chunk = chunk_result?;
-
-            if let Some(ref delta) = chunk.delta {
-                if let Some(ref text) = delta.content {
-                    content.push_str(text);
-                    if let Some(ref cb) = self.callbacks.on_stream_delta {
-                        cb(text);
-                    }
-                }
-                if let Some(ref extra) = delta.extra {
-                    if let Some(thinking) = extra.get("thinking").and_then(|v| v.as_str()) {
-                        reasoning_content.push_str(thinking);
-                        if let Some(ref cb) = self.callbacks.on_thinking {
-                            cb(thinking);
-                        }
-                    }
-                }
-                if let Some(ref tc_deltas) = delta.tool_calls {
-                    for tcd in tc_deltas {
-                        let idx = tcd.index as usize;
-                        while tool_calls.len() <= idx {
-                            tool_calls.push(ToolCall {
-                                id: String::new(),
-                                function: hermes_core::FunctionCall {
-                                    name: String::new(),
-                                    arguments: String::new(),
-                                },
-                            });
-                        }
-                        if let Some(ref id) = tcd.id {
-                            tool_calls[idx].id = id.clone();
-                        }
-                        if let Some(ref fc) = tcd.function {
-                            if let Some(ref name) = fc.name {
-                                tool_calls[idx].function.name = name.clone();
+                        if should_retry_for_partial_tool || should_retry_before_deltas {
+                            let next_attempt = stream_attempt + 2;
+                            let total_attempts = max_stream_retries + 1;
+                            if should_retry_for_partial_tool {
+                                on_chunk(StreamChunk {
+                                    delta: Some(hermes_core::StreamDelta {
+                                        content: Some(
+                                            "\n\n[connection dropped mid tool-call; reconnecting...]\n\n"
+                                                .to_string(),
+                                        ),
+                                        tool_calls: None,
+                                        extra: None,
+                                    }),
+                                    finish_reason: None,
+                                    usage: None,
+                                });
+                                self.emit_status(
+                                    "lifecycle",
+                                    &format!(
+                                        "Connection dropped mid tool-call; reconnecting (attempt {}/{})",
+                                        next_attempt, total_attempts
+                                    ),
+                                );
+                                tracing::warn!(
+                                    "Streaming attempt {}/{} failed after partial tool-call data; retrying: {}",
+                                    stream_attempt + 1,
+                                    total_attempts,
+                                    err
+                                );
+                            } else {
+                                tracing::warn!(
+                                    "Streaming attempt {}/{} failed before deltas; retrying: {}",
+                                    stream_attempt + 1,
+                                    total_attempts,
+                                    err
+                                );
                             }
-                            if let Some(ref args) = fc.arguments {
-                                tool_calls[idx].function.arguments.push_str(args);
+                            continue 'stream_attempt;
+                        }
+                        return Err(err);
+                    }
+                };
+
+                if let Some(ref delta) = chunk.delta {
+                    if let Some(ref text) = delta.content {
+                        deltas_were_sent = true;
+                        content.push_str(text);
+                        if let Some(ref cb) = self.callbacks.on_stream_delta {
+                            cb(text);
+                        }
+                    }
+                    if let Some(ref extra) = delta.extra {
+                        if let Some(thinking) = extra.get("thinking").and_then(|v| v.as_str()) {
+                            reasoning_content.push_str(thinking);
+                            if let Some(ref cb) = self.callbacks.on_thinking {
+                                cb(thinking);
+                            }
+                        }
+                    }
+                    if let Some(ref tc_deltas) = delta.tool_calls {
+                        for tcd in tc_deltas {
+                            let idx = tcd.index as usize;
+                            while tool_calls.len() <= idx {
+                                tool_calls.push(ToolCall {
+                                    id: String::new(),
+                                    function: hermes_core::FunctionCall {
+                                        name: String::new(),
+                                        arguments: String::new(),
+                                    },
+                                });
+                            }
+                            if let Some(ref id) = tcd.id {
+                                tool_calls[idx].id = id.clone();
+                            }
+                            if let Some(ref fc) = tcd.function {
+                                if let Some(ref name) = fc.name {
+                                    tool_calls[idx].function.name = name.clone();
+                                }
+                                if let Some(ref args) = fc.arguments {
+                                    tool_calls[idx].function.arguments.push_str(args);
+                                }
                             }
                         }
                     }
                 }
+
+                if let Some(ref usage) = chunk.usage {
+                    last_usage = Some(usage.clone());
+                }
+                if let Some(ref fr) = chunk.finish_reason {
+                    finish_reason = Some(fr.clone());
+                }
+
+                on_chunk(chunk);
             }
 
-            if let Some(ref usage) = chunk.usage {
-                last_usage = Some(usage.clone());
-            }
-            if let Some(ref fr) = chunk.finish_reason {
-                finish_reason = Some(fr.clone());
+            let has_truncated_tool_args = tool_calls.iter().any(|tc| {
+                let trimmed = tc.function.arguments.trim();
+                !trimmed.is_empty() && serde_json::from_str::<Value>(trimmed).is_err()
+            });
+            if has_truncated_tool_args {
+                finish_reason = Some("length".to_string());
             }
 
-            on_chunk(chunk);
+            let message =
+                Self::assemble_stream_assistant_message(&content, &reasoning_content, &tool_calls);
+
+            return Ok(StreamCollectOutcome::Complete(LlmResponse {
+                message,
+                usage: last_usage,
+                model: active_model.to_string(),
+                finish_reason,
+            }));
         }
 
-        let has_truncated_tool_args = tool_calls.iter().any(|tc| {
-            let trimmed = tc.function.arguments.trim();
-            !trimmed.is_empty() && serde_json::from_str::<Value>(trimmed).is_err()
-        });
-        if has_truncated_tool_args {
-            finish_reason = Some("length".to_string());
-        }
-
-        let message =
-            Self::assemble_stream_assistant_message(&content, &reasoning_content, &tool_calls);
-
-        Ok(StreamCollectOutcome::Complete(LlmResponse {
-            message,
-            usage: last_usage,
-            model: active_model.to_string(),
-            finish_reason,
-        }))
+        Err(AgentError::LlmApi(
+            "streaming failed after retry budget exhausted".to_string(),
+        ))
     }
 
     /// Run the agent loop (non-streaming).
@@ -4700,6 +4804,7 @@ fn merge_usage(existing: Option<UsageStats>, new: &UsageStats) -> UsageStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::stream::BoxStream;
     use hermes_core::JsonSchema;
 
     #[test]
@@ -4994,6 +5099,296 @@ mod tests {
         let rows = captured.lock().expect("captured lock");
         assert!(!rows.iter().any(|(kind, msg)| {
             kind == "lifecycle" && msg.contains("Empty assistant response — retrying")
+        }));
+    }
+
+    fn stream_chunk_content(text: &str) -> StreamChunk {
+        StreamChunk {
+            delta: Some(hermes_core::StreamDelta {
+                content: Some(text.to_string()),
+                tool_calls: None,
+                extra: None,
+            }),
+            finish_reason: None,
+            usage: None,
+        }
+    }
+
+    fn stream_chunk_tool_name(index: u32, id: &str, name: &str) -> StreamChunk {
+        StreamChunk {
+            delta: Some(hermes_core::StreamDelta {
+                content: None,
+                tool_calls: Some(vec![hermes_core::ToolCallDelta {
+                    index,
+                    id: Some(id.to_string()),
+                    function: Some(hermes_core::FunctionCallDelta {
+                        name: Some(name.to_string()),
+                        arguments: None,
+                    }),
+                }]),
+                extra: None,
+            }),
+            finish_reason: None,
+            usage: None,
+        }
+    }
+
+    fn stream_chunk_tool_args(index: u32, args: &str) -> StreamChunk {
+        StreamChunk {
+            delta: Some(hermes_core::StreamDelta {
+                content: None,
+                tool_calls: Some(vec![hermes_core::ToolCallDelta {
+                    index,
+                    id: None,
+                    function: Some(hermes_core::FunctionCallDelta {
+                        name: None,
+                        arguments: Some(args.to_string()),
+                    }),
+                }]),
+                extra: None,
+            }),
+            finish_reason: None,
+            usage: None,
+        }
+    }
+
+    fn stream_chunk_finish(reason: &str) -> StreamChunk {
+        StreamChunk {
+            delta: None,
+            finish_reason: Some(reason.to_string()),
+            usage: None,
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    enum StreamRetryScenario {
+        RecoverOnSecondAttempt,
+        AlwaysFailMidToolCall,
+        TextOnlyDrop,
+    }
+
+    struct StreamRetryProvider {
+        scenario: StreamRetryScenario,
+        calls: std::sync::Mutex<u32>,
+    }
+
+    impl StreamRetryProvider {
+        fn new(scenario: StreamRetryScenario) -> Self {
+            Self {
+                scenario,
+                calls: std::sync::Mutex::new(0),
+            }
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for StreamRetryProvider {
+        async fn chat_completion(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolSchema],
+            _max_tokens: Option<u32>,
+            _temperature: Option<f64>,
+            _model: Option<&str>,
+            _extra_body: Option<&serde_json::Value>,
+        ) -> Result<hermes_core::LlmResponse, AgentError> {
+            Err(AgentError::LlmApi("unused".to_string()))
+        }
+
+        fn chat_completion_stream(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolSchema],
+            _max_tokens: Option<u32>,
+            _temperature: Option<f64>,
+            _model: Option<&str>,
+            _extra_body: Option<&serde_json::Value>,
+        ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+            let mut calls = self.calls.lock().expect("calls lock");
+            *calls += 1;
+            let attempt = *calls;
+
+            let events: Vec<Result<StreamChunk, AgentError>> = match self.scenario {
+                StreamRetryScenario::RecoverOnSecondAttempt => {
+                    if attempt == 1 {
+                        vec![
+                            Ok(stream_chunk_content("Let me write the audit: ")),
+                            Ok(stream_chunk_tool_name(0, "call_1", "write_file")),
+                            Ok(stream_chunk_tool_args(0, "{\"path\":\"/tmp/x\",")),
+                            Err(AgentError::LlmApi(
+                                "Stream read error: peer closed connection".to_string(),
+                            )),
+                        ]
+                    } else {
+                        vec![
+                            Ok(stream_chunk_content("Let me write the audit: ")),
+                            Ok(stream_chunk_tool_name(0, "call_1", "write_file")),
+                            Ok(stream_chunk_tool_args(
+                                0,
+                                "{\"path\":\"/tmp/x\",\"content\":\"hi\"}",
+                            )),
+                            Ok(stream_chunk_finish("tool_calls")),
+                        ]
+                    }
+                }
+                StreamRetryScenario::AlwaysFailMidToolCall => vec![
+                    Ok(stream_chunk_content("Working...")),
+                    Ok(stream_chunk_tool_name(0, "call_2", "write_file")),
+                    Ok(stream_chunk_tool_args(0, "{\"path\":\"/tmp/y\",")),
+                    Err(AgentError::LlmApi(
+                        "Stream read error: connection reset by peer".to_string(),
+                    )),
+                ],
+                StreamRetryScenario::TextOnlyDrop => vec![
+                    Ok(stream_chunk_content("Partial text")),
+                    Err(AgentError::LlmApi(
+                        "Stream read error: connection lost".to_string(),
+                    )),
+                ],
+            };
+
+            futures::stream::iter(events).boxed()
+        }
+    }
+
+    #[tokio::test]
+    async fn stream_mid_tool_call_silent_retry_recovers_tool_call() {
+        let prev = std::env::var("HERMES_STREAM_RETRIES").ok();
+        std::env::set_var("HERMES_STREAM_RETRIES", "2");
+
+        let provider = Arc::new(StreamRetryProvider::new(
+            StreamRetryScenario::RecoverOnSecondAttempt,
+        ));
+        let agent = AgentLoop::new(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            provider.clone(),
+        );
+        let mut ctx = ContextManager::default_budget();
+        ctx.add_message(Message::system("system"));
+        ctx.add_message(Message::user("run"));
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let seen_ref = seen.clone();
+
+        let out = agent
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", &move |chunk| {
+                if let Some(delta) = chunk.delta {
+                    if let Some(text) = delta.content {
+                        seen_ref.lock().expect("seen lock").push(text);
+                    }
+                }
+            })
+            .await;
+
+        match prev {
+            Some(v) => std::env::set_var("HERMES_STREAM_RETRIES", v),
+            None => std::env::remove_var("HERMES_STREAM_RETRIES"),
+        }
+
+        let StreamCollectOutcome::Complete(resp) = out.expect("stream should recover") else {
+            panic!("expected complete response");
+        };
+        let tc = resp
+            .message
+            .tool_calls
+            .as_ref()
+            .and_then(|calls| calls.first())
+            .expect("missing tool call");
+        assert_eq!(tc.function.name, "write_file");
+        assert_eq!(*provider.calls.lock().expect("calls lock"), 2);
+        assert!(seen.lock().expect("seen lock").iter().any(|text| {
+            text.to_lowercase()
+                .contains("connection dropped mid tool-call; reconnecting")
+        }));
+    }
+
+    #[tokio::test]
+    async fn stream_mid_tool_call_exhausted_retries_returns_error() {
+        let prev = std::env::var("HERMES_STREAM_RETRIES").ok();
+        std::env::set_var("HERMES_STREAM_RETRIES", "1");
+
+        let provider = Arc::new(StreamRetryProvider::new(
+            StreamRetryScenario::AlwaysFailMidToolCall,
+        ));
+        let agent = AgentLoop::new(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            provider.clone(),
+        );
+        let mut ctx = ContextManager::default_budget();
+        ctx.add_message(Message::system("system"));
+        ctx.add_message(Message::user("run"));
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let seen_ref = seen.clone();
+
+        let out = agent
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", &move |chunk| {
+                if let Some(delta) = chunk.delta {
+                    if let Some(text) = delta.content {
+                        seen_ref.lock().expect("seen lock").push(text);
+                    }
+                }
+            })
+            .await;
+
+        match prev {
+            Some(v) => std::env::set_var("HERMES_STREAM_RETRIES", v),
+            None => std::env::remove_var("HERMES_STREAM_RETRIES"),
+        }
+
+        let err = match out {
+            Err(err) => err,
+            Ok(_) => panic!("should fail after retries"),
+        };
+        assert!(err.to_string().contains("Stream read error"));
+        assert_eq!(*provider.calls.lock().expect("calls lock"), 2);
+        assert!(seen.lock().expect("seen lock").iter().any(|text| {
+            text.to_lowercase()
+                .contains("connection dropped mid tool-call; reconnecting")
+        }));
+    }
+
+    #[tokio::test]
+    async fn stream_text_only_drop_does_not_retry() {
+        let prev = std::env::var("HERMES_STREAM_RETRIES").ok();
+        std::env::set_var("HERMES_STREAM_RETRIES", "2");
+
+        let provider = Arc::new(StreamRetryProvider::new(StreamRetryScenario::TextOnlyDrop));
+        let agent = AgentLoop::new(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            provider.clone(),
+        );
+        let mut ctx = ContextManager::default_budget();
+        ctx.add_message(Message::system("system"));
+        ctx.add_message(Message::user("run"));
+        let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let seen_ref = seen.clone();
+
+        let out = agent
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", &move |chunk| {
+                if let Some(delta) = chunk.delta {
+                    if let Some(text) = delta.content {
+                        seen_ref.lock().expect("seen lock").push(text);
+                    }
+                }
+            })
+            .await;
+
+        match prev {
+            Some(v) => std::env::set_var("HERMES_STREAM_RETRIES", v),
+            None => std::env::remove_var("HERMES_STREAM_RETRIES"),
+        }
+
+        let err = match out {
+            Err(err) => err,
+            Ok(_) => panic!("text-only stream drops should not retry silently"),
+        };
+        assert!(err.to_string().contains("Stream read error"));
+        assert_eq!(*provider.calls.lock().expect("calls lock"), 1);
+        assert!(!seen.lock().expect("seen lock").iter().any(|text| {
+            text.to_lowercase()
+                .contains("connection dropped mid tool-call; reconnecting")
         }));
     }
 
