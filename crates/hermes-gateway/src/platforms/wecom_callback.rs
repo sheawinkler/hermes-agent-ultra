@@ -773,7 +773,11 @@ async fn handle_callback_request(
                         chat_id: format!(
                             "{}:{}",
                             app.corp_id,
-                            if is_group { chat_id.as_str() } else { from_user.as_str() }
+                            if is_group {
+                                chat_id.as_str()
+                            } else {
+                                from_user.as_str()
+                            }
                         ),
                         user_id: from_user,
                         text,

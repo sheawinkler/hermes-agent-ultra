@@ -35,6 +35,7 @@ impl LlmProvider for MockProvider {
                             name: "echo_tool".to_string(),
                             arguments: "{\"msg\":\"hello\"}".to_string(),
                         },
+                        extra_content: None,
                     }],
                 ),
                 usage: None,

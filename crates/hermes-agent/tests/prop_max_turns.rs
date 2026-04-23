@@ -41,6 +41,7 @@ impl LlmProvider for AlwaysToolCallLlm {
                         name: "echo".to_string(),
                         arguments: r#"{"input":"test"}"#.to_string(),
                     },
+                    extra_content: None,
                 }],
             ),
             usage: Some(UsageStats {
