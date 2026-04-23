@@ -62,6 +62,7 @@ use hermes_gateway::{DmManager, Gateway, GatewayRuntimeContext, SessionManager};
 use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_telemetry::init_telemetry_from_env;
 use hermes_tools::ToolRegistry;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -348,6 +349,7 @@ async fn run_model(cli: Cli, provider_model: Option<String>) -> Result<(), Agent
             println!("  openai       — OpenAI (gpt-4o, gpt-4o-mini, ...)");
             println!("  anthropic    — Anthropic (claude-3-5-sonnet, claude-3-opus, ...)");
             println!("  openrouter   — OpenRouter (multi-provider routing)");
+            println!("  stepfun      — Step Plan / StepFun (step-3.5-flash, ...)");
             println!("\nUsage: hermes model <provider>:<model>");
         }
     }
@@ -3150,6 +3152,7 @@ fn normalize_auth_provider(provider: &str) -> String {
         "wechat" | "wx" => "weixin".to_string(),
         "qq" => "qqbot".to_string(),
         "tg" => "telegram".to_string(),
+        "step" | "step-plan" => "stepfun".to_string(),
         "api-server" => "api_server".to_string(),
         "home-assistant" => "homeassistant".to_string(),
         "wecom-callback" => "wecom_callback".to_string(),
@@ -3194,6 +3197,7 @@ fn secret_provider_aliases(provider: &str) -> Vec<String> {
     match normalize_secret_provider(provider).as_str() {
         "moonshot" => vec!["moonshot".to_string(), "kimi".to_string()],
         "kimi" => vec!["kimi".to_string(), "moonshot".to_string()],
+        "stepfun" => vec!["stepfun".to_string(), "step".to_string()],
         "copilot" => vec!["copilot".to_string(), "github-copilot".to_string()],
         p => vec![p.to_string()],
     }
@@ -3207,6 +3211,7 @@ fn provider_env_var(provider: &str) -> Option<&'static str> {
         "qwen" => Some("DASHSCOPE_API_KEY"),
         "moonshot" | "kimi" => Some("MOONSHOT_API_KEY"),
         "minimax" => Some("MINIMAX_API_KEY"),
+        "stepfun" => Some("STEPFUN_API_KEY"),
         "nous" => Some("NOUS_API_KEY"),
         "copilot" => Some("GITHUB_COPILOT_TOKEN"),
         _ => None,
@@ -3301,6 +3306,7 @@ async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentE
         ("DASHSCOPE_API_KEY", "qwen"),
         ("MOONSHOT_API_KEY", "moonshot"),
         ("MINIMAX_API_KEY", "minimax"),
+        ("STEPFUN_API_KEY", "stepfun"),
         ("NOUS_API_KEY", "nous"),
         ("GITHUB_COPILOT_TOKEN", "copilot"),
     ];
@@ -3722,7 +3728,7 @@ async fn print_auth_status_matrix(cli: &Cli, manager: &AuthManager) -> Result<()
     println!("Auth status matrix:");
     println!("-------------------");
 
-    for provider in ["openai", "anthropic", "openrouter", "copilot"] {
+    for provider in ["openai", "anthropic", "openrouter", "stepfun", "copilot"] {
         let env_present = provider_api_key_from_env(provider).is_some()
             || (provider == "copilot"
                 && std::env::var("GITHUB_COPILOT_TOKEN")
@@ -5715,6 +5721,116 @@ fn prune_old_debug_reports(path: &Path, expire_days: u32) -> Result<usize, Agent
     Ok(removed)
 }
 
+const DEBUG_LOG_SNAPSHOT_MAX_BYTES: usize = 512 * 1024;
+
+#[derive(Debug, Clone)]
+struct DebugLogSnapshot {
+    tail_text: String,
+    #[cfg_attr(not(test), allow(dead_code))]
+    full_text: Option<String>,
+}
+
+fn capture_debug_log_snapshot(log_file: &Path, tail_lines: usize, max_bytes: usize) -> DebugLogSnapshot {
+    if !log_file.exists() {
+        return DebugLogSnapshot {
+            tail_text: "(log file not found)".to_string(),
+            full_text: None,
+        };
+    }
+
+    let mut raw: Vec<u8> = Vec::new();
+    let mut truncated = false;
+    let read_result: Result<(), String> = (|| {
+        let mut file =
+            std::fs::File::open(log_file).map_err(|e| format!("open {}: {}", log_file.display(), e))?;
+        let size = file
+            .metadata()
+            .map_err(|e| format!("stat {}: {}", log_file.display(), e))?
+            .len() as usize;
+        if size == 0 {
+            return Ok(());
+        }
+
+        if size <= max_bytes {
+            file.read_to_end(&mut raw)
+                .map_err(|e| format!("read {}: {}", log_file.display(), e))?;
+            return Ok(());
+        }
+
+        let mut pos = size as u64;
+        let mut chunks: Vec<Vec<u8>> = Vec::new();
+        let mut total = 0usize;
+        let mut newline_count = 0usize;
+        let mut chunk_size = max_bytes.min(8192).max(1);
+        let hard_cap = max_bytes.saturating_mul(2).max(max_bytes);
+
+        while pos > 0
+            && (total < max_bytes || newline_count < tail_lines.saturating_add(1))
+            && total < hard_cap
+        {
+            let read_size = chunk_size.min(pos as usize);
+            pos -= read_size as u64;
+            file.seek(SeekFrom::Start(pos))
+                .map_err(|e| format!("seek {}: {}", log_file.display(), e))?;
+            let mut buf = vec![0u8; read_size];
+            file.read_exact(&mut buf)
+                .map_err(|e| format!("read {}: {}", log_file.display(), e))?;
+            newline_count += buf.iter().filter(|b| **b == b'\n').count();
+            total += buf.len();
+            chunks.push(buf);
+            chunk_size = (chunk_size * 2).min(65_536);
+        }
+
+        chunks.reverse();
+        raw = chunks.concat();
+        truncated = pos > 0;
+        Ok(())
+    })();
+
+    if let Err(err) = read_result {
+        return DebugLogSnapshot {
+            tail_text: format!("(error reading: {err})"),
+            full_text: None,
+        };
+    }
+
+    let mut full_raw = raw.clone();
+    if truncated && full_raw.len() > max_bytes {
+        let cut = full_raw.len() - max_bytes;
+        let on_boundary = cut > 0 && full_raw[cut - 1] == b'\n';
+        full_raw = full_raw[cut..].to_vec();
+        if !on_boundary {
+            if let Some(idx) = full_raw.iter().position(|b| *b == b'\n') {
+                full_raw = full_raw[idx + 1..].to_vec();
+            }
+        }
+    }
+
+    let text = String::from_utf8_lossy(&raw);
+    let mut lines: Vec<&str> = text.lines().collect();
+    if lines.is_empty() {
+        return DebugLogSnapshot {
+            tail_text: "(log file empty)".to_string(),
+            full_text: None,
+        };
+    }
+
+    let start = lines.len().saturating_sub(tail_lines);
+    let tail = lines.drain(start..).collect::<Vec<_>>().join("\n");
+    let mut full_text = String::from_utf8_lossy(&full_raw).to_string();
+    if truncated {
+        full_text = format!(
+            "[... truncated — showing last ~{}KB ...]\n{}",
+            max_bytes / 1024,
+            full_text
+        );
+    }
+    DebugLogSnapshot {
+        tail_text: tail,
+        full_text: Some(full_text),
+    }
+}
+
 fn collect_debug_report(cli: &Cli, lines: u32) -> Result<String, AgentError> {
     let now = chrono::Utc::now().to_rfc3339();
     let root = hermes_state_root(cli);
@@ -5771,18 +5887,9 @@ fn collect_debug_report(cli: &Cli, lines: u32) -> Result<String, AgentError> {
         ));
     }
     report.push_str("\n## Recent Logs\n\n```\n");
-    if log_file.exists() {
-        let content = std::fs::read_to_string(&log_file)
-            .map_err(|e| AgentError::Io(format!("read log {}: {}", log_file.display(), e)))?;
-        let all_lines: Vec<&str> = content.lines().collect();
-        let start = all_lines.len().saturating_sub(lines as usize);
-        for line in &all_lines[start..] {
-            report.push_str(line);
-            report.push('\n');
-        }
-    } else {
-        report.push_str("(log file not found)\n");
-    }
+    let snapshot = capture_debug_log_snapshot(&log_file, lines as usize, DEBUG_LOG_SNAPSHOT_MAX_BYTES);
+    report.push_str(&snapshot.tail_text);
+    report.push('\n');
     report.push_str("```\n");
     Ok(report)
 }
@@ -6620,8 +6727,58 @@ mod tests {
         assert_eq!(normalize_auth_provider("tg"), "telegram");
         assert_eq!(normalize_auth_provider("wechat"), "weixin");
         assert_eq!(normalize_auth_provider("wx"), "weixin");
+        assert_eq!(normalize_auth_provider("step-plan"), "stepfun");
         assert_eq!(normalize_auth_provider("api-server"), "api_server");
         assert_eq!(normalize_auth_provider("mm"), "mattermost");
+    }
+
+    #[test]
+    fn provider_env_var_maps_stepfun() {
+        assert_eq!(provider_env_var("stepfun"), Some("STEPFUN_API_KEY"));
+        assert_eq!(provider_env_var("step"), None);
+        assert_eq!(secret_provider_aliases("stepfun"), vec!["stepfun", "step"]);
+    }
+
+    #[test]
+    fn capture_debug_log_snapshot_preserves_boundary_line() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let log_path = tmp.path().join("hermes.log");
+        std::fs::write(&log_path, "line1\nline2\nline3\n").expect("write log");
+
+        let snap = capture_debug_log_snapshot(&log_path, 1, 12);
+        let full = snap.full_text.unwrap_or_default();
+        assert!(full.contains("line2\nline3"));
+        assert!(!full.contains("line1"));
+    }
+
+    #[test]
+    fn capture_debug_log_snapshot_caps_memory_with_long_lines() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let log_path = tmp.path().join("hermes.log");
+        let long = "x".repeat(256 * 1024);
+        std::fs::write(&log_path, long).expect("write long log");
+
+        let max_bytes = 4096usize;
+        let snap = capture_debug_log_snapshot(&log_path, 5, max_bytes);
+        let full = snap.full_text.unwrap_or_default();
+        assert!(
+            full.len() <= (max_bytes * 2) + 128,
+            "full snapshot should obey hard cap"
+        );
+    }
+
+    #[test]
+    fn run_sessions_db_auto_maintenance_degrades_when_home_is_invalid() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let bad_home = tmp.path().join("not-a-dir");
+        std::fs::write(&bad_home, "x").expect("write blocker file");
+
+        let mut cfg = hermes_config::GatewayConfig::default();
+        cfg.home_dir = Some(bad_home.to_string_lossy().to_string());
+        cfg.sessions.auto_prune = true;
+
+        let result = std::panic::catch_unwind(|| run_sessions_db_auto_maintenance(&cfg));
+        assert!(result.is_ok(), "maintenance should degrade without panicking");
     }
 
     #[test]

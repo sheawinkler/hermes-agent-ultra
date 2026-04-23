@@ -9,6 +9,7 @@ pub fn known_providers() -> Vec<&'static str> {
         "qwen-oauth",
         "kimi",
         "minimax",
+        "stepfun",
         "nous",
         "copilot",
         "copilot-acp",
