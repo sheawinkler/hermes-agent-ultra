@@ -432,6 +432,11 @@ pub struct AgentConfig {
     #[serde(default = "default_thinking_prefill_max_retries")]
     pub thinking_prefill_max_retries: u32,
 
+    /// Additional retries for streaming transport failures during one turn's
+    /// streaming collection path.
+    #[serde(default = "default_stream_read_max_retries")]
+    pub stream_read_max_retries: u32,
+
     /// Run one compression pass before the first LLM call if context is already over threshold.
     #[serde(default = "default_preflight_context_compress")]
     pub preflight_context_compress: bool,
@@ -517,6 +522,10 @@ fn default_thinking_prefill_max_retries() -> u32 {
     2
 }
 
+fn default_stream_read_max_retries() -> u32 {
+    2
+}
+
 fn default_preflight_context_compress() -> bool {
     true
 }
@@ -579,6 +588,7 @@ impl Default for AgentConfig {
             budget_pressure_enabled: default_budget_pressure_enabled(),
             empty_content_max_retries: default_empty_content_max_retries(),
             thinking_prefill_max_retries: default_thinking_prefill_max_retries(),
+            stream_read_max_retries: default_stream_read_max_retries(),
             preflight_context_compress: default_preflight_context_compress(),
             persist_user_message: None,
             invalid_tool_call_max_retries: default_invalid_tool_call_max_retries(),
@@ -2308,7 +2318,7 @@ impl AgentLoop {
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
             .map(|v| v.min(10))
-            .unwrap_or(2);
+            .unwrap_or(self.config.stream_read_max_retries.min(10));
 
         'stream_attempt: for stream_attempt in 0..=max_stream_retries {
             let mut stream = if let Some(rt) = route {
@@ -4829,6 +4839,7 @@ mod tests {
         assert_eq!(config.rollback_on_tool_error_threshold, 3);
         assert!(!config.smart_model_routing.enabled);
         assert!(config.background_review_metrics_enabled);
+        assert_eq!(config.stream_read_max_retries, 2);
     }
 
     #[test]
@@ -5253,17 +5264,14 @@ mod tests {
 
     #[tokio::test]
     async fn stream_mid_tool_call_silent_retry_recovers_tool_call() {
-        let prev = std::env::var("HERMES_STREAM_RETRIES").ok();
-        std::env::set_var("HERMES_STREAM_RETRIES", "2");
-
         let provider = Arc::new(StreamRetryProvider::new(
             StreamRetryScenario::RecoverOnSecondAttempt,
         ));
-        let agent = AgentLoop::new(
-            AgentConfig::default(),
-            Arc::new(ToolRegistry::new()),
-            provider.clone(),
-        );
+        let cfg = AgentConfig {
+            stream_read_max_retries: 2,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider.clone());
         let mut ctx = ContextManager::default_budget();
         ctx.add_message(Message::system("system"));
         ctx.add_message(Message::user("run"));
@@ -5279,11 +5287,6 @@ mod tests {
                 }
             })
             .await;
-
-        match prev {
-            Some(v) => std::env::set_var("HERMES_STREAM_RETRIES", v),
-            None => std::env::remove_var("HERMES_STREAM_RETRIES"),
-        }
 
         let StreamCollectOutcome::Complete(resp) = out.expect("stream should recover") else {
             panic!("expected complete response");
@@ -5304,17 +5307,14 @@ mod tests {
 
     #[tokio::test]
     async fn stream_mid_tool_call_exhausted_retries_returns_error() {
-        let prev = std::env::var("HERMES_STREAM_RETRIES").ok();
-        std::env::set_var("HERMES_STREAM_RETRIES", "1");
-
         let provider = Arc::new(StreamRetryProvider::new(
             StreamRetryScenario::AlwaysFailMidToolCall,
         ));
-        let agent = AgentLoop::new(
-            AgentConfig::default(),
-            Arc::new(ToolRegistry::new()),
-            provider.clone(),
-        );
+        let cfg = AgentConfig {
+            stream_read_max_retries: 1,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider.clone());
         let mut ctx = ContextManager::default_budget();
         ctx.add_message(Message::system("system"));
         ctx.add_message(Message::user("run"));
@@ -5330,11 +5330,6 @@ mod tests {
                 }
             })
             .await;
-
-        match prev {
-            Some(v) => std::env::set_var("HERMES_STREAM_RETRIES", v),
-            None => std::env::remove_var("HERMES_STREAM_RETRIES"),
-        }
 
         let err = match out {
             Err(err) => err,
@@ -5350,15 +5345,12 @@ mod tests {
 
     #[tokio::test]
     async fn stream_text_only_drop_does_not_retry() {
-        let prev = std::env::var("HERMES_STREAM_RETRIES").ok();
-        std::env::set_var("HERMES_STREAM_RETRIES", "2");
-
         let provider = Arc::new(StreamRetryProvider::new(StreamRetryScenario::TextOnlyDrop));
-        let agent = AgentLoop::new(
-            AgentConfig::default(),
-            Arc::new(ToolRegistry::new()),
-            provider.clone(),
-        );
+        let cfg = AgentConfig {
+            stream_read_max_retries: 2,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider.clone());
         let mut ctx = ContextManager::default_budget();
         ctx.add_message(Message::system("system"));
         ctx.add_message(Message::user("run"));
@@ -5374,11 +5366,6 @@ mod tests {
                 }
             })
             .await;
-
-        match prev {
-            Some(v) => std::env::set_var("HERMES_STREAM_RETRIES", v),
-            None => std::env::remove_var("HERMES_STREAM_RETRIES"),
-        }
 
         let err = match out {
             Err(err) => err,
