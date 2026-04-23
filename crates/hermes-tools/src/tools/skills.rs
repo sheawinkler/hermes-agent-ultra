@@ -374,7 +374,10 @@ fn collect_available_skill_files(skill_dir: &Path) -> Value {
                 .and_then(|e| e.to_str())
                 .unwrap_or("")
                 .to_ascii_lowercase();
-            if matches!(ext.as_str(), "md" | "py" | "yaml" | "yml" | "json" | "tex" | "sh") {
+            if matches!(
+                ext.as_str(),
+                "md" | "py" | "yaml" | "yml" | "json" | "tex" | "sh"
+            ) {
                 categories
                     .get_mut("other")
                     .expect("category exists")
@@ -677,7 +680,10 @@ mod tests {
             .unwrap();
         let payload: Value = serde_json::from_str(&result).unwrap();
         assert_eq!(payload["success"], Value::Bool(true));
-        assert_eq!(payload["content"], Value::String("API docs here".to_string()));
+        assert_eq!(
+            payload["content"],
+            Value::String("API docs here".to_string())
+        );
     }
 
     #[tokio::test]

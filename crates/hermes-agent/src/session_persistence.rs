@@ -228,8 +228,9 @@ impl SessionPersistence {
                 .query_map(rusqlite::params![cutoff], |row| row.get::<_, String>(0))
                 .map_err(|e| AgentError::Io(format!("Failed to query stale sessions: {e}")))?;
             for row in rows {
-                session_ids
-                    .push(row.map_err(|e| AgentError::Io(format!("Failed to read session id: {e}")))?);
+                session_ids.push(
+                    row.map_err(|e| AgentError::Io(format!("Failed to read session id: {e}")))?,
+                );
             }
         }
         if session_ids.is_empty() {
@@ -806,7 +807,9 @@ mod tests {
 
         let conn = rusqlite::Connection::open(&sp.db_path).unwrap();
         let still_there: i64 = conn
-            .query_row("SELECT COUNT(*) FROM sessions WHERE id='old-2'", [], |r| r.get(0))
+            .query_row("SELECT COUNT(*) FROM sessions WHERE id='old-2'", [], |r| {
+                r.get(0)
+            })
             .unwrap();
         assert_eq!(still_there, 1);
     }

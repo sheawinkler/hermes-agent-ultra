@@ -549,9 +549,7 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             .unwrap_or_else(|| "(not set)".to_string())),
         ["sessions", "auto_prune"] => Ok(config.sessions.auto_prune.to_string()),
         ["sessions", "retention_days"] => Ok(config.sessions.retention_days.to_string()),
-        ["sessions", "vacuum_after_prune"] => {
-            Ok(config.sessions.vacuum_after_prune.to_string())
-        }
+        ["sessions", "vacuum_after_prune"] => Ok(config.sessions.vacuum_after_prune.to_string()),
         ["sessions", "min_interval_hours"] => Ok(config.sessions.min_interval_hours.to_string()),
         ["llm", provider, "api_key"] => Ok(
             match config
