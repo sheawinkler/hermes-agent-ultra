@@ -11,6 +11,8 @@ use serde_json::Value;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use hermes_intelligence::anthropic_adapter::get_anthropic_max_output;
+
 use hermes_core::{
     AgentError, FunctionCall, FunctionCallDelta, LlmProvider, LlmResponse, Message, MessageRole,
     StreamChunk, StreamDelta, ToolCall, ToolCallDelta, ToolSchema, UsageStats,
@@ -802,6 +804,17 @@ impl AnthropicProvider {
             || lower.contains("moonshot.cn")
     }
 
+    /// Resolve Anthropic Messages `max_tokens` to a strictly positive value.
+    ///
+    /// `Some(0)` is treated as invalid and falls back to the model ceiling,
+    /// preventing avoidable 400s from upstream APIs.
+    fn resolve_messages_max_tokens(requested: Option<u32>, model: &str) -> u32 {
+        if let Some(value) = requested.filter(|v| *v > 0) {
+            return value;
+        }
+        get_anthropic_max_output(model).max(1)
+    }
+
     /// Convert internal messages to Anthropic format, extracting system message.
     fn convert_messages(
         messages: &[Message],
@@ -1028,11 +1041,12 @@ impl LlmProvider for AnthropicProvider {
         let api_key = self.effective_api_key();
         let (system_text, anthropic_messages) =
             Self::convert_messages(messages, Some(self.base_url.as_str()));
+        let resolved_max_tokens = Self::resolve_messages_max_tokens(max_tokens, effective_model);
 
         let mut body = serde_json::json!({
             "model": effective_model,
             "messages": anthropic_messages,
-            "max_tokens": max_tokens.unwrap_or(4096),
+            "max_tokens": resolved_max_tokens,
         });
 
         if let Some(ref sys) = system_text {
@@ -1102,11 +1116,13 @@ impl LlmProvider for AnthropicProvider {
                 &messages,
                 Some(provider.base_url.as_str()),
             );
+            let resolved_max_tokens =
+                AnthropicProvider::resolve_messages_max_tokens(max_tokens, effective_model);
 
             let mut body = serde_json::json!({
                 "model": effective_model,
                 "messages": anthropic_messages,
-                "max_tokens": max_tokens.unwrap_or(4096),
+                "max_tokens": resolved_max_tokens,
                 "stream": true,
             });
 
@@ -2073,5 +2089,25 @@ mod tests {
         assert_eq!(converted[0]["name"], "read_file");
         assert_eq!(converted[0]["description"], "Read a file");
         assert!(converted[0].get("input_schema").is_some());
+    }
+
+    #[test]
+    fn test_anthropic_resolve_messages_max_tokens_prefers_positive_request() {
+        let resolved = AnthropicProvider::resolve_messages_max_tokens(Some(8192), "claude-opus-4-1");
+        assert_eq!(resolved, 8192);
+    }
+
+    #[test]
+    fn test_anthropic_resolve_messages_max_tokens_zero_falls_back_to_model_default() {
+        let resolved = AnthropicProvider::resolve_messages_max_tokens(Some(0), "claude-opus-4-6");
+        assert!(resolved > 0);
+        assert_eq!(resolved, get_anthropic_max_output("claude-opus-4-6"));
+    }
+
+    #[test]
+    fn test_anthropic_resolve_messages_max_tokens_none_falls_back_to_model_default() {
+        let resolved = AnthropicProvider::resolve_messages_max_tokens(None, "claude-sonnet-4-6");
+        assert!(resolved > 0);
+        assert_eq!(resolved, get_anthropic_max_output("claude-sonnet-4-6"));
     }
 }
