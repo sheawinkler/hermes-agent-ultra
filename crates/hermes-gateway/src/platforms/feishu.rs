@@ -453,6 +453,7 @@ impl FeishuAdapter {
     pub async fn send_text(&self, chat_id: &str, text: &str) -> Result<String, GatewayError> {
         let token = self.get_tenant_token().await?;
         let url = format!("{}/im/v1/messages?receive_id_type=chat_id", FEISHU_API_BASE);
+        let text = format_message(text);
 
         let body = serde_json::json!({
             "receive_id": chat_id,
@@ -480,6 +481,7 @@ impl FeishuAdapter {
     pub async fn edit_text(&self, message_id: &str, text: &str) -> Result<(), GatewayError> {
         let token = self.get_tenant_token().await?;
         let url = format!("{}/im/v1/messages/{}", FEISHU_API_BASE, message_id);
+        let text = format_message(text);
 
         let body = serde_json::json!({
             "msg_type": "text",
@@ -1267,6 +1269,10 @@ fn image_fallback_text(image_url: &str, caption: Option<&str>) -> String {
     }
 }
 
+fn format_message(content: &str) -> String {
+    content.trim().to_string()
+}
+
 // ---------------------------------------------------------------------------
 // PlatformAdapter trait implementation
 // ---------------------------------------------------------------------------
@@ -1705,5 +1711,11 @@ mod tests {
     fn image_fallback_text_with_caption() {
         let text = image_fallback_text("https://cdn.example.com/path/diagram", Some("Figure 1"));
         assert_eq!(text, "Figure 1\nhttps://cdn.example.com/path/diagram");
+    }
+
+    #[test]
+    fn format_message_trims_whitespace() {
+        assert_eq!(format_message("\n\nhello world\n"), "hello world");
+        assert_eq!(format_message("  hello world  "), "hello world");
     }
 }
