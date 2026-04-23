@@ -14,6 +14,9 @@ use hermes_cli::app::{
 };
 use hermes_cli::cli::{Cli, CliCommand};
 use hermes_cli::config_env::hydrate_env_from_config;
+use hermes_cli::model_switch::{
+    curated_provider_slugs, normalize_provider_model, provider_catalog_entries,
+};
 use hermes_cli::platform_toolsets::{resolve_platform_tool_schemas, tool_definition_summary};
 use hermes_cli::runtime_tool_wiring::{
     wire_cron_scheduler_backend, wire_gateway_clarify_backend, wire_gateway_messaging_backend,
@@ -337,19 +340,34 @@ async fn run_model(cli: Cli, provider_model: Option<String>) -> Result<(), Agent
 
     match provider_model {
         Some(pm) => {
-            println!("Model switched to: {}", pm);
-            println!("(To persist, run: hermes config set model {})", pm);
+            let normalized = normalize_provider_model(&pm)?;
+            println!("Model switched to: {}", normalized);
+            println!("(To persist, run: hermes config set model {})", normalized);
         }
         None => {
             let current = config.model.as_deref().unwrap_or("gpt-4o");
             println!("Current model: {}", current);
 
-            // List known providers
+            // List providers with merged models.dev-aware previews.
+            let providers = curated_provider_slugs();
+            let entries = provider_catalog_entries(&providers, 3).await;
             println!("\nAvailable providers:");
-            println!("  openai       — OpenAI (gpt-4o, gpt-4o-mini, ...)");
-            println!("  anthropic    — Anthropic (claude-3-5-sonnet, claude-3-opus, ...)");
-            println!("  openrouter   — OpenRouter (multi-provider routing)");
-            println!("  stepfun      — Step Plan / StepFun (step-3.5-flash, ...)");
+            if entries.is_empty() {
+                println!("  openai       — OpenAI (gpt-4o, gpt-4o-mini, ...)");
+                println!("  anthropic    — Anthropic (claude-3-5-sonnet, claude-3-opus, ...)");
+                println!("  openrouter   — OpenRouter (multi-provider routing)");
+                println!("  stepfun      — Step Plan / StepFun (step-3.5-flash, ...)");
+            } else {
+                for entry in entries {
+                    let preview = entry.models.join(", ");
+                    let suffix = if entry.total_models > entry.models.len() {
+                        format!(" (+{} more)", entry.total_models - entry.models.len())
+                    } else {
+                        String::new()
+                    };
+                    println!("  {:<12} — {}{}", entry.provider, preview, suffix);
+                }
+            }
             println!("\nUsage: hermes model <provider>:<model>");
         }
     }

@@ -1301,6 +1301,7 @@ dependencies = [
  "hermes-cron",
  "hermes-environments",
  "hermes-gateway",
+ "hermes-intelligence",
  "hermes-mcp",
  "hermes-skills",
  "hermes-telemetry",

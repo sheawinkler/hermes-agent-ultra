@@ -52,6 +52,7 @@ hermes-acp = { workspace = true }
 hermes-skills = { workspace = true }
 hermes-auth = { workspace = true }
 hermes-telemetry = { workspace = true }
+hermes-intelligence = { workspace = true }
 clap = { workspace = true }
 clap_complete = "4"
 ratatui = { workspace = true }
