@@ -999,3 +999,23 @@
 - Verification (targeted):
   - `cargo test -p hermes-cli qqbot_ -- --nocapture`
   - `python3 scripts/generate-upstream-patch-queue.py --repo-root .`
+
+## 2026-04-23 impl-13 (snapshot decomposition for issue #53)
+- Scope:
+  - Decompose upstream snapshot delta (`main` vs `upstream/main`) into deterministic file-group artifacts for issue `#53`.
+- Repo artifacts:
+  - Added `scripts/generate-upstream-snapshot-diff-map.py`.
+  - Generated:
+    - `docs/parity/upstream-snapshot-diff-map.json`
+    - `docs/parity/upstream-snapshot-diff-map.md`
+  - Captures grouped path prefixes, status counts, classification buckets, and tranche summaries.
+- Snapshot decomposition evidence:
+  - Total diff entries: `2697` (`A=2283`, `D=404`, `M=10`)
+  - Tranche summary:
+    - `ux_surface=1132`
+    - `validation_surface=767`
+    - `rust_divergence=346`
+    - `runtime_surface=271`
+    - `infra_surface=72`
+- Verification:
+  - `python3 scripts/generate-upstream-snapshot-diff-map.py --repo-root .`

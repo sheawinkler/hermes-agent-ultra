@@ -1,0 +1,1373 @@
+{
+  "generated_at_utc": "2026-04-23T18:09:02.368007+00:00",
+  "groups": [
+    {
+      "classification": "needs_rust_implementation_review",
+      "prefix": "tests",
+      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
+      "sample_paths": [
+        "tests/__init__.py",
+        "tests/acp/__init__.py",
+        "tests/acp/test_approval_isolation.py",
+        "tests/acp/test_auth.py",
+        "tests/acp/test_entry.py",
+        "tests/acp/test_events.py",
+        "tests/acp/test_mcp_e2e.py",
+        "tests/acp/test_permissions.py",
+        "tests/acp/test_ping_suppression.py",
+        "tests/acp/test_server.py",
+        "tests/acp/test_session.py",
+        "tests/acp/test_tools.py",
+        "tests/agent/__init__.py",
+        "tests/agent/test_anthropic_adapter.py",
+        "tests/agent/test_auxiliary_client.py"
+      ],
+      "status_counts": {
+        "A": 724
+      },
+      "total": 724
+    },
+    {
+      "classification": "needs_rust_implementation_review",
+      "prefix": "skills",
+      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
+      "sample_paths": [
+        "skills/apple/DESCRIPTION.md",
+        "skills/apple/apple-notes/SKILL.md",
+        "skills/apple/apple-reminders/SKILL.md",
+        "skills/apple/findmy/SKILL.md",
+        "skills/apple/imessage/SKILL.md",
+        "skills/autonomous-ai-agents/DESCRIPTION.md",
+        "skills/autonomous-ai-agents/claude-code/SKILL.md",
+        "skills/autonomous-ai-agents/codex/SKILL.md",
+        "skills/autonomous-ai-agents/hermes-agent/SKILL.md",
+        "skills/autonomous-ai-agents/opencode/SKILL.md",
+        "skills/creative/DESCRIPTION.md",
+        "skills/creative/architecture-diagram/SKILL.md",
+        "skills/creative/architecture-diagram/templates/template.html",
+        "skills/creative/ascii-art/SKILL.md",
+        "skills/creative/ascii-video/README.md"
+      ],
+      "status_counts": {
+        "A": 473
+      },
+      "total": 473
+    },
+    {
+      "classification": "intentional_divergence_rust_primary",
+      "prefix": "crates",
+      "rationale": "Rust workspace remains first-class in this fork; upstream snapshot is Python-first.",
+      "sample_paths": [
+        "crates/hermes-acp/Cargo.toml",
+        "crates/hermes-acp/src/events.rs",
+        "crates/hermes-acp/src/handler.rs",
+        "crates/hermes-acp/src/lib.rs",
+        "crates/hermes-acp/src/permissions.rs",
+        "crates/hermes-acp/src/protocol.rs",
+        "crates/hermes-acp/src/server.rs",
+        "crates/hermes-acp/src/session.rs",
+        "crates/hermes-agent/Cargo.toml",
+        "crates/hermes-agent/src/agent_loop.rs",
+        "crates/hermes-agent/src/api_bridge.rs",
+        "crates/hermes-agent/src/auxiliary_builder.rs",
+        "crates/hermes-agent/src/budget.rs",
+        "crates/hermes-agent/src/compression.rs",
+        "crates/hermes-agent/src/context.rs"
+      ],
+      "status_counts": {
+        "D": 344
+      },
+      "total": 344
+    },
+    {
+      "classification": "needs_rust_implementation_review",
+      "prefix": "ui-tui",
+      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
+      "sample_paths": [
+        "ui-tui/.gitignore",
+        "ui-tui/.prettierrc",
+        "ui-tui/README.md",
+        "ui-tui/eslint.config.mjs",
+        "ui-tui/package-lock.json",
+        "ui-tui/package.json",
+        "ui-tui/packages/hermes-ink/ambient.d.ts",
+        "ui-tui/packages/hermes-ink/index.d.ts",
+        "ui-tui/packages/hermes-ink/index.js",
+        "ui-tui/packages/hermes-ink/package-lock.json",
+        "ui-tui/packages/hermes-ink/package.json",
+        "ui-tui/packages/hermes-ink/src/bootstrap/state.ts",
+        "ui-tui/packages/hermes-ink/src/entry-exports.ts",
+        "ui-tui/packages/hermes-ink/src/hooks/use-stderr.ts",
+        "ui-tui/packages/hermes-ink/src/hooks/use-stdout.ts"
+      ],
+      "status_counts": {
+        "A": 254
+      },
+      "total": 254
+    },
+    {
+      "classification": "needs_rust_implementation_review",
+      "prefix": "optional-skills",
+      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
+      "sample_paths": [
+        "optional-skills/DESCRIPTION.md",
+        "optional-skills/autonomous-ai-agents/DESCRIPTION.md",
+        "optional-skills/autonomous-ai-agents/blackbox/SKILL.md",
+        "optional-skills/autonomous-ai-agents/honcho/SKILL.md",
+        "optional-skills/blockchain/base/SKILL.md",
+        "optional-skills/blockchain/base/scripts/base_client.py",
+        "optional-skills/blockchain/solana/SKILL.md",
+        "optional-skills/blockchain/solana/scripts/solana_client.py",
+        "optional-skills/communication/DESCRIPTION.md",
+        "optional-skills/communication/one-three-one-rule/SKILL.md",
+        "optional-skills/creative/blender-mcp/SKILL.md",
+        "optional-skills/creative/concept-diagrams/SKILL.md",
+        "optional-skills/creative/concept-diagrams/examples/apartment-floor-plan-conversion.md",
+        "optional-skills/creative/concept-diagrams/examples/automated-password-reset-flow.md",
+        "optional-skills/creative/concept-diagrams/examples/autonomous-llm-research-agent-flow.md"
+      ],
+      "status_counts": {
+        "A": 189,
+        "M": 2
+      },
+      "total": 191
+    },
+    {
+      "classification": "needs_rust_implementation_review",
+      "prefix": "website",
+      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
+      "sample_paths": [
+        "website/.gitignore",
+        "website/README.md",
+        "website/docs/developer-guide/_category_.json",
+        "website/docs/developer-guide/acp-internals.md",
+        "website/docs/developer-guide/adding-platform-adapters.md",
+        "website/docs/developer-guide/adding-providers.md",
+        "website/docs/developer-guide/adding-tools.md",
+        "website/docs/developer-guide/agent-loop.md",
+        "website/docs/developer-guide/architecture.md",
+        "website/docs/developer-guide/context-compression-and-caching.md",
+        "website/docs/developer-guide/context-engine-plugin.md",
+        "website/docs/developer-guide/contributing.md",
+        "website/docs/developer-guide/creating-skills.md",
+        "website/docs/developer-guide/cron-internals.md",
+        "website/docs/developer-guide/environments.md"
+      ],
+      "status_counts": {
+        "A": 150
+      },
+      "total": 150
+    },
+    {
+      "classification": "needs_rust_implementation_review",
+      "prefix": "tools",
+      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
+      "sample_paths": [
+        "tools/__init__.py",
+        "tools/ansi_strip.py",
+        "tools/approval.py",
+        "tools/binary_extensions.py",
+        "tools/browser_camofox.py",
+        "tools/browser_camofox_state.py",
+        "tools/browser_cdp_tool.py",
+        "tools/browser_providers/__init__.py",
+        "tools/browser_providers/base.py",
+        "tools/browser_providers/browser_use.py",
+        "tools/browser_providers/browserbase.py",
+        "tools/browser_providers/firecrawl.py",
+        "tools/browser_tool.py",
+        "tools/budget_config.py",
+        "tools/checkpoint_manager.py"
+      ],
+      "status_counts": {
+        "A": 79
+      },
+      "total": 79
+    },
+    {
+      "classification": "needs_rust_implementation_review",
+      "prefix": "web",
+      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
+      "sample_paths": [
+        "web/README.md",
+        "web/eslint.config.js",
+        "web/index.html",
+        "web/package-lock.json",
+        "web/package.json",
+        "web/public/favicon.ico",
+        "web/public/fonts/Collapse-Bold.woff2",
+        "web/public/fonts/Collapse-Regular.woff2",
+        "web/public/fonts/Mondwest-Regular.woff2",
+        "web/public/fonts/RulesCompressed-Medium.woff2",
+        "web/public/fonts/RulesCompressed-Regular.woff2",
+        "web/public/fonts/RulesExpanded-Bold.woff2",
+        "web/public/fonts/RulesExpanded-Regular.woff2",
+        "web/src/App.tsx",
+        "web/src/components/AutoField.tsx"
+      ],
+      "status_counts": {
+        "A": 64
+      },
+      "total": 64
+    },
+    {
+      "classification": "needs_rust_implementation_review",
+      "prefix": "hermes_cli",
+      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
+      "sample_paths": [
+        "hermes_cli/__init__.py",
+        "hermes_cli/auth.py",
+        "hermes_cli/auth_commands.py",
+        "hermes_cli/backup.py",
+        "hermes_cli/banner.py",
+        "hermes_cli/callbacks.py",
+        "hermes_cli/claw.py",
+        "hermes_cli/cli_output.py",
+        "hermes_cli/clipboard.py",
+        "hermes_cli/codex_models.py",
+        "hermes_cli/colors.py",
+        "hermes_cli/commands.py",
+        "hermes_cli/completion.py",
+        "hermes_cli/config.py",
+        "hermes_cli/copilot_auth.py"
+      ],
+      "status_counts": {
+        "A": 51
+      },
+      "total": 51
+    },
+    {
+      "classification": "needs_rust_implementation_review",
+      "prefix": "gateway",
+      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
+      "sample_paths": [
+        "gateway/__init__.py",
+        "gateway/builtin_hooks/__init__.py",
+        "gateway/builtin_hooks/boot_md.py",
+        "gateway/channel_directory.py",
+        "gateway/config.py",
+        "gateway/delivery.py",
+        "gateway/display_config.py",
+        "gateway/hooks.py",
+        "gateway/mirror.py",
+        "gateway/pairing.py",
+        "gateway/platforms/ADDING_A_PLATFORM.md",
+        "gateway/platforms/__init__.py",
+        "gateway/platforms/api_server.py",
+        "gateway/platforms/base.py",
+        "gateway/platforms/bluebubbles.py"
+      ],
+      "status_counts": {
+        "A": 49
+      },
+      "total": 49
+    },
+    {
+      "classification": "needs_rust_implementation_review",
+      "prefix": "agent",
+      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
+      "sample_paths": [
+        "agent/__init__.py",
+        "agent/account_usage.py",
+        "agent/anthropic_adapter.py",
+        "agent/auxiliary_client.py",
+        "agent/bedrock_adapter.py",
+        "agent/codex_responses_adapter.py",
+        "agent/context_compressor.py",
+        "agent/context_engine.py",
+        "agent/context_references.py",
+        "agent/copilot_acp_client.py",
+        "agent/credential_pool.py",
+        "agent/credential_sources.py",
+        "agent/display.py",
+        "agent/error_classifier.py",
+        "agent/file_safety.py"
+      ],
+      "status_counts": {
+        "A": 48
+      },
+      "total": 48
+    },
+    {
+      "classification": "needs_rust_implementation_review",
+      "prefix": "plugins",
+      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
+      "sample_paths": [
+        "plugins/__init__.py",
+        "plugins/context_engine/__init__.py",
+        "plugins/disk-cleanup/README.md",
+        "plugins/disk-cleanup/__init__.py",
+        "plugins/disk-cleanup/disk_cleanup.py",
+        "plugins/disk-cleanup/plugin.yaml",
+        "plugins/example-dashboard/dashboard/dist/index.js",
+        "plugins/example-dashboard/dashboard/manifest.json",
+        "plugins/example-dashboard/dashboard/plugin_api.py",
+        "plugins/image_gen/openai-codex/__init__.py",
+        "plugins/image_gen/openai-codex/plugin.yaml",
+        "plugins/image_gen/openai/__init__.py",
+        "plugins/image_gen/openai/plugin.yaml",
+        "plugins/memory/__init__.py",
+        "plugins/memory/byterover/README.md"
+      ],
+      "status_counts": {
+        "A": 44
+      },
+      "total": 44
+    },
+    {
+      "classification": "needs_rust_implementation_review",
+      "prefix": "environments",
+      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
+      "sample_paths": [
+        "environments/README.md",
+        "environments/__init__.py",
+        "environments/agent_loop.py",
+        "environments/agentic_opd_env.py",
+        "environments/benchmarks/__init__.py",
+        "environments/benchmarks/tblite/README.md",
+        "environments/benchmarks/tblite/__init__.py",
+        "environments/benchmarks/tblite/default.yaml",
+        "environments/benchmarks/tblite/local.yaml",
+        "environments/benchmarks/tblite/local_vllm.yaml",
+        "environments/benchmarks/tblite/run_eval.sh",
+        "environments/benchmarks/tblite/tblite_env.py",
+        "environments/benchmarks/terminalbench_2/__init__.py",
+        "environments/benchmarks/terminalbench_2/default.yaml",
+        "environments/benchmarks/terminalbench_2/run_eval.sh"
+      ],
+      "status_counts": {
+        "A": 43
+      },
+      "total": 43
+    },
+    {
+      "classification": "selective_adopt_review",
+      "prefix": "scripts",
+      "rationale": "Installer/packaging/docs/infra deltas may be partially applicable and should be reviewed.",
+      "sample_paths": [
+        "scripts/build_skills_index.py",
+        "scripts/check-runtime-placeholders.sh",
+        "scripts/clippy-warning-gate.sh",
+        "scripts/contributor_audit.py",
+        "scripts/cron-upstream-sync.sh",
+        "scripts/discord-voice-doctor.py",
+        "scripts/generate-adapter-matrix.py",
+        "scripts/generate-global-parity-proof.py",
+        "scripts/generate-homebrew-formula.sh",
+        "scripts/generate-parity-matrix.py",
+        "scripts/generate-test-intent-mapping.py",
+        "scripts/generate-upstream-patch-queue.py",
+        "scripts/generate-workstream-status.py",
+        "scripts/git-hooks/pre-commit",
+        "scripts/hermes-gateway"
+      ],
+      "status_counts": {
+        "A": 16,
+        "D": 23,
+        "M": 1
+      },
+      "total": 40
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "docs",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "docs/installer-troubleshooting.md",
+        "docs/parity/README.md",
+        "docs/parity/adapter-feature-matrix.json",
+        "docs/parity/adapter-feature-matrix.md",
+        "docs/parity/batch-triage-log.md",
+        "docs/parity/compatibility-policy.md",
+        "docs/parity/divergence-validation.json",
+        "docs/parity/full-queue-triage-groups.json",
+        "docs/parity/full-queue-triage-groups.md",
+        "docs/parity/global-parity-program.md",
+        "docs/parity/global-parity-proof.json",
+        "docs/parity/global-parity-proof.md",
+        "docs/parity/global-parity-thresholds.json",
+        "docs/parity/intentional-divergence.json",
+        "docs/parity/parity-matrix.json"
+      ],
+      "status_counts": {
+        "D": 25
+      },
+      "total": 25
+    },
+    {
+      "classification": "selective_adopt_review",
+      "prefix": ".github",
+      "rationale": "Installer/packaging/docs/infra deltas may be partially applicable and should be reviewed.",
+      "sample_paths": [
+        ".github/ISSUE_TEMPLATE/bug_report.yml",
+        ".github/ISSUE_TEMPLATE/config.yml",
+        ".github/ISSUE_TEMPLATE/feature_request.yml",
+        ".github/ISSUE_TEMPLATE/setup_help.yml",
+        ".github/PULL_REQUEST_TEMPLATE.md",
+        ".github/actions/nix-setup/action.yml",
+        ".github/workflows/ci.yml",
+        ".github/workflows/contributor-check.yml",
+        ".github/workflows/deploy-site.yml",
+        ".github/workflows/docker-publish.yml",
+        ".github/workflows/docs-site-checks.yml",
+        ".github/workflows/nix-lockfile-check.yml",
+        ".github/workflows/nix-lockfile-fix.yml",
+        ".github/workflows/nix.yml",
+        ".github/workflows/parity-audit.yml"
+      ],
+      "status_counts": {
+        "A": 16,
+        "D": 3
+      },
+      "total": 19
+    },
+    {
+      "classification": "needs_rust_implementation_review",
+      "prefix": "acp_adapter",
+      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
+      "sample_paths": [
+        "acp_adapter/__init__.py",
+        "acp_adapter/__main__.py",
+        "acp_adapter/auth.py",
+        "acp_adapter/entry.py",
+        "acp_adapter/events.py",
+        "acp_adapter/permissions.py",
+        "acp_adapter/server.py",
+        "acp_adapter/session.py",
+        "acp_adapter/tools.py"
+      ],
+      "status_counts": {
+        "A": 9
+      },
+      "total": 9
+    },
+    {
+      "classification": "selective_adopt_review",
+      "prefix": "nix",
+      "rationale": "Installer/packaging/docs/infra deltas may be partially applicable and should be reviewed.",
+      "sample_paths": [
+        "nix/checks.nix",
+        "nix/configMergeScript.nix",
+        "nix/devShell.nix",
+        "nix/lib.nix",
+        "nix/nixosModules.nix",
+        "nix/packages.nix",
+        "nix/python.nix",
+        "nix/tui.nix",
+        "nix/web.nix"
+      ],
+      "status_counts": {
+        "A": 9
+      },
+      "total": 9
+    },
+    {
+      "classification": "needs_rust_implementation_review",
+      "prefix": "tui_gateway",
+      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
+      "sample_paths": [
+        "tui_gateway/__init__.py",
+        "tui_gateway/entry.py",
+        "tui_gateway/render.py",
+        "tui_gateway/server.py",
+        "tui_gateway/slash_worker.py"
+      ],
+      "status_counts": {
+        "A": 5
+      },
+      "total": 5
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "datagen-config-examples",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "datagen-config-examples/example_browser_tasks.jsonl",
+        "datagen-config-examples/run_browser_tasks.sh",
+        "datagen-config-examples/trajectory_compression.yaml",
+        "datagen-config-examples/web_research.yaml"
+      ],
+      "status_counts": {
+        "A": 4
+      },
+      "total": 4
+    },
+    {
+      "classification": "needs_rust_implementation_review",
+      "prefix": "cron",
+      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
+      "sample_paths": [
+        "cron/__init__.py",
+        "cron/jobs.py",
+        "cron/scheduler.py"
+      ],
+      "status_counts": {
+        "A": 3
+      },
+      "total": 3
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": ".plans",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        ".plans/openai-api-server.md",
+        ".plans/streaming-support.md"
+      ],
+      "status_counts": {
+        "A": 2
+      },
+      "total": 2
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "acp_registry",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "acp_registry/agent.json",
+        "acp_registry/icon.svg"
+      ],
+      "status_counts": {
+        "A": 2
+      },
+      "total": 2
+    },
+    {
+      "classification": "selective_adopt_review",
+      "prefix": "docker",
+      "rationale": "Installer/packaging/docs/infra deltas may be partially applicable and should be reviewed.",
+      "sample_paths": [
+        "docker/SOUL.md",
+        "docker/entrypoint.sh"
+      ],
+      "status_counts": {
+        "A": 2
+      },
+      "total": 2
+    },
+    {
+      "classification": "selective_adopt_review",
+      "prefix": "packaging",
+      "rationale": "Installer/packaging/docs/infra deltas may be partially applicable and should be reviewed.",
+      "sample_paths": [
+        "packaging/homebrew/README.md",
+        "packaging/homebrew/hermes-agent.rb"
+      ],
+      "status_counts": {
+        "A": 1,
+        "M": 1
+      },
+      "total": 2
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": ".ci",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        ".ci/clippy-allowlist.txt"
+      ],
+      "status_counts": {
+        "D": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": ".dockerignore",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        ".dockerignore"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": ".env.example",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        ".env.example"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": ".envrc",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        ".envrc"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": ".gitattributes",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        ".gitattributes"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "selective_adopt_review",
+      "prefix": ".gitignore",
+      "rationale": "Installer/packaging/docs/infra deltas may be partially applicable and should be reviewed.",
+      "sample_paths": [
+        ".gitignore"
+      ],
+      "status_counts": {
+        "M": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": ".gitmodules",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        ".gitmodules"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": ".mailmap",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        ".mailmap"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "selective_adopt_review",
+      "prefix": "AGENTS.md",
+      "rationale": "Installer/packaging/docs/infra deltas may be partially applicable and should be reviewed.",
+      "sample_paths": [
+        "AGENTS.md"
+      ],
+      "status_counts": {
+        "M": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "CONTRIBUTING.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "CONTRIBUTING.md"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "intentional_divergence_rust_primary",
+      "prefix": "Cargo.lock",
+      "rationale": "Rust workspace remains first-class in this fork; upstream snapshot is Python-first.",
+      "sample_paths": [
+        "Cargo.lock"
+      ],
+      "status_counts": {
+        "D": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "intentional_divergence_rust_primary",
+      "prefix": "Cargo.toml",
+      "rationale": "Rust workspace remains first-class in this fork; upstream snapshot is Python-first.",
+      "sample_paths": [
+        "Cargo.toml"
+      ],
+      "status_counts": {
+        "D": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "selective_adopt_review",
+      "prefix": "Dockerfile",
+      "rationale": "Installer/packaging/docs/infra deltas may be partially applicable and should be reviewed.",
+      "sample_paths": [
+        "Dockerfile"
+      ],
+      "status_counts": {
+        "M": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "selective_adopt_review",
+      "prefix": "LICENSE",
+      "rationale": "Installer/packaging/docs/infra deltas may be partially applicable and should be reviewed.",
+      "sample_paths": [
+        "LICENSE"
+      ],
+      "status_counts": {
+        "M": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "MANIFEST.in",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "MANIFEST.in"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "NOTICE",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "NOTICE"
+      ],
+      "status_counts": {
+        "D": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "PARITY_PLAN.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "PARITY_PLAN.md"
+      ],
+      "status_counts": {
+        "D": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "selective_adopt_review",
+      "prefix": "README.md",
+      "rationale": "Installer/packaging/docs/infra deltas may be partially applicable and should be reviewed.",
+      "sample_paths": [
+        "README.md"
+      ],
+      "status_counts": {
+        "M": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "README_JA.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "README_JA.md"
+      ],
+      "status_counts": {
+        "D": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "README_KO.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "README_KO.md"
+      ],
+      "status_counts": {
+        "D": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "README_ZH.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "README_ZH.md"
+      ],
+      "status_counts": {
+        "D": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "RELEASE_v0.10.0.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "RELEASE_v0.10.0.md"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "RELEASE_v0.2.0.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "RELEASE_v0.2.0.md"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "RELEASE_v0.3.0.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "RELEASE_v0.3.0.md"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "RELEASE_v0.4.0.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "RELEASE_v0.4.0.md"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "RELEASE_v0.5.0.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "RELEASE_v0.5.0.md"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "RELEASE_v0.6.0.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "RELEASE_v0.6.0.md"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "RELEASE_v0.7.0.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "RELEASE_v0.7.0.md"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "RELEASE_v0.8.0.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "RELEASE_v0.8.0.md"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "RELEASE_v0.9.0.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "RELEASE_v0.9.0.md"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "SECURITY.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "SECURITY.md"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "UPSTREAM_ATTRIBUTION.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "UPSTREAM_ATTRIBUTION.md"
+      ],
+      "status_counts": {
+        "D": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "assets",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "assets/banner.png"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "batch_runner.py",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "batch_runner.py"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "cli-config.yaml.example",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "cli-config.yaml.example"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "cli.py",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "cli.py"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "constraints-termux.txt",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "constraints-termux.txt"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "flake.lock",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "flake.lock"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "selective_adopt_review",
+      "prefix": "flake.nix",
+      "rationale": "Installer/packaging/docs/infra deltas may be partially applicable and should be reviewed.",
+      "sample_paths": [
+        "flake.nix"
+      ],
+      "status_counts": {
+        "M": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "hermes",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "hermes"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "hermes-already-has-routines.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "hermes-already-has-routines.md"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "hermes_constants.py",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "hermes_constants.py"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "hermes_logging.py",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "hermes_logging.py"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "hermes_state.py",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "hermes_state.py"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "hermes_time.py",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "hermes_time.py"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "mcp_serve.py",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "mcp_serve.py"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "mini_swe_runner.py",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "mini_swe_runner.py"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "model_tools.py",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "model_tools.py"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "package-lock.json",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "package-lock.json"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "package.json",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "package.json"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "plans",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "plans/gemini-oauth-provider.md"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "pyproject.toml",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "pyproject.toml"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "rl_cli.py",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "rl_cli.py"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "run_agent.py",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "run_agent.py"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "setup-hermes.sh",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "setup-hermes.sh"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "tinker-atropos",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "tinker-atropos"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "toolset_distributions.py",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "toolset_distributions.py"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "toolsets.py",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "toolsets.py"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "trajectory_compressor.py",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "trajectory_compressor.py"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "utils.py",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "utils.py"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "uv.lock",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "uv.lock"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    }
+  ],
+  "refs": {
+    "local_ref": "main",
+    "upstream_ref": "upstream/main"
+  },
+  "summary": {
+    "group_count": 86,
+    "status_counts": {
+      "A": 2283,
+      "D": 404,
+      "M": 10
+    },
+    "total_entries": 2697
+  },
+  "tranche_summary": {
+    "infra_surface": {
+      "prefixes": [
+        ".github",
+        "docker",
+        "nix",
+        "packaging",
+        "scripts"
+      ],
+      "status_counts": {
+        "A": 44,
+        "D": 26,
+        "M": 2
+      },
+      "total": 72
+    },
+    "runtime_surface": {
+      "prefixes": [
+        "agent",
+        "gateway",
+        "hermes_cli",
+        "plugins",
+        "tools"
+      ],
+      "status_counts": {
+        "A": 271
+      },
+      "total": 271
+    },
+    "rust_divergence": {
+      "prefixes": [
+        "Cargo.lock",
+        "Cargo.toml",
+        "crates"
+      ],
+      "status_counts": {
+        "D": 346
+      },
+      "total": 346
+    },
+    "ux_surface": {
+      "prefixes": [
+        "optional-skills",
+        "skills",
+        "ui-tui",
+        "web",
+        "website"
+      ],
+      "status_counts": {
+        "A": 1130,
+        "M": 2
+      },
+      "total": 1132
+    },
+    "validation_surface": {
+      "prefixes": [
+        "environments",
+        "tests"
+      ],
+      "status_counts": {
+        "A": 767
+      },
+      "total": 767
+    }
+  }
+}
