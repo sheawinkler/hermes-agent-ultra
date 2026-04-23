@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-23T06:35:28.710483+00:00`
+Generated: `2026-04-23T06:43:51.538395+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `4766`.
 
@@ -16,16 +16,14 @@ Generated: `2026-04-23T06:35:28.710483+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 155 |
-| ported | 82 |
-| superseded | 4529 |
+| pending | 144 |
+| ported | 92 |
+| superseded | 4530 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `9ed6eb0cca93` | #20 | fix(tui): resolve runtime provider in _make_agent (#11884) |
-| `c6b1ef4e5881` | #20 | feat: add Step Plan provider support (salvage #6005) |
 | `d166716c65ea` | #21 | feat(optional-skills): add page-agent skill under new web-development category (#13976) |
 | `8bcd77a9c2e8` | #23 | feat(wecom): add QR scan flow and interactive setup wizard for bot credentials |
 | `3f60a907e1d3` | #22 | docs(wecom): document QR scan-to-create setup flow |
@@ -44,14 +42,6 @@ Generated: `2026-04-23T06:35:28.710483+00:00`
 | `7eae504d158b` | #22 | fix(tui): address Copilot round-2 on #14045 |
 | `9e1f606f7f92` | #22 | fix: scroll in agents detail view |
 | `5b0741e986c9` | #22 | refactor(tui): consolidate agents overlay — share duration/root helpers via lib |
-| `fc3862bdd637` | #20 | fix(debug): snapshot logs once for debug share |
-| `921133cfa56a` | #26 | fix(debug): preserve full line at truncation boundary and cap memory |
-| `61d0a99c11cd` | #20 | fix(debug): sweep expired pending pastes on slash debug paths |
-| `8dc936f10ecf` | #20 | chore: add taosiyuan163 to AUTHOR_MAP, add truncation boundary tests |
-| `de849c410da9` | #20 | refactor(debug): remove dead _read_log_tail/_read_full_log wrappers |
-| `5dead0f2a08b` | #20 | fix(tui): degrade gracefully when state.db init fails |
-| `c32321718822` | #20 | fix: make CLI status bar skin-aware |
-| `81a504a4a0f3` | #20 | fix: align status bar skin tests with upstream main |
 | `88564ad8bc75` | #26 | fix(skins): don't inherit status_bar_* into light-mode skins |
 | `7027ce42efd2` | #22 | fix(tui): blitz closeout — input wrap parity, shift-tab yolo, bottom statusline |
 | `d55a17bd824c` | #22 | refactor(tui): statusbar as 4-mode position (on\|off\|bottom\|top) |
@@ -63,7 +53,6 @@ Generated: `2026-04-23T06:35:28.710483+00:00`
 | `48f2ac33528e` | #22 | refactor(tui): /clean pass on blitz closeout — trim comments, flatten logic |
 | `6fb98f343a7b` | #22 | fix(tui): address copilot review on #14103 |
 | `3ef6992edf2b` | #22 | fix(tui): drop main-screen banner flash, widen alt-screen clear on entry |
-| `b641639e425b` | #20 | fix(debug): distinguish empty-log from missing-log in report placeholder |
 | `e0d698cfb351` | #22 | fix(tui): yolo toggle only reports on/off for strict '0'/'1' values |
 | `8410ac05a9cc` | #22 | fix(tui): tab title shows cwd + waiting-for-input marker |
 | `103c71ac36c6` | #22 | refactor(tui): /clean pass on tui-polish — data tables, tighter title |
@@ -124,4 +113,15 @@ Generated: `2026-04-23T06:35:28.710483+00:00`
 | `8152de2a844f` | #26 | chore(release): map sicnuyudidi in AUTHOR_MAP |
 | `9bd15184256f` | #23 | fix(feishu): correct identity model docs and prefer tenant-scoped user_id |
 | `c345ec9a6384` | #20 | fix(display): strip standalone tool-call XML tags from visible text |
+| `a3014a4481c8` | #20 | fix(docker): add SETUID/SETGID caps so gosu drop in entrypoint succeeds |
+| `d70f0f1dc03f` | #26 | fix(docker): allow entrypoint to pass-through non-hermes commands |
+| `159061836e1a` | #26 | chore(release): map @akhater's Azure VM commit email in AUTHOR_MAP |
+| `aa75d0a90b1b` | #22 | fix(web): remove duplicate skill count in dashboard badge (#12372) |
+| `50387d718e63` | #26 | chore(release): map haimu0x in AUTHOR_MAP |
+| `ce4214ec94d8` | #26 | Normalize claw workspace paths for Windows |
+| `86510477f330` | #26 | chore(release): map NIDNASSER-Abdelmajid in AUTHOR_MAP |
+| `d67d12b5df3d` | #26 | Update whatsapp-bridge package-lock.json |
+| `2c26a8084854` | #26 | chore(release): map projectadmin-dev in AUTHOR_MAP |
+| `a14fb3ab1ac4` | #26 | fix(cli): guard fallback_model list format in save_config_value |
+| `6ad2fab8cfaa` | #26 | chore(release): map Dev-Mriganka in AUTHOR_MAP |
 

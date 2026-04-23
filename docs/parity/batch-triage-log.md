@@ -912,3 +912,34 @@
   - `cargo test -p hermes-agent --no-run`
   - `python3 scripts/generate-upstream-patch-queue.py --max-commits 0`
   - `python3 scripts/generate-global-parity-proof.py --check-ci`
+
+## 2026-04-23 impl-10 (debug hygiene + status-bar skin parity tranche)
+- Scope:
+  - Port next functional tranche for debug hygiene and TUI skin-aware status-bar behavior from upstream queue, preserving rust-native architecture.
+- Rust implementation commits (chronological):
+  - `5cce6dda` feat(parity): debug paste sweep and skin-aware status bar rendering.
+    - Added pending debug-paste metadata store with best-effort expiry sweep on `debug share` paths.
+    - Added missing vs empty log placeholder distinction in snapshot/report path.
+    - Made TUI rendering consume active `Tui` theme (instead of hard-coded default theme).
+    - Added status-bar palette keys to theme model with fallback behavior and style wiring in status-bar rendering.
+    - Added regression tests for:
+      - missing/empty debug log placeholders
+      - pending-paste sweep behavior and malformed-store best-effort handling
+      - status-message severity style mapping
+      - status-bar palette fallback and override color resolution
+- Upstream SHAs updated:
+  - `61d0a99c11cda30f7a3f58c41693f82bcf1435cf` → `ported`
+  - `b641639e425bfd26dbe3edbd113d8749384cbf40` → `ported`
+  - `c3232171882235bd3cdd0125b1b1ee9748bfe501` → `ported`
+  - `81a504a4a0f3c99ff9411a0a549f4adf9af93312` → `ported`
+  - `de849c410da9dc39bde6b81709cef89a04d64f38` → `superseded` (no dead debug wrapper layer exists in rust tree)
+  - `8dc936f10ecfd4d7c0200522e48374f885c7e024` → `ported` (truncation-boundary tests already present in rust)
+- Verification (targeted + compile):
+  - `cargo test -p hermes-cli capture_debug_log_snapshot_distinguishes_missing_and_empty -- --nocapture`
+  - `cargo test -p hermes-cli sweep_expired_pending_pastes_is_best_effort_and_keeps_fresh_entries -- --nocapture`
+  - `cargo test -p hermes-cli best_effort_sweep_handles_invalid_store_without_failing -- --nocapture`
+  - `cargo test -p hermes-cli status_message_style -- --nocapture`
+  - `cargo test -p hermes-cli test_status_bar_color_fields -- --nocapture`
+  - `cargo test -p hermes-cli --no-run`
+  - `python3 scripts/generate-upstream-patch-queue.py --max-commits 0`
+  - `python3 scripts/generate-global-parity-proof.py --check-ci`
