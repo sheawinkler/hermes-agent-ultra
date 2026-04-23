@@ -4,13 +4,18 @@
 
 A production-grade Rust rewrite of [Hermes Agent](https://github.com/NousResearch/hermes-agent) — the self-improving AI agent by [Nous Research](https://nousresearch.com).
 
-**commit-level feature parity with NousResearch**
+# **Commit-level feature-parity with NousResearch**
 
 ---
 
-## Python v2026.4.13 Alignment Status
+### Baseline target: NousResearch commits trigger Rust parity alignment development for near-real-time feature parity.
 
-Baseline target: `NousResearch/hermes-agent@v2026.4.13` (`1af2e18d408a9dcc2c61d6fc1eef5c6667f8e254`).
+#### README.md updates coming soon to more closely mirror official repo
+#### all work in this repo has and will be tracked via issue tickets
+
+---
+### historical work by lumio labs below
+---
 
 - Progress: **13 / 13 scoped parity items completed**.
 - Completed focus areas: prompt layering/core guidance parity, Python-shaped `resolve_turn_route` / cheap-route pipeline and runtime snapshots (`api_mode`, primary `acp_command`/`acp_args`, credential pool, `TurnRouteSignature`) across HTTP and subprocess-backed providers, smart routing runtime switching and fallback, memory tool semantics and limits, built-in `MEMORY.md`/`USER.md` snapshot injection, memory lifecycle hooks (`on_memory_write`, `queue_prefetch`, `on_pre_compress`, `on_session_end`, `on_delegation`), `session_search` dual mode with `role_filter` and capped limit, memory/skill nudge counters + optional background review (Python review prompts; gated by `background_review_enabled`), and fixture-style parity tests for self-evolution cadence.
