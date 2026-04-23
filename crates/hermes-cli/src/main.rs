@@ -3,6 +3,10 @@
 //! Initializes logging, parses CLI arguments, and dispatches to the
 //! appropriate subcommand handler.
 
+use aes_gcm::aead::Aead;
+use aes_gcm::Aes256Gcm;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine as _;
 use clap::CommandFactory;
 use clap::Parser;
 use clap_complete::{generate, Shell as CompletionShell};
@@ -65,6 +69,8 @@ use hermes_gateway::{DmManager, Gateway, GatewayRuntimeContext, SessionManager};
 use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_telemetry::init_telemetry_from_env;
 use hermes_tools::ToolRegistry;
+use rand::rngs::OsRng;
+use rand::RngCore;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -3549,6 +3555,380 @@ async fn weixin_token_from_env_or_prompt(account_id: &str) -> Result<String, Age
     Ok(v)
 }
 
+async fn qqbot_app_id_from_env_or_prompt(existing: Option<&str>) -> Result<String, AgentError> {
+    if let Ok(v) = std::env::var("QQ_APP_ID") {
+        let v = v.trim().to_string();
+        if !v.is_empty() {
+            return Ok(v);
+        }
+    }
+    if let Some(current) = existing {
+        let trimmed = current.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
+        }
+    }
+    let line = tokio::task::spawn_blocking(|| {
+        use std::io::{self, Write};
+        print!("Enter QQBot app_id (QQ_APP_ID): ");
+        let _ = io::stdout().flush();
+        let mut buf = String::new();
+        io::stdin().read_line(&mut buf).map(|_| buf)
+    })
+    .await
+    .map_err(|e| AgentError::Io(format!("qqbot app_id prompt: {e}")))?
+    .map_err(|e| AgentError::Io(format!("stdin: {e}")))?;
+    let app_id = line.trim().to_string();
+    if app_id.is_empty() {
+        return Err(AgentError::Config(
+            "QQBot app_id cannot be empty (set QQ_APP_ID or input manually)".to_string(),
+        ));
+    }
+    Ok(app_id)
+}
+
+async fn qqbot_client_secret_from_env_or_prompt(
+    existing: Option<&str>,
+) -> Result<String, AgentError> {
+    if let Ok(v) = std::env::var("QQ_CLIENT_SECRET") {
+        let v = v.trim().to_string();
+        if !v.is_empty() {
+            return Ok(v);
+        }
+    }
+    if let Some(current) = existing {
+        let trimmed = current.trim();
+        if !trimmed.is_empty() {
+            return Ok(trimmed.to_string());
+        }
+    }
+    let line = tokio::task::spawn_blocking(|| {
+        use std::io::{self, Write};
+        print!("Enter QQBot client_secret (QQ_CLIENT_SECRET): ");
+        let _ = io::stdout().flush();
+        let mut buf = String::new();
+        io::stdin().read_line(&mut buf).map(|_| buf)
+    })
+    .await
+    .map_err(|e| AgentError::Io(format!("qqbot client_secret prompt: {e}")))?
+    .map_err(|e| AgentError::Io(format!("stdin: {e}")))?;
+    let secret = line.trim().to_string();
+    if secret.is_empty() {
+        return Err(AgentError::Config(
+            "QQBot client_secret cannot be empty (set QQ_CLIENT_SECRET or input manually)"
+                .to_string(),
+        ));
+    }
+    Ok(secret)
+}
+
+fn qqbot_portal_host_from_disk(disk: &hermes_config::GatewayConfig) -> String {
+    if let Some(cfg) = disk.platforms.get("qqbot") {
+        for key in ["portal_host", "qq_portal_host"] {
+            if let Some(v) = cfg.extra.get(key).and_then(|v| v.as_str()) {
+                let s = v.trim();
+                if !s.is_empty() {
+                    return s.to_string();
+                }
+            }
+        }
+    }
+    if let Ok(v) = std::env::var("QQ_PORTAL_HOST") {
+        let s = v.trim();
+        if !s.is_empty() {
+            return s.to_string();
+        }
+    }
+    "q.qq.com".to_string()
+}
+
+fn qqbot_onboard_endpoints_from_disk(disk: &hermes_config::GatewayConfig) -> (String, String) {
+    let mut create_path = "/lite/create_bind_task".to_string();
+    let mut poll_path = "/lite/poll_bind_result".to_string();
+
+    if let Some(cfg) = disk.platforms.get("qqbot") {
+        for key in ["onboard_create_path", "qr_create_path"] {
+            if let Some(v) = cfg.extra.get(key).and_then(|v| v.as_str()) {
+                let s = v.trim();
+                if !s.is_empty() {
+                    create_path = s.to_string();
+                    break;
+                }
+            }
+        }
+        for key in ["onboard_poll_path", "qr_poll_path"] {
+            if let Some(v) = cfg.extra.get(key).and_then(|v| v.as_str()) {
+                let s = v.trim();
+                if !s.is_empty() {
+                    poll_path = s.to_string();
+                    break;
+                }
+            }
+        }
+    }
+
+    if let Ok(v) = std::env::var("QQ_ONBOARD_CREATE_PATH") {
+        let s = v.trim();
+        if !s.is_empty() {
+            create_path = s.to_string();
+        }
+    }
+    if let Ok(v) = std::env::var("QQ_ONBOARD_POLL_PATH") {
+        let s = v.trim();
+        if !s.is_empty() {
+            poll_path = s.to_string();
+        }
+    }
+
+    (create_path, poll_path)
+}
+
+fn qqbot_generate_bind_key_base64() -> String {
+    let mut key = [0u8; 32];
+    OsRng.fill_bytes(&mut key);
+    BASE64_STANDARD.encode(key)
+}
+
+fn qqbot_extract_string(v: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    for key in keys {
+        if let Some(s) = v.get(*key).and_then(|x| x.as_str()) {
+            let s = s.trim();
+            if !s.is_empty() {
+                return Some(s.to_string());
+            }
+        }
+    }
+    None
+}
+
+fn qqbot_extract_i64(v: &serde_json::Value, keys: &[&str]) -> Option<i64> {
+    for key in keys {
+        if let Some(raw) = v.get(*key) {
+            if let Some(parsed) = raw.as_i64() {
+                return Some(parsed);
+            }
+            if let Some(parsed) = raw.as_str().and_then(|s| s.trim().parse::<i64>().ok()) {
+                return Some(parsed);
+            }
+        }
+    }
+    None
+}
+
+fn qqbot_decrypt_secret(encrypted_base64: &str, key_base64: &str) -> Result<String, AgentError> {
+    let key_bytes = BASE64_STANDARD.decode(key_base64.trim()).map_err(|e| {
+        AgentError::Config(format!("qqbot qr decrypt: invalid bind key base64: {e}"))
+    })?;
+    if key_bytes.len() != 32 {
+        return Err(AgentError::Config(format!(
+            "qqbot qr decrypt: expected 32-byte key, got {}",
+            key_bytes.len()
+        )));
+    }
+    let encrypted_bytes = BASE64_STANDARD
+        .decode(encrypted_base64.trim())
+        .map_err(|e| {
+            AgentError::Config(format!("qqbot qr decrypt: invalid encrypted secret: {e}"))
+        })?;
+    if encrypted_bytes.len() < 29 {
+        return Err(AgentError::Config(
+            "qqbot qr decrypt: encrypted payload too short".to_string(),
+        ));
+    }
+    let nonce = aes_gcm::Nonce::from_slice(&encrypted_bytes[..12]);
+    let cipher = <Aes256Gcm as aes_gcm::aead::KeyInit>::new_from_slice(&key_bytes)
+        .map_err(|e| AgentError::Config(format!("qqbot qr decrypt: cipher init failed: {e}")))?;
+    let plaintext = cipher
+        .decrypt(nonce, &encrypted_bytes[12..])
+        .map_err(|_| AgentError::Config("qqbot qr decrypt: decrypt failed".to_string()))?;
+    String::from_utf8(plaintext)
+        .map_err(|e| AgentError::Config(format!("qqbot qr decrypt: invalid utf-8: {e}")))
+}
+
+fn qqbot_connect_url(task_id: &str) -> String {
+    format!(
+        "https://q.qq.com/qqbot/openclaw/connect.html?task_id={}&_wv=2&source=hermes",
+        urlencoding::encode(task_id.trim())
+    )
+}
+
+fn qqbot_api_headers() -> reqwest::header::HeaderMap {
+    use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE, USER_AGENT};
+    let mut headers = HeaderMap::new();
+    headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+    headers.insert(ACCEPT, HeaderValue::from_static("application/json"));
+    headers.insert(
+        USER_AGENT,
+        HeaderValue::from_static("HermesAgentUltra/qqbot-onboard"),
+    );
+    headers
+}
+
+fn qqbot_join_https_url(host: &str, path: &str) -> String {
+    let host = host.trim().trim_end_matches('/');
+    let path = path.trim();
+    if path.starts_with('/') {
+        format!("https://{}{}", host, path)
+    } else {
+        format!("https://{}/{}", host, path)
+    }
+}
+
+async fn qqbot_create_bind_task(
+    client: &reqwest::Client,
+    portal_host: &str,
+    create_path: &str,
+    key_base64: &str,
+) -> Result<String, AgentError> {
+    let url = qqbot_join_https_url(portal_host, create_path);
+    let resp = client
+        .post(url)
+        .headers(qqbot_api_headers())
+        .json(&serde_json::json!({ "key": key_base64 }))
+        .send()
+        .await
+        .map_err(|e| AgentError::Io(format!("qqbot create_bind_task request failed: {e}")))?;
+    let status = resp.status();
+    let payload: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| AgentError::Config(format!("qqbot create_bind_task parse failed: {e}")))?;
+    if !status.is_success() {
+        return Err(AgentError::Config(format!(
+            "qqbot create_bind_task failed ({}): {}",
+            status, payload
+        )));
+    }
+    let retcode = qqbot_extract_i64(&payload, &["retcode"]).unwrap_or(-1);
+    if retcode != 0 {
+        let msg = qqbot_extract_string(&payload, &["msg", "message"])
+            .unwrap_or_else(|| "create_bind_task returned non-zero retcode".to_string());
+        return Err(AgentError::Config(format!(
+            "qqbot create_bind_task retcode={retcode}: {msg}"
+        )));
+    }
+    let task_id = payload
+        .get("data")
+        .and_then(|v| qqbot_extract_string(v, &["task_id"]))
+        .ok_or_else(|| {
+            AgentError::Config("qqbot create_bind_task missing data.task_id".to_string())
+        })?;
+    Ok(task_id)
+}
+
+async fn qqbot_poll_bind_result(
+    client: &reqwest::Client,
+    portal_host: &str,
+    poll_path: &str,
+    task_id: &str,
+) -> Result<(i64, String, String, String), AgentError> {
+    let url = qqbot_join_https_url(portal_host, poll_path);
+    let resp = client
+        .post(url)
+        .headers(qqbot_api_headers())
+        .json(&serde_json::json!({ "task_id": task_id }))
+        .send()
+        .await
+        .map_err(|e| AgentError::Io(format!("qqbot poll_bind_result request failed: {e}")))?;
+    let status = resp.status();
+    let payload: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| AgentError::Config(format!("qqbot poll_bind_result parse failed: {e}")))?;
+    if !status.is_success() {
+        return Err(AgentError::Config(format!(
+            "qqbot poll_bind_result failed ({}): {}",
+            status, payload
+        )));
+    }
+    let retcode = qqbot_extract_i64(&payload, &["retcode"]).unwrap_or(-1);
+    if retcode != 0 {
+        let msg = qqbot_extract_string(&payload, &["msg", "message"])
+            .unwrap_or_else(|| "poll_bind_result returned non-zero retcode".to_string());
+        return Err(AgentError::Config(format!(
+            "qqbot poll_bind_result retcode={retcode}: {msg}"
+        )));
+    }
+    let data = payload.get("data").cloned().unwrap_or_default();
+    let status = qqbot_extract_i64(&data, &["status"]).unwrap_or_default();
+    let app_id = qqbot_extract_string(&data, &["bot_appid", "app_id"]).unwrap_or_default();
+    let encrypted_secret =
+        qqbot_extract_string(&data, &["bot_encrypt_secret", "encrypt_secret"]).unwrap_or_default();
+    let user_openid = qqbot_extract_string(&data, &["user_openid"]).unwrap_or_default();
+    Ok((status, app_id, encrypted_secret, user_openid))
+}
+
+async fn qqbot_qr_login_flow(
+    portal_host: &str,
+    create_path: &str,
+    poll_path: &str,
+    timeout_seconds: u64,
+) -> Result<(String, String, String), AgentError> {
+    const ONBOARD_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(2);
+    const MAX_REFRESHES: usize = 3;
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+        .map_err(|e| AgentError::Io(format!("qqbot onboard client init failed: {e}")))?;
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(timeout_seconds);
+
+    for refresh_idx in 0..=MAX_REFRESHES {
+        let bind_key = qqbot_generate_bind_key_base64();
+        let task_id = qqbot_create_bind_task(&client, portal_host, create_path, &bind_key).await?;
+        let connect_url = qqbot_connect_url(&task_id);
+
+        println!();
+        println!("QQBot QR setup URL:");
+        println!("  {}", connect_url);
+        println!("Scan the URL with QQ on your phone.");
+        render_qr_to_terminal(&connect_url);
+        println!();
+
+        loop {
+            if std::time::Instant::now() >= deadline {
+                return Err(AgentError::Timeout(format!(
+                    "qqbot qr login timed out after {timeout_seconds}s"
+                )));
+            }
+            match qqbot_poll_bind_result(&client, portal_host, poll_path, &task_id).await {
+                Ok((status, app_id, encrypted_secret, user_openid)) => match status {
+                    2 => {
+                        if app_id.trim().is_empty() || encrypted_secret.trim().is_empty() {
+                            return Err(AgentError::Config(
+                                "qqbot qr confirmed but payload missing app_id/encrypted_secret"
+                                    .to_string(),
+                            ));
+                        }
+                        let client_secret = qqbot_decrypt_secret(&encrypted_secret, &bind_key)?;
+                        return Ok((app_id, client_secret, user_openid));
+                    }
+                    3 => {
+                        if refresh_idx >= MAX_REFRESHES {
+                            return Err(AgentError::Timeout(format!(
+                                "qqbot qr expired too many times (max {})",
+                                MAX_REFRESHES
+                            )));
+                        }
+                        println!(
+                            "QQBot QR code expired, refreshing... ({}/{})",
+                            refresh_idx + 1,
+                            MAX_REFRESHES
+                        );
+                        break;
+                    }
+                    _ => {}
+                },
+                Err(_) => {}
+            }
+            tokio::time::sleep(ONBOARD_POLL_INTERVAL).await;
+        }
+    }
+    Err(AgentError::Timeout(
+        "qqbot qr login exhausted refresh retries".to_string(),
+    ))
+}
+
 fn weixin_login_base_url_from_disk(disk: &hermes_config::GatewayConfig) -> String {
     if let Some(wx) = disk.platforms.get("weixin") {
         if let Some(v) = wx.extra.get("base_url").and_then(|v| v.as_str()) {
@@ -4122,6 +4502,84 @@ async fn run_auth(
                     .map_err(|e| AgentError::Config(e.to_string()))?;
                 println!(
                     "Weixin: account_id/token saved and platform enabled in {}",
+                    cfg_path.display()
+                );
+                return Ok(());
+            }
+            if provider == "qqbot" {
+                let cfg_path = hermes_state_root(&cli).join("config.yaml");
+                let mut disk = load_user_config_file(&cfg_path)
+                    .map_err(|e| AgentError::Config(e.to_string()))?;
+                let qr_preferred = qr
+                    || std::env::var("HERMES_QQBOT_QR_LOGIN")
+                        .ok()
+                        .map(|v| is_truthy(&v))
+                        .unwrap_or(false);
+
+                let existing_app_id = disk
+                    .platforms
+                    .get("qqbot")
+                    .and_then(|p| p.extra.get("app_id"))
+                    .and_then(|v| v.as_str());
+                let existing_secret = disk
+                    .platforms
+                    .get("qqbot")
+                    .and_then(|p| p.extra.get("client_secret"))
+                    .and_then(|v| v.as_str());
+
+                let (app_id, client_secret, user_openid) = if qr_preferred {
+                    let portal_host = qqbot_portal_host_from_disk(&disk);
+                    let (create_path, poll_path) = qqbot_onboard_endpoints_from_disk(&disk);
+                    match qqbot_qr_login_flow(&portal_host, &create_path, &poll_path, 600).await {
+                        Ok(tuple) => tuple,
+                        Err(e) => {
+                            println!(
+                                "QQBot QR setup failed, falling back to manual credentials: {}",
+                                e
+                            );
+                            let app_id = qqbot_app_id_from_env_or_prompt(existing_app_id).await?;
+                            let client_secret =
+                                qqbot_client_secret_from_env_or_prompt(existing_secret).await?;
+                            (app_id, client_secret, String::new())
+                        }
+                    }
+                } else {
+                    let app_id = qqbot_app_id_from_env_or_prompt(existing_app_id).await?;
+                    let client_secret =
+                        qqbot_client_secret_from_env_or_prompt(existing_secret).await?;
+                    (app_id, client_secret, String::new())
+                };
+
+                let qq = disk
+                    .platforms
+                    .entry("qqbot".to_string())
+                    .or_insert_with(PlatformConfig::default);
+                qq.enabled = true;
+                qq.extra.insert(
+                    "app_id".to_string(),
+                    serde_json::Value::String(app_id.clone()),
+                );
+                qq.extra.insert(
+                    "client_secret".to_string(),
+                    serde_json::Value::String(client_secret.clone()),
+                );
+                if !qq.extra.contains_key("markdown_support") {
+                    qq.extra.insert(
+                        "markdown_support".to_string(),
+                        serde_json::Value::Bool(true),
+                    );
+                }
+                if !user_openid.trim().is_empty() {
+                    qq.extra.insert(
+                        "user_openid".to_string(),
+                        serde_json::Value::String(user_openid.clone()),
+                    );
+                }
+                validate_config(&disk).map_err(|e| AgentError::Config(e.to_string()))?;
+                save_config_yaml(&cfg_path, &disk)
+                    .map_err(|e| AgentError::Config(e.to_string()))?;
+                println!(
+                    "QQBot: app_id/client_secret saved and platform enabled in {}",
                     cfg_path.display()
                 );
                 return Ok(());
@@ -6918,6 +7376,41 @@ mod tests {
         assert_eq!(provider_env_var("stepfun"), Some("STEPFUN_API_KEY"));
         assert_eq!(provider_env_var("step"), None);
         assert_eq!(secret_provider_aliases("stepfun"), vec!["stepfun", "step"]);
+    }
+
+    #[test]
+    fn qqbot_connect_url_encodes_task_id() {
+        let url = qqbot_connect_url("task id/+");
+        assert!(url.contains("task_id=task%20id%2F%2B"));
+        assert!(url.contains("source=hermes"));
+    }
+
+    #[test]
+    fn qqbot_decrypt_secret_roundtrip() {
+        let key = [7u8; 32];
+        let nonce = [3u8; 12];
+        let key_b64 = BASE64_STANDARD.encode(key);
+
+        let cipher =
+            <Aes256Gcm as aes_gcm::aead::KeyInit>::new_from_slice(&key).expect("cipher init");
+        let ciphertext = cipher
+            .encrypt(aes_gcm::Nonce::from_slice(&nonce), b"qq-secret".as_ref())
+            .expect("encrypt");
+        let mut payload = nonce.to_vec();
+        payload.extend_from_slice(&ciphertext);
+        let encrypted_b64 = BASE64_STANDARD.encode(payload);
+
+        let decrypted = qqbot_decrypt_secret(&encrypted_b64, &key_b64).expect("decrypt");
+        assert_eq!(decrypted, "qq-secret");
+    }
+
+    #[test]
+    fn qqbot_extract_i64_accepts_number_or_string() {
+        let numeric = serde_json::json!({ "status": 2 });
+        assert_eq!(qqbot_extract_i64(&numeric, &["status"]), Some(2));
+
+        let stringified = serde_json::json!({ "status": "3" });
+        assert_eq!(qqbot_extract_i64(&stringified, &["status"]), Some(3));
     }
 
     #[test]
