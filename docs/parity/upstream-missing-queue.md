@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-23T20:06:09.016533+00:00`
+Generated: `2026-04-23T20:14:24.658832+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `74`.
 
@@ -13,8 +13,8 @@ Generated: `2026-04-23T20:06:09.016533+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 70 |
-| ported | 4 |
+| pending | 69 |
+| ported | 5 |
 
 ## First 100 Pending Commits
 
@@ -47,7 +47,6 @@ Generated: `2026-04-23T20:06:09.016533+00:00`
 | `911f57ad979d` | #26 | chore(release): map TaroballzChen in AUTHOR_MAP |
 | `be99feff1f42` | #20 | fix(image-gen): force-refresh plugin providers in long-lived sessions |
 | `8f50f2834a0d` | #26 | chore(release): add Wysie to AUTHOR_MAP |
-| `9dba75bc3862` | #23 | fix(feishu): issue where streaming edits in Feishu show extra leading newlines |
 | `08cb345e242e` | #26 | chore(release): map Lind3ey in AUTHOR_MAP |
 | `51c1d2de16bc` | #20 | fix(profiles): stage profile imports to prevent directory clobbering |
 | `4c02e4597ec9` | #26 | fix(status): catch OSError in os.kill(pid, 0) for Windows compatibility |
