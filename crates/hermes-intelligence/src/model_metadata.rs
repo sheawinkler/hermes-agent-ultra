@@ -4,6 +4,7 @@
 //! compression and run_agent for pre-flight context checks.
 
 use std::collections::HashMap;
+use std::net::{IpAddr, Ipv4Addr};
 
 use serde::{Deserialize, Serialize};
 
@@ -499,13 +500,59 @@ pub fn infer_provider_from_url(base_url: &str) -> Option<&'static str> {
 
 /// Check if a base URL points to a local machine.
 pub fn is_local_endpoint(base_url: &str) -> bool {
-    let lower = base_url.to_lowercase();
-    lower.contains("localhost")
-        || lower.contains("127.0.0.1")
-        || lower.contains("::1")
-        || lower.contains("0.0.0.0")
-        || lower.contains(".docker.internal")
-        || lower.contains(".containers.internal")
+    let trimmed = base_url.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+
+    let parse_target = if trimmed.contains("://") {
+        trimmed.to_string()
+    } else {
+        format!("http://{trimmed}")
+    };
+    let host = reqwest::Url::parse(&parse_target)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_string))
+        .unwrap_or_else(|| trimmed.to_string());
+    let host_lower = host.to_lowercase();
+
+    if host_lower == "localhost"
+        || host_lower == "0.0.0.0"
+        || host_lower == "::1"
+        || host_lower.ends_with(".docker.internal")
+        || host_lower.ends_with(".containers.internal")
+    {
+        return true;
+    }
+
+    if let Ok(addr) = host.parse::<IpAddr>() {
+        return match addr {
+            IpAddr::V4(v4) => {
+                v4.is_private() || v4.is_loopback() || v4.is_link_local() || is_tailscale_cgnat(v4)
+            }
+            IpAddr::V6(v6) => {
+                v6.is_loopback() || v6.is_unique_local() || v6.is_unicast_link_local()
+            }
+        };
+    }
+
+    // Fallback for dotted IPv4-like strings that fail Url/IP parsing.
+    let parts: Vec<_> = host_lower.split('.').collect();
+    if parts.len() == 4 {
+        if let (Ok(first), Ok(second)) = (parts[0].parse::<u8>(), parts[1].parse::<u8>()) {
+            return first == 10
+                || (first == 172 && (16..=31).contains(&second))
+                || (first == 192 && second == 168)
+                || (first == 100 && (64..=127).contains(&second));
+        }
+    }
+
+    false
+}
+
+fn is_tailscale_cgnat(ip: Ipv4Addr) -> bool {
+    let octets = ip.octets();
+    octets[0] == 100 && (64..=127).contains(&octets[1])
 }
 
 // ---------------------------------------------------------------------------
@@ -572,6 +619,16 @@ mod tests {
     fn test_is_local_endpoint() {
         assert!(is_local_endpoint("http://localhost:8080"));
         assert!(is_local_endpoint("http://127.0.0.1:11434"));
+        assert!(is_local_endpoint("http://100.64.0.0:11434"));
+        assert!(is_local_endpoint("http://100.64.0.1:11434/v1"));
+        assert!(is_local_endpoint("http://100.77.243.5:11434"));
+        assert!(is_local_endpoint("https://100.100.100.100:443"));
+        assert!(is_local_endpoint("https://100.127.255.254:443"));
+        assert!(is_local_endpoint("http://100.127.255.255:11434"));
+        assert!(!is_local_endpoint("http://100.63.255.255:11434"));
+        assert!(!is_local_endpoint("http://100.128.0.1:11434"));
+        assert!(!is_local_endpoint("http://100.200.0.1:11434"));
+        assert!(!is_local_endpoint("http://99.64.0.1:11434"));
         assert!(!is_local_endpoint("https://api.openai.com"));
     }
 }
