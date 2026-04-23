@@ -330,6 +330,19 @@ fn scrub_subprocess_env(cmd: &mut TokioCommand) {
     }
 }
 
+fn with_login_profile_sources(command: &str) -> String {
+    #[cfg(unix)]
+    {
+        format!(
+            "[ -f \"$HOME/.profile\" ] && . \"$HOME/.profile\"; [ -f \"$HOME/.bash_profile\" ] && . \"$HOME/.bash_profile\"; {command}"
+        )
+    }
+    #[cfg(not(unix))]
+    {
+        command.to_string()
+    }
+}
+
 impl Default for LocalBackend {
     fn default() -> Self {
         Self::new(120, 1_048_576)
@@ -347,6 +360,7 @@ impl TerminalBackend for LocalBackend {
         pty: bool,
     ) -> Result<CommandOutput, AgentError> {
         let timeout_secs = timeout.unwrap_or(self.default_timeout);
+        let command_with_profiles = with_login_profile_sources(command);
 
         if pty && !background {
             // PTY mode: allocate a pseudo-terminal for interactive commands.
@@ -360,7 +374,7 @@ impl TerminalBackend for LocalBackend {
                     .arg("-q") // quiet mode
                     .arg("/dev/null") // discard typescript file
                     .arg("-c") // command to execute
-                    .arg(command)
+                    .arg(&command_with_profiles)
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .stdin(Stdio::null());
@@ -413,7 +427,11 @@ impl TerminalBackend for LocalBackend {
             #[cfg(unix)]
             {
                 let mut pty_cmd = TokioCommand::new("script");
-                pty_cmd.arg("-q").arg("/dev/null").arg("-c").arg(command);
+                pty_cmd
+                    .arg("-q")
+                    .arg("/dev/null")
+                    .arg("-c")
+                    .arg(&command_with_profiles);
                 pty_cmd
             }
             #[cfg(not(unix))]
@@ -422,12 +440,12 @@ impl TerminalBackend for LocalBackend {
                     "PTY mode is not supported on this platform; using standard shell execution"
                 );
                 let mut shell_cmd = TokioCommand::new("sh");
-                shell_cmd.arg("-c").arg(command);
+                shell_cmd.arg("-c").arg(&command_with_profiles);
                 shell_cmd
             }
         } else {
             let mut shell_cmd = TokioCommand::new("sh");
-            shell_cmd.arg("-c").arg(command);
+            shell_cmd.arg("-c").arg(&command_with_profiles);
             shell_cmd
         };
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -576,6 +594,7 @@ impl TerminalBackend for LocalBackend {
                 .execute_command(command, timeout, workdir, background, pty)
                 .await;
         };
+        let command_with_profiles = with_login_profile_sources(command);
 
         if background {
             let started = self
@@ -605,7 +624,7 @@ impl TerminalBackend for LocalBackend {
                     .arg("-q")
                     .arg("/dev/null")
                     .arg("-c")
-                    .arg(command)
+                    .arg(&command_with_profiles)
                     .stdout(Stdio::piped())
                     .stderr(Stdio::piped())
                     .stdin(Stdio::piped());
@@ -670,7 +689,7 @@ impl TerminalBackend for LocalBackend {
 
         let mut cmd = TokioCommand::new("sh");
         cmd.arg("-c")
-            .arg(command)
+            .arg(&command_with_profiles)
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .stdin(Stdio::piped());
@@ -1044,6 +1063,22 @@ mod tests {
                 None => std::env::remove_var(self.key),
             }
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_with_login_profile_sources_prepends_profile_loads() {
+        let wrapped = with_login_profile_sources("echo hi");
+        assert!(wrapped.contains(". \"$HOME/.profile\""));
+        assert!(wrapped.contains(". \"$HOME/.bash_profile\""));
+        assert!(wrapped.ends_with("echo hi"));
+    }
+
+    #[cfg(not(unix))]
+    #[test]
+    fn test_with_login_profile_sources_is_passthrough_off_unix() {
+        let wrapped = with_login_profile_sources("echo hi");
+        assert_eq!(wrapped, "echo hi");
     }
 
     #[tokio::test]
