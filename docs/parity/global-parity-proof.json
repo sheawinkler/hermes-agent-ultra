@@ -46,7 +46,7 @@
     ],
     "pass": true
   },
-  "generated_at_utc": "2026-04-23T07:03:55.173907+00:00",
+  "generated_at_utc": "2026-04-23T19:37:38.645056+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -75,20 +75,15 @@
   },
   "queue_summary": {
     "by_disposition": {
-      "pending": 135,
-      "ported": 99,
-      "superseded": 4532
+      "pending": 60
     },
     "by_target_ticket": {
-      "20": 1672,
-      "21": 202,
-      "22": 557,
-      "23": 520,
-      "24": 66,
-      "25": 156,
-      "26": 1593
+      "20": 16,
+      "22": 6,
+      "23": 4,
+      "26": 34
     },
-    "total_commits": 4766
+    "total_commits": 60
   },
   "release_gate": {
     "checks": [
