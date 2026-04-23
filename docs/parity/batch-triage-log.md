@@ -1115,3 +1115,34 @@
   - `python3 scripts/generate-upstream-patch-queue.py --repo-root . --no-fetch`
   - `python3 scripts/generate-global-parity-proof.py --repo-root .`
   - `python3 scripts/generate-workstream-status.py --repo-root .`
+
+## 2026-04-23 impl-19 (69-commit upstream queue burndown)
+- Scope:
+  - Process all remaining `pending` entries in `docs/parity/upstream-missing-queue.json` (69 commits at start of pass).
+  - Port concrete Rust-relevant deltas where low-risk and direct, then disposition the rest with per-commit notes.
+- Rust implementation (ported in this pass):
+  - `5a26938aa502` `fix(terminal): auto-source ~/.profile and ~/.bash_profile so n/nvm PATH survives`
+    - `crates/hermes-environments/src/local.rs`
+    - Added shell wrapper `with_login_profile_sources(...)` and applied it across local command execution paths (standard/PTY/stdin).
+    - Added regression tests for wrapper behavior and command execution.
+  - `1df0c812c43a` `feat(skills): add MiniMax-AI/cli as default skill tap`
+    - `crates/hermes-cli/src/commands.rs`
+    - Added `DEFAULT_SKILL_TAPS` with `https://github.com/MiniMax-AI/cli`.
+    - Added merged tap resolution so default + custom taps are listed and deduplicated.
+    - Added tests for default tap presence + dedup semantics.
+  - `d7452af257b9` `fix(pairing): handle null user_name in pairing list display`
+    - Marked `ported-by-equivalence` (existing Rust pairing list already uses safe `Option` fallback to `(unnamed)`).
+  - `82a0ed1afb3f` `feat: add Xiaomi MiMo v2.5-pro and v2.5 model support`
+    - Marked `ported-by-equivalence` (existing Rust model metadata/catalog already includes MiMo `v2.5` and `v2.5-pro`).
+- Queue disposition outcome:
+  - Start: `pending=69`
+  - End: `pending=0`
+  - Final queue counts: `ported=9`, `superseded=65`, `total=74`
+  - Superseded items were documented per SHA with explicit rationale (docs-only, release metadata, python-path-only refactors, or architecture-divergent xterm/ui and gateway lock-model changes).
+- Verification:
+  - `cargo test -p hermes-environments tests::test_with_login_profile_sources_prepends_profile_loads -- --nocapture`
+  - `cargo test -p hermes-environments tests::test_execute_command_echo -- --nocapture`
+  - `cargo test -p hermes-cli tests::test_default_skill_tap_present_in_merged_list -- --nocapture`
+  - `cargo test -p hermes-cli tests::test_merged_skill_taps_deduplicates_default -- --nocapture`
+  - `python3 scripts/generate-upstream-patch-queue.py --no-fetch --max-commits 0`
+  - `python3 scripts/generate-global-parity-proof.py --check-ci`
