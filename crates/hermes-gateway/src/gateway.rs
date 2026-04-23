@@ -316,6 +316,16 @@ impl Gateway {
         self.session_manager.get_messages(&key).await.len()
     }
 
+    async fn clear_session_boundary_security_state(&self, session_key: &str) {
+        if session_key.is_empty() {
+            return;
+        }
+        let mut states = self.runtime_state.write().await;
+        if let Some(state) = states.get_mut(session_key) {
+            state.yolo = false;
+        }
+    }
+
     /// Set the message handler for processing incoming messages.
     pub async fn set_message_handler(&self, handler: MessageHandler) {
         *self.message_handler.write().await = Some(handler);
@@ -551,6 +561,8 @@ impl Gateway {
                 )
                 .await;
                 self.session_manager.reset_session(session_key).await;
+                self.clear_session_boundary_security_state(session_key)
+                    .await;
                 self.emit_hook_event(
                     "session:reset",
                     serde_json::json!({
@@ -959,6 +971,8 @@ impl Gateway {
                         .replace_messages(session_key, target.messages.clone())
                         .await;
                     if copied {
+                        self.clear_session_boundary_security_state(session_key)
+                            .await;
                         format!(
                             "🔁 Switched to session `{}`.\nLoaded {} message(s) into this chat context.",
                             session_id,
@@ -2347,6 +2361,123 @@ mod tests {
         assert!(echoed.contains("provider=openai"));
         assert!(echoed.contains("profile=prod"));
         assert!(echoed.contains("branch=feature/parity"));
+    }
+
+    #[tokio::test]
+    async fn gateway_new_clears_yolo_only_for_target_session() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("test", adapter).await;
+
+        let session_key_1 = gw
+            .session_manager
+            .compose_session_key("test", "chat1", "user1");
+        let session_key_2 = gw
+            .session_manager
+            .compose_session_key("test", "chat2", "user1");
+
+        let yolo_chat1 = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/yolo".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&yolo_chat1).await.is_ok());
+
+        let yolo_chat2 = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat2".into(),
+            user_id: "user1".into(),
+            text: "/yolo".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&yolo_chat2).await.is_ok());
+
+        {
+            let states = gw.runtime_state.read().await;
+            assert_eq!(states.get(&session_key_1).map(|s| s.yolo), Some(true));
+            assert_eq!(states.get(&session_key_2).map(|s| s.yolo), Some(true));
+        }
+
+        let reset_chat1 = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/new".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&reset_chat1).await.is_ok());
+
+        let states = gw.runtime_state.read().await;
+        assert_eq!(states.get(&session_key_1).map(|s| s.yolo), Some(false));
+        assert_eq!(states.get(&session_key_2).map(|s| s.yolo), Some(true));
+    }
+
+    #[tokio::test]
+    async fn gateway_switch_session_clears_yolo_for_current_chat_context() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("test", adapter).await;
+
+        let current_key = gw
+            .session_manager
+            .compose_session_key("test", "chat1", "user1");
+        let target_key = gw
+            .session_manager
+            .compose_session_key("test", "chat2", "user1");
+
+        let _ = gw
+            .session_manager
+            .get_or_create_session("test", "chat2", "user1")
+            .await;
+        gw.session_manager
+            .add_message(&target_key, Message::user("history from another session"))
+            .await;
+
+        let yolo_chat1 = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/yolo".into(),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&yolo_chat1).await.is_ok());
+        {
+            let states = gw.runtime_state.read().await;
+            assert_eq!(states.get(&current_key).map(|s| s.yolo), Some(true));
+        }
+
+        let switch = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: format!("/sessions {}", target_key),
+            message_id: None,
+            is_dm: true,
+        };
+        assert!(gw.route_message(&switch).await.is_ok());
+
+        let states = gw.runtime_state.read().await;
+        assert_eq!(states.get(&current_key).map(|s| s.yolo), Some(false));
     }
 
     #[tokio::test]

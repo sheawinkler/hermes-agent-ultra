@@ -272,6 +272,12 @@ pub fn all_commands() -> Vec<CommandInfo> {
     ]
 }
 
+fn normalize_command_args(args: &str) -> String {
+    args.replace("\u{2014}\u{2014}", "--")
+        .replace('\u{2014}', "--")
+        .replace('\u{2013}', "-")
+}
+
 /// Parse and dispatch a gateway slash command.
 pub fn handle_command(input: &str) -> GatewayCommandResult {
     let trimmed = input.trim();
@@ -281,7 +287,7 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
 
     let parts: Vec<&str> = trimmed.splitn(2, ' ').collect();
     let cmd = parts[0].to_lowercase();
-    let args = parts.get(1).map(|s| s.trim()).unwrap_or("");
+    let args = normalize_command_args(parts.get(1).map(|s| s.trim()).unwrap_or(""));
 
     match cmd.as_str() {
         "/new" => GatewayCommandResult::ResetSession("🆕 New conversation started.".to_string()),
@@ -293,7 +299,7 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
                 )
             } else {
                 GatewayCommandResult::SwitchModel {
-                    model: args.to_string(),
+                    model: args.clone(),
                     reply: format!("🔀 Model switched to: {}", args),
                 }
             }
@@ -303,7 +309,7 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
                 GatewayCommandResult::Reply("Use /personality <name> to switch.".to_string())
             } else {
                 GatewayCommandResult::SwitchPersonality {
-                    name: args.to_string(),
+                    name: args.clone(),
                     reply: format!("🎭 Personality switched to: {}", args),
                 }
             }
@@ -315,7 +321,7 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
                 GatewayCommandResult::Reply("Usage: /approve <user_id>".to_string())
             } else {
                 GatewayCommandResult::ApproveUser {
-                    user_id: args.to_string(),
+                    user_id: args.clone(),
                 }
             }
         }
@@ -324,7 +330,7 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
                 GatewayCommandResult::Reply("Usage: /deny <user_id>".to_string())
             } else {
                 GatewayCommandResult::DenyUser {
-                    user_id: args.to_string(),
+                    user_id: args.clone(),
                 }
             }
         }
@@ -338,7 +344,7 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
                 GatewayCommandResult::Reply("Usage: /background <prompt>".to_string())
             } else {
                 GatewayCommandResult::BackgroundTask {
-                    prompt: args.to_string(),
+                    prompt: args.clone(),
                 }
             }
         }
@@ -347,7 +353,7 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
                 GatewayCommandResult::Reply("Usage: /btw <prompt>".to_string())
             } else {
                 GatewayCommandResult::BtwTask {
-                    prompt: args.to_string(),
+                    prompt: args.clone(),
                 }
             }
         }
@@ -364,7 +370,7 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
                 GatewayCommandResult::Reply("Usage: /sethome <path>".to_string())
             } else {
                 GatewayCommandResult::SetHome {
-                    path: args.to_string(),
+                    path: args.clone(),
                     reply: format!("🏠 Home directory set to: {}", args),
                 }
             }
@@ -380,7 +386,7 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
                 )
             } else {
                 GatewayCommandResult::SwitchProvider {
-                    provider: args.to_string(),
+                    provider: args.clone(),
                     reply: format!("🔌 Provider switched to: {}", args),
                 }
             }
@@ -392,7 +398,7 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
                 )
             } else {
                 GatewayCommandResult::SwitchProfile {
-                    profile: args.to_string(),
+                    profile: args.clone(),
                     reply: format!("👤 Profile switched to: {}", args),
                 }
             }
@@ -402,7 +408,7 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
                 GatewayCommandResult::SwitchBranch { branch: None }
             } else {
                 GatewayCommandResult::SwitchBranch {
-                    branch: Some(args.to_string()),
+                    branch: Some(args.clone()),
                 }
             }
         }
@@ -508,6 +514,28 @@ mod tests {
                 assert_eq!(model, "gpt-4o");
             }
             other => panic!("Expected SwitchModel, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_model_switch_normalizes_ios_unicode_dashes() {
+        let em_dash = '\u{2014}';
+        let en_dash = '\u{2013}';
+
+        let em_input = format!("/model glm-4.7 {}provider zai", em_dash);
+        match handle_command(&em_input) {
+            GatewayCommandResult::SwitchModel { model, .. } => {
+                assert_eq!(model, "glm-4.7 --provider zai");
+            }
+            other => panic!("Expected SwitchModel for em dash input, got {:?}", other),
+        }
+
+        let en_input = format!("/model glm-4.7 {}provider zai", en_dash);
+        match handle_command(&en_input) {
+            GatewayCommandResult::SwitchModel { model, .. } => {
+                assert_eq!(model, "glm-4.7 -provider zai");
+            }
+            other => panic!("Expected SwitchModel for en dash input, got {:?}", other),
         }
     }
 
