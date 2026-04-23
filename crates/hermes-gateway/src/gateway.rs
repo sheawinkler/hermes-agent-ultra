@@ -326,6 +326,25 @@ impl Gateway {
         }
     }
 
+    fn should_apply_slack_reaction_lifecycle(incoming: &IncomingMessage) -> bool {
+        if !incoming.platform.eq_ignore_ascii_case("slack") {
+            return false;
+        }
+        if incoming.text.trim_start().starts_with('/') {
+            return false;
+        }
+        if incoming
+            .message_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .is_none()
+        {
+            return false;
+        }
+        incoming.is_dm || incoming.text.contains("<@")
+    }
+
     /// Set the message handler for processing incoming messages.
     pub async fn set_message_handler(&self, handler: MessageHandler) {
         *self.message_handler.write().await = Some(handler);
@@ -481,6 +500,28 @@ impl Gateway {
             }
         }
 
+        let reaction_adapter = if Self::should_apply_slack_reaction_lifecycle(incoming) {
+            self.get_adapter(&incoming.platform).await
+        } else {
+            None
+        };
+        if let (Some(adapter), Some(message_id)) =
+            (&reaction_adapter, incoming.message_id.as_deref())
+        {
+            if let Err(err) = adapter
+                .add_reaction(&incoming.chat_id, message_id, "eyes")
+                .await
+            {
+                debug!(
+                    platform = incoming.platform,
+                    chat_id = incoming.chat_id,
+                    message_id = message_id,
+                    "Failed to add start reaction: {}",
+                    err
+                );
+            }
+        }
+
         let enriched_text = self
             .enrich_message_with_transcription(&self.enrich_message_with_vision(&incoming.text));
         self.maybe_apply_smart_model_routing(&session_key, &enriched_text)
@@ -497,14 +538,49 @@ impl Gateway {
         let messages = self.session_manager.get_messages(&session_key).await;
 
         // 5. Process through agent loop (streaming or non-streaming)
-        if self.config.streaming_enabled {
+        let processing_result = if self.config.streaming_enabled {
             self.route_streaming(&incoming, messages, &session_key)
-                .await?;
+                .await
         } else {
             self.route_non_streaming(&incoming, messages, &session_key)
-                .await?;
+                .await
+        };
+
+        if let (Some(adapter), Some(message_id)) =
+            (&reaction_adapter, incoming.message_id.as_deref())
+        {
+            if let Err(err) = adapter
+                .remove_reaction(&incoming.chat_id, message_id, "eyes")
+                .await
+            {
+                debug!(
+                    platform = incoming.platform,
+                    chat_id = incoming.chat_id,
+                    message_id = message_id,
+                    "Failed to remove start reaction: {}",
+                    err
+                );
+            }
+            let emoji = if processing_result.is_ok() {
+                "white_check_mark"
+            } else {
+                "x"
+            };
+            if let Err(err) = adapter
+                .add_reaction(&incoming.chat_id, message_id, emoji)
+                .await
+            {
+                debug!(
+                    platform = incoming.platform,
+                    chat_id = incoming.chat_id,
+                    message_id = message_id,
+                    "Failed to add completion reaction: {}",
+                    err
+                );
+            }
         }
 
+        processing_result?;
         Ok(())
     }
 
@@ -1852,6 +1928,11 @@ mod tests {
         messages: Arc<Mutex<Vec<(String, String)>>>,
     }
 
+    struct ReactionTestAdapter {
+        messages: Arc<Mutex<Vec<(String, String)>>>,
+        reactions: Arc<Mutex<Vec<String>>>,
+    }
+
     struct RecordingHook {
         seen: Arc<Mutex<Vec<(String, serde_json::Value)>>>,
     }
@@ -1935,6 +2016,82 @@ mod tests {
 
         fn platform_name(&self) -> &str {
             "test"
+        }
+    }
+
+    #[async_trait]
+    impl PlatformAdapter for ReactionTestAdapter {
+        async fn start(&self) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn stop(&self) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn send_message(
+            &self,
+            chat_id: &str,
+            text: &str,
+            _parse_mode: Option<ParseMode>,
+        ) -> Result<(), GatewayError> {
+            self.messages
+                .lock()
+                .unwrap()
+                .push((chat_id.to_string(), text.to_string()));
+            Ok(())
+        }
+
+        async fn edit_message(
+            &self,
+            _chat_id: &str,
+            _message_id: &str,
+            _text: &str,
+        ) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn send_file(
+            &self,
+            _chat_id: &str,
+            _file_path: &str,
+            _caption: Option<&str>,
+        ) -> Result<(), GatewayError> {
+            Ok(())
+        }
+
+        async fn add_reaction(
+            &self,
+            chat_id: &str,
+            message_id: &str,
+            emoji: &str,
+        ) -> Result<(), GatewayError> {
+            self.reactions
+                .lock()
+                .unwrap()
+                .push(format!("add:{chat_id}:{message_id}:{emoji}"));
+            Ok(())
+        }
+
+        async fn remove_reaction(
+            &self,
+            chat_id: &str,
+            message_id: &str,
+            emoji: &str,
+        ) -> Result<(), GatewayError> {
+            self.reactions
+                .lock()
+                .unwrap()
+                .push(format!("remove:{chat_id}:{message_id}:{emoji}"));
+            Ok(())
+        }
+
+        fn is_running(&self) -> bool {
+            true
+        }
+
+        fn platform_name(&self) -> &str {
+            "slack"
         }
     }
 
@@ -2478,6 +2635,116 @@ mod tests {
 
         let states = gw.runtime_state.read().await;
         assert_eq!(states.get(&current_key).map(|s| s.yolo), Some(false));
+    }
+
+    #[tokio::test]
+    async fn gateway_slack_reaction_lifecycle_success() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let reactions = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(ReactionTestAdapter {
+            messages: sent.clone(),
+            reactions: reactions.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("slack", adapter).await;
+        gw.set_message_handler(Arc::new(|_messages| {
+            Box::pin(async { Ok("done".to_string()) })
+        }))
+        .await;
+
+        let incoming = IncomingMessage {
+            platform: "slack".into(),
+            chat_id: "C123".into(),
+            user_id: "user1".into(),
+            text: "hello".into(),
+            message_id: Some("1710000000.123".into()),
+            is_dm: true,
+        };
+        assert!(gw.route_message(&incoming).await.is_ok());
+
+        let got = reactions.lock().unwrap().clone();
+        assert_eq!(
+            got,
+            vec![
+                "add:C123:1710000000.123:eyes".to_string(),
+                "remove:C123:1710000000.123:eyes".to_string(),
+                "add:C123:1710000000.123:white_check_mark".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn gateway_slack_reaction_lifecycle_failure_sets_error_reaction() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let reactions = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(ReactionTestAdapter {
+            messages: sent.clone(),
+            reactions: reactions.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("slack", adapter).await;
+        gw.set_message_handler(Arc::new(|_messages| {
+            Box::pin(async { Err(GatewayError::Platform("boom".to_string())) })
+        }))
+        .await;
+
+        let incoming = IncomingMessage {
+            platform: "slack".into(),
+            chat_id: "C123".into(),
+            user_id: "user1".into(),
+            text: "hello".into(),
+            message_id: Some("1710000000.456".into()),
+            is_dm: true,
+        };
+        assert!(gw.route_message(&incoming).await.is_err());
+
+        let got = reactions.lock().unwrap().clone();
+        assert_eq!(
+            got,
+            vec![
+                "add:C123:1710000000.456:eyes".to_string(),
+                "remove:C123:1710000000.456:eyes".to_string(),
+                "add:C123:1710000000.456:x".to_string()
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn gateway_slack_reactions_skip_non_dm_non_mentions() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let reactions = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(ReactionTestAdapter {
+            messages: sent.clone(),
+            reactions: reactions.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let dm_manager = DmManager::with_pair_behavior();
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("slack", adapter).await;
+        gw.set_message_handler(Arc::new(|_messages| {
+            Box::pin(async { Ok("done".to_string()) })
+        }))
+        .await;
+
+        let incoming = IncomingMessage {
+            platform: "slack".into(),
+            chat_id: "C123".into(),
+            user_id: "user1".into(),
+            text: "general channel chatter".into(),
+            message_id: Some("1710000000.789".into()),
+            is_dm: false,
+        };
+        assert!(gw.route_message(&incoming).await.is_ok());
+        assert!(reactions.lock().unwrap().is_empty());
     }
 
     #[tokio::test]

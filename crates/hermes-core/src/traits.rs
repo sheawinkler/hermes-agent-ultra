@@ -114,6 +114,26 @@ pub trait PlatformAdapter: Send + Sync {
             .await
     }
 
+    /// Add a reaction emoji to a message if the platform supports it.
+    async fn add_reaction(
+        &self,
+        _chat_id: &str,
+        _message_id: &str,
+        _emoji: &str,
+    ) -> Result<(), GatewayError> {
+        Ok(())
+    }
+
+    /// Remove a reaction emoji from a message if the platform supports it.
+    async fn remove_reaction(
+        &self,
+        _chat_id: &str,
+        _message_id: &str,
+        _emoji: &str,
+    ) -> Result<(), GatewayError> {
+        Ok(())
+    }
+
     /// Check whether the adapter is currently running.
     fn is_running(&self) -> bool;
 
