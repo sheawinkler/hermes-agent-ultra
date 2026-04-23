@@ -39,6 +39,22 @@ pub struct ThemeColors {
     pub error: String,
     pub warning: String,
     pub success: String,
+    #[serde(default)]
+    pub status_bar_bg: Option<String>,
+    #[serde(default)]
+    pub status_bar_text: Option<String>,
+    #[serde(default)]
+    pub status_bar_strong: Option<String>,
+    #[serde(default)]
+    pub status_bar_dim: Option<String>,
+    #[serde(default)]
+    pub status_bar_good: Option<String>,
+    #[serde(default)]
+    pub status_bar_warn: Option<String>,
+    #[serde(default)]
+    pub status_bar_bad: Option<String>,
+    #[serde(default)]
+    pub status_bar_critical: Option<String>,
 }
 
 impl ThemeColors {
@@ -98,6 +114,46 @@ impl ThemeColors {
             error: Self::parse_color(&self.error),
             warning: Self::parse_color(&self.warning),
             success: Self::parse_color(&self.success),
+            status_bar_bg: self
+                .status_bar_bg
+                .as_deref()
+                .map(Self::parse_color)
+                .unwrap_or_else(|| Self::parse_color(&self.primary)),
+            status_bar_text: self
+                .status_bar_text
+                .as_deref()
+                .map(Self::parse_color)
+                .unwrap_or_else(|| Self::parse_color(&self.foreground)),
+            status_bar_strong: self
+                .status_bar_strong
+                .as_deref()
+                .map(Self::parse_color)
+                .unwrap_or_else(|| Self::parse_color(&self.accent)),
+            status_bar_dim: self
+                .status_bar_dim
+                .as_deref()
+                .map(Self::parse_color)
+                .unwrap_or_else(|| Self::parse_color(&self.secondary)),
+            status_bar_good: self
+                .status_bar_good
+                .as_deref()
+                .map(Self::parse_color)
+                .unwrap_or_else(|| Self::parse_color(&self.success)),
+            status_bar_warn: self
+                .status_bar_warn
+                .as_deref()
+                .map(Self::parse_color)
+                .unwrap_or_else(|| Self::parse_color(&self.warning)),
+            status_bar_bad: self
+                .status_bar_bad
+                .as_deref()
+                .map(Self::parse_color)
+                .unwrap_or_else(|| Self::parse_color(&self.error)),
+            status_bar_critical: self
+                .status_bar_critical
+                .as_deref()
+                .map(Self::parse_color)
+                .unwrap_or_else(|| Self::parse_color(&self.error)),
         }
     }
 }
@@ -113,6 +169,14 @@ pub struct RatatuiColors {
     pub error: Color,
     pub warning: Color,
     pub success: Color,
+    pub status_bar_bg: Color,
+    pub status_bar_text: Color,
+    pub status_bar_strong: Color,
+    pub status_bar_dim: Color,
+    pub status_bar_good: Color,
+    pub status_bar_warn: Color,
+    pub status_bar_bad: Color,
+    pub status_bar_critical: Color,
 }
 
 // ---------------------------------------------------------------------------
@@ -263,6 +327,14 @@ pub fn default_theme() -> Theme {
             error: "#f7768e".to_string(),      // Red-pink
             warning: "#e0af68".to_string(),    // Gold
             success: "#9ece6a".to_string(),    // Green
+            status_bar_bg: None,
+            status_bar_text: None,
+            status_bar_strong: None,
+            status_bar_dim: None,
+            status_bar_good: None,
+            status_bar_warn: None,
+            status_bar_bad: None,
+            status_bar_critical: None,
         },
         styles: ThemeStyles {
             user_input: StyleDef {
@@ -324,6 +396,14 @@ pub fn light_theme() -> Theme {
             error: "#cc3333".to_string(),      // Red
             warning: "#b8860b".to_string(),    // Dark goldenrod
             success: "#2e8b57".to_string(),    // Sea green
+            status_bar_bg: None,
+            status_bar_text: None,
+            status_bar_strong: None,
+            status_bar_dim: None,
+            status_bar_good: None,
+            status_bar_warn: None,
+            status_bar_bad: None,
+            status_bar_critical: None,
         },
         styles: ThemeStyles {
             user_input: StyleDef {
@@ -487,5 +567,27 @@ mod tests {
         assert!(styles.user_input.fg.is_some());
         assert!(styles.assistant_response.fg.is_some());
         assert!(styles.error.fg.is_some());
+    }
+
+    #[test]
+    fn test_status_bar_color_fields_fallback_to_palette() {
+        let colors = default_theme().colors.to_ratatui_colors();
+        assert_eq!(colors.status_bar_bg, colors.primary);
+        assert_eq!(colors.status_bar_text, colors.foreground);
+        assert_eq!(colors.status_bar_warn, colors.warning);
+        assert_eq!(colors.status_bar_critical, colors.error);
+    }
+
+    #[test]
+    fn test_status_bar_color_fields_respect_overrides() {
+        let mut theme = default_theme();
+        theme.colors.status_bar_bg = Some("#112233".to_string());
+        theme.colors.status_bar_text = Some("#445566".to_string());
+        theme.colors.status_bar_warn = Some("#778899".to_string());
+        let colors = theme.colors.to_ratatui_colors();
+
+        assert_eq!(colors.status_bar_bg, Color::Rgb(0x11, 0x22, 0x33));
+        assert_eq!(colors.status_bar_text, Color::Rgb(0x44, 0x55, 0x66));
+        assert_eq!(colors.status_bar_warn, Color::Rgb(0x77, 0x88, 0x99));
     }
 }
