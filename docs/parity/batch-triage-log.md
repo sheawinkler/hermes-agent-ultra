@@ -1044,3 +1044,27 @@
   - Source: `upstream/main` file content sync.
 - Verification:
   - Manual diff inspection against upstream showed the intended content replacement only.
+
+## 2026-04-23 impl-16 (provider-alias parity + installer hardening)
+- Scope:
+  - Port upstream provider-alias normalization in models.dev listing path.
+  - Harden installer UX parity for interactive/non-interactive prompts and install-dir/home options while preserving rust-binary install semantics.
+- Rust implementation:
+  - Updated `crates/hermes-intelligence/src/models_dev/client.rs`:
+    - `provider_models_map` now normalizes via `resolve_models_dev_id` instead of strict mapped-only lookup.
+    - Added regression fixture + test coverage for models.dev provider-id input (`github-copilot`) and Hermes alias (`copilot`).
+- Installer implementation:
+  - Updated `scripts/install.sh`:
+    - added `--dir` and `--hermes-home` options
+    - added `HERMES_INSTALL_DIR` env support (legacy `INSTALL_DIR` still accepted)
+    - default install dir now selects `$PREFIX/bin` on Termux and `~/.local/bin` otherwise
+    - prompt helper now supports `/dev/tty` fallback for non-stdin interactive contexts
+- Upstream queue disposition updated:
+  - `3d90292eda55d24098b1d3e73b191896d492e01e` → `ported`
+- Verification:
+  - `cargo test -p hermes-intelligence list_provider_models -- --nocapture`
+  - `bash -n scripts/install.sh`
+  - `bash scripts/install.sh --help`
+  - `python3 scripts/generate-upstream-patch-queue.py --max-commits 0 --no-fetch`
+  - `python3 scripts/generate-global-parity-proof.py`
+  - `python3 scripts/generate-workstream-status.py`

@@ -1,11 +1,11 @@
 {
-  "generated_at_utc": "2026-04-22T19:28:13-06:00",
-  "head_sha": "f069d675ced224d10a7d8eb3e242412bfad66c2d",
+  "generated_at_utc": "2026-04-23T12:43:27-06:00",
+  "head_sha": "4e5a49920c97fffddd159c074c38338e5b8d0b8c",
   "states": {
     "complete": 7
   },
   "upstream_ref": "upstream/main",
-  "upstream_sha": "36730b90c4af0fcf51c6a0713b65d259050c5ca6",
+  "upstream_sha": "f5af6520d0bfac5b17c9ce460a5a06bf3249972c",
   "workstreams": [
     {
       "evidence": [
@@ -39,7 +39,7 @@
       ],
       "metrics": {
         "divergence_documented": true,
-        "local_skill_files": 0,
+        "local_skill_files": 2,
         "upstream_skill_files": 664
       },
       "state": "complete",
