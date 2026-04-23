@@ -1284,8 +1284,10 @@ dependencies = [
 name = "hermes-cli"
 version = "0.0.4"
 dependencies = [
+ "aes-gcm",
  "assert_cmd",
  "async-trait",
+ "base64",
  "chrono",
  "clap",
  "clap_complete",
@@ -1309,6 +1311,7 @@ dependencies = [
  "hex",
  "hmac",
  "libc",
+ "rand 0.8.5",
  "ratatui",
  "regex",
  "reqwest",

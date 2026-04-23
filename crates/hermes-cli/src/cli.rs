@@ -214,7 +214,7 @@ pub enum CliCommand {
         /// API key value for `auth add` (otherwise interactive prompt).
         #[arg(long = "api-key")]
         api_key: Option<String>,
-        /// For Weixin login: prefer QR flow (scan to obtain token).
+        /// For Weixin/QQBot login: prefer QR flow (scan-to-auth onboard).
         #[arg(long)]
         qr: bool,
     },
