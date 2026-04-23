@@ -107,11 +107,12 @@ impl Tui {
         let backend = CrosstermBackend::new(stdout);
         let terminal = ratatui::Terminal::new(backend)?;
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
+        let requested_theme = std::env::var("HERMES_THEME").unwrap_or_else(|_| "dark".to_string());
         Ok(Self {
             terminal,
             events: event_receiver,
             event_sender,
-            theme: Theme::default_theme(),
+            theme: crate::skin_engine::resolve_theme(requested_theme.as_str()),
         })
     }
 
@@ -589,8 +590,7 @@ impl TuiState {
 // ---------------------------------------------------------------------------
 
 /// Render the full TUI frame.
-pub fn render(frame: &mut Frame, app: &App, state: &TuiState) {
-    let theme = &Theme::default_theme(); // In real use, get from Tui
+pub fn render(frame: &mut Frame, app: &App, state: &TuiState, theme: &Theme) {
     let resolved = theme.resolved_styles();
     let colors = theme.colors.to_ratatui_colors();
 
@@ -812,6 +812,24 @@ fn render_input(
 }
 
 /// Render the status bar at the bottom of the screen.
+fn status_message_style(message: &str, colors: &crate::theme::RatatuiColors) -> Style {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("error") {
+        Style::default()
+            .fg(colors.status_bar_critical)
+            .bg(colors.status_bar_bg)
+    } else if lower.contains("warn") {
+        Style::default()
+            .fg(colors.status_bar_warn)
+            .bg(colors.status_bar_bg)
+    } else {
+        Style::default()
+            .fg(colors.status_bar_text)
+            .bg(colors.status_bar_bg)
+    }
+}
+
+/// Render the status bar at the bottom of the screen.
 fn render_status(
     frame: &mut Frame,
     app: &App,
@@ -828,15 +846,60 @@ fn render_status(
     let session = &app.session_id[..8.min(app.session_id.len())];
     let msg_count = app.messages.len();
 
-    let status_text = format!(
-        " {} {} │ Model: {} │ Session: {} │ Messages: {} │ {}",
-        processing_indicator, state.mode, model, session, msg_count, state.status_message,
-    );
+    let status_message_style = status_message_style(&state.status_message, colors);
 
-    let status_bar = Paragraph::new(Line::from(Span::styled(
-        status_text,
-        Style::default().fg(colors.foreground).bg(colors.primary),
-    )));
+    let status_bar = Paragraph::new(Line::from(vec![
+        Span::styled(
+            format!(" {} {} ", processing_indicator, state.mode),
+            Style::default()
+                .fg(colors.status_bar_strong)
+                .bg(colors.status_bar_bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            "│ ",
+            Style::default()
+                .fg(colors.status_bar_dim)
+                .bg(colors.status_bar_bg),
+        ),
+        Span::styled(
+            format!("Model: {} ", model),
+            Style::default()
+                .fg(colors.status_bar_text)
+                .bg(colors.status_bar_bg),
+        ),
+        Span::styled(
+            "│ ",
+            Style::default()
+                .fg(colors.status_bar_dim)
+                .bg(colors.status_bar_bg),
+        ),
+        Span::styled(
+            format!("Session: {} ", session),
+            Style::default()
+                .fg(colors.status_bar_text)
+                .bg(colors.status_bar_bg),
+        ),
+        Span::styled(
+            "│ ",
+            Style::default()
+                .fg(colors.status_bar_dim)
+                .bg(colors.status_bar_bg),
+        ),
+        Span::styled(
+            format!("Messages: {} ", msg_count),
+            Style::default()
+                .fg(colors.status_bar_good)
+                .bg(colors.status_bar_bg),
+        ),
+        Span::styled(
+            "│ ",
+            Style::default()
+                .fg(colors.status_bar_dim)
+                .bg(colors.status_bar_bg),
+        ),
+        Span::styled(state.status_message.clone(), status_message_style),
+    ]));
 
     frame.render_widget(status_bar, area);
 }
@@ -876,9 +939,10 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
     // Main event loop
     while app.running {
         // Render
+        let active_theme = tui.theme().clone();
         tui.terminal
             .draw(|f| {
-                render(f, &app, &state);
+                render(f, &app, &state, &active_theme);
             })
             .map_err(|e| AgentError::Config(e.to_string()))?;
 
@@ -924,9 +988,12 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                     state.status_message = "Processing...".to_string();
 
                                     // Re-render before processing
-                                    tui.terminal.draw(|f| {
-                                        render(f, &app, &state);
-                                    }).map_err(|e| AgentError::Config(e.to_string()))?;
+                                    let active_theme = tui.theme().clone();
+                                    tui.terminal
+                                        .draw(|f| {
+                                            render(f, &app, &state, &active_theme);
+                                        })
+                                        .map_err(|e| AgentError::Config(e.to_string()))?;
 
                                     match app.handle_input(&input).await {
                                         Ok(_) => {
@@ -1127,5 +1194,21 @@ mod tests {
         let handle: StreamHandle = tx.into();
         handle.send_delta("test delta");
         handle.send_done();
+    }
+
+    #[test]
+    fn test_status_message_style_critical_for_error() {
+        let colors = Theme::default_theme().colors.to_ratatui_colors();
+        let style = status_message_style("Error: boom", &colors);
+        assert_eq!(style.fg, Some(colors.status_bar_critical));
+        assert_eq!(style.bg, Some(colors.status_bar_bg));
+    }
+
+    #[test]
+    fn test_status_message_style_warn_for_warning() {
+        let colors = Theme::default_theme().colors.to_ratatui_colors();
+        let style = status_message_style("Warning: retrying", &colors);
+        assert_eq!(style.fg, Some(colors.status_bar_warn));
+        assert_eq!(style.bg, Some(colors.status_bar_bg));
     }
 }

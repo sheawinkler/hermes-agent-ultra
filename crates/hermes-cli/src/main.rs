@@ -5722,6 +5722,7 @@ fn prune_old_debug_reports(path: &Path, expire_days: u32) -> Result<usize, Agent
 }
 
 const DEBUG_LOG_SNAPSHOT_MAX_BYTES: usize = 512 * 1024;
+const DEBUG_PENDING_PASTES_FILE: &str = "pending-pastes.json";
 
 #[derive(Debug, Clone)]
 struct DebugLogSnapshot {
@@ -5730,10 +5731,98 @@ struct DebugLogSnapshot {
     full_text: Option<String>,
 }
 
-fn capture_debug_log_snapshot(log_file: &Path, tail_lines: usize, max_bytes: usize) -> DebugLogSnapshot {
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+struct PendingPasteDelete {
+    url: String,
+    expires_at_unix: i64,
+}
+
+fn debug_pending_pastes_path(reports_dir: &Path) -> PathBuf {
+    reports_dir.join(DEBUG_PENDING_PASTES_FILE)
+}
+
+fn best_effort_sweep_expired_pending_pastes(reports_dir: &Path, now_unix: i64) -> usize {
+    sweep_expired_pending_pastes(reports_dir, now_unix).unwrap_or(0)
+}
+
+fn sweep_expired_pending_pastes(reports_dir: &Path, now_unix: i64) -> Result<usize, AgentError> {
+    let store = debug_pending_pastes_path(reports_dir);
+    if !store.exists() {
+        return Ok(0);
+    }
+    let content = std::fs::read_to_string(&store)
+        .map_err(|e| AgentError::Io(format!("read {}: {}", store.display(), e)))?;
+    let entries: Vec<PendingPasteDelete> = serde_json::from_str(&content).unwrap_or_default();
+    if entries.is_empty() {
+        let _ = std::fs::remove_file(&store);
+        return Ok(0);
+    }
+
+    let mut kept: Vec<PendingPasteDelete> = Vec::new();
+    let mut removed = 0usize;
+    for entry in entries {
+        if entry.expires_at_unix <= now_unix {
+            removed += 1;
+        } else {
+            kept.push(entry);
+        }
+    }
+
+    if removed == 0 {
+        return Ok(0);
+    }
+
+    if kept.is_empty() {
+        std::fs::remove_file(&store)
+            .map_err(|e| AgentError::Io(format!("remove {}: {}", store.display(), e)))?;
+    } else {
+        let body = serde_json::to_string_pretty(&kept)
+            .map_err(|e| AgentError::Config(format!("serialize pending paste store: {}", e)))?;
+        std::fs::write(&store, body)
+            .map_err(|e| AgentError::Io(format!("write {}: {}", store.display(), e)))?;
+    }
+    Ok(removed)
+}
+
+fn record_pending_paste(
+    reports_dir: &Path,
+    url: &str,
+    expire_days: u32,
+    now_unix: i64,
+) -> Result<(), AgentError> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    let store = debug_pending_pastes_path(reports_dir);
+    let mut entries: Vec<PendingPasteDelete> = if store.exists() {
+        std::fs::read_to_string(&store)
+            .ok()
+            .and_then(|s| serde_json::from_str::<Vec<PendingPasteDelete>>(&s).ok())
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let expires_at_unix = now_unix.saturating_add((expire_days as i64).saturating_mul(86_400));
+    entries.push(PendingPasteDelete {
+        url: trimmed.to_string(),
+        expires_at_unix,
+    });
+    let body = serde_json::to_string_pretty(&entries)
+        .map_err(|e| AgentError::Config(format!("serialize pending paste store: {}", e)))?;
+    std::fs::write(&store, body)
+        .map_err(|e| AgentError::Io(format!("write {}: {}", store.display(), e)))?;
+    Ok(())
+}
+
+fn capture_debug_log_snapshot(
+    log_file: &Path,
+    tail_lines: usize,
+    max_bytes: usize,
+) -> DebugLogSnapshot {
     if !log_file.exists() {
         return DebugLogSnapshot {
-            tail_text: "(log file not found)".to_string(),
+            tail_text: "(file not found)".to_string(),
             full_text: None,
         };
     }
@@ -5741,8 +5830,8 @@ fn capture_debug_log_snapshot(log_file: &Path, tail_lines: usize, max_bytes: usi
     let mut raw: Vec<u8> = Vec::new();
     let mut truncated = false;
     let read_result: Result<(), String> = (|| {
-        let mut file =
-            std::fs::File::open(log_file).map_err(|e| format!("open {}: {}", log_file.display(), e))?;
+        let mut file = std::fs::File::open(log_file)
+            .map_err(|e| format!("open {}: {}", log_file.display(), e))?;
         let size = file
             .metadata()
             .map_err(|e| format!("stat {}: {}", log_file.display(), e))?
@@ -5810,7 +5899,7 @@ fn capture_debug_log_snapshot(log_file: &Path, tail_lines: usize, max_bytes: usi
     let mut lines: Vec<&str> = text.lines().collect();
     if lines.is_empty() {
         return DebugLogSnapshot {
-            tail_text: "(log file empty)".to_string(),
+            tail_text: "(file empty)".to_string(),
             full_text: None,
         };
     }
@@ -5887,7 +5976,8 @@ fn collect_debug_report(cli: &Cli, lines: u32) -> Result<String, AgentError> {
         ));
     }
     report.push_str("\n## Recent Logs\n\n```\n");
-    let snapshot = capture_debug_log_snapshot(&log_file, lines as usize, DEBUG_LOG_SNAPSHOT_MAX_BYTES);
+    let snapshot =
+        capture_debug_log_snapshot(&log_file, lines as usize, DEBUG_LOG_SNAPSHOT_MAX_BYTES);
     report.push_str(&snapshot.tail_text);
     report.push('\n');
     report.push_str("```\n");
@@ -5974,6 +6064,14 @@ async fn run_debug(
     let reports_dir = debug_reports_dir_for_cli(&cli);
     std::fs::create_dir_all(&reports_dir)
         .map_err(|e| AgentError::Io(format!("mkdir {}: {}", reports_dir.display(), e)))?;
+    let now_unix = chrono::Utc::now().timestamp();
+    let pending_removed = best_effort_sweep_expired_pending_pastes(&reports_dir, now_unix);
+    if pending_removed > 0 {
+        println!(
+            "Pruned {} expired pending paste record(s).",
+            pending_removed
+        );
+    }
     let removed = prune_old_debug_reports(&reports_dir, expire)?;
     if removed > 0 {
         println!(
@@ -6008,6 +6106,12 @@ async fn run_debug(
                 Ok(resp) if resp.status().is_success() => {
                     let body = resp.text().await.unwrap_or_default();
                     println!("Shared debug report URL: {}", body.trim());
+                    let _ = record_pending_paste(
+                        &reports_dir,
+                        body.trim(),
+                        expire,
+                        chrono::Utc::now().timestamp(),
+                    );
                 }
                 Ok(resp) => {
                     println!(
@@ -6768,6 +6872,61 @@ mod tests {
     }
 
     #[test]
+    fn capture_debug_log_snapshot_distinguishes_missing_and_empty() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let missing = tmp.path().join("missing.log");
+        let missing_snap = capture_debug_log_snapshot(&missing, 10, 1024);
+        assert_eq!(missing_snap.tail_text, "(file not found)");
+
+        let empty = tmp.path().join("empty.log");
+        std::fs::write(&empty, "").expect("write empty log");
+        let empty_snap = capture_debug_log_snapshot(&empty, 10, 1024);
+        assert_eq!(empty_snap.tail_text, "(file empty)");
+    }
+
+    #[test]
+    fn sweep_expired_pending_pastes_is_best_effort_and_keeps_fresh_entries() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let reports_dir = tmp.path();
+        let store = debug_pending_pastes_path(reports_dir);
+        let entries = vec![
+            PendingPasteDelete {
+                url: "https://paste.rs/expired".to_string(),
+                expires_at_unix: 100,
+            },
+            PendingPasteDelete {
+                url: "https://paste.rs/fresh".to_string(),
+                expires_at_unix: 9_999_999_999,
+            },
+        ];
+        std::fs::write(
+            &store,
+            serde_json::to_string_pretty(&entries).expect("serialize"),
+        )
+        .expect("write pending store");
+
+        let removed = sweep_expired_pending_pastes(reports_dir, 1_000).expect("sweep");
+        assert_eq!(removed, 1);
+
+        let kept: Vec<PendingPasteDelete> =
+            serde_json::from_str(&std::fs::read_to_string(&store).expect("read pending store"))
+                .expect("parse pending store");
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].url, "https://paste.rs/fresh");
+    }
+
+    #[test]
+    fn best_effort_sweep_handles_invalid_store_without_failing() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let reports_dir = tmp.path();
+        let store = debug_pending_pastes_path(reports_dir);
+        std::fs::write(&store, "{invalid json").expect("write invalid json");
+
+        let removed = best_effort_sweep_expired_pending_pastes(reports_dir, 1_000);
+        assert_eq!(removed, 0);
+    }
+
+    #[test]
     fn run_sessions_db_auto_maintenance_degrades_when_home_is_invalid() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let bad_home = tmp.path().join("not-a-dir");
@@ -6778,7 +6937,10 @@ mod tests {
         cfg.sessions.auto_prune = true;
 
         let result = std::panic::catch_unwind(|| run_sessions_db_auto_maintenance(&cfg));
-        assert!(result.is_ok(), "maintenance should degrade without panicking");
+        assert!(
+            result.is_ok(),
+            "maintenance should degrade without panicking"
+        );
     }
 
     #[test]
