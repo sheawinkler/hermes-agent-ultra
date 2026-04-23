@@ -973,3 +973,29 @@
   - `cargo test -p hermes-intelligence --no-run`
   - `python3 scripts/generate-upstream-patch-queue.py --max-commits 0`
   - `python3 scripts/generate-global-parity-proof.py --check-ci`
+
+## 2026-04-23 impl-12 (qqbot QR auth parity + upstream queue rebaseline)
+- Scope:
+  - Port QQBot QR scan-to-configure onboarding into Rust CLI auth flow (`hermes auth login qqbot --qr`) with create/poll/decrypt/fallback behavior.
+  - Rebaseline upstream queue against current `upstream/main` head state.
+- Rust implementation commits (chronological):
+  - `180e208f` feat(auth): add qqbot qr login onboarding in rust cli.
+    - Added QQBot QR onboard helpers in `hermes-cli`:
+      - bind-key generation (32-byte random key, base64)
+      - `create_bind_task`/`poll_bind_result` API calls
+      - AES-256-GCM decryption of encrypted client secret
+      - connect URL generation + terminal QR display + expiry refresh loop
+    - Added dedicated `qqbot` branch in `run_auth(login)`:
+      - supports `--qr` and `HERMES_QQBOT_QR_LOGIN`
+      - falls back to manual `QQ_APP_ID`/`QQ_CLIENT_SECRET` prompt path on QR failure
+      - writes `platforms.qqbot.extra.app_id/client_secret` and enables platform
+    - Expanded unit tests for QR helpers (connect-url encoding, decrypt roundtrip, integer extraction).
+- Upstream SHAs functionally covered by this tranche:
+  - `cf55c738e79bf1a9ae809d11bcab695e83f4e248`
+  - `70a33708e7c9d870af5bd7bac1b7e99064bdd84b`
+  - `1f216ecbb4797035362891e584039fc386ec247f`
+- Queue rebaseline notes:
+  - `upstream/main` currently resolves to a single-commit snapshot lineage (`d8cc85dcdccf86f7cf07fe012b00646282a12b90`), so regenerated queue now tracks the live delta set from `main..upstream/main` as `total=1`.
+- Verification (targeted):
+  - `cargo test -p hermes-cli qqbot_ -- --nocapture`
+  - `python3 scripts/generate-upstream-patch-queue.py --repo-root .`
