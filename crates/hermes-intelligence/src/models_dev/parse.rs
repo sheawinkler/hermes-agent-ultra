@@ -76,6 +76,18 @@ fn as_optional_f64(v: &Value, key: &str) -> Option<f64> {
     raw.as_f64()
 }
 
+const CONTEXT_LENGTH_KEYS: &[&str] =
+    &["context", "max_seq_len", "n_ctx_train", "n_ctx", "ctx_size"];
+
+fn extract_context_from_limit(limit: &Value) -> Option<u64> {
+    for key in CONTEXT_LENGTH_KEYS {
+        if let Some(v) = limit.get(*key).and_then(as_positive_u64) {
+            return Some(v);
+        }
+    }
+    None
+}
+
 // ---------------------------------------------------------------------------
 // Public entry points
 // ---------------------------------------------------------------------------
@@ -84,8 +96,7 @@ fn as_optional_f64(v: &Value, key: &str) -> Option<f64> {
 /// 0/missing/non-numeric as `None`.
 pub fn extract_context(entry: &Value) -> Option<u64> {
     let limit = entry.get("limit")?;
-    let ctx = limit.get("context")?;
-    as_positive_u64(ctx)
+    extract_context_from_limit(limit)
 }
 
 /// Convert a raw model entry into a [`ModelInfo`].
@@ -94,7 +105,7 @@ pub fn parse_model_info(model_id: &str, raw: &Value, provider_id: &str) -> Model
     let cost = raw.get("cost").cloned().unwrap_or(Value::Null);
     let modalities = raw.get("modalities").cloned().unwrap_or(Value::Null);
 
-    let context_window = limit.get("context").and_then(as_positive_u64).unwrap_or(0);
+    let context_window = extract_context_from_limit(&limit).unwrap_or(0);
     let max_output = limit.get("output").and_then(as_positive_u64).unwrap_or(0);
     let max_input = limit.get("input").and_then(as_positive_u64);
 
@@ -185,10 +196,7 @@ pub fn parse_model_capabilities(raw: &Value) -> ModelCapabilities {
     let supports_reasoning = as_bool(raw, "reasoning");
 
     let limit = raw.get("limit").cloned().unwrap_or(Value::Null);
-    let context_window = limit
-        .get("context")
-        .and_then(as_positive_u64)
-        .unwrap_or(200_000);
+    let context_window = extract_context_from_limit(&limit).unwrap_or(200_000);
     let max_output_tokens = limit
         .get("output")
         .and_then(as_positive_u64)
@@ -219,6 +227,26 @@ mod tests {
         assert_eq!(
             extract_context(&json!({"limit": {"context": 200000}})),
             Some(200_000)
+        );
+    }
+
+    #[test]
+    fn extract_context_supports_ctx_size_and_legacy_keys() {
+        assert_eq!(
+            extract_context(&json!({"limit": {"max_seq_len": 131072}})),
+            Some(131_072)
+        );
+        assert_eq!(
+            extract_context(&json!({"limit": {"n_ctx_train": 65536}})),
+            Some(65_536)
+        );
+        assert_eq!(
+            extract_context(&json!({"limit": {"n_ctx": 32768}})),
+            Some(32_768)
+        );
+        assert_eq!(
+            extract_context(&json!({"limit": {"ctx_size": 262144}})),
+            Some(262_144)
         );
     }
 

@@ -62,6 +62,8 @@ static DEFAULT_CONTEXT_LENGTHS: &[(&str, u64)] = &[
     ("gpt-4", 128_000),
     // Google
     ("gemini", 1_048_576),
+    ("gemma-4", 256_000),
+    ("gemma4", 256_000),
     ("gemma-4-31b", 256_000),
     ("gemma-3", 131_072),
     ("gemma", 8_192),
@@ -88,6 +90,9 @@ static DEFAULT_CONTEXT_LENGTHS: &[(&str, u64)] = &[
     ("grok", 131_072),
     // Kimi
     ("kimi", 262_144),
+    // Xiaomi MIMO
+    ("mimo-v2.5-pro", 1_000_000),
+    ("mimo-v2.5", 1_000_000),
 ];
 
 // ---------------------------------------------------------------------------
@@ -480,6 +485,7 @@ pub fn infer_provider_from_url(base_url: &str) -> Option<&'static str> {
         ("chatgpt.com", "openai"),
         ("api.anthropic.com", "anthropic"),
         ("api.z.ai", "zai"),
+        ("open.bigmodel.cn", "zai"),
         ("api.moonshot.ai", "kimi-coding"),
         ("api.minimax", "minimax"),
         ("dashscope.aliyuncs.com", "alibaba"),
@@ -568,6 +574,8 @@ mod tests {
         assert_eq!(get_model_context_length("gpt-4o"), 128_000);
         assert_eq!(get_model_context_length("claude-opus-4-6"), 1_000_000);
         assert_eq!(get_model_context_length("gemini-2.0-flash"), 1_048_576);
+        assert_eq!(get_model_context_length("gemma4:31b-cloud"), 256_000);
+        assert_eq!(get_model_context_length("xiaomi/mimo-v2.5-pro"), 1_000_000);
         assert_eq!(
             get_model_context_length("unknown-model"),
             DEFAULT_FALLBACK_CONTEXT
@@ -611,6 +619,10 @@ mod tests {
         assert_eq!(
             infer_provider_from_url("https://api.anthropic.com"),
             Some("anthropic")
+        );
+        assert_eq!(
+            infer_provider_from_url("https://open.bigmodel.cn/api/paas/v4"),
+            Some("zai")
         );
         assert_eq!(infer_provider_from_url("http://localhost:8080"), None);
     }
