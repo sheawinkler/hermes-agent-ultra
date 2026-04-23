@@ -93,6 +93,8 @@ pub struct PluginManifest {
     pub version: String,
     pub description: String,
     #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default)]
     pub author: Option<String>,
     #[serde(default)]
     pub homepage: Option<String>,
@@ -340,7 +342,35 @@ impl PluginManager {
 
             match std::fs::read_to_string(&manifest_path) {
                 Ok(content) => match serde_yaml::from_str::<PluginManifest>(&content) {
-                    Ok(manifest) => {
+                    Ok(mut manifest) => {
+                        // If the manifest doesn't explicitly declare a plugin kind,
+                        // detect Python memory-provider plugins and auto-coerce them
+                        // to `exclusive` so they can be routed away from generic
+                        // plugin loading.
+                        let explicit_kind = manifest
+                            .kind
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|s| !s.is_empty());
+                        if explicit_kind.is_none() {
+                            let init_file = path.join("__init__.py");
+                            if let Ok(source) = std::fs::read_to_string(&init_file) {
+                                let probe = if source.len() > 8192 {
+                                    &source[..8192]
+                                } else {
+                                    source.as_str()
+                                };
+                                if probe.contains("register_memory_provider")
+                                    || probe.contains("MemoryProvider")
+                                {
+                                    manifest.kind = Some("exclusive".to_string());
+                                    tracing::debug!(
+                                        "Plugin {} auto-coerced to kind=exclusive (memory provider heuristic)",
+                                        manifest.name
+                                    );
+                                }
+                            }
+                        }
                         tracing::debug!(
                             "Discovered plugin: {} v{} at {}",
                             manifest.name,
@@ -497,6 +527,7 @@ dependencies:
             name: "test".to_string(),
             version: "1.0.0".to_string(),
             description: "desc".to_string(),
+            kind: None,
             author: Some("me".to_string()),
             homepage: None,
             dependencies: vec![],
@@ -504,5 +535,47 @@ dependencies:
         let meta: PluginMeta = manifest.into();
         assert_eq!(meta.name, "test");
         assert_eq!(meta.author.unwrap(), "me");
+    }
+
+    #[test]
+    fn test_discover_plugins_auto_coerces_memory_provider_kind() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plugin_dir = tmp.path().join("plugins").join("mempalace");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("plugin.yaml"),
+            "name: mempalace\nversion: \"0.1.0\"\ndescription: Test\n",
+        )
+        .unwrap();
+        std::fs::write(
+            plugin_dir.join("__init__.py"),
+            "class MemPalaceProvider: pass\n\ndef register(ctx):\n    ctx.register_memory_provider('mempalace', MemPalaceProvider)\n",
+        )
+        .unwrap();
+
+        let discovered = PluginManager::discover_plugins(tmp.path());
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].0.kind.as_deref(), Some("exclusive"));
+    }
+
+    #[test]
+    fn test_discover_plugins_explicit_standalone_not_overridden() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plugin_dir = tmp.path().join("plugins").join("not_memory");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("plugin.yaml"),
+            "name: not_memory\nversion: \"0.1.0\"\ndescription: Test\nkind: standalone\n",
+        )
+        .unwrap();
+        std::fs::write(
+            plugin_dir.join("__init__.py"),
+            "# MemoryProvider mentioned for docs only\n",
+        )
+        .unwrap();
+
+        let discovered = PluginManager::discover_plugins(tmp.path());
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].0.kind.as_deref(), Some("standalone"));
     }
 }
