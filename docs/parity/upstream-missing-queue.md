@@ -1,29 +1,30 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-22T23:38:29.810603+00:00`
+Generated: `2026-04-23T01:18:59.307001+00:00`
 
-- Range: `main..upstream/main`; total commits tracked: `4659`.
+- Range: `main..upstream/main`; total commits tracked: `4724`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 1655 |
+| #20 | GPAR-01 tests+CI parity | 1667 |
 | #21 | GPAR-02 skills parity | 201 |
-| #22 | GPAR-03 UX parity | 551 |
-| #23 | GPAR-04 gateway/plugin-memory parity | 514 |
-| #24 | GPAR-05 environments+parsers+benchmarks | 64 |
-| #25 | GPAR-06 packaging/docs/install parity | 152 |
-| #26 | GPAR-07 upstream queue backfill | 1522 |
+| #22 | GPAR-03 UX parity | 552 |
+| #23 | GPAR-04 gateway/plugin-memory parity | 516 |
+| #24 | GPAR-05 environments+parsers+benchmarks | 66 |
+| #25 | GPAR-06 packaging/docs/install parity | 156 |
+| #26 | GPAR-07 upstream queue backfill | 1566 |
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 59 |
-| ported | 72 |
-| superseded | 4528 |
+| pending | 121 |
+| ported | 74 |
+| superseded | 4529 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
+| `9ed6eb0cca93` | #20 | fix(tui): resolve runtime provider in _make_agent (#11884) |
 | `c6b1ef4e5881` | #20 | feat: add Step Plan provider support (salvage #6005) |
 | `a7d78d3bfd81` | #20 | fix: preserve reasoning_content on Kimi replay |
 | `d166716c65ea` | #21 | feat(optional-skills): add page-agent skill under new web-development category (#13976) |
@@ -53,6 +54,7 @@ Generated: `2026-04-22T23:38:29.810603+00:00`
 | `61d0a99c11cd` | #20 | fix(debug): sweep expired pending pastes on slash debug paths |
 | `8dc936f10ecf` | #20 | chore: add taosiyuan163 to AUTHOR_MAP, add truncation boundary tests |
 | `de849c410da9` | #20 | refactor(debug): remove dead _read_log_tail/_read_full_log wrappers |
+| `5dead0f2a08b` | #20 | fix(tui): degrade gracefully when state.db init fails |
 | `c32321718822` | #20 | fix: make CLI status bar skin-aware |
 | `81a504a4a0f3` | #20 | fix: align status bar skin tests with upstream main |
 | `88564ad8bc75` | #26 | fix(skins): don't inherit status_bar_* into light-mode skins |
@@ -67,7 +69,6 @@ Generated: `2026-04-22T23:38:29.810603+00:00`
 | `6fb98f343a7b` | #22 | fix(tui): address copilot review on #14103 |
 | `3ef6992edf2b` | #22 | fix(tui): drop main-screen banner flash, widen alt-screen clear on entry |
 | `b641639e425b` | #20 | fix(debug): distinguish empty-log from missing-log in report placeholder |
-| `ea67e49574b0` | #20 | fix(streaming): silent retry when stream dies mid tool-call (#14151) |
 | `e0d698cfb351` | #22 | fix(tui): yolo toggle only reports on/off for strict '0'/'1' values |
 | `8410ac05a9cc` | #22 | fix(tui): tab title shows cwd + waiting-for-input marker |
 | `103c71ac36c6` | #22 | refactor(tui): /clean pass on tui-polish — data tables, tighter title |
@@ -75,12 +76,52 @@ Generated: `2026-04-22T23:38:29.810603+00:00`
 | `ea9ddecc72d1` | #22 | fix(tui): route Ctrl+K and Ctrl+W through macOS readline fallback |
 | `e86acad8f1a5` | #23 | feat(feishu): preserve @mention context on inbound messages |
 | `44a16c5d9d54` | #20 | guard terminal_tool import-time env parsing |
-| `6513138f2684` | #20 | fix(agent): recognize Tailscale CGNAT (100.64.0.0/10) as local for Ollama timeouts |
-| `1e8254e59962` | #20 | fix(agent): guard context compressor against structured message content |
 | `83efea661f83` | #22 | fix(tui): address copilot round 3 on #14145 |
 | `c96a548bde1b` | #26 | feat(models): add xiaomi/mimo-v2.5-pro and mimo-v2.5 to openrouter + nous (#14184) |
 | `51ca57599466` | #20 | feat(gateway): expose plugin slash commands natively on all platforms + decision-capable command hook |
 | `66d2d7090e76` | #26 | fix(model_metadata): add gemma-4 and gemma4 context length entries |
 | `3c54ceb3cafe` | #26 | chore(release): add AUTHOR_MAP entry for Feranmi10 |
 | `284e084bcc06` | #26 | perf(browser): upgrade agent-browser 0.13 -> 0.26, wire daemon idle timeout |
+| `b52123eb158b` | #20 | fix(gateway): recover stale pid and planned restart state |
+| `402d048eb6c6` | #20 | fix(gateway): also unlink stale PID + lock files on cleanup |
+| `10063e730c9b` | #26 | [verified] docs: fix broken env var example in contributing guide |
+| `dad53205ea4d` | #26 | chore(release): map simon-gtcl in AUTHOR_MAP |
+| `e67eb7ff4b79` | #26 | fix(gateway): add hermes-gateway script pattern to PID detection |
+| `12f9f10f0f6a` | #26 | chore(release): map houko in AUTHOR_MAP |
+| `27621ef83690` | #26 | feat: add ctx_size to context length keys for Lemonade server support |
+| `e710bb1f7f99` | #26 | chore(release): map cgarwood82 in AUTHOR_MAP |
+| `e826cc42ef07` | #26 | fix(nix): use stdenv.hostPlatform.system instead of system |
+| `80108104cf92` | #26 | chore(release): map anna-oake in AUTHOR_MAP |
+| `c47d4eda13be` | #26 | fix(tools): restrict RPC socket permissions to owner-only |
+| `ea0e4c267d87` | #26 | chore(release): map jaffarkeikei in AUTHOR_MAP |
+| `9eb543cafe4d` | #20 | feat(/model): merge models.dev entries for lesser-loved providers (#14221) |
+| `c0df4a0a7f0b` | #23 | fix(email): accept **kwargs in send_document to handle metadata param |
+| `0187de1f67cf` | #26 | chore(release): map hxp-plus in AUTHOR_MAP |
+| `953f8fa943e3` | #26 | fix(scripts): read gateway_voice_mode.json as UTF-8 |
+| `0dace06db7c3` | #26 | chore(release): map Tianworld in AUTHOR_MAP |
+| `276ef49c9610` | #26 | fix(provider): recognize open.bigmodel.cn as Zhipu/ZAI provider |
+| `ea83cd91e407` | #26 | chore(release): map wujhsu in AUTHOR_MAP |
+| `3445530dbf18` | #26 | feat(web): support TAVILY_BASE_URL env var for custom proxy endpoints |
+| `3e95963bde2a` | #26 | chore(release): map niyoh120 in AUTHOR_MAP |
+| `435d86ce36b6` | #24 | fix: use builtin cd in command wrapper to bypass shell aliases |
+| `75221db96796` | #26 | chore(release): map vrinek in AUTHOR_MAP |
+| `b9463e32c6e2` | #20 | fix(usage): read top-level Anthropic cache fields from OAI-compatible proxies |
+| `02aba4a728e2` | #26 | fix(skills): follow symlinks in iter_skill_index_files |
+| `6f629a04622d` | #26 | chore(release): map xandersbell in AUTHOR_MAP |
+| `5fbb69989da0` | #25 | fix(docker): add openssh-client for SSH terminal backend |
+| `c0100dde3553` | #26 | chore(release): map Somme4096 in AUTHOR_MAP |
+| `4009f2edd9bd` | #25 | feat(docker): add docker-cli to Docker image |
+| `b2593c8d4ec3` | #26 | chore(release): map brianclemens in AUTHOR_MAP |
+| `d74eaef5f984` | #20 | fix(error_classifier): retry mid-stream SSL/TLS alert errors as transport |
+| `96b0f3700117` | #26 | fix: separate browser_cdp into its own toolset |
+| `98e1396b1569` | #26 | chore(release): map yudaiyan in AUTHOR_MAP |
+| `3e96c87f371e` | #20 | fix(delegate): make MCP toolset inheritance configurable |
+| `7d8b2eee638f` | #20 | fix(delegate): default inherit_mcp_toolsets=true, drop version bump |
+| `db86ed199082` | #26 | fix(terminal): forward docker_forward_env and docker_env to container_config The container_config builder in terminal_tool.py was missing docker_forward_env and docker_env keys, causing config.yaml's docker_forward_env setting to be silently ignored. Environment variables listed in docker_forward_env were never injected into Docker containers. This fix adds both keys to the container_config dict so they are properly passed to _create_environment(). |
+| `142202910e96` | #26 | chore(release): map ycbai in AUTHOR_MAP |
+| `846b9758d879` | #25 | Remove Discussions link from README |
+| `54db93366781` | #26 | chore(release): map longsizhuo in AUTHOR_MAP |
+| `8db5517b4cc7` | #25 | fix: add /opt/data/.local/bin to PATH in Docker image (Closes #13739) |
+| `9ea2d96d7355` | #26 | chore(release): map ms-alan in AUTHOR_MAP |
+| `4c1362884dcb` | #24 | fix(local): respect configured cwd in init_session() |
 

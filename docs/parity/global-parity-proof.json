@@ -2,19 +2,19 @@
   "ci_gate": {
     "checks": [
       {
-        "actual": 5212.0,
+        "actual": 5450.0,
         "limit": 5500,
         "metric": "max_commits_behind",
         "status": "pass"
       },
       {
-        "actual": 4505.0,
+        "actual": 4720.0,
         "limit": 5000,
         "metric": "max_upstream_patch_missing",
         "status": "pass"
       },
       {
-        "actual": 2204.0,
+        "actual": 2280.0,
         "limit": 2500,
         "metric": "max_files_only_upstream",
         "status": "pass"
@@ -46,7 +46,7 @@
     ],
     "pass": true
   },
-  "generated_at_utc": "2026-04-22T23:38:29.896975+00:00",
+  "generated_at_utc": "2026-04-23T01:18:59.407688+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -59,12 +59,12 @@
     "GPAR-09": true
   },
   "metrics": {
-    "max_commits_behind": 5212.0,
+    "max_commits_behind": 5450.0,
     "max_divergence_review_overdue": 0.0,
-    "max_files_only_upstream": 2204.0,
+    "max_files_only_upstream": 2280.0,
     "max_shared_different": 8.0,
     "max_unowned_divergences": 0.0,
-    "max_upstream_patch_missing": 4505.0,
+    "max_upstream_patch_missing": 4720.0,
     "min_test_intent_mapping_ratio": 1.0
   },
   "program": {
@@ -75,37 +75,37 @@
   },
   "queue_summary": {
     "by_disposition": {
-      "pending": 59,
-      "ported": 72,
-      "superseded": 4528
+      "pending": 121,
+      "ported": 74,
+      "superseded": 4529
     },
     "by_target_ticket": {
-      "20": 1655,
+      "20": 1667,
       "21": 201,
-      "22": 551,
-      "23": 514,
-      "24": 64,
-      "25": 152,
-      "26": 1522
+      "22": 552,
+      "23": 516,
+      "24": 66,
+      "25": 156,
+      "26": 1566
     },
-    "total_commits": 4659
+    "total_commits": 4724
   },
   "release_gate": {
     "checks": [
       {
-        "actual": 5212.0,
+        "actual": 5450.0,
         "limit": 0,
         "metric": "max_commits_behind",
         "status": "fail"
       },
       {
-        "actual": 4505.0,
+        "actual": 4720.0,
         "limit": 0,
         "metric": "max_upstream_patch_missing",
         "status": "fail"
       },
       {
-        "actual": 2204.0,
+        "actual": 2280.0,
         "limit": 0,
         "metric": "max_files_only_upstream",
         "status": "fail"
