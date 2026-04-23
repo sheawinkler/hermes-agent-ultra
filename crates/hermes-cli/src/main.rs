@@ -630,13 +630,68 @@ fn gateway_pid_path_for_cli(cli: &Cli) -> PathBuf {
     gateway_pid_path_in(hermes_state_root(cli))
 }
 
+fn gateway_lock_path_for_pid_path(pid_path: &Path) -> PathBuf {
+    pid_path.with_file_name("gateway.lock")
+}
+
 fn read_gateway_pid(path: &Path) -> Option<u32> {
-    std::fs::read_to_string(path).ok()?.trim().parse().ok()
+    let raw = std::fs::read_to_string(path).ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Ok(pid) = trimmed.parse::<u32>() {
+        return Some(pid);
+    }
+    let json: serde_json::Value = serde_json::from_str(trimmed).ok()?;
+    let pid = json.get("pid")?.as_u64()?;
+    u32::try_from(pid).ok()
+}
+
+fn cleanup_stale_gateway_metadata(pid_path: &Path) {
+    let _ = std::fs::remove_file(pid_path);
+    let _ = std::fs::remove_file(gateway_lock_path_for_pid_path(pid_path));
+}
+
+fn looks_like_gateway_process(cmdline: &str) -> bool {
+    let cmdline = cmdline.to_ascii_lowercase();
+    const PATTERNS: &[&str] = &[
+        "hermes_cli.main gateway",
+        "hermes_cli/main.py gateway",
+        "hermes gateway",
+        "hermes-agent-ultra gateway",
+        "hermes-gateway",
+        "gateway/run.py",
+    ];
+    PATTERNS.iter().any(|pattern| cmdline.contains(pattern))
+}
+
+#[cfg(unix)]
+fn gateway_pid_commandline(pid: u32) -> Option<String> {
+    let output = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "command="])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let cmdline = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if cmdline.is_empty() {
+        None
+    } else {
+        Some(cmdline)
+    }
 }
 
 #[cfg(unix)]
 fn gateway_pid_is_alive(pid: u32) -> bool {
-    unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    if unsafe { libc::kill(pid as libc::pid_t, 0) != 0 } {
+        return false;
+    }
+    match gateway_pid_commandline(pid) {
+        Some(cmdline) => looks_like_gateway_process(&cmdline),
+        None => true,
+    }
 }
 
 #[cfg(not(unix))]
@@ -1014,7 +1069,7 @@ async fn run_gateway(
             if let Some(pid) = read_gateway_pid(&pid_path) {
                 if gateway_pid_is_alive(pid) {
                     let _ = gateway_pid_terminate(pid);
-                    let _ = std::fs::remove_file(&pid_path);
+                    cleanup_stale_gateway_metadata(&pid_path);
                     println!("Stopped existing gateway process {}.", pid);
                 }
             }
@@ -1078,7 +1133,7 @@ async fn run_gateway(
                     );
                     return Ok(());
                 }
-                let _ = std::fs::remove_file(&pid_path);
+                cleanup_stale_gateway_metadata(&pid_path);
             }
 
             if !enabled.is_empty() {
@@ -1698,28 +1753,31 @@ async fn run_gateway(
                 println!("{service_state}");
             }
             let pid_path = gateway_pid_path_for_cli(&cli);
-            match std::fs::read_to_string(&pid_path) {
-                Ok(raw) => match raw.trim().parse::<u32>() {
-                    Ok(pid) if gateway_pid_is_alive(pid) => {
-                        println!(
-                            "Gateway status: running (PID {}, file {})",
-                            pid,
-                            pid_path.display()
-                        );
-                    }
-                    Ok(pid) => {
-                        println!(
-                            "Gateway status: not running (stale PID {} in {})",
-                            pid,
-                            pid_path.display()
-                        );
-                    }
-                    Err(_) => {
-                        println!("Gateway status: invalid PID file at {}", pid_path.display());
-                    }
-                },
-                Err(_) => {
-                    println!("Gateway status: not running (no PID file; start with `hermes gateway start`)");
+            if !pid_path.exists() {
+                println!(
+                    "Gateway status: not running (no PID file; start with `hermes gateway start`)"
+                );
+                return Ok(());
+            }
+            match read_gateway_pid(&pid_path) {
+                Some(pid) if gateway_pid_is_alive(pid) => {
+                    println!(
+                        "Gateway status: running (PID {}, file {})",
+                        pid,
+                        pid_path.display()
+                    );
+                }
+                Some(pid) => {
+                    cleanup_stale_gateway_metadata(&pid_path);
+                    println!(
+                        "Gateway status: not running (stale metadata for PID {} in {})",
+                        pid,
+                        pid_path.display()
+                    );
+                }
+                None => {
+                    cleanup_stale_gateway_metadata(&pid_path);
+                    println!("Gateway status: invalid PID file at {}", pid_path.display());
                 }
             }
         }
@@ -1734,9 +1792,9 @@ async fn run_gateway(
                 return Ok(());
             };
             if !gateway_pid_is_alive(pid) {
-                let _ = std::fs::remove_file(&pid_path);
+                cleanup_stale_gateway_metadata(&pid_path);
                 println!(
-                    "Gateway stop: process {} not running; removed stale PID file {}.",
+                    "Gateway stop: process {} not running; removed stale PID/lock metadata for {}.",
                     pid,
                     pid_path.display()
                 );
@@ -1745,7 +1803,7 @@ async fn run_gateway(
             match gateway_pid_terminate(pid) {
                 Ok(()) => {
                     println!("Sent SIGTERM to gateway PID {}.", pid);
-                    let _ = std::fs::remove_file(&pid_path);
+                    cleanup_stale_gateway_metadata(&pid_path);
                     println!("Removed {}.", pid_path.display());
                 }
                 Err(e) => println!("Gateway stop: failed to signal PID {}: {}", pid, e),
@@ -6859,6 +6917,60 @@ mod tests {
         assert_eq!(provider_env_var("stepfun"), Some("STEPFUN_API_KEY"));
         assert_eq!(provider_env_var("step"), None);
         assert_eq!(secret_provider_aliases("stepfun"), vec!["stepfun", "step"]);
+    }
+
+    #[test]
+    fn read_gateway_pid_supports_plain_and_json_records() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let plain = tmp.path().join("plain.pid");
+        std::fs::write(&plain, "12345\n").expect("write plain pid");
+        assert_eq!(read_gateway_pid(&plain), Some(12345));
+
+        let json = tmp.path().join("json.pid");
+        std::fs::write(
+            &json,
+            serde_json::json!({
+                "pid": 23456,
+                "kind": "hermes-gateway",
+                "argv": ["hermes-gateway"]
+            })
+            .to_string(),
+        )
+        .expect("write json pid");
+        assert_eq!(read_gateway_pid(&json), Some(23456));
+
+        let invalid = tmp.path().join("invalid.pid");
+        std::fs::write(&invalid, "{bad").expect("write invalid pid");
+        assert_eq!(read_gateway_pid(&invalid), None);
+    }
+
+    #[test]
+    fn looks_like_gateway_process_includes_gateway_script_pattern() {
+        assert!(looks_like_gateway_process(
+            "python -m hermes_cli.main gateway run"
+        ));
+        assert!(looks_like_gateway_process(
+            "python hermes_cli/main.py gateway run"
+        ));
+        assert!(looks_like_gateway_process("hermes gateway run"));
+        assert!(looks_like_gateway_process(
+            "hermes-gateway --config ~/.hermes"
+        ));
+        assert!(looks_like_gateway_process("python gateway/run.py"));
+        assert!(!looks_like_gateway_process("python worker.py"));
+    }
+
+    #[test]
+    fn cleanup_stale_gateway_metadata_removes_pid_and_lock_files() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let pid_path = tmp.path().join("gateway.pid");
+        let lock_path = gateway_lock_path_for_pid_path(&pid_path);
+        std::fs::write(&pid_path, "999999\n").expect("write pid");
+        std::fs::write(&lock_path, "{\"pid\":999999}").expect("write lock");
+
+        cleanup_stale_gateway_metadata(&pid_path);
+        assert!(!pid_path.exists());
+        assert!(!lock_path.exists());
     }
 
     #[test]
