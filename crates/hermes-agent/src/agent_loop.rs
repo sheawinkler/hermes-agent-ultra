@@ -684,9 +684,8 @@ fn maybe_nous_401_diagnostic(
         return None;
     }
     let lower = err.to_ascii_lowercase();
-    let is_auth_401 = lower.contains("401")
-        || lower.contains("unauthorized")
-        || lower.contains("authentication");
+    let is_auth_401 =
+        lower.contains("401") || lower.contains("unauthorized") || lower.contains("authentication");
     if !is_auth_401 {
         return None;
     }
@@ -1829,8 +1828,8 @@ impl AgentLoop {
                 Arc::new(p)
             }
             "stepfun" => {
-                let url = base_url
-                    .unwrap_or_else(|| "https://api.stepfun.ai/step_plan/v1".to_string());
+                let url =
+                    base_url.unwrap_or_else(|| "https://api.stepfun.ai/step_plan/v1".to_string());
                 Arc::new(GenericProvider::new(url, &api_key, model_name))
             }
             "nous" => {
@@ -6082,15 +6081,8 @@ mod tests {
             Arc::new(DummyProvider),
         );
 
-        let built = agent.build_runtime_provider(
-            "stepfun",
-            "step-3.5-flash",
-            None,
-            None,
-            None,
-            None,
-            None,
-        );
+        let built =
+            agent.build_runtime_provider("stepfun", "step-3.5-flash", None, None, None, None, None);
         assert!(built.is_ok(), "stepfun runtime provider should build");
     }
 
@@ -7157,9 +7149,6 @@ mod tests {
         std::env::remove_var("STEPFUN_API_KEY");
 
         let base = agent.resolve_runtime_base_url("stepfun", None);
-        assert_eq!(
-            base.as_deref(),
-            Some("https://api.stepfun.ai/step_plan/v1")
-        );
+        assert_eq!(base.as_deref(), Some("https://api.stepfun.ai/step_plan/v1"));
     }
 }

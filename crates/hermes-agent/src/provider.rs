@@ -2093,7 +2093,8 @@ mod tests {
 
     #[test]
     fn test_anthropic_resolve_messages_max_tokens_prefers_positive_request() {
-        let resolved = AnthropicProvider::resolve_messages_max_tokens(Some(8192), "claude-opus-4-1");
+        let resolved =
+            AnthropicProvider::resolve_messages_max_tokens(Some(8192), "claude-opus-4-1");
         assert_eq!(resolved, 8192);
     }
 

@@ -188,9 +188,8 @@ impl SqliteSessionSearchBackend {
             return "unknown".to_string();
         };
 
-        let format_human = |dt: DateTime<Local>| -> String {
-            dt.format("%B %d, %Y at %I:%M %p").to_string()
-        };
+        let format_human =
+            |dt: DateTime<Local>| -> String { dt.format("%B %d, %Y at %I:%M %p").to_string() };
 
         if let Ok(seconds) = raw.parse::<f64>() {
             let sec = seconds.trunc() as i64;
@@ -733,7 +732,10 @@ mod tests {
 
     #[test]
     fn format_timestamp_handles_none() {
-        assert_eq!(SqliteSessionSearchBackend::format_timestamp(None), "unknown");
+        assert_eq!(
+            SqliteSessionSearchBackend::format_timestamp(None),
+            "unknown"
+        );
     }
 
     #[test]

@@ -154,7 +154,11 @@ impl App {
                 tracing::info!(
                     "sessions db auto-maintenance pruned {} session(s){}",
                     maintenance.pruned,
-                    if maintenance.vacuumed { " + vacuum" } else { "" }
+                    if maintenance.vacuumed {
+                        " + vacuum"
+                    } else {
+                        ""
+                    }
                 );
             }
         }
@@ -536,10 +540,8 @@ mod tests {
     #[test]
     fn test_resolve_provider_and_model_uses_single_provider_fallback() {
         let mut cfg = GatewayConfig::default();
-        cfg.llm_providers.insert(
-            "stepfun".to_string(),
-            LlmProviderConfig::default(),
-        );
+        cfg.llm_providers
+            .insert("stepfun".to_string(), LlmProviderConfig::default());
         let (provider, model) = resolve_provider_and_model(&cfg, "step-3.5-flash");
         assert_eq!(provider, "stepfun");
         assert_eq!(model, "step-3.5-flash");
