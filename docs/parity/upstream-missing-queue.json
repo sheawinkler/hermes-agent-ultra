@@ -423,12 +423,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "gateway/platforms/feishu.py"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "ported in Rust via crates/hermes-gateway/src/platforms/feishu.rs: normalize outbound text in edit/send paths with format_message(content.trim()) to prevent leading newline artifacts during streaming edits (commit 792affd06)",
       "owner": "",
       "sha": "9dba75bc3862dcf9732029af35a616e0ab034b0d",
       "subject": "fix(feishu): issue where streaming edits in Feishu show extra leading newlines",
@@ -1030,7 +1030,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     }
   ],
-  "generated_at_utc": "2026-04-23T20:06:09.016533+00:00",
+  "generated_at_utc": "2026-04-23T20:14:24.658832+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -1038,8 +1038,8 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 70,
-      "ported": 4
+      "pending": 69,
+      "ported": 5
     },
     "by_target_ticket": {
       "20": 16,

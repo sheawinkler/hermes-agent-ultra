@@ -1099,3 +1099,19 @@
   - `python3 scripts/generate-upstream-patch-queue.py --repo-root . --no-fetch`
   - `python3 scripts/generate-global-parity-proof.py --repo-root .`
   - `python3 scripts/generate-workstream-status.py --repo-root .`
+
+## 2026-04-23 impl-18 (feishu streaming edit formatting parity)
+- Scope:
+  - Port Feishu streaming-edit formatting fix so update payloads do not preserve leading/trailing whitespace artifacts.
+- Rust implementation commit:
+  - `792affd06` fix(parity): trim feishu edit payload text for streaming updates.
+    - Added `format_message(content.trim())` helper in `crates/hermes-gateway/src/platforms/feishu.rs`.
+    - Applied formatting in both `send_text` and `edit_text` payload paths for consistency.
+    - Added regression test `format_message_trims_whitespace`.
+- Upstream SHA updated:
+  - `9dba75bc3862dcf9732029af35a616e0ab034b0d` → `ported`
+- Verification:
+  - `cargo test -p hermes-gateway --features feishu format_message_trims_whitespace -- --nocapture`
+  - `python3 scripts/generate-upstream-patch-queue.py --repo-root . --no-fetch`
+  - `python3 scripts/generate-global-parity-proof.py --repo-root .`
+  - `python3 scripts/generate-workstream-status.py --repo-root .`
