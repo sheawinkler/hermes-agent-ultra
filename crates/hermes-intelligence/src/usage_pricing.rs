@@ -520,14 +520,20 @@ pub fn normalize_usage(
     let prompt_total = get_u64(raw_usage, "prompt_tokens");
     let completion_tokens = get_u64(raw_usage, "completion_tokens");
     let details = raw_usage.get("prompt_tokens_details");
-    let cache_read = details
+    let mut cache_read = details
         .and_then(|d| d.get("cached_tokens"))
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
-    let cache_write = details
+    if cache_read == 0 {
+        cache_read = get_u64(raw_usage, "cache_read_input_tokens");
+    }
+    let mut cache_write = details
         .and_then(|d| d.get("cache_write_tokens"))
         .and_then(|v| v.as_u64())
         .unwrap_or(0);
+    if cache_write == 0 {
+        cache_write = get_u64(raw_usage, "cache_creation_input_tokens");
+    }
 
     let reasoning_tokens = raw_usage
         .get("output_tokens_details")
@@ -613,6 +619,53 @@ mod tests {
         assert_eq!(usage.output_tokens, 500);
         assert_eq!(usage.cache_read_tokens, 200);
         assert_eq!(usage.cache_write_tokens, 50);
+    }
+
+    #[test]
+    fn test_normalize_usage_openai_top_level_write_with_nested_read() {
+        let raw = serde_json::json!({
+            "prompt_tokens": 1000,
+            "completion_tokens": 200,
+            "prompt_tokens_details": { "cached_tokens": 500 },
+            "cache_creation_input_tokens": 300
+        });
+        let usage = normalize_usage(&raw, Some("openrouter"), Some("chat_completions"));
+        assert_eq!(usage.cache_read_tokens, 500);
+        assert_eq!(usage.cache_write_tokens, 300);
+        assert_eq!(usage.input_tokens, 200);
+        assert_eq!(usage.output_tokens, 200);
+    }
+
+    #[test]
+    fn test_normalize_usage_openai_top_level_cache_fields_when_details_missing() {
+        let raw = serde_json::json!({
+            "prompt_tokens": 1000,
+            "completion_tokens": 200,
+            "cache_read_input_tokens": 500,
+            "cache_creation_input_tokens": 300
+        });
+        let usage = normalize_usage(&raw, Some("openrouter"), Some("chat_completions"));
+        assert_eq!(usage.cache_read_tokens, 500);
+        assert_eq!(usage.cache_write_tokens, 300);
+        assert_eq!(usage.input_tokens, 200);
+    }
+
+    #[test]
+    fn test_normalize_usage_openai_prefers_nested_details_over_top_level_fallback() {
+        let raw = serde_json::json!({
+            "prompt_tokens": 1000,
+            "completion_tokens": 200,
+            "prompt_tokens_details": {
+                "cached_tokens": 600,
+                "cache_write_tokens": 150
+            },
+            "cache_read_input_tokens": 999,
+            "cache_creation_input_tokens": 999
+        });
+        let usage = normalize_usage(&raw, Some("openrouter"), Some("chat_completions"));
+        assert_eq!(usage.cache_read_tokens, 600);
+        assert_eq!(usage.cache_write_tokens, 150);
+        assert_eq!(usage.input_tokens, 250);
     }
 
     #[test]
