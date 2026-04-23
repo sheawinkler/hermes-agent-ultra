@@ -114,6 +114,7 @@ impl SessionPersistence {
                 content TEXT,
                 tool_call_id TEXT,
                 tool_calls TEXT,
+                reasoning_content TEXT,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (session_id) REFERENCES sessions(id)
             );
@@ -141,6 +142,14 @@ impl SessionPersistence {
             if !msg.contains("duplicate column") {
                 return Err(AgentError::Io(format!(
                     "Failed to migrate sessions.system_prompt: {e}"
+                )));
+            }
+        }
+        if let Err(e) = conn.execute("ALTER TABLE messages ADD COLUMN reasoning_content TEXT", []) {
+            let msg = e.to_string();
+            if !msg.contains("duplicate column") {
+                return Err(AgentError::Io(format!(
+                    "Failed to migrate messages.reasoning_content: {e}"
                 )));
             }
         }
@@ -210,8 +219,8 @@ impl SessionPersistence {
 
         let mut stmt = conn
             .prepare(
-                "INSERT INTO messages (session_id, role, content, tool_call_id, tool_calls, created_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                "INSERT INTO messages (session_id, role, content, tool_call_id, tool_calls, reasoning_content, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             )
             .map_err(|e| AgentError::Io(format!("Failed to prepare insert: {e}")))?;
 
@@ -234,6 +243,7 @@ impl SessionPersistence {
                 msg.content.as_deref(),
                 msg.tool_call_id.as_deref(),
                 tool_calls_json.as_deref(),
+                msg.reasoning_content.as_deref(),
                 now,
             ])
             .map_err(|e| AgentError::Io(format!("Failed to insert message: {e}")))?;
@@ -354,7 +364,7 @@ impl SessionPersistence {
 
         let mut stmt = conn
             .prepare(
-                "SELECT role, content, tool_call_id, tool_calls
+                "SELECT role, content, tool_call_id, tool_calls, reasoning_content
                  FROM messages
                  WHERE session_id = ?1
                  ORDER BY id ASC",
@@ -367,6 +377,7 @@ impl SessionPersistence {
                 let content: Option<String> = row.get(1)?;
                 let tool_call_id: Option<String> = row.get(2)?;
                 let tool_calls_json: Option<String> = row.get(3)?;
+                let reasoning_content: Option<String> = row.get(4)?;
 
                 let role = match role_str.as_str() {
                     "system" => MessageRole::System,
@@ -384,7 +395,7 @@ impl SessionPersistence {
                     tool_calls,
                     tool_call_id,
                     name: None,
-                    reasoning_content: None,
+                    reasoning_content,
                     cache_control: None,
                 })
             })
@@ -406,10 +417,12 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let sp = SessionPersistence::new(tmp.path());
 
+        let mut assistant = Message::assistant("Hi there!");
+        assistant.reasoning_content = Some("provider scratchpad".to_string());
         let messages = vec![
             Message::system("You are helpful"),
             Message::user("Hello"),
-            Message::assistant("Hi there!"),
+            assistant,
         ];
 
         sp.persist_session(
@@ -432,6 +445,62 @@ mod tests {
         assert_eq!(loaded[0].role, MessageRole::System);
         assert_eq!(loaded[1].content.as_deref(), Some("Hello"));
         assert_eq!(loaded[2].content.as_deref(), Some("Hi there!"));
+        assert_eq!(
+            loaded[2].reasoning_content.as_deref(),
+            Some("provider scratchpad")
+        );
+    }
+
+    #[test]
+    fn test_migrates_reasoning_content_column_for_legacy_db() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("sessions.db");
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE sessions (
+                id TEXT PRIMARY KEY,
+                model TEXT,
+                platform TEXT DEFAULT 'cli',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                title TEXT,
+                message_count INTEGER DEFAULT 0
+            );
+            CREATE TABLE messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                role TEXT NOT NULL,
+                content TEXT,
+                tool_call_id TEXT,
+                tool_calls TEXT,
+                created_at TEXT NOT NULL
+            );",
+        )
+        .unwrap();
+        drop(conn);
+
+        let sp = SessionPersistence::new(tmp.path());
+        let mut assistant = Message::assistant("legacy");
+        assistant.reasoning_content = Some("legacy-think".to_string());
+        sp.persist_session("legacy-migrate", &[assistant], None, None, None, None)
+            .unwrap();
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(messages)")
+            .expect("pragma prepare");
+        let has_reasoning_col = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+            .iter()
+            .any(|name| name == "reasoning_content");
+        assert!(has_reasoning_col);
+
+        let loaded = sp.load_session("legacy-migrate").unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].reasoning_content.as_deref(), Some("legacy-think"));
     }
 
     #[test]
