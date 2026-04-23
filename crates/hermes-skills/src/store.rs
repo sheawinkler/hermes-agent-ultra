@@ -1,5 +1,6 @@
 //! Local skill storage: the `SkillStore` trait and `FileSkillStore` implementation.
 
+use std::collections::HashSet;
 use std::path::{Component, Path, PathBuf};
 
 use async_trait::async_trait;
@@ -339,19 +340,24 @@ impl FileSkillStore {
                 if Self::is_hidden_name(&name) {
                     continue;
                 }
+                let path = entry.path();
                 let file_type = entry
                     .file_type()
                     .await
                     .map_err(|e| SkillError::Io(e.to_string()))?;
-                // Avoid symlink traversal by only following real directories.
-                if !file_type.is_dir() {
+                if !file_type.is_dir() && !file_type.is_symlink() {
                     continue;
                 }
-
-                let path = entry.path();
                 let canonical = fs::canonicalize(&path)
                     .await
                     .map_err(|e| SkillError::Io(e.to_string()))?;
+                if !fs::metadata(&canonical)
+                    .await
+                    .map_err(|e| SkillError::Io(e.to_string()))?
+                    .is_dir()
+                {
+                    continue;
+                }
                 if !canonical.starts_with(&root) {
                     tracing::warn!("Skipping category outside root: {}", path.display());
                     continue;
@@ -377,8 +383,20 @@ impl FileSkillStore {
 
         let root = self.canonical_root().await?;
         let mut stack = vec![dir.to_path_buf()];
+        let mut visited = HashSet::new();
 
         while let Some(current_dir) = stack.pop() {
+            let canonical_current = fs::canonicalize(&current_dir)
+                .await
+                .map_err(|e| SkillError::Io(e.to_string()))?;
+            if !canonical_current.starts_with(&root) {
+                tracing::warn!("Skipping directory outside root: {}", current_dir.display());
+                continue;
+            }
+            if !visited.insert(canonical_current) {
+                continue;
+            }
+
             let mut entries = fs::read_dir(&current_dir)
                 .await
                 .map_err(|e| SkillError::Io(e.to_string()))?;
@@ -398,8 +416,7 @@ impl FileSkillStore {
                     .file_type()
                     .await
                     .map_err(|e| SkillError::Io(e.to_string()))?;
-                // Never recurse into symlinks.
-                if !file_type.is_dir() {
+                if !file_type.is_dir() && !file_type.is_symlink() {
                     continue;
                 }
 
@@ -407,6 +424,13 @@ impl FileSkillStore {
                 let canonical = fs::canonicalize(&path)
                     .await
                     .map_err(|e| SkillError::Io(e.to_string()))?;
+                if !fs::metadata(&canonical)
+                    .await
+                    .map_err(|e| SkillError::Io(e.to_string()))?
+                    .is_dir()
+                {
+                    continue;
+                }
                 if !canonical.starts_with(&root) {
                     tracing::warn!("Skipping directory outside root: {}", path.display());
                     continue;
@@ -612,5 +636,36 @@ mod tests {
         let metas = store.list().await.unwrap();
         assert_eq!(metas.len(), 1);
         assert_eq!(metas[0].name, "visible");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_list_follows_symlinked_skill_directories_once() {
+        use std::os::unix::fs as unix_fs;
+
+        let dir = tempdir().unwrap();
+        let store = FileSkillStore::new(dir.path().to_path_buf());
+
+        let real_skill_dir = dir.path().join("real-cat").join("linked-skill");
+        fs::create_dir_all(&real_skill_dir).await.unwrap();
+        let fm = SkillFrontmatter {
+            name: "linked-skill".to_string(),
+            category: None,
+            description: Some("reachable through symlink".to_string()),
+            version: Some("0.1.0".to_string()),
+        };
+        fs::write(
+            real_skill_dir.join("SKILL.md"),
+            FileSkillStore::render_skill_file(&fm, "# Linked Skill\nBody"),
+        )
+        .await
+        .unwrap();
+
+        let alias_dir = dir.path().join("alias-cat");
+        unix_fs::symlink(dir.path().join("real-cat"), &alias_dir).unwrap();
+
+        let metas = store.list().await.unwrap();
+        let hits = metas.iter().filter(|m| m.name == "linked-skill").count();
+        assert_eq!(hits, 1);
     }
 }
