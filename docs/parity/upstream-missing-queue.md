@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-23T06:43:51.538395+00:00`
+Generated: `2026-04-23T06:48:05.072295+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `4766`.
 
@@ -16,15 +16,14 @@ Generated: `2026-04-23T06:43:51.538395+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 144 |
-| ported | 92 |
+| pending | 139 |
+| ported | 97 |
 | superseded | 4530 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `d166716c65ea` | #21 | feat(optional-skills): add page-agent skill under new web-development category (#13976) |
 | `8bcd77a9c2e8` | #23 | feat(wecom): add QR scan flow and interactive setup wizard for bot credentials |
 | `3f60a907e1d3` | #22 | docs(wecom): document QR scan-to-create setup flow |
 | `b43524ecabc3` | #23 | fix(wecom): visible poll progress + clearer no-bot-info failure + docstring note |
@@ -61,9 +60,7 @@ Generated: `2026-04-23T06:43:51.538395+00:00`
 | `e86acad8f1a5` | #23 | feat(feishu): preserve @mention context on inbound messages |
 | `44a16c5d9d54` | #20 | guard terminal_tool import-time env parsing |
 | `83efea661f83` | #22 | fix(tui): address copilot round 3 on #14145 |
-| `c96a548bde1b` | #26 | feat(models): add xiaomi/mimo-v2.5-pro and mimo-v2.5 to openrouter + nous (#14184) |
 | `51ca57599466` | #20 | feat(gateway): expose plugin slash commands natively on all platforms + decision-capable command hook |
-| `66d2d7090e76` | #26 | fix(model_metadata): add gemma-4 and gemma4 context length entries |
 | `3c54ceb3cafe` | #26 | chore(release): add AUTHOR_MAP entry for Feranmi10 |
 | `284e084bcc06` | #26 | perf(browser): upgrade agent-browser 0.13 -> 0.26, wire daemon idle timeout |
 | `b52123eb158b` | #20 | fix(gateway): recover stale pid and planned restart state |
@@ -72,7 +69,6 @@ Generated: `2026-04-23T06:43:51.538395+00:00`
 | `dad53205ea4d` | #26 | chore(release): map simon-gtcl in AUTHOR_MAP |
 | `e67eb7ff4b79` | #26 | fix(gateway): add hermes-gateway script pattern to PID detection |
 | `12f9f10f0f6a` | #26 | chore(release): map houko in AUTHOR_MAP |
-| `27621ef83690` | #26 | feat: add ctx_size to context length keys for Lemonade server support |
 | `e710bb1f7f99` | #26 | chore(release): map cgarwood82 in AUTHOR_MAP |
 | `e826cc42ef07` | #26 | fix(nix): use stdenv.hostPlatform.system instead of system |
 | `80108104cf92` | #26 | chore(release): map anna-oake in AUTHOR_MAP |
@@ -83,7 +79,6 @@ Generated: `2026-04-23T06:43:51.538395+00:00`
 | `0187de1f67cf` | #26 | chore(release): map hxp-plus in AUTHOR_MAP |
 | `953f8fa943e3` | #26 | fix(scripts): read gateway_voice_mode.json as UTF-8 |
 | `0dace06db7c3` | #26 | chore(release): map Tianworld in AUTHOR_MAP |
-| `276ef49c9610` | #26 | fix(provider): recognize open.bigmodel.cn as Zhipu/ZAI provider |
 | `ea83cd91e407` | #26 | chore(release): map wujhsu in AUTHOR_MAP |
 | `3445530dbf18` | #26 | feat(web): support TAVILY_BASE_URL env var for custom proxy endpoints |
 | `3e95963bde2a` | #26 | chore(release): map niyoh120 in AUTHOR_MAP |
@@ -124,4 +119,9 @@ Generated: `2026-04-23T06:43:51.538395+00:00`
 | `2c26a8084854` | #26 | chore(release): map projectadmin-dev in AUTHOR_MAP |
 | `a14fb3ab1ac4` | #26 | fix(cli): guard fallback_model list format in save_config_value |
 | `6ad2fab8cfaa` | #26 | chore(release): map Dev-Mriganka in AUTHOR_MAP |
+| `fa2dbd1bb56e` | #26 | fix: use utf-8 encoding when reading .env file in load_env() |
+| `64c38cc4d02c` | #26 | chore(release): map shushuzn in AUTHOR_MAP |
+| `050aabe2d408` | #20 | fix(gateway): reset approval and yolo state on session boundary |
+| `36730b90c4af` | #20 | fix(gateway): also clear session-scoped approval state on /new |
+| `d30ee2e54550` | #20 | refactor: unify transport dispatch + collapse normalize shims |
 

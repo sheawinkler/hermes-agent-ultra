@@ -69920,14 +69920,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "optional-skills/web-development/DESCRIPTION.md",
         "optional-skills/web-development/page-agent/SKILL.md"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "ported via 8fcf9c8b (added optional-skills/web-development/page-agent bundle)",
+      "owner": "codex",
       "sha": "d166716c65ea0949026bdbd6d747c8aa59901721",
       "subject": "feat(optional-skills): add page-agent skill under new web-development category (#13976)",
       "target_ticket": 21,
@@ -70898,14 +70898,14 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "agent/model_metadata.py",
         "hermes_cli/models.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "ported via 8fcf9c8b (added mimo-v2.5 context aliases in rust model metadata)",
+      "owner": "codex",
       "sha": "c96a548bde1b347797a77cee5b41fd2daa570eb4",
       "subject": "feat(models): add xiaomi/mimo-v2.5-pro and mimo-v2.5 to openrouter + nous (#14184)",
       "target_ticket": 26,
@@ -70935,13 +70935,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "agent/model_metadata.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "ported via 8fcf9c8b (added gemma-4 and gemma4 context aliases)",
+      "owner": "codex",
       "sha": "66d2d7090e76c9fec04481aac40e8b36ec1fa64c",
       "subject": "fix(model_metadata): add gemma-4 and gemma4 context length entries",
       "target_ticket": 26,
@@ -71061,13 +71061,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "agent/model_metadata.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "ported via 8fcf9c8b (models.dev parser supports ctx_size context key)",
+      "owner": "codex",
       "sha": "27621ef83690372ba56effee2476a7dc732b1e38",
       "subject": "feat: add ctx_size to context length keys for Lemonade server support",
       "target_ticket": 26,
@@ -71207,13 +71207,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "agent/model_metadata.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "ported via 8fcf9c8b (infer_provider_from_url maps open.bigmodel.cn -> zai)",
+      "owner": "codex",
       "sha": "276ef49c96107e3e3d42c304967a32c3343f7e4f",
       "subject": "fix(provider): recognize open.bigmodel.cn as Zhipu/ZAI provider",
       "target_ticket": 26,
@@ -72378,7 +72378,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     }
   ],
-  "generated_at_utc": "2026-04-23T06:43:51.538395+00:00",
+  "generated_at_utc": "2026-04-23T06:48:05.072295+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -72386,8 +72386,8 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 144,
-      "ported": 92,
+      "pending": 139,
+      "ported": 97,
       "superseded": 4530
     },
     "by_target_ticket": {

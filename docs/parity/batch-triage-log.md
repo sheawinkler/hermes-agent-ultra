@@ -943,3 +943,33 @@
   - `cargo test -p hermes-cli --no-run`
   - `python3 scripts/generate-upstream-patch-queue.py --max-commits 0`
   - `python3 scripts/generate-global-parity-proof.py --check-ci`
+
+## 2026-04-23 impl-11 (optional-skill + model-metadata parity tranche)
+- Scope:
+  - Port upstream optional-skill packaging and model metadata/provider detection updates for emerging model/provider aliases.
+- Rust implementation commits (chronological):
+  - `8fcf9c8b` feat(parity): add page-agent optional skill and model metadata aliases.
+    - Added optional skill bundle:
+      - `optional-skills/web-development/DESCRIPTION.md`
+      - `optional-skills/web-development/page-agent/SKILL.md`
+    - Added model context aliases in rust metadata fallback table:
+      - `mimo-v2.5-pro`, `mimo-v2.5` (1M)
+      - `gemma-4`, `gemma4` (256K)
+    - Added provider URL inference alias:
+      - `open.bigmodel.cn` → `zai`
+    - Added models.dev context extraction support for additional keys:
+      - `max_seq_len`, `n_ctx_train`, `n_ctx`, `ctx_size`
+    - Added regression tests for context aliases, provider URL inference, and `ctx_size` extraction.
+- Upstream SHAs moved to `ported`:
+  - `d166716c65ea0949026bdbd6d747c8aa59901721`
+  - `c96a548bde1b347797a77cee5b41fd2daa570eb4`
+  - `66d2d7090e76c9fec04481aac40e8b36ec1fa64c`
+  - `27621ef83690372ba56effee2476a7dc732b1e38`
+  - `276ef49c96107e3e3d42c304967a32c3343f7e4f`
+- Verification (targeted + compile):
+  - `cargo test -p hermes-intelligence test_get_model_context_length -- --nocapture`
+  - `cargo test -p hermes-intelligence test_infer_provider -- --nocapture`
+  - `cargo test -p hermes-intelligence extract_context_supports_ctx_size_and_legacy_keys -- --nocapture`
+  - `cargo test -p hermes-intelligence --no-run`
+  - `python3 scripts/generate-upstream-patch-queue.py --max-commits 0`
+  - `python3 scripts/generate-global-parity-proof.py --check-ci`
