@@ -59,12 +59,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "gateway/platforms/wecom.py"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "ported in Rust via crates/hermes-gateway/src/platforms/wecom_callback.rs: detect group callback chat id, strip leading @mention prefix before command parsing, and preserve group chat scope/is_dm=false (commit 884e81da6)",
       "owner": "",
       "sha": "8b1ff55f5382052a5d98246659136e632af13697",
       "subject": "fix(wecom): strip @mention prefix in group chats for slash command recognition",
@@ -176,12 +176,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "cron/scheduler.py"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "superseded-by-design in Rust: cron execution path returns typed AgentResult (no dynamic dict .get access), so upstream non-dict guard class is structurally prevented; classified as parity-complete with no code delta required",
       "owner": "",
       "sha": "22afa066f838da5fcf1f1a0087524dd4fb99f7c5",
       "subject": "fix(cron): guard against non-dict result from run_conversation",
@@ -793,6 +793,32 @@
     {
       "disposition": "pending",
       "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/ink.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "bc9518f660c75244b45d47f0a7a87f6cd067be62",
+      "subject": "fix(ui-tui): force full xterm.js alt-screen repaints",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/ink.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "071bdb5a3f099be5a7c824906315d483ee5b003d",
+      "subject": "Revert \"fix(ui-tui): force full xterm.js alt-screen repaints\"",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
         "agent/auxiliary_client.py",
         "agent/model_metadata.py",
         "hermes_cli/config.py",
@@ -812,6 +838,58 @@
     {
       "disposition": "pending",
       "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/log-update.test.ts"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "2e7546006697c87ded650573dbbad52d505b63f4",
+      "subject": "test(ui-tui): add log-update diff contract tests",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/ink.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "f7e86577bc258985ddf9cc328f7e7343585ff382",
+      "subject": "fix(ui-tui): heal xterm.js resize-burst render drift",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/ink.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "3e01de0b092c7b14842c5165d09146b45c140066",
+      "subject": "fix(ui-tui): preserve composer after resize-burst healing",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/appLayout.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "60d1edc38a0e1773193a4c7738781ffa1b724bbc",
+      "subject": "fix(ui-tui): keep bottom statusbar in composer layout",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
         "hermes_cli/main.py",
         "hermes_cli/model_switch.py"
       ],
@@ -826,19 +904,133 @@
     {
       "disposition": "pending",
       "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/ink.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "7c4dd7d660f3ea3872c7a9fea873ecb388738e5e",
+      "subject": "refactor(ui-tui): collapse xterm.js resize settle dance",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/log-update.test.ts"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "f28f07e98eda5533abbaebbe9b0640f465bb581a",
+      "subject": "test(ui-tui): drop dead terminalReally from drift repro",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/ink.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "1e445b2547c5f83a4632358f44ba4e51497eb050",
+      "subject": "fix(ui-tui): heal post-resize alt-screen drift",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
         "agent/transports/types.py",
         "tests/agent/transports/test_types.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "ported in Rust via ToolCall.extra_content field + OpenAI/API bridge parser propagation so Gemini thought_signature metadata round-trips through assistant tool calls (commit 5013f2cfa)",
       "owner": "",
       "sha": "f5af6520d0bfac5b17c9ce460a5a06bf3249972c",
       "subject": "fix: add extra_content property to ToolCall for Gemini thought_signature (#14488)",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/app/useMainApp.ts"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "c8ff70fe03f5c0fb5726392bed9586544b1d8b15",
+      "subject": "perf(ui-tui): freeze offscreen live tail during scroll",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/components/ScrollBox.tsx",
+        "ui-tui/packages/hermes-ink/src/ink/dom.ts",
+        "ui-tui/packages/hermes-ink/src/ink/render-node-to-output.ts",
+        "ui-tui/src/components/appChrome.tsx"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "aa47812edfb9cd945822a2a69a260467e8136926",
+      "subject": "fix(ui-tui): clear sticky prompt when follow snaps to bottom",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/viewport.test.ts",
+        "ui-tui/src/components/appChrome.tsx",
+        "ui-tui/src/domain/viewport.ts"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "9a885fba31e5ae8a8a24b7f5dcf8ea19dedddf5c",
+      "subject": "fix(ui-tui): hide stale sticky prompt when newer prompt is visible",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/ink.tsx",
+        "ui-tui/src/__tests__/viewport.test.ts",
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/components/appChrome.tsx",
+        "ui-tui/src/domain/viewport.ts"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "9bf6e1cd6eeecf83ddd4fe97b7c756d6bf2f34cb",
+      "subject": "refactor(ui-tui): clean touched resize and sticky prompt paths",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/log-update.test.ts",
+        "ui-tui/src/app/useMainApp.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "882278520ba9de4e1219a0575313a19e5e8b67de",
+      "subject": "chore: uptick",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
     }
   ],
-  "generated_at_utc": "2026-04-23T19:37:38.686298+00:00",
+  "generated_at_utc": "2026-04-23T20:06:09.016533+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -846,15 +1038,15 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 59,
-      "ported": 1
+      "pending": 70,
+      "ported": 4
     },
     "by_target_ticket": {
       "20": 16,
-      "22": 6,
+      "22": 20,
       "23": 4,
       "26": 34
     },
-    "total_commits": 60
+    "total_commits": 74
   }
 }
