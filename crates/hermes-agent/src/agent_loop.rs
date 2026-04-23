@@ -660,6 +660,20 @@ pub enum ErrorClass {
     Fatal,
 }
 
+fn has_ssl_transient_phrase(lower: &str) -> bool {
+    lower.contains("bad record mac")
+        || lower.contains("ssl alert")
+        || lower.contains("tls alert")
+        || lower.contains("ssl handshake failure")
+        || lower.contains("tlsv1 alert")
+        || lower.contains("sslv3 alert")
+        || lower.contains("bad_record_mac")
+        || lower.contains("ssl_alert")
+        || lower.contains("tls_alert")
+        || lower.contains("tls_alert_internal_error")
+        || lower.contains("[ssl:")
+}
+
 fn classify_error(err: &str) -> ErrorClass {
     let lower = err.to_lowercase();
     let model_not_found = lower.contains("model not found")
@@ -687,6 +701,8 @@ fn classify_error(err: &str) -> ErrorClass {
         || lower.contains("authentication")
     {
         ErrorClass::Auth
+    } else if has_ssl_transient_phrase(&lower) {
+        ErrorClass::Retryable
     } else if lower.contains("500")
         || lower.contains("502")
         || lower.contains("503")
@@ -714,6 +730,7 @@ fn is_transient_stream_error(err: &AgentError) -> bool {
             || lower.contains("connection lost")
             || lower.contains("upstream connect error")
             || lower.contains("stream read error")
+            || has_ssl_transient_phrase(&lower)
     }
 
     match err {
@@ -4867,6 +4884,30 @@ mod tests {
         assert_eq!(
             classify_error("invalid model: gpt-unknown"),
             ErrorClass::Fatal
+        );
+    }
+
+    #[test]
+    fn classify_error_ssl_bad_record_mac_is_retryable() {
+        assert_eq!(
+            classify_error("[SSL: BAD_RECORD_MAC] sslv3 alert bad record mac (_ssl.c:2580)"),
+            ErrorClass::Retryable
+        );
+    }
+
+    #[test]
+    fn classify_error_ssl_openssl_token_form_is_retryable() {
+        assert_eq!(
+            classify_error("ERR_SSL_SSL/TLS_ALERT_BAD_RECORD_MAC during streaming"),
+            ErrorClass::Retryable
+        );
+    }
+
+    #[test]
+    fn classify_error_plain_disconnect_stays_retryable() {
+        assert_eq!(
+            classify_error("Server disconnected without sending a response"),
+            ErrorClass::Retryable
         );
     }
 

@@ -129,6 +129,17 @@ impl ErrorClassifier {
 /// Heuristically classify an LLM API error message string.
 fn classify_llm_api_message(msg: &str) -> ErrorCategory {
     let lower = msg.to_lowercase();
+    let has_ssl_transient = lower.contains("bad record mac")
+        || lower.contains("ssl alert")
+        || lower.contains("tls alert")
+        || lower.contains("ssl handshake failure")
+        || lower.contains("tlsv1 alert")
+        || lower.contains("sslv3 alert")
+        || lower.contains("bad_record_mac")
+        || lower.contains("ssl_alert")
+        || lower.contains("tls_alert")
+        || lower.contains("tls_alert_internal_error")
+        || lower.contains("[ssl:");
 
     // Common patterns from OpenAI, Anthropic, and Google APIs
     if lower.contains("rate_limit")
@@ -156,6 +167,8 @@ fn classify_llm_api_message(msg: &str) -> ErrorCategory {
         || lower.contains("service unavailable")
     {
         ErrorCategory::ModelOverloaded
+    } else if has_ssl_transient {
+        ErrorCategory::Timeout
     } else if lower.contains("timeout") || lower.contains("timed out") {
         ErrorCategory::Timeout
     } else if lower.contains("invalid") || lower.contains("bad request") || lower.contains("400") {
@@ -269,5 +282,23 @@ mod tests {
         let err = AgentError::LlmApi("500 internal server error".into());
         let cat = classifier.classify(&err);
         assert_eq!(cat, ErrorCategory::ServerError { status_code: 500 });
+    }
+
+    #[test]
+    fn test_classify_llm_api_ssl_bad_record_mac_as_timeout() {
+        let classifier = ErrorClassifier::new();
+        let err = AgentError::LlmApi(
+            "[SSL: BAD_RECORD_MAC] sslv3 alert bad record mac (_ssl.c:2580)".into(),
+        );
+        let cat = classifier.classify(&err);
+        assert_eq!(cat, ErrorCategory::Timeout);
+    }
+
+    #[test]
+    fn test_classify_llm_api_ssl_token_form_as_timeout() {
+        let classifier = ErrorClassifier::new();
+        let err = AgentError::LlmApi("ERR_SSL_SSL/TLS_ALERT_BAD_RECORD_MAC during stream".into());
+        let cat = classifier.classify(&err);
+        assert_eq!(cat, ErrorCategory::Timeout);
     }
 }
