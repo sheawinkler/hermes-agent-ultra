@@ -1,12 +1,12 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-23T07:03:48.607584+00:00`
+Generated: `2026-04-23T08:36:28.736708+00:00`
 
-- Range: `main..upstream/main`; total commits tracked: `4766`.
+- Range: `main..upstream/main`; total commits tracked: `4767`.
 
 | Ticket | Label | Commit Count |
 | ---: | --- | ---: |
-| #20 | GPAR-01 tests+CI parity | 1672 |
+| #20 | GPAR-01 tests+CI parity | 1673 |
 | #21 | GPAR-02 skills parity | 202 |
 | #22 | GPAR-03 UX parity | 557 |
 | #23 | GPAR-04 gateway/plugin-memory parity | 520 |
@@ -16,8 +16,8 @@ Generated: `2026-04-23T07:03:48.607584+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 135 |
-| ported | 99 |
+| pending | 130 |
+| ported | 105 |
 | superseded | 4532 |
 
 ## First 100 Pending Commits
@@ -63,17 +63,14 @@ Generated: `2026-04-23T07:03:48.607584+00:00`
 | `3c54ceb3cafe` | #26 | chore(release): add AUTHOR_MAP entry for Feranmi10 |
 | `284e084bcc06` | #26 | perf(browser): upgrade agent-browser 0.13 -> 0.26, wire daemon idle timeout |
 | `b52123eb158b` | #20 | fix(gateway): recover stale pid and planned restart state |
-| `402d048eb6c6` | #20 | fix(gateway): also unlink stale PID + lock files on cleanup |
 | `10063e730c9b` | #26 | [verified] docs: fix broken env var example in contributing guide |
 | `dad53205ea4d` | #26 | chore(release): map simon-gtcl in AUTHOR_MAP |
-| `e67eb7ff4b79` | #26 | fix(gateway): add hermes-gateway script pattern to PID detection |
 | `12f9f10f0f6a` | #26 | chore(release): map houko in AUTHOR_MAP |
 | `e710bb1f7f99` | #26 | chore(release): map cgarwood82 in AUTHOR_MAP |
 | `e826cc42ef07` | #26 | fix(nix): use stdenv.hostPlatform.system instead of system |
 | `80108104cf92` | #26 | chore(release): map anna-oake in AUTHOR_MAP |
 | `c47d4eda13be` | #26 | fix(tools): restrict RPC socket permissions to owner-only |
 | `ea0e4c267d87` | #26 | chore(release): map jaffarkeikei in AUTHOR_MAP |
-| `9eb543cafe4d` | #20 | feat(/model): merge models.dev entries for lesser-loved providers (#14221) |
 | `c0df4a0a7f0b` | #23 | fix(email): accept **kwargs in send_document to handle metadata param |
 | `0187de1f67cf` | #26 | chore(release): map hxp-plus in AUTHOR_MAP |
 | `0dace06db7c3` | #26 | chore(release): map Tianworld in AUTHOR_MAP |
@@ -117,11 +114,14 @@ Generated: `2026-04-23T07:03:48.607584+00:00`
 | `6ad2fab8cfaa` | #26 | chore(release): map Dev-Mriganka in AUTHOR_MAP |
 | `fa2dbd1bb56e` | #26 | fix: use utf-8 encoding when reading .env file in load_env() |
 | `64c38cc4d02c` | #26 | chore(release): map shushuzn in AUTHOR_MAP |
-| `050aabe2d408` | #20 | fix(gateway): reset approval and yolo state on session boundary |
-| `36730b90c4af` | #20 | fix(gateway): also clear session-scoped approval state on /new |
 | `d30ee2e54550` | #20 | refactor: unify transport dispatch + collapse normalize shims |
 | `c78a188ddd13` | #26 | refactor: invalidate transport cache when api_mode auto-upgrades to codex_responses |
 | `f41031af3a68` | #26 | fix: increase max_tokens for GLM 5.1 reasoning headroom |
 | `463fbf141814` | #26 | chore(release): map iborazzi in AUTHOR_MAP |
 | `9c5c8268c6e5` | #21 | fix(skills): remove invalid llm-wiki related skill |
+| `520b8d90020f` | #26 | chore(release): map A-afflatus in AUTHOR_MAP |
+| `a2a8092e90a5` | #20 | feat(cli): add --ignore-user-config and --ignore-rules flags |
+| `6209e85e7d10` | #23 | feat: support document/archive extensions in MEDIA: tag extraction |
+| `effcbc8a6b73` | #26 | chore(release): map huangke19 in AUTHOR_MAP |
+| `e038677ef69d` | #22 | docs: add Exa web search backend setup guide and details |
 

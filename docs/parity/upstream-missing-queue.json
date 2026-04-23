@@ -70995,13 +70995,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "gateway/status.py",
         "tests/gateway/test_status.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "ported in cd8d17cb (stale gateway PID cleanup now unlinks sibling gateway.lock metadata)",
       "owner": "",
       "sha": "402d048eb6c65d4e486d5b1b3900ed20f6d065fa",
       "subject": "fix(gateway): also unlink stale PID + lock files on cleanup",
@@ -71035,12 +71035,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "gateway/status.py"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "ported in cd8d17cb (PID cmdline pattern matching now includes hermes-gateway entrypoint)",
       "owner": "",
       "sha": "e67eb7ff4b792356241418d1da4423ed7326c3db",
       "subject": "fix(gateway): add hermes-gateway script pattern to PID detection",
@@ -71139,7 +71139,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "hermes_cli/model_switch.py",
         "hermes_cli/models.py",
@@ -71147,7 +71147,7 @@
         "tests/hermes_cli/test_opencode_go_in_model_list.py"
       ],
       "files_touched": 4,
-      "notes": "",
+      "notes": "ported in 9fed1274 (Rust /model models.dev-preferred merge, CLI catalog wiring, and regression tests)",
       "owner": "",
       "sha": "9eb543cafe4d19e041a49eb1b67d5fd5990c8ff4",
       "subject": "feat(/model): merge models.dev entries for lesser-loved providers (#14221)",
@@ -71820,13 +71820,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "gateway/run.py",
         "tests/gateway/test_session_boundary_security_state.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "ported in 51449377 (gateway clears session-boundary yolo state; scoped regression tests)",
       "owner": "",
       "sha": "050aabe2d408150cf2ec5b4a8af1c2699cb4d4ad",
       "subject": "fix(gateway): reset approval and yolo state on session boundary",
@@ -71834,13 +71834,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "gateway/run.py",
         "tests/gateway/test_session_boundary_security_state.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "ported in 51449377 (also clear session-scoped yolo state on /new and /sessions boundary)",
       "owner": "",
       "sha": "36730b90c4af0fcf51c6a0713b65d259050c5ca6",
       "subject": "fix(gateway): also clear session-scoped approval state on /new",
@@ -72352,12 +72352,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "gateway/platforms/base.py"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "ported in 51449377 (normalize iOS unicode dashes in slash command args)",
       "owner": "",
       "sha": "2f48c58b85b81ef45e3e25bb1279494e67fa6021",
       "subject": "fix: normalize iOS unicode dashes in slash command args",
@@ -72376,9 +72376,23 @@
       "subject": "chore(release): map Nan93 in AUTHOR_MAP",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/prompt_builder.py",
+        "tests/agent/test_prompt_builder.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "d1ce3586463d72923749a2ac788ef8ca0f90358b",
+      "subject": "feat(agent): add PLATFORM_HINTS for matrix, mattermost, and feishu (#14428)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-04-23T07:03:48.607584+00:00",
+  "generated_at_utc": "2026-04-23T08:36:28.736708+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -72386,12 +72400,12 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 135,
-      "ported": 99,
+      "pending": 130,
+      "ported": 105,
       "superseded": 4532
     },
     "by_target_ticket": {
-      "20": 1672,
+      "20": 1673,
       "21": 202,
       "22": 557,
       "23": 520,
@@ -72399,6 +72413,6 @@
       "25": 156,
       "26": 1593
     },
-    "total_commits": 4766
+    "total_commits": 4767
   }
 }
