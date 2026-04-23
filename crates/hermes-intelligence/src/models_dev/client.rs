@@ -390,7 +390,7 @@ impl ModelsDevClient {
     // ---------- private helpers ----------
 
     fn provider_models_map(&self, provider: &str) -> Option<Map<String, Value>> {
-        let mdev_id = mapping::to_models_dev(provider)?;
+        let mdev_id = mapping::resolve_models_dev_id(provider);
         let snap = self.snapshot();
         snap.get(mdev_id)?.get("models")?.as_object().cloned()
     }
@@ -499,6 +499,17 @@ mod tests {
                         "tool_call": true
                     }
                 }
+            },
+            "github-copilot": {
+                "name": "GitHub Copilot",
+                "env": ["GITHUB_TOKEN"],
+                "api": "https://api.githubcopilot.com",
+                "models": {
+                    "gpt-4.1": {
+                        "tool_call": true,
+                        "limit": {"context": 200000}
+                    }
+                }
             }
         })
     }
@@ -591,6 +602,18 @@ mod tests {
             models,
             vec!["claude-3-tts", "claude-haiku-3-5", "claude-sonnet-4-5"]
         );
+    }
+
+    #[test]
+    fn list_provider_models_accepts_models_dev_provider_ids() {
+        let c = client_with_fixture();
+        let mut via_models_dev = c.list_provider_models("github-copilot");
+        via_models_dev.sort();
+        assert_eq!(via_models_dev, vec!["gpt-4.1"]);
+
+        let mut via_hermes_alias = c.list_provider_models("copilot");
+        via_hermes_alias.sort();
+        assert_eq!(via_hermes_alias, via_models_dev);
     }
 
     #[test]
