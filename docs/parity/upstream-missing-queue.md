@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-23T06:48:05.072295+00:00`
+Generated: `2026-04-23T07:03:48.607584+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `4766`.
 
@@ -16,9 +16,9 @@ Generated: `2026-04-23T06:48:05.072295+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 139 |
-| ported | 97 |
-| superseded | 4530 |
+| pending | 135 |
+| ported | 99 |
+| superseded | 4532 |
 
 ## First 100 Pending Commits
 
@@ -41,7 +41,6 @@ Generated: `2026-04-23T06:48:05.072295+00:00`
 | `7eae504d158b` | #22 | fix(tui): address Copilot round-2 on #14045 |
 | `9e1f606f7f92` | #22 | fix: scroll in agents detail view |
 | `5b0741e986c9` | #22 | refactor(tui): consolidate agents overlay — share duration/root helpers via lib |
-| `88564ad8bc75` | #26 | fix(skins): don't inherit status_bar_* into light-mode skins |
 | `7027ce42efd2` | #22 | fix(tui): blitz closeout — input wrap parity, shift-tab yolo, bottom statusline |
 | `d55a17bd824c` | #22 | refactor(tui): statusbar as 4-mode position (on\|off\|bottom\|top) |
 | `ea32364c9655` | #22 | fix(tui): /statusbar top = inline above input, not row 0 of the screen |
@@ -77,14 +76,11 @@ Generated: `2026-04-23T06:48:05.072295+00:00`
 | `9eb543cafe4d` | #20 | feat(/model): merge models.dev entries for lesser-loved providers (#14221) |
 | `c0df4a0a7f0b` | #23 | fix(email): accept **kwargs in send_document to handle metadata param |
 | `0187de1f67cf` | #26 | chore(release): map hxp-plus in AUTHOR_MAP |
-| `953f8fa943e3` | #26 | fix(scripts): read gateway_voice_mode.json as UTF-8 |
 | `0dace06db7c3` | #26 | chore(release): map Tianworld in AUTHOR_MAP |
 | `ea83cd91e407` | #26 | chore(release): map wujhsu in AUTHOR_MAP |
-| `3445530dbf18` | #26 | feat(web): support TAVILY_BASE_URL env var for custom proxy endpoints |
 | `3e95963bde2a` | #26 | chore(release): map niyoh120 in AUTHOR_MAP |
 | `435d86ce36b6` | #24 | fix: use builtin cd in command wrapper to bypass shell aliases |
 | `75221db96796` | #26 | chore(release): map vrinek in AUTHOR_MAP |
-| `02aba4a728e2` | #26 | fix(skills): follow symlinks in iter_skill_index_files |
 | `6f629a04622d` | #26 | chore(release): map xandersbell in AUTHOR_MAP |
 | `5fbb69989da0` | #25 | fix(docker): add openssh-client for SSH terminal backend |
 | `c0100dde3553` | #26 | chore(release): map Somme4096 in AUTHOR_MAP |
@@ -124,4 +120,8 @@ Generated: `2026-04-23T06:48:05.072295+00:00`
 | `050aabe2d408` | #20 | fix(gateway): reset approval and yolo state on session boundary |
 | `36730b90c4af` | #20 | fix(gateway): also clear session-scoped approval state on /new |
 | `d30ee2e54550` | #20 | refactor: unify transport dispatch + collapse normalize shims |
+| `c78a188ddd13` | #26 | refactor: invalidate transport cache when api_mode auto-upgrades to codex_responses |
+| `f41031af3a68` | #26 | fix: increase max_tokens for GLM 5.1 reasoning headroom |
+| `463fbf141814` | #26 | chore(release): map iborazzi in AUTHOR_MAP |
+| `9c5c8268c6e5` | #21 | fix(skills): remove invalid llm-wiki related skill |
 

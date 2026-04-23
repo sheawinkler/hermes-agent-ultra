@@ -46,7 +46,7 @@
     ],
     "pass": true
   },
-  "generated_at_utc": "2026-04-23T06:48:05.270439+00:00",
+  "generated_at_utc": "2026-04-23T07:03:55.173907+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -75,9 +75,9 @@
   },
   "queue_summary": {
     "by_disposition": {
-      "pending": 139,
-      "ported": 97,
-      "superseded": 4530
+      "pending": 135,
+      "ported": 99,
+      "superseded": 4532
     },
     "by_target_ticket": {
       "20": 1672,

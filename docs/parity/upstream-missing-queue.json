@@ -70477,13 +70477,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/skin_engine.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "not applicable to Rust skin merge path; status_bar_* default palette keys are unset and light themes do not inherit dark-specific values",
+      "owner": "codex",
       "sha": "88564ad8bc7518f2c67bbbc63b758adcac5f8dca",
       "subject": "fix(skins): don't inherit status_bar_* into light-mode skins",
       "target_ticket": 26,
@@ -71181,13 +71181,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "scripts/discord-voice-doctor.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "python script absent in Rust tree; Rust file reads use UTF-8 read_to_string semantics already",
+      "owner": "codex",
       "sha": "953f8fa943e3f670112fd884793a7a5fb0aadff3",
       "subject": "fix(scripts): read gateway_voice_mode.json as UTF-8",
       "target_ticket": 26,
@@ -71233,13 +71233,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tools/web_tools.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in 6edce99c (Tavily search backend + TAVILY_BASE_URL + backend auto-selection)",
+      "owner": "codex",
       "sha": "3445530dbf18d43c322686d9556d2b6d49683b2d",
       "subject": "feat(web): support TAVILY_BASE_URL env var for custom proxy endpoints",
       "target_ticket": 26,
@@ -71299,13 +71299,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "agent/skill_utils.py"
       ],
       "files_touched": 1,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in 6edce99c (skill discovery follows symlinked directories with cycle guard)",
+      "owner": "codex",
       "sha": "02aba4a728e26b4756d2932bafd890d663f6328a",
       "subject": "fix(skills): follow symlinks in iter_skill_index_files",
       "target_ticket": 26,
@@ -72378,7 +72378,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     }
   ],
-  "generated_at_utc": "2026-04-23T06:48:05.072295+00:00",
+  "generated_at_utc": "2026-04-23T07:03:48.607584+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -72386,9 +72386,9 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 139,
-      "ported": 97,
-      "superseded": 4530
+      "pending": 135,
+      "ported": 99,
+      "superseded": 4532
     },
     "by_target_ticket": {
       "20": 1672,
