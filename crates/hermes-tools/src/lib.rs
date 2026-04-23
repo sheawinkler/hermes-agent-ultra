@@ -94,7 +94,8 @@ pub use backends::todo::FileTodoBackend;
 pub use backends::tts::MultiTtsBackend;
 pub use backends::vision::OpenAiVisionBackend;
 pub use backends::web::{
-    ExaSearchBackend, FallbackSearchBackend, FirecrawlExtractBackend, SimpleExtractBackend,
+    search_backend_from_env_or_fallback, ExaSearchBackend, FallbackSearchBackend,
+    FirecrawlExtractBackend, SimpleExtractBackend, TavilySearchBackend,
 };
 
 // Re-export builtin registration helper

@@ -52,9 +52,9 @@ pub fn register_builtin_tools(
     reg(
         registry,
         "web",
-        Arc::new(crate::tools::web::WebSearchHandler::new(Box::new(
-            crate::backends::web::FallbackSearchBackend::new(),
-        ))),
+        Arc::new(crate::tools::web::WebSearchHandler::new(
+            crate::backends::web::search_backend_from_env_or_fallback(),
+        )),
         "🔍",
         vec![],
     );

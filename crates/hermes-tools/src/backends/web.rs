@@ -56,6 +56,7 @@ impl WebSearchBackend for FallbackSearchBackend {
 // ---------------------------------------------------------------------------
 
 const MAX_EXTRACT_BYTES: usize = 512_000; // 500 KB
+const TAVILY_BASE_URL_DEFAULT: &str = "https://api.tavily.com";
 
 /// A web extraction backend that fetches HTML via reqwest with no external API dependency.
 pub struct SimpleExtractBackend {
@@ -219,7 +220,13 @@ impl ExaSearchBackend {
         let api_key = std::env::var("EXA_API_KEY").map_err(|_| {
             ToolError::ExecutionFailed("EXA_API_KEY environment variable not set".into())
         })?;
-        Ok(Self::new(api_key))
+        let api_key = api_key.trim();
+        if api_key.is_empty() {
+            return Err(ToolError::ExecutionFailed(
+                "EXA_API_KEY environment variable is empty".into(),
+            ));
+        }
+        Ok(Self::new(api_key.to_string()))
     }
 }
 
@@ -289,6 +296,165 @@ impl WebSearchBackend for ExaSearchBackend {
 
         serde_json::to_string_pretty(&json!({ "results": formatted }))
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {}", e)))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// TavilySearchBackend
+// ---------------------------------------------------------------------------
+
+/// Real Tavily API search backend.
+pub struct TavilySearchBackend {
+    client: Client,
+    api_key: String,
+    base_url: String,
+}
+
+impl TavilySearchBackend {
+    pub fn new(api_key: String, base_url: String) -> Self {
+        let normalized_base = base_url.trim().trim_end_matches('/').to_string();
+        let base_url = if normalized_base.is_empty() {
+            TAVILY_BASE_URL_DEFAULT.to_string()
+        } else {
+            normalized_base
+        };
+        Self {
+            client: Client::new(),
+            api_key,
+            base_url,
+        }
+    }
+
+    /// Create from environment variables:
+    /// - `TAVILY_API_KEY` (required)
+    /// - `TAVILY_BASE_URL` (optional, defaults to `https://api.tavily.com`)
+    pub fn from_env() -> Result<Self, ToolError> {
+        let api_key = std::env::var("TAVILY_API_KEY").map_err(|_| {
+            ToolError::ExecutionFailed("TAVILY_API_KEY environment variable not set".into())
+        })?;
+        let api_key = api_key.trim();
+        if api_key.is_empty() {
+            return Err(ToolError::ExecutionFailed(
+                "TAVILY_API_KEY environment variable is empty".into(),
+            ));
+        }
+        let base_url = std::env::var("TAVILY_BASE_URL")
+            .unwrap_or_else(|_| TAVILY_BASE_URL_DEFAULT.to_string());
+        Ok(Self::new(api_key.to_string(), base_url))
+    }
+
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+}
+
+#[async_trait]
+impl WebSearchBackend for TavilySearchBackend {
+    async fn search(
+        &self,
+        query: &str,
+        num_results: usize,
+        category: Option<&str>,
+    ) -> Result<String, ToolError> {
+        let topic = match category.unwrap_or("").trim().to_lowercase().as_str() {
+            "news" => "news",
+            _ => "general",
+        };
+        let body = json!({
+            "api_key": self.api_key,
+            "query": query,
+            "max_results": num_results,
+            "topic": topic,
+            "search_depth": "basic",
+            "include_answer": false,
+            "include_images": false,
+            "include_raw_content": false,
+        });
+
+        let endpoint = format!("{}/search", self.base_url);
+        let resp = self
+            .client
+            .post(endpoint)
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| ToolError::ExecutionFailed(format!("Tavily API request failed: {}", e)))?;
+
+        let status = resp.status();
+        let text = resp.text().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to read Tavily response: {}", e))
+        })?;
+
+        if !status.is_success() {
+            return Err(ToolError::ExecutionFailed(format!(
+                "Tavily API error ({}): {}",
+                status, text
+            )));
+        }
+
+        let data: Value = serde_json::from_str(&text).map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to parse Tavily response: {}", e))
+        })?;
+
+        let results = data.get("results").and_then(|r| r.as_array());
+        let formatted: Vec<Value> = results
+            .map(|arr| {
+                arr.iter()
+                    .map(|r| {
+                        json!({
+                            "title": r.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                            "url": r.get("url").and_then(|v| v.as_str()).unwrap_or(""),
+                            "text": r
+                                .get("content")
+                                .or_else(|| r.get("raw_content"))
+                                .and_then(|v| v.as_str())
+                                .unwrap_or(""),
+                            "score": r.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        serde_json::to_string_pretty(&json!({ "results": formatted }))
+            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {}", e)))
+    }
+}
+
+/// Resolve preferred web-search backend from environment.
+///
+/// Priority:
+/// 1. Exa (`EXA_API_KEY`)
+/// 2. Tavily (`TAVILY_API_KEY`, optional `TAVILY_BASE_URL`)
+/// 3. Fallback helpful message backend
+pub fn search_backend_from_env_or_fallback() -> Box<dyn WebSearchBackend> {
+    match search_backend_choice_from_env() {
+        "exa" => ExaSearchBackend::from_env()
+            .map(|b| Box::new(b) as Box<dyn WebSearchBackend>)
+            .unwrap_or_else(|_| Box::new(FallbackSearchBackend::new())),
+        "tavily" => TavilySearchBackend::from_env()
+            .map(|b| Box::new(b) as Box<dyn WebSearchBackend>)
+            .unwrap_or_else(|_| Box::new(FallbackSearchBackend::new())),
+        _ => Box::new(FallbackSearchBackend::new()),
+    }
+}
+
+fn search_backend_choice_from_env() -> &'static str {
+    if std::env::var("EXA_API_KEY")
+        .ok()
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false)
+    {
+        "exa"
+    } else if std::env::var("TAVILY_API_KEY")
+        .ok()
+        .map(|v| !v.trim().is_empty())
+        .unwrap_or(false)
+    {
+        "tavily"
+    } else {
+        "fallback"
     }
 }
 
@@ -470,6 +636,83 @@ impl WebExtractBackend for FirecrawlExtractBackend {
 
         serde_json::to_string_pretty(&result)
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize result: {}", e)))
+    }
+}
+
+#[cfg(test)]
+mod web_search_env_tests {
+    use super::*;
+    use hermes_config::managed_gateway::test_lock;
+
+    struct EnvScope {
+        original: Vec<(&'static str, Option<String>)>,
+        _g: std::sync::MutexGuard<'static, ()>,
+    }
+
+    impl EnvScope {
+        fn new() -> Self {
+            let g = test_lock::lock();
+            let keys = ["EXA_API_KEY", "TAVILY_API_KEY", "TAVILY_BASE_URL"];
+            let original = keys.iter().map(|k| (*k, std::env::var(k).ok())).collect();
+            for k in &keys {
+                std::env::remove_var(k);
+            }
+            Self { original, _g: g }
+        }
+    }
+
+    impl Drop for EnvScope {
+        fn drop(&mut self) {
+            for (k, v) in &self.original {
+                match v {
+                    Some(val) => std::env::set_var(k, val),
+                    None => std::env::remove_var(k),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn tavily_from_env_defaults_base_url() {
+        let _scope = EnvScope::new();
+        std::env::set_var("TAVILY_API_KEY", "tavily-key");
+        let backend = TavilySearchBackend::from_env().expect("tavily backend from env");
+        assert_eq!(backend.base_url(), TAVILY_BASE_URL_DEFAULT);
+    }
+
+    #[test]
+    fn tavily_from_env_honors_custom_base_url() {
+        let _scope = EnvScope::new();
+        std::env::set_var("TAVILY_API_KEY", "tavily-key");
+        std::env::set_var("TAVILY_BASE_URL", "https://proxy.example.com/tavily/");
+        let backend = TavilySearchBackend::from_env().expect("tavily backend from env");
+        assert_eq!(backend.base_url(), "https://proxy.example.com/tavily");
+    }
+
+    #[test]
+    fn search_backend_choice_prefers_exa_over_tavily() {
+        let _scope = EnvScope::new();
+        std::env::set_var("EXA_API_KEY", "exa-key");
+        std::env::set_var("TAVILY_API_KEY", "tavily-key");
+        assert_eq!(search_backend_choice_from_env(), "exa");
+    }
+
+    #[test]
+    fn search_backend_choice_uses_tavily_when_exa_missing() {
+        let _scope = EnvScope::new();
+        std::env::set_var("TAVILY_API_KEY", "tavily-key");
+        assert_eq!(search_backend_choice_from_env(), "tavily");
+    }
+
+    #[tokio::test]
+    async fn search_backend_falls_back_when_keys_missing() {
+        let _scope = EnvScope::new();
+        let backend = search_backend_from_env_or_fallback();
+        let out = backend
+            .search("hello", 3, None)
+            .await
+            .expect("fallback backend should return json");
+        assert!(out.contains("\"no_api_key\""));
     }
 }
 
