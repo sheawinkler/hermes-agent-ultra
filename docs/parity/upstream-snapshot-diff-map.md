@@ -1,10 +1,10 @@
 # Upstream Snapshot Diff Map
 
-Generated: `2026-04-23T18:09:02.368007+00:00`
+Generated: `2026-04-23T18:11:17.041756+00:00`
 
 - Compared refs: `main` vs `upstream/main`
-- Total diff entries: `2697`
-- Status counts: `A=2283`, `D=404`, `M=10`
+- Total diff entries: `2700`
+- Status counts: `A=2283`, `D=407`, `M=10`
 
 ## Prefix Groups
 
@@ -23,8 +23,8 @@ Generated: `2026-04-23T18:09:02.368007+00:00`
 | `agent` | 48 | 48 | 0 | 0 | `needs_rust_implementation_review` |
 | `plugins` | 44 | 44 | 0 | 0 | `needs_rust_implementation_review` |
 | `environments` | 43 | 43 | 0 | 0 | `needs_rust_implementation_review` |
-| `scripts` | 40 | 16 | 1 | 23 | `selective_adopt_review` |
-| `docs` | 25 | 0 | 0 | 25 | `manual_review_required` |
+| `scripts` | 41 | 16 | 1 | 24 | `selective_adopt_review` |
+| `docs` | 27 | 0 | 0 | 27 | `manual_review_required` |
 | `.github` | 19 | 16 | 0 | 3 | `selective_adopt_review` |
 | `acp_adapter` | 9 | 9 | 0 | 0 | `needs_rust_implementation_review` |
 | `nix` | 9 | 9 | 0 | 0 | `selective_adopt_review` |
@@ -101,7 +101,7 @@ Generated: `2026-04-23T18:09:02.368007+00:00`
 
 | Tranche | Total | Status Counts |
 | --- | ---: | --- |
-| `infra_surface` | 72 | `A=44, D=26, M=2` |
+| `infra_surface` | 73 | `A=44, D=27, M=2` |
 | `runtime_surface` | 271 | `A=271` |
 | `rust_divergence` | 346 | `D=346` |
 | `ux_surface` | 1132 | `A=1130, M=2` |

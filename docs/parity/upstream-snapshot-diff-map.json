@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-04-23T18:09:02.368007+00:00",
+  "generated_at_utc": "2026-04-23T18:11:17.041756+00:00",
   "groups": [
     {
       "classification": "needs_rust_implementation_review",
@@ -357,16 +357,16 @@
         "scripts/generate-parity-matrix.py",
         "scripts/generate-test-intent-mapping.py",
         "scripts/generate-upstream-patch-queue.py",
+        "scripts/generate-upstream-snapshot-diff-map.py",
         "scripts/generate-workstream-status.py",
-        "scripts/git-hooks/pre-commit",
-        "scripts/hermes-gateway"
+        "scripts/git-hooks/pre-commit"
       ],
       "status_counts": {
         "A": 16,
-        "D": 23,
+        "D": 24,
         "M": 1
       },
-      "total": 40
+      "total": 41
     },
     {
       "classification": "manual_review_required",
@@ -390,9 +390,9 @@
         "docs/parity/parity-matrix.json"
       ],
       "status_counts": {
-        "D": 25
+        "D": 27
       },
-      "total": 25
+      "total": 27
     },
     {
       "classification": "selective_adopt_review",
@@ -1300,10 +1300,10 @@
     "group_count": 86,
     "status_counts": {
       "A": 2283,
-      "D": 404,
+      "D": 407,
       "M": 10
     },
-    "total_entries": 2697
+    "total_entries": 2700
   },
   "tranche_summary": {
     "infra_surface": {
@@ -1316,10 +1316,10 @@
       ],
       "status_counts": {
         "A": 44,
-        "D": 26,
+        "D": 27,
         "M": 2
       },
-      "total": 72
+      "total": 73
     },
     "runtime_surface": {
       "prefixes": [

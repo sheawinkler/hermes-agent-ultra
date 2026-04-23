@@ -1032,3 +1032,4 @@
 - Verification:
   - `bash -n scripts/install.sh`
   - `bash scripts/install.sh --help`
+  - `python3 scripts/generate-upstream-snapshot-diff-map.py --repo-root .` (post-commit refresh; current summary `2700` entries)
