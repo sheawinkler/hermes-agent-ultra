@@ -60,6 +60,29 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/exit", "Alias for /quit"),
 ];
 
+const DEFAULT_SKILL_TAPS: &[&str] = &["https://github.com/MiniMax-AI/cli"];
+
+fn read_skill_taps(path: &std::path::Path) -> Vec<String> {
+    if !path.exists() {
+        return Vec::new();
+    }
+    let content = std::fs::read_to_string(path).unwrap_or_else(|_| "[]".to_string());
+    serde_json::from_str(&content).unwrap_or_default()
+}
+
+fn merged_skill_taps(custom_taps: &[String]) -> Vec<String> {
+    let mut merged: Vec<String> = Vec::new();
+    for tap in DEFAULT_SKILL_TAPS {
+        merged.push((*tap).to_string());
+    }
+    for tap in custom_taps {
+        if !merged.iter().any(|existing| existing == tap) {
+            merged.push(tap.clone());
+        }
+    }
+    merged
+}
+
 /// Return auto-completion suggestions for a partial slash command.
 pub fn autocomplete(partial: &str) -> Vec<&'static str> {
     if partial.is_empty() {
@@ -1558,20 +1581,14 @@ pub async fn handle_cli_skills(
             let taps_file = hermes_config::hermes_home().join("skill_taps.json");
             match sub {
                 "list" => {
-                    if taps_file.exists() {
-                        let content = std::fs::read_to_string(&taps_file)
-                            .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
-                        let taps: Vec<String> = serde_json::from_str(&content).unwrap_or_default();
-                        if taps.is_empty() {
-                            println!("No skill taps configured.");
-                        } else {
-                            println!("Skill taps:");
-                            for tap in &taps {
-                                println!("  • {}", tap);
-                            }
-                        }
-                    } else {
+                    let taps = merged_skill_taps(&read_skill_taps(&taps_file));
+                    if taps.is_empty() {
                         println!("No skill taps configured.");
+                    } else {
+                        println!("Skill taps:");
+                        for tap in &taps {
+                            println!("  • {}", tap);
+                        }
                     }
                 }
                 "add" => {
@@ -1580,14 +1597,8 @@ pub async fn handle_cli_skills(
                             "Missing tap URL. Usage: hermes skills tap add <url>".into(),
                         )
                     })?;
-                    let mut taps: Vec<String> = if taps_file.exists() {
-                        let content = std::fs::read_to_string(&taps_file)
-                            .unwrap_or_else(|_| "[]".to_string());
-                        serde_json::from_str(&content).unwrap_or_default()
-                    } else {
-                        Vec::new()
-                    };
-                    if taps.contains(&url) {
+                    let mut taps: Vec<String> = read_skill_taps(&taps_file);
+                    if merged_skill_taps(&taps).contains(&url) {
                         println!("Tap already exists: {}", url);
                     } else {
                         taps.push(url.clone());
@@ -1604,24 +1615,28 @@ pub async fn handle_cli_skills(
                             "Missing tap URL. Usage: hermes skills tap remove <url>".into(),
                         )
                     })?;
-                    if taps_file.exists() {
-                        let content = std::fs::read_to_string(&taps_file)
-                            .unwrap_or_else(|_| "[]".to_string());
-                        let mut taps: Vec<String> =
-                            serde_json::from_str(&content).unwrap_or_default();
-                        let before_len = taps.len();
-                        taps.retain(|t| t != &url);
-                        if taps.len() < before_len {
-                            let json = serde_json::to_string_pretty(&taps)
-                                .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
-                            std::fs::write(&taps_file, json)
-                                .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
-                            println!("Removed tap: {}", url);
-                        } else {
-                            println!("Tap not found: {}", url);
-                        }
+                    if DEFAULT_SKILL_TAPS
+                        .iter()
+                        .any(|default_tap| default_tap == &url.as_str())
+                    {
+                        println!("Tap '{}' is a built-in default and cannot be removed.", url);
+                        println!(
+                            "Add custom taps with `hermes skills tap add <url>`; defaults remain active."
+                        );
+                        return Ok(());
+                    }
+
+                    let mut taps: Vec<String> = read_skill_taps(&taps_file);
+                    let before_len = taps.len();
+                    taps.retain(|t| t != &url);
+                    if taps.len() < before_len {
+                        let json = serde_json::to_string_pretty(&taps)
+                            .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
+                        std::fs::write(&taps_file, json)
+                            .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+                        println!("Removed tap: {}", url);
                     } else {
-                        println!("No taps configured.");
+                        println!("Tap not found: {}", url);
                     }
                 }
                 _ => {
@@ -4680,5 +4695,25 @@ mod tests {
     fn test_command_result_equality() {
         assert_eq!(CommandResult::Handled, CommandResult::Handled);
         assert_ne!(CommandResult::Handled, CommandResult::Quit);
+    }
+
+    #[test]
+    fn test_default_skill_tap_present_in_merged_list() {
+        let merged = merged_skill_taps(&[]);
+        assert!(merged
+            .iter()
+            .any(|tap| tap == "https://github.com/MiniMax-AI/cli"));
+    }
+
+    #[test]
+    fn test_merged_skill_taps_deduplicates_default() {
+        let merged = merged_skill_taps(&vec!["https://github.com/MiniMax-AI/cli".to_string()]);
+        assert_eq!(
+            merged
+                .iter()
+                .filter(|tap| tap.as_str() == "https://github.com/MiniMax-AI/cli")
+                .count(),
+            1
+        );
     }
 }
