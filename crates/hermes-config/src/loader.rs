@@ -227,6 +227,7 @@ pub fn load_config(home_dir: Option<&str>) -> Result<GatewayConfig, ConfigError>
 
     // Layer 3: environment variables (highest priority)
     apply_env_overrides(&mut config);
+    normalize_provider_secrets(&mut config);
 
     // Record the effective home dir
     config.home_dir = Some(effective_home);
@@ -256,10 +257,68 @@ pub fn load_from_yaml(path: &Path) -> Result<GatewayConfig, ConfigError> {
 /// Load `config.yaml` from disk if it exists; otherwise return defaults (no env merge).
 pub fn load_user_config_file(path: &Path) -> Result<GatewayConfig, ConfigError> {
     if path.exists() {
-        load_from_yaml(path)
+        let mut cfg = load_from_yaml(path)?;
+        normalize_provider_secrets(&mut cfg);
+        Ok(cfg)
     } else {
         Ok(GatewayConfig::default())
     }
+}
+
+fn normalize_provider_secrets(config: &mut GatewayConfig) {
+    for provider in config.llm_providers.values_mut() {
+        if provider
+            .api_key
+            .as_ref()
+            .is_some_and(|v| v.trim().is_empty())
+        {
+            provider.api_key = None;
+        }
+        if provider
+            .api_key_env
+            .as_ref()
+            .is_some_and(|v| v.trim().is_empty())
+        {
+            provider.api_key_env = None;
+        }
+        if provider
+            .base_url
+            .as_ref()
+            .is_some_and(|v| v.trim().is_empty())
+        {
+            provider.base_url = None;
+        }
+        if provider
+            .oauth_token_url
+            .as_ref()
+            .is_some_and(|v| v.trim().is_empty())
+        {
+            provider.oauth_token_url = None;
+        }
+        if provider
+            .oauth_client_id
+            .as_ref()
+            .is_some_and(|v| v.trim().is_empty())
+        {
+            provider.oauth_client_id = None;
+        }
+    }
+
+    config.llm_providers.retain(|_, provider| {
+        provider.api_key.is_some()
+            || provider.api_key_env.is_some()
+            || provider.base_url.is_some()
+            || provider.command.is_some()
+            || !provider.args.is_empty()
+            || provider.model.is_some()
+            || provider.max_tokens.is_some()
+            || provider.temperature.is_some()
+            || provider.extra_body.is_some()
+            || provider.rate_limit.is_some()
+            || !provider.credential_pool.is_empty()
+            || provider.oauth_token_url.is_some()
+            || provider.oauth_client_id.is_some()
+    });
 }
 
 const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, llm.<provider>.api_key|api_key_env|base_url|model|command|args|oauth_token_url|oauth_client_id, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
@@ -763,7 +822,9 @@ pub fn apply_env_overrides(config: &mut GatewayConfig) {
     for (env_var, provider_name) in [
         ("ANTHROPIC_API_KEY", "anthropic"),
         ("OPENROUTER_API_KEY", "openrouter"),
+        ("HERMES_OPENAI_CODEX_API_KEY", "openai-codex"),
         ("DASHSCOPE_API_KEY", "qwen"),
+        ("HERMES_QWEN_OAUTH_API_KEY", "qwen-oauth"),
         ("MOONSHOT_API_KEY", "kimi"),
         ("MINIMAX_API_KEY", "minimax"),
         ("NOUS_API_KEY", "nous"),
@@ -821,7 +882,7 @@ pub fn validate_config(config: &GatewayConfig) -> Result<(), ConfigError> {
 
     for (name, provider) in &config.llm_providers {
         if let Some(key) = &provider.api_key {
-            if key.is_empty() {
+            if key.trim().is_empty() {
                 return Err(ConfigError::ValidationError(format!(
                     "llm_providers.{name}.api_key must not be empty"
                 )));
@@ -877,6 +938,57 @@ mod tests {
         );
         config.llm_providers = providers;
         assert!(validate_config(&config).is_err());
+    }
+
+    #[test]
+    fn validate_whitespace_api_key() {
+        let mut config = GatewayConfig::default();
+        let mut providers = HashMap::new();
+        providers.insert(
+            "test".into(),
+            crate::config::LlmProviderConfig {
+                api_key: Some("   ".into()),
+                ..Default::default()
+            },
+        );
+        config.llm_providers = providers;
+        assert!(validate_config(&config).is_err());
+    }
+
+    #[test]
+    fn normalize_provider_secrets_removes_empty_provider_entries() {
+        let mut config = GatewayConfig::default();
+        config.llm_providers.insert(
+            "minimax".into(),
+            crate::config::LlmProviderConfig {
+                api_key: Some("".into()),
+                ..Default::default()
+            },
+        );
+        config.llm_providers.insert(
+            "openrouter".into(),
+            crate::config::LlmProviderConfig {
+                api_key: Some("   ".into()),
+                oauth_token_url: Some("  ".into()),
+                ..Default::default()
+            },
+        );
+        config.llm_providers.insert(
+            "nous".into(),
+            crate::config::LlmProviderConfig {
+                api_key: Some("tok-abc".into()),
+                ..Default::default()
+            },
+        );
+        normalize_provider_secrets(&mut config);
+        assert_eq!(config.llm_providers.len(), 1);
+        assert_eq!(
+            config
+                .llm_providers
+                .get("nous")
+                .and_then(|cfg| cfg.api_key.as_deref()),
+            Some("tok-abc")
+        );
     }
 
     #[test]
@@ -1111,6 +1223,39 @@ mod tests {
         unsafe {
             std::env::remove_var("HERMES_OPENAI_API_KEY");
             std::env::remove_var("OPENAI_API_KEY");
+        }
+    }
+
+    #[test]
+    fn apply_env_overrides_supports_codex_and_qwen_oauth_env_vars() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        // SAFETY: test process serializes env mutation via ENV_LOCK.
+        unsafe {
+            std::env::set_var("HERMES_OPENAI_CODEX_API_KEY", "codex-token");
+            std::env::set_var("HERMES_QWEN_OAUTH_API_KEY", "qwen-oauth-token");
+        }
+
+        let mut cfg = GatewayConfig::default();
+        apply_env_overrides(&mut cfg);
+
+        assert_eq!(
+            cfg.llm_providers
+                .get("openai-codex")
+                .and_then(|p| p.api_key.as_deref()),
+            Some("codex-token")
+        );
+        assert_eq!(
+            cfg.llm_providers
+                .get("qwen-oauth")
+                .and_then(|p| p.api_key.as_deref()),
+            Some("qwen-oauth-token")
+        );
+
+        // SAFETY: test process serializes env mutation via ENV_LOCK.
+        unsafe {
+            std::env::remove_var("HERMES_OPENAI_CODEX_API_KEY");
+            std::env::remove_var("HERMES_QWEN_OAUTH_API_KEY");
         }
     }
 }
