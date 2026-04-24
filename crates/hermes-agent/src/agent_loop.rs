@@ -727,11 +727,13 @@ fn classify_error(err: &str) -> ErrorClass {
         || lower.contains("invalid model")
         || lower.contains("no such model")
         || lower.contains("unknown model");
+    let openrouter_privacy_guardrail =
+        lower.contains("privacy guardrail") || lower.contains("openrouter privacy");
 
     if lower.contains("rate limit") || lower.contains("429") || lower.contains("too many") {
         ErrorClass::RateLimit
     } else if lower.contains("404") || lower.contains("not found") {
-        if model_not_found {
+        if model_not_found || openrouter_privacy_guardrail {
             ErrorClass::Fatal
         } else {
             ErrorClass::Retryable
@@ -5384,6 +5386,14 @@ mod tests {
         );
         assert_eq!(
             classify_error("invalid model: gpt-unknown"),
+            ErrorClass::Fatal
+        );
+    }
+
+    #[test]
+    fn classify_error_openrouter_privacy_guardrail_is_fatal() {
+        assert_eq!(
+            classify_error("HTTP 404: OpenRouter privacy guardrail blocked this endpoint"),
             ErrorClass::Fatal
         );
     }
