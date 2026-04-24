@@ -1028,9 +1028,874 @@
       "subject": "chore: uptick",
       "target_ticket": 22,
       "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/model_metadata.py",
+        "hermes_cli/codex_models.py",
+        "hermes_cli/models.py"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream Python/TS delta not directly applicable to Rust-native architecture; behavior covered or intentionally divergent",
+      "owner": "codex",
+      "sha": "8f5fee3e3e4e86124acd1677fbd151e93ee46a9b",
+      "subject": "feat(codex): add gpt-5.5 and wire live model discovery into picker (#14720)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/web_server.py",
+        "tests/hermes_cli/test_web_server.py",
+        "web/src/index.css",
+        "web/src/lib/api.ts",
+        "web/src/themes/context.tsx",
+        "web/src/themes/presets.ts",
+        "web/src/themes/types.ts",
+        "website/docs/user-guide/features/web-dashboard.md"
+      ],
+      "files_touched": 8,
+      "notes": "superseded: upstream TS/web/ui-tui surface is intentionally divergent from Rust CLI/TUI runtime",
+      "owner": "codex",
+      "sha": "255ba5bf26a10911925c5cd01d14b0cd9adb639c",
+      "subject": "feat(dashboard): expand themes to fonts, layout, density (#14725)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/auth.py",
+        "tests/agent/test_credential_pool.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded-by-equivalence: Rust auth store/tests use separate secure path and do not touch Python auth.json path",
+      "owner": "codex",
+      "sha": "b5333abc3025b59312788b29093ec6bb88052895",
+      "subject": "fix(auth): refuse to touch real auth.json during pytest; delete sandbox-escaping test (#14729)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/tools/test_delegate.py",
+        "tools/delegate_tool.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python/TS delta not directly applicable to Rust-native architecture; behavior covered or intentionally divergent",
+      "owner": "codex",
+      "sha": "64e61656862b24776d5d7f5b87699097a16b9ec3",
+      "subject": "fix(delegate): remove model-facing max_iterations override; config is authoritative (#14732)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/run.py",
+        "hermes_cli/gateway.py",
+        "tests/gateway/test_gateway_shutdown.py",
+        "tests/hermes_cli/test_gateway_service.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: python gateway lock/runner implementation differs from Rust gateway session/runtime ownership model",
+      "owner": "codex",
+      "sha": "327b57da91e5699564dd423bbb112ea95671b6e5",
+      "subject": "fix(gateway): kill tool subprocesses before adapter disconnect on drain timeout (#14728)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
+        "cli-config.yaml.example",
+        "hermes_cli/config.py",
+        "hermes_cli/tips.py",
+        "run_agent.py",
+        "tests/run_agent/test_api_max_retries_config.py"
+      ],
+      "files_touched": 5,
+      "notes": "ported-by-equivalence: Rust AgentConfig already exposes configurable retry budget (`retry.max_retries`) and related retry knobs in crates/hermes-agent/src/agent_loop.rs",
+      "owner": "codex",
+      "sha": "165b2e481afa1cd7385c5c9f9ebf33eb4a524131",
+      "subject": "feat(agent): make API retry count configurable via agent.api_max_retries (#14730)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/run.py",
+        "hermes_cli/config.py",
+        "hermes_cli/gateway.py",
+        "hermes_cli/main.py",
+        "tests/hermes_cli/test_update_gateway_restart.py"
+      ],
+      "files_touched": 5,
+      "notes": "superseded: python gateway lock/runner implementation differs from Rust gateway session/runtime ownership model",
+      "owner": "codex",
+      "sha": "97b9b3d6a6848579c5c93cd4b5d8d26f6dde34b8",
+      "subject": "fix(gateway): drain-aware hermes update + faster still-working pings (#14736)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/auxiliary_client.py",
+        "tests/agent/test_auxiliary_client.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python/TS delta not directly applicable to Rust-native architecture; behavior covered or intentionally divergent",
+      "owner": "codex",
+      "sha": "07046096d96bcf4db61fa0c12f79504f92f2a21c",
+      "subject": "fix(agent): clarify exhausted OpenRouter auxiliary credentials",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/web_server.py",
+        "tests/hermes_cli/test_web_server.py",
+        "web/src/lib/api.ts"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream TS/web/ui-tui surface is intentionally divergent from Rust CLI/TUI runtime",
+      "owner": "codex",
+      "sha": "1cc0bdd5f306effd91ec23f0c8d7044acf22473c",
+      "subject": "fix(dashboard): avoid auth header collision with reverse proxies",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "run_agent.py",
+        "tests/run_agent/test_run_agent.py",
+        "tests/tools/test_approval.py",
+        "tools/approval.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded-by-equivalence: corresponding agent/runtime behavior is implemented in Rust agent loop/config paths",
+      "owner": "codex",
+      "sha": "1dfcda4e3c195a03e51a3c69a88f18ebf525eeca",
+      "subject": "fix(approval): guard env and config overwrites",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/tools/test_approval.py",
+        "tools/approval.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded-by-equivalence: approval policy/guards are implemented in Rust tools approval pipeline",
+      "owner": "codex",
+      "sha": "b848ce2c79bfff4c0d470113085cf1ec45aa8877",
+      "subject": "test: cover absolute paths in project env/config approval regex",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/skill_commands.py",
+        "tests/agent/test_skill_commands.py",
+        "tests/tools/test_skills_tool.py",
+        "tools/skills_tool.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream TS/web/ui-tui surface is intentionally divergent from Rust CLI/TUI runtime",
+      "owner": "codex",
+      "sha": "a884f6d5d8cc3e461b611788a7daa027fe0a24ef",
+      "subject": "fix(skills): follow symlinked category dirs consistently",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "run_agent.py",
+        "tests/agent/test_model_metadata.py",
+        "tests/run_agent/test_run_agent.py"
+      ],
+      "files_touched": 3,
+      "notes": "superseded-by-equivalence: corresponding agent/runtime behavior is implemented in Rust agent loop/config paths",
+      "owner": "codex",
+      "sha": "e020f46beccad23f80796d5f7d3a3dc7d4bbdb6f",
+      "subject": "fix(agent): preserve MiniMax context length on delta-only overflow",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream author-map/release-changelog maintenance has no Rust runtime parity impact",
+      "owner": "codex",
+      "sha": "a0d8dd7ba30c193390c71360e94991f61f4c4ef3",
+      "subject": "chore(release): map eumael.mkt@gmail.com -> maelrx",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/run.py",
+        "gateway/status.py",
+        "tests/gateway/test_runner_startup_failures.py",
+        "tests/gateway/test_status.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: python gateway lock/runner implementation differs from Rust gateway session/runtime ownership model",
+      "owner": "codex",
+      "sha": "d0821b0573151fe795622972492a458cd1b55a3d",
+      "subject": "fix(gateway): only clear locks belonging to the replaced process",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/web_server.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: python dashboard/web-server path is not the primary Rust runtime surface",
+      "owner": "codex",
+      "sha": "78d1e252faae2aecd9e65e4c52c5ca01e38a0abd",
+      "subject": "fix(web_server): guard GATEWAY_HEALTH_TIMEOUT against invalid env values",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "CONTRIBUTING.md"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream documentation-only delta; runtime parity unaffected",
+      "owner": "codex",
+      "sha": "c7d023937c53a5df688cb486fd2c7b68fd879f92",
+      "subject": "Update CONTRIBUTING.md",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/tools/test_mcp_stability.py",
+        "tools/mcp_tool.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded-by-equivalence: Rust MCP/tool-arg normalization is implemented in Rust tool/runtime stack with different file layout",
+      "owner": "codex",
+      "sha": "67c8f837fc8b93bc17bf9b1d674138ceab348d6e",
+      "subject": "fix(mcp): per-process PID isolation prevents cross-session crash on restart",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream author-map/release-changelog maintenance has no Rust runtime parity impact",
+      "owner": "codex",
+      "sha": "83859b4da081139a9f458de33a69a9644088fa81",
+      "subject": "chore(release): map jefferson@heimdallstrategy.com -> Mind-Dragon",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/tools/test_file_staleness.py",
+        "tests/tools/test_resolve_path.py",
+        "tools/file_tools.py"
+      ],
+      "files_touched": 3,
+      "notes": "superseded-by-equivalence: Rust file backend resolves paths against active runtime/backend cwd and workspace rules",
+      "owner": "codex",
+      "sha": "4a0c02b7dcb0b513512e3104ac0f07b0b2f2e312",
+      "subject": "fix(file_tools): resolve bookkeeping paths against live terminal cwd",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/discord.py",
+        "tests/gateway/test_discord_connect.py",
+        "website/docs/reference/environment-variables.md",
+        "website/docs/user-guide/messaging/discord.md"
+      ],
+      "files_touched": 4,
+      "notes": "superseded-by-equivalence: Rust Discord adapter already has startup policy and permission/context canonicalization in Rust adapter stack",
+      "owner": "codex",
+      "sha": "a1ff6b45eaf7f4876315e8f8da61b2ec26b49674",
+      "subject": "fix(gateway/discord): add safe startup slash sync policy",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/discord.py",
+        "tests/gateway/test_discord_connect.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded-by-equivalence: Rust Discord adapter already has startup policy and permission/context canonicalization in Rust adapter stack",
+      "owner": "codex",
+      "sha": "b61ac8964b8889840a4841cf617e1a8b4de7763c",
+      "subject": "fix(gateway/discord): read permission attrs from AppCommand, canonicalize contexts",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "README.md"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream documentation-only delta; runtime parity unaffected",
+      "owner": "codex",
+      "sha": "692ae6dd073b4e9fd92f3ef7bc935cef496e8fc8",
+      "subject": "docs(readme): fix stale RL submodule instructions, skills table row, test runner (#14758)",
+      "target_ticket": 25,
+      "target_ticket_name": "GPAR-06 packaging/docs/install parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_busy_session_ack.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: python gateway lock/runner implementation differs from Rust gateway session/runtime ownership model",
+      "owner": "codex",
+      "sha": "9d147f7fdefb598fe49f0bf09053c53940c6793d",
+      "subject": "fix(gateway): enhance message handling during agent tasks with queue mode support",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream author-map/release-changelog maintenance has no Rust runtime parity impact",
+      "owner": "codex",
+      "sha": "d001814e3f20c545fd2866f7458f45ac5014308c",
+      "subject": "chore(release): map rohithsaimidigudla@gmail.com -> whitehatjr1001",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "AGENTS.md"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream documentation-only delta; runtime parity unaffected",
+      "owner": "codex",
+      "sha": "d42b6a2eddc766c72ede28322d15006b3a078988",
+      "subject": "docs(agents): refresh AGENTS.md \u2014 fix stale facts, expand plugins/skills sections (#14763)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "plugins/image_gen/xai/__init__.py",
+        "plugins/image_gen/xai/plugin.yaml",
+        "tests/plugins/image_gen/test_xai_provider.py"
+      ],
+      "files_touched": 3,
+      "notes": "superseded-by-equivalence: Rust image generation backend/provider routing is implemented in crates/hermes-tools backends",
+      "owner": "codex",
+      "sha": "a5e4a86ebe124be1441f4552b11bbc746f6e0cd6",
+      "subject": "feat(xai): add xAI image generation provider (grok-imagine-image)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "plugins/image_gen/xai/__init__.py",
+        "plugins/image_gen/xai/plugin.yaml",
+        "tests/plugins/image_gen/test_xai_provider.py"
+      ],
+      "files_touched": 3,
+      "notes": "superseded-by-equivalence: Rust image generation backend/provider routing is implemented in crates/hermes-tools backends",
+      "owner": "codex",
+      "sha": "9599271180cb301cabd15920c4d380e2b4c47c58",
+      "subject": "fix(xai-image): drop unreachable editing code path",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tools/mixture_of_agents_tool.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python/TS delta not directly applicable to Rust-native architecture; behavior covered or intentionally divergent",
+      "owner": "codex",
+      "sha": "1df35a93b20b92c65e9cb312c3e12d93cb9c2251",
+      "subject": "Fix (mixture_of_agents): replace deprecated Gemini model and forward max_tokens to OpenRouter (#6621)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py",
+        "tests/tools/test_mixture_of_agents_tool.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream author-map/release-changelog maintenance has no Rust runtime parity impact",
+      "owner": "codex",
+      "sha": "5e67b384377b7a76a55395d1553d74c94d76ba2f",
+      "subject": "chore(release): map devorun author + convert MoA defaults test to invariant",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cron/scheduler.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: cron implementation is Rust-native with different job schema; no direct Python cron file port path",
+      "owner": "codex",
+      "sha": "0086fd894d1c4d313f87b134afb1750978f238fa",
+      "subject": "feat(cron): support enabled_toolsets per job to reduce token overhead",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cron/jobs.py",
+        "tools/cronjob_tools.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: cron implementation is Rust-native with different job schema; no direct Python cron file port path",
+      "owner": "codex",
+      "sha": "8b79acb8de64009da7f4f6d16d674b8873d80700",
+      "subject": "feat(cron): expose enabled_toolsets in cronjob tool and create_job()",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/cron/test_jobs.py",
+        "tests/cron/test_scheduler.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: cron implementation is Rust-native with different job schema; no direct Python cron file port path",
+      "owner": "codex",
+      "sha": "18d5ba86764b219fbfdad02e337b12e794953b8f",
+      "subject": "test(cron): add tests for enabled_toolsets in create_job and run_job",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream author-map/release-changelog maintenance has no Rust runtime parity impact",
+      "owner": "codex",
+      "sha": "470389e6a30ab77c92a26c911f96d754209c8589",
+      "subject": "chore(release): map say8hi author for #6130 salvage",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/web_server.py",
+        "plugins/strike-freedom-cockpit/README.md",
+        "plugins/strike-freedom-cockpit/dashboard/dist/index.js",
+        "plugins/strike-freedom-cockpit/dashboard/manifest.json",
+        "plugins/strike-freedom-cockpit/theme/strike-freedom.yaml",
+        "tests/hermes_cli/test_web_server.py",
+        "web/src/App.tsx",
+        "web/src/components/Backdrop.tsx",
+        "web/src/components/ui/card.tsx",
+        "web/src/index.css",
+        "web/src/plugins/index.ts",
+        "web/src/plugins/registry.ts",
+        "web/src/plugins/slots.ts",
+        "web/src/plugins/types.ts",
+        "web/src/themes/context.tsx",
+        "web/src/themes/types.ts",
+        "website/docs/user-guide/features/web-dashboard.md"
+      ],
+      "files_touched": 17,
+      "notes": "superseded: upstream TS/web/ui-tui surface is intentionally divergent from Rust CLI/TUI runtime",
+      "owner": "codex",
+      "sha": "f593c367bec49157efc1c5fe4ccb4c85866588e6",
+      "subject": "feat(dashboard): reskin extension points for themes and plugins (#14776)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "RELEASE_v0.11.0.md",
+        "hermes_cli/__init__.py",
+        "pyproject.toml",
+        "scripts/release.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream author-map/release-changelog maintenance has no Rust runtime parity impact",
+      "owner": "codex",
+      "sha": "bf196a3fc0fd1f79353369e8732051db275c6276",
+      "subject": "chore: release v0.11.0 (2026.4.23) (#14791)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cron/scheduler.py",
+        "hermes_cli/platforms.py",
+        "tests/cron/test_scheduler.py",
+        "tests/hermes_cli/test_tools_config.py",
+        "toolsets.py"
+      ],
+      "files_touched": 5,
+      "notes": "superseded: cron implementation is Rust-native with different job schema; no direct Python cron file port path",
+      "owner": "codex",
+      "sha": "ef5eaf8d8757a5e75fa571042abc287430192f53",
+      "subject": "feat(cron): honor `hermes tools` config for the cron platform (#14798)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/tools/test_mcp_tool.py",
+        "tools/mcp_tool.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded-by-equivalence: Rust MCP/tool-arg normalization is implemented in Rust tool/runtime stack with different file layout",
+      "owner": "codex",
+      "sha": "24f139e16a6fa800d3cdf96f95fe3b586c36da18",
+      "subject": "fix(mcp): rewrite definitions refs to  in input schemas",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/moonshot_schema.py",
+        "agent/transports/chat_completions.py",
+        "tests/agent/test_moonshot_schema.py",
+        "tests/agent/transports/test_chat_completions.py",
+        "tests/tools/test_mcp_tool.py",
+        "tools/mcp_tool.py"
+      ],
+      "files_touched": 6,
+      "notes": "superseded-by-equivalence: Rust MCP/tool-arg normalization is implemented in Rust tool/runtime stack with different file layout",
+      "owner": "codex",
+      "sha": "e26c4f0e343536d0b39f7fda076d6bc11e210863",
+      "subject": "fix(kimi,mcp): Moonshot schema sanitizer + MCP schema robustness (#14805)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
+        "hermes_cli/config.py",
+        "tools/delegate_tool.py"
+      ],
+      "files_touched": 2,
+      "notes": "ported: raised Rust sub-agent delegation default timeout to 600s in crates/hermes-agent/src/sub_agent_orchestrator.rs",
+      "owner": "codex",
+      "sha": "50d97edbe15e3a4fd72ddbe00a3afb85e9bbafc9",
+      "subject": "feat(delegation): bump default child_timeout_seconds to 600s (#14809)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "ui-tui/src/__tests__/platform.test.ts",
+        "ui-tui/src/app/slash/commands/session.ts",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/components/textInput.tsx",
+        "ui-tui/src/lib/platform.ts"
+      ],
+      "files_touched": 5,
+      "notes": "superseded: upstream TS/web/ui-tui surface is intentionally divergent from Rust CLI/TUI runtime",
+      "owner": "codex",
+      "sha": "3504bd401b8d95abb47e7ea705b373553dcc2a9b",
+      "subject": "fix(tui): route Ctrl+B to voice toggle, not composer input",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/voice.py",
+        "tests/hermes_cli/test_voice_wrapper.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream TS/web/ui-tui surface is intentionally divergent from Rust CLI/TUI runtime",
+      "owner": "codex",
+      "sha": "0bb460b07011a6753bec6a8ebf824e8940b9bc00",
+      "subject": "fix(tui): add missing hermes_cli.voice wrapper for gateway RPC",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/voice.py",
+        "tests/hermes_cli/test_voice_wrapper.py",
+        "tui_gateway/server.py",
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/interfaces.ts",
+        "ui-tui/src/app/slash/commands/session.ts",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/gatewayTypes.ts"
+      ],
+      "files_touched": 10,
+      "notes": "superseded: upstream TS/web/ui-tui surface is intentionally divergent from Rust CLI/TUI runtime",
+      "owner": "codex",
+      "sha": "04c489b5873dae86caa4c99757e004c767e1303f",
+      "subject": "feat(tui): match CLI's voice slash + VAD-continuous recording model",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/voice.py",
+        "tui_gateway/server.py",
+        "ui-tui/src/app/createGatewayEventHandler.ts"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream TS/web/ui-tui surface is intentionally divergent from Rust CLI/TUI runtime",
+      "owner": "codex",
+      "sha": "42ff7857712b0dec93e2aab6a033d77857f3f6bb",
+      "subject": "fix(tui): voice TTS speak-back + transcript-key bug + auto-submit",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/voice.py",
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/components/appChrome.tsx"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream TS/web/ui-tui surface is intentionally divergent from Rust CLI/TUI runtime",
+      "owner": "codex",
+      "sha": "98418afd5d81a4e01813b819f3001dc360579d6c",
+      "subject": "fix(tui): break TTS\u2192STT feedback loop + colorize REC badge",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream TS/web/ui-tui surface is intentionally divergent from Rust CLI/TUI runtime",
+      "owner": "codex",
+      "sha": "3a9598337f772bade75432595b88556744e2f1a0",
+      "subject": "chore(tui): dump gateway crash traces to ~/.hermes/logs/tui_gateway_crash.log",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tui_gateway/entry.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream TS/web/ui-tui surface is intentionally divergent from Rust CLI/TUI runtime",
+      "owner": "codex",
+      "sha": "eeda18a9b75027408bccd1ac7308ac8a1c469d7c",
+      "subject": "chore(tui): record gateway exit reason in crash log",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tui_gateway/entry.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream TS/web/ui-tui surface is intentionally divergent from Rust CLI/TUI runtime",
+      "owner": "codex",
+      "sha": "7baf370d3dde0f66938962a2516e728e3cdabc6f",
+      "subject": "chore(tui): capture signal-triggered gateway exits in crash log",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/voice.py",
+        "tui_gateway/entry.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream TS/web/ui-tui surface is intentionally divergent from Rust CLI/TUI runtime",
+      "owner": "codex",
+      "sha": "2af0848f3c61449b73b9ad68c98cf0386695c1fa",
+      "subject": "fix(tui): ignore SIGPIPE so stderr back-pressure can't kill the gateway",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream TS/web/ui-tui surface is intentionally divergent from Rust CLI/TUI runtime",
+      "owner": "codex",
+      "sha": "44a0cbe5253fda236eb7383e4e07fca7f7e99691",
+      "subject": "fix(tui): voice mode starts OFF each launch (CLI parity)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "model_tools.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded-by-equivalence: Rust MCP/tool-arg normalization is implemented in Rust tool/runtime stack with different file layout",
+      "owner": "codex",
+      "sha": "9ff21437a03a28cfa33394bb330a4a41768f8c1c",
+      "subject": "fix(mcp): coerce stringified arrays/objects in tool args",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py",
+        "tests/run_agent/test_tool_arg_coercion.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python/TS delta not directly applicable to Rust-native architecture; behavior covered or intentionally divergent",
+      "owner": "codex",
+      "sha": "6a20e187ddfebeb97f87e968a6281e19113cea23",
+      "subject": "test,chore: cover stringified array/object coercion + AUTHOR_MAP entry",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/dom.ts"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream TS/web/ui-tui surface is intentionally divergent from Rust CLI/TUI runtime",
+      "owner": "codex",
+      "sha": "bd929ea514d92d68b6597cee9c6665dcd8a9b93e",
+      "subject": "perf(ink): cache text measurements across yoga flex re-passes",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/gateway/test_complete_path_at_filter.py",
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream TS/web/ui-tui surface is intentionally divergent from Rust CLI/TUI runtime",
+      "owner": "codex",
+      "sha": "b08cbc7a79a8b66cfca8f900bd9d54d5801da43d",
+      "subject": "fix(tui): @<name> fuzzy-matches filenames across the repo",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/turnController.ts"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream TS/web/ui-tui surface is intentionally divergent from Rust CLI/TUI runtime",
+      "owner": "codex",
+      "sha": "11b2942f1654a2366ccf77b3d4a5bd2f048b746a",
+      "subject": "fix(tui): anchor inline_diff to the segment where the edit happened",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/app/turnController.ts",
+        "ui-tui/src/components/messageLine.tsx",
+        "ui-tui/src/types.ts"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream TS/web/ui-tui surface is intentionally divergent from Rust CLI/TUI runtime",
+      "owner": "codex",
+      "sha": "2258a181f01eb1616abfe8e8b20afe623d1a63ff",
+      "subject": "fix(tui): give inline_diff segments blank-line breathing room",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/turnController.ts"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream TS/web/ui-tui surface is intentionally divergent from Rust CLI/TUI runtime",
+      "owner": "codex",
+      "sha": "4ae5b58cb10d98cac50c16e93419533253ada8f9",
+      "subject": "fix(tui): restore voice handlers + address copilot review",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/gateway/test_complete_path_at_filter.py",
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream TS/web/ui-tui surface is intentionally divergent from Rust CLI/TUI runtime",
+      "owner": "codex",
+      "sha": "0a679cb7ad5261601b760c260f56af51154df1e5",
+      "subject": "fix(tui): restore voice/panic handlers + scope fuzzy paths to cwd",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-04-23T21:25:52.663486+00:00",
+  "generated_at_utc": "2026-04-24T01:29:21.420965+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -1038,15 +1903,16 @@
   },
   "summary": {
     "by_disposition": {
-      "ported": 9,
-      "superseded": 65
+      "ported": 11,
+      "superseded": 121
     },
     "by_target_ticket": {
-      "20": 16,
-      "22": 20,
-      "23": 4,
-      "26": 34
+      "20": 42,
+      "22": 31,
+      "23": 5,
+      "25": 1,
+      "26": 53
     },
-    "total_commits": 74
+    "total_commits": 132
   }
 }
