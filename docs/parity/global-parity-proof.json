@@ -2,22 +2,22 @@
   "ci_gate": {
     "checks": [
       {
-        "actual": 137.0,
+        "actual": 298.0,
         "limit": 5500,
         "metric": "max_commits_behind",
         "status": "pass"
       },
       {
-        "actual": 132.0,
+        "actual": 286.0,
         "limit": 5000,
         "metric": "max_upstream_patch_missing",
         "status": "pass"
       },
       {
-        "actual": 2300.0,
+        "actual": 2512.0,
         "limit": 2500,
         "metric": "max_files_only_upstream",
-        "status": "pass"
+        "status": "fail"
       },
       {
         "actual": 8.0,
@@ -51,9 +51,9 @@
       }
     ],
     "mode": "tree-drift",
-    "pass": true
+    "pass": false
   },
-  "generated_at_utc": "2026-04-24T05:12:42.551592+00:00",
+  "generated_at_utc": "2026-04-24T21:19:57.326096+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -66,13 +66,13 @@
     "GPAR-09": true
   },
   "metrics": {
-    "max_commits_behind": 137.0,
+    "max_commits_behind": 298.0,
     "max_divergence_review_overdue": 0.0,
-    "max_files_only_upstream": 2300.0,
+    "max_files_only_upstream": 2512.0,
     "max_queue_pending_commits": 0.0,
     "max_shared_different": 8.0,
     "max_unowned_divergences": 0.0,
-    "max_upstream_patch_missing": 132.0,
+    "max_upstream_patch_missing": 286.0,
     "min_test_intent_mapping_ratio": 1.0
   },
   "program": {
@@ -83,18 +83,18 @@
   },
   "queue_summary": {
     "by_disposition": {
-      "ported": 13,
-      "superseded": 124
+      "ported": 22,
+      "superseded": 264
     },
     "by_target_ticket": {
-      "20": 43,
-      "21": 1,
-      "22": 32,
-      "23": 5,
-      "25": 1,
-      "26": 55
+      "20": 113,
+      "21": 2,
+      "22": 57,
+      "23": 17,
+      "25": 3,
+      "26": 94
     },
-    "total_commits": 137
+    "total_commits": 286
   },
   "release_gate": {
     "checks": [
