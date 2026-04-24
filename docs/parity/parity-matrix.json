@@ -1,25 +1,25 @@
 {
-  "generated_at_utc": "2026-04-23T01:28:40.929813+00:00",
+  "generated_at_utc": "2026-04-24T01:29:20.072048+00:00",
   "refs": {
     "local_ref": "main",
-    "local_sha": "f069d675ced224d10a7d8eb3e242412bfad66c2d",
+    "local_sha": "efa221b03ffdd61c75bc27990201441d0b397eb2",
     "upstream_ref": "upstream/main",
-    "upstream_sha": "36730b90c4af0fcf51c6a0713b65d259050c5ca6",
+    "upstream_sha": "6fdbf2f2d76cf37393e657bf37ceda3d84589200",
     "merge_base": null
   },
   "summary": {
-    "commits_behind": 5452,
-    "commits_ahead": 233,
-    "upstream_patch_missing": 4722,
-    "upstream_patch_represented": 4,
-    "local_patch_unique": 231,
-    "files_only_upstream": 2281,
-    "files_only_local": 404,
-    "files_shared_identical": 0,
+    "commits_behind": 137,
+    "commits_ahead": 276,
+    "upstream_patch_missing": 132,
+    "upstream_patch_represented": 0,
+    "local_patch_unique": 271,
+    "files_only_upstream": 2300,
+    "files_only_local": 407,
+    "files_shared_identical": 2,
     "files_shared_different": 8,
-    "tree_files_changed": 2694,
-    "tree_insertions": 873540,
-    "tree_deletions": 219253
+    "tree_files_changed": 2716,
+    "tree_insertions": 885115,
+    "tree_deletions": 154262
   },
   "top_upstream_only": [
     {
@@ -28,19 +28,19 @@
     },
     {
       "path": "tests/gateway",
-      "count": 180
+      "count": 181
     },
     {
       "path": "tests/tools",
-      "count": 157
+      "count": 158
     },
     {
       "path": "tests/hermes_cli",
-      "count": 129
+      "count": 131
     },
     {
       "path": "ui-tui/packages",
-      "count": 127
+      "count": 128
     },
     {
       "path": "website/docs",
@@ -48,7 +48,7 @@
     },
     {
       "path": "ui-tui/src",
-      "count": 118
+      "count": 119
     },
     {
       "path": "optional-skills/mlops",
@@ -67,16 +67,16 @@
       "count": 63
     },
     {
+      "path": "tests/run_agent",
+      "count": 59
+    },
+    {
       "path": "tests/agent",
       "count": 58
     },
     {
-      "path": "tests/run_agent",
-      "count": 58
-    },
-    {
       "path": "web/src",
-      "count": 47
+      "count": 48
     },
     {
       "path": "tests/cli",
@@ -115,6 +115,10 @@
       "count": 12
     },
     {
+      "path": "tests/plugins",
+      "count": 12
+    },
+    {
       "path": "tests/acp",
       "count": 11
     },
@@ -128,10 +132,6 @@
     },
     {
       "path": ".github/workflows",
-      "count": 10
-    },
-    {
-      "path": "tests/plugins",
       "count": 10
     },
     {
@@ -175,11 +175,11 @@
       "count": 6
     },
     {
-      "path": "skills/software-development",
+      "path": "plugins/image_gen",
       "count": 6
     },
     {
-      "path": "tests/skills",
+      "path": "skills/software-development",
       "count": 6
     }
   ],
@@ -240,7 +240,7 @@
     },
     {
       "path": "docs/parity",
-      "count": 22
+      "count": 24
     },
     {
       "path": "crates/hermes-config",
@@ -386,19 +386,19 @@
     },
     {
       "path": "tests/gateway",
-      "count": 180
+      "count": 181
     },
     {
       "path": "tests/tools",
-      "count": 157
+      "count": 158
     },
     {
       "path": "tests/hermes_cli",
-      "count": 129
+      "count": 131
     },
     {
       "path": "ui-tui/packages",
-      "count": 127
+      "count": 128
     },
     {
       "path": "website/docs",
@@ -406,7 +406,7 @@
     },
     {
       "path": "ui-tui/src",
-      "count": 118
+      "count": 119
     },
     {
       "path": "optional-skills/mlops",
@@ -425,16 +425,16 @@
       "count": 63
     },
     {
+      "path": "tests/run_agent",
+      "count": 59
+    },
+    {
       "path": "tests/agent",
       "count": 58
     },
     {
-      "path": "tests/run_agent",
-      "count": 58
-    },
-    {
       "path": "web/src",
-      "count": 47
+      "count": 48
     },
     {
       "path": "tests/cli",
@@ -473,6 +473,10 @@
       "count": 12
     },
     {
+      "path": "tests/plugins",
+      "count": 12
+    },
+    {
       "path": "tests/acp",
       "count": 11
     },
@@ -486,10 +490,6 @@
     },
     {
       "path": ".github/workflows",
-      "count": 10
-    },
-    {
-      "path": "tests/plugins",
       "count": 10
     },
     {
@@ -533,11 +533,11 @@
       "count": 6
     },
     {
-      "path": "skills/software-development",
+      "path": "plugins/image_gen",
       "count": 6
     },
     {
-      "path": "tests/skills",
+      "path": "skills/software-development",
       "count": 6
     }
   ],
@@ -564,7 +564,7 @@
     },
     {
       "path": "docs/parity",
-      "count": 22
+      "count": 24
     },
     {
       "path": "crates/hermes-config",
@@ -708,7 +708,7 @@
       "workstream": "WS6",
       "issue": 10,
       "name": "Tests and CI parity",
-      "upstream_only": 733,
+      "upstream_only": 740,
       "shared_different": 0,
       "local_only": 3,
       "risk": "high",
@@ -718,7 +718,7 @@
       "workstream": "WS4",
       "issue": 8,
       "name": "Skills parity",
-      "upstream_only": 664,
+      "upstream_only": 662,
       "shared_different": 0,
       "local_only": 0,
       "risk": "high",
@@ -728,9 +728,9 @@
       "workstream": "WS5",
       "issue": 9,
       "name": "UX parity",
-      "upstream_only": 468,
+      "upstream_only": 471,
       "shared_different": 0,
-      "local_only": 25,
+      "local_only": 27,
       "risk": "high",
       "effort": "XL"
     },
@@ -738,9 +738,9 @@
       "workstream": "WS8",
       "issue": 12,
       "name": "Compatibility and divergence policy",
-      "upstream_only": 203,
+      "upstream_only": 206,
       "shared_different": 8,
-      "local_only": 150,
+      "local_only": 151,
       "risk": "medium",
       "effort": "L"
     },
@@ -748,7 +748,7 @@
       "workstream": "WS3",
       "issue": 7,
       "name": "Tools and adapters parity",
-      "upstream_only": 164,
+      "upstream_only": 172,
       "shared_different": 0,
       "local_only": 86,
       "risk": "high",
@@ -776,38 +776,33 @@
     }
   ],
   "commit_mapping": {
-    "upstream_patch_missing": 4722,
-    "upstream_patch_represented": 4,
-    "local_patch_unique": 231,
-    "local_patch_equivalent_to_upstream": 1,
+    "upstream_patch_missing": 132,
+    "upstream_patch_represented": 0,
+    "local_patch_unique": 271,
+    "local_patch_equivalent_to_upstream": 0,
     "upstream_patch_missing_sample": [
-      "21d80ca68346dfdb8d3556015a723a9217f8566f",
-      "122d8788ae2308dd222eafec393a6862a2e39574",
-      "a49596cbb2c17686f2c6de47393e3c419e4c9444",
-      "6d346250b18df94878f7bcc27604c6e9f51208b0",
-      "bab9c75b5b40bfa8788aaec8a3c6f606bb60d240",
-      "45d0b0b1427b965bd7a61f1510dee5cf2479aa0a",
-      "10b4cfeace2487980cf682808e0613dd099f2167",
-      "bf4223f3818fb5654550b059e416425cb06ab5e2",
-      "cde7e64418e00a1337325e1259a7f8ba7e563315",
-      "3078053795e838e47797ede02b44e6dead731aac",
-      "ebb46ba0e6a70dc1caa0005ca4449a63e0657ad1",
-      "bc71dffd4cb7586bd82501f6897ccca1255c2e1c",
-      "e1710378b7388714b75c8c96ecb917193faf92fc",
-      "f4ff1f496b259d10316f81af52d16756ab274666",
-      "58d5fa1e4cec2783962328d887b12810d6de0c8c",
-      "96cff783357c785ea1ba8a1e61f923364e29f2bd",
-      "4ece87efb0ddb477565a90917538cd6497ce708f",
-      "587d1cf720950dbb7f9b4afb527d2d4898574c7f",
-      "c7fa4447b831e2320b7d07e451bbef63dbf28cf3",
-      "17608c11422bc1bea8c8c2e2032c41cd4ac57a7a"
+      "d8cc85dcdccf86f7cf07fe012b00646282a12b90",
+      "3d90292eda55d24098b1d3e73b191896d492e01e",
+      "77f99c4ff445f7df1634f8e01e0a6d65d46959bc",
+      "8b1ff55f5382052a5d98246659136e632af13697",
+      "85cc12e2bd55a6f9d1328fc21162a4d012a68e30",
+      "92e4bbc201e651dc1b43f16637ff75728b646330",
+      "fa47cbd456718d9cad7a7e0114d94c0337ccb398",
+      "156b3583206d20cf6ca4b3017151d7e9a1a041f3",
+      "48dc8ef1d158b29b0ff5ec04d708b2a0d92a3b72",
+      "e8cba18f77c2ab284e7a1d3c5414c9b155693c81",
+      "15efb410d035faf117d584570ca0566b476b01cd",
+      "5e76c650bbae787cbc920646b3822294f02bb8f5",
+      "22afa066f838da5fcf1f1a0087524dd4fb99f7c5",
+      "1c532278ae701f9f6184e8643df8e1bbf94a4fd6",
+      "738d0900fddd865c80379af742f4a79c3fa39125",
+      "f4612785a48557f3a6752fd0f75b44ade395a2c2",
+      "43de1ca8c2874f9a2f589794861fc47d165b90f5",
+      "36adcebe6ca8f5d8511be617c49d384a5d3205fb",
+      "f77da7de42a1d98fe8f3092e826352e6b4029786",
+      "48923e5a3d8f521084bc11a2ed9e528ea3feee06"
     ],
-    "upstream_patch_represented_sample": [
-      "1f6a1f0028e1d5bcf1a3621f53ad1e16b6398ad0",
-      "612321631faa9021379e62d467626e52154d3983",
-      "4b35836ba42a59a669699197573a969431b4df44",
-      "3baafea380ec18a6179fe3e82d742557d66389e4"
-    ],
+    "upstream_patch_represented_sample": [],
     "local_patch_unique_sample": [
       "7a2bcf75a59e4b7d8da3d9efb067ee3d4b51bb43",
       "196cc967c3f005686f865ed48343e20e8c1baab2",
@@ -830,11 +825,9 @@
       "d7694db691baff7d8f6c8e6c5264b1617587c09b",
       "42a7d078a49f6783a97db73a2984534db528e153"
     ],
-    "local_patch_equivalent_sample": [
-      "b1d41bf1859700455bc89c420a0efd12dec5950b"
-    ],
+    "local_patch_equivalent_sample": [],
     "intentional_divergence_items": 5,
-    "intentional_divergence_covered_files": 1142
+    "intentional_divergence_covered_files": 1143
   },
   "intentional_divergence": [
     {
@@ -879,7 +872,7 @@
       "status": "approved",
       "workstream": "WS4",
       "summary": "Track upstream skills and optional-skills catalogs via parity audits while keeping Rust runtime skill loading externalized (no direct Python skill-tree vendoring).",
-      "matched_files": 664,
+      "matched_files": 662,
       "matched_sample": [
         "optional-skills/DESCRIPTION.md",
         "optional-skills/autonomous-ai-agents/DESCRIPTION.md",
@@ -908,7 +901,7 @@
       "status": "approved",
       "workstream": "WS5",
       "summary": "Treat Rust CLI/TUI and gateway as primary UX surface; upstream web/ui-tui trees are tracked as intentional divergence unless explicitly ported.",
-      "matched_files": 468,
+      "matched_files": 471,
       "matched_sample": [
         "ui-tui/.gitignore",
         "ui-tui/.prettierrc",

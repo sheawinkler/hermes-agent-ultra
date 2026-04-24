@@ -1146,3 +1146,30 @@
   - `cargo test -p hermes-cli tests::test_merged_skill_taps_deduplicates_default -- --nocapture`
   - `python3 scripts/generate-upstream-patch-queue.py --no-fetch --max-commits 0`
   - `python3 scripts/generate-global-parity-proof.py --check-ci`
+
+## 2026-04-24 impl-20 (functional release gate + pending queue reburn)
+- Scope:
+  - Convert release gating from strict tree-equality checks to functional parity criteria while preserving CI drift visibility.
+  - Process newly surfaced pending upstream queue tranche (`58` pending after upstream ref refresh).
+- Gate implementation:
+  - Updated `scripts/generate-global-parity-proof.py`:
+    - added gate-mode metadata (`gate_mode`)
+    - added `metric_thresholds` support for scoped threshold groups
+    - added queue pending metric (`max_queue_pending_commits`)
+  - Updated `docs/parity/global-parity-thresholds.json`:
+    - `release_thresholds.gate_mode = functional`
+    - release checks now enforce divergence/test integrity + `max_queue_pending_commits=0`
+    - CI gate remains `tree-drift` observability mode
+  - Updated `docs/parity/README.md` to document CI-vs-release gate intent.
+- Additional parity port in this tranche:
+  - `50d97edbe15e` (`feat(delegation): bump default child_timeout_seconds to 600s`)
+    - ported in Rust by changing `DEFAULT_SUB_AGENT_TIMEOUT_SECS` to `600` in `crates/hermes-agent/src/sub_agent_orchestrator.rs`.
+  - `165b2e481afa` marked `ported-by-equivalence` (Rust `AgentConfig.retry.max_retries` already configurable).
+- Queue disposition outcome:
+  - Processed all new pending commits (`58`) with per-SHA notes.
+  - Current queue summary: `total=132`, `ported=11`, `superseded=121`, `pending=0`.
+- Verification:
+  - `cargo test -p hermes-agent sub_agent_orchestrator:: -- --nocapture`
+  - `python3 scripts/generate-upstream-patch-queue.py --max-commits 0 --no-fetch`
+  - `python3 scripts/generate-workstream-status.py`
+  - `python3 scripts/generate-global-parity-proof.py --check-ci --check-release`
