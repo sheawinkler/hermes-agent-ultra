@@ -583,6 +583,38 @@ mod tests {
     }
 
     #[test]
+    fn test_provider_api_key_from_env_supports_anthropic_aliases() {
+        let primary = "ANTHROPIC_API_KEY";
+        let secondary = "ANTHROPIC_TOKEN";
+        let tertiary = "CLAUDE_CODE_OAUTH_TOKEN";
+        std::env::remove_var(primary);
+        std::env::remove_var(secondary);
+        std::env::remove_var(tertiary);
+
+        std::env::set_var(tertiary, "claude-oauth-token");
+        assert_eq!(
+            provider_api_key_from_env("anthropic").as_deref(),
+            Some("claude-oauth-token")
+        );
+
+        std::env::set_var(secondary, "anthropic-token");
+        assert_eq!(
+            provider_api_key_from_env("anthropic").as_deref(),
+            Some("anthropic-token")
+        );
+
+        std::env::set_var(primary, "anthropic-api-key");
+        assert_eq!(
+            provider_api_key_from_env("anthropic").as_deref(),
+            Some("anthropic-api-key")
+        );
+
+        std::env::remove_var(primary);
+        std::env::remove_var(secondary);
+        std::env::remove_var(tertiary);
+    }
+
+    #[test]
     fn test_provider_api_key_from_env_supports_qwen_oauth() {
         let oauth_var = "HERMES_QWEN_OAUTH_API_KEY";
         let fallback_var = "DASHSCOPE_API_KEY";
@@ -603,6 +635,18 @@ mod tests {
 
         std::env::remove_var(oauth_var);
         std::env::remove_var(fallback_var);
+    }
+
+    #[test]
+    fn test_provider_api_key_from_env_supports_google_gemini_cli() {
+        let var = "HERMES_GEMINI_OAUTH_API_KEY";
+        std::env::remove_var(var);
+        std::env::set_var(var, "google-gemini-oauth-token");
+        assert_eq!(
+            provider_api_key_from_env("google-gemini-cli").as_deref(),
+            Some("google-gemini-oauth-token")
+        );
+        std::env::remove_var(var);
     }
 }
 
@@ -755,9 +799,18 @@ pub fn provider_api_key_from_env(provider: &str) -> Option<String> {
         "openai-codex" | "codex" => std::env::var("HERMES_OPENAI_CODEX_API_KEY")
             .ok()
             .filter(|s| !s.trim().is_empty()),
-        "anthropic" => std::env::var("ANTHROPIC_API_KEY")
+        "anthropic" | "claude" | "claude-code" => std::env::var("ANTHROPIC_API_KEY")
             .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| std::env::var("ANTHROPIC_TOKEN").ok())
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| std::env::var("CLAUDE_CODE_OAUTH_TOKEN").ok())
             .filter(|s| !s.trim().is_empty()),
+        "google-gemini-cli" | "gemini-cli" | "gemini-oauth" => {
+            std::env::var("HERMES_GEMINI_OAUTH_API_KEY")
+                .ok()
+                .filter(|s| !s.trim().is_empty())
+        }
         "openrouter" => std::env::var("OPENROUTER_API_KEY")
             .ok()
             .filter(|s| !s.trim().is_empty()),

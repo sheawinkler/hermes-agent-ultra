@@ -1615,20 +1615,38 @@ impl AgentLoop {
                 .or_else(|| std::env::var("STEPFUN_API_KEY").ok())
                 .filter(|v| !v.trim().is_empty());
         }
-        let env_var = match provider {
-            "anthropic" => "ANTHROPIC_API_KEY",
-            "openrouter" => "OPENROUTER_API_KEY",
-            "qwen" | "qwen-oauth" => "DASHSCOPE_API_KEY",
-            "kimi" | "moonshot" => "MOONSHOT_API_KEY",
-            "minimax" => "MINIMAX_API_KEY",
-            "nous" => "NOUS_API_KEY",
-            "copilot" | "copilot-acp" => "GITHUB_COPILOT_TOKEN",
-            _ => "",
-        };
-        if env_var.is_empty() {
-            None
-        } else {
-            std::env::var(env_var).ok().filter(|v| !v.trim().is_empty())
+        match provider {
+            "anthropic" | "claude" | "claude-code" => std::env::var("ANTHROPIC_API_KEY")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .or_else(|| std::env::var("ANTHROPIC_TOKEN").ok())
+                .filter(|v| !v.trim().is_empty())
+                .or_else(|| std::env::var("CLAUDE_CODE_OAUTH_TOKEN").ok())
+                .filter(|v| !v.trim().is_empty()),
+            "google-gemini-cli" | "gemini-cli" | "gemini-oauth" => {
+                std::env::var("HERMES_GEMINI_OAUTH_API_KEY")
+                    .ok()
+                    .filter(|v| !v.trim().is_empty())
+            }
+            "openrouter" => std::env::var("OPENROUTER_API_KEY")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
+            "qwen" | "qwen-oauth" => std::env::var("DASHSCOPE_API_KEY")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
+            "kimi" | "moonshot" => std::env::var("MOONSHOT_API_KEY")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
+            "minimax" => std::env::var("MINIMAX_API_KEY")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
+            "nous" => std::env::var("NOUS_API_KEY")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
+            "copilot" | "copilot-acp" => std::env::var("GITHUB_COPILOT_TOKEN")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
+            _ => None,
         }
     }
 
@@ -1657,6 +1675,8 @@ impl AgentLoop {
                     Some("https://api.openai.com/v1".to_string())
                 } else if provider == "qwen-oauth" {
                     Some("https://dashscope.aliyuncs.com/compatible-mode/v1".to_string())
+                } else if provider == "google-gemini-cli" {
+                    Some("cloudcode-pa://google".to_string())
                 } else if provider == "stepfun" {
                     Some("https://api.stepfun.ai/step_plan/v1".to_string())
                 } else {
@@ -1669,6 +1689,8 @@ impl AgentLoop {
         let provider_key = match provider {
             "openai-codex" | "codex" => "openai-codex",
             "qwen-oauth" => "qwen-oauth",
+            "anthropic" | "claude" | "claude-code" => "anthropic",
+            "google-gemini-cli" | "gemini-cli" | "gemini-oauth" => "google-gemini-cli",
             _ => return None,
         };
         let path = self.auth_tokens_path();
@@ -1693,6 +1715,8 @@ impl AgentLoop {
         self.refresh_single_oauth_store_token_if_needed("openai-codex")
             .await;
         self.refresh_single_oauth_store_token_if_needed("qwen-oauth")
+            .await;
+        self.refresh_single_oauth_store_token_if_needed("anthropic")
             .await;
     }
 
@@ -1780,20 +1804,40 @@ impl AgentLoop {
                 "HERMES_OPENAI_CODEX_OAUTH_CLIENT_ID",
             ),
             "qwen-oauth" => ("HERMES_QWEN_OAUTH_TOKEN_URL", "HERMES_QWEN_OAUTH_CLIENT_ID"),
+            "anthropic" => (
+                "HERMES_ANTHROPIC_OAUTH_TOKEN_URL",
+                "HERMES_ANTHROPIC_OAUTH_CLIENT_ID",
+            ),
             _ => return cfg_token_url.zip(cfg_client_id),
         };
-        let token_url = cfg_token_url.or_else(|| {
-            std::env::var(token_url_env)
-                .ok()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-        })?;
-        let client_id = cfg_client_id.or_else(|| {
-            std::env::var(client_id_env)
-                .ok()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-        })?;
+        let token_url = cfg_token_url
+            .or_else(|| {
+                std::env::var(token_url_env)
+                    .ok()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+            })
+            .or_else(|| {
+                if provider_key == "anthropic" {
+                    Some("https://console.anthropic.com/v1/oauth/token".to_string())
+                } else {
+                    None
+                }
+            })?;
+        let client_id = cfg_client_id
+            .or_else(|| {
+                std::env::var(client_id_env)
+                    .ok()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+            })
+            .or_else(|| {
+                if provider_key == "anthropic" {
+                    Some("9d1c250a-e61b-44d9-88ed-5944d1962f5e".to_string())
+                } else {
+                    None
+                }
+            })?;
         Some((token_url, client_id))
     }
 
@@ -7482,6 +7526,117 @@ mod tests {
         let resolved = agent.resolve_runtime_api_key("custom", None, None);
         assert_eq!(resolved.as_deref(), Some("env-secret"));
         std::env::remove_var("MY_FALLBACK_KEY");
+    }
+
+    #[test]
+    fn test_runtime_provider_api_key_env_supports_anthropic_aliases_and_gemini_oauth() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let agent = AgentLoop::new(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        std::env::remove_var("ANTHROPIC_TOKEN");
+        std::env::set_var("CLAUDE_CODE_OAUTH_TOKEN", "claude-code-token");
+        assert_eq!(
+            agent
+                .resolve_runtime_api_key("anthropic", None, None)
+                .as_deref(),
+            Some("claude-code-token")
+        );
+        std::env::remove_var("CLAUDE_CODE_OAUTH_TOKEN");
+
+        std::env::set_var("HERMES_GEMINI_OAUTH_API_KEY", "gemini-oauth-token");
+        assert_eq!(
+            agent
+                .resolve_runtime_api_key("google-gemini-cli", None, None)
+                .as_deref(),
+            Some("gemini-oauth-token")
+        );
+        std::env::remove_var("HERMES_GEMINI_OAUTH_API_KEY");
+    }
+
+    #[test]
+    fn test_oauth_refresh_config_anthropic_defaults_available() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        std::env::remove_var("HERMES_ANTHROPIC_OAUTH_TOKEN_URL");
+        std::env::remove_var("HERMES_ANTHROPIC_OAUTH_CLIENT_ID");
+        let agent = AgentLoop::new(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let (token_url, client_id) = agent.oauth_refresh_config("anthropic").unwrap();
+        assert_eq!(token_url, "https://console.anthropic.com/v1/oauth/token");
+        assert_eq!(client_id, "9d1c250a-e61b-44d9-88ed-5944d1962f5e");
     }
 
     #[test]
