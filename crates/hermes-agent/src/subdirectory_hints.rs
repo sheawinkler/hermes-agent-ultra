@@ -3,7 +3,7 @@
 //! Ported from Python `agent/subdirectory_hints.py`.
 //!
 //! As the agent navigates into subdirectories via tool calls, this module
-//! discovers and loads project context files (AGENTS.md, CLAUDE.md,
+//! discovers and loads project context files (AGENTS.md, CLAUDE.md, DESIGN.md,
 //! .cursorrules) from those directories. Discovered hints are appended
 //! to the tool result so the model gets relevant context at the moment
 //! it starts working in a new area of the codebase.
@@ -21,6 +21,8 @@ const HINT_FILENAMES: &[&str] = &[
     "agents.md",
     "CLAUDE.md",
     "claude.md",
+    "DESIGN.md",
+    "design.md",
     ".cursorrules",
 ];
 
@@ -351,6 +353,21 @@ mod tests {
     }
 
     #[test]
+    fn test_tracker_discovers_design_md() {
+        let tmp = tempfile::tempdir().unwrap();
+        let subdir = tmp.path().join("frontend");
+        std::fs::create_dir_all(&subdir).unwrap();
+        std::fs::write(subdir.join("DESIGN.md"), "Design tokens and rules").unwrap();
+
+        let mut tracker = SubdirectoryHintTracker::new(tmp.path());
+        let args = serde_json::json!({"path": "frontend/app.tsx"});
+        let result = tracker.check_tool_call("read_file", &args);
+
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("Design tokens and rules"));
+    }
+
+    #[test]
     fn test_generate_project_hints_rust() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("Cargo.toml"), "[package]").unwrap();
@@ -375,7 +392,7 @@ mod tests {
         std::fs::create_dir_all(&src_dir).unwrap();
         std::fs::write(src_dir.join("main.rs"), "fn main() {}").unwrap();
 
-        let mut tracker = SubdirectoryHintTracker::new(tmp.path());
+        let tracker = SubdirectoryHintTracker::new(tmp.path());
         let args = serde_json::json!({"command": "cat src/main.rs"});
         let dirs = tracker.extract_directories("terminal", &args);
         // Should extract src directory from the command

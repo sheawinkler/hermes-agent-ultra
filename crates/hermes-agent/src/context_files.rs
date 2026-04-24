@@ -4,7 +4,8 @@
 //! loads and concatenates them, and injects into the system prompt
 //! via `SystemPromptBuilder`.
 //!
-//! Also supports `AGENTS.md` in the working directory as workspace-level context.
+//! Also supports workspace-level context files in the working directory
+//! (AGENTS.md, DESIGN.md, etc.).
 
 use std::path::{Path, PathBuf};
 
@@ -18,7 +19,14 @@ const TRUNCATE_HEAD_RATIO: f64 = 0.7;
 const TRUNCATE_TAIL_RATIO: f64 = 0.2;
 
 /// Context file names to look for in the working directory.
-const WORKSPACE_CONTEXT_FILES: &[&str] = &["AGENTS.md", "agents.md", ".hermes.md", "HERMES.md"];
+const WORKSPACE_CONTEXT_FILES: &[&str] = &[
+    "AGENTS.md",
+    "agents.md",
+    "DESIGN.md",
+    "design.md",
+    ".hermes.md",
+    "HERMES.md",
+];
 
 /// Threat patterns for prompt injection detection in context files.
 const THREAT_PATTERNS: &[(&str, &str)] = &[
@@ -310,6 +318,16 @@ mod tests {
         let result = load_workspace_context(tmp.path());
         assert!(result.is_some());
         assert!(result.unwrap().contains("Agent instructions here"));
+    }
+
+    #[test]
+    fn test_load_workspace_context_design_md() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("DESIGN.md"), "Design system spec here").unwrap();
+
+        let result = load_workspace_context(tmp.path());
+        assert!(result.is_some());
+        assert!(result.unwrap().contains("Design system spec here"));
     }
 
     #[test]
