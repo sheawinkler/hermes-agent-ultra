@@ -136,7 +136,12 @@ async fn main() {
             .await
         }
         CliCommand::Setup => run_setup().await,
-        CliCommand::Doctor => run_doctor(cli).await,
+        CliCommand::Doctor {
+            deep,
+            snapshot,
+            snapshot_path,
+            bundle,
+        } => run_doctor(cli, deep, snapshot, snapshot_path, bundle).await,
         CliCommand::Update => run_update().await,
         CliCommand::Status => run_status(cli).await,
         CliCommand::Dashboard {
@@ -5968,54 +5973,81 @@ async fn run_setup() -> Result<(), AgentError> {
 }
 
 /// Handle `hermes doctor`.
-async fn run_doctor(cli: Cli) -> Result<(), AgentError> {
+async fn run_doctor(
+    cli: Cli,
+    deep: bool,
+    snapshot: bool,
+    snapshot_path: Option<String>,
+    bundle: bool,
+) -> Result<(), AgentError> {
     println!("Hermes Agent — System Check");
     println!("===========================\n");
 
-    // Check config
+    let mut checks: Vec<serde_json::Value> = Vec::new();
     let config_dir = hermes_config::hermes_home();
-    print!("Config directory ({})... ", config_dir.display());
-    if config_dir.exists() {
-        println!("✓");
-    } else {
-        println!("✗ (run `hermes setup`)");
-    }
 
-    // Check config.yaml
-    let config_path = config_dir.join("config.yaml");
-    print!("config.yaml... ");
-    if config_path.exists() {
+    let config_dir_ok = config_dir.exists();
+    print!("Config directory ({})... ", config_dir.display());
+    if config_dir_ok {
         println!("✓");
     } else {
         println!("✗ (run `hermes setup`)");
     }
+    checks.push(serde_json::json!({
+        "name": "config_dir",
+        "ok": config_dir_ok,
+        "path": config_dir.display().to_string()
+    }));
+
+    let config_path = config_dir.join("config.yaml");
+    let config_yaml_ok = config_path.exists();
+    print!("config.yaml... ");
+    if config_yaml_ok {
+        println!("✓");
+    } else {
+        println!("✗ (run `hermes setup`)");
+    }
+    checks.push(serde_json::json!({
+        "name": "config_yaml",
+        "ok": config_yaml_ok,
+        "path": config_path.display().to_string()
+    }));
 
     let env_path = config_dir.join(".env");
+    let project_env = std::env::current_dir()
+        .ok()
+        .map(|p| p.join(".env"))
+        .filter(|p| p.exists());
+    let env_ok = env_path.exists() || project_env.is_some();
     print!("~/.hermes/.env... ");
     if env_path.exists() {
         println!("✓");
+    } else if let Some(ref p) = project_env {
+        println!("✓ (using fallback {})", p.display());
     } else {
-        let project_env = std::env::current_dir()
-            .ok()
-            .map(|p| p.join(".env"))
-            .filter(|p| p.exists());
-        if let Some(p) = project_env {
-            println!("✓ (using fallback {})", p.display());
-        } else {
-            println!("✗ (run `hermes setup`)");
-        }
+        println!("✗ (run `hermes setup`)");
     }
+    checks.push(serde_json::json!({
+        "name": "env_file",
+        "ok": env_ok,
+        "path": env_path.display().to_string(),
+        "fallback": project_env.as_ref().map(|p| p.display().to_string()),
+    }));
 
-    // Check SOUL.md persona file
     let soul_path = config_dir.join("SOUL.md");
+    let soul_ok = soul_path.exists();
     print!("SOUL.md persona file... ");
-    if soul_path.exists() {
+    if soul_ok {
         println!("✓");
     } else {
         println!("✗ (will be created by `hermes setup` or installer)");
     }
+    checks.push(serde_json::json!({
+        "name": "soul_md",
+        "ok": soul_ok,
+        "path": soul_path.display().to_string()
+    }));
 
-    // Check API keys via environment
     let env_file = config_dir.join(".env");
     let project_env_file = std::env::current_dir().ok().map(|p| p.join(".env"));
     let has_key = |key: &str| -> bool {
@@ -6033,6 +6065,8 @@ async fn run_doctor(cli: Cli) -> Result<(), AgentError> {
     };
 
     let api_checks = [
+        ("HERMES_OPENAI_API_KEY", "OpenAI (Hermes)"),
+        ("OPENAI_API_KEY", "OpenAI"),
         ("ANTHROPIC_API_KEY", "Anthropic"),
         ("OPENROUTER_API_KEY", "OpenRouter"),
         ("EXA_API_KEY", "Exa (web search)"),
@@ -6040,23 +6074,20 @@ async fn run_doctor(cli: Cli) -> Result<(), AgentError> {
     ];
 
     println!("\nAPI Keys:");
-    print!("  OpenAI (HERMES_OPENAI_API_KEY/OPENAI_API_KEY)... ");
-    let has_openai_key = has_key("HERMES_OPENAI_API_KEY") || has_key("OPENAI_API_KEY");
-    if has_openai_key {
-        println!("✓");
-    } else {
-        println!("✗ (not set)");
-    }
     for (env_var, name) in &api_checks {
+        let ok = has_key(env_var);
         print!("  {} ({})... ", name, env_var);
-        if has_key(env_var) {
+        if ok {
             println!("✓");
         } else {
             println!("✗ (not set)");
         }
+        checks.push(serde_json::json!({
+            "name": format!("api_key_{env_var}"),
+            "ok": ok
+        }));
     }
 
-    // Check external tools
     println!("\nExternal tools:");
     let tool_checks = [
         ("docker", "Docker", false),
@@ -6068,18 +6099,34 @@ async fn run_doctor(cli: Cli) -> Result<(), AgentError> {
 
     for (cmd, name, optional) in &tool_checks {
         print!("  {}... ", name);
-        match tokio::process::Command::new("which")
+        let ok = match tokio::process::Command::new("which")
             .arg(cmd)
             .output()
             .await
         {
-            Ok(output) if output.status.success() => println!("✓"),
-            _ if *optional => println!("(optional, not found)"),
-            _ => println!("✗ (not found)"),
-        }
+            Ok(output) if output.status.success() => {
+                println!("✓");
+                true
+            }
+            _ if *optional => {
+                println!("(optional, not found)");
+                true
+            }
+            _ => {
+                println!("✗ (not found)");
+                false
+            }
+        };
+        checks.push(serde_json::json!({
+            "name": format!("bin_{cmd}"),
+            "ok": ok,
+            "optional": optional
+        }));
     }
 
-    // Try loading config
+    let mut config_summary = serde_json::json!({
+        "loaded": false
+    });
     println!("\nConfiguration:");
     print!("  Loading config... ");
     match load_config(cli.config_dir.as_deref()) {
@@ -6092,14 +6139,213 @@ async fn run_doctor(cli: Cli) -> Result<(), AgentError> {
             println!("  Max turns: {}", config.max_turns);
             let platform_count = config.platforms.iter().filter(|(_, p)| p.enabled).count();
             println!("  Enabled platforms: {}", platform_count);
+            config_summary = serde_json::json!({
+                "loaded": true,
+                "model": config.model,
+                "max_turns": config.max_turns,
+                "enabled_platforms": platform_count,
+            });
+            checks.push(serde_json::json!({
+                "name": "config_load",
+                "ok": true
+            }));
         }
         Err(e) => {
             println!("✗ ({})", e);
+            checks.push(serde_json::json!({
+                "name": "config_load",
+                "ok": false,
+                "error": e.to_string()
+            }));
         }
+    }
+
+    if deep {
+        println!("\nDeep diagnostics:");
+        let svc = gateway_service_status()?;
+        let svc_ok = svc.is_some();
+        println!(
+            "  gateway service... {}",
+            if svc_ok { "✓" } else { "(not detected)" }
+        );
+        checks.push(serde_json::json!({
+            "name": "gateway_service_status",
+            "ok": true,
+            "detail": svc
+        }));
+
+        let pid_path = gateway_pid_path_for_cli(&cli);
+        let pid = read_gateway_pid(&pid_path);
+        let pid_alive = pid.map(gateway_pid_is_alive).unwrap_or(false);
+        println!(
+            "  gateway pid... {}",
+            if pid_alive { "✓" } else { "(not running)" }
+        );
+        checks.push(serde_json::json!({
+            "name": "gateway_pid",
+            "ok": pid_alive,
+            "pid": pid,
+            "pid_path": pid_path.display().to_string()
+        }));
+
+        let cl_health = reqwest::Client::new()
+            .get("http://127.0.0.1:8075/health")
+            .timeout(std::time::Duration::from_secs(3))
+            .send()
+            .await
+            .map(|resp| resp.status().is_success())
+            .unwrap_or(false);
+        println!(
+            "  contextlattice health... {}",
+            if cl_health { "✓" } else { "✗" }
+        );
+        checks.push(serde_json::json!({
+            "name": "contextlattice_health",
+            "ok": cl_health,
+            "url": "http://127.0.0.1:8075/health"
+        }));
+
+        let replay_dir = hermes_state_root(&cli).join("logs").join("replay");
+        let replay_count = std::fs::read_dir(&replay_dir)
+            .map(|it| it.filter_map(|e| e.ok()).count())
+            .unwrap_or(0usize);
+        println!(
+            "  replay traces... {} ({} files)",
+            if replay_count > 0 { "✓" } else { "(none)" },
+            replay_count
+        );
+        checks.push(serde_json::json!({
+            "name": "replay_traces",
+            "ok": true,
+            "dir": replay_dir.display().to_string(),
+            "count": replay_count
+        }));
+    }
+
+    let snapshot_payload = serde_json::json!({
+        "generated_at": chrono::Utc::now().to_rfc3339(),
+        "deep": deep,
+        "state_root": hermes_state_root(&cli).display().to_string(),
+        "checks": checks,
+        "config_summary": config_summary,
+    });
+
+    let mut snapshot_written: Option<PathBuf> = None;
+    if snapshot || bundle {
+        let out = write_doctor_snapshot(&cli, &snapshot_payload, snapshot_path.as_deref())?;
+        println!("\nDoctor snapshot: {}", out.display());
+        snapshot_written = Some(out);
+    }
+
+    if bundle {
+        let snapshot_path = snapshot_written.as_ref().ok_or_else(|| {
+            AgentError::Config("doctor bundle requires snapshot path".to_string())
+        })?;
+        let bundle_path = build_doctor_support_bundle(&cli, snapshot_path)?;
+        println!("Support bundle: {}", bundle_path.display());
     }
 
     println!("\nDone.");
     Ok(())
+}
+
+fn write_doctor_snapshot(
+    cli: &Cli,
+    snapshot_payload: &serde_json::Value,
+    requested_path: Option<&str>,
+) -> Result<PathBuf, AgentError> {
+    let path = if let Some(raw) = requested_path.map(str::trim).filter(|s| !s.is_empty()) {
+        PathBuf::from(raw)
+    } else {
+        hermes_state_root(cli).join("snapshots").join(format!(
+            "doctor-{}.json",
+            chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
+        ))
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AgentError::Io(format!("mkdir {}: {}", parent.display(), e)))?;
+    }
+    let body = serde_json::to_string_pretty(snapshot_payload)
+        .map_err(|e| AgentError::Config(format!("serialize doctor snapshot: {}", e)))?;
+    std::fs::write(&path, body)
+        .map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))?;
+    Ok(path)
+}
+
+fn build_doctor_support_bundle(cli: &Cli, snapshot_path: &Path) -> Result<PathBuf, AgentError> {
+    let reports_dir = debug_reports_dir_for_cli(cli);
+    std::fs::create_dir_all(&reports_dir)
+        .map_err(|e| AgentError::Io(format!("mkdir {}: {}", reports_dir.display(), e)))?;
+    let bundle_path = reports_dir.join(format!(
+        "support-bundle-{}.tar.gz",
+        chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
+    ));
+    let file = std::fs::File::create(&bundle_path)
+        .map_err(|e| AgentError::Io(format!("create {}: {}", bundle_path.display(), e)))?;
+    let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
+    let mut tar = tar::Builder::new(encoder);
+
+    tar.append_path_with_name(snapshot_path, "doctor/snapshot.json")
+        .map_err(|e| {
+            AgentError::Io(format!(
+                "append snapshot {}: {}",
+                snapshot_path.display(),
+                e
+            ))
+        })?;
+
+    let report = collect_debug_report(cli, 200)?;
+    let report_bytes = report.as_bytes();
+    let mut header = tar::Header::new_gnu();
+    header.set_mode(0o644);
+    header.set_size(report_bytes.len() as u64);
+    header.set_cksum();
+    tar.append_data(&mut header, "doctor/debug-report.md", report_bytes)
+        .map_err(|e| AgentError::Io(format!("append debug report: {}", e)))?;
+
+    let state_root = hermes_state_root(cli);
+    let log_files = [
+        (
+            "logs/hermes.log",
+            state_root.join("logs").join("hermes.log"),
+        ),
+        (
+            "logs/mcp-stderr.log",
+            state_root.join("logs").join("mcp-stderr.log"),
+        ),
+    ];
+    for (name, path) in log_files {
+        if path.exists() {
+            tar.append_path_with_name(&path, format!("doctor/{name}"))
+                .map_err(|e| AgentError::Io(format!("append {}: {}", path.display(), e)))?;
+        }
+    }
+
+    let replay_dir = state_root.join("logs").join("replay");
+    if replay_dir.exists() {
+        let mut replay_files: Vec<PathBuf> = std::fs::read_dir(&replay_dir)
+            .map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path()).collect())
+            .unwrap_or_default();
+        replay_files.sort();
+        replay_files.reverse();
+        for path in replay_files.into_iter().take(5) {
+            if path.is_file() {
+                let name = format!(
+                    "doctor/replay/{}",
+                    path.file_name()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "replay.jsonl".to_string())
+                );
+                tar.append_path_with_name(&path, name)
+                    .map_err(|e| AgentError::Io(format!("append {}: {}", path.display(), e)))?;
+            }
+        }
+    }
+
+    tar.finish()
+        .map_err(|e| AgentError::Io(format!("finalize {}: {}", bundle_path.display(), e)))?;
+    Ok(bundle_path)
 }
 
 /// Handle `hermes update`.
