@@ -1,0 +1,40 @@
+{
+  "source_repo": "NousResearch/hermes-agent",
+  "source_ref": "upstream/main@6f1eed3968318dc1d6ca3fb3ded2de6fc8e50308",
+  "captured_on": "2026-04-24",
+  "required_known_provider_ids": [
+    "ai-gateway",
+    "alibaba",
+    "alibaba-coding-plan",
+    "anthropic",
+    "arcee",
+    "bedrock",
+    "deepseek",
+    "gemini",
+    "google-gemini-cli",
+    "huggingface",
+    "kilocode",
+    "kimi-coding",
+    "kimi-coding-cn",
+    "minimax",
+    "minimax-cn",
+    "nous",
+    "nvidia",
+    "ollama-cloud",
+    "openai-codex",
+    "opencode-go",
+    "opencode-zen",
+    "qwen-oauth",
+    "stepfun",
+    "xai",
+    "xiaomi",
+    "zai"
+  ],
+  "required_oauth_provider_ids": [
+    "anthropic",
+    "nous",
+    "openai-codex",
+    "qwen-oauth",
+    "google-gemini-cli"
+  ]
+}
