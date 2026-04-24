@@ -17,10 +17,12 @@ use hermes_cli::app::{
     bridge_tool_registry, build_agent_config, build_provider, provider_api_key_from_env,
 };
 use hermes_cli::auth::{
-    clear_provider_auth_state, get_qwen_auth_status, login_nous_device_code,
-    login_openai_codex_device_code, read_provider_auth_state, resolve_qwen_runtime_credentials,
-    save_codex_auth_state, save_nous_auth_state, save_provider_auth_state, CodexDeviceCodeOptions,
-    NousDeviceCodeOptions, QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+    clear_provider_auth_state, get_anthropic_oauth_status, get_gemini_oauth_auth_status,
+    get_qwen_auth_status, login_anthropic_oauth, login_google_gemini_cli_oauth,
+    login_nous_device_code, login_openai_codex_device_code, read_provider_auth_state,
+    resolve_qwen_runtime_credentials, save_codex_auth_state, save_nous_auth_state,
+    save_provider_auth_state, AnthropicOAuthLoginOptions, CodexDeviceCodeOptions,
+    GeminiOAuthLoginOptions, NousDeviceCodeOptions, QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
 };
 use hermes_cli::cli::{Cli, CliCommand};
 use hermes_cli::config_env::hydrate_env_from_config;
@@ -3281,8 +3283,10 @@ fn normalize_auth_provider(provider: &str) -> String {
         "wechat" | "wx" => "weixin".to_string(),
         "qq" => "qqbot".to_string(),
         "tg" => "telegram".to_string(),
+        "claude" | "claude-code" => "anthropic".to_string(),
         "codex" => "openai-codex".to_string(),
         "qwen-cli" | "qwen-portal" => "qwen-oauth".to_string(),
+        "gemini-cli" | "gemini-oauth" => "google-gemini-cli".to_string(),
         "step" | "step-plan" => "stepfun".to_string(),
         "api-server" => "api_server".to_string(),
         "home-assistant" => "homeassistant".to_string(),
@@ -3320,18 +3324,30 @@ fn normalize_secret_provider(provider: &str) -> String {
     let p = provider.trim().to_ascii_lowercase();
     match p.as_str() {
         "github-copilot" => "copilot".to_string(),
+        "claude" | "claude-code" => "anthropic".to_string(),
         "codex" => "openai-codex".to_string(),
+        "gemini-cli" | "gemini-oauth" => "google-gemini-cli".to_string(),
         _ => p,
     }
 }
 
 fn secret_provider_aliases(provider: &str) -> Vec<String> {
     match normalize_secret_provider(provider).as_str() {
+        "anthropic" => vec![
+            "anthropic".to_string(),
+            "claude".to_string(),
+            "claude-code".to_string(),
+        ],
         "moonshot" => vec!["moonshot".to_string(), "kimi".to_string()],
         "kimi" => vec!["kimi".to_string(), "moonshot".to_string()],
         "stepfun" => vec!["stepfun".to_string(), "step".to_string()],
         "copilot" => vec!["copilot".to_string(), "github-copilot".to_string()],
         "openai-codex" => vec!["openai-codex".to_string(), "codex".to_string()],
+        "google-gemini-cli" => vec![
+            "google-gemini-cli".to_string(),
+            "gemini-cli".to_string(),
+            "gemini-oauth".to_string(),
+        ],
         p => vec![p.to_string()],
     }
 }
@@ -3341,6 +3357,7 @@ fn provider_env_var(provider: &str) -> Option<&'static str> {
         "openai" => Some("HERMES_OPENAI_API_KEY"),
         "openai-codex" => Some("HERMES_OPENAI_CODEX_API_KEY"),
         "anthropic" => Some("ANTHROPIC_API_KEY"),
+        "google-gemini-cli" => Some("HERMES_GEMINI_OAUTH_API_KEY"),
         "openrouter" => Some("OPENROUTER_API_KEY"),
         "qwen" => Some("DASHSCOPE_API_KEY"),
         "qwen-oauth" => Some("HERMES_QWEN_OAUTH_API_KEY"),
@@ -3356,7 +3373,7 @@ fn provider_env_var(provider: &str) -> Option<&'static str> {
 fn provider_supports_oauth(provider: &str) -> bool {
     matches!(
         normalize_auth_provider(provider).as_str(),
-        "nous" | "openai-codex" | "qwen-oauth"
+        "anthropic" | "nous" | "openai-codex" | "qwen-oauth" | "google-gemini-cli"
     )
 }
 
@@ -3466,6 +3483,9 @@ async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentE
         ("OPENAI_API_KEY", "openai"),
         ("HERMES_OPENAI_CODEX_API_KEY", "openai-codex"),
         ("ANTHROPIC_API_KEY", "anthropic"),
+        ("ANTHROPIC_TOKEN", "anthropic"),
+        ("CLAUDE_CODE_OAUTH_TOKEN", "anthropic"),
+        ("HERMES_GEMINI_OAUTH_API_KEY", "google-gemini-cli"),
         ("OPENROUTER_API_KEY", "openrouter"),
         ("DASHSCOPE_API_KEY", "qwen"),
         ("HERMES_QWEN_OAUTH_API_KEY", "qwen-oauth"),
@@ -4275,6 +4295,7 @@ async fn print_auth_status_matrix(cli: &Cli, manager: &AuthManager) -> Result<()
         "nous",
         "openai-codex",
         "qwen-oauth",
+        "google-gemini-cli",
         "copilot",
     ] {
         let env_present = provider_api_key_from_env(provider).is_some()
@@ -4459,6 +4480,50 @@ async fn run_auth(
                         println!("Saved OAuth state: {}", auth_path.display());
                         return Ok(());
                     }
+                    "anthropic" => {
+                        let state =
+                            login_anthropic_oauth(AnthropicOAuthLoginOptions::default()).await?;
+                        let access_token = state.access_token.clone();
+                        let refresh_token = state.refresh_token.clone();
+                        let expires_at_ms = state.expires_at_ms;
+                        let auth_state = serde_json::json!({
+                            "access_token": access_token.clone(),
+                            "refresh_token": refresh_token.clone(),
+                            "expires_at_ms": expires_at_ms,
+                            "source": "hermes_pkce",
+                        });
+                        let auth_path = save_provider_auth_state("anthropic", auth_state)?;
+                        manager
+                            .save_credential(OAuthCredential {
+                                provider: "anthropic".to_string(),
+                                access_token: access_token.clone(),
+                                refresh_token: refresh_token.clone(),
+                                token_type: "bearer".to_string(),
+                                scope: None,
+                                expires_at: parse_unix_millis_utc(expires_at_ms),
+                            })
+                            .await?;
+                        let entries = pool_store.providers.entry(provider.clone()).or_default();
+                        let default_label = format!("{provider}-{}", entries.len() + 1);
+                        let entry = AuthPoolEntry {
+                            id: uuid::Uuid::new_v4().simple().to_string()[..6].to_string(),
+                            label: label.unwrap_or(default_label),
+                            auth_type: "oauth".to_string(),
+                            source: "hermes_pkce".to_string(),
+                            access_token: access_token.clone(),
+                            last_status: None,
+                            last_status_at: None,
+                            last_error_code: None,
+                        };
+                        entries.push(entry.clone());
+                        save_auth_pool_store(&pool_path, &pool_store)?;
+                        println!(
+                            "Added Anthropic OAuth credential (label='{}', id={}).",
+                            entry.label, entry.id
+                        );
+                        println!("Saved OAuth state: {}", auth_path.display());
+                        return Ok(());
+                    }
                     "qwen-oauth" => {
                         let creds = resolve_qwen_runtime_credentials(
                             false,
@@ -4498,6 +4563,57 @@ async fn run_auth(
                             entry.label, entry.id
                         );
                         println!("Qwen auth file: {}", creds.auth_file.display());
+                        println!("Saved OAuth state: {}", auth_path.display());
+                        return Ok(());
+                    }
+                    "google-gemini-cli" => {
+                        let creds =
+                            login_google_gemini_cli_oauth(GeminiOAuthLoginOptions::default())
+                                .await?;
+                        let access_token = creds.api_key.clone();
+                        let refresh_token = creds.refresh_token.clone();
+                        let expires_at_ms = creds.expires_at_ms;
+                        let email = creds.email.clone();
+                        let project_id = creds.project_id.clone();
+                        let source = creds.source.clone();
+                        let auth_state = serde_json::json!({
+                            "access_token": access_token.clone(),
+                            "refresh_token": refresh_token.clone(),
+                            "expires_at_ms": expires_at_ms,
+                            "email": email.clone(),
+                            "project_id": project_id.clone(),
+                            "source": source.clone(),
+                        });
+                        let auth_path = save_provider_auth_state("google-gemini-cli", auth_state)?;
+                        manager
+                            .save_credential(OAuthCredential {
+                                provider: "google-gemini-cli".to_string(),
+                                access_token: access_token.clone(),
+                                refresh_token: refresh_token.clone(),
+                                token_type: "bearer".to_string(),
+                                scope: None,
+                                expires_at: parse_unix_millis_utc(expires_at_ms),
+                            })
+                            .await?;
+                        let entries = pool_store.providers.entry(provider.clone()).or_default();
+                        let default_label = format!("{provider}-{}", entries.len() + 1);
+                        let entry = AuthPoolEntry {
+                            id: uuid::Uuid::new_v4().simple().to_string()[..6].to_string(),
+                            label: label.unwrap_or_else(|| email.clone().unwrap_or(default_label)),
+                            auth_type: "oauth".to_string(),
+                            source: source,
+                            access_token: access_token.clone(),
+                            last_status: None,
+                            last_status_at: None,
+                            last_error_code: None,
+                        };
+                        entries.push(entry.clone());
+                        save_auth_pool_store(&pool_path, &pool_store)?;
+                        println!(
+                            "Added Google Gemini OAuth credential (label='{}', id={}).",
+                            entry.label, entry.id
+                        );
+                        println!("Google auth file: {}", creds.auth_file.display());
                         println!("Saved OAuth state: {}", auth_path.display());
                         return Ok(());
                     }
@@ -4885,6 +5001,34 @@ async fn run_auth(
                 println!("Saved OAuth state: {}", auth_path.display());
                 return Ok(());
             }
+            if provider == "anthropic" {
+                let state = login_anthropic_oauth(AnthropicOAuthLoginOptions::default()).await?;
+                let access_token = state.access_token.clone();
+                let refresh_token = state.refresh_token.clone();
+                let expires_at_ms = state.expires_at_ms;
+                let auth_state = serde_json::json!({
+                    "access_token": access_token.clone(),
+                    "refresh_token": refresh_token.clone(),
+                    "expires_at_ms": expires_at_ms,
+                    "source": "hermes_pkce",
+                });
+                let auth_path = save_provider_auth_state("anthropic", auth_state)?;
+                manager
+                    .save_credential(OAuthCredential {
+                        provider: "anthropic".to_string(),
+                        access_token,
+                        refresh_token,
+                        token_type: "bearer".to_string(),
+                        scope: None,
+                        expires_at: parse_unix_millis_utc(expires_at_ms),
+                    })
+                    .await?;
+                println!(
+                    "Anthropic OAuth login complete; credential saved as provider 'anthropic'."
+                );
+                println!("Saved OAuth state: {}", auth_path.display());
+                return Ok(());
+            }
             if provider == "qwen-oauth" {
                 let creds = resolve_qwen_runtime_credentials(
                     false,
@@ -4909,6 +5053,38 @@ async fn run_auth(
                     "Qwen OAuth credential imported from {} and stored as provider 'qwen-oauth'.",
                     creds.auth_file.display()
                 );
+                println!("Saved OAuth state: {}", auth_path.display());
+                return Ok(());
+            }
+            if provider == "google-gemini-cli" {
+                let creds =
+                    login_google_gemini_cli_oauth(GeminiOAuthLoginOptions::default()).await?;
+                let access_token = creds.api_key.clone();
+                let refresh_token = creds.refresh_token.clone();
+                let expires_at_ms = creds.expires_at_ms;
+                let auth_state = serde_json::json!({
+                    "access_token": access_token.clone(),
+                    "refresh_token": refresh_token.clone(),
+                    "expires_at_ms": expires_at_ms,
+                    "email": creds.email.clone(),
+                    "project_id": creds.project_id.clone(),
+                    "source": creds.source.clone(),
+                });
+                let auth_path = save_provider_auth_state("google-gemini-cli", auth_state)?;
+                manager
+                    .save_credential(OAuthCredential {
+                        provider: "google-gemini-cli".to_string(),
+                        access_token,
+                        refresh_token,
+                        token_type: "bearer".to_string(),
+                        scope: None,
+                        expires_at: parse_unix_millis_utc(expires_at_ms),
+                    })
+                    .await?;
+                println!(
+                    "Google Gemini OAuth login complete; credential saved as provider 'google-gemini-cli'."
+                );
+                println!("Google auth file: {}", creds.auth_file.display());
                 println!("Saved OAuth state: {}", auth_path.display());
                 return Ok(());
             }
@@ -5121,6 +5297,83 @@ async fn run_auth(
                 }
                 if let Some(err) = qwen_status.error.as_deref() {
                     println!("Qwen OAuth detail: {}", err);
+                }
+                println!(
+                    "Auth status: provider='{}', credential_present={}, source={}, oauth_state_present={}",
+                    provider, has_token, source, auth_state_present
+                );
+                return Ok(());
+            }
+            if provider == "google-gemini-cli" {
+                let google_status = get_gemini_oauth_auth_status().await;
+                let auth_state_present = read_provider_auth_state(&provider)?.is_some();
+                let store_present = manager.get_access_token(&provider).await?.is_some();
+                let env_present = provider_api_key_from_env(&provider).is_some();
+                let (has_token, source) = if env_present {
+                    (true, "env")
+                } else if store_present {
+                    (true, "token_store")
+                } else if auth_state_present {
+                    (true, "auth_json")
+                } else {
+                    (false, "none")
+                };
+                println!(
+                    "Google Gemini OAuth: logged_in={} auth_file={} source={} expires_at_ms={}",
+                    google_status.logged_in,
+                    google_status.auth_file.display(),
+                    google_status.source.as_deref().unwrap_or("none"),
+                    google_status
+                        .expires_at_ms
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "unknown".to_string())
+                );
+                if let Some(email) = google_status.email.as_deref() {
+                    println!("Google account: {}", email);
+                }
+                if let Some(project_id) = google_status.project_id.as_deref() {
+                    println!("Google project_id: {}", project_id);
+                }
+                if let Some(token) = google_status.api_key.as_deref() {
+                    println!("Google OAuth token: {}", mask_secret(token));
+                }
+                if let Some(err) = google_status.error.as_deref() {
+                    println!("Google OAuth detail: {}", err);
+                }
+                println!(
+                    "Auth status: provider='{}', credential_present={}, source={}, oauth_state_present={}",
+                    provider, has_token, source, auth_state_present
+                );
+                return Ok(());
+            }
+            if provider == "anthropic" {
+                let anthropic_status = get_anthropic_oauth_status().await;
+                let auth_state_present = read_provider_auth_state(&provider)?.is_some();
+                let store_present = manager.get_access_token(&provider).await?.is_some();
+                let env_present = provider_api_key_from_env(&provider).is_some();
+                let (has_token, source) = if env_present {
+                    (true, "env")
+                } else if store_present {
+                    (true, "token_store")
+                } else if auth_state_present {
+                    (true, "auth_json")
+                } else {
+                    (false, "none")
+                };
+                println!(
+                    "Anthropic OAuth: logged_in={} source={} expires_at_ms={}",
+                    anthropic_status.logged_in,
+                    anthropic_status.source.as_deref().unwrap_or("none"),
+                    anthropic_status
+                        .expires_at_ms
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "unknown".to_string())
+                );
+                if let Some(token) = anthropic_status.api_key.as_deref() {
+                    println!("Anthropic OAuth token: {}", mask_secret(token));
+                }
+                if let Some(err) = anthropic_status.error.as_deref() {
+                    println!("Anthropic OAuth detail: {}", err);
                 }
                 println!(
                     "Auth status: provider='{}', credential_present={}, source={}, oauth_state_present={}",
@@ -8138,8 +8391,10 @@ mod tests {
         assert_eq!(normalize_auth_provider("tg"), "telegram");
         assert_eq!(normalize_auth_provider("wechat"), "weixin");
         assert_eq!(normalize_auth_provider("wx"), "weixin");
+        assert_eq!(normalize_auth_provider("claude"), "anthropic");
         assert_eq!(normalize_auth_provider("codex"), "openai-codex");
         assert_eq!(normalize_auth_provider("qwen-cli"), "qwen-oauth");
+        assert_eq!(normalize_auth_provider("gemini-cli"), "google-gemini-cli");
         assert_eq!(normalize_auth_provider("step-plan"), "stepfun");
         assert_eq!(normalize_auth_provider("api-server"), "api_server");
         assert_eq!(normalize_auth_provider("mm"), "mattermost");
@@ -8153,6 +8408,11 @@ mod tests {
             "oauth"
         );
         assert_eq!(resolve_auth_type_for_provider("qwen-oauth", None), "oauth");
+        assert_eq!(
+            resolve_auth_type_for_provider("google-gemini-cli", None),
+            "oauth"
+        );
+        assert_eq!(resolve_auth_type_for_provider("anthropic", None), "oauth");
         assert_eq!(resolve_auth_type_for_provider("openai", None), "api_key");
         assert_eq!(
             resolve_auth_type_for_provider("openai", Some("API-KEY")),
@@ -8176,7 +8436,15 @@ mod tests {
             provider_env_var("qwen-oauth"),
             Some("HERMES_QWEN_OAUTH_API_KEY")
         );
+        assert_eq!(
+            provider_env_var("google-gemini-cli"),
+            Some("HERMES_GEMINI_OAUTH_API_KEY")
+        );
         assert_eq!(secret_provider_aliases("stepfun"), vec!["stepfun", "step"]);
+        assert_eq!(
+            secret_provider_aliases("claude"),
+            vec!["anthropic", "claude", "claude-code"]
+        );
     }
 
     #[test]
