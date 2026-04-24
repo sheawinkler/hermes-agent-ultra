@@ -13,6 +13,8 @@ use hermes_core::{ToolHandler, ToolSchema};
 use serde_json::Value;
 use tracing::warn;
 
+use crate::tool_policy::{annotate_policy_audit, ToolPolicyDecision, ToolPolicyEngine};
+
 // ---------------------------------------------------------------------------
 // ToolEntry
 // ---------------------------------------------------------------------------
@@ -51,6 +53,8 @@ pub struct ToolRegistryInner {
     tools: HashMap<String, ToolEntry>,
     /// Global default max result size in characters.
     pub global_max_result_size_chars: usize,
+    /// Centralized policy engine for tool-call governance.
+    pub policy: ToolPolicyEngine,
 }
 
 /// Thread-safe wrapper around `ToolRegistryInner`.
@@ -66,6 +70,7 @@ impl ToolRegistry {
             inner: Arc::new(Mutex::new(ToolRegistryInner {
                 tools: HashMap::new(),
                 global_max_result_size_chars: 50_000,
+                policy: ToolPolicyEngine::from_env(),
             })),
         }
     }
@@ -76,8 +81,15 @@ impl ToolRegistry {
             inner: Arc::new(Mutex::new(ToolRegistryInner {
                 tools: HashMap::new(),
                 global_max_result_size_chars: max,
+                policy: ToolPolicyEngine::from_env(),
             })),
         }
+    }
+
+    /// Override active tool policy engine (used by tests/runtime tuning).
+    pub fn set_policy(&self, policy: ToolPolicyEngine) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.policy = policy;
     }
 
     /// Register a new tool.
@@ -144,23 +156,35 @@ impl ToolRegistry {
     /// On success, returns the tool result string.
     /// On failure, returns a JSON error string: `{"error": "..."}`.
     pub fn dispatch(&self, name: &str, params: Value) -> String {
-        let inner = self.inner.lock().unwrap();
-        let entry = match inner.tools.get(name) {
-            Some(e) => e,
-            None => return Self::tool_error(&format!("Tool not found: {}", name)),
+        let (handler, max_chars, policy_decision) = {
+            let inner = self.inner.lock().unwrap();
+            let entry = match inner.tools.get(name) {
+                Some(e) => e,
+                None => return Self::tool_error(&format!("Tool not found: {}", name)),
+            };
+            let decision = inner.policy.evaluate(name, &params);
+            if !decision.allow {
+                return Self::tool_error(&format!(
+                    "Blocked by tool policy: {}",
+                    decision.reason.unwrap_or_else(|| "policy deny".to_string())
+                ));
+            }
+            (
+                Arc::clone(&entry.handler),
+                entry
+                    .max_result_size_chars
+                    .unwrap_or(inner.global_max_result_size_chars),
+                decision,
+            )
         };
-        let handler = Arc::clone(&entry.handler);
-        let max_chars = entry
-            .max_result_size_chars
-            .unwrap_or(inner.global_max_result_size_chars);
-        drop(inner); // release lock before async execute
+        maybe_log_audit(name, &policy_decision);
 
         // Use tokio to run the async handler
         let result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async { handler.execute(params).await })
         });
 
-        match result {
+        let output = match result {
             Ok(output) => {
                 if output.len() > max_chars {
                     Self::tool_result(&format!(
@@ -173,24 +197,36 @@ impl ToolRegistry {
                 }
             }
             Err(e) => Self::tool_error(&e.to_string()),
-        }
+        };
+        maybe_annotate_audit(output, &policy_decision)
     }
 
     /// Dispatch a tool call asynchronously.
     pub async fn dispatch_async(&self, name: &str, params: Value) -> String {
-        let (handler, max_chars) = {
+        let (handler, max_chars, policy_decision) = {
             let inner = self.inner.lock().unwrap();
             match inner.tools.get(name) {
                 Some(e) => (
                     Arc::clone(&e.handler),
                     e.max_result_size_chars
                         .unwrap_or(inner.global_max_result_size_chars),
+                    inner.policy.evaluate(name, &params),
                 ),
                 None => return Self::tool_error(&format!("Tool not found: {}", name)),
             }
         };
+        if !policy_decision.allow {
+            return Self::tool_error(&format!(
+                "Blocked by tool policy: {}",
+                policy_decision
+                    .reason
+                    .clone()
+                    .unwrap_or_else(|| "policy deny".to_string())
+            ));
+        }
+        maybe_log_audit(name, &policy_decision);
 
-        match handler.execute(params).await {
+        let output = match handler.execute(params).await {
             Ok(output) => {
                 if output.len() > max_chars {
                     Self::tool_result(&format!(
@@ -203,7 +239,8 @@ impl ToolRegistry {
                 }
             }
             Err(e) => Self::tool_error(&e.to_string()),
-        }
+        };
+        maybe_annotate_audit(output, &policy_decision)
     }
 
     /// Get a reference to a tool entry by name.
@@ -276,6 +313,30 @@ impl ToolRegistry {
     }
 }
 
+fn maybe_log_audit(tool_name: &str, decision: &ToolPolicyDecision) {
+    if decision.audited_only {
+        warn!(
+            "Tool policy audit-only violation for '{}': {}",
+            tool_name,
+            decision.reason.as_deref().unwrap_or("no reason supplied")
+        );
+    }
+}
+
+fn maybe_annotate_audit(output: String, decision: &ToolPolicyDecision) -> String {
+    if decision.audited_only {
+        annotate_policy_audit(
+            &output,
+            decision
+                .reason
+                .as_deref()
+                .unwrap_or("tool policy audit warning"),
+        )
+    } else {
+        output
+    }
+}
+
 impl Default for ToolRegistry {
     fn default() -> Self {
         Self::new()
@@ -299,6 +360,9 @@ mod tests {
     use super::*;
     use async_trait::async_trait;
     use hermes_core::{tool_schema, JsonSchema, ToolError};
+    use serde_json::json;
+
+    use crate::tool_policy::{ToolPolicyEngine, ToolPolicyMode};
 
     struct EchoHandler;
 
@@ -418,5 +482,58 @@ mod tests {
         // ToolSchema name comes from the handler's schema(), which is "echo" for EchoHandler.
         // The registry key ("available") and the schema name may differ.
         assert_eq!(defs[0].name, "echo");
+    }
+
+    #[test]
+    fn test_dispatch_async_blocked_by_policy() {
+        let registry = ToolRegistry::new();
+        let handler = Arc::new(EchoHandler);
+        let schema = handler.schema();
+        registry.register(
+            "echo",
+            "test",
+            schema,
+            handler,
+            Arc::new(|| true),
+            vec![],
+            false,
+            "Echo",
+            "🔊",
+            None,
+        );
+        registry
+            .set_policy(ToolPolicyEngine::new(ToolPolicyMode::Enforce).with_denylist(&["echo"]));
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let result = rt.block_on(async { registry.dispatch_async("echo", json!({"k":"v"})).await });
+        assert!(result.contains("Blocked by tool policy"));
+    }
+
+    #[test]
+    fn test_dispatch_async_audit_annotation() {
+        let registry = ToolRegistry::new();
+        let handler = Arc::new(EchoHandler);
+        let schema = handler.schema();
+        registry.register(
+            "echo",
+            "test",
+            schema,
+            handler,
+            Arc::new(|| true),
+            vec![],
+            false,
+            "Echo",
+            "🔊",
+            None,
+        );
+        registry
+            .set_policy(ToolPolicyEngine::new(ToolPolicyMode::Audit).with_allowlist(&["other"]));
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let result = rt.block_on(async { registry.dispatch_async("echo", json!({"k":"v"})).await });
+        let parsed: Value = serde_json::from_str(&result).expect("json output");
+        assert!(parsed["_tool_policy_warning"]
+            .as_str()
+            .unwrap_or("")
+            .contains("allowlist"));
+        assert_eq!(parsed["k"], "v");
     }
 }

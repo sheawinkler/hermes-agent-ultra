@@ -14,6 +14,7 @@ pub mod backends;
 pub mod dispatch;
 pub mod register_builtins;
 pub mod registry;
+pub mod tool_policy;
 pub mod tools;
 pub mod toolset;
 pub mod toolset_distributions;
@@ -22,6 +23,7 @@ pub mod v4a_patch;
 
 // Re-export registry types
 pub use registry::{ToolEntry, ToolEntryInfo, ToolRegistry};
+pub use tool_policy::{ToolPolicyDecision, ToolPolicyEngine, ToolPolicyMode};
 
 // Re-export toolset types
 pub use toolset::{Toolset, ToolsetError, ToolsetManager};
