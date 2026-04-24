@@ -10,17 +10,54 @@
 //! - Error handling and connection lifecycle
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::process::Stdio;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use serde_json::Value;
+use tokio::fs::OpenOptions;
 use tokio::io::AsyncBufReadExt;
 use tokio::io::AsyncReadExt;
 use tokio::io::AsyncWriteExt;
 use tokio::process::{Child, Command};
+use tokio::task::JoinHandle;
 use tracing::{error, info, trace};
 
 use crate::McpError;
+
+const MCP_PROTOCOL_VERSION_HEADER_VALUE: &str = "2025-03-26";
+
+fn hermes_home_dir() -> PathBuf {
+    if let Ok(path) = std::env::var("HERMES_HOME") {
+        let trimmed = path.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed);
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        let trimmed = home.trim();
+        if !trimmed.is_empty() {
+            return PathBuf::from(trimmed).join(".hermes-agent-ultra");
+        }
+    }
+    PathBuf::from(".hermes-agent-ultra")
+}
+
+async fn mcp_stderr_log_file() -> Option<tokio::fs::File> {
+    let path = hermes_home_dir().join("logs").join("mcp-stderr.log");
+    if let Some(parent) = path.parent() {
+        if tokio::fs::create_dir_all(parent).await.is_err() {
+            return None;
+        }
+    }
+    OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .await
+        .ok()
+}
 
 fn classify_http_status_error(status: reqwest::StatusCode, body: &str) -> McpError {
     let msg = format!("HTTP error {}: {}", status, body);
@@ -78,6 +115,8 @@ pub struct StdioTransport {
     env: HashMap<String, String>,
     /// The child process.
     child: Option<Child>,
+    /// Background task draining child stderr to an MCP log file.
+    stderr_drain_task: Option<JoinHandle<()>>,
     /// Whether the transport has been started.
     started: bool,
 }
@@ -90,6 +129,7 @@ impl StdioTransport {
             args: args.to_vec(),
             env: env.clone(),
             child: None,
+            stderr_drain_task: None,
             started: false,
         }
     }
@@ -123,6 +163,45 @@ impl McpTransport for StdioTransport {
         let child = cmd.spawn().map_err(|e| {
             McpError::ConnectionError(format!("Failed to spawn process '{}': {}", self.command, e))
         })?;
+
+        let mut child = child;
+        if let Some(stderr) = child.stderr.take() {
+            let command = self.command.clone();
+            self.stderr_drain_task = Some(tokio::spawn(async move {
+                let mut reader = tokio::io::BufReader::new(stderr);
+                let mut line = String::new();
+                let mut log = mcp_stderr_log_file().await;
+                if let Some(file) = log.as_mut() {
+                    let ts = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let _ = file
+                        .write_all(
+                            format!(
+                                "\n===== [ts={}] starting MCP stdio server '{}' =====\n",
+                                ts, command
+                            )
+                            .as_bytes(),
+                        )
+                        .await;
+                }
+                loop {
+                    line.clear();
+                    let Ok(bytes) = reader.read_line(&mut line).await else {
+                        break;
+                    };
+                    if bytes == 0 {
+                        break;
+                    }
+                    if let Some(file) = log.as_mut() {
+                        if file.write_all(line.as_bytes()).await.is_err() {
+                            log = None;
+                        }
+                    }
+                }
+            }));
+        }
 
         self.child = Some(child);
         self.started = true;
@@ -237,6 +316,9 @@ impl McpTransport for StdioTransport {
     }
 
     async fn close(&mut self) -> Result<(), McpError> {
+        if let Some(task) = self.stderr_drain_task.take() {
+            task.abort();
+        }
         if let Some(mut child) = self.child.take() {
             info!("Shutting down MCP stdio process");
             // Try graceful shutdown first
@@ -412,6 +494,7 @@ impl HttpTransport {
     fn build_request(&self, method: reqwest::Method, url: &str) -> reqwest::RequestBuilder {
         let mut builder = self.client.request(method, url);
         builder = builder.header("Content-Type", "application/json");
+        builder = builder.header("MCP-Protocol-Version", MCP_PROTOCOL_VERSION_HEADER_VALUE);
         if let Some(ref token) = self.auth_token {
             builder = builder.header("Authorization", format!("Bearer {}", token));
         }
@@ -571,6 +654,7 @@ impl HttpSseTransport {
     fn build_request(&self, method: reqwest::Method, url: &str) -> reqwest::RequestBuilder {
         let mut builder = self.client.request(method, url);
         builder = builder.header("Content-Type", "application/json");
+        builder = builder.header("MCP-Protocol-Version", MCP_PROTOCOL_VERSION_HEADER_VALUE);
         if let Some(ref token) = self.auth_token {
             builder = builder.header("Authorization", format!("Bearer {}", token));
         }
@@ -722,6 +806,36 @@ mod tests {
             Some("secret-token".to_string()),
         );
         assert_eq!(transport.auth_token, Some("secret-token".to_string()));
+    }
+
+    #[test]
+    fn test_http_transport_seeds_protocol_header() {
+        let transport = HttpTransport::new("http://localhost:8080/mcp", None);
+        let req = transport
+            .build_request(reqwest::Method::POST, "http://localhost:8080/mcp/message")
+            .build()
+            .expect("build request");
+        assert_eq!(
+            req.headers()
+                .get("MCP-Protocol-Version")
+                .and_then(|v| v.to_str().ok()),
+            Some(MCP_PROTOCOL_VERSION_HEADER_VALUE)
+        );
+    }
+
+    #[test]
+    fn test_http_sse_transport_seeds_protocol_header() {
+        let transport = HttpSseTransport::new("http://localhost:8080/mcp", None);
+        let req = transport
+            .build_request(reqwest::Method::POST, "http://localhost:8080/mcp/message")
+            .build()
+            .expect("build request");
+        assert_eq!(
+            req.headers()
+                .get("MCP-Protocol-Version")
+                .and_then(|v| v.to_str().ok()),
+            Some(MCP_PROTOCOL_VERSION_HEADER_VALUE)
+        );
     }
 
     #[test]
