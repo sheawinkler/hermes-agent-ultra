@@ -8,6 +8,7 @@ fork-specific history.
 - `scripts/sync-upstream.sh`
   - One-shot upstream sync (`fetch -> strategy apply -> test -> push`)
   - Default mode: create a sync branch and open a PR
+  - Supports `--draft-pr` for safer review-first PR creation
   - Supports `--strategy merge|cherry-pick`
   - Supports strict risk gating via `--strict-risk-gate`
   - Emits timestamped reports under `.sync-reports/`
@@ -24,6 +25,7 @@ fork-specific history.
 ```bash
 bash scripts/sync-upstream.sh --dry-run
 bash scripts/sync-upstream.sh
+bash scripts/sync-upstream.sh --draft-pr
 ```
 
 Cherry-pick mode for linear upstream replay:

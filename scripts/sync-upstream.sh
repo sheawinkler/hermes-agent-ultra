@@ -24,6 +24,7 @@ Options:
   --no-tests                Skip post-sync verification command
   --test-cmd <command>      Verification command (default: cargo test -p hermes-gateway)
   --no-pr                   Do not open a PR in branch-pr mode
+  --draft-pr                Open PR as draft in branch-pr mode
   --dry-run                 Show what would happen, emit report, and exit
   -h, --help                Show help
 USAGE
@@ -48,6 +49,7 @@ SYNC_STRATEGY="merge"
 RUN_TESTS="1"
 TEST_CMD="cargo test -p hermes-gateway"
 CREATE_PR="1"
+PR_DRAFT="0"
 CREATE_CONFLICT_ISSUE="1"
 CONFLICT_LABEL="upstream-sync-conflict"
 STRICT_RISK_GATE="${STRICT_RISK_GATE:-0}"
@@ -120,6 +122,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-pr)
       CREATE_PR="0"
+      shift
+      ;;
+    --draft-pr)
+      PR_DRAFT="1"
       shift
       ;;
     --dry-run)
@@ -215,6 +221,7 @@ create_report_header() {
   append_report "mode: ${MODE}"
   append_report "strategy: ${SYNC_STRATEGY}"
   append_report "strict_risk_gate: ${STRICT_RISK_GATE}"
+  append_report "draft_pr: ${PR_DRAFT}"
   append_report "allow_risk_paths: ${ALLOW_RISK_PATHS}"
   append_report "risk_paths_file: ${RISK_PATHS_FILE}"
   append_report "upstream_url: ${UPSTREAM_URL}"
@@ -507,8 +514,11 @@ Commits pending from upstream at sync start:
 ${COMMITS_TO_SYNC}
 \`\`\`
 PRBODY
-
-  if gh pr create --base "${BASE_BRANCH}" --head "${SYNC_BRANCH}" --title "${TITLE}" --body-file "${BODY_FILE}"; then
+  PR_ARGS=(--base "${BASE_BRANCH}" --head "${SYNC_BRANCH}" --title "${TITLE}" --body-file "${BODY_FILE}")
+  if [[ "${PR_DRAFT}" == "1" ]]; then
+    PR_ARGS+=(--draft)
+  fi
+  if gh pr create "${PR_ARGS[@]}"; then
     log "PR created successfully."
   else
     log "PR creation failed (branch was pushed). Create PR manually if needed."
