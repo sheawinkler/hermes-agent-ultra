@@ -1,6 +1,6 @@
 {
   "divergence_file": "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/parity/intentional-divergence.json",
-  "generated_at_utc": "2026-04-24T01:29:21.327974+00:00",
+  "generated_at_utc": "2026-04-24T21:19:40.454981+00:00",
   "items": [
     {
       "errors": [],
@@ -58,7 +58,7 @@
       "errors": [],
       "id": "rust-skills-catalog-governance",
       "last_reviewed": "2026-04-21",
-      "matched_files": 664,
+      "matched_files": 670,
       "matched_sample": [
         "optional-skills/DESCRIPTION.md",
         "optional-skills/autonomous-ai-agents/DESCRIPTION.md",
@@ -70,6 +70,7 @@
         "optional-skills/blockchain/solana/scripts/solana_client.py",
         "optional-skills/communication/DESCRIPTION.md",
         "optional-skills/communication/one-three-one-rule/SKILL.md",
+        "optional-skills/creative/DESCRIPTION.md",
         "optional-skills/creative/blender-mcp/SKILL.md",
         "optional-skills/creative/concept-diagrams/SKILL.md",
         "optional-skills/creative/concept-diagrams/examples/apartment-floor-plan-conversion.md",
@@ -78,8 +79,7 @@
         "optional-skills/creative/concept-diagrams/examples/banana-journey-tree-to-smoothie.md",
         "optional-skills/creative/concept-diagrams/examples/commercial-aircraft-structure.md",
         "optional-skills/creative/concept-diagrams/examples/cpu-ooo-microarchitecture.md",
-        "optional-skills/creative/concept-diagrams/examples/electricity-grid-flow.md",
-        "optional-skills/creative/concept-diagrams/examples/feature-film-production-pipeline.md"
+        "optional-skills/creative/concept-diagrams/examples/electricity-grid-flow.md"
       ],
       "overdue": false,
       "owner": "sheawinkler",
@@ -92,7 +92,7 @@
       "errors": [],
       "id": "rust-cli-tui-primary-ux-surface",
       "last_reviewed": "2026-04-21",
-      "matched_files": 471,
+      "matched_files": 637,
       "matched_sample": [
         "ui-tui/.gitignore",
         "ui-tui/.prettierrc",
@@ -126,10 +126,10 @@
   "summary": {
     "errors": 0,
     "items": 5,
-    "local_paths": 417,
+    "local_paths": 424,
     "review_overdue": 0,
     "unowned": 0,
-    "upstream_paths": 2311,
+    "upstream_paths": 2523,
     "warnings": 0
   }
 }
