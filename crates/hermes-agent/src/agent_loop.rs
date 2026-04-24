@@ -7,6 +7,7 @@
 //! 4. Repeat until the model finishes naturally or the turn budget is exceeded
 
 use std::collections::{HashMap, HashSet};
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -822,6 +823,183 @@ fn rand_u64_range(min: u64, max: u64) -> u64 {
 enum StreamCollectOutcome {
     Complete(LlmResponse),
     Interrupted(LlmResponse),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct TurnGovernor {
+    max_tokens: Option<u32>,
+    tool_concurrency: usize,
+    pressure: f64,
+}
+
+#[derive(Debug, Clone)]
+struct ReplayRecorder {
+    path: Option<PathBuf>,
+}
+
+impl ReplayRecorder {
+    fn for_session(config: &AgentConfig, session_id: &str) -> Self {
+        let enabled = std::env::var("HERMES_REPLAY_ENABLED")
+            .map(|v| {
+                matches!(
+                    v.trim().to_ascii_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
+            .unwrap_or(false);
+        if !enabled {
+            return Self { path: None };
+        }
+        let root = config
+            .hermes_home
+            .as_deref()
+            .map(PathBuf::from)
+            .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
+            .or_else(|| {
+                std::env::var("HOME")
+                    .ok()
+                    .map(|home| PathBuf::from(home).join(".hermes-agent-ultra"))
+            })
+            .unwrap_or_else(|| PathBuf::from(".hermes-agent-ultra"));
+        let dir = root.join("logs").join("replay");
+        if std::fs::create_dir_all(&dir).is_err() {
+            return Self { path: None };
+        }
+        let sid = if session_id.trim().is_empty() {
+            format!("session-{}", chrono::Utc::now().format("%Y%m%dT%H%M%SZ"))
+        } else {
+            session_id
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
+                .collect::<String>()
+        };
+        Self {
+            path: Some(dir.join(format!("{sid}.jsonl"))),
+        }
+    }
+
+    fn record(&self, event: &str, payload: Value) {
+        let Some(path) = self.path.as_ref() else {
+            return;
+        };
+        let mut redacted = payload;
+        redact_json_value(&mut redacted);
+        let line = serde_json::json!({
+            "ts": chrono::Utc::now().to_rfc3339(),
+            "event": event,
+            "payload": redacted,
+        })
+        .to_string();
+        if let Ok(mut f) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let _ = writeln!(f, "{line}");
+        }
+    }
+}
+
+fn replay_sensitive_key(key: &str) -> bool {
+    let k = key.to_ascii_lowercase();
+    k.contains("api_key")
+        || k.contains("token")
+        || k.contains("secret")
+        || k.contains("password")
+        || k.contains("authorization")
+        || k.contains("cookie")
+        || k.contains("session")
+}
+
+fn redact_json_value(value: &mut Value) {
+    match value {
+        Value::Object(map) => {
+            for (k, v) in map.iter_mut() {
+                if replay_sensitive_key(k) {
+                    *v = Value::String("[redacted]".to_string());
+                } else {
+                    redact_json_value(v);
+                }
+            }
+        }
+        Value::Array(arr) => {
+            for v in arr {
+                redact_json_value(v);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn governor_enabled() -> bool {
+    std::env::var("HERMES_PERFORMANCE_GOVERNOR")
+        .map(|v| {
+            !matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "0" | "false" | "off"
+            )
+        })
+        .unwrap_or(true)
+}
+
+fn governor_tool_concurrency_base() -> usize {
+    std::env::var("HERMES_TOOL_CALL_MAX_CONCURRENCY")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(8)
+}
+
+fn governor_for_turn(
+    config: &AgentConfig,
+    ctx: &ContextManager,
+    requested_tools: usize,
+) -> TurnGovernor {
+    let threshold = ((ctx.max_context_chars().max(1) as f64) * 0.8).max(1.0);
+    let pressure = (ctx.total_chars() as f64 / threshold).max(0.0);
+    let enabled = governor_enabled();
+
+    let max_tokens = if enabled {
+        config.max_tokens.map(|base| {
+            if pressure >= 0.95 {
+                base.saturating_div(4).max(64)
+            } else if pressure >= 0.85 {
+                base.saturating_div(2).max(128)
+            } else {
+                base
+            }
+        })
+    } else {
+        config.max_tokens
+    };
+
+    let base_concurrency = governor_tool_concurrency_base();
+    let mut tool_concurrency = if enabled {
+        if pressure >= 0.95 {
+            base_concurrency.min(2)
+        } else if pressure >= 0.85 {
+            base_concurrency.min(4)
+        } else {
+            base_concurrency
+        }
+    } else {
+        base_concurrency
+    };
+    if requested_tools > 0 {
+        tool_concurrency = tool_concurrency.min(requested_tools).max(1);
+    }
+
+    TurnGovernor {
+        max_tokens,
+        tool_concurrency,
+        pressure,
+    }
 }
 
 /// The main agent loop.
@@ -2188,6 +2366,7 @@ impl AgentLoop {
         ctx: &'a ContextManager,
         tool_schemas: &'a [ToolSchema],
         route: Option<&'a TurnRuntimeRoute>,
+        max_tokens_override: Option<u32>,
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<Output = Result<hermes_core::LlmResponse, AgentError>>
@@ -2195,7 +2374,7 @@ impl AgentLoop {
                 + 'a,
         >,
     > {
-        Box::pin(self.call_llm_with_retry_inner(ctx, tool_schemas, route))
+        Box::pin(self.call_llm_with_retry_inner(ctx, tool_schemas, route, max_tokens_override))
     }
 
     async fn call_llm_with_retry_inner(
@@ -2203,6 +2382,7 @@ impl AgentLoop {
         ctx: &ContextManager,
         tool_schemas: &[ToolSchema],
         route: Option<&TurnRuntimeRoute>,
+        max_tokens_override: Option<u32>,
     ) -> Result<hermes_core::LlmResponse, AgentError> {
         let model = route
             .map(|r| r.model.as_str())
@@ -2227,6 +2407,7 @@ impl AgentLoop {
         let (effective_max_retries, effective_base_delay_ms) =
             (retry.max_retries, retry.base_delay_ms);
         let default_extra_body = self.extra_body_for_api_mode(&self.config.api_mode);
+        let effective_max_tokens = max_tokens_override.or(self.config.max_tokens);
 
         for attempt in 0..=effective_max_retries {
             self.interrupt.check_interrupt()?;
@@ -2250,7 +2431,7 @@ impl AgentLoop {
                             .chat_completion(
                                 &api_messages,
                                 tool_schemas,
-                                self.config.max_tokens,
+                                effective_max_tokens,
                                 self.config.temperature,
                                 Some(model),
                                 extra_body_for_call.as_ref(),
@@ -2267,7 +2448,7 @@ impl AgentLoop {
                             .chat_completion(
                                 &api_messages,
                                 tool_schemas,
-                                self.config.max_tokens,
+                                effective_max_tokens,
                                 self.config.temperature,
                                 Some(self.config.model.as_str()),
                                 default_extra_body.as_ref(),
@@ -2280,7 +2461,7 @@ impl AgentLoop {
                     .chat_completion(
                         &api_messages,
                         tool_schemas,
-                        self.config.max_tokens,
+                        effective_max_tokens,
                         self.config.temperature,
                         Some(model),
                         default_extra_body.as_ref(),
@@ -2332,7 +2513,7 @@ impl AgentLoop {
                                             .chat_completion(
                                                 &api_messages,
                                                 tool_schemas,
-                                                self.config.max_tokens,
+                                                effective_max_tokens,
                                                 self.config.temperature,
                                                 Some(fallback),
                                                 default_extra_body.as_ref(),
@@ -2405,10 +2586,12 @@ impl AgentLoop {
         tool_schemas: &[ToolSchema],
         route: Option<&TurnRuntimeRoute>,
         active_model: &str,
+        max_tokens_override: Option<u32>,
         on_chunk: &(dyn Fn(StreamChunk) + Send + Sync),
     ) -> Result<StreamCollectOutcome, AgentError> {
         let api_messages = self.messages_for_api_call(ctx);
         let default_extra_body = self.extra_body_for_api_mode(&self.config.api_mode);
+        let effective_max_tokens = max_tokens_override.or(self.config.max_tokens);
         let max_stream_retries = std::env::var("HERMES_STREAM_RETRIES")
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
@@ -2433,7 +2616,7 @@ impl AgentLoop {
                     Ok(provider) => provider.chat_completion_stream(
                         &api_messages,
                         tool_schemas,
-                        self.config.max_tokens,
+                        effective_max_tokens,
                         self.config.temperature,
                         Some(active_model),
                         extra_body_for_call.as_ref(),
@@ -2447,7 +2630,7 @@ impl AgentLoop {
                         self.llm_provider.chat_completion_stream(
                             &api_messages,
                             tool_schemas,
-                            self.config.max_tokens,
+                            effective_max_tokens,
                             self.config.temperature,
                             Some(self.config.model.as_str()),
                             default_extra_body.as_ref(),
@@ -2458,7 +2641,7 @@ impl AgentLoop {
                 self.llm_provider.chat_completion_stream(
                     &api_messages,
                     tool_schemas,
-                    self.config.max_tokens,
+                    effective_max_tokens,
                     self.config.temperature,
                     Some(active_model),
                     default_extra_body.as_ref(),
@@ -2734,6 +2917,16 @@ impl AgentLoop {
         if self.config.preflight_context_compress {
             self.auto_compress_if_over_threshold(&mut ctx);
         }
+        let replay = ReplayRecorder::for_session(&self.config, session_id);
+        replay.record(
+            "session_start",
+            serde_json::json!({
+                "session_id": session_id,
+                "mode": "run",
+                "model": self.config.model,
+                "max_turns": self.config.max_turns,
+            }),
+        );
 
         let mut total_turns: u32 = 0;
         let mut _total_api_time_ms: u64 = 0;
@@ -2773,6 +2966,14 @@ impl AgentLoop {
                     ctx.add_message(msg);
                 }
                 self.memory_on_session_end(ctx.get_messages());
+                replay.record(
+                    "session_end",
+                    serde_json::json!({
+                        "reason": "max_turns",
+                        "total_turns": total_turns,
+                        "session_cost_usd": session_cost_usd,
+                    }),
+                );
                 return Ok(AgentResult {
                     messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
                     finished_naturally: false,
@@ -2828,6 +3029,23 @@ impl AgentLoop {
                 .as_ref()
                 .map(|r| r.model.as_str())
                 .unwrap_or(self.config.model.as_str());
+            let llm_governor = governor_for_turn(&self.config, &ctx, 0);
+            tracing::debug!(
+                turn = total_turns,
+                model = active_model,
+                governor_pressure = llm_governor.pressure,
+                governor_max_tokens = ?llm_governor.max_tokens,
+                "turn governor snapshot"
+            );
+            replay.record(
+                "turn_start",
+                serde_json::json!({
+                    "turn": total_turns,
+                    "model": active_model,
+                    "pressure": llm_governor.pressure,
+                    "max_tokens": llm_governor.max_tokens,
+                }),
+            );
             let hook_ctx = serde_json::json!({"turn": total_turns, "model": active_model});
             let pre_results = self.invoke_hook(HookType::PreLlmCall, &hook_ctx);
             self.inject_hook_context(&pre_results, &mut ctx);
@@ -2850,7 +3068,12 @@ impl AgentLoop {
                     ));
                 }
                 let r = match self
-                    .call_llm_with_retry(&ctx, &tool_schemas, turn_runtime_route.as_ref())
+                    .call_llm_with_retry(
+                        &ctx,
+                        &tool_schemas,
+                        turn_runtime_route.as_ref(),
+                        llm_governor.max_tokens,
+                    )
                     .await
                 {
                     Ok(r) => r,
@@ -2925,6 +3148,17 @@ impl AgentLoop {
             };
             let api_elapsed = api_start.elapsed().as_millis() as u64;
             _total_api_time_ms += api_elapsed;
+            replay.record(
+                "llm_response",
+                serde_json::json!({
+                    "turn": total_turns,
+                    "model": response.model,
+                    "finish_reason": response.finish_reason,
+                    "api_time_ms": api_elapsed,
+                    "tool_call_count": response.message.tool_calls.as_ref().map(|v| v.len()).unwrap_or(0),
+                    "has_visible_text": Self::assistant_visible_text(&response.message),
+                }),
+            );
 
             // --- Post-LLM hook ---
             let post_ctx = serde_json::json!({
@@ -3042,6 +3276,14 @@ impl AgentLoop {
                     self.memory_sync(&u, &a, session_id);
                     self.spawn_background_review(total_turns, &ctx, review_memory_at_end);
                     self.memory_on_session_end(ctx.get_messages());
+                    replay.record(
+                        "session_end",
+                        serde_json::json!({
+                            "reason": "finished_naturally",
+                            "total_turns": total_turns,
+                            "session_cost_usd": session_cost_usd,
+                        }),
+                    );
                     return Ok(AgentResult {
                         messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
                         finished_naturally: true,
@@ -3203,10 +3445,12 @@ impl AgentLoop {
                 ));
             }
             let tool_start = Instant::now();
+            let tool_governor = governor_for_turn(&self.config, &ctx, tool_calls.len());
             let results = self
                 .execute_tool_calls(
                     &tool_calls,
                     total_turns,
+                    tool_governor.tool_concurrency,
                     self.config
                         .max_cost_usd
                         .map(|limit| (limit - session_cost_usd).max(0.0)),
@@ -3215,6 +3459,16 @@ impl AgentLoop {
                 .await;
             let tool_elapsed = tool_start.elapsed().as_millis() as u64;
             _total_tool_time_ms += tool_elapsed;
+            replay.record(
+                "tool_batch",
+                serde_json::json!({
+                    "turn": total_turns,
+                    "tool_count": tool_calls.len(),
+                    "tool_concurrency": tool_governor.tool_concurrency,
+                    "tool_time_ms": tool_elapsed,
+                    "errors": results.iter().filter(|r| r.is_error).count(),
+                }),
+            );
 
             let turn_tool_error_count = results.iter().filter(|r| r.is_error).count() as u32;
             if self.config.rollback_on_tool_error_threshold > 0
@@ -3269,6 +3523,15 @@ impl AgentLoop {
             }
 
             for result in results {
+                replay.record(
+                    "tool_result",
+                    serde_json::json!({
+                        "turn": total_turns,
+                        "tool_call_id": result.tool_call_id,
+                        "is_error": result.is_error,
+                        "content_preview": result.content.chars().take(240).collect::<String>(),
+                    }),
+                );
                 ctx.add_message(Message::tool_result(&result.tool_call_id, &result.content));
             }
             if !tool_calls.is_empty()
@@ -3456,6 +3719,16 @@ impl AgentLoop {
         if self.config.preflight_context_compress {
             self.auto_compress_if_over_threshold(&mut ctx);
         }
+        let replay = ReplayRecorder::for_session(&self.config, session_id);
+        replay.record(
+            "session_start",
+            serde_json::json!({
+                "session_id": session_id,
+                "mode": "stream",
+                "model": self.config.model,
+                "max_turns": self.config.max_turns,
+            }),
+        );
 
         let mut total_turns: u32 = 0;
         let mut accumulated_usage: Option<UsageStats> = None;
@@ -3494,6 +3767,14 @@ impl AgentLoop {
                     ctx.add_message(msg);
                 }
                 self.memory_on_session_end(ctx.get_messages());
+                replay.record(
+                    "session_end",
+                    serde_json::json!({
+                        "reason": "max_turns",
+                        "total_turns": total_turns,
+                        "session_cost_usd": session_cost_usd,
+                    }),
+                );
                 return Ok(AgentResult {
                     messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
                     finished_naturally: false,
@@ -3544,6 +3825,23 @@ impl AgentLoop {
                 .as_ref()
                 .map(|r| r.model.as_str())
                 .unwrap_or(self.config.model.as_str());
+            let llm_governor = governor_for_turn(&self.config, &ctx, 0);
+            tracing::debug!(
+                turn = total_turns,
+                model = active_model,
+                governor_pressure = llm_governor.pressure,
+                governor_max_tokens = ?llm_governor.max_tokens,
+                "turn governor snapshot"
+            );
+            replay.record(
+                "turn_start",
+                serde_json::json!({
+                    "turn": total_turns,
+                    "model": active_model,
+                    "pressure": llm_governor.pressure,
+                    "max_tokens": llm_governor.max_tokens,
+                }),
+            );
             let hook_ctx = serde_json::json!({"turn": total_turns, "model": active_model});
             let pre_results = self.invoke_hook(HookType::PreLlmCall, &hook_ctx);
             self.inject_hook_context(&pre_results, &mut ctx);
@@ -3573,6 +3871,7 @@ impl AgentLoop {
                             &tool_schemas,
                             turn_runtime_route.as_ref(),
                             active_model,
+                            llm_governor.max_tokens,
                             &*on_chunk,
                         )
                         .await?
@@ -3601,7 +3900,12 @@ impl AgentLoop {
                     }
                 } else {
                     match self
-                        .call_llm_with_retry(&ctx, &tool_schemas, turn_runtime_route.as_ref())
+                        .call_llm_with_retry(
+                            &ctx,
+                            &tool_schemas,
+                            turn_runtime_route.as_ref(),
+                            llm_governor.max_tokens,
+                        )
                         .await
                     {
                         Ok(r) => r,
@@ -3678,6 +3982,17 @@ impl AgentLoop {
                 break r;
             };
             let _api_elapsed_ms = api_start.elapsed().as_millis() as u64;
+            replay.record(
+                "llm_response",
+                serde_json::json!({
+                    "turn": total_turns,
+                    "model": response.model,
+                    "finish_reason": response.finish_reason,
+                    "api_time_ms": _api_elapsed_ms,
+                    "tool_call_count": response.message.tool_calls.as_ref().map(|v| v.len()).unwrap_or(0),
+                    "has_visible_text": Self::assistant_visible_text(&response.message),
+                }),
+            );
 
             // --- Post-LLM hook ---
             let post_ctx = serde_json::json!({
@@ -3723,6 +4038,14 @@ impl AgentLoop {
                         session_cost_usd, limit
                     )));
                     self.memory_on_session_end(ctx.get_messages());
+                    replay.record(
+                        "session_end",
+                        serde_json::json!({
+                            "reason": "cost_guard",
+                            "total_turns": total_turns,
+                            "session_cost_usd": session_cost_usd,
+                        }),
+                    );
                     return Ok(AgentResult {
                         messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
                         finished_naturally: false,
@@ -3813,6 +4136,14 @@ impl AgentLoop {
                 self.memory_sync(&u, &a, session_id);
                 self.spawn_background_review(total_turns, &ctx, review_memory_at_end);
                 self.memory_on_session_end(ctx.get_messages());
+                replay.record(
+                    "session_end",
+                    serde_json::json!({
+                        "reason": "finished_naturally",
+                        "total_turns": total_turns,
+                        "session_cost_usd": session_cost_usd,
+                    }),
+                );
                 if stream_mute.swap(false, Ordering::AcqRel) {
                     on_chunk(StreamChunk {
                         delta: Some(hermes_core::StreamDelta {
@@ -4006,12 +4337,22 @@ impl AgentLoop {
                 .execute_tool_calls(
                     &tool_calls,
                     total_turns,
+                    governor_for_turn(&self.config, &ctx, tool_calls.len()).tool_concurrency,
                     self.config
                         .max_cost_usd
                         .map(|limit| (limit - session_cost_usd).max(0.0)),
                     &mut tool_errors,
                 )
                 .await;
+            replay.record(
+                "tool_batch",
+                serde_json::json!({
+                    "turn": total_turns,
+                    "tool_count": tool_calls.len(),
+                    "tool_concurrency": governor_for_turn(&self.config, &ctx, tool_calls.len()).tool_concurrency,
+                    "errors": results.iter().filter(|r| r.is_error).count(),
+                }),
+            );
 
             let turn_tool_error_count = results.iter().filter(|r| r.is_error).count() as u32;
             if self.config.rollback_on_tool_error_threshold > 0
@@ -4059,6 +4400,15 @@ impl AgentLoop {
             }
 
             for result in results {
+                replay.record(
+                    "tool_result",
+                    serde_json::json!({
+                        "turn": total_turns,
+                        "tool_call_id": result.tool_call_id,
+                        "is_error": result.is_error,
+                        "content_preview": result.content.chars().take(240).collect::<String>(),
+                    }),
+                );
                 ctx.add_message(Message::tool_result(&result.tool_call_id, &result.content));
             }
             if !tool_calls.is_empty()
@@ -4435,10 +4785,13 @@ impl AgentLoop {
         &self,
         tool_calls: &[ToolCall],
         turn: u32,
+        tool_concurrency: usize,
         parent_budget_remaining_usd: Option<f64>,
         tool_errors: &mut Vec<hermes_core::ToolErrorRecord>,
     ) -> Vec<ToolResult> {
         let mut join_set = JoinSet::new();
+        let tool_concurrency = tool_concurrency.max(1);
+        let mut results = Vec::with_capacity(tool_calls.len());
         let max_delegate_depth = self.resolve_max_delegate_depth();
         let current_delegate_depth = self.delegate_depth;
         let orchestrator = self.sub_agent_orchestrator.clone();
@@ -4588,9 +4941,32 @@ impl AgentLoop {
                     }
                 }
             });
+            if join_set.len() >= tool_concurrency {
+                if let Some(result) = join_set.join_next().await {
+                    match result {
+                        Ok(tool_result) => {
+                            if tool_result.is_error {
+                                let tc = tool_calls
+                                    .iter()
+                                    .find(|tc| tc.id == tool_result.tool_call_id);
+                                if let Some(tc) = tc {
+                                    tool_errors.push(hermes_core::ToolErrorRecord {
+                                        tool_name: tc.function.name.clone(),
+                                        error: tool_result.content.clone(),
+                                        turn,
+                                    });
+                                }
+                            }
+                            results.push(tool_result);
+                        }
+                        Err(e) => {
+                            tracing::error!("Task join error: {}", e);
+                        }
+                    }
+                }
+            }
         }
 
-        let mut results = Vec::with_capacity(tool_calls.len());
         for tool_result in orchestrated {
             if tool_result.is_error {
                 let tc = tool_calls
@@ -5429,7 +5805,7 @@ mod tests {
         let seen_ref = seen.clone();
 
         let out = agent
-            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", &move |chunk| {
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, &move |chunk| {
                 if let Some(delta) = chunk.delta {
                     if let Some(text) = delta.content {
                         seen_ref.lock().expect("seen lock").push(text);
@@ -5472,7 +5848,7 @@ mod tests {
         let seen_ref = seen.clone();
 
         let out = agent
-            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", &move |chunk| {
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, &move |chunk| {
                 if let Some(delta) = chunk.delta {
                     if let Some(text) = delta.content {
                         seen_ref.lock().expect("seen lock").push(text);
@@ -5508,7 +5884,7 @@ mod tests {
         let seen_ref = seen.clone();
 
         let out = agent
-            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", &move |chunk| {
+            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, &move |chunk| {
                 if let Some(delta) = chunk.delta {
                     if let Some(text) = delta.content {
                         seen_ref.lock().expect("seen lock").push(text);
@@ -7159,5 +7535,34 @@ mod tests {
 
         let base = agent.resolve_runtime_base_url("stepfun", None);
         assert_eq!(base.as_deref(), Some("https://api.stepfun.ai/step_plan/v1"));
+    }
+
+    #[test]
+    fn test_governor_reduces_budget_under_high_pressure() {
+        let mut ctx = ContextManager::default_budget();
+        let payload = "x".repeat(((ctx.max_context_chars() as f64) * 0.9) as usize);
+        ctx.add_message(Message::user(payload));
+        let config = AgentConfig {
+            max_tokens: Some(1200),
+            ..AgentConfig::default()
+        };
+        let gov = governor_for_turn(&config, &ctx, 12);
+        assert!(gov.pressure >= 0.9);
+        assert!(gov.max_tokens.unwrap_or(1200) < 1200);
+        assert!(gov.tool_concurrency <= 4);
+    }
+
+    #[test]
+    fn test_redact_json_value_masks_sensitive_fields() {
+        let mut payload = serde_json::json!({
+            "api_key": "abc",
+            "nested": { "token": "def", "safe": "ok" },
+            "list": [{"password":"x"}, {"value":"y"}]
+        });
+        redact_json_value(&mut payload);
+        assert_eq!(payload["api_key"], "[redacted]");
+        assert_eq!(payload["nested"]["token"], "[redacted]");
+        assert_eq!(payload["nested"]["safe"], "ok");
+        assert_eq!(payload["list"][0]["password"], "[redacted]");
     }
 }
