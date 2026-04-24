@@ -727,8 +727,10 @@ pub fn apply_env_overrides(config: &mut GatewayConfig) {
         proxy.socks_proxy = Some(v);
     }
     if let Ok(v) = std::env::var("HERMES_LLM_API_KEY") {
-        for provider in config.llm_providers.values_mut() {
-            provider.api_key = Some(v.clone());
+        if !v.trim().is_empty() {
+            for provider in config.llm_providers.values_mut() {
+                provider.api_key = Some(v.clone());
+            }
         }
     }
     if let Ok(v) = std::env::var("HERMES_BUDGET_MAX_RESULT_CHARS") {
@@ -745,15 +747,18 @@ pub fn apply_env_overrides(config: &mut GatewayConfig) {
     // Provider-specific API keys (prefer HERMES_OPENAI_API_KEY over legacy OPENAI_API_KEY).
     let openai_env = std::env::var("HERMES_OPENAI_API_KEY")
         .ok()
-        .or_else(|| std::env::var("OPENAI_API_KEY").ok());
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| {
+            std::env::var("OPENAI_API_KEY")
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+        });
     if let Some(v) = openai_env {
-        if !v.trim().is_empty() {
-            config
-                .llm_providers
-                .entry("openai".to_string())
-                .or_insert_with(LlmProviderConfig::default)
-                .api_key = Some(v);
-        }
+        config
+            .llm_providers
+            .entry("openai".to_string())
+            .or_insert_with(LlmProviderConfig::default)
+            .api_key = Some(v);
     }
     for (env_var, provider_name) in [
         ("ANTHROPIC_API_KEY", "anthropic"),
@@ -765,6 +770,9 @@ pub fn apply_env_overrides(config: &mut GatewayConfig) {
         ("GITHUB_COPILOT_TOKEN", "copilot"),
     ] {
         if let Ok(v) = std::env::var(env_var) {
+            if v.trim().is_empty() {
+                continue;
+            }
             config
                 .llm_providers
                 .entry(provider_name.to_string())
@@ -774,8 +782,10 @@ pub fn apply_env_overrides(config: &mut GatewayConfig) {
     }
 
     if let Ok(v) = std::env::var("HERMES_BASE_URL") {
-        for provider in config.llm_providers.values_mut() {
-            provider.base_url = Some(v.clone());
+        if !v.trim().is_empty() {
+            for provider in config.llm_providers.values_mut() {
+                provider.base_url = Some(v.clone());
+            }
         }
     }
 
@@ -1044,6 +1054,63 @@ mod tests {
         unsafe {
             std::env::remove_var("OPENAI_API_KEY");
             std::env::remove_var("EXA_API_KEY");
+        }
+    }
+
+    #[test]
+    fn apply_env_overrides_ignores_empty_provider_keys() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        // SAFETY: test process serializes env mutation via ENV_LOCK.
+        unsafe {
+            std::env::set_var("OPENROUTER_API_KEY", "");
+            std::env::set_var("MINIMAX_API_KEY", "   ");
+            std::env::remove_var("NOUS_API_KEY");
+        }
+
+        let mut cfg = GatewayConfig::default();
+        apply_env_overrides(&mut cfg);
+
+        assert!(
+            !cfg.llm_providers.contains_key("openrouter"),
+            "empty OPENROUTER_API_KEY should not create provider entry"
+        );
+        assert!(
+            !cfg.llm_providers.contains_key("minimax"),
+            "empty MINIMAX_API_KEY should not create provider entry"
+        );
+
+        // SAFETY: test process serializes env mutation via ENV_LOCK.
+        unsafe {
+            std::env::remove_var("OPENROUTER_API_KEY");
+            std::env::remove_var("MINIMAX_API_KEY");
+        }
+    }
+
+    #[test]
+    fn apply_env_overrides_openai_falls_back_when_primary_env_is_empty() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        // SAFETY: test process serializes env mutation via ENV_LOCK.
+        unsafe {
+            std::env::set_var("HERMES_OPENAI_API_KEY", "");
+            std::env::set_var("OPENAI_API_KEY", "fallback-openai-key");
+        }
+
+        let mut cfg = GatewayConfig::default();
+        apply_env_overrides(&mut cfg);
+
+        assert_eq!(
+            cfg.llm_providers
+                .get("openai")
+                .and_then(|p| p.api_key.as_deref()),
+            Some("fallback-openai-key")
+        );
+
+        // SAFETY: test process serializes env mutation via ENV_LOCK.
+        unsafe {
+            std::env::remove_var("HERMES_OPENAI_API_KEY");
+            std::env::remove_var("OPENAI_API_KEY");
         }
     }
 }

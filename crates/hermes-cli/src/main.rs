@@ -5695,16 +5695,72 @@ fn parse_env_assignment(line: &str) -> Option<(String, String)> {
     Some((key.to_string(), value.trim().to_string()))
 }
 
+fn normalize_env_value(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches('"')
+        .trim_matches('\'')
+        .trim()
+        .to_string()
+}
+
 fn read_env_key(path: &Path, key: &str) -> Option<String> {
     let raw = std::fs::read_to_string(path).ok()?;
     for line in raw.lines() {
         if let Some((k, v)) = parse_env_assignment(line) {
             if k == key {
-                return Some(v.trim_matches('"').trim_matches('\'').to_string());
+                let value = normalize_env_value(&v);
+                if !value.is_empty() {
+                    return Some(value);
+                }
+                return None;
             }
         }
     }
     None
+}
+
+const SETUP_OPENAI_ENV_KEYS: &[&str] = &["HERMES_OPENAI_API_KEY", "OPENAI_API_KEY"];
+const SETUP_ANTHROPIC_ENV_KEYS: &[&str] = &["ANTHROPIC_API_KEY"];
+const SETUP_OPENROUTER_ENV_KEYS: &[&str] = &["OPENROUTER_API_KEY"];
+const SETUP_NOUS_ENV_KEYS: &[&str] = &["NOUS_API_KEY"];
+
+fn setup_model_from_choice(choice: &str) -> &'static str {
+    match choice.trim() {
+        "2" => "openai:gpt-4o-mini",
+        "3" => "anthropic:claude-3-5-sonnet",
+        "4" => "openrouter:auto",
+        "5" => "nous:hermes-3-llama-3.1-405b",
+        _ => "openai:gpt-4o",
+    }
+}
+
+fn setup_provider_from_model(model: &str) -> &str {
+    model
+        .split_once(':')
+        .map(|(provider, _)| provider.trim())
+        .filter(|provider| !provider.is_empty())
+        .unwrap_or("openai")
+}
+
+fn setup_provider_display(provider: &str) -> &'static str {
+    match provider {
+        "openai" => "OpenAI",
+        "anthropic" => "Anthropic",
+        "openrouter" => "OpenRouter",
+        "nous" => "Nous",
+        _ => "Provider",
+    }
+}
+
+fn setup_provider_env_keys(provider: &str) -> &'static [&'static str] {
+    match provider {
+        "openai" => SETUP_OPENAI_ENV_KEYS,
+        "anthropic" => SETUP_ANTHROPIC_ENV_KEYS,
+        "openrouter" => SETUP_OPENROUTER_ENV_KEYS,
+        "nous" => SETUP_NOUS_ENV_KEYS,
+        _ => &[],
+    }
 }
 
 fn merge_missing_env_keys(src: &Path, dst: &Path, label: &str) -> Result<usize, AgentError> {
@@ -5720,10 +5776,14 @@ fn merge_missing_env_keys(src: &Path, dst: &Path, label: &str) -> Result<usize, 
 
     let mut to_import = Vec::new();
     for line in src_content.lines() {
-        if let Some((k, _)) = parse_env_assignment(line) {
-            if !existing_keys.contains(&k) {
-                to_import.push(line.trim().to_string());
+        if let Some((k, v)) = parse_env_assignment(line) {
+            if existing_keys.contains(&k) {
+                continue;
             }
+            if normalize_env_value(&v).is_empty() {
+                continue;
+            }
+            to_import.push(line.trim().to_string());
         }
     }
 
@@ -5832,24 +5892,63 @@ async fn run_setup() -> Result<(), AgentError> {
     // 2. Optional import from legacy Python/OpenClaw .env files
     maybe_import_legacy_env(&mut reader, &env_path)?;
 
-    // 2. Prompt for API key
-    let has_env_openai_key = read_env_key(&env_path, "HERMES_OPENAI_API_KEY").is_some()
-        || read_env_key(&env_path, "OPENAI_API_KEY").is_some();
-    if has_env_openai_key {
+    // 3. Prompt for model/provider
+    println!("\nAvailable models:");
+    println!("  1) openai:gpt-4o          (recommended)");
+    println!("  2) openai:gpt-4o-mini     (fast & cheap)");
+    println!("  3) anthropic:claude-3-5-sonnet");
+    println!("  4) openrouter:auto        (multi-provider)");
+    println!("  5) nous:hermes-3-llama-3.1-405b");
+    let has_nous_key = std::env::var("NOUS_API_KEY")
+        .ok()
+        .is_some_and(|v| !v.trim().is_empty())
+        || read_env_key(&env_path, "NOUS_API_KEY").is_some();
+    let default_model_choice = if has_nous_key { "5" } else { "1" };
+    print!("Choose model [{}]: ", default_model_choice);
+    io::stdout().flush().ok();
+    let mut model_choice = String::new();
+    reader.read_line(&mut model_choice).ok();
+    let model_choice = if model_choice.trim().is_empty() {
+        default_model_choice
+    } else {
+        model_choice.trim()
+    };
+    let model = setup_model_from_choice(model_choice);
+    let selected_provider = setup_provider_from_model(model).to_string();
+    let selected_provider_label = setup_provider_display(&selected_provider);
+    let selected_provider_env_keys = setup_provider_env_keys(&selected_provider);
+    let env_keys_display = selected_provider_env_keys.join("/");
+
+    // 4. Prompt for selected provider API key
+    let has_selected_provider_env_key = selected_provider_env_keys.iter().any(|key| {
+        std::env::var(key)
+            .ok()
+            .is_some_and(|v| !v.trim().is_empty())
+            || read_env_key(&env_path, key).is_some()
+    });
+    if has_selected_provider_env_key {
         print!(
-            "\nOpenAI API key (leave blank to keep HERMES_OPENAI_API_KEY/OPENAI_API_KEY from {}): ",
+            "\n{} API key (leave blank to keep {} from environment/{}): ",
+            selected_provider_label,
+            env_keys_display,
             env_path.display()
         );
     } else {
-        print!("\nOpenAI API key (leave blank to skip): ");
+        print!(
+            "\n{} API key (leave blank to skip): ",
+            selected_provider_label
+        );
     }
     io::stdout().flush().ok();
     let mut api_key = String::new();
     reader.read_line(&mut api_key).ok();
     let api_key = api_key.trim().to_string();
-    let mut stored_openai_secret_in_vault = false;
+    let mut stored_provider_secret_in_vault = false;
     if !api_key.is_empty() {
-        print!("Store OpenAI key in encrypted vault (recommended) [Y/n]: ");
+        print!(
+            "Store {} key in encrypted vault (recommended) [Y/n]: ",
+            selected_provider_label
+        );
         io::stdout().flush().ok();
         let mut answer = String::new();
         reader.read_line(&mut answer).ok();
@@ -5859,7 +5958,7 @@ async fn run_setup() -> Result<(), AgentError> {
             let manager = AuthManager::new(store);
             manager
                 .save_credential(OAuthCredential {
-                    provider: "openai".to_string(),
+                    provider: selected_provider.clone(),
                     access_token: api_key.clone(),
                     refresh_token: None,
                     token_type: "bearer".to_string(),
@@ -5867,28 +5966,11 @@ async fn run_setup() -> Result<(), AgentError> {
                     expires_at: None,
                 })
                 .await?;
-            stored_openai_secret_in_vault = true;
+            stored_provider_secret_in_vault = true;
         }
     }
 
-    // 3. Prompt for model
-    println!("\nAvailable models:");
-    println!("  1) openai:gpt-4o          (recommended)");
-    println!("  2) openai:gpt-4o-mini     (fast & cheap)");
-    println!("  3) anthropic:claude-3-5-sonnet");
-    println!("  4) openrouter:auto        (multi-provider)");
-    print!("Choose model [1]: ");
-    io::stdout().flush().ok();
-    let mut model_choice = String::new();
-    reader.read_line(&mut model_choice).ok();
-    let model = match model_choice.trim() {
-        "2" => "openai:gpt-4o-mini",
-        "3" => "anthropic:claude-3-5-sonnet",
-        "4" => "openrouter:auto",
-        _ => "openai:gpt-4o",
-    };
-
-    // 4. Prompt for personality
+    // 5. Prompt for personality
     print!("\nPersonality (default, concise, creative, technical) [default]: ");
     io::stdout().flush().ok();
     let mut personality = String::new();
@@ -5909,7 +5991,7 @@ async fn run_setup() -> Result<(), AgentError> {
         if !answer.trim().eq_ignore_ascii_case("y") {
             println!("Keeping existing config.yaml.");
             println!(
-                "\nSetup complete! Run `hermes-agent-ultra` (or `hermes`) to start an interactive session."
+                "\nSetup complete! Run `hermes-ultra` (or `hermes-agent-ultra`/`hermes`) to start an interactive session."
             );
             return Ok(());
         }
@@ -5923,21 +6005,23 @@ async fn run_setup() -> Result<(), AgentError> {
     disk.personality = Some(personality.to_string());
     disk.max_turns = 50;
 
-    if !api_key.is_empty() && !stored_openai_secret_in_vault {
+    if !api_key.is_empty() && !stored_provider_secret_in_vault {
         let provider = disk
             .llm_providers
-            .entry("openai".to_string())
+            .entry(selected_provider.clone())
             .or_insert_with(hermes_config::LlmProviderConfig::default);
         provider.api_key = Some(api_key.clone());
-    } else if stored_openai_secret_in_vault {
+    } else if stored_provider_secret_in_vault {
         println!(
-            "  ✓ Stored HERMES_OPENAI_API_KEY in encrypted vault: {}",
+            "  ✓ Stored {} key in encrypted vault: {}",
+            selected_provider_label,
             config_dir.join("auth").join("tokens.json").display()
         );
-    } else if has_env_openai_key {
+    } else if has_selected_provider_env_key {
         println!(
-            "  ✓ Keeping HERMES_OPENAI_API_KEY/OPENAI_API_KEY from {} for runtime auth",
-            env_path.display()
+            "  ✓ Keeping {} from environment/{} for runtime auth",
+            env_keys_display,
+            env_path.display(),
         );
     }
     validate_config(&disk).map_err(|e| AgentError::Config(e.to_string()))?;
@@ -5966,9 +6050,11 @@ async fn run_setup() -> Result<(), AgentError> {
     }
 
     println!(
-        "\nSetup complete! Run `hermes-agent-ultra` (or `hermes`) to start an interactive session."
+        "\nSetup complete! Run `hermes-ultra` (or `hermes-agent-ultra`/`hermes`) to start an interactive session."
     );
-    println!("Run `hermes-agent-ultra doctor` (or `hermes doctor`) to check system requirements.");
+    println!(
+        "Run `hermes-ultra doctor` (or `hermes-agent-ultra doctor`/`hermes doctor`) to check system requirements."
+    );
     Ok(())
 }
 
@@ -6069,6 +6155,7 @@ async fn run_doctor(
         ("OPENAI_API_KEY", "OpenAI"),
         ("ANTHROPIC_API_KEY", "Anthropic"),
         ("OPENROUTER_API_KEY", "OpenRouter"),
+        ("NOUS_API_KEY", "Nous"),
         ("EXA_API_KEY", "Exa (web search)"),
         ("FIRECRAWL_API_KEY", "Firecrawl (web extract)"),
     ];
@@ -7622,6 +7709,58 @@ mod tests {
         assert_eq!(provider_env_var("stepfun"), Some("STEPFUN_API_KEY"));
         assert_eq!(provider_env_var("step"), None);
         assert_eq!(secret_provider_aliases("stepfun"), vec!["stepfun", "step"]);
+    }
+
+    #[test]
+    fn setup_model_choice_supports_nous() {
+        assert_eq!(setup_model_from_choice("5"), "nous:hermes-3-llama-3.1-405b");
+        assert_eq!(
+            setup_provider_from_model("nous:hermes-3-llama-3.1-405b"),
+            "nous"
+        );
+    }
+
+    #[test]
+    fn setup_provider_env_keys_include_nous() {
+        assert_eq!(setup_provider_display("nous"), "Nous");
+        assert_eq!(setup_provider_env_keys("nous"), &["NOUS_API_KEY"]);
+    }
+
+    #[test]
+    fn read_env_key_treats_empty_values_as_missing() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let env_file = tmp.path().join(".env");
+        std::fs::write(
+            &env_file,
+            "OPENROUTER_API_KEY=\nMINIMAX_API_KEY='   '\nOPENAI_API_KEY=real-key\n",
+        )
+        .expect("write env");
+
+        assert_eq!(read_env_key(&env_file, "OPENROUTER_API_KEY"), None);
+        assert_eq!(read_env_key(&env_file, "MINIMAX_API_KEY"), None);
+        assert_eq!(
+            read_env_key(&env_file, "OPENAI_API_KEY").as_deref(),
+            Some("real-key")
+        );
+    }
+
+    #[test]
+    fn merge_missing_env_keys_skips_empty_values() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let src = tmp.path().join("legacy.env");
+        let dst = tmp.path().join("target.env");
+        std::fs::write(
+            &src,
+            "OPENROUTER_API_KEY=\nMINIMAX_API_KEY='  '\nOPENAI_API_KEY=real-key\n",
+        )
+        .expect("write source env");
+
+        let imported = merge_missing_env_keys(&src, &dst, "legacy.env").expect("merge env keys");
+        assert_eq!(imported, 1);
+        let contents = std::fs::read_to_string(&dst).expect("read merged env");
+        assert!(contents.contains("OPENAI_API_KEY=real-key"));
+        assert!(!contents.contains("OPENROUTER_API_KEY="));
+        assert!(!contents.contains("MINIMAX_API_KEY="));
     }
 
     #[test]
