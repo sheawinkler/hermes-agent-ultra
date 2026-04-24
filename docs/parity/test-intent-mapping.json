@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-04-24T01:29:20.140282+00:00",
+  "generated_at_utc": "2026-04-24T21:19:39.230152+00:00",
   "intent_unit": "domain_intent",
   "intents": [
     {
@@ -37,7 +37,7 @@
       ]
     },
     {
-      "evidence_count": 68,
+      "evidence_count": 69,
       "evidence_sample": [
         "crates/hermes-tools/src/approval.rs",
         "crates/hermes-tools/src/backends/browser.rs",
@@ -61,9 +61,9 @@
         "crates/hermes-tools/src/lib.rs",
         "crates/hermes-tools/src/register_builtins.rs",
         "crates/hermes-tools/src/registry.rs",
+        "crates/hermes-tools/src/tool_policy.rs",
         "crates/hermes-tools/src/tools/browser.rs",
-        "crates/hermes-tools/src/tools/clarify.rs",
-        "crates/hermes-tools/src/tools/code_execution.rs"
+        "crates/hermes-tools/src/tools/clarify.rs"
       ],
       "id": "tool-runtime-behavior",
       "mapped": true,
@@ -73,11 +73,12 @@
       ]
     },
     {
-      "evidence_count": 34,
+      "evidence_count": 35,
       "evidence_sample": [
         "crates/hermes-cli/src/app.rs",
         "crates/hermes-cli/src/auth.rs",
         "crates/hermes-cli/src/banner.rs",
+        "crates/hermes-cli/src/bin/hermes-ultra.rs",
         "crates/hermes-cli/src/bin/hermes.rs",
         "crates/hermes-cli/src/checklist.rs",
         "crates/hermes-cli/src/claw_migrate.rs",
@@ -98,8 +99,7 @@
         "crates/hermes-cli/src/profiles.rs",
         "crates/hermes-cli/src/providers.rs",
         "crates/hermes-cli/src/runtime_tool_wiring.rs",
-        "crates/hermes-cli/src/setup.rs",
-        "crates/hermes-cli/src/skills_config.rs"
+        "crates/hermes-cli/src/setup.rs"
       ],
       "id": "cli-command-surface",
       "mapped": true,
