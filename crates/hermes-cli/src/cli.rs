@@ -214,7 +214,7 @@ pub enum CliCommand {
         /// Action: "login", "logout", "status", "add", "list", "remove", or "reset".
         action: Option<String>,
         /// Provider: openai/anthropic/... / `telegram` / `weixin|wechat|wx` (write platform token to config.yaml) / `copilot`.
-        /// If omitted, uses `HERMES_AUTH_DEFAULT_PROVIDER` or `openai`.
+        /// If omitted, uses `HERMES_AUTH_DEFAULT_PROVIDER`, config model provider, or `nous`.
         provider: Option<String>,
         /// Action target (e.g. pooled credential index/id/label for `remove`).
         target: Option<String>,
