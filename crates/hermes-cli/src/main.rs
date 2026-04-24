@@ -22,7 +22,10 @@ use hermes_cli::auth::{
     login_nous_device_code, login_openai_codex_device_code, read_provider_auth_state,
     resolve_qwen_runtime_credentials, save_codex_auth_state, save_nous_auth_state,
     save_provider_auth_state, AnthropicOAuthLoginOptions, CodexDeviceCodeOptions,
-    GeminiOAuthLoginOptions, NousDeviceCodeOptions, QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+    GeminiOAuthLoginOptions, NousDeviceCodeOptions, ANTHROPIC_OAUTH_CLIENT_ID,
+    ANTHROPIC_OAUTH_TOKEN_URL, CODEX_OAUTH_CLIENT_ID, CODEX_OAUTH_TOKEN_URL,
+    DEFAULT_CODEX_BASE_URL, QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS, QWEN_OAUTH_CLIENT_ID,
+    QWEN_OAUTH_TOKEN_URL,
 };
 use hermes_cli::cli::{Cli, CliCommand};
 use hermes_cli::config_env::hydrate_env_from_config;
@@ -3288,6 +3291,19 @@ fn normalize_auth_provider(provider: &str) -> String {
         "qwen-cli" | "qwen-portal" => "qwen-oauth".to_string(),
         "gemini-cli" | "gemini-oauth" => "google-gemini-cli".to_string(),
         "step" | "step-plan" => "stepfun".to_string(),
+        "moonshot" | "kimi" => "kimi-coding".to_string(),
+        "minimax-cn" | "minimax_cn" | "minimax-china" => "minimax-cn".to_string(),
+        "dashscope" | "aliyun" | "alibaba-cloud" => "alibaba".to_string(),
+        "alibaba_coding" | "alibaba-coding" | "alibaba_coding_plan" => {
+            "alibaba-coding-plan".to_string()
+        }
+        "kilo" | "kilo-code" | "kilo-gateway" => "kilocode".to_string(),
+        "opencode" | "zen" => "opencode-zen".to_string(),
+        "aigateway" | "vercel" | "vercel-ai-gateway" => "ai-gateway".to_string(),
+        "x-ai" | "x.ai" | "grok" => "xai".to_string(),
+        "glm" | "z-ai" | "z.ai" | "zhipu" => "zai".to_string(),
+        "nim" | "nvidia-nim" | "build-nvidia" | "nemotron" => "nvidia".to_string(),
+        "hf" | "hugging-face" | "huggingface-hub" => "huggingface".to_string(),
         "api-server" => "api_server".to_string(),
         "home-assistant" => "homeassistant".to_string(),
         "wecom-callback" => "wecom_callback".to_string(),
@@ -3327,6 +3343,18 @@ fn normalize_secret_provider(provider: &str) -> String {
         "claude" | "claude-code" => "anthropic".to_string(),
         "codex" => "openai-codex".to_string(),
         "gemini-cli" | "gemini-oauth" => "google-gemini-cli".to_string(),
+        "moonshot" | "kimi" => "kimi-coding".to_string(),
+        "aigateway" | "vercel" | "vercel-ai-gateway" => "ai-gateway".to_string(),
+        "opencode" | "zen" => "opencode-zen".to_string(),
+        "kilo" | "kilo-code" | "kilo-gateway" => "kilocode".to_string(),
+        "x-ai" | "x.ai" | "grok" => "xai".to_string(),
+        "glm" | "z-ai" | "z.ai" | "zhipu" => "zai".to_string(),
+        "nim" | "nvidia-nim" | "build-nvidia" | "nemotron" => "nvidia".to_string(),
+        "hf" | "hugging-face" | "huggingface-hub" => "huggingface".to_string(),
+        "dashscope" | "aliyun" | "alibaba-cloud" => "alibaba".to_string(),
+        "alibaba_coding" | "alibaba-coding" | "alibaba_coding_plan" => {
+            "alibaba-coding-plan".to_string()
+        }
         _ => p,
     }
 }
@@ -3338,8 +3366,12 @@ fn secret_provider_aliases(provider: &str) -> Vec<String> {
             "claude".to_string(),
             "claude-code".to_string(),
         ],
-        "moonshot" => vec!["moonshot".to_string(), "kimi".to_string()],
-        "kimi" => vec!["kimi".to_string(), "moonshot".to_string()],
+        "moonshot" | "kimi" | "kimi-coding" => vec![
+            "kimi-coding".to_string(),
+            "kimi".to_string(),
+            "moonshot".to_string(),
+        ],
+        "kimi-coding-cn" => vec!["kimi-coding-cn".to_string()],
         "stepfun" => vec!["stepfun".to_string(), "step".to_string()],
         "copilot" => vec!["copilot".to_string(), "github-copilot".to_string()],
         "openai-codex" => vec!["openai-codex".to_string(), "codex".to_string()],
@@ -3348,6 +3380,27 @@ fn secret_provider_aliases(provider: &str) -> Vec<String> {
             "gemini-cli".to_string(),
             "gemini-oauth".to_string(),
         ],
+        "zai" => vec![
+            "zai".to_string(),
+            "glm".to_string(),
+            "z-ai".to_string(),
+            "z.ai".to_string(),
+        ],
+        "xai" => vec![
+            "xai".to_string(),
+            "x-ai".to_string(),
+            "x.ai".to_string(),
+            "grok".to_string(),
+        ],
+        "nvidia" => vec![
+            "nvidia".to_string(),
+            "nvidia-nim".to_string(),
+            "nim".to_string(),
+        ],
+        "huggingface" => vec!["huggingface".to_string(), "hf".to_string()],
+        "ai-gateway" => vec!["ai-gateway".to_string(), "aigateway".to_string()],
+        "opencode-zen" => vec!["opencode-zen".to_string(), "opencode".to_string()],
+        "kilocode" => vec!["kilocode".to_string(), "kilo".to_string()],
         p => vec![p.to_string()],
     }
 }
@@ -3358,23 +3411,39 @@ fn provider_env_var(provider: &str) -> Option<&'static str> {
         "openai-codex" => Some("HERMES_OPENAI_CODEX_API_KEY"),
         "anthropic" => Some("ANTHROPIC_API_KEY"),
         "google-gemini-cli" => Some("HERMES_GEMINI_OAUTH_API_KEY"),
+        "gemini" => Some("GOOGLE_API_KEY"),
         "openrouter" => Some("OPENROUTER_API_KEY"),
-        "qwen" => Some("DASHSCOPE_API_KEY"),
+        "qwen" | "alibaba" => Some("DASHSCOPE_API_KEY"),
+        "alibaba-coding-plan" => Some("ALIBABA_CODING_PLAN_API_KEY"),
         "qwen-oauth" => Some("HERMES_QWEN_OAUTH_API_KEY"),
-        "moonshot" | "kimi" => Some("MOONSHOT_API_KEY"),
+        "moonshot" | "kimi" | "kimi-coding" => Some("KIMI_API_KEY"),
+        "kimi-coding-cn" => Some("KIMI_CN_API_KEY"),
         "minimax" => Some("MINIMAX_API_KEY"),
+        "minimax-cn" => Some("MINIMAX_CN_API_KEY"),
         "stepfun" => Some("STEPFUN_API_KEY"),
         "nous" => Some("NOUS_API_KEY"),
         "copilot" => Some("GITHUB_COPILOT_TOKEN"),
+        "ai-gateway" => Some("AI_GATEWAY_API_KEY"),
+        "arcee" => Some("ARCEEAI_API_KEY"),
+        "deepseek" => Some("DEEPSEEK_API_KEY"),
+        "huggingface" => Some("HF_TOKEN"),
+        "kilocode" => Some("KILOCODE_API_KEY"),
+        "nvidia" => Some("NVIDIA_API_KEY"),
+        "ollama-cloud" => Some("OLLAMA_API_KEY"),
+        "opencode-go" => Some("OPENCODE_GO_API_KEY"),
+        "opencode-zen" => Some("OPENCODE_ZEN_API_KEY"),
+        "xai" => Some("XAI_API_KEY"),
+        "xiaomi" => Some("XIAOMI_API_KEY"),
+        "zai" => Some("GLM_API_KEY"),
         _ => None,
     }
 }
 
 fn provider_supports_oauth(provider: &str) -> bool {
-    matches!(
-        normalize_auth_provider(provider).as_str(),
-        "anthropic" | "nous" | "openai-codex" | "qwen-oauth" | "google-gemini-cli"
-    )
+    let normalized = normalize_auth_provider(provider);
+    hermes_cli::providers::OAUTH_CAPABLE_PROVIDERS
+        .iter()
+        .any(|candidate| candidate.eq_ignore_ascii_case(normalized.as_str()))
 }
 
 fn resolve_auth_type_for_provider(provider: &str, requested: Option<&str>) -> String {
@@ -3486,14 +3555,36 @@ async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentE
         ("ANTHROPIC_TOKEN", "anthropic"),
         ("CLAUDE_CODE_OAUTH_TOKEN", "anthropic"),
         ("HERMES_GEMINI_OAUTH_API_KEY", "google-gemini-cli"),
+        ("GOOGLE_API_KEY", "gemini"),
+        ("GEMINI_API_KEY", "gemini"),
         ("OPENROUTER_API_KEY", "openrouter"),
         ("DASHSCOPE_API_KEY", "qwen"),
+        ("ALIBABA_CODING_PLAN_API_KEY", "alibaba-coding-plan"),
         ("HERMES_QWEN_OAUTH_API_KEY", "qwen-oauth"),
-        ("MOONSHOT_API_KEY", "moonshot"),
+        ("KIMI_API_KEY", "kimi-coding"),
+        ("KIMI_CODING_API_KEY", "kimi-coding"),
+        ("KIMI_CN_API_KEY", "kimi-coding-cn"),
+        ("MOONSHOT_API_KEY", "kimi-coding"),
         ("MINIMAX_API_KEY", "minimax"),
+        ("MINIMAX_CN_API_KEY", "minimax-cn"),
         ("STEPFUN_API_KEY", "stepfun"),
         ("NOUS_API_KEY", "nous"),
         ("GITHUB_COPILOT_TOKEN", "copilot"),
+        ("AI_GATEWAY_API_KEY", "ai-gateway"),
+        ("ARCEEAI_API_KEY", "arcee"),
+        ("ARCEE_API_KEY", "arcee"),
+        ("DEEPSEEK_API_KEY", "deepseek"),
+        ("HF_TOKEN", "huggingface"),
+        ("KILOCODE_API_KEY", "kilocode"),
+        ("NVIDIA_API_KEY", "nvidia"),
+        ("OLLAMA_API_KEY", "ollama-cloud"),
+        ("OPENCODE_GO_API_KEY", "opencode-go"),
+        ("OPENCODE_ZEN_API_KEY", "opencode-zen"),
+        ("XAI_API_KEY", "xai"),
+        ("XIAOMI_API_KEY", "xiaomi"),
+        ("GLM_API_KEY", "zai"),
+        ("ZAI_API_KEY", "zai"),
+        ("Z_AI_API_KEY", "zai"),
     ];
 
     for (env_var, provider) in env_bindings {
@@ -4287,17 +4378,10 @@ async fn print_auth_status_matrix(cli: &Cli, manager: &AuthManager) -> Result<()
     println!("Auth status matrix:");
     println!("-------------------");
 
-    for provider in [
-        "openai",
-        "anthropic",
-        "openrouter",
-        "stepfun",
-        "nous",
-        "openai-codex",
-        "qwen-oauth",
-        "google-gemini-cli",
-        "copilot",
-    ] {
+    let mut llm_providers = hermes_cli::providers::known_providers();
+    llm_providers.sort_unstable();
+    llm_providers.dedup();
+    for provider in llm_providers {
         let env_present = provider_api_key_from_env(provider).is_some()
             || (provider == "copilot"
                 && std::env::var("GITHUB_COPILOT_TOKEN")
@@ -6328,34 +6412,249 @@ fn read_env_key(path: &Path, key: &str) -> Option<String> {
 }
 
 const SETUP_OPENAI_ENV_KEYS: &[&str] = &["HERMES_OPENAI_API_KEY", "OPENAI_API_KEY"];
-const SETUP_ANTHROPIC_ENV_KEYS: &[&str] = &["ANTHROPIC_API_KEY"];
+const SETUP_OPENAI_CODEX_ENV_KEYS: &[&str] = &["HERMES_OPENAI_CODEX_API_KEY"];
+const SETUP_ANTHROPIC_ENV_KEYS: &[&str] = &[
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_TOKEN",
+    "CLAUDE_CODE_OAUTH_TOKEN",
+];
 const SETUP_OPENROUTER_ENV_KEYS: &[&str] = &["OPENROUTER_API_KEY"];
+const SETUP_GOOGLE_GEMINI_CLI_ENV_KEYS: &[&str] = &["HERMES_GEMINI_OAUTH_API_KEY"];
+const SETUP_GEMINI_ENV_KEYS: &[&str] = &["GOOGLE_API_KEY", "GEMINI_API_KEY"];
 const SETUP_NOUS_ENV_KEYS: &[&str] = &["NOUS_API_KEY"];
+const SETUP_QWEN_ENV_KEYS: &[&str] = &["DASHSCOPE_API_KEY"];
+const SETUP_QWEN_OAUTH_ENV_KEYS: &[&str] = &["HERMES_QWEN_OAUTH_API_KEY", "DASHSCOPE_API_KEY"];
+const SETUP_ALIBABA_CODING_PLAN_ENV_KEYS: &[&str] = &["ALIBABA_CODING_PLAN_API_KEY"];
+const SETUP_KIMI_CODING_ENV_KEYS: &[&str] = &["KIMI_API_KEY", "KIMI_CODING_API_KEY"];
+const SETUP_KIMI_CODING_CN_ENV_KEYS: &[&str] = &["KIMI_CN_API_KEY"];
+const SETUP_MINIMAX_ENV_KEYS: &[&str] = &["MINIMAX_API_KEY"];
+const SETUP_MINIMAX_CN_ENV_KEYS: &[&str] = &["MINIMAX_CN_API_KEY"];
+const SETUP_STEPFUN_ENV_KEYS: &[&str] = &["HERMES_STEPFUN_API_KEY", "STEPFUN_API_KEY"];
+const SETUP_COPILOT_ENV_KEYS: &[&str] = &["GITHUB_COPILOT_TOKEN"];
+const SETUP_AI_GATEWAY_ENV_KEYS: &[&str] = &["AI_GATEWAY_API_KEY"];
+const SETUP_ARCEE_ENV_KEYS: &[&str] = &["ARCEEAI_API_KEY", "ARCEE_API_KEY"];
+const SETUP_DEEPSEEK_ENV_KEYS: &[&str] = &["DEEPSEEK_API_KEY"];
+const SETUP_HUGGINGFACE_ENV_KEYS: &[&str] = &["HF_TOKEN"];
+const SETUP_KILOCODE_ENV_KEYS: &[&str] = &["KILOCODE_API_KEY"];
+const SETUP_NVIDIA_ENV_KEYS: &[&str] = &["NVIDIA_API_KEY"];
+const SETUP_OLLAMA_CLOUD_ENV_KEYS: &[&str] = &["OLLAMA_API_KEY"];
+const SETUP_OPENCODE_GO_ENV_KEYS: &[&str] = &["OPENCODE_GO_API_KEY"];
+const SETUP_OPENCODE_ZEN_ENV_KEYS: &[&str] = &["OPENCODE_ZEN_API_KEY"];
+const SETUP_XAI_ENV_KEYS: &[&str] = &["XAI_API_KEY"];
+const SETUP_XIAOMI_ENV_KEYS: &[&str] = &["XIAOMI_API_KEY"];
+const SETUP_ZAI_ENV_KEYS: &[&str] = &["GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY"];
+const SETUP_BEDROCK_ENV_KEYS: &[&str] = &[
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+];
 
-fn setup_model_from_choice(choice: &str) -> &'static str {
-    match choice.trim() {
-        "2" => "openai:gpt-4o-mini",
-        "3" => "anthropic:claude-3-5-sonnet",
-        "4" => "openrouter:auto",
-        "5" => "nous:hermes-3-llama-3.1-405b",
-        _ => "openai:gpt-4o",
-    }
+#[derive(Clone, Copy)]
+struct SetupModelOption {
+    provider: &'static str,
+    model: &'static str,
+    label: &'static str,
 }
 
-fn setup_provider_from_model(model: &str) -> &str {
-    model
-        .split_once(':')
-        .map(|(provider, _)| provider.trim())
-        .filter(|provider| !provider.is_empty())
-        .unwrap_or("openai")
+const SETUP_MODEL_OPTIONS: &[SetupModelOption] = &[
+    SetupModelOption {
+        provider: "nous",
+        model: "nous:hermes-3-llama-3.1-405b",
+        label: "Nous Hermes 3 (recommended, OAuth)",
+    },
+    SetupModelOption {
+        provider: "openai",
+        model: "openai:gpt-4o",
+        label: "OpenAI gpt-4o",
+    },
+    SetupModelOption {
+        provider: "openai",
+        model: "openai:gpt-4o-mini",
+        label: "OpenAI gpt-4o-mini (fast & cheap)",
+    },
+    SetupModelOption {
+        provider: "anthropic",
+        model: "anthropic:claude-3-5-sonnet",
+        label: "Anthropic Claude (OAuth/API key)",
+    },
+    SetupModelOption {
+        provider: "openrouter",
+        model: "openrouter:auto",
+        label: "OpenRouter auto (multi-provider)",
+    },
+    SetupModelOption {
+        provider: "openai-codex",
+        model: "openai-codex:gpt-5.3-codex",
+        label: "OpenAI Codex (OAuth)",
+    },
+    SetupModelOption {
+        provider: "google-gemini-cli",
+        model: "google-gemini-cli:gemini-3.1-pro-preview",
+        label: "Google Gemini CLI (OAuth)",
+    },
+    SetupModelOption {
+        provider: "gemini",
+        model: "gemini:gemini-3.1-pro-preview",
+        label: "Google AI Studio Gemini (API key)",
+    },
+    SetupModelOption {
+        provider: "qwen-oauth",
+        model: "qwen-oauth:qwen-plus-latest",
+        label: "Qwen OAuth (CLI token)",
+    },
+    SetupModelOption {
+        provider: "qwen",
+        model: "qwen:qwen-plus-latest",
+        label: "Alibaba DashScope Qwen",
+    },
+    SetupModelOption {
+        provider: "alibaba",
+        model: "alibaba:qwen-plus-latest",
+        label: "Alibaba Cloud DashScope",
+    },
+    SetupModelOption {
+        provider: "alibaba-coding-plan",
+        model: "alibaba-coding-plan:qwen-plus-latest",
+        label: "Alibaba Coding Plan",
+    },
+    SetupModelOption {
+        provider: "deepseek",
+        model: "deepseek:deepseek-chat",
+        label: "DeepSeek",
+    },
+    SetupModelOption {
+        provider: "kimi-coding",
+        model: "kimi-coding:kimi-k2.6",
+        label: "Kimi Coding (Moonshot)",
+    },
+    SetupModelOption {
+        provider: "kimi-coding-cn",
+        model: "kimi-coding-cn:kimi-k2.6",
+        label: "Kimi Coding China",
+    },
+    SetupModelOption {
+        provider: "stepfun",
+        model: "stepfun:step-3.5-flash",
+        label: "StepFun Step Plan",
+    },
+    SetupModelOption {
+        provider: "minimax",
+        model: "minimax:MiniMax-M2.7",
+        label: "MiniMax",
+    },
+    SetupModelOption {
+        provider: "minimax-cn",
+        model: "minimax-cn:MiniMax-M2.7",
+        label: "MiniMax China",
+    },
+    SetupModelOption {
+        provider: "zai",
+        model: "zai:glm-5.1",
+        label: "Z.AI / GLM",
+    },
+    SetupModelOption {
+        provider: "xai",
+        model: "xai:grok-3-mini",
+        label: "xAI",
+    },
+    SetupModelOption {
+        provider: "nvidia",
+        model: "nvidia:nvidia/nemotron-3-super-120b-a12b",
+        label: "NVIDIA NIM",
+    },
+    SetupModelOption {
+        provider: "huggingface",
+        model: "huggingface:Qwen/Qwen3.5-397B-A17B",
+        label: "Hugging Face Router",
+    },
+    SetupModelOption {
+        provider: "opencode-go",
+        model: "opencode-go:kimi-k2.6",
+        label: "OpenCode Go",
+    },
+    SetupModelOption {
+        provider: "opencode-zen",
+        model: "opencode-zen:gpt-5.4",
+        label: "OpenCode Zen",
+    },
+    SetupModelOption {
+        provider: "kilocode",
+        model: "kilocode:openai/gpt-5.4",
+        label: "KiloCode",
+    },
+    SetupModelOption {
+        provider: "ai-gateway",
+        model: "ai-gateway:openai/gpt-5.4",
+        label: "Vercel AI Gateway",
+    },
+    SetupModelOption {
+        provider: "arcee",
+        model: "arcee:trinity-large-preview",
+        label: "Arcee AI",
+    },
+    SetupModelOption {
+        provider: "xiaomi",
+        model: "xiaomi:mimo-v2.5-pro",
+        label: "Xiaomi MiMo",
+    },
+    SetupModelOption {
+        provider: "ollama-cloud",
+        model: "ollama-cloud:llama3.1:8b",
+        label: "Ollama Cloud",
+    },
+    SetupModelOption {
+        provider: "copilot",
+        model: "copilot:gpt-5.4",
+        label: "GitHub Copilot",
+    },
+];
+
+fn default_setup_model_choice() -> usize {
+    SETUP_MODEL_OPTIONS
+        .iter()
+        .position(|option| option.provider == "nous")
+        .map(|idx| idx + 1)
+        .unwrap_or(1)
+}
+
+fn setup_option_from_choice(choice: &str) -> &'static SetupModelOption {
+    let idx = choice.trim().parse::<usize>().ok().filter(|n| *n >= 1);
+    idx.and_then(|n| SETUP_MODEL_OPTIONS.get(n - 1))
+        .unwrap_or(&SETUP_MODEL_OPTIONS[0])
 }
 
 fn setup_provider_display(provider: &str) -> &'static str {
     match provider {
         "openai" => "OpenAI",
+        "openai-codex" => "OpenAI Codex",
         "anthropic" => "Anthropic",
+        "google-gemini-cli" => "Google Gemini CLI",
+        "gemini" => "Google AI Studio",
         "openrouter" => "OpenRouter",
+        "qwen" => "Alibaba DashScope",
+        "alibaba" => "Alibaba Cloud DashScope",
+        "qwen-oauth" => "Qwen OAuth",
+        "alibaba-coding-plan" => "Alibaba Coding Plan",
+        "deepseek" => "DeepSeek",
+        "kimi-coding" => "Kimi Coding",
+        "kimi-coding-cn" => "Kimi Coding CN",
+        "minimax" => "MiniMax",
+        "minimax-cn" => "MiniMax CN",
+        "stepfun" => "StepFun",
         "nous" => "Nous",
+        "ai-gateway" => "Vercel AI Gateway",
+        "arcee" => "Arcee",
+        "bedrock" => "AWS Bedrock",
+        "copilot" => "GitHub Copilot",
+        "huggingface" => "Hugging Face",
+        "kilocode" => "KiloCode",
+        "nvidia" => "NVIDIA NIM",
+        "ollama-cloud" => "Ollama Cloud",
+        "opencode-go" => "OpenCode Go",
+        "opencode-zen" => "OpenCode Zen",
+        "xai" => "xAI",
+        "xiaomi" => "Xiaomi MiMo",
+        "zai" => "Z.AI / GLM",
         _ => "Provider",
     }
 }
@@ -6364,9 +6663,61 @@ fn setup_provider_env_keys(provider: &str) -> &'static [&'static str] {
     match provider {
         "openai" => SETUP_OPENAI_ENV_KEYS,
         "anthropic" => SETUP_ANTHROPIC_ENV_KEYS,
+        "openai-codex" => SETUP_OPENAI_CODEX_ENV_KEYS,
+        "google-gemini-cli" => SETUP_GOOGLE_GEMINI_CLI_ENV_KEYS,
+        "gemini" => SETUP_GEMINI_ENV_KEYS,
         "openrouter" => SETUP_OPENROUTER_ENV_KEYS,
+        "qwen" | "alibaba" => SETUP_QWEN_ENV_KEYS,
+        "qwen-oauth" => SETUP_QWEN_OAUTH_ENV_KEYS,
+        "alibaba-coding-plan" => SETUP_ALIBABA_CODING_PLAN_ENV_KEYS,
+        "deepseek" => SETUP_DEEPSEEK_ENV_KEYS,
+        "kimi-coding" => SETUP_KIMI_CODING_ENV_KEYS,
+        "kimi-coding-cn" => SETUP_KIMI_CODING_CN_ENV_KEYS,
+        "minimax" => SETUP_MINIMAX_ENV_KEYS,
+        "minimax-cn" => SETUP_MINIMAX_CN_ENV_KEYS,
+        "stepfun" => SETUP_STEPFUN_ENV_KEYS,
         "nous" => SETUP_NOUS_ENV_KEYS,
+        "ai-gateway" => SETUP_AI_GATEWAY_ENV_KEYS,
+        "arcee" => SETUP_ARCEE_ENV_KEYS,
+        "bedrock" => SETUP_BEDROCK_ENV_KEYS,
+        "copilot" => SETUP_COPILOT_ENV_KEYS,
+        "huggingface" => SETUP_HUGGINGFACE_ENV_KEYS,
+        "kilocode" => SETUP_KILOCODE_ENV_KEYS,
+        "nvidia" => SETUP_NVIDIA_ENV_KEYS,
+        "ollama-cloud" => SETUP_OLLAMA_CLOUD_ENV_KEYS,
+        "opencode-go" => SETUP_OPENCODE_GO_ENV_KEYS,
+        "opencode-zen" => SETUP_OPENCODE_ZEN_ENV_KEYS,
+        "xai" => SETUP_XAI_ENV_KEYS,
+        "xiaomi" => SETUP_XIAOMI_ENV_KEYS,
+        "zai" => SETUP_ZAI_ENV_KEYS,
         _ => &[],
+    }
+}
+
+fn setup_provider_default_base_url(provider: &str) -> Option<&'static str> {
+    match provider {
+        "openai-codex" => Some("https://chatgpt.com/backend-api/codex"),
+        "google-gemini-cli" => Some("cloudcode-pa://google"),
+        "gemini" => Some("https://generativelanguage.googleapis.com/v1beta"),
+        "qwen" | "alibaba" => Some("https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
+        "alibaba-coding-plan" => Some("https://coding-intl.dashscope.aliyuncs.com/v1"),
+        "deepseek" => Some("https://api.deepseek.com/v1"),
+        "kimi-coding" => Some("https://api.moonshot.ai/v1"),
+        "kimi-coding-cn" => Some("https://api.moonshot.cn/v1"),
+        "minimax-cn" => Some("https://api.minimaxi.com/anthropic"),
+        "stepfun" => Some("https://api.stepfun.ai/step_plan/v1"),
+        "ai-gateway" => Some("https://ai-gateway.vercel.sh/v1"),
+        "arcee" => Some("https://api.arcee.ai/api/v1"),
+        "huggingface" => Some("https://router.huggingface.co/v1"),
+        "kilocode" => Some("https://api.kilo.ai/api/gateway"),
+        "nvidia" => Some("https://integrate.api.nvidia.com/v1"),
+        "ollama-cloud" => Some("https://ollama.com/v1"),
+        "opencode-go" => Some("https://opencode.ai/zen/go/v1"),
+        "opencode-zen" => Some("https://opencode.ai/zen/v1"),
+        "xai" => Some("https://api.x.ai/v1"),
+        "xiaomi" => Some("https://api.xiaomimimo.com/v1"),
+        "zai" => Some("https://api.z.ai/api/paas/v4"),
+        _ => None,
     }
 }
 
@@ -6525,31 +6876,24 @@ async fn run_setup() -> Result<(), AgentError> {
     maybe_import_legacy_env(&mut reader, &env_path)?;
 
     // 3. Prompt for model/provider
-    println!("\nAvailable models:");
-    println!("  1) openai:gpt-4o");
-    println!("  2) openai:gpt-4o-mini     (fast & cheap)");
-    println!("  3) anthropic:claude-3-5-sonnet");
-    println!("  4) openrouter:auto        (multi-provider)");
-    println!("  5) nous:hermes-3-llama-3.1-405b (recommended)");
-    let has_nous_key = std::env::var("NOUS_API_KEY")
-        .ok()
-        .is_some_and(|v| !v.trim().is_empty())
-        || read_env_key(&env_path, "NOUS_API_KEY").is_some();
-    let default_model_choice = "5";
-    if !has_nous_key {
-        println!("  (Nous is the default; setup can complete OAuth login automatically.)");
+    println!("\nAvailable models/providers:");
+    for (idx, option) in SETUP_MODEL_OPTIONS.iter().enumerate() {
+        println!("  {:>2}) {:<52} {}", idx + 1, option.model, option.label);
     }
+    let default_model_choice = default_setup_model_choice();
+    println!("  (Nous remains the default; OAuth can be completed during setup.)");
     print!("Choose model [{}]: ", default_model_choice);
     io::stdout().flush().ok();
     let mut model_choice = String::new();
     reader.read_line(&mut model_choice).ok();
     let model_choice = if model_choice.trim().is_empty() {
-        default_model_choice
+        default_model_choice.to_string()
     } else {
-        model_choice.trim()
+        model_choice.trim().to_string()
     };
-    let model = setup_model_from_choice(model_choice);
-    let selected_provider = setup_provider_from_model(model).to_string();
+    let selected_option = setup_option_from_choice(&model_choice);
+    let model = selected_option.model;
+    let selected_provider = selected_option.provider.to_string();
     let selected_provider_label = setup_provider_display(&selected_provider);
     let selected_provider_env_keys = setup_provider_env_keys(&selected_provider);
     let env_keys_display = selected_provider_env_keys.join("/");
@@ -6561,44 +6905,171 @@ async fn run_setup() -> Result<(), AgentError> {
             .is_some_and(|v| !v.trim().is_empty())
             || read_env_key(&env_path, key).is_some()
     });
-    let mut nous_oauth_state: Option<hermes_cli::auth::NousAuthState> = None;
     let mut api_key = String::new();
     let mut stored_provider_secret_in_vault = false;
+    let mut selected_base_url_override =
+        setup_provider_default_base_url(&selected_provider).map(ToString::to_string);
+    let mut selected_oauth_token_url: Option<String> = None;
+    let mut selected_oauth_client_id: Option<String> = None;
 
-    if selected_provider == "nous" {
-        print!("\nAuthenticate with Nous Portal OAuth device login now? [Y/n]: ");
+    if provider_supports_oauth(&selected_provider) {
+        print!(
+            "\nAuthenticate with {} OAuth flow now? [Y/n]: ",
+            selected_provider_label
+        );
         io::stdout().flush().ok();
         let mut answer = String::new();
         reader.read_line(&mut answer).ok();
-        let use_nous_oauth = !matches!(answer.trim().to_ascii_lowercase().as_str(), "n" | "no");
-        if use_nous_oauth {
-            let state = login_nous_device_code(NousDeviceCodeOptions::default()).await?;
-            let auth_path = save_nous_auth_state(&state)?;
-            println!("  ✓ Saved Nous OAuth state: {}", auth_path.display());
-            let runtime_key = state.runtime_api_key().ok_or_else(|| {
-                AgentError::AuthFailed(
-                    "Nous login succeeded but no runtime API key was returned".into(),
-                )
-            })?;
+        let use_oauth = !matches!(answer.trim().to_ascii_lowercase().as_str(), "n" | "no");
+        if use_oauth {
             let store = FileTokenStore::new(config_dir.join("auth").join("tokens.json")).await?;
             let manager = AuthManager::new(store);
-            manager
-                .save_credential(OAuthCredential {
-                    provider: "nous".to_string(),
-                    access_token: runtime_key,
-                    refresh_token: state.refresh_token.clone(),
-                    token_type: state.token_type.clone(),
-                    scope: state.scope.clone(),
-                    expires_at: parse_rfc3339_utc(state.agent_key_expires_at.as_deref())
-                        .or_else(|| parse_rfc3339_utc(state.expires_at.as_deref())),
-                })
-                .await?;
-            stored_provider_secret_in_vault = true;
-            nous_oauth_state = Some(state);
+            match selected_provider.as_str() {
+                "nous" => {
+                    let state = login_nous_device_code(NousDeviceCodeOptions::default()).await?;
+                    let auth_path = save_nous_auth_state(&state)?;
+                    println!("  ✓ Saved Nous OAuth state: {}", auth_path.display());
+                    let runtime_key = state.runtime_api_key().ok_or_else(|| {
+                        AgentError::AuthFailed(
+                            "Nous login succeeded but no runtime API key was returned".into(),
+                        )
+                    })?;
+                    manager
+                        .save_credential(OAuthCredential {
+                            provider: "nous".to_string(),
+                            access_token: runtime_key,
+                            refresh_token: state.refresh_token.clone(),
+                            token_type: state.token_type.clone(),
+                            scope: state.scope.clone(),
+                            expires_at: parse_rfc3339_utc(state.agent_key_expires_at.as_deref())
+                                .or_else(|| parse_rfc3339_utc(state.expires_at.as_deref())),
+                        })
+                        .await?;
+                    selected_base_url_override = Some(state.inference_base_url.clone());
+                    selected_oauth_token_url = Some(format!(
+                        "{}/api/oauth/token",
+                        state.portal_base_url.trim_end_matches('/')
+                    ));
+                    selected_oauth_client_id = Some(state.client_id.clone());
+                    stored_provider_secret_in_vault = true;
+                }
+                "openai-codex" => {
+                    let state =
+                        login_openai_codex_device_code(CodexDeviceCodeOptions::default()).await?;
+                    let auth_path = save_codex_auth_state(&state)?;
+                    println!(
+                        "  ✓ Saved OpenAI Codex OAuth state: {}",
+                        auth_path.display()
+                    );
+                    manager
+                        .save_credential(OAuthCredential {
+                            provider: "openai-codex".to_string(),
+                            access_token: state.tokens.access_token.clone(),
+                            refresh_token: state.tokens.refresh_token.clone(),
+                            token_type: "bearer".to_string(),
+                            scope: None,
+                            expires_at: state
+                                .tokens
+                                .expires_in
+                                .filter(|secs| *secs > 0)
+                                .map(|secs| chrono::Utc::now() + chrono::Duration::seconds(secs)),
+                        })
+                        .await?;
+                    selected_oauth_token_url = Some(CODEX_OAUTH_TOKEN_URL.to_string());
+                    selected_oauth_client_id = Some(CODEX_OAUTH_CLIENT_ID.to_string());
+                    selected_base_url_override = Some(DEFAULT_CODEX_BASE_URL.to_string());
+                    stored_provider_secret_in_vault = true;
+                }
+                "anthropic" => {
+                    let state =
+                        login_anthropic_oauth(AnthropicOAuthLoginOptions::default()).await?;
+                    let auth_state = serde_json::json!({
+                        "access_token": state.access_token.clone(),
+                        "refresh_token": state.refresh_token.clone(),
+                        "expires_at_ms": state.expires_at_ms,
+                        "source": "hermes_pkce",
+                    });
+                    let auth_path = save_provider_auth_state("anthropic", auth_state)?;
+                    println!("  ✓ Saved Anthropic OAuth state: {}", auth_path.display());
+                    manager
+                        .save_credential(OAuthCredential {
+                            provider: "anthropic".to_string(),
+                            access_token: state.access_token.clone(),
+                            refresh_token: state.refresh_token.clone(),
+                            token_type: "bearer".to_string(),
+                            scope: None,
+                            expires_at: parse_unix_millis_utc(state.expires_at_ms),
+                        })
+                        .await?;
+                    selected_oauth_token_url = Some(ANTHROPIC_OAUTH_TOKEN_URL.to_string());
+                    selected_oauth_client_id = Some(ANTHROPIC_OAUTH_CLIENT_ID.to_string());
+                    stored_provider_secret_in_vault = true;
+                }
+                "qwen-oauth" => {
+                    let creds = resolve_qwen_runtime_credentials(
+                        false,
+                        true,
+                        QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+                    )
+                    .await?;
+                    let auth_state = serde_json::to_value(&creds.tokens)
+                        .map_err(|e| AgentError::Config(format!("encode state: {}", e)))?;
+                    let auth_path = save_provider_auth_state("qwen-oauth", auth_state)?;
+                    println!("  ✓ Saved Qwen OAuth state: {}", auth_path.display());
+                    manager
+                        .save_credential(OAuthCredential {
+                            provider: "qwen-oauth".to_string(),
+                            access_token: creds.api_key.clone(),
+                            refresh_token: creds.refresh_token.clone(),
+                            token_type: creds.token_type.clone(),
+                            scope: None,
+                            expires_at: parse_unix_millis_utc(creds.expires_at_ms),
+                        })
+                        .await?;
+                    selected_base_url_override = Some(creds.base_url.clone());
+                    selected_oauth_token_url = Some(QWEN_OAUTH_TOKEN_URL.to_string());
+                    selected_oauth_client_id = Some(QWEN_OAUTH_CLIENT_ID.to_string());
+                    stored_provider_secret_in_vault = true;
+                }
+                "google-gemini-cli" => {
+                    let creds =
+                        login_google_gemini_cli_oauth(GeminiOAuthLoginOptions::default()).await?;
+                    let auth_state = serde_json::json!({
+                        "access_token": creds.api_key.clone(),
+                        "refresh_token": creds.refresh_token.clone(),
+                        "expires_at_ms": creds.expires_at_ms,
+                        "email": creds.email.clone(),
+                        "project_id": creds.project_id.clone(),
+                        "source": creds.source.clone(),
+                    });
+                    let auth_path = save_provider_auth_state("google-gemini-cli", auth_state)?;
+                    println!(
+                        "  ✓ Saved Google Gemini OAuth state: {}",
+                        auth_path.display()
+                    );
+                    manager
+                        .save_credential(OAuthCredential {
+                            provider: "google-gemini-cli".to_string(),
+                            access_token: creds.api_key.clone(),
+                            refresh_token: creds.refresh_token.clone(),
+                            token_type: "bearer".to_string(),
+                            scope: None,
+                            expires_at: parse_unix_millis_utc(creds.expires_at_ms),
+                        })
+                        .await?;
+                    selected_base_url_override = Some(creds.base_url.clone());
+                    stored_provider_secret_in_vault = true;
+                }
+                _ => {}
+            }
         }
     }
 
-    if nous_oauth_state.is_none() {
+    if selected_provider == "bedrock" {
+        println!(
+            "\nAWS Bedrock uses AWS credential chain (env/profile/role). Skipping API key prompt."
+        );
+    } else if !stored_provider_secret_in_vault {
         if has_selected_provider_env_key {
             print!(
                 "\n{} API key (leave blank to keep {} from environment/{}): ",
@@ -6684,19 +7155,6 @@ async fn run_setup() -> Result<(), AgentError> {
         selected_provider.as_str(),
     );
 
-    if let Some(state) = &nous_oauth_state {
-        let provider = disk
-            .llm_providers
-            .entry("nous".to_string())
-            .or_insert_with(hermes_config::LlmProviderConfig::default);
-        provider.base_url = Some(state.inference_base_url.clone());
-        provider.oauth_token_url = Some(format!(
-            "{}/api/oauth/token",
-            state.portal_base_url.trim_end_matches('/')
-        ));
-        provider.oauth_client_id = Some(state.client_id.clone());
-    }
-
     if !api_key.is_empty() && !stored_provider_secret_in_vault {
         let provider = disk
             .llm_providers
@@ -6715,6 +7173,19 @@ async fn run_setup() -> Result<(), AgentError> {
             env_keys_display,
             env_path.display(),
         );
+    }
+    let provider = disk
+        .llm_providers
+        .entry(selected_provider.clone())
+        .or_insert_with(hermes_config::LlmProviderConfig::default);
+    if let Some(base_url) = selected_base_url_override {
+        provider.base_url = Some(base_url);
+    }
+    if let Some(token_url) = selected_oauth_token_url {
+        provider.oauth_token_url = Some(token_url);
+    }
+    if let Some(client_id) = selected_oauth_client_id {
+        provider.oauth_client_id = Some(client_id);
     }
     validate_config(&disk).map_err(|e| AgentError::Config(e.to_string()))?;
     save_config_yaml(&config_path, &disk).map_err(|e| AgentError::Config(e.to_string()))?;
@@ -8396,6 +8867,11 @@ mod tests {
         assert_eq!(normalize_auth_provider("qwen-cli"), "qwen-oauth");
         assert_eq!(normalize_auth_provider("gemini-cli"), "google-gemini-cli");
         assert_eq!(normalize_auth_provider("step-plan"), "stepfun");
+        assert_eq!(normalize_auth_provider("aigateway"), "ai-gateway");
+        assert_eq!(normalize_auth_provider("moonshot"), "kimi-coding");
+        assert_eq!(normalize_auth_provider("z-ai"), "zai");
+        assert_eq!(normalize_auth_provider("grok"), "xai");
+        assert_eq!(normalize_auth_provider("hf"), "huggingface");
         assert_eq!(normalize_auth_provider("api-server"), "api_server");
         assert_eq!(normalize_auth_provider("mm"), "mattermost");
     }
@@ -8449,17 +8925,48 @@ mod tests {
 
     #[test]
     fn setup_model_choice_supports_nous() {
-        assert_eq!(setup_model_from_choice("5"), "nous:hermes-3-llama-3.1-405b");
-        assert_eq!(
-            setup_provider_from_model("nous:hermes-3-llama-3.1-405b"),
-            "nous"
-        );
+        let default = default_setup_model_choice().to_string();
+        let option = setup_option_from_choice(&default);
+        assert_eq!(option.model, "nous:hermes-3-llama-3.1-405b");
+        assert_eq!(option.provider, "nous");
     }
 
     #[test]
     fn setup_provider_env_keys_include_nous() {
         assert_eq!(setup_provider_display("nous"), "Nous");
         assert_eq!(setup_provider_env_keys("nous"), &["NOUS_API_KEY"]);
+        assert_eq!(setup_provider_display("alibaba"), "Alibaba Cloud DashScope");
+        assert_eq!(
+            setup_provider_env_keys("google-gemini-cli"),
+            &["HERMES_GEMINI_OAUTH_API_KEY"]
+        );
+        assert_eq!(
+            setup_provider_default_base_url("ai-gateway"),
+            Some("https://ai-gateway.vercel.sh/v1")
+        );
+        assert!(
+            SETUP_MODEL_OPTIONS.len() >= 20,
+            "setup provider catalog unexpectedly narrow"
+        );
+    }
+
+    #[test]
+    fn oauth_provider_set_matches_snapshot_registry() {
+        let expected: std::collections::BTreeSet<&str> =
+            hermes_cli::providers::OAUTH_CAPABLE_PROVIDERS
+                .iter()
+                .copied()
+                .collect();
+        let actual: std::collections::BTreeSet<&str> = [
+            "anthropic",
+            "nous",
+            "openai-codex",
+            "qwen-oauth",
+            "google-gemini-cli",
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(actual, expected);
     }
 
     #[test]
