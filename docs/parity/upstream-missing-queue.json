@@ -1893,9 +1893,82 @@
       "subject": "fix(tui): restore voice/panic handlers + scope fuzzy paths to cwd",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "ui-tui/src/components/appLayout.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "TS ui-tui overlay regression fix; Rust TUI stack is architecture-different and this exact path is non-applicable.",
+      "owner": "",
+      "sha": "7c59e1a87114de5ec6d7c53253a992e4159998e5",
+      "subject": "fix(tui): keep FloatingOverlays visible when input is blocked",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
+        "tools/mcp_tool.py"
+      ],
+      "files_touched": 1,
+      "notes": "ported in Rust: crates/hermes-mcp/src/transport.rs now drains stdio child stderr into ~/.hermes-agent-ultra/logs/mcp-stderr.log instead of exposing to user TTY/backpressure.",
+      "owner": "",
+      "sha": "379b2273d95566e8a69eadabceabc6ee08521b49",
+      "subject": "fix(mcp): route stdio subprocess stderr to log file, not user TTY (#14901)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/config.py",
+        "skills/creative/design-md/SKILL.md",
+        "skills/creative/design-md/templates/starter.md",
+        "tests/tools/test_tool_output_limits.py",
+        "tools/file_operations.py",
+        "tools/terminal_tool.py",
+        "tools/tool_output_limits.py",
+        "website/docs/user-guide/configuration.md"
+      ],
+      "files_touched": 8,
+      "notes": "Python-only tool_output limits + upstream skills vendoring change; Rust runtime is architecture-different and skills catalog vendoring is tracked as intentional divergence.",
+      "owner": "",
+      "sha": "983bbe2d40f7b23b263c35d98e7454fcdd474cf1",
+      "subject": "feat(skills): add design-md skill for Google's DESIGN.md spec (#14876)",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
+        "tests/tools/test_mcp_tool.py",
+        "tools/mcp_tool.py"
+      ],
+      "files_touched": 2,
+      "notes": "ported in Rust: HTTP MCP transports now seed MCP-Protocol-Version header before initialize/message calls (crates/hermes-mcp/src/transport.rs).",
+      "owner": "",
+      "sha": "3ccda2aa059f8b50d58688ca5836dfe9c716d941",
+      "subject": "fix(mcp): seed protocol header before HTTP initialize",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "release AUTHOR_MAP maintenance in upstream Python release script; not applicable to Rust repo release flow.",
+      "owner": "",
+      "sha": "eb93f88e1d42cae0c552a978e1344cb68bc5ea79",
+      "subject": "chore(release): add MattMaximo to AUTHOR_MAP for PR #10450 salvage",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
     }
   ],
-  "generated_at_utc": "2026-04-24T01:29:21.420965+00:00",
+  "generated_at_utc": "2026-04-24T05:12:41.140513+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -1903,16 +1976,17 @@
   },
   "summary": {
     "by_disposition": {
-      "ported": 11,
-      "superseded": 121
+      "ported": 13,
+      "superseded": 124
     },
     "by_target_ticket": {
-      "20": 42,
-      "22": 31,
+      "20": 43,
+      "21": 1,
+      "22": 32,
       "23": 5,
       "25": 1,
-      "26": 53
+      "26": 55
     },
-    "total_commits": 132
+    "total_commits": 137
   }
 }

@@ -1173,3 +1173,29 @@
   - `python3 scripts/generate-upstream-patch-queue.py --max-commits 0 --no-fetch`
   - `python3 scripts/generate-workstream-status.py`
   - `python3 scripts/generate-global-parity-proof.py --check-ci --check-release`
+
+## 2026-04-24 impl-21 (new upstream burst triage + MCP transport parity)
+- Scope:
+  - Process newly arrived upstream tranche after `upstream/main` moved from `6fdbf2f2d` to `eb93f88e1`.
+  - Close all newly pending queue items while preserving functional release-gate pass criteria.
+- New upstream burst observed:
+  - `main..upstream/main`: `143` non-merge commits.
+  - Queue grew from `132` to `137` tracked commits, with `5` new `pending` commits.
+- Rust parity ports implemented:
+  - `3ccda2aa059f` (`fix(mcp): seed protocol header before HTTP initialize`)
+    - Ported in Rust by seeding `MCP-Protocol-Version: 2025-03-26` in HTTP MCP transports.
+  - `379b2273d955` (`fix(mcp): route stdio subprocess stderr to log file, not user TTY`)
+    - Ported in Rust by draining child stdio MCP stderr into `~/.hermes-agent-ultra/logs/mcp-stderr.log`.
+    - Added background stderr drain task lifecycle handling in `StdioTransport`.
+- Remaining new commits dispositioned:
+  - `7c59e1a87114` (TS `ui-tui` overlay fix): `superseded` (architecture-different Rust TUI stack).
+  - `983bbe2d40f7` (Python tool output limits + skill vendoring): `superseded` (Python path + intentional skills vendoring divergence policy).
+  - `eb93f88e1d42` (AUTHOR_MAP maintenance): `superseded`.
+- Verification:
+  - `cargo test -p hermes-mcp -- --nocapture`
+  - `python3 scripts/generate-upstream-patch-queue.py --max-commits 0 --no-fetch`
+  - `python3 scripts/generate-workstream-status.py`
+  - `python3 scripts/generate-global-parity-proof.py --check-ci --check-release`
+- Outcome:
+  - Queue summary: `total=137`, `ported=13`, `superseded=124`, `pending=0`.
+  - Gates: CI `PASS` (tree-drift), release `PASS` (functional).
