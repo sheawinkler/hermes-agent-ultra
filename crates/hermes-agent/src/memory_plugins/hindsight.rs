@@ -81,6 +81,7 @@ struct HindsightConfig {
     api_key: String,
     api_url: String,
     bank_id: String,
+    bank_id_template: String,
     budget: String,
     mode: String,
     memory_mode: String,
@@ -94,6 +95,7 @@ struct HindsightConfig {
     recall_prompt_preamble: String,
     bank_mission: String,
     retain_async: bool,
+    timeout_secs: u64,
 }
 
 impl HindsightConfig {
@@ -102,6 +104,7 @@ impl HindsightConfig {
             api_key: std::env::var("HINDSIGHT_API_KEY").unwrap_or_default(),
             api_url: std::env::var("HINDSIGHT_API_URL").ok().unwrap_or_default(),
             bank_id: std::env::var("HINDSIGHT_BANK_ID").unwrap_or_else(|_| "hermes".into()),
+            bank_id_template: std::env::var("HINDSIGHT_BANK_ID_TEMPLATE").unwrap_or_default(),
             budget: std::env::var("HINDSIGHT_BUDGET").unwrap_or_else(|_| "mid".into()),
             mode: std::env::var("HINDSIGHT_MODE").unwrap_or_else(|_| "cloud".into()),
             memory_mode: "hybrid".into(),
@@ -115,6 +118,10 @@ impl HindsightConfig {
             recall_prompt_preamble: String::new(),
             bank_mission: String::new(),
             retain_async: true,
+            timeout_secs: std::env::var("HINDSIGHT_TIMEOUT")
+                .ok()
+                .and_then(|v| v.parse::<u64>().ok())
+                .unwrap_or(90),
         };
 
         // Try profile-scoped config first, then legacy path
@@ -167,6 +174,9 @@ impl HindsightConfig {
                         config.budget = budget.to_string();
                     }
                 }
+                if let Some(template) = raw.get("bank_id_template").and_then(|v| v.as_str()) {
+                    config.bank_id_template = template.to_string();
+                }
                 if let Some(mm) = raw.get("memory_mode").and_then(|v| v.as_str()) {
                     if ["context", "tools", "hybrid"].contains(&mm) {
                         config.memory_mode = mm.to_string();
@@ -203,6 +213,13 @@ impl HindsightConfig {
                 }
                 if let Some(ra) = raw.get("retain_async").and_then(|v| v.as_bool()) {
                     config.retain_async = ra;
+                }
+                if let Some(timeout) = raw
+                    .get("hindsight_timeout")
+                    .or(raw.get("timeout"))
+                    .and_then(|v| v.as_u64())
+                {
+                    config.timeout_secs = timeout.max(1);
                 }
             }
         }
@@ -275,7 +292,27 @@ impl MemoryProviderPlugin for HindsightPlugin {
     }
 
     fn initialize(&self, session_id: &str, hermes_home: &str) {
-        let config = HindsightConfig::load(hermes_home);
+        let mut config = HindsightConfig::load(hermes_home);
+        config.bank_id = resolve_bank_id_template(
+            &config.bank_id_template,
+            &config.bank_id,
+            &[
+                (
+                    "profile",
+                    std::env::var("HERMES_PROFILE").unwrap_or_default(),
+                ),
+                (
+                    "workspace",
+                    std::env::var("HERMES_WORKSPACE").unwrap_or_default(),
+                ),
+                (
+                    "platform",
+                    std::env::var("HERMES_PLATFORM").unwrap_or_default(),
+                ),
+                ("user", std::env::var("HERMES_USER_ID").unwrap_or_default()),
+                ("session", session_id.to_string()),
+            ],
+        );
         tracing::info!(
             "Hindsight initialized: mode={}, api_url={}, bank={}, budget={}, memory_mode={}",
             config.mode,
@@ -370,7 +407,10 @@ impl MemoryProviderPlugin for HindsightPlugin {
         let cfg = config.clone();
         let out = Arc::clone(&self.prefetch_result);
         std::thread::spawn(move || {
-            let client = match Client::builder().timeout(Duration::from_secs(45)).build() {
+            let client = match Client::builder()
+                .timeout(Duration::from_secs(cfg.timeout_secs))
+                .build()
+            {
                 Ok(c) => c,
                 Err(e) => {
                     tracing::debug!("Hindsight prefetch client build failed: {}", e);
@@ -446,7 +486,10 @@ impl MemoryProviderPlugin for HindsightPlugin {
         };
 
         std::thread::spawn(move || {
-            let client = match Client::builder().timeout(Duration::from_secs(120)).build() {
+            let client = match Client::builder()
+                .timeout(Duration::from_secs(cfg.timeout_secs))
+                .build()
+            {
                 Ok(c) => c,
                 Err(e) => {
                     tracing::debug!("Hindsight sync client: {}", e);
@@ -493,7 +536,10 @@ impl MemoryProviderPlugin for HindsightPlugin {
             None => return json!({"error": "Hindsight not initialized"}).to_string(),
         };
 
-        let client = match Client::builder().timeout(Duration::from_secs(90)).build() {
+        let client = match Client::builder()
+            .timeout(Duration::from_secs(cfg.timeout_secs))
+            .build()
+        {
             Ok(c) => c,
             Err(e) => return json!({"error": format!("HTTP client: {}", e)}).to_string(),
         };
@@ -572,6 +618,8 @@ impl MemoryProviderPlugin for HindsightPlugin {
             {"key": "api_url", "description": "Hindsight API URL", "default": DEFAULT_API_URL},
             {"key": "api_key", "description": "Hindsight API key", "secret": true, "env_var": "HINDSIGHT_API_KEY", "url": "https://ui.hindsight.vectorize.io"},
             {"key": "bank_id", "description": "Memory bank name", "default": "hermes"},
+            {"key": "bank_id_template", "description": "Optional dynamic bank template with placeholders: {profile}, {workspace}, {platform}, {user}, {session}", "default": ""},
+            {"key": "hindsight_timeout", "description": "HTTP timeout in seconds", "default": 90},
             {"key": "recall_budget", "description": "Recall thoroughness", "default": "mid", "choices": ["low", "mid", "high"]},
             {"key": "memory_mode", "description": "Memory integration mode", "default": "hybrid", "choices": ["hybrid", "context", "tools"]}
         ]))
@@ -591,6 +639,54 @@ fn urlencode_path(seg: &str) -> String {
             _ => format!("%{:02X}", c as u8),
         })
         .collect()
+}
+
+fn sanitize_bank_segment(value: &str) -> String {
+    if value.is_empty() {
+        return String::new();
+    }
+    let mut out = String::new();
+    let mut prev_dash = false;
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+            out.push(ch);
+            prev_dash = false;
+        } else if !prev_dash {
+            out.push('-');
+            prev_dash = true;
+        }
+    }
+    out.trim_matches(|c| c == '-' || c == '_').to_string()
+}
+
+fn resolve_bank_id_template(
+    template: &str,
+    fallback: &str,
+    placeholders: &[(&str, String)],
+) -> String {
+    if template.trim().is_empty() {
+        return fallback.to_string();
+    }
+    let mut rendered = template.to_string();
+    for (key, value) in placeholders {
+        let token = format!("{{{}}}", key);
+        rendered = rendered.replace(&token, &sanitize_bank_segment(value));
+    }
+    if rendered.contains('{') || rendered.contains('}') {
+        return fallback.to_string();
+    }
+    while rendered.contains("--") {
+        rendered = rendered.replace("--", "-");
+    }
+    while rendered.contains("__") {
+        rendered = rendered.replace("__", "_");
+    }
+    let normalized = rendered.trim_matches(|c| c == '-' || c == '_').to_string();
+    if normalized.is_empty() {
+        fallback.to_string()
+    } else {
+        normalized
+    }
 }
 
 fn hindsight_recall(
@@ -734,6 +830,7 @@ mod tests {
             api_key: "test".into(),
             api_url: DEFAULT_API_URL.into(),
             bank_id: "hermes".into(),
+            bank_id_template: String::new(),
             budget: "mid".into(),
             mode: "cloud".into(),
             memory_mode: "context".into(),
@@ -747,6 +844,7 @@ mod tests {
             recall_prompt_preamble: String::new(),
             bank_mission: String::new(),
             retain_async: true,
+            timeout_secs: 90,
         });
         assert!(plugin.get_tool_schemas().is_empty());
     }
@@ -758,6 +856,7 @@ mod tests {
             api_key: "test".into(),
             api_url: DEFAULT_API_URL.into(),
             bank_id: "hermes".into(),
+            bank_id_template: String::new(),
             budget: "mid".into(),
             mode: "cloud".into(),
             memory_mode: mode.into(),
@@ -771,6 +870,7 @@ mod tests {
             recall_prompt_preamble: String::new(),
             bank_mission: String::new(),
             retain_async: true,
+            timeout_secs: 90,
         };
 
         *plugin.config.lock().unwrap() = Some(make_config("hybrid"));
@@ -788,5 +888,31 @@ mod tests {
         let plugin = HindsightPlugin::new();
         let result = plugin.handle_tool_call("hindsight_recall", &json!({}));
         assert!(result.contains("error"));
+    }
+
+    #[test]
+    fn test_resolve_bank_id_template_sanitizes_and_collapses() {
+        let bank = resolve_bank_id_template(
+            "hermes-{profile}-{user}-{session}",
+            "hermes",
+            &[
+                ("profile", "dev/workspace".to_string()),
+                ("workspace", String::new()),
+                ("platform", String::new()),
+                ("user", "u@id".to_string()),
+                ("session", "sess_123".to_string()),
+            ],
+        );
+        assert_eq!(bank, "hermes-dev-workspace-u-id-sess_123");
+    }
+
+    #[test]
+    fn test_resolve_bank_id_template_unknown_placeholder_falls_back() {
+        let bank = resolve_bank_id_template(
+            "hermes-{unknown}",
+            "fallback-bank",
+            &[("profile", "p1".to_string())],
+        );
+        assert_eq!(bank, "fallback-bank");
     }
 }

@@ -87,6 +87,8 @@ const CURATED_PROVIDER_MODELS: &[(&str, &[&str])] = &[
         &[
             "deepseek-chat",
             "deepseek-reasoner",
+            "deepseek-v4-pro",
+            "deepseek-v4-flash",
             "deepseek-v3.2",
             "deepseek-ai/deepseek-v3-2",
         ],
@@ -319,6 +321,13 @@ mod tests {
         assert!(is_models_dev_preferred_provider("google"));
         assert!(!is_models_dev_preferred_provider("openrouter"));
         assert!(!is_models_dev_preferred_provider("nous"));
+    }
+
+    #[test]
+    fn deepseek_curated_models_include_v4_variants() {
+        let models = provider_curated_models("deepseek");
+        assert!(models.contains(&"deepseek-v4-pro"));
+        assert!(models.contains(&"deepseek-v4-flash"));
     }
 
     #[tokio::test]
