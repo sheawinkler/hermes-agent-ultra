@@ -39,7 +39,7 @@ use crate::interrupt::InterruptController;
 type BoxSendFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
 /// Default wall-clock cap for a single child agent turn-chain.
-pub const DEFAULT_SUB_AGENT_TIMEOUT_SECS: u64 = 300;
+pub const DEFAULT_SUB_AGENT_TIMEOUT_SECS: u64 = 600;
 /// Floor on child max_turns regardless of parent budget.
 pub const SUB_AGENT_MIN_TURNS: u32 = 2;
 /// Ceiling on child max_turns to keep sub-tasks bounded.
