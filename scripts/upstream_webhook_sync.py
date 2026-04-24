@@ -861,6 +861,7 @@ def run_sync_for_event(
     conflict_label: str,
     skip_tests: bool,
     no_pr: bool,
+    draft_pr: bool,
     timeout_sec: int,
 ) -> tuple[int, str, str]:
     sync_script = os.path.join(repo_root, "scripts", "sync-upstream.sh")
@@ -888,6 +889,8 @@ def run_sync_for_event(
         cmd.append("--no-tests")
     if no_pr:
         cmd.append("--no-pr")
+    if draft_pr:
+        cmd.append("--draft-pr")
 
     LOG.info(
         "running sync for delivery=%s repo=%s ref=%s after=%s",
@@ -1077,6 +1080,7 @@ def worker_loop(args: argparse.Namespace) -> int:
                 conflict_label=args.conflict_label,
                 skip_tests=args.no_tests,
                 no_pr=args.no_pr,
+                draft_pr=args.draft_pr,
                 timeout_sec=args.sync_timeout_sec,
             )
             outcome = parse_report_status(report_path)
@@ -1150,6 +1154,7 @@ def worker_loop(args: argparse.Namespace) -> int:
                 conflict_label=args.conflict_label,
                 skip_tests=args.no_tests,
                 no_pr=args.no_pr,
+                draft_pr=args.draft_pr,
                 timeout_sec=args.sync_timeout_sec,
             )
             outcome = parse_report_status(report_path)
@@ -1223,6 +1228,7 @@ def worker_loop(args: argparse.Namespace) -> int:
             conflict_label=args.conflict_label,
             skip_tests=args.no_tests,
             no_pr=args.no_pr,
+            draft_pr=args.draft_pr,
             timeout_sec=args.sync_timeout_sec,
         )
         outcome = parse_report_status(report_path)
@@ -1312,6 +1318,12 @@ def build_parser() -> argparse.ArgumentParser:
     worker.add_argument("--conflict-label", default="upstream-sync-conflict")
     worker.add_argument("--no-tests", action="store_true", default=False)
     worker.add_argument("--no-pr", action="store_true", default=False)
+    worker.add_argument(
+        "--draft-pr",
+        action="store_true",
+        default=False,
+        help="Open sync PRs as draft (ignored when --no-pr is set)",
+    )
     worker.add_argument(
         "--disable-parity-drift-check",
         action="store_true",
