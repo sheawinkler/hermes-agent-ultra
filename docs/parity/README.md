@@ -32,6 +32,8 @@ By default this command fetches upstream directly from GitHub
 - `adapter-feature-matrix.md`: human-readable adapter matrix
 - `divergence-validation.json`: ownership/review freshness and coverage checks for intentional divergences
 - `global-parity-thresholds.json`: machine-readable CI/release parity thresholds
+  - `ci_thresholds`: tree-drift observability gate
+  - `release_thresholds`: functional parity gate (GPAR/workstream + divergence/test integrity)
 - `global-parity-proof.json`: consolidated parity proof with gate results for tickets #19-#28
 - `global-parity-proof.md`: human-readable parity proof summary
 - `shared-different-classification.json`: functional-vs-policy classification for shared-different files

@@ -14,12 +14,27 @@ def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def gate_mode(thresholds: dict[str, Any]) -> str:
+    mode = str(thresholds.get("gate_mode", "")).strip().lower()
+    return mode if mode else "legacy"
+
+
+def gate_metric_thresholds(thresholds: dict[str, Any]) -> dict[str, Any]:
+    metric_thresholds = thresholds.get("metric_thresholds")
+    if isinstance(metric_thresholds, dict):
+        return metric_thresholds
+    out: dict[str, Any] = {}
+    for key, value in thresholds.items():
+        if key in {"required_workstreams_complete", "gate_mode"}:
+            continue
+        out[key] = value
+    return out
+
+
 def evaluate_gate(metrics: dict[str, float], thresholds: dict[str, Any]) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
     passed = True
-    for key, limit in thresholds.items():
-        if key == "required_workstreams_complete":
-            continue
+    for key, limit in gate_metric_thresholds(thresholds).items():
         actual = metrics.get(key)
         if actual is None:
             checks.append({"metric": key, "status": "missing", "actual": None, "limit": limit})
@@ -145,10 +160,15 @@ def main() -> int:
         "max_unowned_divergences": float(divergence_summary.get("unowned", 0)),
         "max_divergence_review_overdue": float(divergence_summary.get("review_overdue", 0)),
         "min_test_intent_mapping_ratio": float(intent_summary.get("mapping_ratio", 0.0)),
+        "max_queue_pending_commits": float(
+            queue_summary.get("by_disposition", {}).get("pending", 0)
+        ),
     }
 
     ci_gate = evaluate_gate(metrics, thresholds.get("ci_thresholds", {}))
     release_gate = evaluate_gate(metrics, thresholds.get("release_thresholds", {}))
+    ci_gate["mode"] = gate_mode(thresholds.get("ci_thresholds", {}))
+    release_gate["mode"] = gate_mode(thresholds.get("release_thresholds", {}))
 
     required = thresholds.get("release_thresholds", {}).get("required_workstreams_complete", [])
     required_ok = all(bool(gpar_completion.get(ws_id, False)) for ws_id in required)
@@ -207,7 +227,9 @@ def main() -> int:
         "## Gate Status",
         "",
         f"- CI gate: **{'PASS' if ci_gate['pass'] else 'FAIL'}**",
+        f"- CI gate mode: `{ci_gate.get('mode', 'legacy')}`",
         f"- Release gate: **{'PASS' if release_gate['pass'] else 'FAIL'}**",
+        f"- Release gate mode: `{release_gate.get('mode', 'legacy')}`",
         "",
         "## Metrics",
         "",
