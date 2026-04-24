@@ -254,22 +254,30 @@ impl MemoryManager {
 
     /// Collect prefetch context from all providers, wrap in memory-context fence.
     pub fn prefetch_all(&self, query: &str, session_id: &str) -> String {
-        let parts: Vec<String> = self
-            .providers
-            .iter()
-            .filter_map(|p| {
-                let result = p.prefetch(query, session_id);
-                if result.trim().is_empty() {
-                    None
-                } else {
-                    Some(result)
-                }
-            })
-            .collect();
+        let mut candidates: Vec<FusedMemoryCandidate> = Vec::new();
+        for provider in &self.providers {
+            let result = provider.prefetch(query, session_id);
+            if result.trim().is_empty() {
+                continue;
+            }
+            candidates.push(FusedMemoryCandidate {
+                provider: provider.name().to_string(),
+                content: result,
+            });
+        }
 
-        if parts.is_empty() {
+        if candidates.is_empty() {
             return String::new();
         }
+
+        let parts = if memory_fusion_enabled() {
+            fuse_memory_candidates(candidates, query)
+        } else {
+            candidates
+                .into_iter()
+                .map(|entry| entry.content)
+                .collect::<Vec<_>>()
+        };
 
         let raw = parts.join("\n\n");
         build_memory_context_block(&raw)
@@ -468,6 +476,121 @@ impl Default for MemoryManager {
     }
 }
 
+#[derive(Debug, Clone)]
+struct FusedMemoryCandidate {
+    provider: String,
+    content: String,
+}
+
+fn memory_fusion_enabled() -> bool {
+    std::env::var("HERMES_MEMORY_FUSION")
+        .map(|v| {
+            !matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "0" | "false" | "off"
+            )
+        })
+        .unwrap_or(true)
+}
+
+fn memory_fusion_top_k() -> usize {
+    std::env::var("HERMES_MEMORY_FUSION_TOP_K")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(6)
+}
+
+fn memory_fusion_weights() -> HashMap<String, f64> {
+    let raw = std::env::var("HERMES_MEMORY_FUSION_WEIGHTS")
+        .unwrap_or_else(|_| "builtin=1.2,contextlattice=1.25,supermemory=1.15".to_string());
+    let mut weights = HashMap::new();
+    for piece in raw.split(',') {
+        let token = piece.trim();
+        if token.is_empty() {
+            continue;
+        }
+        let mut split = token.splitn(2, '=');
+        let Some(name) = split.next().map(str::trim).filter(|s| !s.is_empty()) else {
+            continue;
+        };
+        let Some(weight) = split
+            .next()
+            .map(str::trim)
+            .and_then(|v| v.parse::<f64>().ok())
+            .filter(|v| v.is_finite() && *v > 0.0)
+        else {
+            continue;
+        };
+        weights.insert(name.to_ascii_lowercase(), weight);
+    }
+    weights
+}
+
+fn query_terms(query: &str) -> Vec<String> {
+    query
+        .split_whitespace()
+        .map(|tok| tok.trim_matches(|c: char| !c.is_alphanumeric()))
+        .map(|tok| tok.to_ascii_lowercase())
+        .filter(|tok| tok.len() >= 3)
+        .collect()
+}
+
+fn canonical_memory_key(text: &str) -> String {
+    text.to_ascii_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn score_memory_candidate(
+    candidate: &FusedMemoryCandidate,
+    terms: &[String],
+    weights: &HashMap<String, f64>,
+) -> f64 {
+    let content_lc = candidate.content.to_ascii_lowercase();
+    let provider_weight = weights
+        .get(&candidate.provider.to_ascii_lowercase())
+        .copied()
+        .unwrap_or(1.0);
+    let term_hits = terms
+        .iter()
+        .filter(|term| content_lc.contains(term.as_str()))
+        .count() as f64;
+    let term_score = if terms.is_empty() {
+        0.0
+    } else {
+        term_hits / terms.len() as f64
+    };
+    let length_score = (candidate.content.len() as f64 / 1200.0).min(1.0) * 0.1;
+    provider_weight + term_score + length_score
+}
+
+fn fuse_memory_candidates(candidates: Vec<FusedMemoryCandidate>, query: &str) -> Vec<String> {
+    let terms = query_terms(query);
+    let weights = memory_fusion_weights();
+    let mut scored: Vec<(f64, FusedMemoryCandidate)> = candidates
+        .into_iter()
+        .map(|entry| (score_memory_candidate(&entry, &terms, &weights), entry))
+        .collect();
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0));
+
+    let mut seen = std::collections::HashSet::new();
+    let mut fused = Vec::new();
+    let top_k = memory_fusion_top_k();
+    for (_score, entry) in scored {
+        let key = canonical_memory_key(&entry.content);
+        if key.is_empty() || !seen.insert(key) {
+            continue;
+        }
+        fused.push(format!("[{}] {}", entry.provider, entry.content.trim()));
+        if fused.len() >= top_k {
+            break;
+        }
+    }
+    fused
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -626,5 +749,32 @@ mod tests {
         assert!(block.ends_with("</memory-context>"));
         assert!(block.contains("User prefers dark mode."));
         assert!(block.contains("[System note:"));
+    }
+
+    #[test]
+    fn test_fusion_deduplicates_and_orders_by_score() {
+        let candidates = vec![
+            FusedMemoryCandidate {
+                provider: "builtin".to_string(),
+                content: "User likes Rust and tokio".to_string(),
+            },
+            FusedMemoryCandidate {
+                provider: "contextlattice".to_string(),
+                content: "User likes Rust and tokio".to_string(),
+            },
+            FusedMemoryCandidate {
+                provider: "supermemory".to_string(),
+                content: "User writes Python and SQL".to_string(),
+            },
+        ];
+        let fused = fuse_memory_candidates(candidates, "Need rust tokio context");
+        assert_eq!(fused.len(), 2);
+        assert!(fused[0].contains("Rust"));
+    }
+
+    #[test]
+    fn test_query_terms_filters_short_tokens() {
+        let terms = query_terms("go rust dl tokio memory");
+        assert_eq!(terms, vec!["rust", "tokio", "memory"]);
     }
 }
