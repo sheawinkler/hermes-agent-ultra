@@ -27,6 +27,162 @@ use tracing::{error, info, trace};
 use crate::McpError;
 
 const MCP_PROTOCOL_VERSION_HEADER_VALUE: &str = "2025-03-26";
+const DEFAULT_MCP_MAX_MESSAGE_BYTES_STRICT: usize = 1 * 1024 * 1024;
+const DEFAULT_MCP_MAX_MESSAGE_BYTES_BALANCED: usize = 2 * 1024 * 1024;
+const DEFAULT_MCP_MAX_MESSAGE_BYTES_RELAXED: usize = 8 * 1024 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum McpSandboxProfile {
+    Strict,
+    Balanced,
+    Relaxed,
+}
+
+impl McpSandboxProfile {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Strict => "strict",
+            Self::Balanced => "balanced",
+            Self::Relaxed => "relaxed",
+        }
+    }
+}
+
+fn parse_sandbox_profile(raw: &str) -> McpSandboxProfile {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "strict" => McpSandboxProfile::Strict,
+        "relaxed" => McpSandboxProfile::Relaxed,
+        _ => McpSandboxProfile::Balanced,
+    }
+}
+
+fn sandbox_profile_from_env() -> McpSandboxProfile {
+    parse_sandbox_profile(
+        &std::env::var("HERMES_MCP_SANDBOX_PROFILE").unwrap_or_else(|_| "balanced".to_string()),
+    )
+}
+
+fn mcp_max_message_bytes(profile: McpSandboxProfile) -> usize {
+    std::env::var("HERMES_MCP_MAX_MESSAGE_BYTES")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(match profile {
+            McpSandboxProfile::Strict => DEFAULT_MCP_MAX_MESSAGE_BYTES_STRICT,
+            McpSandboxProfile::Balanced => DEFAULT_MCP_MAX_MESSAGE_BYTES_BALANCED,
+            McpSandboxProfile::Relaxed => DEFAULT_MCP_MAX_MESSAGE_BYTES_RELAXED,
+        })
+}
+
+fn max_message_bytes_from_env() -> usize {
+    mcp_max_message_bytes(sandbox_profile_from_env())
+}
+
+fn parse_allowlist(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_ascii_lowercase())
+        .collect()
+}
+
+fn command_basename(command: &str) -> String {
+    std::path::Path::new(command)
+        .file_name()
+        .map(|s| s.to_string_lossy().to_string())
+        .unwrap_or_else(|| command.to_string())
+        .to_ascii_lowercase()
+}
+
+fn command_allowed_by_profile(
+    profile: McpSandboxProfile,
+    command: &str,
+    allowlist: &[String],
+) -> bool {
+    if matches!(profile, McpSandboxProfile::Relaxed) {
+        return true;
+    }
+    let base = command_basename(command);
+    if !allowlist.is_empty() && allowlist.iter().any(|entry| entry == &base) {
+        return true;
+    }
+
+    match profile {
+        McpSandboxProfile::Strict => false,
+        McpSandboxProfile::Balanced => {
+            // Block direct shell launches in balanced mode unless explicitly allowlisted.
+            !matches!(base.as_str(), "sh" | "bash" | "zsh" | "fish")
+        }
+        McpSandboxProfile::Relaxed => true,
+    }
+}
+
+fn default_allowlist() -> Vec<String> {
+    parse_allowlist(
+        &std::env::var("HERMES_MCP_SANDBOX_ALLOWED_COMMANDS")
+            .unwrap_or_else(|_| "node,npx,python,python3,uv,uvx,deno".to_string()),
+    )
+}
+
+fn is_sensitive_env_key(key: &str) -> bool {
+    let upper = key.to_ascii_uppercase();
+    upper.contains("API_KEY")
+        || upper.contains("TOKEN")
+        || upper.contains("SECRET")
+        || upper.contains("PASSWORD")
+        || upper.contains("AUTH")
+        || upper.contains("COOKIE")
+        || upper.contains("SESSION")
+}
+
+fn sanitize_child_env(
+    env: &HashMap<String, String>,
+    profile: McpSandboxProfile,
+) -> HashMap<String, String> {
+    if matches!(profile, McpSandboxProfile::Relaxed) {
+        return env.clone();
+    }
+
+    let mut out = HashMap::new();
+    for (k, v) in env {
+        let key_upper = k.to_ascii_uppercase();
+        if is_sensitive_env_key(k) {
+            continue;
+        }
+        if matches!(profile, McpSandboxProfile::Strict) {
+            let allowed_strict = key_upper == "PATH"
+                || key_upper == "HOME"
+                || key_upper == "USER"
+                || key_upper == "SHELL"
+                || key_upper == "TMPDIR"
+                || key_upper == "TEMP"
+                || key_upper == "TZ"
+                || key_upper == "LANG"
+                || key_upper == "TERM"
+                || key_upper.starts_with("LC_")
+                || key_upper.starts_with("MCP_")
+                || key_upper.starts_with("HERMES_MCP_");
+            if !allowed_strict {
+                continue;
+            }
+        }
+        out.insert(k.clone(), v.clone());
+    }
+    out
+}
+
+fn sandbox_cwd(profile: McpSandboxProfile) -> Option<PathBuf> {
+    if let Ok(v) = std::env::var("HERMES_MCP_SANDBOX_CWD") {
+        let p = PathBuf::from(v.trim());
+        if !p.as_os_str().is_empty() {
+            return Some(p);
+        }
+    }
+    if matches!(profile, McpSandboxProfile::Strict) {
+        return Some(hermes_home_dir());
+    }
+    None
+}
 
 fn hermes_home_dir() -> PathBuf {
     if let Ok(path) = std::env::var("HERMES_HOME") {
@@ -69,6 +225,19 @@ fn classify_http_status_error(status: reqwest::StatusCode, body: &str) -> McpErr
         501 | 503 => McpError::NotConfigured(msg),
         _ => McpError::ConnectionError(msg),
     }
+}
+
+fn enforce_message_size(content_length: usize, max_message_bytes: usize) -> Result<(), McpError> {
+    if content_length > max_message_bytes {
+        return Err(McpError::Protocol {
+            code: -32600,
+            message: format!(
+                "MCP message exceeds limit: {} bytes > {} bytes",
+                content_length, max_message_bytes
+            ),
+        });
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +313,22 @@ impl McpTransport for StdioTransport {
             ));
         }
 
+        let sandbox_profile = sandbox_profile_from_env();
+        let allowlist = default_allowlist();
+        if !command_allowed_by_profile(sandbox_profile, &self.command, &allowlist) {
+            return Err(McpError::Forbidden(format!(
+                "MCP command '{}' blocked by sandbox profile '{}' (allowlist: {})",
+                self.command,
+                sandbox_profile.as_str(),
+                if allowlist.is_empty() {
+                    "(none)".to_string()
+                } else {
+                    allowlist.join(",")
+                }
+            )));
+        }
+        let sanitized_env = sanitize_child_env(&self.env, sandbox_profile);
+
         info!(
             "Starting MCP stdio transport: {} {:?}",
             self.command, self.args
@@ -155,8 +340,13 @@ impl McpTransport for StdioTransport {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
+        if let Some(cwd) = sandbox_cwd(sandbox_profile) {
+            cmd.current_dir(cwd);
+        }
+
+        cmd.env_clear();
         // Set environment variables
-        for (key, value) in &self.env {
+        for (key, value) in &sanitized_env {
             cmd.env(key, value);
         }
 
@@ -222,6 +412,8 @@ impl McpTransport for StdioTransport {
 
         let body =
             serde_json::to_string(&message).map_err(|e| McpError::Serialization(e.to_string()))?;
+        let max_message_bytes = max_message_bytes_from_env();
+        enforce_message_size(body.len(), max_message_bytes)?;
         let header = format!("Content-Length: {}\r\n\r\n", body.len());
 
         trace!("Sending MCP message: {} bytes", body.len());
@@ -292,6 +484,7 @@ impl McpTransport for StdioTransport {
                 message: "Missing Content-Length header".to_string(),
             });
         }
+        enforce_message_size(content_length, max_message_bytes_from_env())?;
 
         // Read the JSON body
         let mut body_buf = vec![0u8; content_length];
@@ -300,14 +493,9 @@ impl McpTransport for StdioTransport {
             .await
             .map_err(|e| McpError::ConnectionError(format!("Read body failed: {}", e)))?;
 
-        let body_str = String::from_utf8(body_buf).map_err(|e| McpError::Protocol {
-            code: -32700,
-            message: format!("Invalid UTF-8 in body: {}", e),
-        })?;
+        trace!("Received MCP message: {} bytes", body_buf.len());
 
-        trace!("Received MCP message: {} bytes", body_str.len());
-
-        let value: Value = serde_json::from_str(&body_str).map_err(|e| McpError::Protocol {
+        let value: Value = serde_json::from_slice(&body_buf).map_err(|e| McpError::Protocol {
             code: -32700,
             message: format!("JSON parse error: {}", e),
         })?;
@@ -369,6 +557,8 @@ impl McpTransport for ServerStdioTransport {
     async fn send(&mut self, message: Value) -> Result<(), McpError> {
         let body =
             serde_json::to_string(&message).map_err(|e| McpError::Serialization(e.to_string()))?;
+        let max_message_bytes = max_message_bytes_from_env();
+        enforce_message_size(body.len(), max_message_bytes)?;
         let header = format!("Content-Length: {}\r\n\r\n", body.len());
 
         let mut stdout = tokio::io::stdout();
@@ -423,6 +613,7 @@ impl McpTransport for ServerStdioTransport {
                 message: "Missing Content-Length header".to_string(),
             });
         }
+        enforce_message_size(content_length, max_message_bytes_from_env())?;
 
         let mut body_buf = vec![0u8; content_length];
         reader
@@ -430,12 +621,7 @@ impl McpTransport for ServerStdioTransport {
             .await
             .map_err(|e| McpError::ConnectionError(format!("Read body failed: {}", e)))?;
 
-        let body_str = String::from_utf8(body_buf).map_err(|e| McpError::Protocol {
-            code: -32700,
-            message: format!("Invalid UTF-8 in body: {}", e),
-        })?;
-
-        serde_json::from_str(&body_str).map_err(|e| McpError::Protocol {
+        serde_json::from_slice(&body_buf).map_err(|e| McpError::Protocol {
             code: -32700,
             message: format!("JSON parse error: {}", e),
         })
@@ -558,11 +744,12 @@ impl McpTransport for HttpTransport {
 
         // Store the response for receive()
         let body = response
-            .text()
+            .bytes()
             .await
             .map_err(|e| McpError::ConnectionError(format!("Failed to read response: {}", e)))?;
-
-        let value: Value = serde_json::from_str(&body).map_err(|e| McpError::Protocol {
+        let max_message_bytes = max_message_bytes_from_env();
+        enforce_message_size(body.len(), max_message_bytes)?;
+        let value: Value = serde_json::from_slice(&body).map_err(|e| McpError::Protocol {
             code: -32700,
             message: format!("Invalid JSON response: {}", e),
         })?;
@@ -731,9 +918,15 @@ impl McpTransport for HttpSseTransport {
         }
 
         let body = response
-            .text()
+            .bytes()
             .await
             .map_err(|e| McpError::ConnectionError(format!("Failed to read response: {}", e)))?;
+        let max_message_bytes = max_message_bytes_from_env();
+        enforce_message_size(body.len(), max_message_bytes)?;
+        let body = String::from_utf8(body.to_vec()).map_err(|e| McpError::Protocol {
+            code: -32700,
+            message: format!("Invalid UTF-8 in response: {}", e),
+        })?;
 
         // Parse response — may be SSE or plain JSON.
         let json_body = if body.contains("data: ") {
@@ -747,10 +940,11 @@ impl McpTransport for HttpSseTransport {
             body
         };
 
-        let value: Value = serde_json::from_str(&json_body).map_err(|e| McpError::Protocol {
-            code: -32700,
-            message: format!("Invalid JSON response: {}", e),
-        })?;
+        let value: Value =
+            serde_json::from_slice(json_body.as_bytes()).map_err(|e| McpError::Protocol {
+                code: -32700,
+                message: format!("Invalid JSON response: {}", e),
+            })?;
 
         self.pending_response = Some(value);
         Ok(())
@@ -862,5 +1056,73 @@ mod tests {
         let e =
             classify_http_status_error(reqwest::StatusCode::SERVICE_UNAVAILABLE, "not configured");
         assert!(matches!(e, McpError::NotConfigured(_)));
+    }
+
+    #[test]
+    fn test_parse_sandbox_profile() {
+        assert_eq!(parse_sandbox_profile("strict"), McpSandboxProfile::Strict);
+        assert_eq!(parse_sandbox_profile("relaxed"), McpSandboxProfile::Relaxed);
+        assert_eq!(
+            parse_sandbox_profile("something-else"),
+            McpSandboxProfile::Balanced
+        );
+    }
+
+    #[test]
+    fn test_command_allowed_by_profile() {
+        let allowlist = vec!["python3".to_string()];
+        assert!(command_allowed_by_profile(
+            McpSandboxProfile::Balanced,
+            "python3",
+            &allowlist
+        ));
+        assert!(!command_allowed_by_profile(
+            McpSandboxProfile::Balanced,
+            "/bin/sh",
+            &[]
+        ));
+        assert!(command_allowed_by_profile(
+            McpSandboxProfile::Relaxed,
+            "/bin/sh",
+            &[]
+        ));
+        assert!(!command_allowed_by_profile(
+            McpSandboxProfile::Strict,
+            "node",
+            &[]
+        ));
+    }
+
+    #[test]
+    fn test_sanitize_child_env_balanced_removes_secrets() {
+        let mut env = HashMap::new();
+        env.insert("PATH".to_string(), "/usr/bin".to_string());
+        env.insert("OPENAI_API_KEY".to_string(), "secret".to_string());
+        env.insert("CUSTOM_FLAG".to_string(), "1".to_string());
+        let sanitized = sanitize_child_env(&env, McpSandboxProfile::Balanced);
+        assert!(sanitized.contains_key("PATH"));
+        assert!(sanitized.contains_key("CUSTOM_FLAG"));
+        assert!(!sanitized.contains_key("OPENAI_API_KEY"));
+    }
+
+    #[test]
+    fn test_sanitize_child_env_strict_allows_whitelist_only() {
+        let mut env = HashMap::new();
+        env.insert("PATH".to_string(), "/usr/bin".to_string());
+        env.insert("HOME".to_string(), "/tmp".to_string());
+        env.insert("CUSTOM_FLAG".to_string(), "1".to_string());
+        env.insert("MCP_ENDPOINT".to_string(), "x".to_string());
+        let sanitized = sanitize_child_env(&env, McpSandboxProfile::Strict);
+        assert!(sanitized.contains_key("PATH"));
+        assert!(sanitized.contains_key("HOME"));
+        assert!(sanitized.contains_key("MCP_ENDPOINT"));
+        assert!(!sanitized.contains_key("CUSTOM_FLAG"));
+    }
+
+    #[test]
+    fn test_enforce_message_size() {
+        assert!(enforce_message_size(128, 256).is_ok());
+        let err = enforce_message_size(257, 256).expect_err("must fail");
+        assert!(matches!(err, McpError::Protocol { .. }));
     }
 }
