@@ -46,41 +46,43 @@ curl -fsSL https://raw.githubusercontent.com/sheawinkler/hermes-agent-ultra/main
 ### From source
 
 ```bash
-cargo install --git https://github.com/sheawinkler/hermes-agent-ultra hermes-cli --locked --bin hermes-agent-ultra --bin hermes
+cargo install --git https://github.com/sheawinkler/hermes-agent-ultra hermes-cli --locked --bin hermes-agent-ultra --bin hermes-ultra --bin hermes
 ```
 
 ## First Run
 
 ```bash
-hermes setup
+hermes-ultra setup
 ```
 
 Setup initializes `~/.hermes-agent-ultra` and can import API keys from legacy `.env` files when present.
+
+`hermes` remains available as a compatibility alias, but `hermes-ultra` is the recommended command.
 
 ## Daily Use
 
 Interactive:
 
 ```bash
-hermes
+hermes-ultra
 ```
 
 One-shot query:
 
 ```bash
-hermes chat --query "summarize this repository"
+hermes-ultra chat --query "summarize this repository"
 ```
 
 Gateway mode:
 
 ```bash
-hermes gateway --live
+hermes-ultra gateway --live
 ```
 
 Deep health report with support bundle:
 
 ```bash
-hermes doctor --deep --snapshot --bundle
+hermes-ultra doctor --deep --snapshot --bundle
 ```
 
 ## Context Loading and Memory
