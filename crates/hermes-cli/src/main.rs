@@ -16,6 +16,11 @@ use hermes_auth::{AuthManager, FileTokenStore, OAuthCredential};
 use hermes_cli::app::{
     bridge_tool_registry, build_agent_config, build_provider, provider_api_key_from_env,
 };
+use hermes_cli::auth::{
+    clear_provider_auth_state, login_nous_device_code, login_openai_codex_device_code,
+    read_provider_auth_state, save_codex_auth_state, save_nous_auth_state, CodexDeviceCodeOptions,
+    NousDeviceCodeOptions,
+};
 use hermes_cli::cli::{Cli, CliCommand};
 use hermes_cli::config_env::hydrate_env_from_config;
 use hermes_cli::model_switch::{
@@ -241,8 +246,32 @@ async fn main() {
         CliCommand::Insights { days, source } => {
             hermes_cli::commands::handle_cli_insights(days, source).await
         }
-        CliCommand::Login { provider } => hermes_cli::commands::handle_cli_login(provider).await,
-        CliCommand::Logout { provider } => hermes_cli::commands::handle_cli_logout(provider).await,
+        CliCommand::Login { provider } => {
+            run_auth(
+                cli,
+                Some("login".to_string()),
+                provider,
+                None,
+                None,
+                None,
+                None,
+                false,
+            )
+            .await
+        }
+        CliCommand::Logout { provider } => {
+            run_auth(
+                cli,
+                Some("logout".to_string()),
+                provider,
+                None,
+                None,
+                None,
+                None,
+                false,
+            )
+            .await
+        }
         CliCommand::Whatsapp { action } => hermes_cli::commands::handle_cli_whatsapp(action).await,
         CliCommand::Pairing { action, device_id } => {
             hermes_cli::commands::handle_cli_pairing(action, device_id).await
@@ -3211,7 +3240,7 @@ async fn run_telegram_poll_loop(gateway: Arc<Gateway>, adapter: Arc<TelegramAdap
     }
 }
 
-/// Default auth provider: CLI arg, then `HERMES_AUTH_DEFAULT_PROVIDER`, then `openai`.
+/// Default auth provider: CLI arg, then `HERMES_AUTH_DEFAULT_PROVIDER`, then `nous`.
 ///
 /// Set `HERMES_AUTH_DEFAULT_PROVIDER=telegram` if you primarily use the Telegram gateway.
 fn resolve_auth_provider(provider: Option<String>) -> String {
@@ -3231,8 +3260,19 @@ fn resolve_auth_provider(provider: Option<String>) -> String {
     let raw = std::env::var("HERMES_AUTH_DEFAULT_PROVIDER")
         .ok()
         .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| "openai".to_string());
+        .or_else(|| infer_default_auth_provider_from_config())
+        .unwrap_or_else(|| "nous".to_string());
     normalize_auth_provider(&raw)
+}
+
+fn infer_default_auth_provider_from_config() -> Option<String> {
+    let cfg = load_config(None).ok()?;
+    let model = cfg.model?;
+    let provider = model
+        .split_once(':')
+        .map(|(provider, _)| provider.trim())
+        .filter(|provider| !provider.is_empty())?;
+    Some(provider.to_string())
 }
 
 fn normalize_auth_provider(provider: &str) -> String {
@@ -3240,6 +3280,7 @@ fn normalize_auth_provider(provider: &str) -> String {
         "wechat" | "wx" => "weixin".to_string(),
         "qq" => "qqbot".to_string(),
         "tg" => "telegram".to_string(),
+        "codex" => "openai-codex".to_string(),
         "step" | "step-plan" => "stepfun".to_string(),
         "api-server" => "api_server".to_string(),
         "home-assistant" => "homeassistant".to_string(),
@@ -3277,6 +3318,7 @@ fn normalize_secret_provider(provider: &str) -> String {
     let p = provider.trim().to_ascii_lowercase();
     match p.as_str() {
         "github-copilot" => "copilot".to_string(),
+        "codex" => "openai-codex".to_string(),
         _ => p,
     }
 }
@@ -3287,6 +3329,7 @@ fn secret_provider_aliases(provider: &str) -> Vec<String> {
         "kimi" => vec!["kimi".to_string(), "moonshot".to_string()],
         "stepfun" => vec!["stepfun".to_string(), "step".to_string()],
         "copilot" => vec!["copilot".to_string(), "github-copilot".to_string()],
+        "openai-codex" => vec!["openai-codex".to_string(), "codex".to_string()],
         p => vec![p.to_string()],
     }
 }
@@ -3294,9 +3337,11 @@ fn secret_provider_aliases(provider: &str) -> Vec<String> {
 fn provider_env_var(provider: &str) -> Option<&'static str> {
     match normalize_secret_provider(provider).as_str() {
         "openai" => Some("HERMES_OPENAI_API_KEY"),
+        "openai-codex" => Some("HERMES_OPENAI_CODEX_API_KEY"),
         "anthropic" => Some("ANTHROPIC_API_KEY"),
         "openrouter" => Some("OPENROUTER_API_KEY"),
         "qwen" => Some("DASHSCOPE_API_KEY"),
+        "qwen-oauth" => Some("HERMES_QWEN_OAUTH_API_KEY"),
         "moonshot" | "kimi" => Some("MOONSHOT_API_KEY"),
         "minimax" => Some("MINIMAX_API_KEY"),
         "stepfun" => Some("STEPFUN_API_KEY"),
@@ -3304,6 +3349,30 @@ fn provider_env_var(provider: &str) -> Option<&'static str> {
         "copilot" => Some("GITHUB_COPILOT_TOKEN"),
         _ => None,
     }
+}
+
+fn provider_supports_oauth(provider: &str) -> bool {
+    matches!(
+        normalize_auth_provider(provider).as_str(),
+        "nous" | "openai-codex"
+    )
+}
+
+fn resolve_auth_type_for_provider(provider: &str, requested: Option<&str>) -> String {
+    if let Some(raw) = requested.map(str::trim).filter(|v| !v.is_empty()) {
+        return raw.replace('-', "_").to_ascii_lowercase();
+    }
+    if provider_supports_oauth(provider) {
+        "oauth".to_string()
+    } else {
+        "api_key".to_string()
+    }
+}
+
+fn parse_rfc3339_utc(value: Option<&str>) -> Option<chrono::DateTime<chrono::Utc>> {
+    value
+        .and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc))
 }
 
 fn secret_vault_path_for_cli(cli: &Cli) -> PathBuf {
@@ -3389,9 +3458,11 @@ async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentE
     let env_bindings = [
         ("HERMES_OPENAI_API_KEY", "openai"),
         ("OPENAI_API_KEY", "openai"),
+        ("HERMES_OPENAI_CODEX_API_KEY", "openai-codex"),
         ("ANTHROPIC_API_KEY", "anthropic"),
         ("OPENROUTER_API_KEY", "openrouter"),
         ("DASHSCOPE_API_KEY", "qwen"),
+        ("HERMES_QWEN_OAUTH_API_KEY", "qwen-oauth"),
         ("MOONSHOT_API_KEY", "moonshot"),
         ("MINIMAX_API_KEY", "minimax"),
         ("STEPFUN_API_KEY", "stepfun"),
@@ -4190,7 +4261,16 @@ async fn print_auth_status_matrix(cli: &Cli, manager: &AuthManager) -> Result<()
     println!("Auth status matrix:");
     println!("-------------------");
 
-    for provider in ["openai", "anthropic", "openrouter", "stepfun", "copilot"] {
+    for provider in [
+        "openai",
+        "anthropic",
+        "openrouter",
+        "stepfun",
+        "nous",
+        "openai-codex",
+        "qwen-oauth",
+        "copilot",
+    ] {
         let env_present = provider_api_key_from_env(provider).is_some()
             || (provider == "copilot"
                 && std::env::var("GITHUB_COPILOT_TOKEN")
@@ -4198,14 +4278,24 @@ async fn print_auth_status_matrix(cli: &Cli, manager: &AuthManager) -> Result<()
                     .map(|v| !v.trim().is_empty())
                     .unwrap_or(false));
         let store_present = manager.get_access_token(provider).await?.is_some();
+        let auth_state_present = if provider_supports_oauth(provider) {
+            read_provider_auth_state(provider)?.is_some()
+        } else {
+            false
+        };
         let (present, source) = if env_present {
             (true, "env")
         } else if store_present {
             (true, "token_store")
+        } else if auth_state_present {
+            (true, "auth_json")
         } else {
             (false, "none")
         };
-        println!("  - {:<16} present={} source={}", provider, present, source);
+        println!(
+            "  - {:<16} present={} source={} oauth_state_present={}",
+            provider, present, source, auth_state_present
+        );
     }
 
     for provider in [
@@ -4275,12 +4365,103 @@ async fn run_auth(
     let mut pool_store = load_auth_pool_store(&pool_path)?;
     match action.as_deref().unwrap_or("status") {
         "add" => {
-            let provider = provider.trim().to_ascii_lowercase();
-            let auth_type = auth_type
-                .as_deref()
-                .unwrap_or("api_key")
-                .replace('-', "_")
-                .to_ascii_lowercase();
+            let provider = normalize_auth_provider(provider.trim());
+            let auth_type = resolve_auth_type_for_provider(&provider, auth_type.as_deref());
+
+            if auth_type == "oauth" {
+                match provider.as_str() {
+                    "nous" => {
+                        let state =
+                            login_nous_device_code(NousDeviceCodeOptions::default()).await?;
+                        let auth_path = save_nous_auth_state(&state)?;
+                        let runtime_key = state.runtime_api_key().ok_or_else(|| {
+                            AgentError::AuthFailed(
+                                "Nous login succeeded but no runtime API key was returned".into(),
+                            )
+                        })?;
+                        let expires_at = parse_rfc3339_utc(state.agent_key_expires_at.as_deref())
+                            .or_else(|| parse_rfc3339_utc(state.expires_at.as_deref()));
+                        manager
+                            .save_credential(OAuthCredential {
+                                provider: "nous".to_string(),
+                                access_token: runtime_key.clone(),
+                                refresh_token: state.refresh_token.clone(),
+                                token_type: state.token_type.clone(),
+                                scope: state.scope.clone(),
+                                expires_at,
+                            })
+                            .await?;
+                        let entries = pool_store.providers.entry(provider.clone()).or_default();
+                        let default_label = format!("{provider}-{}", entries.len() + 1);
+                        let entry = AuthPoolEntry {
+                            id: uuid::Uuid::new_v4().simple().to_string()[..6].to_string(),
+                            label: label.unwrap_or(default_label),
+                            auth_type: "oauth".to_string(),
+                            source: "device_code".to_string(),
+                            access_token: runtime_key,
+                            last_status: None,
+                            last_status_at: None,
+                            last_error_code: None,
+                        };
+                        entries.push(entry.clone());
+                        save_auth_pool_store(&pool_path, &pool_store)?;
+                        println!(
+                            "Added Nous OAuth credential (label='{}', id={}).",
+                            entry.label, entry.id
+                        );
+                        println!("Saved OAuth state: {}", auth_path.display());
+                        return Ok(());
+                    }
+                    "openai-codex" => {
+                        let state =
+                            login_openai_codex_device_code(CodexDeviceCodeOptions::default())
+                                .await?;
+                        let auth_path = save_codex_auth_state(&state)?;
+                        let expires_at = state
+                            .tokens
+                            .expires_in
+                            .filter(|secs| *secs > 0)
+                            .map(|secs| chrono::Utc::now() + chrono::Duration::seconds(secs));
+                        manager
+                            .save_credential(OAuthCredential {
+                                provider: "openai-codex".to_string(),
+                                access_token: state.tokens.access_token.clone(),
+                                refresh_token: state.tokens.refresh_token.clone(),
+                                token_type: "bearer".to_string(),
+                                scope: None,
+                                expires_at,
+                            })
+                            .await?;
+                        let entries = pool_store.providers.entry(provider.clone()).or_default();
+                        let default_label = format!("{provider}-{}", entries.len() + 1);
+                        let entry = AuthPoolEntry {
+                            id: uuid::Uuid::new_v4().simple().to_string()[..6].to_string(),
+                            label: label.unwrap_or(default_label),
+                            auth_type: "oauth".to_string(),
+                            source: "device_code".to_string(),
+                            access_token: state.tokens.access_token.clone(),
+                            last_status: None,
+                            last_status_at: None,
+                            last_error_code: None,
+                        };
+                        entries.push(entry.clone());
+                        save_auth_pool_store(&pool_path, &pool_store)?;
+                        println!(
+                            "Added OpenAI Codex OAuth credential (label='{}', id={}).",
+                            entry.label, entry.id
+                        );
+                        println!("Saved OAuth state: {}", auth_path.display());
+                        return Ok(());
+                    }
+                    _ => {
+                        return Err(AgentError::Config(format!(
+                            "OAuth flow is not implemented for provider '{}'",
+                            provider
+                        )));
+                    }
+                }
+            }
+
             let token = if let Some(raw) = api_key {
                 raw.trim().to_string()
             } else {
@@ -4368,6 +4549,9 @@ async fn run_auth(
             if entries.is_empty() {
                 pool_store.providers.remove(&provider);
                 token_store.remove(&provider).await?;
+                if provider_supports_oauth(&provider) {
+                    let _ = clear_provider_auth_state(&provider)?;
+                }
             } else if let Some(next) = entries.first() {
                 manager
                     .save_credential(OAuthCredential {
@@ -4604,6 +4788,55 @@ async fn run_auth(
                 );
                 return Ok(());
             }
+            if provider == "nous" {
+                let state = login_nous_device_code(NousDeviceCodeOptions::default()).await?;
+                let auth_path = save_nous_auth_state(&state)?;
+                let runtime_key = state.runtime_api_key().ok_or_else(|| {
+                    AgentError::AuthFailed(
+                        "Nous login succeeded but no runtime API key was returned".into(),
+                    )
+                })?;
+                let expires_at = parse_rfc3339_utc(state.agent_key_expires_at.as_deref())
+                    .or_else(|| parse_rfc3339_utc(state.expires_at.as_deref()));
+                manager
+                    .save_credential(OAuthCredential {
+                        provider: "nous".to_string(),
+                        access_token: runtime_key,
+                        refresh_token: state.refresh_token.clone(),
+                        token_type: state.token_type.clone(),
+                        scope: state.scope.clone(),
+                        expires_at,
+                    })
+                    .await?;
+                println!("Nous device login complete; credential saved as provider 'nous'.");
+                println!("Saved OAuth state: {}", auth_path.display());
+                return Ok(());
+            }
+            if provider == "openai-codex" {
+                let state =
+                    login_openai_codex_device_code(CodexDeviceCodeOptions::default()).await?;
+                let auth_path = save_codex_auth_state(&state)?;
+                let expires_at = state
+                    .tokens
+                    .expires_in
+                    .filter(|secs| *secs > 0)
+                    .map(|secs| chrono::Utc::now() + chrono::Duration::seconds(secs));
+                manager
+                    .save_credential(OAuthCredential {
+                        provider: "openai-codex".to_string(),
+                        access_token: state.tokens.access_token.clone(),
+                        refresh_token: state.tokens.refresh_token.clone(),
+                        token_type: "bearer".to_string(),
+                        scope: None,
+                        expires_at,
+                    })
+                    .await?;
+                println!(
+                    "OpenAI Codex device login complete; credential saved as provider 'openai-codex'."
+                );
+                println!("Saved OAuth state: {}", auth_path.display());
+                return Ok(());
+            }
             if provider == "copilot" || provider == "github-copilot" {
                 let access_token = hermes_cli::copilot_auth::start_copilot_device_flow().await?;
                 manager
@@ -4690,6 +4923,9 @@ async fn run_auth(
             }
             let msg = hermes_cli::auth::logout(&provider).await?;
             token_store.remove(&provider).await?;
+            if provider_supports_oauth(&provider) {
+                let _ = clear_provider_auth_state(&provider)?;
+            }
             println!("{} (removed credential for provider: {})", msg, provider);
         }
         _ => {
@@ -4783,16 +5019,23 @@ async fn run_auth(
             }
             let env_present = provider_api_key_from_env(&provider).is_some();
             let store_present = manager.get_access_token(&provider).await?.is_some();
+            let auth_state_present = if provider_supports_oauth(&provider) {
+                read_provider_auth_state(&provider)?.is_some()
+            } else {
+                false
+            };
             let (has_token, source) = if env_present {
                 (true, "env")
             } else if store_present {
                 (true, "token_store")
+            } else if auth_state_present {
+                (true, "auth_json")
             } else {
                 (false, "none")
             };
             println!(
-                "Auth status: provider='{}', credential_present={}, source={}",
-                provider, has_token, source
+                "Auth status: provider='{}', credential_present={}, source={}, oauth_state_present={}",
+                provider, has_token, source, auth_state_present
             );
         }
     }
@@ -5805,6 +6048,31 @@ fn merge_missing_env_keys(src: &Path, dst: &Path, label: &str) -> Result<usize, 
     Ok(to_import.len())
 }
 
+fn upsert_env_key(path: &Path, key: &str, value: &str) -> Result<(), AgentError> {
+    let existing = std::fs::read_to_string(path).unwrap_or_default();
+    let mut updated_lines = Vec::new();
+    let mut replaced = false;
+    for line in existing.lines() {
+        if let Some((k, _)) = parse_env_assignment(line) {
+            if k == key {
+                updated_lines.push(format!("{key}={value}"));
+                replaced = true;
+                continue;
+            }
+        }
+        updated_lines.push(line.to_string());
+    }
+    if !replaced {
+        updated_lines.push(format!("{key}={value}"));
+    }
+    let mut updated = updated_lines.join("\n");
+    if !updated.ends_with('\n') {
+        updated.push('\n');
+    }
+    std::fs::write(path, updated)
+        .map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))
+}
+
 fn maybe_import_legacy_env(
     reader: &mut dyn std::io::BufRead,
     env_path: &Path,
@@ -5894,16 +6162,19 @@ async fn run_setup() -> Result<(), AgentError> {
 
     // 3. Prompt for model/provider
     println!("\nAvailable models:");
-    println!("  1) openai:gpt-4o          (recommended)");
+    println!("  1) openai:gpt-4o");
     println!("  2) openai:gpt-4o-mini     (fast & cheap)");
     println!("  3) anthropic:claude-3-5-sonnet");
     println!("  4) openrouter:auto        (multi-provider)");
-    println!("  5) nous:hermes-3-llama-3.1-405b");
+    println!("  5) nous:hermes-3-llama-3.1-405b (recommended)");
     let has_nous_key = std::env::var("NOUS_API_KEY")
         .ok()
         .is_some_and(|v| !v.trim().is_empty())
         || read_env_key(&env_path, "NOUS_API_KEY").is_some();
-    let default_model_choice = if has_nous_key { "5" } else { "1" };
+    let default_model_choice = "5";
+    if !has_nous_key {
+        println!("  (Nous is the default; setup can complete OAuth login automatically.)");
+    }
     print!("Choose model [{}]: ", default_model_choice);
     io::stdout().flush().ok();
     let mut model_choice = String::new();
@@ -5919,31 +6190,69 @@ async fn run_setup() -> Result<(), AgentError> {
     let selected_provider_env_keys = setup_provider_env_keys(&selected_provider);
     let env_keys_display = selected_provider_env_keys.join("/");
 
-    // 4. Prompt for selected provider API key
+    // 4. Prompt for selected provider API key (or OAuth device login where supported)
     let has_selected_provider_env_key = selected_provider_env_keys.iter().any(|key| {
         std::env::var(key)
             .ok()
             .is_some_and(|v| !v.trim().is_empty())
             || read_env_key(&env_path, key).is_some()
     });
-    if has_selected_provider_env_key {
-        print!(
-            "\n{} API key (leave blank to keep {} from environment/{}): ",
-            selected_provider_label,
-            env_keys_display,
-            env_path.display()
-        );
-    } else {
-        print!(
-            "\n{} API key (leave blank to skip): ",
-            selected_provider_label
-        );
-    }
-    io::stdout().flush().ok();
+    let mut nous_oauth_state: Option<hermes_cli::auth::NousAuthState> = None;
     let mut api_key = String::new();
-    reader.read_line(&mut api_key).ok();
-    let api_key = api_key.trim().to_string();
     let mut stored_provider_secret_in_vault = false;
+
+    if selected_provider == "nous" {
+        print!("\nAuthenticate with Nous Portal OAuth device login now? [Y/n]: ");
+        io::stdout().flush().ok();
+        let mut answer = String::new();
+        reader.read_line(&mut answer).ok();
+        let use_nous_oauth = !matches!(answer.trim().to_ascii_lowercase().as_str(), "n" | "no");
+        if use_nous_oauth {
+            let state = login_nous_device_code(NousDeviceCodeOptions::default()).await?;
+            let auth_path = save_nous_auth_state(&state)?;
+            println!("  ✓ Saved Nous OAuth state: {}", auth_path.display());
+            let runtime_key = state.runtime_api_key().ok_or_else(|| {
+                AgentError::AuthFailed(
+                    "Nous login succeeded but no runtime API key was returned".into(),
+                )
+            })?;
+            let store = FileTokenStore::new(config_dir.join("auth").join("tokens.json")).await?;
+            let manager = AuthManager::new(store);
+            manager
+                .save_credential(OAuthCredential {
+                    provider: "nous".to_string(),
+                    access_token: runtime_key,
+                    refresh_token: state.refresh_token.clone(),
+                    token_type: state.token_type.clone(),
+                    scope: state.scope.clone(),
+                    expires_at: parse_rfc3339_utc(state.agent_key_expires_at.as_deref())
+                        .or_else(|| parse_rfc3339_utc(state.expires_at.as_deref())),
+                })
+                .await?;
+            stored_provider_secret_in_vault = true;
+            nous_oauth_state = Some(state);
+        }
+    }
+
+    if nous_oauth_state.is_none() {
+        if has_selected_provider_env_key {
+            print!(
+                "\n{} API key (leave blank to keep {} from environment/{}): ",
+                selected_provider_label,
+                env_keys_display,
+                env_path.display()
+            );
+        } else {
+            print!(
+                "\n{} API key (leave blank to skip): ",
+                selected_provider_label
+            );
+        }
+        io::stdout().flush().ok();
+        reader.read_line(&mut api_key).ok();
+        api_key = api_key.trim().to_string();
+    }
+
     if !api_key.is_empty() {
         print!(
             "Store {} key in encrypted vault (recommended) [Y/n]: ",
@@ -6004,6 +6313,25 @@ async fn run_setup() -> Result<(), AgentError> {
     disk.model = Some(model.to_string());
     disk.personality = Some(personality.to_string());
     disk.max_turns = 50;
+
+    let _ = upsert_env_key(
+        &env_path,
+        "HERMES_AUTH_DEFAULT_PROVIDER",
+        selected_provider.as_str(),
+    );
+
+    if let Some(state) = &nous_oauth_state {
+        let provider = disk
+            .llm_providers
+            .entry("nous".to_string())
+            .or_insert_with(hermes_config::LlmProviderConfig::default);
+        provider.base_url = Some(state.inference_base_url.clone());
+        provider.oauth_token_url = Some(format!(
+            "{}/api/oauth/token",
+            state.portal_base_url.trim_end_matches('/')
+        ));
+        provider.oauth_client_id = Some(state.client_id.clone());
+    }
 
     if !api_key.is_empty() && !stored_provider_secret_in_vault {
         let provider = disk
@@ -7699,15 +8027,42 @@ mod tests {
         assert_eq!(normalize_auth_provider("tg"), "telegram");
         assert_eq!(normalize_auth_provider("wechat"), "weixin");
         assert_eq!(normalize_auth_provider("wx"), "weixin");
+        assert_eq!(normalize_auth_provider("codex"), "openai-codex");
         assert_eq!(normalize_auth_provider("step-plan"), "stepfun");
         assert_eq!(normalize_auth_provider("api-server"), "api_server");
         assert_eq!(normalize_auth_provider("mm"), "mattermost");
     }
 
     #[test]
+    fn resolve_auth_type_prefers_oauth_for_supported_providers() {
+        assert_eq!(resolve_auth_type_for_provider("nous", None), "oauth");
+        assert_eq!(
+            resolve_auth_type_for_provider("openai-codex", None),
+            "oauth"
+        );
+        assert_eq!(resolve_auth_type_for_provider("openai", None), "api_key");
+        assert_eq!(
+            resolve_auth_type_for_provider("openai", Some("API-KEY")),
+            "api_key"
+        );
+        assert_eq!(
+            resolve_auth_type_for_provider("openai", Some("oauth")),
+            "oauth"
+        );
+    }
+
+    #[test]
     fn provider_env_var_maps_stepfun() {
         assert_eq!(provider_env_var("stepfun"), Some("STEPFUN_API_KEY"));
         assert_eq!(provider_env_var("step"), None);
+        assert_eq!(
+            provider_env_var("openai-codex"),
+            Some("HERMES_OPENAI_CODEX_API_KEY")
+        );
+        assert_eq!(
+            provider_env_var("qwen-oauth"),
+            Some("HERMES_QWEN_OAUTH_API_KEY")
+        );
         assert_eq!(secret_provider_aliases("stepfun"), vec!["stepfun", "step"]);
     }
 
@@ -7761,6 +8116,23 @@ mod tests {
         assert!(contents.contains("OPENAI_API_KEY=real-key"));
         assert!(!contents.contains("OPENROUTER_API_KEY="));
         assert!(!contents.contains("MINIMAX_API_KEY="));
+    }
+
+    #[test]
+    fn upsert_env_key_rewrites_existing_and_appends_missing() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let env_file = tmp.path().join(".env");
+        std::fs::write(
+            &env_file,
+            "OPENAI_API_KEY=old\nHERMES_AUTH_DEFAULT_PROVIDER=openai\n",
+        )
+        .expect("write env");
+        upsert_env_key(&env_file, "HERMES_AUTH_DEFAULT_PROVIDER", "nous").expect("upsert");
+        upsert_env_key(&env_file, "NOUS_API_KEY", "tok").expect("append");
+        let raw = std::fs::read_to_string(&env_file).expect("read env");
+        assert!(raw.contains("HERMES_AUTH_DEFAULT_PROVIDER=nous"));
+        assert!(raw.contains("NOUS_API_KEY=tok"));
+        assert!(!raw.contains("HERMES_AUTH_DEFAULT_PROVIDER=openai"));
     }
 
     #[test]
