@@ -755,6 +755,7 @@ fn classify_error(err: &str) -> ErrorClass {
         || lower.contains("503")
         || lower.contains("timeout")
         || lower.contains("connection")
+        || lower.contains("disconnected")
         || lower.contains("overloaded")
     {
         ErrorClass::Retryable
@@ -768,6 +769,7 @@ fn is_transient_stream_error(err: &AgentError) -> bool {
         let lower = msg.to_lowercase();
         lower.contains("timeout")
             || lower.contains("connection")
+            || lower.contains("disconnected")
             || lower.contains("remoteprotocol")
             || lower.contains("remote protocol")
             || lower.contains("network error")
