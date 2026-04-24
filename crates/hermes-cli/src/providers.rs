@@ -7,6 +7,7 @@ pub fn known_providers() -> Vec<&'static str> {
         "openai-codex",
         "qwen",
         "qwen-oauth",
+        "google-gemini-cli",
         "kimi",
         "minimax",
         "stepfun",
