@@ -17,9 +17,10 @@ use hermes_cli::app::{
     bridge_tool_registry, build_agent_config, build_provider, provider_api_key_from_env,
 };
 use hermes_cli::auth::{
-    clear_provider_auth_state, login_nous_device_code, login_openai_codex_device_code,
-    read_provider_auth_state, save_codex_auth_state, save_nous_auth_state, CodexDeviceCodeOptions,
-    NousDeviceCodeOptions,
+    clear_provider_auth_state, get_qwen_auth_status, login_nous_device_code,
+    login_openai_codex_device_code, read_provider_auth_state, resolve_qwen_runtime_credentials,
+    save_codex_auth_state, save_nous_auth_state, save_provider_auth_state, CodexDeviceCodeOptions,
+    NousDeviceCodeOptions, QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
 };
 use hermes_cli::cli::{Cli, CliCommand};
 use hermes_cli::config_env::hydrate_env_from_config;
@@ -3281,6 +3282,7 @@ fn normalize_auth_provider(provider: &str) -> String {
         "qq" => "qqbot".to_string(),
         "tg" => "telegram".to_string(),
         "codex" => "openai-codex".to_string(),
+        "qwen-cli" | "qwen-portal" => "qwen-oauth".to_string(),
         "step" | "step-plan" => "stepfun".to_string(),
         "api-server" => "api_server".to_string(),
         "home-assistant" => "homeassistant".to_string(),
@@ -3354,7 +3356,7 @@ fn provider_env_var(provider: &str) -> Option<&'static str> {
 fn provider_supports_oauth(provider: &str) -> bool {
     matches!(
         normalize_auth_provider(provider).as_str(),
-        "nous" | "openai-codex"
+        "nous" | "openai-codex" | "qwen-oauth"
     )
 }
 
@@ -3373,6 +3375,10 @@ fn parse_rfc3339_utc(value: Option<&str>) -> Option<chrono::DateTime<chrono::Utc
     value
         .and_then(|v| chrono::DateTime::parse_from_rfc3339(v).ok())
         .map(|dt| dt.with_timezone(&chrono::Utc))
+}
+
+fn parse_unix_millis_utc(value: Option<i64>) -> Option<chrono::DateTime<chrono::Utc>> {
+    value.and_then(chrono::DateTime::from_timestamp_millis)
 }
 
 fn secret_vault_path_for_cli(cli: &Cli) -> PathBuf {
@@ -4453,6 +4459,48 @@ async fn run_auth(
                         println!("Saved OAuth state: {}", auth_path.display());
                         return Ok(());
                     }
+                    "qwen-oauth" => {
+                        let creds = resolve_qwen_runtime_credentials(
+                            false,
+                            true,
+                            QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+                        )
+                        .await?;
+                        let auth_state = serde_json::to_value(&creds.tokens)
+                            .map_err(|e| AgentError::Config(format!("encode state: {}", e)))?;
+                        let auth_path = save_provider_auth_state("qwen-oauth", auth_state)?;
+                        manager
+                            .save_credential(OAuthCredential {
+                                provider: "qwen-oauth".to_string(),
+                                access_token: creds.api_key.clone(),
+                                refresh_token: creds.refresh_token.clone(),
+                                token_type: creds.token_type.clone(),
+                                scope: None,
+                                expires_at: parse_unix_millis_utc(creds.expires_at_ms),
+                            })
+                            .await?;
+                        let entries = pool_store.providers.entry(provider.clone()).or_default();
+                        let default_label = format!("{provider}-{}", entries.len() + 1);
+                        let entry = AuthPoolEntry {
+                            id: uuid::Uuid::new_v4().simple().to_string()[..6].to_string(),
+                            label: label.unwrap_or(default_label),
+                            auth_type: "oauth".to_string(),
+                            source: creds.source.clone(),
+                            access_token: creds.api_key.clone(),
+                            last_status: None,
+                            last_status_at: None,
+                            last_error_code: None,
+                        };
+                        entries.push(entry.clone());
+                        save_auth_pool_store(&pool_path, &pool_store)?;
+                        println!(
+                            "Added Qwen OAuth credential (label='{}', id={}).",
+                            entry.label, entry.id
+                        );
+                        println!("Qwen auth file: {}", creds.auth_file.display());
+                        println!("Saved OAuth state: {}", auth_path.display());
+                        return Ok(());
+                    }
                     _ => {
                         return Err(AgentError::Config(format!(
                             "OAuth flow is not implemented for provider '{}'",
@@ -4837,6 +4885,33 @@ async fn run_auth(
                 println!("Saved OAuth state: {}", auth_path.display());
                 return Ok(());
             }
+            if provider == "qwen-oauth" {
+                let creds = resolve_qwen_runtime_credentials(
+                    false,
+                    true,
+                    QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+                )
+                .await?;
+                let auth_state = serde_json::to_value(&creds.tokens)
+                    .map_err(|e| AgentError::Config(format!("encode state: {}", e)))?;
+                let auth_path = save_provider_auth_state("qwen-oauth", auth_state)?;
+                manager
+                    .save_credential(OAuthCredential {
+                        provider: "qwen-oauth".to_string(),
+                        access_token: creds.api_key.clone(),
+                        refresh_token: creds.refresh_token.clone(),
+                        token_type: creds.token_type.clone(),
+                        scope: None,
+                        expires_at: parse_unix_millis_utc(creds.expires_at_ms),
+                    })
+                    .await?;
+                println!(
+                    "Qwen OAuth credential imported from {} and stored as provider 'qwen-oauth'.",
+                    creds.auth_file.display()
+                );
+                println!("Saved OAuth state: {}", auth_path.display());
+                return Ok(());
+            }
             if provider == "copilot" || provider == "github-copilot" {
                 let access_token = hermes_cli::copilot_auth::start_copilot_device_flow().await?;
                 manager
@@ -5014,6 +5089,42 @@ async fn run_auth(
                     cfg_path.display(),
                     token_present,
                     enabled
+                );
+                return Ok(());
+            }
+            if provider == "qwen-oauth" {
+                let qwen_status = get_qwen_auth_status().await;
+                let auth_state_present = read_provider_auth_state(&provider)?.is_some();
+                let store_present = manager.get_access_token(&provider).await?.is_some();
+                let env_present = provider_api_key_from_env(&provider).is_some();
+                let (has_token, source) = if env_present {
+                    (true, "env")
+                } else if store_present {
+                    (true, "token_store")
+                } else if auth_state_present {
+                    (true, "auth_json")
+                } else {
+                    (false, "none")
+                };
+                println!(
+                    "Qwen OAuth: logged_in={} auth_file={} source={} expires_at_ms={}",
+                    qwen_status.logged_in,
+                    qwen_status.auth_file.display(),
+                    qwen_status.source.as_deref().unwrap_or("none"),
+                    qwen_status
+                        .expires_at_ms
+                        .map(|v| v.to_string())
+                        .unwrap_or_else(|| "unknown".to_string())
+                );
+                if let Some(token) = qwen_status.api_key.as_deref() {
+                    println!("Qwen OAuth token: {}", mask_secret(token));
+                }
+                if let Some(err) = qwen_status.error.as_deref() {
+                    println!("Qwen OAuth detail: {}", err);
+                }
+                println!(
+                    "Auth status: provider='{}', credential_present={}, source={}, oauth_state_present={}",
+                    provider, has_token, source, auth_state_present
                 );
                 return Ok(());
             }
@@ -8028,6 +8139,7 @@ mod tests {
         assert_eq!(normalize_auth_provider("wechat"), "weixin");
         assert_eq!(normalize_auth_provider("wx"), "weixin");
         assert_eq!(normalize_auth_provider("codex"), "openai-codex");
+        assert_eq!(normalize_auth_provider("qwen-cli"), "qwen-oauth");
         assert_eq!(normalize_auth_provider("step-plan"), "stepfun");
         assert_eq!(normalize_auth_provider("api-server"), "api_server");
         assert_eq!(normalize_auth_provider("mm"), "mattermost");
@@ -8040,6 +8152,7 @@ mod tests {
             resolve_auth_type_for_provider("openai-codex", None),
             "oauth"
         );
+        assert_eq!(resolve_auth_type_for_provider("qwen-oauth", None), "oauth");
         assert_eq!(resolve_auth_type_for_provider("openai", None), "api_key");
         assert_eq!(
             resolve_auth_type_for_provider("openai", Some("API-KEY")),
