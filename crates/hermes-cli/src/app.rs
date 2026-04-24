@@ -569,6 +569,41 @@ mod tests {
         std::env::remove_var(hermes_var);
         std::env::remove_var(stepfun_var);
     }
+
+    #[test]
+    fn test_provider_api_key_from_env_supports_openai_codex() {
+        let var = "HERMES_OPENAI_CODEX_API_KEY";
+        std::env::remove_var(var);
+        std::env::set_var(var, "codex-oauth-token");
+        assert_eq!(
+            provider_api_key_from_env("openai-codex").as_deref(),
+            Some("codex-oauth-token")
+        );
+        std::env::remove_var(var);
+    }
+
+    #[test]
+    fn test_provider_api_key_from_env_supports_qwen_oauth() {
+        let oauth_var = "HERMES_QWEN_OAUTH_API_KEY";
+        let fallback_var = "DASHSCOPE_API_KEY";
+        std::env::remove_var(oauth_var);
+        std::env::remove_var(fallback_var);
+
+        std::env::set_var(fallback_var, "dashscope-fallback");
+        assert_eq!(
+            provider_api_key_from_env("qwen-oauth").as_deref(),
+            Some("dashscope-fallback")
+        );
+
+        std::env::set_var(oauth_var, "qwen-oauth-token");
+        assert_eq!(
+            provider_api_key_from_env("qwen-oauth").as_deref(),
+            Some("qwen-oauth-token")
+        );
+
+        std::env::remove_var(oauth_var);
+        std::env::remove_var(fallback_var);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -671,6 +706,7 @@ pub fn bridge_tool_registry(tools: &ToolRegistry) -> AgentToolRegistry {
 // ---------------------------------------------------------------------------
 
 const STEPFUN_BASE_URL: &str = "https://api.stepfun.ai/step_plan/v1";
+const OPENAI_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 
 fn resolve_provider_and_model(config: &GatewayConfig, model: &str) -> (String, String) {
     let trimmed = model.trim();
@@ -716,6 +752,9 @@ pub fn provider_api_key_from_env(provider: &str) -> Option<String> {
             .filter(|s| !s.trim().is_empty())
             .or_else(|| std::env::var("OPENAI_API_KEY").ok())
             .filter(|s| !s.trim().is_empty()),
+        "openai-codex" | "codex" => std::env::var("HERMES_OPENAI_CODEX_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
         "anthropic" => std::env::var("ANTHROPIC_API_KEY")
             .ok()
             .filter(|s| !s.trim().is_empty()),
@@ -724,6 +763,11 @@ pub fn provider_api_key_from_env(provider: &str) -> Option<String> {
             .filter(|s| !s.trim().is_empty()),
         "qwen" => std::env::var("DASHSCOPE_API_KEY")
             .ok()
+            .filter(|s| !s.trim().is_empty()),
+        "qwen-oauth" => std::env::var("HERMES_QWEN_OAUTH_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| std::env::var("DASHSCOPE_API_KEY").ok())
             .filter(|s| !s.trim().is_empty()),
         "kimi" | "moonshot" => std::env::var("MOONSHOT_API_KEY")
             .ok()
@@ -784,6 +828,11 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
             }
             Arc::new(p)
         }
+        "openai-codex" | "codex" => {
+            let mut p = OpenAiProvider::new(&api_key).with_model(model_name.as_str());
+            p = p.with_base_url(base_url.unwrap_or_else(|| OPENAI_CODEX_BASE_URL.to_string()));
+            Arc::new(p)
+        }
         "anthropic" => {
             let mut p = AnthropicProvider::new(&api_key).with_model(model_name.as_str());
             if let Some(url) = base_url {
@@ -795,7 +844,7 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
             let p = OpenRouterProvider::new(&api_key).with_model(model_name.as_str());
             Arc::new(p)
         }
-        "qwen" => {
+        "qwen" | "qwen-oauth" => {
             let mut p = QwenProvider::new(&api_key).with_model(model_name.as_str());
             if let Some(url) = base_url {
                 p = p.with_base_url(url);
