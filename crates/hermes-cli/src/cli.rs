@@ -97,7 +97,20 @@ pub enum CliCommand {
     Setup,
 
     /// Check dependencies and configuration health.
-    Doctor,
+    Doctor {
+        /// Run deeper diagnostics (gateway/runtime/memory endpoints).
+        #[arg(long)]
+        deep: bool,
+        /// Write a machine-readable doctor snapshot JSON.
+        #[arg(long)]
+        snapshot: bool,
+        /// Override snapshot output path.
+        #[arg(long)]
+        snapshot_path: Option<String>,
+        /// Build a support bundle tar.gz with diagnostics artifacts.
+        #[arg(long)]
+        bundle: bool,
+    },
 
     /// Check for updates.
     Update,
@@ -593,7 +606,43 @@ mod tests {
     #[test]
     fn cli_parse_doctor() {
         let cli = Cli::try_parse_from(vec!["hermes", "doctor"]).unwrap();
-        assert!(matches!(cli.command, Some(CliCommand::Doctor)));
+        assert!(matches!(
+            cli.command,
+            Some(CliCommand::Doctor {
+                deep: false,
+                snapshot: false,
+                snapshot_path: None,
+                bundle: false
+            })
+        ));
+    }
+
+    #[test]
+    fn cli_parse_doctor_with_flags() {
+        let cli = Cli::try_parse_from(vec![
+            "hermes",
+            "doctor",
+            "--deep",
+            "--snapshot",
+            "--snapshot-path",
+            "/tmp/doctor.json",
+            "--bundle",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(CliCommand::Doctor {
+                deep,
+                snapshot,
+                snapshot_path,
+                bundle,
+            }) => {
+                assert!(deep);
+                assert!(snapshot);
+                assert!(bundle);
+                assert_eq!(snapshot_path.as_deref(), Some("/tmp/doctor.json"));
+            }
+            _ => panic!("Expected Doctor command"),
+        }
     }
 
     #[test]
