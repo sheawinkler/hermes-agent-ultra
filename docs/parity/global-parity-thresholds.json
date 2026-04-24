@@ -7,13 +7,13 @@
     "upstream_ref": "upstream/main"
   },
   "release_thresholds": {
-    "max_commits_behind": 0,
-    "max_upstream_patch_missing": 0,
-    "max_files_only_upstream": 0,
-    "max_shared_different": 0,
-    "max_unowned_divergences": 0,
-    "max_divergence_review_overdue": 0,
-    "min_test_intent_mapping_ratio": 0.9,
+    "gate_mode": "functional",
+    "metric_thresholds": {
+      "max_unowned_divergences": 0,
+      "max_divergence_review_overdue": 0,
+      "min_test_intent_mapping_ratio": 0.9,
+      "max_queue_pending_commits": 0
+    },
     "required_workstreams_complete": [
       "GPAR-01",
       "GPAR-02",
@@ -27,13 +27,15 @@
     ]
   },
   "ci_thresholds": {
+    "gate_mode": "tree-drift",
     "max_commits_behind": 5500,
     "max_upstream_patch_missing": 5000,
     "max_files_only_upstream": 2500,
     "max_shared_different": 15,
     "max_unowned_divergences": 0,
     "max_divergence_review_overdue": 0,
-    "min_test_intent_mapping_ratio": 0.9
+    "min_test_intent_mapping_ratio": 0.9,
+    "max_queue_pending_commits": 100
   },
   "drift_alert_thresholds": {
     "warn_commits_behind": 5200,
