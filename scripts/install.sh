@@ -18,6 +18,7 @@ VERSION="${VERSION:-latest}"
 INSTALL_DIR="${HERMES_INSTALL_DIR:-${INSTALL_DIR:-$(default_install_dir)}}"
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 CANONICAL_BIN_NAME="${CANONICAL_BIN_NAME:-hermes-agent-ultra}"
+PRIMARY_BIN_NAME="${PRIMARY_BIN_NAME:-hermes-ultra}"
 LEGACY_BIN_NAME="${LEGACY_BIN_NAME:-hermes}"
 RELEASE_BIN_BASENAME="${RELEASE_BIN_BASENAME:-hermes}"
 RUN_SETUP_MODE="${RUN_SETUP_MODE:-auto}" # auto|always|never
@@ -51,6 +52,7 @@ Environment variables:
   INSTALL_DIR            Destination bin directory (legacy alias, overridden by HERMES_INSTALL_DIR)
   HERMES_HOME            Hermes config dir for SOUL.md bootstrap (default: $HOME/.hermes)
   CANONICAL_BIN_NAME     Installed binary name (default: hermes-agent-ultra)
+  PRIMARY_BIN_NAME       Primary user-facing command symlink (default: hermes-ultra)
   LEGACY_BIN_NAME        Compatibility alias symlink name (default: hermes)
   RELEASE_BIN_BASENAME   Tarball executable basename (default: hermes)
   RUN_SETUP_MODE         auto|always|never for setup flow (default: auto)
@@ -253,7 +255,7 @@ done
 
 if [[ -n "${DOWNLOADED_ASSET}" ]]; then
   tar -xzf "${TMP_DIR}/${RELEASE_BIN_BASENAME}.tar.gz" -C "${TMP_DIR}"
-  for candidate in "${CANONICAL_BIN_NAME}" "${RELEASE_BIN_BASENAME}" "${LEGACY_BIN_NAME}"; do
+  for candidate in "${CANONICAL_BIN_NAME}" "${PRIMARY_BIN_NAME}" "${RELEASE_BIN_BASENAME}" "${LEGACY_BIN_NAME}"; do
     if [[ -f "${TMP_DIR}/${candidate}" ]]; then
       SOURCE_BIN="${TMP_DIR}/${candidate}"
       break
@@ -284,6 +286,9 @@ if [[ ! -f "${SOURCE_BIN}" ]]; then
 fi
 
 install -m 0755 "${SOURCE_BIN}" "${INSTALL_DIR}/${CANONICAL_BIN_NAME}"
+if [[ "${PRIMARY_BIN_NAME}" != "${CANONICAL_BIN_NAME}" ]]; then
+  ln -sfn "${CANONICAL_BIN_NAME}" "${INSTALL_DIR}/${PRIMARY_BIN_NAME}"
+fi
 if [[ "${LEGACY_BIN_NAME}" != "${CANONICAL_BIN_NAME}" ]]; then
   ln -sfn "${CANONICAL_BIN_NAME}" "${INSTALL_DIR}/${LEGACY_BIN_NAME}"
 fi
@@ -310,6 +315,9 @@ fi
 
 if command -v "${CANONICAL_BIN_NAME}" >/dev/null 2>&1; then
   echo "Detected on PATH: $(command -v "${CANONICAL_BIN_NAME}")"
+  if command -v "${PRIMARY_BIN_NAME}" >/dev/null 2>&1; then
+    echo "Primary command available: $(command -v "${PRIMARY_BIN_NAME}")"
+  fi
   if command -v "${LEGACY_BIN_NAME}" >/dev/null 2>&1; then
     echo "Legacy alias available: $(command -v "${LEGACY_BIN_NAME}")"
   fi

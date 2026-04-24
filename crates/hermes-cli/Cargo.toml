@@ -16,6 +16,10 @@ name = "hermes"
 path = "src/bin/hermes.rs"
 
 [[bin]]
+name = "hermes-ultra"
+path = "src/bin/hermes-ultra.rs"
+
+[[bin]]
 name = "hermes-agent-ultra"
 path = "src/main.rs"
 
