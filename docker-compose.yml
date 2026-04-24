@@ -1,0 +1,42 @@
+#
+# docker-compose.yml for Hermes Agent Ultra
+#
+# Usage:
+#   HERMES_UID=$(id -u) HERMES_GID=$(id -g) docker compose up -d
+#
+# Set HERMES_UID / HERMES_GID to the host user that owns ~/.hermes-agent-ultra
+# so files created in the container stay writable from the host.
+#
+# Security notes:
+#   - Dashboard binds to 127.0.0.1 by default.
+#   - To expose API server beyond localhost, set API_SERVER_KEY and API_SERVER_HOST.
+#
+services:
+  gateway:
+    build: .
+    image: hermes-agent-ultra
+    container_name: hermes-agent-ultra
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ~/.hermes-agent-ultra:/data
+    environment:
+      - HERMES_UID=${HERMES_UID:-10000}
+      - HERMES_GID=${HERMES_GID:-10000}
+      # - API_SERVER_HOST=0.0.0.0
+      # - API_SERVER_KEY=${API_SERVER_KEY}
+    command: ["gateway", "run"]
+
+  dashboard:
+    image: hermes-agent-ultra
+    container_name: hermes-agent-ultra-dashboard
+    restart: unless-stopped
+    network_mode: host
+    depends_on:
+      - gateway
+    volumes:
+      - ~/.hermes-agent-ultra:/data
+    environment:
+      - HERMES_UID=${HERMES_UID:-10000}
+      - HERMES_GID=${HERMES_GID:-10000}
+    command: ["dashboard", "--host", "127.0.0.1", "--no-open"]
