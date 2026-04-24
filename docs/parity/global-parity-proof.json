@@ -2,19 +2,19 @@
   "ci_gate": {
     "checks": [
       {
-        "actual": 5452.0,
+        "actual": 137.0,
         "limit": 5500,
         "metric": "max_commits_behind",
         "status": "pass"
       },
       {
-        "actual": 4722.0,
+        "actual": 132.0,
         "limit": 5000,
         "metric": "max_upstream_patch_missing",
         "status": "pass"
       },
       {
-        "actual": 2281.0,
+        "actual": 2300.0,
         "limit": 2500,
         "metric": "max_files_only_upstream",
         "status": "pass"
@@ -42,11 +42,18 @@
         "limit": 0.9,
         "metric": "min_test_intent_mapping_ratio",
         "status": "pass"
+      },
+      {
+        "actual": 0.0,
+        "limit": 100,
+        "metric": "max_queue_pending_commits",
+        "status": "pass"
       }
     ],
+    "mode": "tree-drift",
     "pass": true
   },
-  "generated_at_utc": "2026-04-23T21:25:52.728426+00:00",
+  "generated_at_utc": "2026-04-24T01:29:22.647772+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -59,12 +66,13 @@
     "GPAR-09": true
   },
   "metrics": {
-    "max_commits_behind": 5452.0,
+    "max_commits_behind": 137.0,
     "max_divergence_review_overdue": 0.0,
-    "max_files_only_upstream": 2281.0,
+    "max_files_only_upstream": 2300.0,
+    "max_queue_pending_commits": 0.0,
     "max_shared_different": 8.0,
     "max_unowned_divergences": 0.0,
-    "max_upstream_patch_missing": 4722.0,
+    "max_upstream_patch_missing": 132.0,
     "min_test_intent_mapping_ratio": 1.0
   },
   "program": {
@@ -75,43 +83,20 @@
   },
   "queue_summary": {
     "by_disposition": {
-      "ported": 9,
-      "superseded": 65
+      "ported": 11,
+      "superseded": 121
     },
     "by_target_ticket": {
-      "20": 16,
-      "22": 20,
-      "23": 4,
-      "26": 34
+      "20": 42,
+      "22": 31,
+      "23": 5,
+      "25": 1,
+      "26": 53
     },
-    "total_commits": 74
+    "total_commits": 132
   },
   "release_gate": {
     "checks": [
-      {
-        "actual": 5452.0,
-        "limit": 0,
-        "metric": "max_commits_behind",
-        "status": "fail"
-      },
-      {
-        "actual": 4722.0,
-        "limit": 0,
-        "metric": "max_upstream_patch_missing",
-        "status": "fail"
-      },
-      {
-        "actual": 2281.0,
-        "limit": 0,
-        "metric": "max_files_only_upstream",
-        "status": "fail"
-      },
-      {
-        "actual": 8.0,
-        "limit": 0,
-        "metric": "max_shared_different",
-        "status": "fail"
-      },
       {
         "actual": 0.0,
         "limit": 0,
@@ -131,6 +116,12 @@
         "status": "pass"
       },
       {
+        "actual": 0.0,
+        "limit": 0,
+        "metric": "max_queue_pending_commits",
+        "status": "pass"
+      },
+      {
         "actual": {
           "GPAR-01": true,
           "GPAR-02": true,
@@ -147,7 +138,8 @@
         "status": "pass"
       }
     ],
-    "pass": false
+    "mode": "functional",
+    "pass": true
   },
   "sources": {
     "adapter_matrix": "docs/parity/adapter-feature-matrix.json",
