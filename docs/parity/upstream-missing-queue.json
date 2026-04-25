@@ -4258,27 +4258,700 @@
       "subject": "fix(tui): render tool trail before anchored inline diffs",
       "target_ticket": 22,
       "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/tui_gateway/test_make_agent_provider.py",
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "53fc10fc9a8bef54fdbb8ebd704b4389ecdd47f3",
+      "subject": "fix(tui): keep default personality neutral",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/base.py",
+        "gateway/platforms/telegram.py",
+        "gateway/platforms/telegram_network.py",
+        "tests/gateway/test_proxy_mode.py",
+        "tests/gateway/test_telegram_network.py"
+      ],
+      "files_touched": 5,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "e7590f92a2d7a45ee17e3300950bf98edd98c530",
+      "subject": "fix(telegram): honor no_proxy for explicit proxy setup",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/context_compressor.py",
+        "run_agent.py",
+        "tests/run_agent/test_flush_memories_codex.py"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "8a2506af43760a9dbecb384fc2b1fd7f5937ad0c",
+      "subject": "fix(aux): surface auxiliary failures in UI",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
+        "hermes_cli/models.py"
+      ],
+      "files_touched": 1,
+      "notes": "ported in Rust: added gpt-5.5 and gpt-5.5-pro to curated OpenRouter catalog in crates/hermes-cli/src/model_switch.rs",
+      "owner": "codex",
+      "sha": "db9d6375fb187be5972fb10b35e31a81bf28a612",
+      "subject": "feat(models): add openai/gpt-5.5 and gpt-5.5-pro to OpenRouter + Nous Portal (#15343)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "batch_runner.py",
+        "model_tools.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "dbdefa43c866011ec82ea6e8a38ae97431210199",
+      "subject": "fix: eliminate duplicate checkpoint entries and JSON-unsafe coercion",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/test_batch_runner_checkpoint.py",
+        "tests/test_model_tools.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "ef9355455b4141e694a03768a90ebc6ad4691e90",
+      "subject": "test: regression coverage for checkpoint dedup and inf/nan coercion",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream release metadata/changelog maintenance (AUTHOR_MAP/chore) has no runtime parity impact in rust-native repo",
+      "owner": "codex",
+      "sha": "14b27bb68c22b76cddde44c5487bff9dd2b0f988",
+      "subject": "chore(release): map @tochukwuada in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/memory_manager.py",
+        "agent/memory_provider.py",
+        "run_agent.py",
+        "tests/agent/test_memory_provider.py",
+        "tests/run_agent/test_flush_memories_codex.py"
+      ],
+      "files_touched": 5,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "6a957a74bc03c5269dd34b235d96beb1f27ad02b",
+      "subject": "fix(memory): add write origin metadata",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/codex_responses_adapter.py",
+        "tests/run_agent/test_run_agent_codex_responses.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "4093ee9c62571d79c834a3bd72a8a32d8221a65b",
+      "subject": "fix(codex): detect leaked tool-call text in assistant content (#15347)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "run_agent.py",
+        "tests/run_agent/test_tool_call_args_sanitizer.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "7a192b124e220dc4b5d2cd1600aab9e348f7ced4",
+      "subject": "fix(run_agent): repair corrupted tool_call arguments before sending to provider",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/web_server.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "b7c1d77e55b7818001beb32c080a7e74f4529e0a",
+      "subject": "fix(dashboard): remove unimplemented 'block' busy_input_mode option",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "run_agent.py",
+        "tests/run_agent/test_streaming_tool_call_repair.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "17fc84c256234f54b3492be4687cf94b7ce2125b",
+      "subject": "fix: repair malformed tool call args in streaming assembly before flagging as truncated",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream release metadata/changelog maintenance (AUTHOR_MAP/chore) has no runtime parity impact in rust-native repo",
+      "owner": "codex",
+      "sha": "bb53d79d261c30edac64f8ee9e19fdf6068114d9",
+      "subject": "chore(release): map q19dcp@gmail.com -> aj-nt in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "run_agent.py",
+        "tests/run_agent/test_repair_tool_call_arguments.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "2d444fc84d2f656554417f877bcf3d91166d405a",
+      "subject": "fix(run_agent): handle unescaped control chars in tool_call arguments (#15356)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "website/docs/reference/faq.md"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream docs/nix/web packaging delta is outside rust runtime parity scope for this repository",
+      "owner": "codex",
+      "sha": "0bcbc9e316644dfda332e1d57b46e5078a9f85cf",
+      "subject": "docs(faq): Update docs on backups",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/skill_commands.py",
+        "agent/skill_preprocessing.py",
+        "tests/tools/test_skills_tool.py",
+        "tools/skills_tool.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "ead66f0c92329770bc57c9058da0a4d465859ac8",
+      "subject": "fix(skills): apply inline shell in skill_view",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/tools/test_skills_tool.py",
+        "tools/skills_tool.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "2de8a7a22921ad93cc68505fb3576dead0753e99",
+      "subject": "fix(skills): drop raw_content to avoid doubling skill payload",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cli.py",
+        "hermes_cli/commands.py",
+        "tests/cli/test_busy_input_mode_command.py",
+        "website/docs/user-guide/cli.md"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "1dcf79a8647e730d77c7875b362ec5d93129a08f",
+      "subject": "feat: add slash command for busy input mode",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cli.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "08d5c9c5399222011777fc8681c2e3757b9226de",
+      "subject": "fix: Ctrl+D deletes char under cursor, only exits on empty input (bash/zsh behaviour)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cli.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "ed91b79b7ecad032b5a167c1b6f5404db5a7e38a",
+      "subject": "fix(cli): keep Ctrl+D no-op when only attachments pending",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream release metadata/changelog maintenance (AUTHOR_MAP/chore) has no runtime parity impact in rust-native repo",
+      "owner": "codex",
+      "sha": "e3697e20a68e206b8dca713cca4091e1078c961f",
+      "subject": "chore(release): map iRonin personal email to GitHub login",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream release metadata/changelog maintenance (AUTHOR_MAP/chore) has no runtime parity impact in rust-native repo",
+      "owner": "codex",
+      "sha": "e3a1a9c24dcedb621a4e15ac267c785282f2a119",
+      "subject": "chore(release): map julia@alexland.us -> alexg0bot in AUTHOR_MAP (#15384)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_busy_session_ack.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "3e6c1085659544f33eacee0ff938faed09d8e442",
+      "subject": "fix(gateway): honor queue mode in runner PRIORITY interrupt path",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/config.py",
+        "tests/gateway/test_config.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "8ea389a7f815c0e37ea382c55a38cf5e4e640ca5",
+      "subject": "fix(gateway/config): coerce quoted boolean values in config parsing",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cli.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "fd3864d8bd512ffa21a671d99969a6e54dd91a02",
+      "subject": "feat(cli): wrap /compress in _busy_command to block input during compression",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/web_server.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "7957da7a1d5a2e39bb04597a48a05ade613238a8",
+      "subject": "fix(web_server): hold _oauth_sessions_lock during PKCE session state writes",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/api_server.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "a29bad2a3c3e2a277ec33a24d952d780eaa71350",
+      "subject": "fix(api-server): persist response snapshot on client disconnect when store=True",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/api_server.py",
+        "tests/gateway/test_api_server.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "36d68bcb82ea4868afc0e6f8eeb803c213bfedcc",
+      "subject": "fix(api-server): persist incomplete snapshot on asyncio.CancelledError too",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream release metadata/changelog maintenance (AUTHOR_MAP/chore) has no runtime parity impact in rust-native repo",
+      "owner": "codex",
+      "sha": "c7d62b3fe30747798a25dc759ee242e36a8faa22",
+      "subject": "chore(release): map ebukau84@gmail.com -> UgwujaGeorge in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/auth.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded-by-design: rust auth loader fails closed on invalid auth.json parse and does not silently reset persisted auth state",
+      "owner": "codex",
+      "sha": "c599a41b84b48566c8510c603ec1cd974f6ee9de",
+      "subject": "fix(auth): preserve corrupt auth.json and warn instead of silently resetting",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/tools/test_base_environment.py",
+        "tools/environments/base.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "fd10463069d8e4d218696510709f16e26359492d",
+      "subject": "fix(env): safely quote ~/ subpaths in wrapped cd commands",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "run_agent.py",
+        "tests/run_agent/test_memory_sync_interrupted.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "00c3d848d8a21b1865f6d9115d696cf2eae48ef7",
+      "subject": "fix(memory): skip external-provider sync on interrupted turns (#15218)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/bluebubbles.py",
+        "gateway/session.py",
+        "tests/gateway/test_bluebubbles.py",
+        "tests/gateway/test_run_progress_topics.py",
+        "tests/gateway/test_session.py"
+      ],
+      "files_touched": 5,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "f731c2c2bd8c11550750d3eeaeda0b8dbc0b2784",
+      "subject": "fix(gateway/bluebubbles): align iMessage delivery with non-editable UX",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream release metadata/changelog maintenance (AUTHOR_MAP/chore) has no runtime parity impact in rust-native repo",
+      "owner": "codex",
+      "sha": "4fade39c90084efd9cadd3ad7d8c37f42a16810a",
+      "subject": "chore(release): map benjaminsehl noreply email in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
+        "run_agent.py"
+      ],
+      "files_touched": 1,
+      "notes": "ported-by-equivalence: rust provider preserves reasoning_content on tool-call turns (crates/hermes-agent/src/provider.rs)",
+      "owner": "codex",
+      "sha": "93a2d6b307674fc9975538cd7a2f903068211c95",
+      "subject": "fix: add DeepSeek reasoning_content echo for tool-call messages",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream release metadata/changelog maintenance (AUTHOR_MAP/chore) has no runtime parity impact in rust-native repo",
+      "owner": "codex",
+      "sha": "e93cc934c7d0f9d779cf1f631ea1cd81d482e652",
+      "subject": "chore(release): map chenzeshi@live.com -> chen1749144759 in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
+        "run_agent.py",
+        "tests/run_agent/test_deepseek_reasoning_content_echo.py"
+      ],
+      "files_touched": 2,
+      "notes": "ported-by-equivalence: rust provider reasoning_content extraction is centralized in hermes-agent provider parsing helpers and covered by tests",
+      "owner": "codex",
+      "sha": "d58b305adfdb5697c0ff268696040b0505d40892",
+      "subject": "refactor(deepseek-reasoning): consolidate detection into helpers + regression tests",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_resume_command.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream python-path delta is not directly applicable to rust-native architecture; equivalent runtime behavior is covered in Rust modules",
+      "owner": "codex",
+      "sha": "19a3e2ce8ee5aa9cf69307a5ac38e9f12f20e9a5",
+      "subject": "fix(gateway): follow compression continuations during /resume",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream release metadata/changelog maintenance (AUTHOR_MAP/chore) has no runtime parity impact in rust-native repo",
+      "owner": "codex",
+      "sha": "f14264c4383527e3168b3a910e2f89697bd0e253",
+      "subject": "chore(release): map simbamax99@gmail.com to @simbam99",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "skills/productivity/google-workspace/scripts/_hermes_home.py",
+        "skills/productivity/google-workspace/scripts/google_api.py",
+        "skills/productivity/google-workspace/scripts/gws_bridge.py",
+        "skills/productivity/google-workspace/scripts/setup.py",
+        "tests/skills/test_google_oauth_setup.py"
+      ],
+      "files_touched": 5,
+      "notes": "superseded: upstream python google-workspace skill-script changes target paths not vendored in this rust workspace",
+      "owner": "codex",
+      "sha": "c34d3f480778e9c223f6cccb5cdd713c4e7cce29",
+      "subject": "fix(skills): factor HERMES_HOME resolution into shared _hermes_home helper",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream release metadata/changelog maintenance (AUTHOR_MAP/chore) has no runtime parity impact in rust-native repo",
+      "owner": "codex",
+      "sha": "629e108ee24e023856320a22b780e451097a1e46",
+      "subject": "chore(release): map jerome.benoit@sap.com to jerome-benoit",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "pyproject.toml",
+        "skills/productivity/google-workspace/scripts/setup.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream python google-workspace skill-script changes target paths not vendored in this rust workspace",
+      "owner": "codex",
+      "sha": "13038dc747aacc211fcc2a5cf2e7fafc1b3719b8",
+      "subject": "fix(skills): ship google-workspace deps as [google] extra; make setup.py 3.9-parseable",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cli.py",
+        "gateway/run.py",
+        "hermes_cli/model_switch.py",
+        "tests/hermes_cli/test_model_switch_context_display.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded-by-equivalence: rust /model output is driven by provider-curated catalog + model metadata rather than raw models.dev-only values",
+      "owner": "codex",
+      "sha": "05d8f11085fec55106a0d2e0ed2051baeb4b108c",
+      "subject": "fix(/model): show provider-enforced context length, not raw models.dev (#15438)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "nix/lib.nix",
+        "nix/web.nix",
+        "ui-tui/package-lock.json"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream docs/nix/web packaging delta is outside rust runtime parity scope for this repository",
+      "owner": "codex",
+      "sha": "3e61703b08f475c9982cf4099d049eeac232a7a1",
+      "subject": "fix(nix): use --rebuild in fix-lockfiles to bypass cached FOD store paths (#15444)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
+        "gateway/platforms/matrix.py"
+      ],
+      "files_touched": 1,
+      "notes": "ported-by-equivalence: rust Matrix adapter binds native crypto machine device_id via whoami/device override (crates/hermes-gateway/src/platforms/matrix.rs)",
+      "owner": "codex",
+      "sha": "3cf13747b794655806fe7ac3487bf876e431fcd0",
+      "subject": "fix(matrix): bind PgCryptoStore device_id so fresh E2EE installs work",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
+        "gateway/platforms/matrix.py",
+        "tests/gateway/test_matrix.py"
+      ],
+      "files_touched": 2,
+      "notes": "ported-by-equivalence: rust Matrix adapter already uses native device_id path without upstream python-specific imports/mocks",
+      "owner": "codex",
+      "sha": "2182de55bb7734b804abd3403570ec45428feece",
+      "subject": "fix(matrix): drop needless DeviceID import + mock put_device_id in tests",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cli-config.yaml.example",
+        "tools/delegate_tool.py",
+        "website/docs/guides/delegation-patterns.md"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream docs/python delegate-tool config note is outside rust runtime parity scope for this workspace",
+      "owner": "codex",
+      "sha": "0ed37c0ca4bfde29e9aa09ba97ac8a2c8af93888",
+      "subject": "docs(delegate): document max_concurrent_children and max_spawn_depth + cost warning",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cli-config.yaml.example",
+        "scripts/release.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream cli-config example comment churn is docs/release metadata with no rust runtime behavior impact",
+      "owner": "codex",
+      "sha": "0a59994030681cfd3fb53662d1482d41dd45153d",
+      "subject": "fix(cli-config): keep delegation overrides commented in example",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
     }
   ],
-  "generated_at_utc": "2026-04-24T21:19:22.348751+00:00",
+  "generated_at_utc": "2026-04-25T03:40:12.254705+00:00",
   "refs": {
-    "local_ref": "main",
-    "range": "main..upstream/main",
+    "local_ref": "origin/main",
+    "range": "origin/main..upstream/main",
     "upstream_ref": "upstream/main"
   },
   "summary": {
     "by_disposition": {
-      "ported": 22,
-      "superseded": 264
+      "ported": 27,
+      "superseded": 307
     },
     "by_target_ticket": {
-      "20": 113,
-      "21": 2,
-      "22": 57,
-      "23": 17,
+      "20": 132,
+      "21": 4,
+      "22": 60,
+      "23": 22,
       "25": 3,
-      "26": 94
+      "26": 113
     },
-    "total_commits": 286
+    "total_commits": 334
   }
 }
