@@ -6617,12 +6617,6 @@ fn default_setup_model_choice() -> usize {
         .unwrap_or(1)
 }
 
-fn setup_option_from_choice(choice: &str) -> &'static SetupModelOption {
-    let idx = choice.trim().parse::<usize>().ok().filter(|n| *n >= 1);
-    idx.and_then(|n| SETUP_MODEL_OPTIONS.get(n - 1))
-        .unwrap_or(&SETUP_MODEL_OPTIONS[0])
-}
-
 fn setup_provider_display(provider: &str) -> &'static str {
     match provider {
         "openai" => "OpenAI",
@@ -6875,23 +6869,19 @@ async fn run_setup() -> Result<(), AgentError> {
     // 2. Optional import from legacy Python/OpenClaw .env files
     maybe_import_legacy_env(&mut reader, &env_path)?;
 
-    // 3. Prompt for model/provider
-    println!("\nAvailable models/providers:");
-    for (idx, option) in SETUP_MODEL_OPTIONS.iter().enumerate() {
-        println!("  {:>2}) {:<52} {}", idx + 1, option.model, option.label);
-    }
+    // 3. Prompt for model/provider via interactive single-select list
     let default_model_choice = default_setup_model_choice();
-    println!("  (Nous remains the default; OAuth can be completed during setup.)");
-    print!("Choose model [{}]: ", default_model_choice);
-    io::stdout().flush().ok();
-    let mut model_choice = String::new();
-    reader.read_line(&mut model_choice).ok();
-    let model_choice = if model_choice.trim().is_empty() {
-        default_model_choice.to_string()
-    } else {
-        model_choice.trim().to_string()
-    };
-    let selected_option = setup_option_from_choice(&model_choice);
+    let default_model_index = default_model_choice.saturating_sub(1);
+    let option_labels: Vec<String> = SETUP_MODEL_OPTIONS
+        .iter()
+        .map(|option| format!("{:<52} {}", option.model, option.label))
+        .collect();
+    println!("\nNous remains the default; OAuth can be completed during setup.");
+    let selected =
+        hermes_cli::curses_select("Select model/provider", &option_labels, default_model_index);
+    let selected_option = SETUP_MODEL_OPTIONS
+        .get(selected.index)
+        .unwrap_or(&SETUP_MODEL_OPTIONS[default_model_index]);
     let mut model = selected_option.model.to_string();
     let selected_provider = selected_option.provider.to_string();
     let selected_provider_label = setup_provider_display(&selected_provider);
@@ -6901,44 +6891,61 @@ async fn run_setup() -> Result<(), AgentError> {
     let suggested_provider_models = provider_model_ids(&selected_provider).await;
     let displayed_suggested_models: Vec<String> =
         suggested_provider_models.into_iter().take(25).collect();
-    if !displayed_suggested_models.is_empty() {
-        println!("\nSuggested {} models:", selected_provider_label);
-        for (idx, candidate) in displayed_suggested_models.iter().enumerate() {
-            let full = if candidate.contains(':') {
-                candidate.to_string()
-            } else {
-                format!("{}:{}", selected_provider, candidate)
-            };
-            println!("  {:>2}) {}", idx + 1, full);
-        }
-    }
-    print!("Model ID for {} [{}]: ", selected_provider_label, model);
-    io::stdout().flush().ok();
-    let mut model_override = String::new();
-    reader.read_line(&mut model_override).ok();
-    let model_override = model_override.trim();
-    if !model_override.is_empty() {
-        if let Ok(choice) = model_override.parse::<usize>() {
-            if choice >= 1 && choice <= displayed_suggested_models.len() {
-                let candidate = &displayed_suggested_models[choice - 1];
-                model = if candidate.contains(':') {
-                    candidate.to_string()
-                } else {
-                    format!("{}:{}", selected_provider, candidate)
-                };
-            } else {
-                return Err(AgentError::Config(format!(
-                    "Invalid model selection index {} for provider {}",
-                    choice, selected_provider
-                )));
-            }
-        } else {
+    if displayed_suggested_models.is_empty() {
+        print!("Model ID for {} [{}]: ", selected_provider_label, model);
+        io::stdout().flush().ok();
+        let mut model_override = String::new();
+        reader.read_line(&mut model_override).ok();
+        let model_override = model_override.trim();
+        if !model_override.is_empty() {
             let candidate = if model_override.contains(':') {
                 model_override.to_string()
             } else {
                 format!("{}:{}", selected_provider, model_override)
             };
             model = normalize_provider_model(&candidate)?;
+        }
+    } else {
+        let mut suggested_labels: Vec<String> = displayed_suggested_models
+            .iter()
+            .map(|candidate| {
+                if candidate.contains(':') {
+                    candidate.to_string()
+                } else {
+                    format!("{}:{}", selected_provider, candidate)
+                }
+            })
+            .collect();
+        suggested_labels.push("Custom model ID…".to_string());
+        let suggested_pick = hermes_cli::curses_select(
+            &format!("Select {} model", selected_provider_label),
+            &suggested_labels,
+            0,
+        );
+        if suggested_pick.confirmed && suggested_pick.index < displayed_suggested_models.len() {
+            let candidate = &displayed_suggested_models[suggested_pick.index];
+            model = if candidate.contains(':') {
+                candidate.to_string()
+            } else {
+                format!("{}:{}", selected_provider, candidate)
+            };
+        } else if suggested_pick.confirmed {
+            print!(
+                "Custom model ID for {} (provider prefix optional) [{}]: ",
+                selected_provider_label, model
+            );
+            io::stdout().flush().ok();
+            let mut model_override = String::new();
+            reader.read_line(&mut model_override).ok();
+            let model_override = model_override.trim();
+            if !model_override.is_empty() {
+                let candidate = if model_override.contains(':') {
+                    model_override.to_string()
+                } else {
+                    format!("{}:{}", selected_provider, model_override)
+                };
+                model = normalize_provider_model(&candidate)?;
+            }
         }
     }
 
@@ -8969,8 +8976,7 @@ mod tests {
 
     #[test]
     fn setup_model_choice_supports_nous() {
-        let default = default_setup_model_choice().to_string();
-        let option = setup_option_from_choice(&default);
+        let option = &SETUP_MODEL_OPTIONS[default_setup_model_choice().saturating_sub(1)];
         assert_eq!(option.model, "nous:moonshotai/kimi-k2.6");
         assert_eq!(option.provider, "nous");
     }
