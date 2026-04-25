@@ -10,6 +10,7 @@ use hermes_core::AgentError;
 use regex::Regex;
 
 use crate::app::App;
+use crate::model_switch::{curated_provider_slugs, normalize_provider_model, provider_model_ids};
 
 // ---------------------------------------------------------------------------
 // CommandResult
@@ -36,7 +37,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/reset", "Reset the current session (clear messages)"),
     ("/retry", "Retry the last user message"),
     ("/undo", "Undo the last exchange"),
-    ("/model", "Show or switch the current model"),
+    (
+        "/model",
+        "Show current model, set directly, or pick provider/model interactively",
+    ),
     ("/personality", "Show or switch the current personality"),
     ("/skills", "List available skills"),
     ("/tools", "List registered tools"),
@@ -138,7 +142,7 @@ pub async fn handle_slash_command(
             println!("[Last exchange undone]");
             Ok(CommandResult::Handled)
         }
-        "/model" => handle_model_command(app, args),
+        "/model" => handle_model_command(app, args).await,
         "/personality" => handle_personality_command(app, args),
         "/skills" => handle_skills_command(app),
         "/tools" => handle_tools_command(app),
@@ -176,15 +180,103 @@ pub async fn handle_slash_command(
 // Individual command handlers
 // ---------------------------------------------------------------------------
 
-fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ModelSwitchRequest {
+    PickProviderThenModel,
+    PickModelFromProvider(String),
+    SetDirect(String),
+}
+
+fn parse_model_switch_request(args: &[&str], known_providers: &[&str]) -> ModelSwitchRequest {
     if args.is_empty() {
-        // Show current model
-        println!("Current model: {}", app.current_model);
-    } else {
-        // Switch model
-        let provider_model = args.join(" ");
-        app.switch_model(&provider_model);
-        println!("Model switched to: {}", provider_model);
+        return ModelSwitchRequest::PickProviderThenModel;
+    }
+    let raw = args.join(" ");
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return ModelSwitchRequest::PickProviderThenModel;
+    }
+    if trimmed.contains(':') {
+        return ModelSwitchRequest::SetDirect(trimmed.to_string());
+    }
+    if known_providers
+        .iter()
+        .any(|p| p.eq_ignore_ascii_case(trimmed))
+    {
+        return ModelSwitchRequest::PickModelFromProvider(trimmed.to_ascii_lowercase());
+    }
+    ModelSwitchRequest::SetDirect(trimmed.to_string())
+}
+
+fn split_provider_model(provider_model: &str) -> (&str, &str) {
+    provider_model
+        .split_once(':')
+        .unwrap_or(("openai", provider_model))
+}
+
+async fn pick_model_for_provider(
+    app: &mut App,
+    provider: &str,
+    current_model: &str,
+) -> Result<bool, AgentError> {
+    let models = provider_model_ids(provider).await;
+    if models.is_empty() {
+        println!("No models available for provider '{}'.", provider);
+        return Ok(false);
+    }
+
+    let (_, current_model_id) = split_provider_model(current_model);
+    let default_index = models
+        .iter()
+        .position(|m| m.eq_ignore_ascii_case(current_model_id))
+        .unwrap_or(0);
+    let labels: Vec<String> = models.clone();
+    let title = format!("Select {} model ({} available)", provider, labels.len());
+    let pick = crate::curses_select(&title, &labels, default_index);
+    if !pick.confirmed || pick.index >= models.len() {
+        println!("Model switch cancelled.");
+        return Ok(false);
+    }
+    let provider_model = format!("{}:{}", provider, models[pick.index].trim());
+    app.switch_model(&provider_model);
+    println!("Model switched to: {}", provider_model);
+    Ok(true)
+}
+
+async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let known_providers = curated_provider_slugs();
+    match parse_model_switch_request(args, &known_providers) {
+        ModelSwitchRequest::SetDirect(raw) => {
+            let provider_model = normalize_provider_model(&raw)?;
+            app.switch_model(&provider_model);
+            println!("Model switched to: {}", provider_model);
+        }
+        ModelSwitchRequest::PickModelFromProvider(provider) => {
+            let current_model = app.current_model.clone();
+            pick_model_for_provider(app, &provider, &current_model).await?;
+        }
+        ModelSwitchRequest::PickProviderThenModel => {
+            println!("Current model: {}", app.current_model);
+            let providers: Vec<String> = known_providers.iter().map(|p| (*p).to_string()).collect();
+            if providers.is_empty() {
+                println!("No providers are registered for selection.");
+                return Ok(CommandResult::Handled);
+            }
+            let (current_provider, _) = split_provider_model(&app.current_model);
+            let default_provider_index = providers
+                .iter()
+                .position(|p| p.eq_ignore_ascii_case(current_provider))
+                .unwrap_or(0);
+            let provider_pick =
+                crate::curses_select("Select provider", &providers, default_provider_index);
+            if !provider_pick.confirmed || provider_pick.index >= providers.len() {
+                println!("Model switch cancelled.");
+                return Ok(CommandResult::Handled);
+            }
+            let provider = providers[provider_pick.index].as_str();
+            let current_model = app.current_model.clone();
+            pick_model_for_provider(app, provider, &current_model).await?;
+        }
     }
     Ok(CommandResult::Handled)
 }
@@ -4715,5 +4807,39 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn parse_model_switch_request_picks_provider_when_empty() {
+        let providers = vec!["openai", "nous", "anthropic"];
+        let req = parse_model_switch_request(&[], &providers);
+        assert_eq!(req, ModelSwitchRequest::PickProviderThenModel);
+    }
+
+    #[test]
+    fn parse_model_switch_request_uses_provider_picker_for_provider_arg() {
+        let providers = vec!["openai", "nous", "anthropic"];
+        let req = parse_model_switch_request(&["NOUS"], &providers);
+        assert_eq!(
+            req,
+            ModelSwitchRequest::PickModelFromProvider("nous".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_model_switch_request_accepts_direct_provider_model() {
+        let providers = vec!["openai", "nous", "anthropic"];
+        let req = parse_model_switch_request(&["openai:gpt-4o"], &providers);
+        assert_eq!(
+            req,
+            ModelSwitchRequest::SetDirect("openai:gpt-4o".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_model_switch_request_keeps_bare_model_as_direct() {
+        let providers = vec!["openai", "nous", "anthropic"];
+        let req = parse_model_switch_request(&["gpt-4o"], &providers);
+        assert_eq!(req, ModelSwitchRequest::SetDirect("gpt-4o".to_string()));
     }
 }
