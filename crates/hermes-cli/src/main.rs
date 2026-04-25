@@ -370,7 +370,7 @@ async fn main() {
 
 /// Initialize the tracing subscriber with env filter.
 fn init_tracing(verbose: bool) {
-    let default = if verbose { "debug" } else { "info" };
+    let default = if verbose { "debug" } else { "warn" };
     init_telemetry_from_env("hermes-cli", default);
 }
 
@@ -553,6 +553,28 @@ async fn run_tools_setup_wizard(cli: &Cli) -> Result<(), AgentError> {
 
     let mut pre_selected: HashSet<usize> = HashSet::new();
     let mut rows: Vec<String> = Vec::with_capacity(tools.len());
+    let summarize = |text: &str| -> String {
+        let flattened: String = text
+            .chars()
+            .map(|ch| match ch {
+                '\n' | '\r' | '\t' => ' ',
+                c if c.is_control() => ' ',
+                c => c,
+            })
+            .collect();
+        let compact = flattened.split_whitespace().collect::<Vec<_>>().join(" ");
+        let max_chars = 120usize;
+        if compact.chars().count() <= max_chars {
+            compact
+        } else {
+            let mut out = compact
+                .chars()
+                .take(max_chars.saturating_sub(1))
+                .collect::<String>();
+            out.push('…');
+            out
+        }
+    };
     for (idx, tool) in tools.iter().enumerate() {
         let currently_enabled = if explicit_enabled {
             disk.tools_config
@@ -577,7 +599,7 @@ async fn run_tools_setup_wizard(cli: &Cli) -> Result<(), AgentError> {
             } else {
                 "disabled"
             },
-            tool.description
+            summarize(&tool.description)
         ));
     }
 

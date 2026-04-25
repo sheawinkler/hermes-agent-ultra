@@ -24,6 +24,9 @@ fn register_runtime_tool(
     description: &str,
     emoji: &str,
 ) {
+    // Runtime backends intentionally replace baseline tool handlers.
+    // Deregister first to avoid noisy overwrite warnings in interactive TUI sessions.
+    let _ = tool_registry.deregister(name);
     let schema = handler.schema();
     tool_registry.register(
         name,
