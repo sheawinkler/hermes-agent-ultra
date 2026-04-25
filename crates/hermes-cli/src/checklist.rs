@@ -97,6 +97,18 @@ fn truncate_for_terminal(text: &str, max_chars: usize) -> String {
     text.chars().take(max_chars).collect()
 }
 
+fn sanitize_display_text(text: &str) -> String {
+    let replaced: String = text
+        .chars()
+        .map(|ch| match ch {
+            '\n' | '\r' | '\t' => ' ',
+            c if c.is_control() => ' ',
+            c => c,
+        })
+        .collect();
+    replaced.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 fn render_header_line(
     stdout: &mut io::Stdout,
     y: u16,
@@ -172,7 +184,8 @@ fn curses_checklist_inner(
             }
             let check = if chosen.contains(&i) { "✓" } else { " " };
             let arrow = if i == cursor_pos { "❯" } else { " " };
-            let line = format!(" {} [{}] {}", arrow, check, &items[i]);
+            let label = sanitize_display_text(&items[i]);
+            let line = format!(" {} [{}] {}", arrow, check, label);
             let truncated = truncate_for_terminal(&line, max_x);
 
             execute!(stdout, cursor::MoveTo(0, y as u16))?;
@@ -278,7 +291,8 @@ fn numbered_fallback(
             } else {
                 "[ ]"
             };
-            println!("  {} {:>2}. {}", marker, i + 1, label);
+            let clean = truncate_for_terminal(&sanitize_display_text(label), 160);
+            println!("  {} {:>2}. {}", marker, i + 1, clean);
         }
 
         if let Some(ref sfn) = status_fn {
@@ -367,7 +381,8 @@ fn curses_select_inner(
                 break;
             }
             let bullet = if i == cursor_pos { "❯" } else { " " };
-            let line = format!(" {} {}", bullet, &items[i]);
+            let label = sanitize_display_text(&items[i]);
+            let line = format!(" {} {}", bullet, label);
             let truncated = truncate_for_terminal(&line, max_x);
 
             execute!(stdout, cursor::MoveTo(0, y as u16))?;
@@ -432,7 +447,8 @@ fn numbered_select_fallback(title: &str, items: &[String], initial_index: usize)
     println!("\n  \x1b[33m{}\x1b[0m", title);
     for (i, label) in items.iter().enumerate() {
         let marker = if i == initial_index { "*" } else { " " };
-        println!("  {} {:>2}. {}", marker, i + 1, label);
+        let clean = truncate_for_terminal(&sanitize_display_text(label), 160);
+        println!("  {} {:>2}. {}", marker, i + 1, clean);
     }
     println!();
     print!(
@@ -493,5 +509,12 @@ mod tests {
         let result = curses_select("Select", &[], 0);
         assert!(!result.confirmed);
         assert_eq!(result.index, 0);
+    }
+
+    #[test]
+    fn sanitize_display_text_flattens_multiline_labels() {
+        let raw = "line1\nline2\tline3\rline4";
+        let clean = sanitize_display_text(raw);
+        assert_eq!(clean, "line1 line2 line3 line4");
     }
 }
