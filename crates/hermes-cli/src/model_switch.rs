@@ -37,6 +37,9 @@ const CURATED_PROVIDER_MODELS: &[(&str, &[&str])] = &[
     (
         "nous",
         &[
+            "nousresearch/hermes-3-llama-3.1-405b",
+            "nousresearch/hermes-4-405b",
+            "nousresearch/hermes-4-70b",
             "moonshotai/kimi-k2.6",
             "xiaomi/mimo-v2.5-pro",
             "anthropic/claude-sonnet-4.5",
@@ -439,6 +442,9 @@ mod tests {
         let out = provider_model_ids_with_client("nous", &client).await;
         assert!(
             out.starts_with(&[
+                "nousresearch/hermes-3-llama-3.1-405b".to_string(),
+                "nousresearch/hermes-4-405b".to_string(),
+                "nousresearch/hermes-4-70b".to_string(),
                 "moonshotai/kimi-k2.6".to_string(),
                 "xiaomi/mimo-v2.5-pro".to_string(),
                 "anthropic/claude-sonnet-4.5".to_string()
