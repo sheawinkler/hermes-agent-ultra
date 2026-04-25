@@ -2552,12 +2552,12 @@ impl AgentLoop {
         let model = route
             .map(|r| r.model.as_str())
             .unwrap_or(self.config.model.as_str());
+        let (inferred_provider, model_name) = self.extract_provider_and_model(model);
         let route_provider_hint = route
             .and_then(|r| r.provider.as_deref())
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_string);
-        let inferred_provider = self.extract_provider_and_model(model).0;
         let active_provider = route_provider_hint.unwrap_or(inferred_provider);
         if let Some(rt) = route {
             if let Some(ref label) = rt.route_label {
@@ -2598,7 +2598,7 @@ impl AgentLoop {
                                 tool_schemas,
                                 effective_max_tokens,
                                 self.config.temperature,
-                                Some(model),
+                                Some(model_name),
                                 extra_body_for_call.as_ref(),
                             )
                             .await
@@ -2615,7 +2615,10 @@ impl AgentLoop {
                                 tool_schemas,
                                 effective_max_tokens,
                                 self.config.temperature,
-                                Some(self.config.model.as_str()),
+                                Some(
+                                    self.extract_provider_and_model(self.config.model.as_str())
+                                        .1,
+                                ),
                                 default_extra_body.as_ref(),
                             )
                             .await
@@ -2628,7 +2631,7 @@ impl AgentLoop {
                         tool_schemas,
                         effective_max_tokens,
                         self.config.temperature,
-                        Some(model),
+                        Some(model_name),
                         default_extra_body.as_ref(),
                     )
                     .await
@@ -2680,7 +2683,7 @@ impl AgentLoop {
                                                 tool_schemas,
                                                 effective_max_tokens,
                                                 self.config.temperature,
-                                                Some(fallback),
+                                                Some(self.extract_provider_and_model(fallback).1),
                                                 default_extra_body.as_ref(),
                                             )
                                             .await;
@@ -2755,6 +2758,7 @@ impl AgentLoop {
         on_chunk: &(dyn Fn(StreamChunk) + Send + Sync),
     ) -> Result<StreamCollectOutcome, AgentError> {
         let api_messages = self.messages_for_api_call(ctx);
+        let (_, active_model_name) = self.extract_provider_and_model(active_model);
         let default_extra_body = self.extra_body_for_api_mode(&self.config.api_mode);
         let effective_max_tokens = max_tokens_override.or(self.config.max_tokens);
         let max_stream_retries = std::env::var("HERMES_STREAM_RETRIES")
@@ -2783,7 +2787,7 @@ impl AgentLoop {
                         tool_schemas,
                         effective_max_tokens,
                         self.config.temperature,
-                        Some(active_model),
+                        Some(model_name),
                         extra_body_for_call.as_ref(),
                     ),
                     Err(e) => {
@@ -2797,7 +2801,10 @@ impl AgentLoop {
                             tool_schemas,
                             effective_max_tokens,
                             self.config.temperature,
-                            Some(self.config.model.as_str()),
+                            Some(
+                                self.extract_provider_and_model(self.config.model.as_str())
+                                    .1,
+                            ),
                             default_extra_body.as_ref(),
                         )
                     }
@@ -2808,7 +2815,7 @@ impl AgentLoop {
                     tool_schemas,
                     effective_max_tokens,
                     self.config.temperature,
-                    Some(active_model),
+                    Some(active_model_name),
                     default_extra_body.as_ref(),
                 )
             };
@@ -4938,6 +4945,7 @@ impl AgentLoop {
             "[SYSTEM] Maximum conversation turns reached. Please provide a brief summary of \
              what was accomplished and any remaining tasks.",
         ));
+        let (_, model_name) = self.extract_provider_and_model(self.config.model.as_str());
         let response = self
             .llm_provider
             .chat_completion(
@@ -4945,7 +4953,7 @@ impl AgentLoop {
                 &[],
                 self.config.max_tokens,
                 self.config.temperature,
-                Some(self.config.model.as_str()),
+                Some(model_name),
                 self.extra_body_for_api_mode(&self.config.api_mode).as_ref(),
             )
             .await
@@ -5660,6 +5668,146 @@ mod tests {
         assert!(rows
             .iter()
             .any(|(kind, msg)| kind == "lifecycle" && msg.contains("triggering compression")));
+    }
+
+    #[tokio::test]
+    async fn call_llm_with_retry_strips_provider_prefix_for_primary_and_fallback_models() {
+        use futures::stream::BoxStream;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct RecordingProvider {
+            seen_models: Arc<std::sync::Mutex<Vec<String>>>,
+            call_count: AtomicUsize,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for RecordingProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                self.seen_models
+                    .lock()
+                    .expect("seen model lock")
+                    .push(model.unwrap_or_default().to_string());
+                let idx = self.call_count.fetch_add(1, Ordering::SeqCst);
+                if idx == 0 {
+                    return Err(AgentError::LlmApi(
+                        "API error 429: synthetic retry".to_string(),
+                    ));
+                }
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("ok"),
+                    usage: None,
+                    model: "ok".to_string(),
+                    finish_reason: Some("stop".to_string()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let seen_models = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let mut cfg = AgentConfig::default();
+        cfg.model = "nous:primary-model".to_string();
+        cfg.retry.max_retries = 0;
+        cfg.retry.fallback_model = Some("openrouter:backup-model".to_string());
+
+        let provider = Arc::new(RecordingProvider {
+            seen_models: seen_models.clone(),
+            call_count: AtomicUsize::new(0),
+        });
+        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider);
+        let mut ctx = ContextManager::new(32);
+        ctx.add_message(Message::user("hello"));
+
+        let resp = agent
+            .call_llm_with_retry_inner(&ctx, &[], None, None)
+            .await
+            .expect("fallback should recover");
+        assert_eq!(resp.message.content.as_deref(), Some("ok"));
+
+        let seen = seen_models.lock().expect("seen model lock").clone();
+        assert_eq!(
+            seen,
+            vec!["primary-model".to_string(), "backup-model".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn handle_max_iterations_uses_provider_native_model_id() {
+        use futures::stream::BoxStream;
+
+        struct RecordingProvider {
+            seen_model: Arc<std::sync::Mutex<Option<String>>>,
+        }
+
+        #[async_trait::async_trait]
+        impl LlmProvider for RecordingProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                *self.seen_model.lock().expect("seen model lock") =
+                    Some(model.unwrap_or_default().to_string());
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("summary"),
+                    usage: None,
+                    model: "ok".to_string(),
+                    finish_reason: Some("stop".to_string()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let seen_model = Arc::new(std::sync::Mutex::new(None::<String>));
+        let mut cfg = AgentConfig::default();
+        cfg.model = "nous:moonshotai/kimi-k2.6".to_string();
+
+        let provider = Arc::new(RecordingProvider {
+            seen_model: seen_model.clone(),
+        });
+        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider);
+        let mut ctx = ContextManager::new(32);
+        ctx.add_message(Message::user("hit turn limit"));
+
+        let _ = agent
+            .handle_max_iterations(&mut ctx)
+            .await
+            .expect("max iterations summary should succeed");
+        let seen = seen_model.lock().expect("seen model lock").clone();
+        assert_eq!(seen.as_deref(), Some("moonshotai/kimi-k2.6"));
     }
 
     #[tokio::test]
