@@ -107,7 +107,8 @@ impl Tui {
         let backend = CrosstermBackend::new(stdout);
         let terminal = ratatui::Terminal::new(backend)?;
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
-        let requested_theme = std::env::var("HERMES_THEME").unwrap_or_else(|_| "dark".to_string());
+        let requested_theme =
+            std::env::var("HERMES_THEME").unwrap_or_else(|_| "ultra-neon".to_string());
         Ok(Self {
             terminal,
             events: event_receiver,
@@ -753,9 +754,13 @@ pub fn render(frame: &mut Frame, app: &App, state: &TuiState, theme: &Theme) {
     let colors = theme.colors.to_ratatui_colors();
 
     let size = frame.area();
+    frame.render_widget(
+        Block::default().style(Style::default().bg(colors.background)),
+        size,
+    );
 
     // Layout: header, messages, completions (optional), input, status bar
-    let header_height = 1;
+    let header_height = 2;
     let input_height = 4;
     let completion_height = if state.completions.is_empty() {
         0
@@ -793,6 +798,7 @@ pub fn render(frame: &mut Frame, app: &App, state: &TuiState, theme: &Theme) {
             &state.completions,
             state.completion_index,
             completions_area,
+            &colors,
         );
     }
 
@@ -806,30 +812,60 @@ pub fn render(frame: &mut Frame, app: &App, state: &TuiState, theme: &Theme) {
 }
 
 fn render_header(frame: &mut Frame, app: &App, area: Rect, colors: &crate::theme::RatatuiColors) {
-    let title = Paragraph::new(Line::from(vec![
-        Span::styled(
-            " Hermes Agent Ultra ",
-            Style::default()
-                .fg(colors.status_bar_strong)
-                .bg(colors.status_bar_bg)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            "│ ",
-            Style::default()
-                .fg(colors.status_bar_dim)
-                .bg(colors.status_bar_bg),
-        ),
-        Span::styled(
-            format!(
-                "Session {}  •  Ctrl+Enter send  •  Ctrl+←/→ word nav",
-                &app.session_id[..8.min(app.session_id.len())]
+    let session_short = &app.session_id[..8.min(app.session_id.len())];
+    let text = Text::from(vec![
+        Line::from(vec![
+            Span::styled(
+                " HERMES ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(colors.status_bar_good)
+                    .add_modifier(Modifier::BOLD),
             ),
-            Style::default()
-                .fg(colors.status_bar_text)
-                .bg(colors.status_bar_bg),
-        ),
-    ]));
+            Span::styled(
+                " AGENT ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(colors.warning)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                " ULTRA ",
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(colors.status_bar_strong)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("   SESSION {session_short}"),
+                Style::default()
+                    .fg(colors.status_bar_text)
+                    .bg(colors.status_bar_bg),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                "  Ctrl+Enter send",
+                Style::default()
+                    .fg(colors.status_bar_text)
+                    .bg(colors.status_bar_bg),
+            ),
+            Span::styled(
+                "  •  Ctrl/Alt+←/→ word nav",
+                Style::default()
+                    .fg(colors.status_bar_dim)
+                    .bg(colors.status_bar_bg),
+            ),
+            Span::styled(
+                "  •  Ctrl+W delete word",
+                Style::default()
+                    .fg(colors.status_bar_dim)
+                    .bg(colors.status_bar_bg),
+            ),
+        ]),
+    ]);
+    let title = Paragraph::new(text)
+        .block(Block::default().style(Style::default().bg(colors.status_bar_bg)));
     frame.render_widget(title, area);
 }
 
@@ -1191,6 +1227,7 @@ fn render_completions(
     completions: &[String],
     selected: Option<usize>,
     area: Rect,
+    colors: &crate::theme::RatatuiColors,
 ) {
     let items: Vec<Line<'static>> = completions
         .iter()
@@ -1199,10 +1236,10 @@ fn render_completions(
             let style = if selected == Some(i) {
                 Style::default()
                     .fg(Color::Black)
-                    .bg(Color::Yellow)
+                    .bg(colors.status_bar_strong)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(Color::DarkGray)
+                Style::default().fg(colors.status_bar_dim)
             };
             Line::from(Span::styled(cmd.clone(), style))
         })
@@ -1212,6 +1249,7 @@ fn render_completions(
         .block(
             Block::default()
                 .borders(Borders::ALL)
+                .border_style(Style::default().fg(colors.status_bar_dim))
                 .title(" Slash Completions "),
         )
         .wrap(Wrap { trim: true });
@@ -1237,20 +1275,24 @@ fn render_input(
         InputMode::Command => Style::default().fg(Color::Black).bg(colors.accent),
     };
 
-    let input_text = if state.input.is_empty() && state.mode == InputMode::Insert {
-        if state.history_search_active {
-            format!("(reverse-i-search)`{}': ", state.history_search_query)
-        } else {
-            "Type a message (Ctrl+Enter send, Ctrl+←/→ word, Ctrl+W delete-word, Ctrl+R history)"
-                .to_string()
-        }
-    } else if state.history_search_active {
-        format!(
-            "(reverse-i-search)`{}': {}",
-            state.history_search_query, state.input
-        )
+    let history_prefix = if state.history_search_active {
+        format!("(reverse-i-search)`{}': ", state.history_search_query)
     } else {
-        state.input.clone()
+        String::new()
+    };
+    let show_placeholder =
+        state.input.is_empty() && state.mode == InputMode::Insert && !state.history_search_active;
+    let input_text = if show_placeholder {
+        "Type a message and press Ctrl+Enter to send".to_string()
+    } else {
+        format!("{history_prefix}{}", state.input)
+    };
+    let input_body_style = if show_placeholder {
+        Style::default()
+            .fg(colors.status_bar_dim)
+            .add_modifier(Modifier::ITALIC)
+    } else {
+        Style::default().fg(colors.foreground)
     };
 
     // For multi-line, show line count indicator
@@ -1265,12 +1307,20 @@ fn render_input(
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Composer ")
-        .border_style(Style::default().fg(colors.status_bar_dim));
+        .border_style(Style::default().fg(colors.status_bar_strong));
+    let prompt_glyph = "›";
     let paragraph = Paragraph::new(Text::from(vec![Line::from(vec![
         Span::styled(mode_indicator, mode_style),
-        Span::styled(line_indicator, Style::default().fg(Color::DarkGray)),
+        Span::styled(line_indicator, Style::default().fg(colors.status_bar_dim)),
+        Span::styled(" │ ", Style::default().fg(colors.status_bar_dim)),
+        Span::styled(
+            prompt_glyph,
+            Style::default()
+                .fg(colors.status_bar_strong)
+                .add_modifier(Modifier::BOLD),
+        ),
         Span::raw(" "),
-        Span::raw(input_text),
+        Span::styled(input_text, input_body_style),
     ])]))
     .block(block.clone())
     .wrap(Wrap { trim: false });
@@ -1286,17 +1336,14 @@ fn render_input(
         return None;
     }
 
-    let history_prefix = if state.history_search_active {
-        format!("(reverse-i-search)`{}': ", state.history_search_query)
-    } else {
-        String::new()
-    };
     let mut rendered_before_cursor = String::new();
     rendered_before_cursor.push_str(&history_prefix);
     rendered_before_cursor.push_str(&state.input[..state.cursor_position.min(state.input.len())]);
 
     let width = inner.width as usize;
-    let mut x = mode_indicator.chars().count() + line_indicator_width + 1;
+    let prefix_width =
+        mode_indicator.chars().count() + line_indicator_width + " │ ".chars().count() + 2;
+    let mut x = prefix_width;
     let mut y = 0usize;
 
     for ch in rendered_before_cursor.chars() {
@@ -1372,7 +1419,7 @@ fn render_status(
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled(
-            "│ ",
+            "◆ ",
             Style::default()
                 .fg(colors.status_bar_dim)
                 .bg(colors.status_bar_bg),
@@ -1384,7 +1431,7 @@ fn render_status(
                 .bg(colors.status_bar_bg),
         ),
         Span::styled(
-            "│ ",
+            "◆ ",
             Style::default()
                 .fg(colors.status_bar_dim)
                 .bg(colors.status_bar_bg),
@@ -1396,7 +1443,7 @@ fn render_status(
                 .bg(colors.status_bar_bg),
         ),
         Span::styled(
-            "│ ",
+            "◆ ",
             Style::default()
                 .fg(colors.status_bar_dim)
                 .bg(colors.status_bar_bg),
@@ -1408,7 +1455,7 @@ fn render_status(
                 .bg(colors.status_bar_bg),
         ),
         Span::styled(
-            "│ ",
+            "◆ ",
             Style::default()
                 .fg(colors.status_bar_dim)
                 .bg(colors.status_bar_bg),

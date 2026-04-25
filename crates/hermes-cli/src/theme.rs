@@ -319,61 +319,61 @@ pub fn default_theme() -> Theme {
     Theme {
         name: "dark".to_string(),
         colors: ThemeColors {
-            primary: "#7c9eff".to_string(),    // Soft blue
-            secondary: "#a0a0c0".to_string(),  // Muted purple-gray
-            accent: "#ff79c6".to_string(),     // Pink
-            background: "#1a1b26".to_string(), // Dark navy
-            foreground: "#c0caf5".to_string(), // Light blue-gray
-            error: "#f7768e".to_string(),      // Red-pink
-            warning: "#e0af68".to_string(),    // Gold
-            success: "#9ece6a".to_string(),    // Green
-            status_bar_bg: None,
-            status_bar_text: None,
-            status_bar_strong: None,
-            status_bar_dim: None,
-            status_bar_good: None,
-            status_bar_warn: None,
-            status_bar_bad: None,
-            status_bar_critical: None,
+            primary: "#160f2f".to_string(),
+            secondary: "#6f7a94".to_string(),
+            accent: "#ff4fd8".to_string(),
+            background: "#070b14".to_string(),
+            foreground: "#e6ecff".to_string(),
+            error: "#ff4d7d".to_string(),
+            warning: "#ffbf47".to_string(),
+            success: "#3df2a4".to_string(),
+            status_bar_bg: Some("#140d2d".to_string()),
+            status_bar_text: Some("#e8ecff".to_string()),
+            status_bar_strong: Some("#ff5adf".to_string()),
+            status_bar_dim: Some("#7d88a8".to_string()),
+            status_bar_good: Some("#37e8a1".to_string()),
+            status_bar_warn: Some("#ffbf47".to_string()),
+            status_bar_bad: Some("#ff4d7d".to_string()),
+            status_bar_critical: Some("#ff2366".to_string()),
         },
         styles: ThemeStyles {
             user_input: StyleDef {
-                fg: Some("#7aa2f7".to_string()), // Blue
+                fg: Some("#79b8ff".to_string()),
                 bg: None,
                 bold: true,
                 italic: false,
                 underline: false,
             },
             assistant_response: StyleDef {
-                fg: Some("#c0caf5".to_string()), // Foreground
+                fg: Some("#e6ecff".to_string()),
                 bg: None,
                 bold: false,
                 italic: false,
                 underline: false,
             },
             system_message: StyleDef {
-                fg: Some("#565f89".to_string()), // Dim gray-blue
+                fg: Some("#7f8cb2".to_string()),
                 bg: None,
                 bold: false,
                 italic: true,
                 underline: false,
             },
             tool_call: StyleDef {
-                fg: Some("#ff9e64".to_string()), // Orange
+                fg: Some("#ff9d4d".to_string()),
                 bg: None,
                 bold: false,
                 italic: false,
                 underline: false,
             },
             tool_result: StyleDef {
-                fg: Some("#9ece6a".to_string()), // Green
+                fg: Some("#33e8a0".to_string()),
                 bg: None,
                 bold: false,
                 italic: false,
                 underline: false,
             },
             error: StyleDef {
-                fg: Some("#f7768e".to_string()), // Red-pink
+                fg: Some("#ff4d7d".to_string()),
                 bg: None,
                 bold: true,
                 italic: false,
@@ -381,6 +381,19 @@ pub fn default_theme() -> Theme {
             },
         },
     }
+}
+
+/// Built-in hyper-saturated theme used by Hermes Agent Ultra.
+pub fn ultra_neon_theme() -> Theme {
+    let mut theme = default_theme();
+    theme.name = "ultra-neon".to_string();
+    theme.colors.accent = "#ff2be3".to_string();
+    theme.colors.status_bar_strong = Some("#ff2be3".to_string());
+    theme.colors.primary = "#1a0b39".to_string();
+    theme.styles.user_input.fg = Some("#8dc5ff".to_string());
+    theme.styles.tool_call.fg = Some("#ffab5a".to_string());
+    theme.styles.tool_result.fg = Some("#2effb3".to_string());
+    theme
 }
 
 /// Built-in light theme.
@@ -505,6 +518,13 @@ mod tests {
     }
 
     #[test]
+    fn test_ultra_neon_theme() {
+        let theme = ultra_neon_theme();
+        assert_eq!(theme.name, "ultra-neon");
+        assert_eq!(theme.colors.accent, "#ff2be3");
+    }
+
+    #[test]
     fn test_theme_serialization() {
         let theme = default_theme();
         let json = serde_json::to_string(&theme).unwrap();
@@ -570,12 +590,12 @@ mod tests {
     }
 
     #[test]
-    fn test_status_bar_color_fields_fallback_to_palette() {
+    fn test_status_bar_color_fields_set_for_default_theme() {
         let colors = default_theme().colors.to_ratatui_colors();
-        assert_eq!(colors.status_bar_bg, colors.primary);
-        assert_eq!(colors.status_bar_text, colors.foreground);
-        assert_eq!(colors.status_bar_warn, colors.warning);
-        assert_eq!(colors.status_bar_critical, colors.error);
+        assert_eq!(colors.status_bar_bg, Color::Rgb(0x14, 0x0d, 0x2d));
+        assert_eq!(colors.status_bar_text, Color::Rgb(0xe8, 0xec, 0xff));
+        assert_eq!(colors.status_bar_warn, Color::Rgb(0xff, 0xbf, 0x47));
+        assert_eq!(colors.status_bar_critical, Color::Rgb(0xff, 0x23, 0x66));
     }
 
     #[test]

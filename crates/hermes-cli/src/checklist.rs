@@ -90,6 +90,28 @@ fn atty_is_tty() -> bool {
     terminal::size().is_ok()
 }
 
+fn truncate_for_terminal(text: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    text.chars().take(max_chars).collect()
+}
+
+fn render_header_line(
+    stdout: &mut io::Stdout,
+    y: u16,
+    text: &str,
+    max_x: usize,
+) -> Result<(), io::Error> {
+    execute!(stdout, cursor::MoveTo(0, y))?;
+    write!(
+        stdout,
+        "\x1b[1;38;5;213m{}\x1b[0m",
+        truncate_for_terminal(text, max_x)
+    )?;
+    Ok(())
+}
+
 /// Inner implementation using crossterm raw mode.
 fn curses_checklist_inner(
     title: &str,
@@ -117,9 +139,9 @@ fn curses_checklist_inner(
         let max_x = cols as usize;
         let max_y = rows as usize;
 
-        // Reserve rows: 2 for header, 1 for status
-        let footer_rows = if status_fn.is_some() { 1 } else { 0 };
-        let visible_rows = max_y.saturating_sub(3 + footer_rows);
+        // Reserve rows: title, hint, spacing, footer/status
+        let footer_rows = if status_fn.is_some() { 2 } else { 1 };
+        let visible_rows = max_y.saturating_sub(4 + footer_rows);
 
         // Adjust scroll
         if cursor_pos < scroll_offset {
@@ -131,17 +153,13 @@ fn curses_checklist_inner(
         // Clear and draw
         execute!(stdout, terminal::Clear(terminal::ClearType::All))?;
 
-        // Header
-        execute!(stdout, cursor::MoveTo(0, 0))?;
-        write!(
-            stdout,
-            "\x1b[1;33m{}\x1b[0m",
-            &title[..title.len().min(max_x)]
-        )?;
+        let title_text = format!("✦ {title}");
+        render_header_line(&mut stdout, 0, &title_text, max_x)?;
         execute!(stdout, cursor::MoveTo(0, 1))?;
         write!(
             stdout,
-            "\x1b[2m  ↑↓ navigate  SPACE toggle  ENTER confirm  ESC cancel\x1b[0m"
+            "\x1b[38;5;245m  ↑↓ navigate  SPACE toggle  ENTER confirm  ESC cancel  •  {} selected\x1b[0m",
+            chosen.len()
         )?;
 
         // Items
@@ -153,28 +171,44 @@ fn curses_checklist_inner(
                 break;
             }
             let check = if chosen.contains(&i) { "✓" } else { " " };
-            let arrow = if i == cursor_pos { "→" } else { " " };
+            let arrow = if i == cursor_pos { "❯" } else { " " };
             let line = format!(" {} [{}] {}", arrow, check, &items[i]);
-            let truncated = &line[..line.len().min(max_x)];
+            let truncated = truncate_for_terminal(&line, max_x);
 
             execute!(stdout, cursor::MoveTo(0, y as u16))?;
             if i == cursor_pos {
-                write!(stdout, "\x1b[1;32m{}\x1b[0m", truncated)?;
+                write!(stdout, "\x1b[1;38;5;231;48;5;27m{}\x1b[0m", truncated)?;
             } else {
                 write!(stdout, "{}", truncated)?;
             }
         }
 
         // Status bar
+        let page_hint = format!(
+            "items {}-{} of {}",
+            scroll_offset + 1,
+            (scroll_offset + visible_rows).min(items.len()),
+            items.len()
+        );
+        execute!(stdout, cursor::MoveTo(0, (max_y.saturating_sub(1)) as u16))?;
+        write!(
+            stdout,
+            "\x1b[38;5;99m{}\x1b[0m",
+            truncate_for_terminal(&page_hint, max_x)
+        )?;
+
         if let Some(ref sfn) = status_fn {
             let status_text = sfn(&chosen);
             if !status_text.is_empty() {
                 let sx = max_x.saturating_sub(status_text.len() + 1);
-                execute!(stdout, cursor::MoveTo(sx as u16, (max_y - 1) as u16))?;
+                execute!(
+                    stdout,
+                    cursor::MoveTo(sx as u16, (max_y.saturating_sub(2)) as u16)
+                )?;
                 write!(
                     stdout,
-                    "\x1b[2m{}\x1b[0m",
-                    &status_text[..status_text.len().min(max_x)]
+                    "\x1b[38;5;245m{}\x1b[0m",
+                    truncate_for_terminal(&status_text, max_x)
                 )?;
             }
         }
@@ -306,7 +340,7 @@ fn curses_select_inner(
         let (cols, rows) = terminal::size().unwrap_or((80, 24));
         let max_x = cols as usize;
         let max_y = rows as usize;
-        let visible_rows = max_y.saturating_sub(4);
+        let visible_rows = max_y.saturating_sub(5);
 
         if cursor_pos < scroll_offset {
             scroll_offset = cursor_pos;
@@ -316,16 +350,13 @@ fn curses_select_inner(
 
         execute!(stdout, terminal::Clear(terminal::ClearType::All))?;
 
-        execute!(stdout, cursor::MoveTo(0, 0))?;
-        write!(
-            stdout,
-            "\x1b[1;33m{}\x1b[0m",
-            &title[..title.len().min(max_x)]
-        )?;
+        let title_text = format!("✦ {title}");
+        render_header_line(&mut stdout, 0, &title_text, max_x)?;
         execute!(stdout, cursor::MoveTo(0, 1))?;
         write!(
             stdout,
-            "\x1b[2m  ↑↓ navigate  ENTER confirm  ESC cancel\x1b[0m"
+            "\x1b[38;5;245m  ↑↓ navigate  ENTER confirm  ESC cancel  •  {} option(s)\x1b[0m",
+            items.len()
         )?;
 
         for (draw_i, i) in
@@ -335,17 +366,30 @@ fn curses_select_inner(
             if y >= max_y {
                 break;
             }
-            let bullet = if i == cursor_pos { "▶" } else { " " };
+            let bullet = if i == cursor_pos { "❯" } else { " " };
             let line = format!(" {} {}", bullet, &items[i]);
-            let truncated = &line[..line.len().min(max_x)];
+            let truncated = truncate_for_terminal(&line, max_x);
 
             execute!(stdout, cursor::MoveTo(0, y as u16))?;
             if i == cursor_pos {
-                write!(stdout, "\x1b[1;32m{}\x1b[0m", truncated)?;
+                write!(stdout, "\x1b[1;38;5;231;48;5;27m{}\x1b[0m", truncated)?;
             } else {
                 write!(stdout, "{}", truncated)?;
             }
         }
+
+        let footer = format!(
+            "showing {}-{} of {}",
+            scroll_offset + 1,
+            (scroll_offset + visible_rows).min(items.len()),
+            items.len()
+        );
+        execute!(stdout, cursor::MoveTo(0, max_y.saturating_sub(1) as u16))?;
+        write!(
+            stdout,
+            "\x1b[38;5;99m{}\x1b[0m",
+            truncate_for_terminal(&footer, max_x)
+        )?;
 
         stdout.flush()?;
 
