@@ -405,6 +405,21 @@ Prioritize evidence, explicit reasoning, and clear uncertainty bounds.\n\
 Break complex problems into assumptions, observations, and conclusions.\n\
 When data is missing, state what is unknown and propose the next highest-value check.";
 
+const BUILTIN_PERSONALITY_CONCISE: &str = "You are operating in the `concise` persona.\n\
+Prioritize brevity and directness while preserving technical correctness.\n\
+Prefer short, action-oriented responses with minimal filler.\n\
+When detail is needed, keep structure tight and focused on execution.";
+
+const BUILTIN_PERSONALITY_CREATIVE: &str = "You are operating in the `creative` persona.\n\
+Favor original framing, vivid but clear language, and idea generation.\n\
+Offer multiple strong options when brainstorming.\n\
+Balance creativity with practical constraints and actionable next steps.";
+
+const BUILTIN_PERSONALITY_TECHNICAL: &str = "You are operating in the `technical` persona.\n\
+Prioritize precision, systems-level thinking, and implementation detail.\n\
+Expose assumptions, interfaces, and edge cases explicitly.\n\
+When proposing changes, include concrete verification paths.";
+
 /// Load the SOUL.md personality file from `~/.hermes/SOUL.md`.
 ///
 /// Returns `None` if the file doesn't exist or can't be read.
@@ -427,6 +442,9 @@ fn builtin_personality(name: &str) -> Option<&'static str> {
         "coder" => Some(BUILTIN_PERSONALITY_CODER),
         "writer" => Some(BUILTIN_PERSONALITY_WRITER),
         "analyst" => Some(BUILTIN_PERSONALITY_ANALYST),
+        "concise" => Some(BUILTIN_PERSONALITY_CONCISE),
+        "creative" => Some(BUILTIN_PERSONALITY_CREATIVE),
+        "technical" => Some(BUILTIN_PERSONALITY_TECHNICAL),
         _ => None,
     }
 }
@@ -1058,6 +1076,27 @@ mod tests {
         let p = resolve_personality("analyst", None).unwrap();
         assert!(p.contains("`analyst` persona"));
         assert!(p.contains("evidence"));
+    }
+
+    #[test]
+    fn test_persona_snapshot_concise() {
+        let p = resolve_personality("concise", None).unwrap();
+        assert!(p.contains("`concise` persona"));
+        assert!(p.contains("brevity"));
+    }
+
+    #[test]
+    fn test_persona_snapshot_creative() {
+        let p = resolve_personality("creative", None).unwrap();
+        assert!(p.contains("`creative` persona"));
+        assert!(p.contains("idea generation"));
+    }
+
+    #[test]
+    fn test_persona_snapshot_technical() {
+        let p = resolve_personality("technical", None).unwrap();
+        assert!(p.contains("`technical` persona"));
+        assert!(p.contains("systems-level"));
     }
 
     #[test]

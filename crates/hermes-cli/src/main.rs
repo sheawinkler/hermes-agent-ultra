@@ -3764,10 +3764,16 @@ async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentE
     ];
 
     for (env_var, provider) in env_bindings {
-        if std::env::var(env_var)
-            .ok()
-            .is_some_and(|v| !v.trim().is_empty())
-        {
+        let env_present = std::env::var(env_var).ok().filter(|v| !v.trim().is_empty());
+        if let Some(current) = env_present {
+            if provider_supports_oauth(provider) {
+                if let Some((_provider, secret)) = lookup_secret_from_vault(&store, provider).await
+                {
+                    if secret.trim() != current.trim() {
+                        std::env::set_var(env_var, secret);
+                    }
+                }
+            }
             continue;
         }
         if let Some((_provider, secret)) = lookup_secret_from_vault(&store, provider).await {
@@ -6636,7 +6642,7 @@ struct SetupModelOption {
 const SETUP_MODEL_OPTIONS: &[SetupModelOption] = &[
     SetupModelOption {
         provider: "nous",
-        model: "nous:nousresearch/hermes-3-llama-3.1-405b",
+        model: "nous:openai/gpt-5.5-pro",
         label: "Nous (recommended, OAuth)",
     },
     SetupModelOption {
@@ -9252,7 +9258,7 @@ mod tests {
     #[test]
     fn setup_model_choice_supports_nous() {
         let option = &SETUP_MODEL_OPTIONS[default_setup_model_choice().saturating_sub(1)];
-        assert_eq!(option.model, "nous:nousresearch/hermes-3-llama-3.1-405b");
+        assert_eq!(option.model, "nous:openai/gpt-5.5-pro");
         assert_eq!(option.provider, "nous");
     }
 
@@ -9307,6 +9313,51 @@ mod tests {
         .into_iter()
         .collect();
         assert_eq!(actual, expected);
+    }
+
+    #[tokio::test]
+    async fn hydrate_provider_env_from_vault_overrides_oauth_provider_env() {
+        use clap::Parser;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let config_dir = tmp.path().join("cfg");
+        std::fs::create_dir_all(&config_dir).expect("create cfg dir");
+        let cli = Cli::parse_from([
+            "hermes-agent-ultra",
+            "--config-dir",
+            config_dir.to_str().expect("cfg path utf8"),
+        ]);
+
+        let vault_path = secret_vault_path_for_cli(&cli);
+        let store = FileTokenStore::new(vault_path).await.expect("vault store");
+        let manager = AuthManager::new(store);
+        manager
+            .save_credential(OAuthCredential {
+                provider: "nous".to_string(),
+                access_token: "vault-good-key".to_string(),
+                refresh_token: None,
+                token_type: "bearer".to_string(),
+                scope: None,
+                expires_at: None,
+            })
+            .await
+            .expect("save vault credential");
+
+        let previous = std::env::var("NOUS_API_KEY").ok();
+        std::env::set_var("NOUS_API_KEY", "env-stale-key");
+
+        hydrate_provider_env_from_vault_for_cli(&cli)
+            .await
+            .expect("hydrate env");
+        assert_eq!(
+            std::env::var("NOUS_API_KEY").as_deref(),
+            Ok("vault-good-key")
+        );
+
+        match previous {
+            Some(value) => std::env::set_var("NOUS_API_KEY", value),
+            None => std::env::remove_var("NOUS_API_KEY"),
+        }
     }
 
     #[test]

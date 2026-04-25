@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use hermes_core::AgentError;
 use hermes_intelligence::models_dev::{default_client, ModelsDevClient};
+use serde_json::Value;
 
 // Providers where models.dev entries are merged on top of the curated list.
 // Keep openrouter/nous out of this set per upstream behavior.
@@ -22,6 +23,7 @@ const MODELS_DEV_PREFERRED: &[&str] = &[
     "gemini",
     "google",
 ];
+const NOUS_DEFAULT_INFERENCE_BASE_URL: &str = "https://inference-api.nousresearch.com/v1";
 
 const CURATED_PROVIDER_MODELS: &[(&str, &[&str])] = &[
     (
@@ -215,6 +217,99 @@ pub fn provider_curated_models(provider: &str) -> &'static [&'static str] {
     &[]
 }
 
+fn resolve_nous_catalog_endpoint_and_token() -> Option<(String, String)> {
+    let auth_state = crate::auth::read_provider_auth_state("nous").ok().flatten();
+    let token = std::env::var("NOUS_API_KEY")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| {
+            auth_state.as_ref().and_then(|state| {
+                state
+                    .get("agent_key")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(ToString::to_string)
+            })
+        })
+        .or_else(|| {
+            auth_state.as_ref().and_then(|state| {
+                state
+                    .get("access_token")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(ToString::to_string)
+            })
+        })?;
+
+    let base_url = std::env::var("NOUS_INFERENCE_BASE_URL")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| {
+            auth_state.as_ref().and_then(|state| {
+                state
+                    .get("inference_base_url")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(ToString::to_string)
+            })
+        })
+        .unwrap_or_else(|| NOUS_DEFAULT_INFERENCE_BASE_URL.to_string());
+    Some((base_url, token))
+}
+
+async fn fetch_nous_live_models() -> Vec<String> {
+    if cfg!(test) {
+        return Vec::new();
+    }
+    let Some((base_url, token)) = resolve_nous_catalog_endpoint_and_token() else {
+        return Vec::new();
+    };
+    let url = format!("{}/models", base_url.trim_end_matches('/'));
+    let response = match reqwest::Client::new()
+        .get(url)
+        .bearer_auth(token)
+        .send()
+        .await
+    {
+        Ok(resp) => resp,
+        Err(_) => return Vec::new(),
+    };
+    if !response.status().is_success() {
+        return Vec::new();
+    }
+    let payload: Value = match response.json().await {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let ids = payload
+        .get("data")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| row.get("id").and_then(Value::as_str))
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
+    if ids.is_empty() {
+        return ids;
+    }
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut dedup = Vec::with_capacity(ids.len());
+    for id in ids {
+        let key = id.to_ascii_lowercase();
+        if seen.insert(key) {
+            dedup.push(id);
+        }
+    }
+    dedup
+}
+
 pub async fn provider_model_ids_with_client(
     provider: &str,
     client: &ModelsDevClient,
@@ -226,26 +321,38 @@ pub async fn provider_model_ids_with_client(
 
     let normalized = provider.trim().to_ascii_lowercase();
     if normalized == "nous" {
-        // Nous Portal fronts a large OpenRouter-compatible catalog.
-        // Keep curated picks first, then append dynamic agentic models.
-        client.fetch(false).await;
-        let models_dev = client.list_agentic_models("openrouter");
-        if models_dev.is_empty() {
-            return curated.iter().map(|model| model.to_string()).collect();
-        }
+        // Nous model picker should always include curated compatibility picks
+        // (including kimi-k2.6), then append live/models.dev discoveries.
         let mut seen: HashSet<String> = HashSet::new();
-        let mut merged: Vec<String> = Vec::with_capacity(curated.len() + models_dev.len());
+        let mut merged: Vec<String> = Vec::new();
         for model in curated {
             let key = model.to_ascii_lowercase();
             if seen.insert(key) {
                 merged.push((*model).to_string());
             }
         }
+
+        let live = fetch_nous_live_models().await;
+        for model in live {
+            let key = model.to_ascii_lowercase();
+            if seen.insert(key) {
+                merged.push(model);
+            }
+        }
+
+        // Nous Portal fronts a large OpenRouter-compatible catalog.
+        // Keep curated picks first, then append dynamic agentic models.
+        client.fetch(false).await;
+        let models_dev = client.list_agentic_models("openrouter");
         for model in models_dev {
             let key = model.to_ascii_lowercase();
             if seen.insert(key) {
                 merged.push(model);
             }
+        }
+
+        if merged.is_empty() {
+            return curated.iter().map(|model| model.to_string()).collect();
         }
         return merged;
     }
