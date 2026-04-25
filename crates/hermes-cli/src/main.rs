@@ -6793,6 +6793,17 @@ fn default_setup_model_choice() -> usize {
         .unwrap_or(1)
 }
 
+fn setup_provider_defaults() -> Vec<SetupModelOption> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut providers = Vec::new();
+    for option in SETUP_MODEL_OPTIONS {
+        if seen.insert(option.provider) {
+            providers.push(*option);
+        }
+    }
+    providers
+}
+
 fn setup_provider_display(provider: &str) -> &'static str {
     match provider {
         "openai" => "OpenAI",
@@ -7045,90 +7056,55 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
     // 2. Optional import from legacy Python/OpenClaw .env files
     maybe_import_legacy_env(&mut reader, &env_path)?;
 
-    // 3. Prompt for model/provider via interactive single-select list
-    let default_model_choice = default_setup_model_choice();
-    let default_model_index = default_model_choice.saturating_sub(1);
-    let option_labels: Vec<String> = SETUP_MODEL_OPTIONS
+    // 3. Choose setup depth first (upstream parity: quick/full first).
+    let mode_labels = vec![
+        "Quick setup (recommended) — provider, auth, model".to_string(),
+        "Full setup — quick + personality + optional sections".to_string(),
+    ];
+    let mode_pick = hermes_cli::curses_select("Choose setup mode", &mode_labels, 0);
+    let full_setup = mode_pick.confirmed && mode_pick.index == 1;
+
+    // 4. Prompt for provider first (upstream parity: provider before model).
+    let provider_defaults = setup_provider_defaults();
+    let default_provider = SETUP_MODEL_OPTIONS
+        .get(default_setup_model_choice().saturating_sub(1))
+        .map(|option| option.provider)
+        .unwrap_or("nous");
+    let default_provider_index = provider_defaults
         .iter()
-        .map(|option| format!("{:<52} {}", option.model, option.label))
+        .position(|option| option.provider == default_provider)
+        .unwrap_or(0);
+    let provider_labels: Vec<String> = provider_defaults
+        .iter()
+        .map(|option| {
+            let auth_label = if provider_supports_oauth(option.provider) {
+                "OAuth/API key"
+            } else if option.provider == "bedrock" {
+                "AWS credentials"
+            } else {
+                "API key"
+            };
+            format!(
+                "{:<22} {:<18} {}",
+                setup_provider_display(option.provider),
+                format!("({auth_label})"),
+                option.label
+            )
+        })
         .collect();
-    println!("\nNous remains the default; OAuth can be completed during setup.");
+    println!("\nSetup order: provider -> auth -> model.");
     let selected =
-        hermes_cli::curses_select("Select model/provider", &option_labels, default_model_index);
-    let selected_option = SETUP_MODEL_OPTIONS
+        hermes_cli::curses_select("Select provider", &provider_labels, default_provider_index);
+    let selected_option = provider_defaults
         .get(selected.index)
-        .unwrap_or(&SETUP_MODEL_OPTIONS[default_model_index]);
+        .unwrap_or(&provider_defaults[default_provider_index]);
     let mut model = selected_option.model.to_string();
     let selected_provider = selected_option.provider.to_string();
     let selected_provider_label = setup_provider_display(&selected_provider);
     let selected_provider_env_keys = setup_provider_env_keys(&selected_provider);
     let env_keys_display = selected_provider_env_keys.join("/");
 
-    let suggested_provider_models = provider_model_ids(&selected_provider).await;
-    let suggested_limit = if selected_provider == "nous" { 50 } else { 25 };
-    let displayed_suggested_models: Vec<String> = suggested_provider_models
-        .into_iter()
-        .take(suggested_limit)
-        .collect();
-    if displayed_suggested_models.is_empty() {
-        print!("Model ID for {} [{}]: ", selected_provider_label, model);
-        io::stdout().flush().ok();
-        let mut model_override = String::new();
-        reader.read_line(&mut model_override).ok();
-        let model_override = model_override.trim();
-        if !model_override.is_empty() {
-            let candidate = if model_override.contains(':') {
-                model_override.to_string()
-            } else {
-                format!("{}:{}", selected_provider, model_override)
-            };
-            model = normalize_provider_model(&candidate)?;
-        }
-    } else {
-        let mut suggested_labels: Vec<String> = displayed_suggested_models
-            .iter()
-            .map(|candidate| {
-                if candidate.contains(':') {
-                    candidate.to_string()
-                } else {
-                    format!("{}:{}", selected_provider, candidate)
-                }
-            })
-            .collect();
-        suggested_labels.push("Custom model ID…".to_string());
-        let suggested_pick = hermes_cli::curses_select(
-            &format!("Select {} model", selected_provider_label),
-            &suggested_labels,
-            0,
-        );
-        if suggested_pick.confirmed && suggested_pick.index < displayed_suggested_models.len() {
-            let candidate = &displayed_suggested_models[suggested_pick.index];
-            model = if candidate.contains(':') {
-                candidate.to_string()
-            } else {
-                format!("{}:{}", selected_provider, candidate)
-            };
-        } else if suggested_pick.confirmed {
-            print!(
-                "Custom model ID for {} (provider prefix optional) [{}]: ",
-                selected_provider_label, model
-            );
-            io::stdout().flush().ok();
-            let mut model_override = String::new();
-            reader.read_line(&mut model_override).ok();
-            let model_override = model_override.trim();
-            if !model_override.is_empty() {
-                let candidate = if model_override.contains(':') {
-                    model_override.to_string()
-                } else {
-                    format!("{}:{}", selected_provider, model_override)
-                };
-                model = normalize_provider_model(&candidate)?;
-            }
-        }
-    }
-
-    // 4. Prompt for selected provider API key (or OAuth device login where supported)
+    // 5. Prompt for selected provider API key (or OAuth device login where supported)
     let has_selected_provider_env_key = selected_provider_env_keys.iter().any(|key| {
         std::env::var(key)
             .ok()
@@ -7344,19 +7320,89 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
         }
     }
 
-    // 5. Prompt for personality
-    print!("\nPersonality (default, concise, creative, technical) [default]: ");
-    io::stdout().flush().ok();
-    let mut personality = String::new();
-    reader.read_line(&mut personality).ok();
-    let personality = personality.trim();
-    let personality = if personality.is_empty() {
-        "default"
+    // 6. Prompt for model after provider auth is established.
+    let suggested_provider_models = provider_model_ids(&selected_provider).await;
+    let suggested_limit = if selected_provider == "nous" { 50 } else { 25 };
+    let displayed_suggested_models: Vec<String> = suggested_provider_models
+        .into_iter()
+        .take(suggested_limit)
+        .collect();
+    if displayed_suggested_models.is_empty() {
+        print!("Model ID for {} [{}]: ", selected_provider_label, model);
+        io::stdout().flush().ok();
+        let mut model_override = String::new();
+        reader.read_line(&mut model_override).ok();
+        let model_override = model_override.trim();
+        if !model_override.is_empty() {
+            let candidate = if model_override.contains(':') {
+                model_override.to_string()
+            } else {
+                format!("{}:{}", selected_provider, model_override)
+            };
+            model = normalize_provider_model(&candidate)?;
+        }
     } else {
-        personality
+        let mut suggested_labels: Vec<String> = displayed_suggested_models
+            .iter()
+            .map(|candidate| {
+                if candidate.contains(':') {
+                    candidate.to_string()
+                } else {
+                    format!("{}:{}", selected_provider, candidate)
+                }
+            })
+            .collect();
+        suggested_labels.push("Custom model ID…".to_string());
+        let suggested_pick = hermes_cli::curses_select(
+            &format!("Select {} model", selected_provider_label),
+            &suggested_labels,
+            0,
+        );
+        if suggested_pick.confirmed && suggested_pick.index < displayed_suggested_models.len() {
+            let candidate = &displayed_suggested_models[suggested_pick.index];
+            model = if candidate.contains(':') {
+                candidate.to_string()
+            } else {
+                format!("{}:{}", selected_provider, candidate)
+            };
+        } else if suggested_pick.confirmed {
+            print!(
+                "Custom model ID for {} (provider prefix optional) [{}]: ",
+                selected_provider_label, model
+            );
+            io::stdout().flush().ok();
+            let mut model_override = String::new();
+            reader.read_line(&mut model_override).ok();
+            let model_override = model_override.trim();
+            if !model_override.is_empty() {
+                let candidate = if model_override.contains(':') {
+                    model_override.to_string()
+                } else {
+                    format!("{}:{}", selected_provider, model_override)
+                };
+                model = normalize_provider_model(&candidate)?;
+            }
+        }
+    }
+
+    // 7. Prompt for personality (full setup only).
+    let personality = if full_setup {
+        print!("\nPersonality (default, concise, creative, technical) [default]: ");
+        io::stdout().flush().ok();
+        let mut personality = String::new();
+        reader.read_line(&mut personality).ok();
+        let personality = personality.trim();
+        if personality.is_empty() {
+            "default".to_string()
+        } else {
+            personality.to_string()
+        }
+    } else {
+        println!("\nQuick setup: using default personality.");
+        "default".to_string()
     };
 
-    // 5. Write config.yaml
+    // 8. Write config.yaml
     let mut overwrite_config = true;
     if config_path.exists() {
         print!("\nconfig.yaml already exists. Overwrite? [y/N]: ");
@@ -7448,8 +7494,10 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
     }
 
     drop(reader);
-    if prompt_yes_no("\nConfigure optional setup sections now?", true).await? {
+    if full_setup && prompt_yes_no("\nConfigure optional setup sections now?", true).await? {
         run_optional_setup_sections(&cli, &disk).await?;
+    } else if !full_setup {
+        println!("Skipped optional setup sections (quick setup mode).");
     }
 
     println!(
@@ -9168,6 +9216,21 @@ mod tests {
         let option = &SETUP_MODEL_OPTIONS[default_setup_model_choice().saturating_sub(1)];
         assert_eq!(option.model, "nous:moonshotai/kimi-k2.6");
         assert_eq!(option.provider, "nous");
+    }
+
+    #[test]
+    fn setup_provider_defaults_are_unique_and_include_nous() {
+        let providers = setup_provider_defaults();
+        assert!(!providers.is_empty());
+        let mut seen = std::collections::BTreeSet::new();
+        for option in providers {
+            assert!(
+                seen.insert(option.provider),
+                "duplicate provider {}",
+                option.provider
+            );
+        }
+        assert!(seen.contains("nous"));
     }
 
     #[test]
