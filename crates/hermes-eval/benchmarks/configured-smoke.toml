@@ -1,0 +1,21 @@
+[benchmark]
+id = "configured-smoke"
+name = "Configured Smoke Benchmark"
+source = "local"
+version = "1"
+
+[[tasks]]
+task_id = "smoke_repo_summary"
+category = "smoke"
+instruction = "Summarize what this repository appears to contain in 2-3 sentences."
+expected_any = ["crates", "rust", "agent", "repository"]
+min_length = 60
+timeout_secs = 90
+
+[[tasks]]
+task_id = "smoke_capability_check"
+category = "smoke"
+instruction = "List one capability this agent has and one way to verify it."
+expected_any = ["smoke", "noop rollout", "task_id"]
+min_length = 50
+timeout_secs = 90

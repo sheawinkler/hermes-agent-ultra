@@ -38,6 +38,7 @@
 pub mod adapter;
 #[cfg(feature = "agent-loop")]
 pub mod agent_rollout;
+pub mod configured;
 pub mod error;
 pub mod reporter;
 pub mod result;
@@ -48,6 +49,7 @@ pub mod verifier;
 pub use adapter::{BenchmarkAdapter, BenchmarkMetadata, TaskSpec};
 #[cfg(feature = "agent-loop")]
 pub use agent_rollout::AgentLoopRollout;
+pub use configured::{ConfiguredBenchmarkAdapter, ConfiguredTask, ConfiguredVerifier};
 pub use error::{EvalError, EvalResult};
 pub use reporter::{JsonReporter, Reporter};
 pub use result::{AggregateMetrics, RunRecord, TaskResult, TaskStatus};
