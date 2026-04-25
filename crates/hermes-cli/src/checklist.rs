@@ -21,6 +21,15 @@ pub struct ChecklistResult {
     pub confirmed: bool,
 }
 
+/// Result of a single-select interaction.
+#[derive(Debug, Clone, Copy)]
+pub struct SelectResult {
+    /// Selected index.
+    pub index: usize,
+    /// Whether the user confirmed (Enter) or cancelled (Esc).
+    pub confirmed: bool,
+}
+
 /// Run an interactive multi-select checklist in the terminal.
 ///
 /// # Arguments
@@ -48,6 +57,29 @@ pub fn curses_checklist(
             // On error, fall back to numbered input
             numbered_fallback(title, items, selected, status_fn)
         }
+    }
+}
+
+/// Run an interactive single-select list in the terminal.
+///
+/// Uses arrow keys (`↑↓` / `j``k`) and Enter to confirm. Esc cancels and
+/// returns `confirmed = false` while keeping the initial index.
+pub fn curses_select(title: &str, items: &[String], initial_index: usize) -> SelectResult {
+    if items.is_empty() {
+        return SelectResult {
+            index: 0,
+            confirmed: false,
+        };
+    }
+
+    let clamped_initial = initial_index.min(items.len().saturating_sub(1));
+    if !atty_is_tty() {
+        return numbered_select_fallback(title, items, clamped_initial);
+    }
+
+    match curses_select_inner(title, items, clamped_initial) {
+        Ok(result) => result,
+        Err(_) => numbered_select_fallback(title, items, clamped_initial),
     }
 }
 
@@ -258,6 +290,139 @@ fn numbered_fallback(
     }
 }
 
+fn curses_select_inner(
+    title: &str,
+    items: &[String],
+    initial_index: usize,
+) -> Result<SelectResult, io::Error> {
+    let mut cursor_pos = initial_index;
+    let mut scroll_offset: usize = 0;
+    let mut stdout = io::stdout();
+
+    enable_raw_mode()?;
+    execute!(stdout, terminal::EnterAlternateScreen, cursor::Hide)?;
+
+    let result = loop {
+        let (cols, rows) = terminal::size().unwrap_or((80, 24));
+        let max_x = cols as usize;
+        let max_y = rows as usize;
+        let visible_rows = max_y.saturating_sub(4);
+
+        if cursor_pos < scroll_offset {
+            scroll_offset = cursor_pos;
+        } else if cursor_pos >= scroll_offset + visible_rows {
+            scroll_offset = cursor_pos.saturating_sub(visible_rows) + 1;
+        }
+
+        execute!(stdout, terminal::Clear(terminal::ClearType::All))?;
+
+        execute!(stdout, cursor::MoveTo(0, 0))?;
+        write!(
+            stdout,
+            "\x1b[1;33m{}\x1b[0m",
+            &title[..title.len().min(max_x)]
+        )?;
+        execute!(stdout, cursor::MoveTo(0, 1))?;
+        write!(
+            stdout,
+            "\x1b[2m  ↑↓ navigate  ENTER confirm  ESC cancel\x1b[0m"
+        )?;
+
+        for (draw_i, i) in
+            (scroll_offset..items.len().min(scroll_offset + visible_rows)).enumerate()
+        {
+            let y = draw_i + 3;
+            if y >= max_y {
+                break;
+            }
+            let bullet = if i == cursor_pos { "▶" } else { " " };
+            let line = format!(" {} {}", bullet, &items[i]);
+            let truncated = &line[..line.len().min(max_x)];
+
+            execute!(stdout, cursor::MoveTo(0, y as u16))?;
+            if i == cursor_pos {
+                write!(stdout, "\x1b[1;32m{}\x1b[0m", truncated)?;
+            } else {
+                write!(stdout, "{}", truncated)?;
+            }
+        }
+
+        stdout.flush()?;
+
+        if let Ok(Event::Key(KeyEvent { code, .. })) = event::read() {
+            match code {
+                KeyCode::Up | KeyCode::Char('k') => {
+                    cursor_pos = if cursor_pos == 0 {
+                        items.len() - 1
+                    } else {
+                        cursor_pos - 1
+                    };
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    cursor_pos = (cursor_pos + 1) % items.len();
+                }
+                KeyCode::Enter => {
+                    break SelectResult {
+                        index: cursor_pos,
+                        confirmed: true,
+                    };
+                }
+                KeyCode::Esc | KeyCode::Char('q') => {
+                    break SelectResult {
+                        index: initial_index,
+                        confirmed: false,
+                    };
+                }
+                _ => {}
+            }
+        }
+    };
+
+    execute!(stdout, cursor::Show, terminal::LeaveAlternateScreen)?;
+    disable_raw_mode()?;
+
+    Ok(result)
+}
+
+fn numbered_select_fallback(title: &str, items: &[String], initial_index: usize) -> SelectResult {
+    println!("\n  \x1b[33m{}\x1b[0m", title);
+    for (i, label) in items.iter().enumerate() {
+        let marker = if i == initial_index { "*" } else { " " };
+        println!("  {} {:>2}. {}", marker, i + 1, label);
+    }
+    println!();
+    print!(
+        "  \x1b[2mChoose # [{}] (Enter keeps default): \x1b[0m",
+        initial_index + 1
+    );
+    io::stdout().flush().ok();
+
+    let mut input = String::new();
+    if io::stdin().read_line(&mut input).is_ok() {
+        let trimmed = input.trim();
+        if trimmed.is_empty() {
+            return SelectResult {
+                index: initial_index,
+                confirmed: true,
+            };
+        }
+        if let Ok(choice) = trimmed.parse::<usize>() {
+            let idx = choice.saturating_sub(1);
+            if idx < items.len() {
+                return SelectResult {
+                    index: idx,
+                    confirmed: true,
+                };
+            }
+        }
+    }
+
+    SelectResult {
+        index: initial_index,
+        confirmed: false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -277,5 +442,12 @@ mod tests {
         // With empty items, curses_checklist returns immediately
         let result = curses_checklist("Test", &[], &HashSet::new(), None);
         assert!(result.confirmed);
+    }
+
+    #[test]
+    fn test_curses_select_empty_items() {
+        let result = curses_select("Select", &[], 0);
+        assert!(!result.confirmed);
+        assert_eq!(result.index, 0);
     }
 }
