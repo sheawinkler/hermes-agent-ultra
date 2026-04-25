@@ -222,6 +222,31 @@ pub async fn provider_model_ids_with_client(
     }
 
     let normalized = provider.trim().to_ascii_lowercase();
+    if normalized == "nous" {
+        // Nous Portal fronts a large OpenRouter-compatible catalog.
+        // Keep curated picks first, then append dynamic agentic models.
+        client.fetch(false).await;
+        let models_dev = client.list_agentic_models("openrouter");
+        if models_dev.is_empty() {
+            return curated.iter().map(|model| model.to_string()).collect();
+        }
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut merged: Vec<String> = Vec::with_capacity(curated.len() + models_dev.len());
+        for model in curated {
+            let key = model.to_ascii_lowercase();
+            if seen.insert(key) {
+                merged.push((*model).to_string());
+            }
+        }
+        for model in models_dev {
+            let key = model.to_ascii_lowercase();
+            if seen.insert(key) {
+                merged.push(model);
+            }
+        }
+        return merged;
+    }
+
     if !is_models_dev_preferred_provider(&normalized) {
         return curated.iter().map(|model| model.to_string()).collect();
     }
@@ -398,6 +423,32 @@ mod tests {
             .map(|m| (*m).to_string())
             .collect();
         assert_eq!(out, expected);
+    }
+
+    #[tokio::test]
+    async fn nous_provider_uses_curated_plus_openrouter_agentic_catalog() {
+        let client = seeded_client(json!({
+            "openrouter": {
+                "models": {
+                    "moonshotai/kimi-k2.6": {"tool_call": true},
+                    "openai/gpt-5.5": {"tool_call": true},
+                    "anthropic/claude-opus-4.7": {"tool_call": true}
+                }
+            }
+        }));
+        let out = provider_model_ids_with_client("nous", &client).await;
+        assert!(
+            out.starts_with(&[
+                "moonshotai/kimi-k2.6".to_string(),
+                "xiaomi/mimo-v2.5-pro".to_string(),
+                "anthropic/claude-sonnet-4.5".to_string()
+            ]),
+            "nous list should keep curated models first"
+        );
+        assert!(
+            out.iter().any(|m| m == "openai/gpt-5.5"),
+            "expected openrouter-derived models in nous catalog"
+        );
     }
 
     #[tokio::test]
