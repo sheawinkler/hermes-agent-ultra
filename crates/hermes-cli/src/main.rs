@@ -6624,6 +6624,7 @@ const SETUP_BEDROCK_ENV_KEYS: &[&str] = &[
     "AWS_SECRET_ACCESS_KEY",
     "AWS_SESSION_TOKEN",
 ];
+const HERMES_ENABLE_NOUS_MANAGED_TOOLS_ENV_KEY: &str = "HERMES_ENABLE_NOUS_MANAGED_TOOLS";
 
 #[derive(Clone, Copy)]
 struct SetupModelOption {
@@ -6635,7 +6636,7 @@ struct SetupModelOption {
 const SETUP_MODEL_OPTIONS: &[SetupModelOption] = &[
     SetupModelOption {
         provider: "nous",
-        model: "nous:moonshotai/kimi-k2.6",
+        model: "nous:nousresearch/hermes-3-llama-3.1-405b",
         label: "Nous (recommended, OAuth)",
     },
     SetupModelOption {
@@ -7117,6 +7118,8 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
         setup_provider_default_base_url(&selected_provider).map(ToString::to_string);
     let mut selected_oauth_token_url: Option<String> = None;
     let mut selected_oauth_client_id: Option<String> = None;
+    let mut selected_nous_oauth_authenticated = false;
+    let mut selected_nous_managed_tools_enabled: Option<bool> = None;
 
     if provider_supports_oauth(&selected_provider) {
         print!(
@@ -7158,6 +7161,7 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
                     ));
                     selected_oauth_client_id = Some(state.client_id.clone());
                     stored_provider_secret_in_vault = true;
+                    selected_nous_oauth_authenticated = true;
                 }
                 "openai-codex" => {
                     let state =
@@ -7268,6 +7272,25 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
                 }
                 _ => {}
             }
+        }
+    }
+
+    if selected_provider == "nous" {
+        if selected_nous_oauth_authenticated {
+            print!("\nEnable Nous managed tool-gateway integrations (recommended) [Y/n]: ");
+            io::stdout().flush().ok();
+            let mut answer = String::new();
+            reader.read_line(&mut answer).ok();
+            let enable = !matches!(answer.trim().to_ascii_lowercase().as_str(), "n" | "no");
+            selected_nous_managed_tools_enabled = Some(enable);
+        } else {
+            println!(
+                "\nNote: Nous managed tool-gateway integrations require Nous OAuth login in setup."
+            );
+            println!(
+                "      Re-run setup with Nous OAuth, then set {}=1 if needed.",
+                HERMES_ENABLE_NOUS_MANAGED_TOOLS_ENV_KEY
+            );
         }
     }
 
@@ -7474,6 +7497,12 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
         validate_config(&disk).map_err(|e| AgentError::Config(e.to_string()))?;
         save_config_yaml(&config_path, &disk).map_err(|e| AgentError::Config(e.to_string()))?;
         println!("\n  ✓ Wrote config.yaml");
+    }
+
+    if let Some(enabled) = selected_nous_managed_tools_enabled {
+        let flag = if enabled { "1" } else { "0" };
+        upsert_env_key(&env_path, HERMES_ENABLE_NOUS_MANAGED_TOOLS_ENV_KEY, flag)?;
+        println!("  ✓ {}={}", HERMES_ENABLE_NOUS_MANAGED_TOOLS_ENV_KEY, flag);
     }
 
     // 6. Write default profile
@@ -9223,7 +9252,7 @@ mod tests {
     #[test]
     fn setup_model_choice_supports_nous() {
         let option = &SETUP_MODEL_OPTIONS[default_setup_model_choice().saturating_sub(1)];
-        assert_eq!(option.model, "nous:moonshotai/kimi-k2.6");
+        assert_eq!(option.model, "nous:nousresearch/hermes-3-llama-3.1-405b");
         assert_eq!(option.provider, "nous");
     }
 
