@@ -17,7 +17,7 @@ use crossterm::terminal::{
 };
 use crossterm::ExecutableCommand;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
@@ -331,6 +331,95 @@ impl TuiState {
                 self.selection_anchor = None;
                 false
             }
+            // Ctrl/Alt+Left → jump backward by word
+            KeyCode::Left
+                if mods.contains(KeyModifiers::CONTROL) || mods.contains(KeyModifiers::ALT) =>
+            {
+                self.cursor_position = self.word_start_left(self.cursor_position);
+                self.selection_anchor = None;
+                false
+            }
+            // Ctrl/Alt+Right → jump forward by word
+            KeyCode::Right
+                if mods.contains(KeyModifiers::CONTROL) || mods.contains(KeyModifiers::ALT) =>
+            {
+                self.cursor_position = self.word_end_right(self.cursor_position);
+                self.selection_anchor = None;
+                false
+            }
+            // Ctrl+B / Ctrl+F → char-wise navigation
+            KeyCode::Char('b') if mods.contains(KeyModifiers::CONTROL) => {
+                self.cursor_position = self.prev_char_start(self.cursor_position);
+                self.selection_anchor = None;
+                false
+            }
+            KeyCode::Char('f') if mods.contains(KeyModifiers::CONTROL) => {
+                self.cursor_position = self.next_char_start(self.cursor_position);
+                self.selection_anchor = None;
+                false
+            }
+            // Ctrl+W or Ctrl/Alt+Backspace → delete previous word
+            KeyCode::Char('w') if mods.contains(KeyModifiers::CONTROL) => {
+                let start = self.word_start_left(self.cursor_position);
+                if start < self.cursor_position {
+                    self.input.drain(start..self.cursor_position);
+                    self.cursor_position = start;
+                }
+                self.refresh_completions();
+                self.selection_anchor = None;
+                false
+            }
+            KeyCode::Backspace
+                if mods.contains(KeyModifiers::CONTROL) || mods.contains(KeyModifiers::ALT) =>
+            {
+                let start = self.word_start_left(self.cursor_position);
+                if start < self.cursor_position {
+                    self.input.drain(start..self.cursor_position);
+                    self.cursor_position = start;
+                }
+                self.refresh_completions();
+                self.selection_anchor = None;
+                false
+            }
+            // Ctrl+D/Delete → delete char under cursor
+            KeyCode::Delete => {
+                if self.cursor_position < self.input.len() {
+                    let next = self.next_char_start(self.cursor_position);
+                    self.input.drain(self.cursor_position..next);
+                    self.refresh_completions();
+                }
+                self.selection_anchor = None;
+                false
+            }
+            KeyCode::Char('d') if mods.contains(KeyModifiers::CONTROL) => {
+                if self.cursor_position < self.input.len() {
+                    let next = self.next_char_start(self.cursor_position);
+                    self.input.drain(self.cursor_position..next);
+                    self.refresh_completions();
+                }
+                self.selection_anchor = None;
+                false
+            }
+            // Ctrl+U / Ctrl+K → delete to start/end of line
+            KeyCode::Char('u') if mods.contains(KeyModifiers::CONTROL) => {
+                let start = self.line_start();
+                if start < self.cursor_position {
+                    self.input.drain(start..self.cursor_position);
+                    self.cursor_position = start;
+                }
+                self.refresh_completions();
+                self.selection_anchor = None;
+                false
+            }
+            KeyCode::Char('k') if mods.contains(KeyModifiers::CONTROL) => {
+                let end = self.line_end();
+                if self.cursor_position < end {
+                    self.input.drain(self.cursor_position..end);
+                }
+                self.refresh_completions();
+                self.selection_anchor = None;
+                false
+            }
             KeyCode::Char(c) => {
                 if self.history_search_active {
                     self.history_search_query.push(c);
@@ -349,10 +438,7 @@ impl TuiState {
                 self.input.insert(self.cursor_position, c);
                 self.cursor_position += c.len_utf8();
                 self.selection_anchor = None;
-                // Check for slash command auto-completion
-                if self.input.starts_with('/') {
-                    self.update_completions();
-                }
+                self.refresh_completions();
                 false
             }
             KeyCode::Backspace => {
@@ -371,12 +457,7 @@ impl TuiState {
                     self.cursor_position = prev;
                 }
                 self.selection_anchor = None;
-                if self.input.starts_with('/') {
-                    self.update_completions();
-                } else {
-                    self.completions.clear();
-                    self.completion_index = None;
-                }
+                self.refresh_completions();
                 false
             }
             KeyCode::Left => {
@@ -515,9 +596,86 @@ impl TuiState {
         }
     }
 
+    fn refresh_completions(&mut self) {
+        if self.input.starts_with('/') {
+            self.update_completions();
+        } else {
+            self.completions.clear();
+            self.completion_index = None;
+        }
+    }
+
     // -----------------------------------------------------------------------
     // Multi-line cursor helpers
     // -----------------------------------------------------------------------
+
+    fn prev_char_start(&self, pos: usize) -> usize {
+        if pos == 0 {
+            return 0;
+        }
+        self.input[..pos]
+            .char_indices()
+            .last()
+            .map(|(i, _)| i)
+            .unwrap_or(0)
+    }
+
+    fn next_char_start(&self, pos: usize) -> usize {
+        if pos >= self.input.len() {
+            return self.input.len();
+        }
+        self.input[pos..]
+            .char_indices()
+            .nth(1)
+            .map(|(i, _)| pos + i)
+            .unwrap_or(self.input.len())
+    }
+
+    fn is_word_char(c: char) -> bool {
+        c.is_alphanumeric() || matches!(c, '_' | '-')
+    }
+
+    fn word_start_left(&self, pos: usize) -> usize {
+        let mut p = pos.min(self.input.len());
+        while p > 0 {
+            let prev = self.prev_char_start(p);
+            let ch = self.input[prev..p].chars().next().unwrap_or_default();
+            if Self::is_word_char(ch) {
+                break;
+            }
+            p = prev;
+        }
+        while p > 0 {
+            let prev = self.prev_char_start(p);
+            let ch = self.input[prev..p].chars().next().unwrap_or_default();
+            if !Self::is_word_char(ch) {
+                break;
+            }
+            p = prev;
+        }
+        p
+    }
+
+    fn word_end_right(&self, pos: usize) -> usize {
+        let mut p = pos.min(self.input.len());
+        while p < self.input.len() {
+            let next = self.next_char_start(p);
+            let ch = self.input[p..next].chars().next().unwrap_or_default();
+            if Self::is_word_char(ch) {
+                break;
+            }
+            p = next;
+        }
+        while p < self.input.len() {
+            let next = self.next_char_start(p);
+            let ch = self.input[p..next].chars().next().unwrap_or_default();
+            if !Self::is_word_char(ch) {
+                break;
+            }
+            p = next;
+        }
+        p
+    }
 
     /// Get the byte offset of the start of the current line.
     fn line_start(&self) -> usize {
@@ -596,7 +754,8 @@ pub fn render(frame: &mut Frame, app: &App, state: &TuiState, theme: &Theme) {
 
     let size = frame.area();
 
-    // Layout: messages (top), input (middle), completions (optional), status bar (bottom)
+    // Layout: header, messages, completions (optional), input, status bar
+    let header_height = 1;
     let input_height = 3;
     let completion_height = if state.completions.is_empty() {
         0
@@ -608,17 +767,21 @@ pub fn render(frame: &mut Frame, app: &App, state: &TuiState, theme: &Theme) {
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(5),                    // messages
+            Constraint::Length(header_height),     // header
+            Constraint::Min(4),                    // messages
             Constraint::Length(completion_height), // completions
             Constraint::Length(input_height),      // input
             Constraint::Length(status_height),     // status
         ])
         .split(size);
 
-    let messages_area = vertical[0];
-    let completions_area = vertical[1];
-    let input_area = vertical[2];
-    let status_area = vertical[3];
+    let header_area = vertical[0];
+    let messages_area = vertical[1];
+    let completions_area = vertical[2];
+    let input_area = vertical[3];
+    let status_area = vertical[4];
+
+    render_header(frame, app, header_area, &colors);
 
     // --- Render message history ---
     render_messages(frame, app, state, messages_area, &resolved, &colors);
@@ -634,10 +797,40 @@ pub fn render(frame: &mut Frame, app: &App, state: &TuiState, theme: &Theme) {
     }
 
     // --- Render input area ---
-    render_input(frame, state, input_area, &colors);
+    if let Some(pos) = render_input(frame, state, input_area, &colors) {
+        frame.set_cursor_position(pos);
+    }
 
     // --- Render status bar ---
     render_status(frame, app, state, status_area, &colors);
+}
+
+fn render_header(frame: &mut Frame, app: &App, area: Rect, colors: &crate::theme::RatatuiColors) {
+    let title = Paragraph::new(Line::from(vec![
+        Span::styled(
+            " Hermes Agent Ultra ",
+            Style::default()
+                .fg(colors.status_bar_strong)
+                .bg(colors.status_bar_bg)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            "│ ",
+            Style::default()
+                .fg(colors.status_bar_dim)
+                .bg(colors.status_bar_bg),
+        ),
+        Span::styled(
+            format!(
+                "Session {}  •  Ctrl+Enter send  •  Ctrl+←/→ word nav",
+                &app.session_id[..8.min(app.session_id.len())]
+            ),
+            Style::default()
+                .fg(colors.status_bar_text)
+                .bg(colors.status_bar_bg),
+        ),
+    ]));
+    frame.render_widget(title, area);
 }
 
 /// Render the message history area.
@@ -763,7 +956,7 @@ fn render_input(
     state: &TuiState,
     area: Rect,
     colors: &crate::theme::RatatuiColors,
-) {
+) -> Option<Position> {
     let mode_indicator = match state.mode {
         InputMode::Normal => " NORMAL ",
         InputMode::Insert => " INSERT ",
@@ -780,7 +973,7 @@ fn render_input(
         if state.history_search_active {
             format!("(reverse-i-search)`{}': ", state.history_search_query)
         } else {
-            "Type a message (Enter=newline, Ctrl+Enter=send)...".to_string()
+            "Type a message (Ctrl+Enter send, Ctrl+←/→ word, Ctrl+W delete-word)...".to_string()
         }
     } else if state.history_search_active {
         format!(
@@ -798,17 +991,67 @@ fn render_input(
     } else {
         String::new()
     };
+    let line_indicator_width = line_indicator.chars().count();
 
+    let block = Block::default().borders(Borders::BOTTOM);
     let paragraph = Paragraph::new(Text::from(vec![Line::from(vec![
         Span::styled(mode_indicator, mode_style),
         Span::styled(line_indicator, Style::default().fg(Color::DarkGray)),
         Span::raw(" "),
         Span::raw(input_text),
     ])]))
-    .block(Block::default().borders(Borders::BOTTOM))
+    .block(block.clone())
     .wrap(Wrap { trim: false });
 
     frame.render_widget(paragraph, area);
+
+    if state.mode == InputMode::Normal {
+        return None;
+    }
+
+    let inner = block.inner(area);
+    if inner.width == 0 || inner.height == 0 {
+        return None;
+    }
+
+    let history_prefix = if state.history_search_active {
+        format!("(reverse-i-search)`{}': ", state.history_search_query)
+    } else {
+        String::new()
+    };
+    let mut rendered_before_cursor = String::new();
+    rendered_before_cursor.push_str(&history_prefix);
+    rendered_before_cursor.push_str(&state.input[..state.cursor_position.min(state.input.len())]);
+
+    let width = inner.width as usize;
+    let mut x = mode_indicator.chars().count() + line_indicator_width + 1;
+    let mut y = 0usize;
+
+    for ch in rendered_before_cursor.chars() {
+        if ch == '\n' {
+            y += 1;
+            x = 0;
+            continue;
+        }
+        if x >= width {
+            y += 1;
+            x = 0;
+        }
+        x += 1;
+    }
+
+    if x >= width {
+        y += x / width;
+        x %= width;
+    }
+    if y >= inner.height as usize {
+        return None;
+    }
+
+    Some(Position {
+        x: inner.x + x as u16,
+        y: inner.y + y as u16,
+    })
 }
 
 /// Render the status bar at the bottom of the screen.
@@ -1210,5 +1453,28 @@ mod tests {
         let style = status_message_style("Warning: retrying", &colors);
         assert_eq!(style.fg, Some(colors.status_bar_warn));
         assert_eq!(style.bg, Some(colors.status_bar_bg));
+    }
+
+    #[test]
+    fn test_word_navigation_helpers() {
+        let mut state = TuiState::default();
+        state.input = "alpha beta  gamma".to_string();
+
+        assert_eq!(state.word_start_left(state.input.len()), 12); // gamma
+        assert_eq!(state.word_start_left(11), 6); // beta
+        assert_eq!(state.word_end_right(0), 5); // alpha
+        assert_eq!(state.word_end_right(6), 10); // beta
+    }
+
+    #[test]
+    fn test_ctrl_w_delete_previous_word_behavior() {
+        let mut state = TuiState::default();
+        state.input = "hello brave new world".to_string();
+        state.cursor_position = state.input.len();
+
+        let start = state.word_start_left(state.cursor_position);
+        state.input.drain(start..state.cursor_position);
+        state.cursor_position = start;
+        assert_eq!(state.input, "hello brave new ");
     }
 }

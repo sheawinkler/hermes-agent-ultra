@@ -30,7 +30,7 @@ use hermes_cli::auth::{
 use hermes_cli::cli::{Cli, CliCommand};
 use hermes_cli::config_env::hydrate_env_from_config;
 use hermes_cli::model_switch::{
-    curated_provider_slugs, normalize_provider_model, provider_catalog_entries,
+    curated_provider_slugs, normalize_provider_model, provider_catalog_entries, provider_model_ids,
 };
 use hermes_cli::platform_toolsets::{resolve_platform_tool_schemas, tool_definition_summary};
 use hermes_cli::runtime_tool_wiring::{
@@ -6459,8 +6459,8 @@ struct SetupModelOption {
 const SETUP_MODEL_OPTIONS: &[SetupModelOption] = &[
     SetupModelOption {
         provider: "nous",
-        model: "nous:hermes-3-llama-3.1-405b",
-        label: "Nous Hermes 3 (recommended, OAuth)",
+        model: "nous:moonshotai/kimi-k2.6",
+        label: "Nous (recommended, OAuth)",
     },
     SetupModelOption {
         provider: "openai",
@@ -6845,7 +6845,7 @@ fn maybe_import_legacy_env(
 async fn run_setup() -> Result<(), AgentError> {
     use std::io::{self, BufRead, Write};
 
-    println!("Hermes Agent — Setup Wizard");
+    println!("Hermes Agent Ultra — Setup Wizard");
     println!("===========================\n");
 
     let config_dir = hermes_config::hermes_home();
@@ -6892,11 +6892,55 @@ async fn run_setup() -> Result<(), AgentError> {
         model_choice.trim().to_string()
     };
     let selected_option = setup_option_from_choice(&model_choice);
-    let model = selected_option.model;
+    let mut model = selected_option.model.to_string();
     let selected_provider = selected_option.provider.to_string();
     let selected_provider_label = setup_provider_display(&selected_provider);
     let selected_provider_env_keys = setup_provider_env_keys(&selected_provider);
     let env_keys_display = selected_provider_env_keys.join("/");
+
+    let suggested_provider_models = provider_model_ids(&selected_provider).await;
+    let displayed_suggested_models: Vec<String> =
+        suggested_provider_models.into_iter().take(25).collect();
+    if !displayed_suggested_models.is_empty() {
+        println!("\nSuggested {} models:", selected_provider_label);
+        for (idx, candidate) in displayed_suggested_models.iter().enumerate() {
+            let full = if candidate.contains(':') {
+                candidate.to_string()
+            } else {
+                format!("{}:{}", selected_provider, candidate)
+            };
+            println!("  {:>2}) {}", idx + 1, full);
+        }
+    }
+    print!("Model ID for {} [{}]: ", selected_provider_label, model);
+    io::stdout().flush().ok();
+    let mut model_override = String::new();
+    reader.read_line(&mut model_override).ok();
+    let model_override = model_override.trim();
+    if !model_override.is_empty() {
+        if let Ok(choice) = model_override.parse::<usize>() {
+            if choice >= 1 && choice <= displayed_suggested_models.len() {
+                let candidate = &displayed_suggested_models[choice - 1];
+                model = if candidate.contains(':') {
+                    candidate.to_string()
+                } else {
+                    format!("{}:{}", selected_provider, candidate)
+                };
+            } else {
+                return Err(AgentError::Config(format!(
+                    "Invalid model selection index {} for provider {}",
+                    choice, selected_provider
+                )));
+            }
+        } else {
+            let candidate = if model_override.contains(':') {
+                model_override.to_string()
+            } else {
+                format!("{}:{}", selected_provider, model_override)
+            };
+            model = normalize_provider_model(&candidate)?;
+        }
+    }
 
     // 4. Prompt for selected provider API key (or OAuth device login where supported)
     let has_selected_provider_env_key = selected_provider_env_keys.iter().any(|key| {
@@ -7145,7 +7189,7 @@ async fn run_setup() -> Result<(), AgentError> {
     // rewriting config.yaml from scratch.
     let mut disk =
         load_user_config_file(&config_path).map_err(|e| AgentError::Config(e.to_string()))?;
-    disk.model = Some(model.to_string());
+    disk.model = Some(model.clone());
     disk.personality = Some(personality.to_string());
     disk.max_turns = 50;
 
@@ -7229,7 +7273,7 @@ async fn run_doctor(
     snapshot_path: Option<String>,
     bundle: bool,
 ) -> Result<(), AgentError> {
-    println!("Hermes Agent — System Check");
+    println!("Hermes Agent Ultra — System Check");
     println!("===========================\n");
 
     let mut checks: Vec<serde_json::Value> = Vec::new();
@@ -7607,7 +7651,7 @@ async fn run_update() -> Result<(), AgentError> {
 
 /// Handle `hermes status`.
 async fn run_status(cli: Cli) -> Result<(), AgentError> {
-    println!("Hermes Agent — Status");
+    println!("Hermes Agent Ultra — Status");
     println!("=====================\n");
 
     println!("Version: {}", env!("CARGO_PKG_VERSION"));
@@ -8927,7 +8971,7 @@ mod tests {
     fn setup_model_choice_supports_nous() {
         let default = default_setup_model_choice().to_string();
         let option = setup_option_from_choice(&default);
-        assert_eq!(option.model, "nous:hermes-3-llama-3.1-405b");
+        assert_eq!(option.model, "nous:moonshotai/kimi-k2.6");
         assert_eq!(option.provider, "nous");
     }
 
