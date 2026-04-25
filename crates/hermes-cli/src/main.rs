@@ -7065,8 +7065,11 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
     let env_keys_display = selected_provider_env_keys.join("/");
 
     let suggested_provider_models = provider_model_ids(&selected_provider).await;
-    let displayed_suggested_models: Vec<String> =
-        suggested_provider_models.into_iter().take(25).collect();
+    let suggested_limit = if selected_provider == "nous" { 50 } else { 25 };
+    let displayed_suggested_models: Vec<String> = suggested_provider_models
+        .into_iter()
+        .take(suggested_limit)
+        .collect();
     if displayed_suggested_models.is_empty() {
         print!("Model ID for {} [{}]: ", selected_provider_label, model);
         io::stdout().flush().ok();
