@@ -9,7 +9,7 @@
 //!
 //! Corresponds to Python `agent/memory_manager.py`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
 use regex::Regex;
@@ -264,6 +264,11 @@ impl MemoryManager {
                 provider: provider.name().to_string(),
                 content: result,
             });
+        }
+
+        if memory_graph_depth() > 1 {
+            let mut graph = graph_enrich_candidates(&candidates, query, memory_graph_depth());
+            candidates.append(&mut graph);
         }
 
         if candidates.is_empty() {
@@ -527,6 +532,13 @@ fn memory_fusion_weights() -> HashMap<String, f64> {
     weights
 }
 
+fn memory_graph_depth() -> usize {
+    std::env::var("HERMES_MEMORY_GRAPH_DEPTH")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(2)
+}
+
 fn query_terms(query: &str) -> Vec<String> {
     query
         .split_whitespace()
@@ -542,6 +554,113 @@ fn canonical_memory_key(text: &str) -> String {
         .collect::<Vec<_>>()
         .join(" ")
 }
+
+fn graph_enrich_candidates(
+    candidates: &[FusedMemoryCandidate],
+    query: &str,
+    depth: usize,
+) -> Vec<FusedMemoryCandidate> {
+    if candidates.len() < 2 || depth <= 1 {
+        return Vec::new();
+    }
+
+    let mut adjacency: HashMap<String, HashSet<String>> = HashMap::new();
+    for candidate in candidates {
+        let entities = extract_graph_entities(&candidate.content);
+        for i in 0..entities.len() {
+            for j in (i + 1)..entities.len() {
+                let a = entities[i].clone();
+                let b = entities[j].clone();
+                adjacency.entry(a.clone()).or_default().insert(b.clone());
+                adjacency.entry(b).or_default().insert(a);
+            }
+        }
+    }
+    if adjacency.is_empty() {
+        return Vec::new();
+    }
+
+    let query_nodes = query_terms(query)
+        .into_iter()
+        .filter(|t| adjacency.contains_key(t))
+        .collect::<Vec<_>>();
+    if query_nodes.is_empty() {
+        return Vec::new();
+    }
+
+    let mut queue: VecDeque<(String, usize)> = VecDeque::new();
+    let mut visited: HashSet<String> = HashSet::new();
+    for node in query_nodes {
+        visited.insert(node.clone());
+        queue.push_back((node, 0));
+    }
+
+    let mut links = Vec::new();
+    while let Some((node, dist)) = queue.pop_front() {
+        if dist >= depth {
+            continue;
+        }
+        let Some(neighbors) = adjacency.get(&node) else {
+            continue;
+        };
+        for next in neighbors {
+            links.push(format!("{node} -> {next}"));
+            if visited.insert(next.clone()) {
+                queue.push_back((next.clone(), dist + 1));
+            }
+            if links.len() >= 20 {
+                break;
+            }
+        }
+        if links.len() >= 20 {
+            break;
+        }
+    }
+
+    if links.is_empty() {
+        return Vec::new();
+    }
+
+    let mut summary = String::from(
+        "Graph-depth memory hints (additive to ContextLattice and provider recall):\n",
+    );
+    for link in links.into_iter().take(12) {
+        summary.push_str("- ");
+        summary.push_str(&link);
+        summary.push('\n');
+    }
+
+    vec![FusedMemoryCandidate {
+        provider: "graph-depth".to_string(),
+        content: summary,
+    }]
+}
+
+fn extract_graph_entities(text: &str) -> Vec<String> {
+    lazy_static::lazy_static! {
+        static ref ENTITY_RE: Regex = Regex::new(r"[A-Za-z_][A-Za-z0-9_]{2,}").unwrap();
+    }
+    let mut seen = HashSet::new();
+    let mut entities = Vec::new();
+    for m in ENTITY_RE.find_iter(text) {
+        let token = m.as_str().to_ascii_lowercase();
+        if STOPWORDS.contains(&token.as_str()) {
+            continue;
+        }
+        if seen.insert(token.clone()) {
+            entities.push(token);
+        }
+        if entities.len() >= 24 {
+            break;
+        }
+    }
+    entities
+}
+
+const STOPWORDS: &[&str] = &[
+    "the", "and", "with", "from", "that", "this", "were", "have", "has", "for", "into", "your",
+    "user", "session", "memory", "context", "about", "will", "shall", "must", "should",
+];
 
 fn score_memory_candidate(
     candidate: &FusedMemoryCandidate,
