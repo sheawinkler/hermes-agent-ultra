@@ -82,6 +82,7 @@ use hermes_telemetry::init_telemetry_from_env;
 use hermes_tools::ToolRegistry;
 use rand::rngs::OsRng;
 use rand::RngCore;
+use std::collections::HashSet;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
@@ -1910,31 +1911,6 @@ fn parse_csv_list(raw: &str) -> Vec<String> {
         .collect()
 }
 
-fn normalize_gateway_platform_key(raw: &str) -> Option<&'static str> {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "telegram" | "tg" => Some("telegram"),
-        "weixin" | "wechat" | "wx" => Some("weixin"),
-        "qq" | "qqbot" => Some("qqbot"),
-        "discord" => Some("discord"),
-        "slack" => Some("slack"),
-        "matrix" => Some("matrix"),
-        "mattermost" | "mm" => Some("mattermost"),
-        "signal" => Some("signal"),
-        "whatsapp" | "wa" => Some("whatsapp"),
-        "dingtalk" => Some("dingtalk"),
-        "feishu" | "lark" => Some("feishu"),
-        "wecom" => Some("wecom"),
-        "wecom_callback" | "wecom-callback" => Some("wecom_callback"),
-        "bluebubbles" | "imessage" => Some("bluebubbles"),
-        "email" => Some("email"),
-        "sms" => Some("sms"),
-        "homeassistant" | "ha" => Some("homeassistant"),
-        "webhook" => Some("webhook"),
-        "api_server" | "api-server" | "api" => Some("api_server"),
-        _ => None,
-    }
-}
-
 fn enabled_flag(platform: Option<&PlatformConfig>) -> &'static str {
     if platform.map(|p| p.enabled).unwrap_or(false) {
         "enabled"
@@ -2175,9 +2151,7 @@ async fn run_gateway_setup(cli: &Cli) -> Result<(), AgentError> {
     let cfg_path = hermes_state_root(cli).join("config.yaml");
     let mut disk =
         load_user_config_file(&cfg_path).map_err(|e| AgentError::Config(e.to_string()))?;
-    println!("This wizard configures messaging platforms in config.yaml.");
-    println!("Current platform status:");
-    for (k, label) in [
+    let platform_catalog: &[(&str, &str)] = &[
         ("weixin", "Weixin"),
         ("qqbot", "QQBot"),
         ("telegram", "Telegram"),
@@ -2197,23 +2171,51 @@ async fn run_gateway_setup(cli: &Cli) -> Result<(), AgentError> {
         ("homeassistant", "HomeAssistant"),
         ("webhook", "Webhook"),
         ("api_server", "API Server"),
-    ] {
-        println!("  - {:<13} {}", label, enabled_flag(disk.platforms.get(k)));
+    ];
+    println!("This wizard configures messaging platforms in config.yaml.");
+    println!("Current platform status:");
+    for (k, label) in platform_catalog {
+        println!("  - {:<13} {}", label, enabled_flag(disk.platforms.get(*k)));
     }
     println!();
-    println!("Examples: weixin,telegram   or   discord,slack,matrix");
-    let raw = prompt_line(
-        "Platforms to configure (comma-separated, empty defaults to weixin,telegram): ",
-    )
-    .await?;
-    let mut selected: Vec<String> = if raw.trim().is_empty() {
-        vec!["weixin".to_string(), "telegram".to_string()]
-    } else {
-        parse_csv_list(&raw)
-            .into_iter()
-            .filter_map(|k| normalize_gateway_platform_key(&k).map(|v| v.to_string()))
-            .collect()
-    };
+    println!("Use SPACE to toggle platforms and ENTER to confirm.");
+    let mut pre_selected: HashSet<usize> = HashSet::new();
+    for (idx, (key, _)) in platform_catalog.iter().enumerate() {
+        if disk
+            .platforms
+            .get(*key)
+            .map(|cfg| cfg.enabled)
+            .unwrap_or(false)
+        {
+            pre_selected.insert(idx);
+        }
+    }
+    let selection_items: Vec<String> = platform_catalog
+        .iter()
+        .map(|(key, label)| format!("{:<13} {}", label, enabled_flag(disk.platforms.get(*key))))
+        .collect();
+    let selected_result = hermes_cli::curses_checklist(
+        "Select platforms to configure",
+        &selection_items,
+        &pre_selected,
+        Some(&|selected| {
+            if selected.is_empty() {
+                "none selected".to_string()
+            } else {
+                format!("{} selected", selected.len())
+            }
+        }),
+    );
+    if !selected_result.confirmed {
+        println!("Gateway setup cancelled.");
+        return Ok(());
+    }
+    let mut selected: Vec<String> = selected_result
+        .selected
+        .iter()
+        .copied()
+        .filter_map(|idx| platform_catalog.get(idx).map(|(key, _)| key.to_string()))
+        .collect();
     selected.sort();
     selected.dedup();
     if selected.is_empty() {
