@@ -756,7 +756,7 @@ pub fn render(frame: &mut Frame, app: &App, state: &TuiState, theme: &Theme) {
 
     // Layout: header, messages, completions (optional), input, status bar
     let header_height = 1;
-    let input_height = 3;
+    let input_height = 4;
     let completion_height = if state.completions.is_empty() {
         0
     } else {
@@ -834,72 +834,316 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect, colors: &crate::theme
 }
 
 /// Render the message history area.
+fn role_visuals(
+    role: hermes_core::MessageRole,
+    styles: &crate::theme::ResolvedStyles,
+    colors: &crate::theme::RatatuiColors,
+) -> (&'static str, &'static str, Style, Style) {
+    match role {
+        hermes_core::MessageRole::User => (
+            "◆",
+            "USER",
+            styles.user_input,
+            styles.user_input.remove_modifier(Modifier::BOLD),
+        ),
+        hermes_core::MessageRole::Assistant => (
+            "●",
+            "HERMES",
+            styles.assistant_response,
+            styles.assistant_response,
+        ),
+        hermes_core::MessageRole::System => {
+            ("◇", "SYSTEM", styles.system_message, styles.system_message)
+        }
+        hermes_core::MessageRole::Tool => (
+            "◈",
+            "TOOL",
+            styles.tool_call,
+            Style::default().fg(colors.status_bar_text),
+        ),
+    }
+}
+
+fn render_inline_with_code(
+    prefix: &str,
+    text: &str,
+    base_style: Style,
+    code_style: Style,
+) -> Line<'static> {
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    if !prefix.is_empty() {
+        spans.push(Span::styled(prefix.to_string(), base_style));
+    }
+
+    let mut in_code = false;
+    let mut current = String::new();
+    for ch in text.chars() {
+        if ch == '`' {
+            if !current.is_empty() {
+                spans.push(Span::styled(
+                    std::mem::take(&mut current),
+                    if in_code { code_style } else { base_style },
+                ));
+            }
+            in_code = !in_code;
+            continue;
+        }
+        current.push(ch);
+    }
+    if !current.is_empty() {
+        spans.push(Span::styled(
+            current,
+            if in_code { code_style } else { base_style },
+        ));
+    }
+    if spans.is_empty() {
+        spans.push(Span::styled(String::new(), base_style));
+    }
+    Line::from(spans)
+}
+
+fn parse_markdown_numbered_marker(line: &str) -> Option<(&str, &str)> {
+    let digits = line
+        .char_indices()
+        .take_while(|(_, ch)| ch.is_ascii_digit())
+        .last()
+        .map(|(idx, ch)| idx + ch.len_utf8())
+        .unwrap_or(0);
+    if digits == 0 {
+        return None;
+    }
+    let rest = &line[digits..];
+    if let Some(tail) = rest.strip_prefix(". ") {
+        return Some((&line[..digits + 1], tail));
+    }
+    if let Some(tail) = rest.strip_prefix(") ") {
+        return Some((&line[..digits + 1], tail));
+    }
+    None
+}
+
+fn render_assistant_markdown_lines(
+    content: &str,
+    styles: &crate::theme::ResolvedStyles,
+    colors: &crate::theme::RatatuiColors,
+) -> Vec<Line<'static>> {
+    let mut rendered: Vec<Line<'static>> = Vec::new();
+    let mut in_code_block = false;
+    let mut code_lang = String::new();
+    let code_frame_style = Style::default().fg(colors.status_bar_dim);
+    let code_text_style = Style::default().fg(colors.status_bar_text);
+    let heading_style = Style::default()
+        .fg(colors.status_bar_strong)
+        .add_modifier(Modifier::BOLD);
+    let bullet_style = Style::default()
+        .fg(colors.accent)
+        .add_modifier(Modifier::BOLD);
+    let quote_style = Style::default()
+        .fg(colors.status_bar_dim)
+        .add_modifier(Modifier::ITALIC);
+    let inline_code_style = Style::default()
+        .fg(colors.accent)
+        .add_modifier(Modifier::BOLD);
+
+    for raw in content.lines() {
+        let trimmed = raw.trim_start();
+        let is_fence = trimmed.starts_with("```") || trimmed.starts_with("~~~");
+        if is_fence {
+            if in_code_block {
+                rendered.push(Line::from(vec![Span::styled(
+                    "    └─ end code",
+                    code_frame_style,
+                )]));
+                in_code_block = false;
+                code_lang.clear();
+            } else {
+                in_code_block = true;
+                code_lang = trimmed
+                    .trim_start_matches('`')
+                    .trim_start_matches('~')
+                    .trim()
+                    .to_string();
+                let label = if code_lang.is_empty() {
+                    "    ┌─ code".to_string()
+                } else {
+                    format!("    ┌─ code ({})", code_lang)
+                };
+                rendered.push(Line::from(vec![Span::styled(label, code_frame_style)]));
+            }
+            continue;
+        }
+
+        if in_code_block {
+            rendered.push(Line::from(vec![
+                Span::styled("    │ ", code_frame_style),
+                Span::styled(raw.to_string(), code_text_style),
+            ]));
+            continue;
+        }
+
+        if trimmed.is_empty() {
+            rendered.push(Line::from(String::new()));
+            continue;
+        }
+
+        let heading_level = trimmed.chars().take_while(|ch| *ch == '#').count();
+        if (1..=6).contains(&heading_level) {
+            let rest = trimmed[heading_level..].trim_start();
+            if !rest.is_empty() {
+                rendered.push(Line::from(vec![
+                    Span::styled(
+                        format!("    {} ", "#".repeat(heading_level)),
+                        Style::default().fg(colors.status_bar_dim),
+                    ),
+                    Span::styled(rest.to_string(), heading_style),
+                ]));
+                continue;
+            }
+        }
+
+        if let Some(quote) = trimmed.strip_prefix('>').map(str::trim_start) {
+            rendered.push(render_inline_with_code(
+                "    ▎ ",
+                quote,
+                quote_style,
+                inline_code_style,
+            ));
+            continue;
+        }
+
+        if let Some(body) = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "))
+            .or_else(|| trimmed.strip_prefix("+ "))
+        {
+            rendered.push(Line::from(vec![
+                Span::styled("    • ", bullet_style),
+                Span::styled(body.to_string(), styles.assistant_response),
+            ]));
+            continue;
+        }
+
+        if let Some((marker, body)) = parse_markdown_numbered_marker(trimmed) {
+            rendered.push(Line::from(vec![
+                Span::styled(format!("    {marker} "), bullet_style),
+                Span::styled(body.to_string(), styles.assistant_response),
+            ]));
+            continue;
+        }
+
+        rendered.push(render_inline_with_code(
+            "    ",
+            trimmed,
+            styles.assistant_response,
+            inline_code_style,
+        ));
+    }
+
+    if in_code_block {
+        rendered.push(Line::from(vec![Span::styled(
+            "    └─ end code",
+            code_frame_style,
+        )]));
+    }
+    rendered
+}
+
 fn render_messages(
     frame: &mut Frame,
     app: &App,
     state: &TuiState,
     area: Rect,
     styles: &crate::theme::ResolvedStyles,
-    _colors: &crate::theme::RatatuiColors,
+    colors: &crate::theme::RatatuiColors,
 ) {
-    let mut lines: Vec<Line> = Vec::new();
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    for (idx, msg) in app.messages.iter().enumerate() {
+        if idx > 0 {
+            lines.push(Line::from(String::new()));
+        }
+        let (glyph, label, label_style, body_style) = role_visuals(msg.role, styles, colors);
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!(" {} ", glyph),
+                label_style.add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(label.to_string(), label_style.add_modifier(Modifier::BOLD)),
+        ]));
 
-    for msg in &app.messages {
-        match msg.role {
-            hermes_core::MessageRole::User => {
-                if let Some(ref content) = msg.content {
+        if let Some(content) = msg.content.as_deref() {
+            match msg.role {
+                hermes_core::MessageRole::Assistant => {
+                    lines.extend(render_assistant_markdown_lines(content, styles, colors));
+                }
+                hermes_core::MessageRole::Tool => {
+                    let all_lines: Vec<&str> = content.lines().collect();
+                    for line in all_lines.iter().take(8) {
+                        lines.push(render_inline_with_code(
+                            "    ",
+                            line,
+                            styles.tool_result,
+                            Style::default()
+                                .fg(colors.accent)
+                                .add_modifier(Modifier::BOLD),
+                        ));
+                    }
+                    if all_lines.len() > 8 {
+                        lines.push(Line::from(vec![Span::styled(
+                            format!("    … {} more lines", all_lines.len() - 8),
+                            Style::default().fg(colors.status_bar_dim),
+                        )]));
+                    }
+                }
+                _ => {
                     for line in content.lines() {
-                        lines.push(Line::from(Span::styled(
-                            format!("You: {}", line),
-                            styles.user_input,
-                        )));
+                        lines.push(render_inline_with_code(
+                            "    ",
+                            line,
+                            body_style,
+                            Style::default()
+                                .fg(colors.accent)
+                                .add_modifier(Modifier::BOLD),
+                        ));
                     }
                 }
             }
-            hermes_core::MessageRole::Assistant => {
-                if let Some(ref content) = msg.content {
-                    for line in content.lines() {
-                        lines.push(Line::from(Span::styled(
-                            format!("Assistant: {}", line),
-                            styles.assistant_response,
-                        )));
-                    }
-                }
-                // Show tool calls if present
-                if let Some(ref tool_calls) = msg.tool_calls {
-                    for tc in tool_calls {
-                        let args =
-                            serde_json::from_str::<serde_json::Value>(&tc.function.arguments)
-                                .unwrap_or_else(|_| serde_json::Value::Null);
-                        let preview = build_tool_preview_from_value(&tc.function.name, &args, 40)
-                            .unwrap_or_default();
-                        let emoji = tool_emoji(&tc.function.name);
-                        let label = if preview.is_empty() {
-                            format!("  [Tool: {emoji} {}]", tc.function.name)
-                        } else {
-                            format!("  [Tool: {emoji} {} {preview}]", tc.function.name)
-                        };
-                        lines.push(Line::from(Span::styled(label, styles.tool_call)));
-                    }
+        }
+
+        if msg.role == hermes_core::MessageRole::Assistant {
+            if let Some(reasoning) = msg
+                .reasoning_content
+                .as_ref()
+                .filter(|s| !s.trim().is_empty())
+            {
+                lines.push(Line::from(vec![Span::styled(
+                    "    🤔 reasoning",
+                    Style::default().fg(colors.status_bar_dim),
+                )]));
+                for line in reasoning.lines() {
+                    lines.push(Line::from(vec![Span::styled(
+                        format!("      {}", line.trim_end()),
+                        Style::default()
+                            .fg(colors.status_bar_dim)
+                            .add_modifier(Modifier::ITALIC),
+                    )]));
                 }
             }
-            hermes_core::MessageRole::Tool => {
-                if let Some(ref content) = msg.content {
-                    let preview: String = content.chars().take(200).collect();
-                    lines.push(Line::from(Span::styled(
-                        format!("  Tool result: {}", preview),
-                        styles.tool_result,
-                    )));
-                }
-            }
-            hermes_core::MessageRole::System => {
-                if let Some(ref content) = msg.content {
-                    for line in content.lines() {
-                        lines.push(Line::from(Span::styled(
-                            format!("[System] {}", line),
-                            styles.system_message,
-                        )));
-                    }
+            if let Some(tool_calls) = msg.tool_calls.as_ref() {
+                for tc in tool_calls {
+                    let args = serde_json::from_str::<serde_json::Value>(&tc.function.arguments)
+                        .unwrap_or_else(|_| serde_json::Value::Null);
+                    let preview = build_tool_preview_from_value(&tc.function.name, &args, 44)
+                        .unwrap_or_default();
+                    let emoji = tool_emoji(&tc.function.name);
+                    let summary = if preview.is_empty() {
+                        format!("{emoji} {}", tc.function.name)
+                    } else {
+                        format!("{emoji} {} {}", tc.function.name, preview)
+                    };
+                    lines.push(Line::from(vec![
+                        Span::styled("    ↳ ", Style::default().fg(colors.status_bar_dim)),
+                        Span::styled(summary, styles.tool_call),
+                    ]));
                 }
             }
         }
@@ -907,12 +1151,30 @@ fn render_messages(
 
     // Streaming buffer (partial assistant response)
     if !state.stream_buffer.is_empty() {
-        for line in state.stream_buffer.lines() {
-            lines.push(Line::from(Span::styled(
-                format!("Assistant: {}", line),
-                styles.assistant_response,
-            )));
+        if !lines.is_empty() {
+            lines.push(Line::from(String::new()));
         }
+        lines.push(Line::from(vec![
+            Span::styled(
+                " ● ",
+                styles.assistant_response.add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "HERMES (streaming)",
+                styles.assistant_response.add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        lines.extend(render_assistant_markdown_lines(
+            &state.stream_buffer,
+            styles,
+            colors,
+        ));
+        lines.push(Line::from(vec![Span::styled(
+            "    ▌",
+            Style::default()
+                .fg(colors.accent)
+                .add_modifier(Modifier::BOLD),
+        )]));
     }
 
     let paragraph = Paragraph::new(Text::from(lines))
@@ -930,13 +1192,14 @@ fn render_completions(
     selected: Option<usize>,
     area: Rect,
 ) {
-    let items: Vec<Line> = completions
+    let items: Vec<Line<'static>> = completions
         .iter()
         .enumerate()
         .map(|(i, cmd)| {
             let style = if selected == Some(i) {
                 Style::default()
-                    .fg(Color::Yellow)
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
                     .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::DarkGray)
@@ -945,8 +1208,13 @@ fn render_completions(
         })
         .collect();
 
-    let paragraph =
-        Paragraph::new(Text::from(items)).block(Block::default().borders(Borders::NONE));
+    let paragraph = Paragraph::new(Text::from(items))
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(" Slash Completions "),
+        )
+        .wrap(Wrap { trim: true });
     frame.render_widget(paragraph, area);
 }
 
@@ -973,7 +1241,8 @@ fn render_input(
         if state.history_search_active {
             format!("(reverse-i-search)`{}': ", state.history_search_query)
         } else {
-            "Type a message (Ctrl+Enter send, Ctrl+←/→ word, Ctrl+W delete-word)...".to_string()
+            "Type a message (Ctrl+Enter send, Ctrl+←/→ word, Ctrl+W delete-word, Ctrl+R history)"
+                .to_string()
         }
     } else if state.history_search_active {
         format!(
@@ -993,7 +1262,10 @@ fn render_input(
     };
     let line_indicator_width = line_indicator.chars().count();
 
-    let block = Block::default().borders(Borders::BOTTOM);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Composer ")
+        .border_style(Style::default().fg(colors.status_bar_dim));
     let paragraph = Paragraph::new(Text::from(vec![Line::from(vec![
         Span::styled(mode_indicator, mode_style),
         Span::styled(line_indicator, Style::default().fg(Color::DarkGray)),
