@@ -1199,3 +1199,31 @@
 - Outcome:
   - Queue summary: `total=137`, `ported=13`, `superseded=124`, `pending=0`.
   - Gates: CI `PASS` (tree-drift), release `PASS` (functional).
+
+## 2026-04-24 impl-22 (remaining pending closure + OpenRouter model parity refresh)
+- Scope:
+  - Close the newly surfaced remaining `pending` upstream queue tranche after upstream refresh.
+  - Land concrete Rust parity patch for upstream model-catalog delta (`gpt-5.5` / `gpt-5.5-pro`).
+- Rust implementation (ported in this pass):
+  - `db9d6375fb18` (`feat(models): add openai/gpt-5.5 and gpt-5.5-pro to OpenRouter + Nous Portal`)
+    - Ported for OpenRouter catalog in Rust:
+      - `crates/hermes-cli/src/model_switch.rs`
+      - added curated models:
+        - `openai/gpt-5.5`
+        - `openai/gpt-5.5-pro`
+    - Added regression coverage:
+      - `openrouter_curated_models_include_gpt55_variants`
+- Remaining pending commits dispositioned:
+  - Processed all `pending` commits in the refreshed queue snapshot and set explicit per-SHA notes (`ported` or `superseded`) with architecture rationale.
+  - Included new upstream docs/config churn SHAs:
+    - `0ed37c0ca4bf` (`docs(delegate): ...`) → `superseded`
+    - `0a5999403068` (`fix(cli-config): ...`) → `superseded`
+- Verification:
+  - `cargo test -p hermes-cli model_switch::tests::openrouter_curated_models_include_gpt55_variants -- --nocapture`
+  - `cargo fmt --all -- --check`
+  - `python3 scripts/generate-upstream-patch-queue.py --repo-root . --local-ref origin/main --upstream-remote upstream --upstream-branch main --no-fetch --out-json docs/parity/upstream-missing-queue.json --out-md docs/parity/upstream-missing-queue.md`
+  - `python3 scripts/generate-global-parity-proof.py --repo-root . --out-json docs/parity/global-parity-proof.json --out-md docs/parity/global-parity-proof.md`
+- Outcome:
+  - Queue summary: `total=334`, `ported=27`, `superseded=307`, `pending=0`.
+  - Release gate: `PASS` (`functional` mode).
+  - CI drift gate remains `FAIL` only on `max_files_only_upstream` (`2512 > 2500`), with all functional checks passing.
