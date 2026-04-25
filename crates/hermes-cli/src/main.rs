@@ -7322,7 +7322,11 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
 
     // 6. Prompt for model after provider auth is established.
     let suggested_provider_models = provider_model_ids(&selected_provider).await;
-    let suggested_limit = if selected_provider == "nous" { 50 } else { 25 };
+    let suggested_limit = if selected_provider == "nous" {
+        usize::MAX
+    } else {
+        25
+    };
     let displayed_suggested_models: Vec<String> = suggested_provider_models
         .into_iter()
         .take(suggested_limit)
@@ -7353,11 +7357,16 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
             })
             .collect();
         suggested_labels.push("Custom model ID…".to_string());
-        let suggested_pick = hermes_cli::curses_select(
-            &format!("Select {} model", selected_provider_label),
-            &suggested_labels,
-            0,
-        );
+        let model_title = if selected_provider == "nous" {
+            format!(
+                "Select {} model ({} available)",
+                selected_provider_label,
+                displayed_suggested_models.len()
+            )
+        } else {
+            format!("Select {} model", selected_provider_label)
+        };
+        let suggested_pick = hermes_cli::curses_select(&model_title, &suggested_labels, 0);
         if suggested_pick.confirmed && suggested_pick.index < displayed_suggested_models.len() {
             let candidate = &displayed_suggested_models[suggested_pick.index];
             model = if candidate.contains(':') {
