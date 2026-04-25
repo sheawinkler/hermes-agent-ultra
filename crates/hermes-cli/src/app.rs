@@ -759,6 +759,11 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         memory_nudge_interval: config.agent.memory_nudge_interval,
         skill_creation_nudge_interval: config.agent.skill_creation_nudge_interval,
         background_review_enabled: config.agent.background_review_enabled,
+        code_index_enabled: config.agent.code_index_enabled,
+        code_index_max_files: config.agent.code_index_max_files,
+        code_index_max_symbols: config.agent.code_index_max_symbols,
+        lsp_context_enabled: config.agent.lsp_context_enabled,
+        lsp_context_max_chars: config.agent.lsp_context_max_chars,
         ..AgentConfig::default()
     }
 }
