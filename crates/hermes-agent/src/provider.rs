@@ -277,6 +277,24 @@ impl GenericProvider {
         Value::Array(out)
     }
 
+    fn format_tools_for_openai_api(tools: &[ToolSchema]) -> Value {
+        Value::Array(
+            tools
+                .iter()
+                .map(|tool| {
+                    serde_json::json!({
+                        "type": "function",
+                        "function": {
+                            "name": tool.name,
+                            "description": tool.description,
+                            "parameters": tool.parameters,
+                        }
+                    })
+                })
+                .collect(),
+        )
+    }
+
     fn build_request(
         &self,
         client: &Client,
@@ -354,7 +372,7 @@ impl LlmProvider for GenericProvider {
             body["temperature"] = serde_json::json!(temp);
         }
         if !tools.is_empty() {
-            body["tools"] = serde_json::json!(tools);
+            body["tools"] = Self::format_tools_for_openai_api(tools);
         }
         if let Some(eb) = extra_body {
             if let Value::Object(map) = eb {
@@ -429,7 +447,7 @@ impl LlmProvider for GenericProvider {
                 body["temperature"] = serde_json::json!(temp);
             }
             if !tools.is_empty() {
-                body["tools"] = serde_json::json!(tools);
+                body["tools"] = GenericProvider::format_tools_for_openai_api(&tools);
             }
             if let Some(ref eb) = extra_body {
                 if let Value::Object(map) = eb {
@@ -1471,7 +1489,7 @@ impl LlmProvider for OpenRouterProvider {
             body["temperature"] = serde_json::json!(temp);
         }
         if !tools.is_empty() {
-            body["tools"] = serde_json::json!(tools);
+            body["tools"] = GenericProvider::format_tools_for_openai_api(tools);
         }
         if let Some(ref eb) = merged_extra {
             if let Value::Object(map) = eb {
@@ -1724,6 +1742,22 @@ fn parse_openai_response(json: &Value) -> Result<LlmResponse, AgentError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_format_tools_for_openai_api_shape() {
+        let tools = vec![ToolSchema::new(
+            "read_file",
+            "Read file content",
+            hermes_core::JsonSchema::new("object"),
+        )];
+        let formatted = GenericProvider::format_tools_for_openai_api(&tools);
+        let rows = formatted.as_array().expect("tools array");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["type"], "function");
+        assert_eq!(rows[0]["function"]["name"], "read_file");
+        assert_eq!(rows[0]["function"]["description"], "Read file content");
+        assert_eq!(rows[0]["function"]["parameters"]["type"], "object");
+    }
 
     #[test]
     fn test_parse_openai_response_basic() {

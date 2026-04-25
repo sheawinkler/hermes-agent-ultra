@@ -813,6 +813,14 @@ fn classify_error(err: &str) -> ErrorClass {
     }
 }
 
+fn is_tool_payload_validation_error(err: &str) -> bool {
+    let lower = err.to_ascii_lowercase();
+    (lower.contains("invalid input") && lower.contains("function"))
+        || lower.contains("provider returned error")
+            && (lower.contains("request is not valid") || lower.contains("check the model name"))
+        || lower.contains("tools") && lower.contains("invalid")
+}
+
 fn is_transient_stream_error(err: &AgentError) -> bool {
     fn has_transient_phrase(msg: &str) -> bool {
         let lower = msg.to_lowercase();
@@ -2311,7 +2319,9 @@ impl AgentLoop {
         if let Some(ref personality) = self.config.personality {
             let requested = personality.trim();
             if !requested.is_empty() {
-                if let Some(profile) =
+                if requested.eq_ignore_ascii_case("default") {
+                    // "default" means keep SOUL/default identity only.
+                } else if let Some(profile) =
                     resolve_personality(requested, self.config.hermes_home.as_deref())
                 {
                     builder = builder
@@ -2662,6 +2672,83 @@ impl AgentLoop {
                             return Err(AgentError::LlmApi(err_str));
                         }
                         ErrorClass::Fatal => {
+                            if !tool_schemas.is_empty()
+                                && is_tool_payload_validation_error(&err_str)
+                            {
+                                tracing::warn!(
+                                    "LLM rejected tool payload; retrying once without tools"
+                                );
+                                let no_tools_result = if let Some(rt) = route {
+                                    let (provider_name, model_name) =
+                                        self.extract_provider_and_model(model);
+                                    let mode =
+                                        rt.api_mode.as_ref().unwrap_or(&self.config.api_mode);
+                                    let extra_body_for_call = self.extra_body_for_api_mode(mode);
+                                    let pool = self.credential_pool_for_route(rt);
+                                    match self.build_runtime_provider(
+                                        rt.provider.as_deref().unwrap_or(provider_name.as_str()),
+                                        model_name,
+                                        rt.base_url.as_deref(),
+                                        rt.api_key_env.as_deref(),
+                                        None,
+                                        Some(mode),
+                                        pool,
+                                    ) {
+                                        Ok(provider) => {
+                                            provider
+                                                .chat_completion(
+                                                    &api_messages,
+                                                    &[],
+                                                    effective_max_tokens,
+                                                    self.config.temperature,
+                                                    Some(model_name),
+                                                    extra_body_for_call.as_ref(),
+                                                )
+                                                .await
+                                        }
+                                        Err(_) => {
+                                            self.llm_provider
+                                                .chat_completion(
+                                                    &api_messages,
+                                                    &[],
+                                                    effective_max_tokens,
+                                                    self.config.temperature,
+                                                    Some(
+                                                        self.extract_provider_and_model(
+                                                            self.config.model.as_str(),
+                                                        )
+                                                        .1,
+                                                    ),
+                                                    default_extra_body.as_ref(),
+                                                )
+                                                .await
+                                        }
+                                    }
+                                } else {
+                                    self.llm_provider
+                                        .chat_completion(
+                                            &api_messages,
+                                            &[],
+                                            effective_max_tokens,
+                                            self.config.temperature,
+                                            Some(model_name),
+                                            default_extra_body.as_ref(),
+                                        )
+                                        .await
+                                };
+                                match no_tools_result {
+                                    Ok(resp) => {
+                                        self.emit_status(
+                                            "lifecycle",
+                                            "Provider rejected tool schema; continued without tools for this turn",
+                                        );
+                                        return Ok(resp);
+                                    }
+                                    Err(no_tools_err) => {
+                                        return Err(AgentError::LlmApi(no_tools_err.to_string()));
+                                    }
+                                }
+                            }
                             return Err(AgentError::LlmApi(err_str));
                         }
                         ErrorClass::ContextOverflow => {
@@ -5556,6 +5643,17 @@ mod tests {
     }
 
     #[test]
+    fn tool_payload_validation_error_detector_matches_known_provider_signatures() {
+        let strict_shape = "API error 400 Bad Request: Invalid input: expected \"function\"";
+        assert!(is_tool_payload_validation_error(strict_shape));
+        let provider_generic = "API error 400 Bad Request: This request is not valid. Check the model name and other parameters. Additional info: Provider returned error";
+        assert!(is_tool_payload_validation_error(provider_generic));
+        assert!(!is_tool_payload_validation_error(
+            "API error 400 Bad Request: max_tokens must be positive"
+        ));
+    }
+
+    #[test]
     fn maybe_nous_401_diagnostic_returns_hint_for_nous_auth_failures() {
         let diag = maybe_nous_401_diagnostic(
             "nous",
@@ -6395,6 +6493,57 @@ mod tests {
         );
         let prompt = agent.build_system_prompt("", &[], "gpt-4o");
         assert!(!prompt.contains("## Active Personality (unknown_persona)"));
+        assert!(prompt.contains("You are Hermes Agent"));
+    }
+
+    #[test]
+    fn test_default_personality_name_does_not_add_overlay_block() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let config = AgentConfig {
+            personality: Some("default".to_string()),
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let prompt = agent.build_system_prompt("", &[], "gpt-4o");
+        assert!(!prompt.contains("## Active Personality (default)"));
         assert!(prompt.contains("You are Hermes Agent"));
     }
 
