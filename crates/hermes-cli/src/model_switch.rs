@@ -27,6 +27,8 @@ const CURATED_PROVIDER_MODELS: &[(&str, &[&str])] = &[
     (
         "openrouter",
         &[
+            "openai/gpt-5.5",
+            "openai/gpt-5.5-pro",
             "moonshotai/kimi-k2.6",
             "anthropic/claude-opus-4.7",
             "openai/gpt-5.4",
@@ -328,6 +330,13 @@ mod tests {
         let models = provider_curated_models("deepseek");
         assert!(models.contains(&"deepseek-v4-pro"));
         assert!(models.contains(&"deepseek-v4-flash"));
+    }
+
+    #[test]
+    fn openrouter_curated_models_include_gpt55_variants() {
+        let models = provider_curated_models("openrouter");
+        assert!(models.contains(&"openai/gpt-5.5"));
+        assert!(models.contains(&"openai/gpt-5.5-pro"));
     }
 
     #[tokio::test]
