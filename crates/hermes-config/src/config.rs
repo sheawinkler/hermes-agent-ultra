@@ -210,6 +210,21 @@ pub struct AgentLoopBehaviorConfig {
     /// When true (default), spawn the extra LLM pass for memory/skill review — Python has no master off-switch.
     #[serde(default = "default_agent_background_review_enabled")]
     pub background_review_enabled: bool,
+    /// Enable always-on workspace code indexing + repo-map context injection.
+    #[serde(default = "default_agent_code_index_enabled")]
+    pub code_index_enabled: bool,
+    /// Maximum files included in repo-map prompt block.
+    #[serde(default = "default_agent_code_index_max_files")]
+    pub code_index_max_files: usize,
+    /// Maximum symbols included in repo-map prompt block.
+    #[serde(default = "default_agent_code_index_max_symbols")]
+    pub code_index_max_symbols: usize,
+    /// Enable LSP-style context injection after file operations.
+    #[serde(default = "default_agent_lsp_context_enabled")]
+    pub lsp_context_enabled: bool,
+    /// Character budget for injected LSP context block.
+    #[serde(default = "default_agent_lsp_context_max_chars")]
+    pub lsp_context_max_chars: usize,
 }
 
 fn default_agent_memory_nudge_interval() -> u32 {
@@ -228,6 +243,26 @@ fn default_agent_background_review_enabled() -> bool {
     true
 }
 
+fn default_agent_code_index_enabled() -> bool {
+    true
+}
+
+fn default_agent_code_index_max_files() -> usize {
+    32
+}
+
+fn default_agent_code_index_max_symbols() -> usize {
+    160
+}
+
+fn default_agent_lsp_context_enabled() -> bool {
+    true
+}
+
+fn default_agent_lsp_context_max_chars() -> usize {
+    2_800
+}
+
 impl Default for AgentLoopBehaviorConfig {
     fn default() -> Self {
         Self {
@@ -235,6 +270,11 @@ impl Default for AgentLoopBehaviorConfig {
             skill_creation_nudge_interval: default_agent_skill_nudge_interval(),
             skip_context_files: default_agent_skip_context_files(),
             background_review_enabled: default_agent_background_review_enabled(),
+            code_index_enabled: default_agent_code_index_enabled(),
+            code_index_max_files: default_agent_code_index_max_files(),
+            code_index_max_symbols: default_agent_code_index_max_symbols(),
+            lsp_context_enabled: default_agent_lsp_context_enabled(),
+            lsp_context_max_chars: default_agent_lsp_context_max_chars(),
         }
     }
 }

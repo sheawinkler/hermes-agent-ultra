@@ -29,6 +29,7 @@ use hermes_core::{
 
 use crate::api_bridge::CodexProvider;
 use crate::budget;
+use crate::code_index::CodeIndex;
 use crate::context::{
     load_builtin_memory_snapshot, load_soul_md, resolve_personality, ContextManager,
     SystemPromptBuilder,
@@ -37,6 +38,7 @@ use crate::context_files::{load_hermes_context_files, load_workspace_context};
 use crate::context_references::preprocess_context_references_async;
 use crate::credential_pool::CredentialPool;
 use crate::interrupt::InterruptController;
+use crate::lsp_context::{build_lsp_context_note, LspContextConfig};
 use crate::memory_manager::MemoryManager;
 use crate::plugins::{HookResult, HookType, PluginManager};
 use crate::provider::{AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider};
@@ -457,6 +459,26 @@ pub struct AgentConfig {
     /// Max retries when streaming assembles truncated tool arguments (`finish_reason=length` parity).
     #[serde(default = "default_truncated_tool_call_max_retries")]
     pub truncated_tool_call_max_retries: u32,
+
+    /// Enable always-on workspace code indexing + repo-map prompt injection.
+    #[serde(default = "default_code_index_enabled")]
+    pub code_index_enabled: bool,
+
+    /// Maximum files included in repo-map prompt rendering.
+    #[serde(default = "default_code_index_max_files")]
+    pub code_index_max_files: usize,
+
+    /// Maximum symbols included in repo-map prompt rendering.
+    #[serde(default = "default_code_index_max_symbols")]
+    pub code_index_max_symbols: usize,
+
+    /// Enable LSP-style context injection after file tool calls.
+    #[serde(default = "default_lsp_context_enabled")]
+    pub lsp_context_enabled: bool,
+
+    /// Maximum character budget for injected LSP context block.
+    #[serde(default = "default_lsp_context_max_chars")]
+    pub lsp_context_max_chars: usize,
 }
 
 fn default_max_turns() -> u32 {
@@ -543,6 +565,26 @@ fn default_truncated_tool_call_max_retries() -> u32 {
     3
 }
 
+fn default_code_index_enabled() -> bool {
+    true
+}
+
+fn default_code_index_max_files() -> usize {
+    32
+}
+
+fn default_code_index_max_symbols() -> usize {
+    160
+}
+
+fn default_lsp_context_enabled() -> bool {
+    true
+}
+
+fn default_lsp_context_max_chars() -> usize {
+    2_800
+}
+
 impl Default for AgentConfig {
     fn default() -> Self {
         Self {
@@ -595,6 +637,11 @@ impl Default for AgentConfig {
             invalid_tool_call_max_retries: default_invalid_tool_call_max_retries(),
             invalid_tool_json_max_retries: default_invalid_tool_json_max_retries(),
             truncated_tool_call_max_retries: default_truncated_tool_call_max_retries(),
+            code_index_enabled: default_code_index_enabled(),
+            code_index_max_files: default_code_index_max_files(),
+            code_index_max_symbols: default_code_index_max_symbols(),
+            lsp_context_enabled: default_lsp_context_enabled(),
+            lsp_context_max_chars: default_lsp_context_max_chars(),
         }
     }
 }
@@ -1033,6 +1080,10 @@ pub struct AgentLoop {
     /// tool calls are executed by the orchestrator (spawn/timeout/cancel/
     /// lineage) instead of simply returning a signal envelope.
     sub_agent_orchestrator: Option<Arc<crate::sub_agent_orchestrator::SubAgentOrchestrator>>,
+    /// Always-on workspace code index + repo-map source.
+    code_index: Option<Arc<Mutex<CodeIndex>>>,
+    /// LSP-style context injection controls.
+    lsp_context: LspContextConfig,
 }
 
 #[derive(Debug, Clone)]
@@ -1123,6 +1174,8 @@ impl AgentLoop {
         tool_registry: Arc<ToolRegistry>,
         llm_provider: Arc<dyn LlmProvider>,
     ) -> Self {
+        let code_index = Self::init_code_index(&config);
+        let lsp_context = Self::build_lsp_context_config(&config);
         Self {
             config,
             tool_registry,
@@ -1136,6 +1189,8 @@ impl AgentLoop {
             evolution_counters: Arc::new(Mutex::new(EvolutionCounters::default())),
             oauth_refresh_backoff: Arc::new(Mutex::new(HashMap::new())),
             sub_agent_orchestrator: None,
+            code_index,
+            lsp_context,
         }
     }
 
@@ -1146,6 +1201,8 @@ impl AgentLoop {
         llm_provider: Arc<dyn LlmProvider>,
         interrupt: InterruptController,
     ) -> Self {
+        let code_index = Self::init_code_index(&config);
+        let lsp_context = Self::build_lsp_context_config(&config);
         Self {
             config,
             tool_registry,
@@ -1159,7 +1216,33 @@ impl AgentLoop {
             evolution_counters: Arc::new(Mutex::new(EvolutionCounters::default())),
             oauth_refresh_backoff: Arc::new(Mutex::new(HashMap::new())),
             sub_agent_orchestrator: None,
+            code_index,
+            lsp_context,
         }
+    }
+
+    fn init_code_index(config: &AgentConfig) -> Option<Arc<Mutex<CodeIndex>>> {
+        if !config.code_index_enabled {
+            return None;
+        }
+        let workspace_root = std::env::var("TERMINAL_CWD")
+            .ok()
+            .map(PathBuf::from)
+            .or_else(|| std::env::current_dir().ok())
+            .unwrap_or_else(|| PathBuf::from("."));
+        if !workspace_root.exists() {
+            return None;
+        }
+        let mut index = CodeIndex::default_for_workspace(workspace_root);
+        let _ = index.ensure_fresh();
+        Some(Arc::new(Mutex::new(index)))
+    }
+
+    fn build_lsp_context_config(config: &AgentConfig) -> LspContextConfig {
+        let mut cfg = LspContextConfig::from_env();
+        cfg.enabled = cfg.enabled && config.lsp_context_enabled;
+        cfg.max_chars = config.lsp_context_max_chars.max(400);
+        cfg
     }
 
     /// Attach an in-process sub-agent orchestrator. When set, `delegate_task`
@@ -1421,6 +1504,37 @@ impl AgentLoop {
             .filter_map(|m| serde_json::to_value(m).ok())
             .collect();
         mm.on_session_end(&as_values);
+    }
+
+    fn code_index_repo_map_block(&self) -> Option<String> {
+        let Some(ref idx) = self.code_index else {
+            return None;
+        };
+        let Ok(mut idx) = idx.lock() else {
+            return None;
+        };
+        let rendered = idx.render_repo_map(
+            Some(self.config.code_index_max_files),
+            Some(self.config.code_index_max_symbols),
+        );
+        if rendered.trim().is_empty() {
+            None
+        } else {
+            Some(rendered)
+        }
+    }
+
+    fn lsp_context_note(&self, tool_calls: &[ToolCall], results: &[ToolResult]) -> Option<String> {
+        if !self.lsp_context.enabled {
+            return None;
+        }
+        let Some(ref idx) = self.code_index else {
+            return None;
+        };
+        let Ok(mut idx) = idx.lock() else {
+            return None;
+        };
+        build_lsp_context_note(tool_calls, results, &mut idx, &self.lsp_context)
     }
 
     fn should_inject_tool_enforcement(&self, model: &str) -> bool {
@@ -2239,6 +2353,9 @@ impl AgentLoop {
 
         if let Some(context_prompt) = self.context_files_prompt() {
             builder = builder.with_context_files(&context_prompt);
+        }
+        if let Some(repo_map) = self.code_index_repo_map_block() {
+            builder = builder.with_block(&repo_map);
         }
 
         let provider = self.effective_provider_for_prompt(model_for_prompt);
@@ -3569,6 +3686,7 @@ impl AgentLoop {
                 }
                 inject_budget_pressure_into_last_tool_result(&mut results, w.as_deref());
             }
+            let lsp_note = self.lsp_context_note(&tool_calls, &results);
 
             for result in results {
                 replay.record(
@@ -3581,6 +3699,9 @@ impl AgentLoop {
                     }),
                 );
                 ctx.add_message(Message::tool_result(&result.tool_call_id, &result.content));
+            }
+            if let Some(note) = lsp_note {
+                ctx.add_message(Message::system(note));
             }
             if !tool_calls.is_empty()
                 && tool_calls
@@ -4446,6 +4567,7 @@ impl AgentLoop {
                 }
                 inject_budget_pressure_into_last_tool_result(&mut results, w.as_deref());
             }
+            let lsp_note = self.lsp_context_note(&tool_calls, &results);
 
             for result in results {
                 replay.record(
@@ -4458,6 +4580,9 @@ impl AgentLoop {
                     }),
                 );
                 ctx.add_message(Message::tool_result(&result.tool_call_id, &result.content));
+            }
+            if let Some(note) = lsp_note {
+                ctx.add_message(Message::system(note));
             }
             if !tool_calls.is_empty()
                 && tool_calls
