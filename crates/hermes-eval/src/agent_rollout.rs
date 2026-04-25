@@ -31,11 +31,20 @@ use crate::runner::TaskRollout;
 #[derive(Clone)]
 pub struct AgentLoopRollout {
     agent: Arc<AgentLoop>,
+    full_state: bool,
 }
 
 impl AgentLoopRollout {
     pub fn new(agent: Arc<AgentLoop>) -> Self {
-        Self { agent }
+        Self {
+            agent,
+            full_state: false,
+        }
+    }
+
+    pub fn with_full_state(mut self, full_state: bool) -> Self {
+        self.full_state = full_state;
+        self
     }
 
     /// Build the JSON blob passed to the benchmark [`Verifier`](crate::verifier::Verifier).
@@ -79,6 +88,6 @@ impl TaskRollout for AgentLoopRollout {
             .run(messages, None)
             .await
             .map_err(|e| EvalError::TaskExecution(e.to_string()))?;
-        Self::summarize_result(&result, &task.task_id, false)
+        Self::summarize_result(&result, &task.task_id, self.full_state)
     }
 }
