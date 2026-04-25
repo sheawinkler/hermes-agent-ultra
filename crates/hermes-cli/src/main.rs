@@ -147,7 +147,7 @@ async fn main() {
             )
             .await
         }
-        CliCommand::Setup => run_setup().await,
+        CliCommand::Setup => run_setup(cli).await,
         CliCommand::Doctor {
             deep,
             snapshot,
@@ -525,6 +525,180 @@ async fn run_tools(
                 "Unknown tools action: {}. Use 'list', 'enable', or 'disable'.",
                 other
             );
+        }
+    }
+    Ok(())
+}
+
+async fn run_tools_setup_wizard(cli: &Cli) -> Result<(), AgentError> {
+    let runtime_config =
+        load_config(cli.config_dir.as_deref()).map_err(|e| AgentError::Config(e.to_string()))?;
+    let registry = Arc::new(hermes_tools::ToolRegistry::new());
+    let terminal_backend = build_terminal_backend(&runtime_config);
+    let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
+    let skill_provider: Arc<dyn hermes_core::SkillProvider> =
+        Arc::new(SkillManager::new(skill_store));
+    hermes_tools::register_builtin_tools(&registry, terminal_backend, skill_provider);
+    let mut tools = registry.list_tools();
+    if tools.is_empty() {
+        println!("No tools registered (tools are loaded at runtime).");
+        return Ok(());
+    }
+    tools.sort_by(|a, b| a.name.cmp(&b.name));
+
+    let cfg_path = hermes_state_root(cli).join("config.yaml");
+    let mut disk =
+        load_user_config_file(&cfg_path).map_err(|e| AgentError::Config(e.to_string()))?;
+    let explicit_enabled = !disk.tools_config.enabled.is_empty();
+
+    let mut pre_selected: HashSet<usize> = HashSet::new();
+    let mut rows: Vec<String> = Vec::with_capacity(tools.len());
+    for (idx, tool) in tools.iter().enumerate() {
+        let currently_enabled = if explicit_enabled {
+            disk.tools_config
+                .enabled
+                .iter()
+                .any(|name| name == &tool.name)
+        } else {
+            !disk
+                .tools_config
+                .disabled
+                .iter()
+                .any(|name| name == &tool.name)
+        };
+        if currently_enabled {
+            pre_selected.insert(idx);
+        }
+        rows.push(format!(
+            "{:<24} {:<8} {}",
+            tool.name,
+            if currently_enabled {
+                "enabled"
+            } else {
+                "disabled"
+            },
+            tool.description
+        ));
+    }
+
+    let result = hermes_cli::curses_checklist(
+        "Select enabled tools",
+        &rows,
+        &pre_selected,
+        Some(&|selected| format!("{} selected", selected.len())),
+    );
+    if !result.confirmed {
+        println!("Tools setup cancelled.");
+        return Ok(());
+    }
+
+    let mut enabled_known: Vec<String> = result
+        .selected
+        .iter()
+        .copied()
+        .filter_map(|idx| tools.get(idx).map(|t| t.name.clone()))
+        .collect();
+    enabled_known.sort();
+    enabled_known.dedup();
+    let enabled_known_set: HashSet<String> = enabled_known.iter().cloned().collect();
+
+    let mut known_tool_names: Vec<String> = tools.iter().map(|t| t.name.clone()).collect();
+    known_tool_names.sort();
+    known_tool_names.dedup();
+    let known_tool_set: HashSet<String> = known_tool_names.iter().cloned().collect();
+
+    let mut disabled_known: Vec<String> = known_tool_names
+        .into_iter()
+        .filter(|name| !enabled_known_set.contains(name))
+        .collect();
+    disabled_known.sort();
+    disabled_known.dedup();
+
+    // Preserve unknown/custom tool keys while replacing known-tool state.
+    disk.tools_config
+        .enabled
+        .retain(|name| !known_tool_set.contains(name));
+    disk.tools_config
+        .disabled
+        .retain(|name| !known_tool_set.contains(name));
+    disk.tools_config.enabled.extend(enabled_known.clone());
+    disk.tools_config.disabled.extend(disabled_known.clone());
+    disk.tools_config.enabled.sort();
+    disk.tools_config.enabled.dedup();
+    disk.tools_config.disabled.sort();
+    disk.tools_config.disabled.dedup();
+
+    save_config_yaml(&cfg_path, &disk).map_err(|e| AgentError::Config(e.to_string()))?;
+    println!(
+        "Updated tools setup: {} enabled, {} disabled (config: {}).",
+        enabled_known.len(),
+        disabled_known.len(),
+        cfg_path.display()
+    );
+    Ok(())
+}
+
+async fn run_optional_setup_sections(
+    cli: &Cli,
+    current_config: &GatewayConfig,
+) -> Result<(), AgentError> {
+    let items = vec![
+        "Messaging platforms (gateway setup wizard)".to_string(),
+        "Tools (interactive enable/disable checklist)".to_string(),
+        "Memory backend setup (initialize MEMORY.md/USER.md)".to_string(),
+    ];
+    let mut pre_selected: HashSet<usize> = HashSet::new();
+    if current_config.platforms.values().any(|p| p.enabled) {
+        pre_selected.insert(0);
+    }
+    if !current_config.tools_config.enabled.is_empty()
+        || !current_config.tools_config.disabled.is_empty()
+    {
+        pre_selected.insert(1);
+    }
+    let memory_root = hermes_home();
+    let memory_enabled = !memory_root.join(".memory_disabled").exists();
+    let memory_ready = memory_enabled
+        && memory_root.join("memories").join("MEMORY.md").exists()
+        && memory_root.join("memories").join("USER.md").exists();
+    if memory_ready {
+        pre_selected.insert(2);
+    }
+
+    let selected = hermes_cli::curses_checklist(
+        "Optional setup sections",
+        &items,
+        &pre_selected,
+        Some(&|choice| {
+            if choice.is_empty() {
+                "none selected".to_string()
+            } else {
+                format!("{} selected", choice.len())
+            }
+        }),
+    );
+    if !selected.confirmed {
+        println!("Skipped optional setup sections.");
+        return Ok(());
+    }
+    let mut order: Vec<usize> = selected.selected.iter().copied().collect();
+    order.sort_unstable();
+    for idx in order {
+        match idx {
+            0 => {
+                println!("\nOpening gateway setup...");
+                run_gateway_setup(cli).await?;
+            }
+            1 => {
+                println!("\nOpening tools setup...");
+                run_tools_setup_wizard(cli).await?;
+            }
+            2 => {
+                println!("\nOpening memory setup...");
+                hermes_cli::commands::handle_cli_memory(Some("setup".to_string()), None, false)
+                    .await?;
+            }
+            _ => {}
         }
     }
     Ok(())
@@ -6838,13 +7012,13 @@ fn maybe_import_legacy_env(
 }
 
 /// Handle `hermes setup`.
-async fn run_setup() -> Result<(), AgentError> {
+async fn run_setup(cli: Cli) -> Result<(), AgentError> {
     use std::io::{self, BufRead, Write};
 
     println!("Hermes Agent Ultra — Setup Wizard");
     println!("===========================\n");
 
-    let config_dir = hermes_config::hermes_home();
+    let config_dir = hermes_state_root(&cli);
     println!("Config directory: {}", config_dir.display());
 
     // 1. Create directory structure
@@ -7180,17 +7354,15 @@ async fn run_setup() -> Result<(), AgentError> {
     };
 
     // 5. Write config.yaml
+    let mut overwrite_config = true;
     if config_path.exists() {
         print!("\nconfig.yaml already exists. Overwrite? [y/N]: ");
         io::stdout().flush().ok();
         let mut answer = String::new();
         reader.read_line(&mut answer).ok();
         if !answer.trim().eq_ignore_ascii_case("y") {
+            overwrite_config = false;
             println!("Keeping existing config.yaml.");
-            println!(
-                "\nSetup complete! Run `hermes-ultra` (or `hermes-agent-ultra`/`hermes`) to start an interactive session."
-            );
-            return Ok(());
         }
     }
 
@@ -7198,58 +7370,65 @@ async fn run_setup() -> Result<(), AgentError> {
     // rewriting config.yaml from scratch.
     let mut disk =
         load_user_config_file(&config_path).map_err(|e| AgentError::Config(e.to_string()))?;
-    disk.model = Some(model.clone());
-    disk.personality = Some(personality.to_string());
-    disk.max_turns = 50;
+    if overwrite_config {
+        disk.model = Some(model.clone());
+        disk.personality = Some(personality.to_string());
+        disk.max_turns = 50;
 
-    let _ = upsert_env_key(
-        &env_path,
-        "HERMES_AUTH_DEFAULT_PROVIDER",
-        selected_provider.as_str(),
-    );
+        let _ = upsert_env_key(
+            &env_path,
+            "HERMES_AUTH_DEFAULT_PROVIDER",
+            selected_provider.as_str(),
+        );
 
-    if !api_key.is_empty() && !stored_provider_secret_in_vault {
+        if !api_key.is_empty() && !stored_provider_secret_in_vault {
+            let provider = disk
+                .llm_providers
+                .entry(selected_provider.clone())
+                .or_insert_with(hermes_config::LlmProviderConfig::default);
+            provider.api_key = Some(api_key.clone());
+        } else if stored_provider_secret_in_vault {
+            println!(
+                "  ✓ Stored {} key in encrypted vault: {}",
+                selected_provider_label,
+                config_dir.join("auth").join("tokens.json").display()
+            );
+        } else if has_selected_provider_env_key {
+            println!(
+                "  ✓ Keeping {} from environment/{} for runtime auth",
+                env_keys_display,
+                env_path.display(),
+            );
+        }
         let provider = disk
             .llm_providers
             .entry(selected_provider.clone())
             .or_insert_with(hermes_config::LlmProviderConfig::default);
-        provider.api_key = Some(api_key.clone());
-    } else if stored_provider_secret_in_vault {
-        println!(
-            "  ✓ Stored {} key in encrypted vault: {}",
-            selected_provider_label,
-            config_dir.join("auth").join("tokens.json").display()
-        );
-    } else if has_selected_provider_env_key {
-        println!(
-            "  ✓ Keeping {} from environment/{} for runtime auth",
-            env_keys_display,
-            env_path.display(),
-        );
+        if let Some(base_url) = selected_base_url_override {
+            provider.base_url = Some(base_url);
+        }
+        if let Some(token_url) = selected_oauth_token_url {
+            provider.oauth_token_url = Some(token_url);
+        }
+        if let Some(client_id) = selected_oauth_client_id {
+            provider.oauth_client_id = Some(client_id);
+        }
+        validate_config(&disk).map_err(|e| AgentError::Config(e.to_string()))?;
+        save_config_yaml(&config_path, &disk).map_err(|e| AgentError::Config(e.to_string()))?;
+        println!("\n  ✓ Wrote config.yaml");
     }
-    let provider = disk
-        .llm_providers
-        .entry(selected_provider.clone())
-        .or_insert_with(hermes_config::LlmProviderConfig::default);
-    if let Some(base_url) = selected_base_url_override {
-        provider.base_url = Some(base_url);
-    }
-    if let Some(token_url) = selected_oauth_token_url {
-        provider.oauth_token_url = Some(token_url);
-    }
-    if let Some(client_id) = selected_oauth_client_id {
-        provider.oauth_client_id = Some(client_id);
-    }
-    validate_config(&disk).map_err(|e| AgentError::Config(e.to_string()))?;
-    save_config_yaml(&config_path, &disk).map_err(|e| AgentError::Config(e.to_string()))?;
-    println!("\n  ✓ Wrote config.yaml");
 
     // 6. Write default profile
     let default_profile = config_dir.join("profiles").join("default.yaml");
     if !default_profile.exists() {
+        let profile_model = disk.model.clone().unwrap_or_else(|| model.clone());
+        let profile_personality = disk
+            .personality
+            .clone()
+            .unwrap_or_else(|| personality.to_string());
         let profile_content = format!(
             "# Default Hermes Profile\nname: default\nmodel: {}\npersonality: {}\n",
-            model, personality,
+            profile_model, profile_personality,
         );
         std::fs::write(&default_profile, profile_content)
             .map_err(|e| AgentError::Io(format!("Failed to write profile: {}", e)))?;
@@ -7263,6 +7442,11 @@ async fn run_setup() -> Result<(), AgentError> {
         std::fs::write(&soul_path, soul_template)
             .map_err(|e| AgentError::Io(format!("Failed to write SOUL.md: {}", e)))?;
         println!("  ✓ Created SOUL.md");
+    }
+
+    drop(reader);
+    if prompt_yes_no("\nConfigure optional setup sections now?", true).await? {
+        run_optional_setup_sections(&cli, &disk).await?;
     }
 
     println!(
