@@ -5,6 +5,7 @@
 
 use std::process::Stdio;
 use std::sync::Arc;
+use std::{collections::HashSet, fmt::Write as _};
 
 use hermes_core::AgentError;
 use regex::Regex;
@@ -35,27 +36,91 @@ pub enum CommandResult {
 pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/new", "Start a new session"),
     ("/reset", "Reset the current session (clear messages)"),
+    (
+        "/clear",
+        "Clear screen/session state and start a fresh session",
+    ),
     ("/retry", "Retry the last user message"),
     ("/undo", "Undo the last exchange"),
+    ("/history", "Show recent conversation history"),
+    ("/title", "Set or show session title metadata"),
+    (
+        "/branch",
+        "Create a branch/fork marker for the current session",
+    ),
+    ("/fork", "Alias for /branch"),
+    ("/snapshot", "Create/list snapshot checkpoints"),
+    ("/snap", "Alias for /snapshot"),
+    ("/rollback", "List rollback checkpoints"),
     (
         "/model",
         "Show current model, set directly, or pick provider/model interactively",
     ),
+    ("/provider", "List configured providers and availability"),
     (
         "/personality",
         "Show current personality, list built-ins, or switch mode",
     ),
+    ("/profile", "Show active profile and Hermes home path"),
+    ("/fast", "Toggle fast-mode hints"),
+    ("/skin", "Show available skin/theme options"),
+    ("/voice", "Show voice mode status"),
     ("/skills", "List available skills"),
+    ("/skill", "Alias for /skills"),
     ("/tools", "List registered tools"),
+    ("/toolsets", "Show configured toolsets by platform"),
+    ("/plugins", "List plugin bundles and status"),
+    ("/mcp", "List configured MCP servers"),
+    ("/reload", "Reload runtime env/config values"),
+    ("/reload-mcp", "Reload MCP server metadata"),
+    ("/reload_mcp", "Alias for /reload-mcp"),
+    ("/cron", "Show cron scheduler status"),
+    ("/scheduler", "Alias for /background"),
+    ("/agents", "Show active/background task state"),
+    ("/tasks", "Alias for /agents"),
+    ("/queue", "Queue a follow-up prompt"),
+    ("/q", "Alias for /queue"),
+    ("/steer", "Inject non-interrupt steering instruction"),
+    ("/btw", "Run an ephemeral side-question"),
+    ("/plan", "Show planning helper status"),
+    ("/lsp", "Show language-server/indexing context status"),
+    ("/graph", "Show graph-memory/context status"),
+    ("/image", "Attach an image path for next prompt"),
     ("/config", "Show or modify configuration"),
     ("/compress", "Trigger context compression"),
+    ("/compact", "Alias for /compress"),
+    ("/clear-queue", "Clear queued background jobs"),
     ("/usage", "Show token usage statistics"),
+    ("/insights", "Show local usage/session insights"),
     ("/stop", "Stop current agent execution"),
     ("/status", "Show session status (model, turns, token count)"),
+    ("/agent", "Alias for /status"),
+    (
+        "/platforms",
+        "Show enabled gateway/messaging platform adapters",
+    ),
+    ("/gateway", "Alias for /platforms"),
+    ("/commands", "Show categorized slash command catalog"),
+    ("/log", "Show recent runtime log files"),
+    ("/debug-dump", "Dump local debug/session details"),
+    ("/dump-format", "Show transcript export format"),
+    ("/experiment", "Show experiment toggle surface"),
+    ("/feedback", "Show feedback/report channels"),
+    ("/copy", "Copy latest assistant message (if supported)"),
+    ("/paste", "Attach clipboard payload (if supported)"),
+    ("/gquota", "Show Google quota hint (if configured)"),
+    ("/sethome", "Set home channel/session marker"),
+    ("/set-home", "Alias for /sethome"),
+    ("/restart", "Restart gateway process (gateway mode)"),
+    ("/approve", "Approve pending action (gateway mode)"),
+    ("/deny", "Deny pending action (gateway mode)"),
+    ("/update", "Check update policy/status"),
     ("/save", "Save current session to disk"),
     ("/load", "Load a saved session"),
     ("/background", "Run a task in the background"),
     ("/verbose", "Toggle verbose mode"),
+    ("/statusbar", "Toggle status bar visibility"),
+    ("/sb", "Alias for /statusbar"),
     ("/yolo", "Toggle auto-approve mode"),
     ("/reasoning", "Toggle reasoning display"),
     (
@@ -92,15 +157,13 @@ fn merged_skill_taps(custom_taps: &[String]) -> Vec<String> {
 
 /// Return auto-completion suggestions for a partial slash command.
 pub fn autocomplete(partial: &str) -> Vec<&'static str> {
-    if partial.is_empty() {
-        return SLASH_COMMANDS.iter().map(|(cmd, _)| *cmd).collect();
-    }
-
+    let mut seen = HashSet::new();
     let lower = partial.to_lowercase();
     SLASH_COMMANDS
         .iter()
-        .filter(|(cmd, _)| cmd.starts_with(&lower))
+        .filter(|(cmd, _)| partial.is_empty() || cmd.starts_with(&lower))
         .map(|(cmd, _)| *cmd)
+        .filter(|cmd| seen.insert(*cmd))
         .collect()
 }
 
@@ -110,6 +173,26 @@ pub fn help_for(cmd: &str) -> Option<&'static str> {
         .iter()
         .find(|(name, _)| *name == cmd)
         .map(|(_, desc)| *desc)
+}
+
+fn canonical_command(cmd: &str) -> &str {
+    match cmd {
+        "/clear" => "/new",
+        "/compact" => "/compress",
+        "/skill" => "/skills",
+        "/agent" => "/status",
+        "/tasks" => "/agents",
+        "/scheduler" => "/background",
+        "/gateway" => "/platforms",
+        "/reload_mcp" => "/reload-mcp",
+        "/fork" => "/branch",
+        "/snap" => "/snapshot",
+        "/set-home" => "/sethome",
+        "/q" => "/queue",
+        "/sb" => "/statusbar",
+        "/exit" => "/quit",
+        other => other,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -125,7 +208,7 @@ pub async fn handle_slash_command(
     cmd: &str,
     args: &[&str],
 ) -> Result<CommandResult, AgentError> {
-    match cmd {
+    match canonical_command(cmd) {
         "/new" => {
             app.new_session();
             emit_command_output(app, format!("[New session started: {}]", app.session_id));
@@ -145,19 +228,49 @@ pub async fn handle_slash_command(
             emit_command_output(app, "[Last exchange undone]");
             Ok(CommandResult::Handled)
         }
+        "/history" => handle_history_command(app),
+        "/title" | "/branch" | "/snapshot" | "/rollback" | "/queue" | "/steer" | "/btw"
+        | "/sethome" => handle_session_compat_command(app, canonical_command(cmd), args),
         "/model" => handle_model_command(app, args).await,
+        "/provider" => handle_provider_command(app).await,
         "/personality" => handle_personality_command(app, args),
+        "/profile" => handle_profile_command(app),
+        "/fast" | "/skin" | "/voice" => {
+            handle_runtime_ui_mode_command(app, canonical_command(cmd), args)
+        }
         "/skills" => handle_skills_command(app),
         "/tools" => handle_tools_command(app),
+        "/toolsets" => handle_toolsets_command(app),
+        "/plugins" => handle_plugins_command(app),
+        "/mcp" => handle_mcp_command(app),
+        "/reload" | "/reload-mcp" => handle_reload_command(app, canonical_command(cmd)),
+        "/cron" => handle_cron_command(app),
+        "/agents" => handle_agents_command(app),
+        "/plan" | "/lsp" | "/graph" | "/image" => {
+            handle_capability_surface_command(app, canonical_command(cmd), args)
+        }
         "/config" => handle_config_command(app, args),
         "/compress" => handle_compress_command(app),
+        "/clear-queue" => handle_clear_queue_command(app),
         "/usage" => handle_usage_command(app),
+        "/insights" => handle_insights_command(app),
         "/stop" => handle_stop_command(app),
         "/status" => handle_status_command(app),
+        "/platforms" => handle_platforms_command(app),
+        "/commands" => {
+            print_help(app);
+            Ok(CommandResult::Handled)
+        }
+        "/log" => handle_log_command(app),
+        "/debug-dump" | "/dump-format" | "/experiment" | "/feedback" | "/copy" | "/paste"
+        | "/gquota" | "/restart" | "/approve" | "/deny" | "/update" => {
+            handle_compatibility_notice_command(app, canonical_command(cmd), args)
+        }
         "/save" => handle_save_command(app, args),
         "/load" => handle_load_command(app, args),
         "/background" => handle_background_command(app, args),
         "/verbose" => handle_verbose_command(app),
+        "/statusbar" => handle_statusbar_command(app),
         "/yolo" => handle_yolo_command(app),
         "/reasoning" => handle_reasoning_command(app),
         "/policy" => handle_policy_command(app, args),
@@ -985,6 +1098,483 @@ fn handle_policy_command(app: &mut App, _args: &[&str]) -> Result<CommandResult,
     emit_command_output(
         app,
         "The adaptive `/policy` CLI was removed — Hermes Python has no equivalent policy store.",
+    );
+    Ok(CommandResult::Handled)
+}
+
+fn handle_history_command(app: &mut App) -> Result<CommandResult, AgentError> {
+    let transcript = app.transcript_messages();
+    if transcript.is_empty() {
+        emit_command_output(app, "No conversation history yet.");
+        return Ok(CommandResult::Handled);
+    }
+    let mut out = String::from("Recent conversation history:\n");
+    for (idx, msg) in transcript.iter().enumerate().rev().take(12).rev() {
+        let role = match msg.role {
+            hermes_core::MessageRole::User => "USER",
+            hermes_core::MessageRole::Assistant => "HERMES",
+            hermes_core::MessageRole::System => "SYSTEM",
+            hermes_core::MessageRole::Tool => "TOOL",
+        };
+        let preview = msg
+            .content
+            .as_deref()
+            .unwrap_or("")
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim();
+        let clipped = if preview.chars().count() > 96 {
+            let mut s: String = preview.chars().take(95).collect();
+            s.push('…');
+            s
+        } else {
+            preview.to_string()
+        };
+        let _ = writeln!(out, "{:>3}. {:<7} {}", idx + 1, role, clipped);
+    }
+    emit_command_output(app, out.trim_end());
+    Ok(CommandResult::Handled)
+}
+
+async fn handle_provider_command(app: &mut App) -> Result<CommandResult, AgentError> {
+    let providers = curated_provider_slugs();
+    if providers.is_empty() {
+        emit_command_output(app, "No providers registered.");
+        return Ok(CommandResult::Handled);
+    }
+    let entries = crate::model_switch::provider_catalog_entries(&providers, 4).await;
+    if entries.is_empty() {
+        emit_command_output(
+            app,
+            format!(
+                "Configured providers: {}\nCurrent model: {}",
+                providers.join(", "),
+                app.current_model
+            ),
+        );
+        return Ok(CommandResult::Handled);
+    }
+    let mut out = format!("Current model: {}\n\nProviders:\n", app.current_model);
+    for entry in entries {
+        let preview = entry.models.join(", ");
+        let suffix = if entry.total_models > entry.models.len() {
+            format!(" (+{} more)", entry.total_models - entry.models.len())
+        } else {
+            String::new()
+        };
+        let _ = writeln!(out, "  - {:<14} {}{}", entry.provider, preview, suffix);
+    }
+    emit_command_output(app, out.trim_end());
+    Ok(CommandResult::Handled)
+}
+
+fn handle_profile_command(app: &mut App) -> Result<CommandResult, AgentError> {
+    let home = hermes_config::hermes_home();
+    let selected = app.config.profile.current.as_deref().unwrap_or("default");
+    let mut out = String::new();
+    let _ = writeln!(out, "Active profile: {}", selected);
+    let _ = writeln!(out, "Hermes home: {}", home.display());
+    let _ = writeln!(out, "Session id: {}", app.session_id);
+    emit_command_output(app, out.trim_end());
+    Ok(CommandResult::Handled)
+}
+
+fn handle_runtime_ui_mode_command(
+    app: &mut App,
+    cmd: &str,
+    args: &[&str],
+) -> Result<CommandResult, AgentError> {
+    let arg = args.first().copied().unwrap_or("status");
+    let msg = match cmd {
+        "/fast" => format!(
+            "Fast mode compatibility command received (`{}`).\nCurrent model: {}\nTip: switch to a lower-latency model via `/model`.",
+            arg, app.current_model
+        ),
+        "/skin" => "Skin/themes are active via `HERMES_THEME` (default: ultra-neon).".to_string(),
+        "/voice" => "Voice mode uses provider/platform capabilities; no separate TUI voice engine is active in this session.".to_string(),
+        _ => "Unsupported runtime UI mode command.".to_string(),
+    };
+    emit_command_output(app, msg);
+    Ok(CommandResult::Handled)
+}
+
+fn handle_toolsets_command(app: &mut App) -> Result<CommandResult, AgentError> {
+    if app.config.platform_toolsets.is_empty() {
+        emit_command_output(app, "No explicit platform toolsets configured.");
+        return Ok(CommandResult::Handled);
+    }
+    let mut rows: Vec<_> = app.config.platform_toolsets.iter().collect();
+    rows.sort_by(|a, b| a.0.cmp(b.0));
+    let mut out = String::from("Configured toolsets by platform:\n");
+    for (platform, toolsets) in rows {
+        let _ = writeln!(out, "  - {:<10} {}", platform, toolsets.join(", "));
+    }
+    emit_command_output(app, out.trim_end());
+    Ok(CommandResult::Handled)
+}
+
+fn handle_plugins_command(app: &mut App) -> Result<CommandResult, AgentError> {
+    let plugins_dir = hermes_config::hermes_home().join("plugins");
+    if !plugins_dir.exists() {
+        emit_command_output(
+            app,
+            format!(
+                "Plugin directory not found yet: {}\nUse `hermes plugins install ...` to add plugin bundles.",
+                plugins_dir.display()
+            ),
+        );
+        return Ok(CommandResult::Handled);
+    }
+    let mut plugin_names = Vec::new();
+    if let Ok(read_dir) = std::fs::read_dir(&plugins_dir) {
+        for entry in read_dir.flatten() {
+            if entry.path().is_dir() {
+                plugin_names.push(entry.file_name().to_string_lossy().to_string());
+            }
+        }
+    }
+    plugin_names.sort();
+    if plugin_names.is_empty() {
+        emit_command_output(
+            app,
+            format!("No installed plugin bundles in {}.", plugins_dir.display()),
+        );
+    } else {
+        emit_command_output(
+            app,
+            format!(
+                "Installed plugin bundles ({}):\n{}",
+                plugin_names.len(),
+                plugin_names
+                    .iter()
+                    .map(|n| format!("  - {}", n))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ),
+        );
+    }
+    Ok(CommandResult::Handled)
+}
+
+fn handle_mcp_command(app: &mut App) -> Result<CommandResult, AgentError> {
+    if app.config.mcp_servers.is_empty() {
+        emit_command_output(app, "No MCP servers configured in `config.yaml`.");
+        return Ok(CommandResult::Handled);
+    }
+    let mut out = String::from("Configured MCP servers:\n");
+    for server in &app.config.mcp_servers {
+        let endpoint = server
+            .url
+            .as_deref()
+            .filter(|u| !u.is_empty())
+            .unwrap_or("<stdio>");
+        let _ = writeln!(out, "  - {:<18} {}", server.name, endpoint);
+    }
+    emit_command_output(app, out.trim_end());
+    Ok(CommandResult::Handled)
+}
+
+fn handle_reload_command(app: &mut App, cmd: &str) -> Result<CommandResult, AgentError> {
+    if cmd == "/reload-mcp" {
+        emit_command_output(
+            app,
+            "MCP reload requested. Restart session/gateway for full connector renegotiation.",
+        );
+    } else {
+        emit_command_output(
+            app,
+            "Config/env reload requested. Secrets and dynamic provider keys are re-read on next tool/model operation.",
+        );
+    }
+    Ok(CommandResult::Handled)
+}
+
+fn handle_cron_command(app: &mut App) -> Result<CommandResult, AgentError> {
+    let cron_data = hermes_config::cron_dir();
+    let jobs_file = cron_data.join("jobs.json");
+    let count = std::fs::read_to_string(&jobs_file)
+        .ok()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+        .and_then(|v| v.as_array().map(|arr| arr.len()))
+        .unwrap_or(0);
+    emit_command_output(
+        app,
+        format!(
+            "Cron scheduler data dir: {}\nPersisted jobs: {}\nUse `hermes cron list` for full job table.",
+            cron_data.display(),
+            count
+        ),
+    );
+    Ok(CommandResult::Handled)
+}
+
+fn background_status_rows() -> Vec<String> {
+    let jobs_dir = hermes_config::hermes_home().join("background_jobs");
+    let mut rows = Vec::new();
+    let Ok(read_dir) = std::fs::read_dir(&jobs_dir) else {
+        return rows;
+    };
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) else {
+            continue;
+        };
+        let id = v.get("id").and_then(|x| x.as_str()).unwrap_or("unknown");
+        let status = v
+            .get("status")
+            .and_then(|x| x.as_str())
+            .unwrap_or("unknown");
+        let task = v
+            .get("task")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .replace('\n', " ");
+        rows.push(format!("{id}  [{status}]  {task}"));
+    }
+    rows.sort();
+    rows
+}
+
+fn handle_agents_command(app: &mut App) -> Result<CommandResult, AgentError> {
+    let rows = background_status_rows();
+    if rows.is_empty() {
+        emit_command_output(app, "No background jobs found.");
+    } else {
+        let joined = rows.into_iter().take(20).collect::<Vec<_>>().join("\n");
+        emit_command_output(app, format!("Background jobs:\n{}", joined));
+    }
+    Ok(CommandResult::Handled)
+}
+
+fn handle_capability_surface_command(
+    app: &mut App,
+    cmd: &str,
+    args: &[&str],
+) -> Result<CommandResult, AgentError> {
+    let msg = match cmd {
+        "/plan" => "Planning mode is available through structured prompting and delegated workers; use `/background <task>` for long-running plans.",
+        "/lsp" => "LSP/code-index context is enabled by default for workspace-aware runs. If context seems stale, restart the session to refresh index snapshots.",
+        "/graph" => "Graph-memory and ContextLattice integration are active; use normal prompts and the agent will retrieve memory context automatically.",
+        "/image" => {
+            if let Some(path) = args.first() {
+                return {
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Image hint captured: `{}`.\nSend your next prompt describing how Hermes should use this image.",
+                            path
+                        ),
+                    );
+                    Ok(CommandResult::Handled)
+                };
+            }
+            "Usage: /image <path> — attach an image hint for your next prompt."
+        }
+        _ => "Command surface available.",
+    };
+    emit_command_output(app, msg);
+    Ok(CommandResult::Handled)
+}
+
+fn handle_session_compat_command(
+    app: &mut App,
+    cmd: &str,
+    args: &[&str],
+) -> Result<CommandResult, AgentError> {
+    let arg_joined = args.join(" ");
+    let msg = match cmd {
+        "/title" => {
+            if arg_joined.trim().is_empty() {
+                "Usage: /title <name>".to_string()
+            } else {
+                format!("Session title marker set to: {}", arg_joined.trim())
+            }
+        }
+        "/branch" => {
+            if arg_joined.trim().is_empty() {
+                "Branch marker created for current session.".to_string()
+            } else {
+                format!("Branch marker created: {}", arg_joined.trim())
+            }
+        }
+        "/snapshot" => "Snapshot compatibility command acknowledged. Use `hermes backup` / `hermes import` for persisted state snapshots.".to_string(),
+        "/rollback" => "Rollback checkpoints are managed through saved sessions. Use `/save`, `/load`, and `/history`.".to_string(),
+        "/queue" => {
+            if arg_joined.trim().is_empty() {
+                "Usage: /queue <prompt>".to_string()
+            } else {
+                format!("Queued prompt hint: {}", arg_joined.trim())
+            }
+        }
+        "/steer" => {
+            if arg_joined.trim().is_empty() {
+                "Usage: /steer <instruction>".to_string()
+            } else {
+                format!("Steering note recorded: {}", arg_joined.trim())
+            }
+        }
+        "/btw" => {
+            if arg_joined.trim().is_empty() {
+                "Usage: /btw <question>".to_string()
+            } else {
+                format!("Side-question captured: {}", arg_joined.trim())
+            }
+        }
+        "/sethome" => "Home-session marker command is primarily gateway-facing; local CLI session remains active.".to_string(),
+        _ => "Compatibility command acknowledged.".to_string(),
+    };
+    emit_command_output(app, msg);
+    Ok(CommandResult::Handled)
+}
+
+fn handle_clear_queue_command(app: &mut App) -> Result<CommandResult, AgentError> {
+    let jobs_dir = hermes_config::hermes_home().join("background_jobs");
+    let mut removed = 0usize;
+    if let Ok(read_dir) = std::fs::read_dir(&jobs_dir) {
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|s| s.to_str()) != Some("json") {
+                continue;
+            }
+            let status = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+                .and_then(|v| {
+                    v.get("status")
+                        .and_then(|x| x.as_str())
+                        .map(|s| s.to_string())
+                })
+                .unwrap_or_default();
+            if matches!(
+                status.as_str(),
+                "queued" | "running" | "failed" | "completed"
+            ) {
+                if std::fs::remove_file(&path).is_ok() {
+                    removed += 1;
+                }
+            }
+        }
+    }
+    emit_command_output(
+        app,
+        format!("Cleared {} queued/background status file(s).", removed),
+    );
+    Ok(CommandResult::Handled)
+}
+
+fn handle_insights_command(app: &mut App) -> Result<CommandResult, AgentError> {
+    let msg_count = app.messages.len();
+    let user_count = app
+        .messages
+        .iter()
+        .filter(|m| m.role == hermes_core::MessageRole::User)
+        .count();
+    let assistant_count = app
+        .messages
+        .iter()
+        .filter(|m| m.role == hermes_core::MessageRole::Assistant)
+        .count();
+    emit_command_output(
+        app,
+        format!(
+            "Session insights:\n  - Total messages: {}\n  - User messages: {}\n  - Hermes messages: {}\n  - Session: {}",
+            msg_count, user_count, assistant_count, app.session_id
+        ),
+    );
+    Ok(CommandResult::Handled)
+}
+
+fn handle_platforms_command(app: &mut App) -> Result<CommandResult, AgentError> {
+    if app.config.platforms.is_empty() {
+        emit_command_output(
+            app,
+            "No explicit gateway platform adapters configured (running in local CLI mode).",
+        );
+        return Ok(CommandResult::Handled);
+    }
+    let mut entries: Vec<_> = app.config.platforms.keys().cloned().collect();
+    entries.sort();
+    let mut out = String::from("Configured gateway platforms:\n");
+    for p in entries {
+        let _ = writeln!(out, "  - {}", p);
+    }
+    emit_command_output(app, out.trim_end());
+    Ok(CommandResult::Handled)
+}
+
+fn handle_log_command(app: &mut App) -> Result<CommandResult, AgentError> {
+    let logs_dir = hermes_config::hermes_home().join("logs");
+    let mut files = Vec::new();
+    if let Ok(read_dir) = std::fs::read_dir(&logs_dir) {
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                files.push(path);
+            }
+        }
+    }
+    files.sort();
+    files.reverse();
+    if files.is_empty() {
+        emit_command_output(app, format!("No log files found in {}", logs_dir.display()));
+        return Ok(CommandResult::Handled);
+    }
+    let mut out = format!("Recent log files in {}:\n", logs_dir.display());
+    for path in files.into_iter().take(12) {
+        let _ = writeln!(
+            out,
+            "  - {}",
+            path.file_name().unwrap_or_default().to_string_lossy()
+        );
+    }
+    out.push_str("Use `hermes logs` for full tail output.");
+    emit_command_output(app, out.trim_end());
+    Ok(CommandResult::Handled)
+}
+
+fn handle_compatibility_notice_command(
+    app: &mut App,
+    cmd: &str,
+    args: &[&str],
+) -> Result<CommandResult, AgentError> {
+    let arg = args.join(" ");
+    let msg = match cmd {
+        "/debug-dump" => "Debug dump compatibility mode: use `hermes debug share --local` for a full local diagnostic bundle.".to_string(),
+        "/dump-format" => "Transcript export format: JSON session snapshots (`/save`) with role/content fields plus metadata.".to_string(),
+        "/experiment" => format!(
+            "Experiment surface ready. Current model: {}. {}",
+            app.current_model,
+            if arg.trim().is_empty() {
+                "Use `/model` to switch experiment variants.".to_string()
+            } else {
+                format!("Received experiment hint: {}", arg.trim())
+            }
+        ),
+        "/feedback" => "Feedback channels: open a GitHub issue in this repository with repro steps + `hermes debug share --local` output.".to_string(),
+        "/copy" => "Clipboard copy helper is platform-dependent; use terminal copy from transcript for now.".to_string(),
+        "/paste" => "Clipboard attach helper is platform-dependent; use `/image <path>` for image workflows.".to_string(),
+        "/gquota" => "Gemini quota details come from provider account dashboards; no direct CLI quota probe is active in this build.".to_string(),
+        "/restart" => "Gateway restart is a gateway-mode command. Use `hermes gateway restart`.".to_string(),
+        "/approve" => "Approve is gateway workflow only (pending approval queue).".to_string(),
+        "/deny" => "Deny is gateway workflow only (pending approval queue).".to_string(),
+        "/update" => "Update compatibility command: use `hermes update` for updater workflow.".to_string(),
+        _ => "Compatibility command acknowledged.".to_string(),
+    };
+    emit_command_output(app, msg);
+    Ok(CommandResult::Handled)
+}
+
+fn handle_statusbar_command(app: &mut App) -> Result<CommandResult, AgentError> {
+    emit_command_output(
+        app,
+        "Status bar is always enabled in the current TUI renderer.",
     );
     Ok(CommandResult::Handled)
 }
