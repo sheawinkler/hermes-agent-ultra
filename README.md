@@ -125,6 +125,16 @@ Pi-style conversation traits are available through built-in personalities:
 - `decision-coach`: structured options + trade-off guidance. Use when choosing between paths and you need constraints made explicit.
 - `reflective`: focused clarifying questions before advice. Use when you want to clarify goals or emotions before acting.
 
+Specialized execution personalities are also built in:
+
+- `security-auditor`: threat-modeling and abuse-path checks. Use when you want explicit security risks and mitigations.
+- `release-manager`: launch gating and rollback planning. Use when deciding if a change is safe to ship.
+- `ops-sre`: reliability/incident orientation. Use when triaging production issues from logs and metrics.
+- `mcp-integrator`: connector/protocol-first integration. Use when wiring MCP tools, auth, and capability contracts.
+- `quant-researcher`: hypothesis-driven strategy analysis. Use when evaluating trading/market ideas with risk-aware metrics.
+- `performance-engineer`: profiling and benchmark focus. Use when optimizing latency, throughput, and resource cost.
+- `research-scout`: source-driven synthesis. Use when quickly mapping a topic and planning next validation steps.
+
 Use `/personality list` to see all built-ins and `/personality <name>` to switch.
 
 ## Architecture
