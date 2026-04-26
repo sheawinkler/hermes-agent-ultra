@@ -286,14 +286,21 @@ async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandRes
 
 fn handle_personality_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     let builtin = hermes_agent::builtin_personality_names();
+    let builtin_descriptions = hermes_agent::builtin_personality_descriptions();
+    let print_builtin = || {
+        println!("Built-in personalities:");
+        for (name, usage) in builtin_descriptions {
+            println!("  - {:<14} {}", name, usage);
+        }
+    };
     if args.is_empty() {
         match &app.current_personality {
             Some(p) => println!("Current personality: {}", p),
             None => println!("No personality set"),
         }
-        println!("Built-in personalities: {}", builtin.join(", "));
+        print_builtin();
     } else if args.len() == 1 && args[0].eq_ignore_ascii_case("list") {
-        println!("Built-in personalities: {}", builtin.join(", "));
+        print_builtin();
     } else {
         let name = args.join(" ");
         app.switch_personality(&name);

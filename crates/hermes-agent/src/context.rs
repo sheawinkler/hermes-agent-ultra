@@ -447,6 +447,45 @@ const BUILTIN_PERSONALITY_NAMES: &[&str] = &[
     "reflective",
 ];
 
+const BUILTIN_PERSONALITY_DESCRIPTIONS: &[(&str, &str)] = &[
+    (
+        "coder",
+        "Use when you want implementation-heavy answers, patches, and concrete debugging steps.",
+    ),
+    (
+        "writer",
+        "Use when you want polished narrative writing, drafts, or editorial tone shaping.",
+    ),
+    (
+        "analyst",
+        "Use when you need structured reasoning, trade-off analysis, and decision framing.",
+    ),
+    (
+        "concise",
+        "Use when you want short, direct responses with minimal extra explanation.",
+    ),
+    (
+        "creative",
+        "Use when you want idea generation, exploration, and novel framing options.",
+    ),
+    (
+        "technical",
+        "Use when precision matters: architecture, systems behavior, and implementation detail.",
+    ),
+    (
+        "companion",
+        "Use when you want supportive, non-judgmental dialogue with practical next steps.",
+    ),
+    (
+        "decision-coach",
+        "Use when choosing between options and you want constraints + trade-offs made explicit.",
+    ),
+    (
+        "reflective",
+        "Use when clarifying goals or emotions before committing to a recommendation.",
+    ),
+];
+
 /// Load the SOUL.md personality file from `~/.hermes/SOUL.md`.
 ///
 /// Returns `None` if the file doesn't exist or can't be read.
@@ -482,6 +521,11 @@ fn builtin_personality(name: &str) -> Option<&'static str> {
 /// Return the built-in personality names available without user files.
 pub fn builtin_personality_names() -> &'static [&'static str] {
     BUILTIN_PERSONALITY_NAMES
+}
+
+/// Return one-line usage guidance for each built-in personality.
+pub fn builtin_personality_descriptions() -> &'static [(&'static str, &'static str)] {
+    BUILTIN_PERSONALITY_DESCRIPTIONS
 }
 
 /// Resolve a named personality by checking user files first, then built-ins.
@@ -1161,6 +1205,17 @@ mod tests {
         assert!(names.contains(&"companion"));
         assert!(names.contains(&"decision-coach"));
         assert!(names.contains(&"reflective"));
+    }
+
+    #[test]
+    fn test_builtin_personality_descriptions_cover_all_names() {
+        let names = builtin_personality_names();
+        let descriptions = builtin_personality_descriptions();
+        assert_eq!(descriptions.len(), names.len());
+        for (name, desc) in descriptions {
+            assert!(names.contains(name));
+            assert!(!desc.trim().is_empty());
+        }
     }
 
     #[test]

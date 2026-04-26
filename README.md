@@ -121,9 +121,9 @@ The skill is designed for author/lint/diff/export flows with `@google/design.md`
 
 Pi-style conversation traits are available through built-in personalities:
 
-- `companion`: warm, non-judgmental support with active listening
-- `decision-coach`: structured options + trade-off guidance
-- `reflective`: focused clarifying questions before advice
+- `companion`: warm, non-judgmental support with active listening. Use when you want supportive dialogue plus practical next steps.
+- `decision-coach`: structured options + trade-off guidance. Use when choosing between paths and you need constraints made explicit.
+- `reflective`: focused clarifying questions before advice. Use when you want to clarify goals or emotions before acting.
 
 Use `/personality list` to see all built-ins and `/personality <name>` to switch.
 
