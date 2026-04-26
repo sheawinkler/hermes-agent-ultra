@@ -309,7 +309,7 @@ async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandRes
 fn emit_command_output(app: &mut App, text: impl Into<String>) {
     let rendered = text.into();
     if app.stream_handle.is_some() {
-        app.messages.push(hermes_core::Message::assistant(rendered));
+        app.push_ui_assistant(rendered);
     } else {
         println!("{}", rendered);
     }
