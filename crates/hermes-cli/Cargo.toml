@@ -61,6 +61,7 @@ clap = { workspace = true }
 clap_complete = "4"
 ratatui = { workspace = true }
 crossterm = { workspace = true }
+tui-textarea = { workspace = true }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 futures = { workspace = true }
