@@ -7448,6 +7448,11 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
     // 7. Prompt for personality (full setup only).
     let personality = if full_setup {
         let builtin_personalities = hermes_agent::builtin_personality_names();
+        let builtin_descriptions = hermes_agent::builtin_personality_descriptions();
+        println!("\nBuilt-in personality guide:");
+        for (name, usage) in builtin_descriptions {
+            println!("  - {:<14} {}", name, usage);
+        }
         print!(
             "\nPersonality (default, {}) [default]: ",
             builtin_personalities.join(", ")
