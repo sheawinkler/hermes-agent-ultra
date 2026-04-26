@@ -284,36 +284,59 @@ async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandRes
     Ok(CommandResult::Handled)
 }
 
+fn emit_command_output(app: &mut App, text: impl Into<String>) {
+    let rendered = text.into();
+    if app.stream_handle.is_some() {
+        app.messages.push(hermes_core::Message::assistant(rendered));
+    } else {
+        println!("{}", rendered);
+    }
+}
+
+fn format_personality_catalog(
+    current_personality: Option<&str>,
+    builtin_descriptions: &[(&str, &str)],
+) -> String {
+    let mut out = String::from("## Built-in personalities\n\n");
+    if let Some(current) = current_personality.filter(|v| !v.trim().is_empty()) {
+        out.push_str(&format!("Current: `{}`\n\n", current));
+    } else {
+        out.push_str("Current: `(none)`\n\n");
+    }
+    out.push_str("Use `/personality <name>` to switch.\n\n");
+    for (name, usage) in builtin_descriptions {
+        out.push_str(&format!("- `{}`\n  {}\n\n", name, usage));
+    }
+    out.trim_end().to_string()
+}
+
 fn handle_personality_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     let builtin = hermes_agent::builtin_personality_names();
     let builtin_descriptions = hermes_agent::builtin_personality_descriptions();
-    let print_builtin = || {
-        println!("Built-in personalities:");
-        for (name, usage) in builtin_descriptions {
-            println!("  - {:<14} {}", name, usage);
-        }
-    };
     if args.is_empty() {
-        match &app.current_personality {
-            Some(p) => println!("Current personality: {}", p),
-            None => println!("No personality set"),
-        }
-        print_builtin();
+        emit_command_output(
+            app,
+            format_personality_catalog(app.current_personality.as_deref(), builtin_descriptions),
+        );
     } else if args.len() == 1 && args[0].eq_ignore_ascii_case("list") {
-        print_builtin();
+        emit_command_output(
+            app,
+            format_personality_catalog(app.current_personality.as_deref(), builtin_descriptions),
+        );
     } else {
         let name = args.join(" ");
         app.switch_personality(&name);
-        println!("Personality switched to: {}", name);
+        let mut response = format!("Switched personality to `{}`.", name);
         if !name.contains(char::is_whitespace)
             && !name.eq_ignore_ascii_case("default")
             && !builtin.iter().any(|n| n.eq_ignore_ascii_case(&name))
         {
-            println!(
-                "Note: '{}' is not built-in. Hermes will look for personalities/{}.md or treat inline text as compatibility mode.",
-                name, name
-            );
+            response.push_str(&format!(
+                "\n\nNote: `{}` is not built-in. Hermes will look for `personalities/{}.md` or treat inline text as compatibility mode.",
+                name, name,
+            ));
         }
+        emit_command_output(app, response);
     }
     Ok(CommandResult::Handled)
 }
@@ -4863,5 +4886,29 @@ mod tests {
         let providers = vec!["openai", "nous", "anthropic"];
         let req = parse_model_switch_request(&["gpt-4o"], &providers);
         assert_eq!(req, ModelSwitchRequest::SetDirect("gpt-4o".to_string()));
+    }
+
+    #[test]
+    fn format_personality_catalog_includes_current_and_usage_hint() {
+        let catalog = format_personality_catalog(
+            Some("technical"),
+            &[("coder", "Use when building or debugging code.")],
+        );
+        assert!(catalog.contains("## Built-in personalities"));
+        assert!(catalog.contains("Current: `technical`"));
+        assert!(catalog.contains("Use `/personality <name>` to switch."));
+    }
+
+    #[test]
+    fn format_personality_catalog_renders_multiline_entries() {
+        let catalog = format_personality_catalog(
+            None,
+            &[
+                ("coder", "Use when building or debugging code."),
+                ("writer", "Use when drafting polished prose."),
+            ],
+        );
+        assert!(catalog.contains("- `coder`\n  Use when building or debugging code."));
+        assert!(catalog.contains("- `writer`\n  Use when drafting polished prose."));
     }
 }
