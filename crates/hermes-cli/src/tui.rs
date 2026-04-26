@@ -11,7 +11,7 @@
 use std::io::Stdout;
 use std::time::Duration;
 
-use crossterm::event::{Event as CrosstermEvent, KeyEvent};
+use crossterm::event::{Event as CrosstermEvent, KeyEvent, MouseEvent};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -20,9 +20,12 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
+use ratatui::widgets::{
+    Block, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+};
 use ratatui::Frame;
 use tokio::sync::mpsc;
+use tui_textarea::{CursorMove, TextArea};
 
 use hermes_core::{AgentError, StreamChunk};
 
@@ -52,6 +55,8 @@ pub enum Event {
     AgentDone,
     /// Interrupt signal (Ctrl+C).
     Interrupt,
+    /// Mouse interaction.
+    Mouse(MouseEvent),
 }
 
 // ---------------------------------------------------------------------------
@@ -340,43 +345,22 @@ impl TuiState {
                 self.scroll_offset = 0;
                 false
             }
-            // Ctrl+Enter or Alt+Enter → submit
+            // Submit is handled by the caller checking for these combos.
             KeyCode::Enter
                 if mods.contains(KeyModifiers::CONTROL) || mods.contains(KeyModifiers::ALT) =>
             {
-                // Submit is handled by the caller checking for this combo
                 false
             }
-            // Plain Enter → insert newline (multi-line editing)
-            KeyCode::Enter => {
-                if self.input.starts_with('/') && !self.input.contains('\n') {
-                    // Slash commands submit on Enter from the run-loop.
-                    return false;
-                }
-                self.input.insert(self.cursor_position, '\n');
-                self.cursor_position += 1;
-                self.selection_anchor = None;
+            // Slash commands submit on plain Enter in the run-loop.
+            KeyCode::Enter if self.input.starts_with('/') && !self.input.contains('\n') => false,
+            KeyCode::Tab => {
+                // Accept completion
+                self.accept_completion();
+                self.completions.clear();
+                self.completion_index = None;
                 false
             }
-            // Ctrl+A → move to beginning of line
-            KeyCode::Char('a') if mods.contains(KeyModifiers::CONTROL) => {
-                self.cursor_position = self.line_start();
-                self.selection_anchor = None;
-                false
-            }
-            // Ctrl+E → move to end of line
-            KeyCode::Char('e') if mods.contains(KeyModifiers::CONTROL) => {
-                self.cursor_position = self.line_end();
-                self.selection_anchor = None;
-                false
-            }
-            // Ctrl+V → paste from clipboard (best-effort via crossterm)
-            KeyCode::Char('v') if mods.contains(KeyModifiers::CONTROL) => {
-                // Bracketed paste is delivered as regular Char events in this input loop,
-                // so no dedicated Ctrl+V action is required here.
-                false
-            }
-            // Ctrl+R → toggle history search
+            // Ctrl+R toggles reverse-search across message input history.
             KeyCode::Char('r') if mods.contains(KeyModifiers::CONTROL) => {
                 self.history_search_active = !self.history_search_active;
                 if !self.history_search_active {
@@ -384,204 +368,42 @@ impl TuiState {
                 }
                 false
             }
-            KeyCode::Home => {
-                self.cursor_position = self.line_start();
-                self.selection_anchor = None;
+            KeyCode::Char(c) if self.history_search_active => {
+                self.history_search_query.push(c);
+                if let Some(found) = app
+                    .input_history
+                    .iter()
+                    .rev()
+                    .find(|h| h.contains(&self.history_search_query))
+                {
+                    self.input = found.clone();
+                    self.cursor_position = self.input.len();
+                }
                 false
             }
-            KeyCode::End => {
-                self.cursor_position = self.line_end();
-                self.selection_anchor = None;
+            KeyCode::Backspace if self.history_search_active => {
+                self.history_search_query.pop();
                 false
             }
-            // Ctrl/Alt+Left → jump backward by word
-            KeyCode::Left
-                if mods.contains(KeyModifiers::CONTROL) || mods.contains(KeyModifiers::ALT) =>
+            // On single-line inputs without completion menus, Up/Down browse previous prompts.
+            KeyCode::Up
+                if !self.input.contains('\n') && !completion_nav_active && mods.is_empty() =>
             {
-                self.cursor_position = self.word_start_left(self.cursor_position);
-                self.selection_anchor = None;
-                false
-            }
-            // Ctrl/Alt+Right → jump forward by word
-            KeyCode::Right
-                if mods.contains(KeyModifiers::CONTROL) || mods.contains(KeyModifiers::ALT) =>
-            {
-                self.cursor_position = self.word_end_right(self.cursor_position);
-                self.selection_anchor = None;
-                false
-            }
-            // Ctrl+B / Ctrl+F → char-wise navigation
-            KeyCode::Char('b') if mods.contains(KeyModifiers::CONTROL) => {
-                self.cursor_position = self.prev_char_start(self.cursor_position);
-                self.selection_anchor = None;
-                false
-            }
-            KeyCode::Char('f') if mods.contains(KeyModifiers::CONTROL) => {
-                self.cursor_position = self.next_char_start(self.cursor_position);
-                self.selection_anchor = None;
-                false
-            }
-            // Ctrl+W or Ctrl/Alt+Backspace → delete previous word
-            KeyCode::Char('w') if mods.contains(KeyModifiers::CONTROL) => {
-                let start = self.word_start_left(self.cursor_position);
-                if start < self.cursor_position {
-                    self.input.drain(start..self.cursor_position);
-                    self.cursor_position = start;
-                }
-                self.refresh_completions();
-                self.selection_anchor = None;
-                false
-            }
-            KeyCode::Backspace
-                if mods.contains(KeyModifiers::CONTROL) || mods.contains(KeyModifiers::ALT) =>
-            {
-                let start = self.word_start_left(self.cursor_position);
-                if start < self.cursor_position {
-                    self.input.drain(start..self.cursor_position);
-                    self.cursor_position = start;
-                }
-                self.refresh_completions();
-                self.selection_anchor = None;
-                false
-            }
-            // Ctrl+D/Delete → delete char under cursor
-            KeyCode::Delete => {
-                if self.cursor_position < self.input.len() {
-                    let next = self.next_char_start(self.cursor_position);
-                    self.input.drain(self.cursor_position..next);
-                    self.refresh_completions();
-                }
-                self.selection_anchor = None;
-                false
-            }
-            KeyCode::Char('d') if mods.contains(KeyModifiers::CONTROL) => {
-                if self.cursor_position < self.input.len() {
-                    let next = self.next_char_start(self.cursor_position);
-                    self.input.drain(self.cursor_position..next);
-                    self.refresh_completions();
-                }
-                self.selection_anchor = None;
-                false
-            }
-            // Ctrl+U / Ctrl+K → delete to start/end of line
-            KeyCode::Char('u') if mods.contains(KeyModifiers::CONTROL) => {
-                let start = self.line_start();
-                if start < self.cursor_position {
-                    self.input.drain(start..self.cursor_position);
-                    self.cursor_position = start;
-                }
-                self.refresh_completions();
-                self.selection_anchor = None;
-                false
-            }
-            KeyCode::Char('k') if mods.contains(KeyModifiers::CONTROL) => {
-                let end = self.line_end();
-                if self.cursor_position < end {
-                    self.input.drain(self.cursor_position..end);
-                }
-                self.refresh_completions();
-                self.selection_anchor = None;
-                false
-            }
-            KeyCode::Char(c) => {
-                if self.history_search_active {
-                    self.history_search_query.push(c);
-                    // Search through history
-                    if let Some(found) = app
-                        .input_history
-                        .iter()
-                        .rev()
-                        .find(|h| h.contains(&self.history_search_query))
-                    {
-                        self.input = found.clone();
-                        self.cursor_position = self.input.len();
-                    }
-                    return false;
-                }
-                self.input.insert(self.cursor_position, c);
-                self.cursor_position += c.len_utf8();
-                self.selection_anchor = None;
-                self.refresh_completions();
-                false
-            }
-            KeyCode::Backspace => {
-                if self.history_search_active {
-                    self.history_search_query.pop();
-                    return false;
-                }
-                if self.cursor_position > 0 {
-                    // Find the previous char boundary
-                    let prev = self.input[..self.cursor_position]
-                        .char_indices()
-                        .last()
-                        .map(|(i, _)| i)
-                        .unwrap_or(0);
-                    self.input.drain(prev..self.cursor_position);
-                    self.cursor_position = prev;
-                }
-                self.selection_anchor = None;
-                self.refresh_completions();
-                false
-            }
-            KeyCode::Left => {
-                if self.cursor_position > 0 {
-                    // Move to previous char boundary
-                    self.cursor_position = self.input[..self.cursor_position]
-                        .char_indices()
-                        .last()
-                        .map(|(i, _)| i)
-                        .unwrap_or(0);
-                }
-                self.selection_anchor = None;
-                false
-            }
-            KeyCode::Right => {
-                if self.cursor_position < self.input.len() {
-                    // Move to next char boundary
-                    self.cursor_position = self.input[self.cursor_position..]
-                        .char_indices()
-                        .nth(1)
-                        .map(|(i, _)| self.cursor_position + i)
-                        .unwrap_or(self.input.len());
-                }
-                self.selection_anchor = None;
-                false
-            }
-            KeyCode::Up => {
-                // In multi-line: move cursor up one line
-                if self.input.contains('\n') {
-                    if let Some(new_pos) = self.cursor_up() {
-                        self.cursor_position = new_pos;
-                        return false;
-                    }
-                }
-                // Single-line or at top: browse history
                 if let Some(prev) = app.history_prev() {
                     self.input = prev.to_string();
                     self.cursor_position = self.input.len();
                 }
+                self.refresh_completions();
                 false
             }
-            KeyCode::Down => {
-                // In multi-line: move cursor down one line
-                if self.input.contains('\n') {
-                    if let Some(new_pos) = self.cursor_down() {
-                        self.cursor_position = new_pos;
-                        return false;
-                    }
-                }
-                // Single-line or at bottom: browse history
+            KeyCode::Down
+                if !self.input.contains('\n') && !completion_nav_active && mods.is_empty() =>
+            {
                 if let Some(next) = app.history_next() {
                     self.input = next.to_string();
                     self.cursor_position = self.input.len();
                 }
-                false
-            }
-            KeyCode::Tab => {
-                // Accept completion
-                self.accept_completion();
-                self.completions.clear();
-                self.completion_index = None;
+                self.refresh_completions();
                 false
             }
             KeyCode::Esc => {
@@ -593,7 +415,12 @@ impl TuiState {
                 self.mode = InputMode::Normal;
                 false
             }
-            _ => false,
+            _ => {
+                self.apply_textarea_input(key);
+                self.selection_anchor = None;
+                self.refresh_completions();
+                false
+            }
         }
     }
 
@@ -660,6 +487,70 @@ impl TuiState {
         }
     }
 
+    fn cursor_row_col(input: &str, cursor_byte: usize) -> (usize, usize) {
+        let clamped = cursor_byte.min(input.len());
+        let before = &input[..clamped];
+        let row = before.bytes().filter(|b| *b == b'\n').count();
+        let line_start = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let col = input[line_start..clamped].chars().count();
+        (row, col)
+    }
+
+    fn row_col_to_byte_offset(input: &str, row: usize, col: usize) -> usize {
+        let mut current_row = 0usize;
+        let mut line_start = 0usize;
+        for (idx, ch) in input.char_indices() {
+            if current_row == row {
+                break;
+            }
+            if ch == '\n' {
+                current_row += 1;
+                line_start = idx + ch.len_utf8();
+            }
+        }
+        if current_row < row {
+            line_start = input.len();
+        }
+        let line_end = input[line_start..]
+            .find('\n')
+            .map(|i| line_start + i)
+            .unwrap_or(input.len());
+        let mut byte = line_start;
+        for (taken, (idx, ch)) in input[line_start..line_end].char_indices().enumerate() {
+            if taken == col {
+                return line_start + idx;
+            }
+            byte = line_start + idx + ch.len_utf8();
+        }
+        byte.min(line_end)
+    }
+
+    fn textarea_from_input(&self) -> TextArea<'static> {
+        let lines: Vec<String> = if self.input.is_empty() {
+            vec![String::new()]
+        } else {
+            self.input.split('\n').map(ToString::to_string).collect()
+        };
+        let mut textarea = TextArea::from(lines);
+        let (row, col) = Self::cursor_row_col(&self.input, self.cursor_position);
+        let row_u16 = row.min(u16::MAX as usize) as u16;
+        let col_u16 = col.min(u16::MAX as usize) as u16;
+        textarea.move_cursor(CursorMove::Jump(row_u16, col_u16));
+        textarea
+    }
+
+    fn sync_from_textarea(&mut self, textarea: &TextArea<'_>) {
+        self.input = textarea.lines().join("\n");
+        let (row, col) = textarea.cursor();
+        self.cursor_position = Self::row_col_to_byte_offset(&self.input, row, col);
+    }
+
+    fn apply_textarea_input(&mut self, key: KeyEvent) {
+        let mut textarea = self.textarea_from_input();
+        let _ = textarea.input(key);
+        self.sync_from_textarea(&textarea);
+    }
+
     fn move_completion_selection(&mut self, delta: isize) {
         if self.completions.is_empty() {
             self.completion_index = None;
@@ -687,132 +578,6 @@ impl TuiState {
             self.input = first.clone();
             self.cursor_position = self.input.len();
         }
-    }
-
-    // -----------------------------------------------------------------------
-    // Multi-line cursor helpers
-    // -----------------------------------------------------------------------
-
-    fn prev_char_start(&self, pos: usize) -> usize {
-        if pos == 0 {
-            return 0;
-        }
-        self.input[..pos]
-            .char_indices()
-            .last()
-            .map(|(i, _)| i)
-            .unwrap_or(0)
-    }
-
-    fn next_char_start(&self, pos: usize) -> usize {
-        if pos >= self.input.len() {
-            return self.input.len();
-        }
-        self.input[pos..]
-            .char_indices()
-            .nth(1)
-            .map(|(i, _)| pos + i)
-            .unwrap_or(self.input.len())
-    }
-
-    fn is_word_char(c: char) -> bool {
-        c.is_alphanumeric() || matches!(c, '_' | '-')
-    }
-
-    fn word_start_left(&self, pos: usize) -> usize {
-        let mut p = pos.min(self.input.len());
-        while p > 0 {
-            let prev = self.prev_char_start(p);
-            let ch = self.input[prev..p].chars().next().unwrap_or_default();
-            if Self::is_word_char(ch) {
-                break;
-            }
-            p = prev;
-        }
-        while p > 0 {
-            let prev = self.prev_char_start(p);
-            let ch = self.input[prev..p].chars().next().unwrap_or_default();
-            if !Self::is_word_char(ch) {
-                break;
-            }
-            p = prev;
-        }
-        p
-    }
-
-    fn word_end_right(&self, pos: usize) -> usize {
-        let mut p = pos.min(self.input.len());
-        while p < self.input.len() {
-            let next = self.next_char_start(p);
-            let ch = self.input[p..next].chars().next().unwrap_or_default();
-            if Self::is_word_char(ch) {
-                break;
-            }
-            p = next;
-        }
-        while p < self.input.len() {
-            let next = self.next_char_start(p);
-            let ch = self.input[p..next].chars().next().unwrap_or_default();
-            if !Self::is_word_char(ch) {
-                break;
-            }
-            p = next;
-        }
-        p
-    }
-
-    /// Get the byte offset of the start of the current line.
-    fn line_start(&self) -> usize {
-        self.input[..self.cursor_position]
-            .rfind('\n')
-            .map(|i| i + 1)
-            .unwrap_or(0)
-    }
-
-    /// Get the byte offset of the end of the current line.
-    fn line_end(&self) -> usize {
-        self.input[self.cursor_position..]
-            .find('\n')
-            .map(|i| self.cursor_position + i)
-            .unwrap_or(self.input.len())
-    }
-
-    /// Column offset within the current line.
-    fn current_column(&self) -> usize {
-        self.cursor_position - self.line_start()
-    }
-
-    /// Move cursor up one line, returning the new byte offset or None if at top.
-    fn cursor_up(&self) -> Option<usize> {
-        let line_start = self.line_start();
-        if line_start == 0 {
-            return None; // already on first line
-        }
-        let col = self.current_column();
-        // Previous line ends at line_start - 1 (the '\n')
-        let prev_line_end = line_start - 1;
-        let prev_line_start = self.input[..prev_line_end]
-            .rfind('\n')
-            .map(|i| i + 1)
-            .unwrap_or(0);
-        let prev_line_len = prev_line_end - prev_line_start;
-        Some(prev_line_start + col.min(prev_line_len))
-    }
-
-    /// Move cursor down one line, returning the new byte offset or None if at bottom.
-    fn cursor_down(&self) -> Option<usize> {
-        let line_end = self.line_end();
-        if line_end >= self.input.len() {
-            return None; // already on last line
-        }
-        let col = self.current_column();
-        let next_line_start = line_end + 1;
-        let next_line_end = self.input[next_line_start..]
-            .find('\n')
-            .map(|i| next_line_start + i)
-            .unwrap_or(self.input.len());
-        let next_line_len = next_line_end - next_line_start;
-        Some(next_line_start + col.min(next_line_len))
     }
 
     /// Get the spinner character for the current frame.
@@ -1399,6 +1164,28 @@ fn render_messages(
 
     frame.render_widget(Clear, area);
     frame.render_widget(paragraph, area);
+
+    if lines.len() > viewport_rows {
+        let mut scrollbar_state = ScrollbarState::new(lines.len())
+            .position(start)
+            .viewport_content_length(viewport_rows);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .track_symbol(Some("│"))
+            .thumb_symbol("█")
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_style(
+                Style::default()
+                    .fg(colors.status_bar_dim)
+                    .bg(colors.background),
+            )
+            .thumb_style(
+                Style::default()
+                    .fg(colors.status_bar_strong)
+                    .bg(colors.background),
+            );
+        frame.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
+    }
 }
 
 /// Render slash-command completions as a popup over the conversation panel.
@@ -1410,29 +1197,32 @@ fn render_completions_popup(
     input_area: Rect,
     colors: &crate::theme::RatatuiColors,
 ) {
-    let max_height = 12usize;
-    let visible_cap = completions.len().min(max_height);
-    let inner_rows = visible_cap.max(1);
-    if inner_rows == 0 {
+    if completions.is_empty() {
         return;
     }
+    let max_inner_rows = 10usize;
+    let visible_rows = completions.len().min(max_inner_rows).max(1);
     let mut start = 0usize;
     if let Some(sel) = selected {
-        if sel >= inner_rows {
-            start = sel + 1 - inner_rows;
+        if sel >= visible_rows {
+            start = sel + 1 - visible_rows;
         }
     }
-    let end = (start + inner_rows).min(completions.len());
+    let end = (start + visible_rows).min(completions.len());
     let max_item_width = completions[start..end]
         .iter()
         .map(|c| {
             let desc = crate::commands::help_for(c).unwrap_or("");
-            format!("{c}  {desc}").chars().count()
+            if desc.is_empty() {
+                c.chars().count()
+            } else {
+                format!("{c} — {desc}").chars().count()
+            }
         })
         .max()
         .unwrap_or(0);
     let popup_max_width = messages_area.width.saturating_sub(2).max(1);
-    let popup_min_width = 28u16.min(popup_max_width);
+    let popup_min_width = 36u16.min(popup_max_width);
     let popup_width = (max_item_width as u16 + 8).clamp(popup_min_width, popup_max_width);
     let popup_height = (end.saturating_sub(start) as u16 + 2).max(3);
     if popup_width == 0 || popup_height == 0 {
@@ -1452,6 +1242,7 @@ fn render_completions_popup(
         height: popup_height,
     };
 
+    let inner_width = popup_width.saturating_sub(4) as usize;
     let items: Vec<Line<'static>> = completions
         .iter()
         .enumerate()
@@ -1474,14 +1265,11 @@ fn render_completions_popup(
             } else {
                 format!("{:<18} {}", cmd, desc)
             };
-            Line::from(Span::styled(
-                truncate_chars(&text, popup_width.saturating_sub(4) as usize),
-                style,
-            ))
+            Line::from(Span::styled(truncate_chars(&text, inner_width), style))
         })
         .collect();
 
-    let title = if completions.len() > visible_cap {
+    let title = if completions.len() > visible_rows {
         format!(
             " Slash Commands ({}/{}) ↑↓ scroll Tab accept ",
             end,
@@ -1502,6 +1290,34 @@ fn render_completions_popup(
         .wrap(Wrap { trim: true });
     frame.render_widget(Clear, popup);
     frame.render_widget(paragraph, popup);
+
+    if completions.len() > visible_rows {
+        let inner = Rect {
+            x: popup.x.saturating_add(1),
+            y: popup.y.saturating_add(1),
+            width: popup.width.saturating_sub(2),
+            height: popup.height.saturating_sub(2),
+        };
+        let mut scrollbar_state = ScrollbarState::new(completions.len())
+            .position(start)
+            .viewport_content_length(visible_rows);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .track_symbol(Some("│"))
+            .thumb_symbol("█")
+            .begin_symbol(None)
+            .end_symbol(None)
+            .track_style(
+                Style::default()
+                    .fg(colors.status_bar_dim)
+                    .bg(colors.status_bar_bg),
+            )
+            .thumb_style(
+                Style::default()
+                    .fg(colors.status_bar_strong)
+                    .bg(colors.status_bar_bg),
+            );
+        frame.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
+    }
 }
 
 /// Render the input area (supports multi-line display with wrapping).
@@ -1511,80 +1327,70 @@ fn render_input(
     area: Rect,
     colors: &crate::theme::RatatuiColors,
 ) -> Option<Position> {
-    let mode_indicator = match state.mode {
-        InputMode::Normal => " NORMAL ",
-        InputMode::Insert => " INSERT ",
-        InputMode::Command => " CMD ",
+    let mode_label = match state.mode {
+        InputMode::Normal => "NORMAL",
+        InputMode::Insert => "INSERT",
+        InputMode::Command => "COMMAND",
     };
-
-    let mode_style = match state.mode {
-        InputMode::Normal => Style::default()
-            .fg(colors.status_bar_dim)
-            .bg(colors.background),
-        InputMode::Insert => Style::default()
-            .fg(colors.status_bar_good)
-            .bg(colors.background)
-            .add_modifier(Modifier::BOLD),
-        InputMode::Command => Style::default()
-            .fg(colors.accent)
-            .bg(colors.background)
-            .add_modifier(Modifier::BOLD),
+    let mode_color = match state.mode {
+        InputMode::Normal => colors.status_bar_dim,
+        InputMode::Insert => colors.status_bar_good,
+        InputMode::Command => colors.accent,
     };
-
-    let history_prefix = if state.history_search_active {
-        format!("(reverse-i-search)`{}': ", state.history_search_query)
-    } else {
-        String::new()
-    };
-    let show_placeholder =
-        state.input.is_empty() && state.mode == InputMode::Insert && !state.history_search_active;
-    let input_text = if show_placeholder {
-        "Type a message and press Ctrl+Enter to send".to_string()
-    } else {
-        format!("{history_prefix}{}", state.input)
-    };
-    let input_body_style = if show_placeholder {
-        Style::default()
-            .fg(colors.status_bar_dim)
-            .bg(colors.background)
-            .add_modifier(Modifier::ITALIC)
-    } else {
-        Style::default().fg(colors.foreground).bg(colors.background)
-    };
-
-    // For multi-line, show line count indicator
     let line_count = state.input.matches('\n').count() + 1;
-    let line_indicator = if line_count > 1 {
-        format!(" L{}", line_count)
-    } else {
-        String::new()
-    };
-    let line_indicator_width = line_indicator.chars().count();
 
-    let block = Block::default()
+    let mut block = Block::default()
         .borders(Borders::ALL)
-        .title(" Message ")
+        .title(Line::from(vec![
+            Span::styled(" Message  •  ", Style::default().fg(colors.status_bar_dim)),
+            Span::styled(
+                mode_label.to_string(),
+                Style::default().fg(mode_color).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("  •  L{} ", line_count),
+                Style::default().fg(colors.status_bar_dim),
+            ),
+        ]))
         .style(Style::default().bg(colors.background))
         .border_style(Style::default().fg(colors.status_bar_strong));
-    let prompt_glyph = "›";
-    let paragraph = Paragraph::new(Text::from(vec![Line::from(vec![
-        Span::styled(mode_indicator, mode_style),
-        Span::styled(line_indicator, Style::default().fg(colors.status_bar_dim)),
-        Span::styled(" │ ", Style::default().fg(colors.status_bar_dim)),
-        Span::styled(
-            prompt_glyph,
+    if state.history_search_active {
+        block = block.title_bottom(Line::from(Span::styled(
+            format!(
+                " reverse-i-search: `{}` (Ctrl+R to exit) ",
+                state.history_search_query
+            ),
             Style::default()
-                .fg(colors.status_bar_strong)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::raw(" "),
-        Span::styled(input_text, input_body_style),
-    ])]))
-    .block(block.clone())
-    .wrap(Wrap { trim: false });
+                .fg(colors.status_bar_warn)
+                .bg(colors.background)
+                .add_modifier(Modifier::ITALIC),
+        )));
+    }
+
+    let mut textarea = state.textarea_from_input();
+    textarea.set_block(block.clone());
+    textarea.set_style(Style::default().fg(colors.foreground).bg(colors.background));
+    textarea.set_cursor_style(
+        Style::default()
+            .fg(Color::Black)
+            .bg(colors.status_bar_strong)
+            .add_modifier(Modifier::BOLD),
+    );
+    textarea.set_cursor_line_style(Style::default().bg(colors.background));
+    if state.input.is_empty() && state.mode == InputMode::Insert && !state.history_search_active {
+        textarea.set_placeholder_text("Type a message and press Ctrl+Enter to send");
+        textarea.set_placeholder_style(
+            Style::default()
+                .fg(colors.status_bar_dim)
+                .bg(colors.background)
+                .add_modifier(Modifier::ITALIC),
+        );
+    } else {
+        textarea.set_placeholder_text("");
+    }
 
     frame.render_widget(Clear, area);
-    frame.render_widget(paragraph, area);
+    frame.render_widget(&textarea, area);
 
     if state.mode == InputMode::Normal {
         return None;
@@ -1594,53 +1400,10 @@ fn render_input(
     if inner.width == 0 || inner.height == 0 {
         return None;
     }
-
-    let mut rendered_before_cursor = String::new();
-    rendered_before_cursor.push_str(&history_prefix);
-    rendered_before_cursor.push_str(&state.input[..state.cursor_position.min(state.input.len())]);
-
-    let width = inner.width as usize;
-    if width == 0 {
-        return None;
-    }
-    let prefix_width =
-        mode_indicator.chars().count() + line_indicator_width + " │ ".chars().count() + 2;
-    let mut x = 0usize;
-    let mut y = 0usize;
-
-    for _ in 0..prefix_width {
-        if x >= width {
-            y += 1;
-            x = 0;
-        }
-        x += 1;
-    }
-
-    for ch in rendered_before_cursor.chars() {
-        if ch == '\n' {
-            y += 1;
-            x = 0;
-            continue;
-        }
-        if x >= width {
-            y += 1;
-            x = 0;
-        }
-        x += 1;
-    }
-
-    if x >= width {
-        y += x / width;
-        x %= width;
-    }
-    if y >= inner.height as usize {
-        y = inner.height.saturating_sub(1) as usize;
-        x = width.saturating_sub(1);
-    }
-
+    let (row, col) = textarea.cursor();
     Some(Position {
-        x: inner.x + x.min(width.saturating_sub(1)) as u16,
-        y: inner.y + y as u16,
+        x: inner.x + (col as u16).min(inner.width.saturating_sub(1)),
+        y: inner.y + (row as u16).min(inner.height.saturating_sub(1)),
     })
 }
 
@@ -1748,11 +1511,16 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
     let event_sender = tui.event_sender();
     let _event_task = tokio::spawn(async move {
         loop {
+            if crate::checklist::embedded_picker_active() {
+                tokio::time::sleep(Duration::from_millis(16)).await;
+                continue;
+            }
             if crossterm::event::poll(Duration::from_millis(100)).unwrap_or(false) {
                 if let Ok(event) = crossterm::event::read() {
                     let msg = match event {
                         CrosstermEvent::Key(key) => Some(Event::Key(key)),
                         CrosstermEvent::Resize(w, h) => Some(Event::Resize(w, h)),
+                        CrosstermEvent::Mouse(mouse) => Some(Event::Mouse(mouse)),
                         _ => None,
                     };
                     if let Some(msg) = msg {
@@ -1845,6 +1613,18 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                     }
                     Some(Event::Resize(_, _)) => {
                         // Terminal was resized — next render will adapt
+                    }
+                    Some(Event::Mouse(mouse)) => {
+                        use crossterm::event::MouseEventKind;
+                        match mouse.kind {
+                            MouseEventKind::ScrollUp => {
+                                state.scroll_offset = state.scroll_offset.saturating_add(3);
+                            }
+                            MouseEventKind::ScrollDown => {
+                                state.scroll_offset = state.scroll_offset.saturating_sub(3);
+                            }
+                            _ => {}
+                        }
                     }
                     Some(Event::Message(msg)) => {
                         state.status_message = msg;
@@ -1967,27 +1747,6 @@ mod tests {
     }
 
     #[test]
-    fn test_multiline_cursor_helpers() {
-        let mut state = TuiState::default();
-        state.input = "line1\nline2\nline3".to_string();
-        // Cursor at start of line2 (byte 6)
-        state.cursor_position = 6;
-        assert_eq!(state.line_start(), 6);
-        assert_eq!(state.line_end(), 11);
-        assert_eq!(state.current_column(), 0);
-
-        // Move up should go to line1
-        let up = state.cursor_up();
-        assert_eq!(up, Some(0));
-
-        // Cursor at middle of line2
-        state.cursor_position = 8; // "li" of line2
-        assert_eq!(state.current_column(), 2);
-        let down = state.cursor_down();
-        assert_eq!(down, Some(14)); // "li" of line3
-    }
-
-    #[test]
     fn test_spinner_char() {
         let mut state = TuiState::default();
         let c1 = state.spinner_char();
@@ -2045,29 +1804,6 @@ mod tests {
         let style = status_message_style("Warning: retrying", &colors);
         assert_eq!(style.fg, Some(colors.status_bar_warn));
         assert_eq!(style.bg, Some(colors.status_bar_bg));
-    }
-
-    #[test]
-    fn test_word_navigation_helpers() {
-        let mut state = TuiState::default();
-        state.input = "alpha beta  gamma".to_string();
-
-        assert_eq!(state.word_start_left(state.input.len()), 12); // gamma
-        assert_eq!(state.word_start_left(11), 6); // beta
-        assert_eq!(state.word_end_right(0), 5); // alpha
-        assert_eq!(state.word_end_right(6), 10); // beta
-    }
-
-    #[test]
-    fn test_ctrl_w_delete_previous_word_behavior() {
-        let mut state = TuiState::default();
-        state.input = "hello brave new world".to_string();
-        state.cursor_position = state.input.len();
-
-        let start = state.word_start_left(state.cursor_position);
-        state.input.drain(start..state.cursor_position);
-        state.cursor_position = start;
-        assert_eq!(state.input, "hello brave new ");
     }
 
     #[test]

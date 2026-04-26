@@ -7,10 +7,37 @@
 
 use std::collections::HashSet;
 use std::io::{self, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crossterm::event::{self, Event, KeyCode, KeyEvent};
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode};
 use crossterm::{cursor, execute, terminal};
+
+/// True while an embedded picker owns terminal key input.
+///
+/// The TUI event pump must pause reads during this interval to avoid
+/// concurrent consumers on the same crossterm input stream.
+static EMBEDDED_PICKER_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Return whether an embedded picker is currently active.
+pub fn embedded_picker_active() -> bool {
+    EMBEDDED_PICKER_ACTIVE.load(Ordering::SeqCst)
+}
+
+struct EmbeddedPickerGuard;
+
+impl EmbeddedPickerGuard {
+    fn enter() -> Self {
+        EMBEDDED_PICKER_ACTIVE.store(true, Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for EmbeddedPickerGuard {
+    fn drop(&mut self) {
+        EMBEDDED_PICKER_ACTIVE.store(false, Ordering::SeqCst);
+    }
+}
 
 /// Result of a checklist interaction.
 #[derive(Debug, Clone)]
@@ -98,6 +125,7 @@ pub fn curses_select_embedded(title: &str, items: &[String], initial_index: usiz
     if !atty_is_tty() {
         return numbered_select_fallback(title, items, clamped_initial);
     }
+    let _guard = EmbeddedPickerGuard::enter();
     match curses_select_inner(title, items, clamped_initial, false) {
         Ok(result) => result,
         Err(_) => numbered_select_fallback(title, items, clamped_initial),
