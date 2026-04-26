@@ -793,11 +793,13 @@ pub fn render(frame: &mut Frame, app: &App, state: &TuiState, theme: &Theme) {
 
     // Layout: header, messages, completions (optional), input, status bar
     let header_height = 2;
-    let input_height = 4;
+    let composer_lines = state.input.matches('\n').count() as u16 + 1;
+    let input_height = (composer_lines + 2).clamp(3, 6);
+    let completion_rows = state.completions.len().min(6) as u16;
     let completion_height = if state.completions.is_empty() {
         0
     } else {
-        state.completions.len() as u16 + 2
+        completion_rows + 2
     };
     let status_height = 1;
 
@@ -1276,15 +1278,32 @@ fn render_messages(
     colors: &crate::theme::RatatuiColors,
 ) {
     let lines = build_transcript_lines(&app.messages, state, styles, colors);
-    let viewport_rows = usize::from(area.height.max(1));
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Conversation ")
+        .border_style(Style::default().fg(colors.status_bar_dim));
+    let inner = block.inner(area);
+    if inner.width == 0 || inner.height == 0 {
+        frame.render_widget(block, area);
+        return;
+    }
+
+    let viewport_rows = usize::from(inner.height.max(1));
     let max_hidden_from_bottom = lines.len().saturating_sub(viewport_rows);
     let hidden_from_bottom = usize::from(state.scroll_offset).min(max_hidden_from_bottom);
     let end = lines.len().saturating_sub(hidden_from_bottom);
     let start = end.saturating_sub(viewport_rows);
-    let visible_lines: Vec<Line<'static>> = lines[start..end].to_vec();
+    let mut visible_lines: Vec<Line<'static>> = lines[start..end].to_vec();
+    if visible_lines.len() < viewport_rows {
+        let pad = viewport_rows - visible_lines.len();
+        let mut padded = Vec::with_capacity(viewport_rows);
+        padded.extend((0..pad).map(|_| Line::from(String::new())));
+        padded.extend(visible_lines);
+        visible_lines = padded;
+    }
 
     let paragraph = Paragraph::new(Text::from(visible_lines))
-        .block(Block::default().borders(Borders::NONE))
+        .block(block)
         .wrap(Wrap { trim: false });
 
     frame.render_widget(paragraph, area);
@@ -1298,9 +1317,22 @@ fn render_completions(
     area: Rect,
     colors: &crate::theme::RatatuiColors,
 ) {
+    let inner_rows = usize::from(area.height.saturating_sub(2));
+    if inner_rows == 0 {
+        return;
+    }
+    let mut start = 0usize;
+    if let Some(sel) = selected {
+        if sel >= inner_rows {
+            start = sel + 1 - inner_rows;
+        }
+    }
+    let end = (start + inner_rows).min(completions.len());
     let items: Vec<Line<'static>> = completions
         .iter()
         .enumerate()
+        .skip(start)
+        .take(end.saturating_sub(start))
         .map(|(i, cmd)| {
             let style = if selected == Some(i) {
                 Style::default()

@@ -43,7 +43,9 @@ pub mod webhook_delivery;
 
 // Re-export primary types
 pub use app::App;
-pub use checklist::{curses_checklist, curses_select, ChecklistResult, SelectResult};
+pub use checklist::{
+    curses_checklist, curses_select, curses_select_embedded, ChecklistResult, SelectResult,
+};
 pub use claw_migrate::{run_migration, MigrateOptions, MigrationResult};
 pub use cli::{Cli, CliCommand};
 pub use commands::CommandResult;
