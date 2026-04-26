@@ -128,12 +128,12 @@ pub async fn handle_slash_command(
     match cmd {
         "/new" => {
             app.new_session();
-            println!("[New session started: {}]", app.session_id);
+            emit_command_output(app, format!("[New session started: {}]", app.session_id));
             Ok(CommandResult::Handled)
         }
         "/reset" => {
             app.reset_session();
-            println!("[Session reset]");
+            emit_command_output(app, "[Session reset]");
             Ok(CommandResult::Handled)
         }
         "/retry" => {
@@ -142,7 +142,7 @@ pub async fn handle_slash_command(
         }
         "/undo" => {
             app.undo_last();
-            println!("[Last exchange undone]");
+            emit_command_output(app, "[Last exchange undone]");
             Ok(CommandResult::Handled)
         }
         "/model" => handle_model_command(app, args).await,
@@ -162,17 +162,20 @@ pub async fn handle_slash_command(
         "/reasoning" => handle_reasoning_command(app),
         "/policy" => handle_policy_command(app, args),
         "/help" => {
-            print_help();
+            print_help(app);
             Ok(CommandResult::Handled)
         }
         "/quit" | "/exit" => {
-            println!("Goodbye!");
+            emit_command_output(app, "Goodbye!");
             Ok(CommandResult::Quit)
         }
         _ => {
-            println!(
-                "Unknown command: {}. Type /help for available commands.",
-                cmd
+            emit_command_output(
+                app,
+                format!(
+                    "Unknown command: {}. Type /help for available commands.",
+                    cmd
+                ),
             );
             Ok(CommandResult::Handled)
         }
@@ -224,7 +227,10 @@ async fn pick_model_for_provider(
 ) -> Result<bool, AgentError> {
     let models = provider_model_ids(provider).await;
     if models.is_empty() {
-        println!("No models available for provider '{}'.", provider);
+        emit_command_output(
+            app,
+            format!("No models available for provider '{}'.", provider),
+        );
         return Ok(false);
     }
 
@@ -237,12 +243,12 @@ async fn pick_model_for_provider(
     let title = format!("Select {} model ({} available)", provider, labels.len());
     let pick = crate::curses_select(&title, &labels, default_index);
     if !pick.confirmed || pick.index >= models.len() {
-        println!("Model switch cancelled.");
+        emit_command_output(app, "Model switch cancelled.");
         return Ok(false);
     }
     let provider_model = format!("{}:{}", provider, models[pick.index].trim());
     app.switch_model(&provider_model);
-    println!("Model switched to: {}", provider_model);
+    emit_command_output(app, format!("Model switched to: {}", provider_model));
     Ok(true)
 }
 
@@ -252,17 +258,17 @@ async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandRes
         ModelSwitchRequest::SetDirect(raw) => {
             let provider_model = normalize_provider_model(&raw)?;
             app.switch_model(&provider_model);
-            println!("Model switched to: {}", provider_model);
+            emit_command_output(app, format!("Model switched to: {}", provider_model));
         }
         ModelSwitchRequest::PickModelFromProvider(provider) => {
             let current_model = app.current_model.clone();
             pick_model_for_provider(app, &provider, &current_model).await?;
         }
         ModelSwitchRequest::PickProviderThenModel => {
-            println!("Current model: {}", app.current_model);
+            emit_command_output(app, format!("Current model: {}", app.current_model));
             let providers: Vec<String> = known_providers.iter().map(|p| (*p).to_string()).collect();
             if providers.is_empty() {
-                println!("No providers are registered for selection.");
+                emit_command_output(app, "No providers are registered for selection.");
                 return Ok(CommandResult::Handled);
             }
             let (current_provider, _) = split_provider_model(&app.current_model);
@@ -273,7 +279,7 @@ async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandRes
             let provider_pick =
                 crate::curses_select("Select provider", &providers, default_provider_index);
             if !provider_pick.confirmed || provider_pick.index >= providers.len() {
-                println!("Model switch cancelled.");
+                emit_command_output(app, "Model switch cancelled.");
                 return Ok(CommandResult::Handled);
             }
             let provider = providers[provider_pick.index].as_str();
@@ -341,12 +347,15 @@ fn handle_personality_command(app: &mut App, args: &[&str]) -> Result<CommandRes
     Ok(CommandResult::Handled)
 }
 
-fn handle_skills_command(_app: &mut App) -> Result<CommandResult, AgentError> {
+fn handle_skills_command(app: &mut App) -> Result<CommandResult, AgentError> {
     let skills_dir = hermes_config::hermes_home().join("skills");
     if !skills_dir.exists() {
-        println!(
-            "No skills directory found at {}. Run `hermes setup` first.",
-            skills_dir.display()
+        emit_command_output(
+            app,
+            format!(
+                "No skills directory found at {}. Run `hermes setup` first.",
+                skills_dir.display()
+            ),
         );
         return Ok(CommandResult::Handled);
     }
@@ -378,14 +387,20 @@ fn handle_skills_command(_app: &mut App) -> Result<CommandResult, AgentError> {
     skills.sort_by(|a, b| a.0.cmp(&b.0));
 
     if skills.is_empty() {
-        println!("No installed skills found in {}.", skills_dir.display());
-        println!("Install skills with `hermes skills install <name>`.");
+        emit_command_output(
+            app,
+            format!(
+                "No installed skills found in {}.\nInstall skills with `hermes skills install <name>`.",
+                skills_dir.display()
+            ),
+        );
     } else {
-        println!("Installed skills ({}):", skills.len());
+        let mut out = format!("Installed skills ({}):\n", skills.len());
         for (name, title) in &skills {
-            println!("  • {} — {}", name, title);
+            out.push_str(&format!("- `{}` — {}\n", name, title));
         }
-        println!("\nUse `hermes skills inspect <name>` for details.");
+        out.push_str("\nUse `hermes skills inspect <name>` for details.");
+        emit_command_output(app, out.trim_end());
     }
     Ok(CommandResult::Handled)
 }
@@ -393,12 +408,13 @@ fn handle_skills_command(_app: &mut App) -> Result<CommandResult, AgentError> {
 fn handle_tools_command(app: &mut App) -> Result<CommandResult, AgentError> {
     let tools = app.tool_registry.list_tools();
     if tools.is_empty() {
-        println!("No tools registered.");
+        emit_command_output(app, "No tools registered.");
     } else {
-        println!("Registered tools ({}):", tools.len());
+        let mut out = format!("Registered tools ({}):\n", tools.len());
         for tool in &tools {
-            println!("  • {} — {}", tool.name, tool.description);
+            out.push_str(&format!("- `{}` — {}\n", tool.name, tool.description));
         }
+        emit_command_output(app, out.trim_end());
     }
     Ok(CommandResult::Handled)
 }
@@ -408,33 +424,42 @@ fn handle_config_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
         // Show full config
         let config_json = serde_json::to_string_pretty(&*app.config)
             .unwrap_or_else(|e| format!("<serialization error: {}>", e));
-        println!("{}", config_json);
+        emit_command_output(app, config_json);
     } else {
         match args[0] {
             "get" => {
                 if args.len() < 2 {
-                    println!("Usage: /config get <key>");
+                    emit_command_output(app, "Usage: /config get <key>");
                 } else {
                     let key = args[1];
                     let value = get_config_value(app, key);
                     match value {
-                        Some(v) => println!("{} = {}", key, v),
-                        None => println!("Key '{}' not found in configuration.", key),
+                        Some(v) => emit_command_output(app, format!("{} = {}", key, v)),
+                        None => emit_command_output(
+                            app,
+                            format!("Key '{}' not found in configuration.", key),
+                        ),
                     }
                 }
             }
             "set" => {
                 if args.len() < 3 {
-                    println!("Usage: /config set <key> <value>");
+                    emit_command_output(app, "Usage: /config set <key> <value>");
                 } else {
                     let key = args[1];
                     let value = args[2..].join(" ");
-                    set_config_value(app, key, &value);
-                    println!("Set {} = {}", key, value);
+                    if set_config_value(app, key, &value) {
+                        emit_command_output(app, format!("Set {} = {}", key, value));
+                    } else {
+                        emit_command_output(app, format!("Unknown configuration key: {}", key));
+                    }
                 }
             }
             _ => {
-                println!("Unknown config action '{}'. Use 'get' or 'set'.", args[0]);
+                emit_command_output(
+                    app,
+                    format!("Unknown config action '{}'. Use 'get' or 'set'.", args[0]),
+                );
             }
         }
     }
@@ -453,7 +478,7 @@ fn get_config_value(app: &App, key: &str) -> Option<String> {
 }
 
 /// Set a configuration value by dotted key path.
-fn set_config_value(app: &mut App, key: &str, value: &str) {
+fn set_config_value(app: &mut App, key: &str, value: &str) -> bool {
     match key {
         "model" => {
             app.config = Arc::new({
@@ -462,6 +487,7 @@ fn set_config_value(app: &mut App, key: &str, value: &str) {
                 cfg
             });
             app.switch_model(value);
+            true
         }
         "personality" => {
             app.config = Arc::new({
@@ -470,6 +496,7 @@ fn set_config_value(app: &mut App, key: &str, value: &str) {
                 cfg
             });
             app.switch_personality(value);
+            true
         }
         "max_turns" => {
             if let Ok(turns) = value.parse::<u32>() {
@@ -478,18 +505,22 @@ fn set_config_value(app: &mut App, key: &str, value: &str) {
                     cfg.max_turns = turns;
                     cfg
                 });
+                true
+            } else {
+                false
             }
         }
-        _ => {
-            println!("Unknown configuration key: {}", key);
-        }
+        _ => false,
     }
 }
 
 fn handle_compress_command(app: &mut App) -> Result<CommandResult, AgentError> {
     let msg_count = app.messages.len();
     if msg_count <= 2 {
-        println!("Context too small to compress ({} messages).", msg_count);
+        emit_command_output(
+            app,
+            format!("Context too small to compress ({} messages).", msg_count),
+        );
         return Ok(CommandResult::Handled);
     }
 
@@ -507,11 +538,14 @@ fn handle_compress_command(app: &mut App) -> Result<CommandResult, AgentError> {
         .push(hermes_core::Message::system(summary_text));
     app.messages.extend(retained);
 
-    println!(
-        "Compressed context: removed {} messages, kept {}. Total now: {}.",
-        removed,
-        keep,
-        app.messages.len(),
+    emit_command_output(
+        app,
+        format!(
+            "Compressed context: removed {} messages, kept {}. Total now: {}.",
+            removed,
+            keep,
+            app.messages.len(),
+        ),
     );
     Ok(CommandResult::Handled)
 }
@@ -535,20 +569,22 @@ fn handle_usage_command(app: &mut App) -> Result<CommandResult, AgentError> {
         .map(|m| m.content.as_ref().map_or(0, |c| c.len()) / 4)
         .sum();
 
-    println!("Session Usage Statistics");
-    println!("  Session:    {}", app.session_id);
-    println!("  Model:      {}", app.current_model);
-    println!("  Messages:   {} total", msg_count);
-    println!("    User:     {}", user_msgs);
-    println!("    Assistant: {}", assistant_msgs);
-    println!("  Est. tokens: ~{}", estimated_tokens);
+    emit_command_output(
+        app,
+        format!(
+            "Session Usage Statistics\n  Session:     {}\n  Model:       {}\n  Messages:    {} total\n    User:      {}\n    Assistant: {}\n  Est. tokens: ~{}",
+            app.session_id, app.current_model, msg_count, user_msgs, assistant_msgs, estimated_tokens
+        ),
+    );
     Ok(CommandResult::Handled)
 }
 
 fn handle_stop_command(app: &mut App) -> Result<CommandResult, AgentError> {
     app.interrupt_controller.interrupt(None);
-    println!("[Stopping current agent execution]");
-    println!("Agent execution halted. You can continue typing or use /retry.");
+    emit_command_output(
+        app,
+        "[Stopping current agent execution]\nAgent execution halted. You can continue typing or use /retry.",
+    );
     Ok(CommandResult::Handled)
 }
 
@@ -565,17 +601,19 @@ fn handle_status_command(app: &mut App) -> Result<CommandResult, AgentError> {
         .map(|m| m.content.as_ref().map_or(0, |c| c.len()) / 4)
         .sum();
 
-    println!("Session Status");
-    println!("  ID:           {}", app.session_id);
-    println!("  Model:        {}", app.current_model);
-    println!(
-        "  Personality:  {}",
-        app.current_personality.as_deref().unwrap_or("(none)")
+    emit_command_output(
+        app,
+        format!(
+            "Session Status\n  ID:            {}\n  Model:         {}\n  Personality:   {}\n  Turns:         {}\n  Messages:      {}\n  Est. tokens:   ~{}\n  Max turns:     {}",
+            app.session_id,
+            app.current_model,
+            app.current_personality.as_deref().unwrap_or("(none)"),
+            turns,
+            msg_count,
+            estimated_tokens,
+            app.config.max_turns
+        ),
     );
-    println!("  Turns:        {}", turns);
-    println!("  Messages:     {}", msg_count);
-    println!("  Est. tokens:  ~{}", estimated_tokens);
-    println!("  Max turns:    {}", app.config.max_turns);
     Ok(CommandResult::Handled)
 }
 
@@ -607,7 +645,7 @@ fn handle_save_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Ag
     std::fs::write(&path, json)
         .map_err(|e| AgentError::Io(format!("Failed to save session: {}", e)))?;
 
-    println!("Session saved to {}", path.display());
+    emit_command_output(app, format!("Session saved to {}", path.display()));
     Ok(CommandResult::Handled)
 }
 
@@ -617,7 +655,7 @@ fn handle_load_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Ag
     if args.is_empty() {
         // List available sessions
         if !sessions_dir.exists() {
-            println!("No saved sessions found.");
+            emit_command_output(app, "No saved sessions found.");
             return Ok(CommandResult::Handled);
         }
         let entries: Vec<String> = std::fs::read_dir(&sessions_dir)
@@ -639,13 +677,14 @@ fn handle_load_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Ag
             .unwrap_or_default();
 
         if entries.is_empty() {
-            println!("No saved sessions found.");
+            emit_command_output(app, "No saved sessions found.");
         } else {
-            println!("Saved sessions:");
+            let mut out = String::from("Saved sessions:\n");
             for name in &entries {
-                println!("  • {}", name);
+                out.push_str(&format!("- `{}`\n", name));
             }
-            println!("\nUsage: /load <session-name>");
+            out.push_str("\nUsage: `/load <session-name>`");
+            emit_command_output(app, out.trim_end());
         }
         return Ok(CommandResult::Handled);
     }
@@ -653,7 +692,10 @@ fn handle_load_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Ag
     let name = args[0];
     let path = sessions_dir.join(format!("{}.json", name));
     if !path.exists() {
-        println!("Session '{}' not found at {}", name, path.display());
+        emit_command_output(
+            app,
+            format!("Session '{}' not found at {}", name, path.display()),
+        );
         return Ok(CommandResult::Handled);
     }
 
@@ -674,22 +716,27 @@ fn handle_load_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Ag
             };
             app.messages.push(message);
         }
-        println!(
-            "Loaded session '{}' ({} messages)",
-            name,
-            app.messages.len()
+        emit_command_output(
+            app,
+            format!(
+                "Loaded session '{}' ({} messages)",
+                name,
+                app.messages.len()
+            ),
         );
     } else {
-        println!("Session file has no messages array.");
+        emit_command_output(app, "Session file has no messages array.");
     }
 
     Ok(CommandResult::Handled)
 }
 
-fn handle_background_command(_app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+fn handle_background_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     if args.is_empty() {
-        println!("Usage: /background <message>");
-        println!("Queues a task to run in the background while you continue chatting.");
+        emit_command_output(
+            app,
+            "Usage: /background <message>\nQueues a task to run in the background while you continue chatting.",
+        );
         return Ok(CommandResult::Handled);
     }
 
@@ -824,11 +871,16 @@ fn handle_background_command(_app: &mut App, args: &[&str]) -> Result<CommandRes
         }
     });
 
-    println!("[Background task queued: \"{}\"]", task);
-    println!("Job ID: {}", status["id"].as_str().unwrap_or("unknown"));
-    println!("Status: {}", status_path.display());
-    println!("Logs:   {}", log_path.display());
-    println!("This task runs in a detached `hermes chat --query ...` process.");
+    emit_command_output(
+        app,
+        format!(
+            "[Background task queued: \"{}\"]\nJob ID: {}\nStatus: {}\nLogs:   {}\nThis task runs in a detached `hermes chat --query ...` process.",
+            task,
+            status["id"].as_str().unwrap_or("unknown"),
+            status_path.display(),
+            log_path.display()
+        ),
+    );
 
     Ok(CommandResult::Handled)
 }
@@ -850,14 +902,18 @@ fn write_json_map(
     std::fs::write(path, content)
 }
 
-fn handle_verbose_command(_app: &mut App) -> Result<CommandResult, AgentError> {
+fn handle_verbose_command(app: &mut App) -> Result<CommandResult, AgentError> {
     let current = tracing::enabled!(tracing::Level::DEBUG);
     if current {
-        println!("Verbose mode: OFF (switching to info level)");
-        println!("(Runtime log level changes require restart — use `hermes -v` for verbose)");
+        emit_command_output(
+            app,
+            "Verbose mode: OFF (switching to info level)\n(Runtime log level changes require restart — use `hermes -v` for verbose)",
+        );
     } else {
-        println!("Verbose mode: ON (switching to debug level)");
-        println!("(Runtime log level changes require restart — use `hermes -v` for verbose)");
+        emit_command_output(
+            app,
+            "Verbose mode: ON (switching to debug level)\n(Runtime log level changes require restart — use `hermes -v` for verbose)",
+        );
     }
     Ok(CommandResult::Handled)
 }
@@ -873,15 +929,20 @@ fn handle_yolo_command(app: &mut App) -> Result<CommandResult, AgentError> {
     });
 
     if !new_val {
-        println!("YOLO mode: ON — tool executions will not require approval.");
-        println!("Be careful! The agent can now execute tools without confirmation.");
+        emit_command_output(
+            app,
+            "YOLO mode: ON — tool executions will not require approval.\nBe careful! The agent can now execute tools without confirmation.",
+        );
     } else {
-        println!("YOLO mode: OFF — tool executions will require approval.");
+        emit_command_output(
+            app,
+            "YOLO mode: OFF — tool executions will require approval.",
+        );
     }
     Ok(CommandResult::Handled)
 }
 
-fn handle_reasoning_command(_app: &mut App) -> Result<CommandResult, AgentError> {
+fn handle_reasoning_command(app: &mut App) -> Result<CommandResult, AgentError> {
     // Reasoning display is a runtime-only toggle; stored as thread-local state
     // since StreamingConfig doesn't have a show_reasoning field.
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -891,28 +952,34 @@ fn handle_reasoning_command(_app: &mut App) -> Result<CommandResult, AgentError>
     let new_val = !prev;
 
     if new_val {
-        println!("Reasoning display: ON — model reasoning will be shown.");
+        emit_command_output(
+            app,
+            "Reasoning display: ON — model reasoning will be shown.",
+        );
     } else {
-        println!("Reasoning display: OFF — model reasoning will be hidden.");
+        emit_command_output(
+            app,
+            "Reasoning display: OFF — model reasoning will be hidden.",
+        );
     }
     Ok(CommandResult::Handled)
 }
 
-fn handle_policy_command(_app: &mut App, _args: &[&str]) -> Result<CommandResult, AgentError> {
-    println!(
-        "The adaptive `/policy` CLI was removed — Hermes Python has no equivalent policy store."
+fn handle_policy_command(app: &mut App, _args: &[&str]) -> Result<CommandResult, AgentError> {
+    emit_command_output(
+        app,
+        "The adaptive `/policy` CLI was removed — Hermes Python has no equivalent policy store.",
     );
     Ok(CommandResult::Handled)
 }
 
-fn print_help() {
-    println!("Hermes Agent — Available Commands:");
-    println!();
+fn print_help(app: &mut App) {
+    let mut out = String::from("Hermes Agent — Available Commands:\n\n");
     for (cmd, desc) in SLASH_COMMANDS {
-        println!("  {:16} {}", cmd, desc);
+        out.push_str(&format!("`{:<16}` {}\n", cmd, desc));
     }
-    println!();
-    println!("You can also type any text to send it as a message to the agent.");
+    out.push_str("\nYou can also type any text to send it as a message to the agent.");
+    emit_command_output(app, out);
 }
 
 // ---------------------------------------------------------------------------
