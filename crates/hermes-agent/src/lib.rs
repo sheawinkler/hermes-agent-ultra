@@ -42,8 +42,8 @@ pub use agent_loop::{
 // Re-export context management
 pub use compression::summarize_messages_with_llm;
 pub use context::{
-    load_context_files, load_soul_md, load_soul_md_from, switch_personality, ContextManager,
-    SystemPromptBuilder,
+    builtin_personality_names, load_context_files, load_soul_md, load_soul_md_from,
+    switch_personality, ContextManager, SystemPromptBuilder,
 };
 
 // Re-export budget enforcement

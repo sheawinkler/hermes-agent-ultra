@@ -41,7 +41,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
         "/model",
         "Show current model, set directly, or pick provider/model interactively",
     ),
-    ("/personality", "Show or switch the current personality"),
+    (
+        "/personality",
+        "Show current personality, list built-ins, or switch mode",
+    ),
     ("/skills", "List available skills"),
     ("/tools", "List registered tools"),
     ("/config", "Show or modify configuration"),
@@ -282,16 +285,28 @@ async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandRes
 }
 
 fn handle_personality_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let builtin = hermes_agent::builtin_personality_names();
     if args.is_empty() {
-        // Show current personality
         match &app.current_personality {
             Some(p) => println!("Current personality: {}", p),
             None => println!("No personality set"),
         }
+        println!("Built-in personalities: {}", builtin.join(", "));
+    } else if args.len() == 1 && args[0].eq_ignore_ascii_case("list") {
+        println!("Built-in personalities: {}", builtin.join(", "));
     } else {
         let name = args.join(" ");
         app.switch_personality(&name);
         println!("Personality switched to: {}", name);
+        if !name.contains(char::is_whitespace)
+            && !name.eq_ignore_ascii_case("default")
+            && !builtin.iter().any(|n| n.eq_ignore_ascii_case(&name))
+        {
+            println!(
+                "Note: '{}' is not built-in. Hermes will look for personalities/{}.md or treat inline text as compatibility mode.",
+                name, name
+            );
+        }
     }
     Ok(CommandResult::Handled)
 }

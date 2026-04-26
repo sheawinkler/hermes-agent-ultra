@@ -117,6 +117,16 @@ The skill is designed for author/lint/diff/export flows with `@google/design.md`
 - Session persistence and search
 - Gateway adapters and API surfaces for production integration
 
+## Conversation Modes
+
+Pi-style conversation traits are available through built-in personalities:
+
+- `companion`: warm, non-judgmental support with active listening
+- `decision-coach`: structured options + trade-off guidance
+- `reflective`: focused clarifying questions before advice
+
+Use `/personality list` to see all built-ins and `/personality <name>` to switch.
+
 ## Architecture
 
 Workspace crates are organized by runtime role:
