@@ -18,7 +18,7 @@ use crate::registry::ToolRegistry;
 /// Web search and extraction tools.
 pub const TOOLSET_WEB: &[&str] = &["web_search", "web_extract"];
 /// Terminal command execution tools.
-pub const TOOLSET_TERMINAL: &[&str] = &["terminal", "process"];
+pub const TOOLSET_TERMINAL: &[&str] = &["terminal", "process", "process_registry"];
 /// File system tools.
 pub const TOOLSET_FILE: &[&str] = &["read_file", "write_file", "patch", "search_files"];
 /// Browser automation tools.
@@ -63,6 +63,17 @@ pub const TOOLSET_HOMEASSISTANT: &[&str] = &[
     "ha_list_services",
     "ha_call_service",
 ];
+/// Text-to-speech tools.
+pub const TOOLSET_TTS: &[&str] = &["text_to_speech", "tts_premium"];
+/// Voice input/mode tools.
+pub const TOOLSET_VOICE: &[&str] = &["transcription", "voice_mode"];
+/// Security helpers.
+pub const TOOLSET_SECURITY: &[&str] = &["osv_check", "url_safety"];
+/// System utility helpers.
+pub const TOOLSET_SYSTEM: &[&str] =
+    &["env_passthrough", "credential_files", "tool_result_storage"];
+/// Mixture-of-agents workflow.
+pub const TOOLSET_MIXTURE_OF_AGENTS: &[&str] = &["mixture_of_agents"];
 
 // ---------------------------------------------------------------------------
 // Toolset
@@ -206,6 +217,29 @@ impl ToolsetManager {
                 .map(|s| s.to_string())
                 .collect(),
         ));
+        self.register(Toolset::new(
+            "tts",
+            TOOLSET_TTS.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "voice",
+            TOOLSET_VOICE.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "security",
+            TOOLSET_SECURITY.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "system",
+            TOOLSET_SYSTEM.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "mixture_of_agents",
+            TOOLSET_MIXTURE_OF_AGENTS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        ));
 
         // Platform composite toolsets
         self.register(Toolset::with_includes(
@@ -216,12 +250,18 @@ impl ToolsetManager {
                 "file",
                 "browser",
                 "vision",
+                "image_gen",
                 "skills",
                 "memory",
+                "session_search",
                 "todo",
                 "clarify",
                 "code_execution",
                 "delegation",
+                "cronjob",
+                "messaging",
+                "homeassistant",
+                "tts",
             ]
             .into_iter()
             .map(String::from)
@@ -229,23 +269,7 @@ impl ToolsetManager {
         ));
         self.register(Toolset::with_includes(
             "hermes-telegram",
-            vec![
-                "web",
-                "terminal",
-                "file",
-                "browser",
-                "vision",
-                "image_gen",
-                "skills",
-                "memory",
-                "todo",
-                "clarify",
-                "cronjob",
-                "messaging",
-            ]
-            .into_iter()
-            .map(String::from)
-            .collect(),
+            vec!["hermes-cli"].into_iter().map(String::from).collect(),
         ));
         self.register(Toolset::with_includes(
             "hermes-discord",
@@ -511,6 +535,13 @@ mod tests {
         assert!(tools.contains(&"web_search".to_string()));
         assert!(tools.contains(&"terminal".to_string()));
         assert!(tools.contains(&"read_file".to_string()));
+        // Python parity core for CLI.
+        assert!(tools.contains(&"image_generate".to_string()));
+        assert!(tools.contains(&"session_search".to_string()));
+        assert!(tools.contains(&"text_to_speech".to_string()));
+        assert!(tools.contains(&"send_message".to_string()));
+        assert!(tools.contains(&"ha_call_service".to_string()));
+        assert!(tools.contains(&"cronjob".to_string()));
     }
 
     #[test]
@@ -538,6 +569,18 @@ mod tests {
             assert!(
                 tools.contains(&"cronjob".to_string()),
                 "preset {preset} should include cronjob"
+            );
+            assert!(
+                tools.contains(&"session_search".to_string()),
+                "preset {preset} should include session_search"
+            );
+            assert!(
+                tools.contains(&"text_to_speech".to_string()),
+                "preset {preset} should include text_to_speech"
+            );
+            assert!(
+                tools.contains(&"ha_call_service".to_string()),
+                "preset {preset} should include homeassistant tools"
             );
         }
     }
