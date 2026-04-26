@@ -290,6 +290,32 @@ impl TuiState {
     fn handle_insert_key(&mut self, key: KeyEvent, app: &mut App) -> bool {
         use crossterm::event::{KeyCode, KeyModifiers};
         let mods = key.modifiers;
+        let completion_nav_active = self.input.starts_with('/')
+            && !self.completions.is_empty()
+            && !self.history_search_active;
+
+        if completion_nav_active && mods.is_empty() {
+            match key.code {
+                KeyCode::Up => {
+                    self.move_completion_selection(-1);
+                    return false;
+                }
+                KeyCode::Down => {
+                    self.move_completion_selection(1);
+                    return false;
+                }
+                KeyCode::PageUp => {
+                    self.move_completion_selection(-6);
+                    return false;
+                }
+                KeyCode::PageDown => {
+                    self.move_completion_selection(6);
+                    return false;
+                }
+                _ => {}
+            }
+        }
+
         match key.code {
             // Scroll transcript without leaving insert mode.
             KeyCode::PageUp => {
@@ -323,6 +349,10 @@ impl TuiState {
             }
             // Plain Enter → insert newline (multi-line editing)
             KeyCode::Enter => {
+                if self.input.starts_with('/') && !self.input.contains('\n') {
+                    // Slash commands submit on Enter from the run-loop.
+                    return false;
+                }
                 self.input.insert(self.cursor_position, '\n');
                 self.cursor_position += 1;
                 self.selection_anchor = None;
@@ -549,15 +579,7 @@ impl TuiState {
             }
             KeyCode::Tab => {
                 // Accept completion
-                if let Some(idx) = self.completion_index {
-                    if idx < self.completions.len() {
-                        self.input = self.completions[idx].clone();
-                        self.cursor_position = self.input.len();
-                    }
-                } else if !self.completions.is_empty() {
-                    self.input = self.completions[0].clone();
-                    self.cursor_position = self.input.len();
-                }
+                self.accept_completion();
                 self.completions.clear();
                 self.completion_index = None;
                 false
@@ -635,6 +657,35 @@ impl TuiState {
         } else {
             self.completions.clear();
             self.completion_index = None;
+        }
+    }
+
+    fn move_completion_selection(&mut self, delta: isize) {
+        if self.completions.is_empty() {
+            self.completion_index = None;
+            return;
+        }
+        let len = self.completions.len() as isize;
+        let current = self.completion_index.unwrap_or(0) as isize;
+        let mut next = current + delta;
+        while next < 0 {
+            next += len;
+        }
+        next %= len;
+        self.completion_index = Some(next as usize);
+    }
+
+    fn accept_completion(&mut self) {
+        if let Some(idx) = self.completion_index {
+            if idx < self.completions.len() {
+                self.input = self.completions[idx].clone();
+                self.cursor_position = self.input.len();
+                return;
+            }
+        }
+        if let Some(first) = self.completions.first() {
+            self.input = first.clone();
+            self.cursor_position = self.input.len();
         }
     }
 
@@ -786,6 +837,9 @@ pub fn render(frame: &mut Frame, app: &App, state: &TuiState, theme: &Theme) {
     let colors = theme.colors.to_ratatui_colors();
 
     let size = frame.area();
+    if size.width == 0 || size.height == 0 {
+        return;
+    }
     frame.render_widget(
         Block::default().style(Style::default().bg(colors.background)),
         size,
@@ -1254,6 +1308,39 @@ fn build_transcript_lines(
     }
 
     if lines.is_empty() {
+        let neon = Style::default()
+            .fg(colors.status_bar_strong)
+            .bg(colors.background)
+            .add_modifier(Modifier::BOLD);
+        let dim = Style::default()
+            .fg(colors.status_bar_dim)
+            .bg(colors.background);
+        let accent = Style::default().fg(colors.accent).bg(colors.background);
+        let hero = [
+            " ╔══════════════════════════════════════════════════════════════════╗",
+            " ║                                                                  ║",
+            " ║   ██╗  ██╗███████╗██████╗ ███╗   ███╗███████╗███████╗           ║",
+            " ║   ██║  ██║██╔════╝██╔══██╗████╗ ████║██╔════╝██╔════╝           ║",
+            " ║   ███████║█████╗  ██████╔╝██╔████╔██║█████╗  ███████╗           ║",
+            " ║   ██╔══██║██╔══╝  ██╔══██╗██║╚██╔╝██║██╔══╝  ╚════██║           ║",
+            " ║   ██║  ██║███████╗██║  ██║██║ ╚═╝ ██║███████╗███████║           ║",
+            " ║   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚══════╝╚══════╝           ║",
+            " ║                                                                  ║",
+            " ║        AGENT ULTRA • RETRO NEON OPS • READY FOR EXECUTION       ║",
+            " ║                                                                  ║",
+            " ╚══════════════════════════════════════════════════════════════════╝",
+        ];
+        for (idx, row) in hero.iter().enumerate() {
+            let style = if idx == 0 || idx == hero.len() - 1 {
+                accent
+            } else if row.contains("AGENT ULTRA") {
+                neon
+            } else {
+                dim
+            };
+            lines.push(Line::from(vec![Span::styled((*row).to_string(), style)]));
+        }
+        lines.push(Line::from(String::new()));
         lines.push(Line::from(vec![Span::styled(
             " Start chatting — your messages and Hermes replies will appear here.",
             Style::default()
@@ -1323,7 +1410,7 @@ fn render_completions_popup(
     input_area: Rect,
     colors: &crate::theme::RatatuiColors,
 ) {
-    let max_height = 8usize;
+    let max_height = 12usize;
     let visible_cap = completions.len().min(max_height);
     let inner_rows = visible_cap.max(1);
     if inner_rows == 0 {
@@ -1338,10 +1425,15 @@ fn render_completions_popup(
     let end = (start + inner_rows).min(completions.len());
     let max_item_width = completions[start..end]
         .iter()
-        .map(|c| c.chars().count())
+        .map(|c| {
+            let desc = crate::commands::help_for(c).unwrap_or("");
+            format!("{c}  {desc}").chars().count()
+        })
         .max()
         .unwrap_or(0);
-    let popup_width = (max_item_width as u16 + 8).clamp(28, messages_area.width.saturating_sub(2));
+    let popup_max_width = messages_area.width.saturating_sub(2).max(1);
+    let popup_min_width = 28u16.min(popup_max_width);
+    let popup_width = (max_item_width as u16 + 8).clamp(popup_min_width, popup_max_width);
     let popup_height = (end.saturating_sub(start) as u16 + 2).max(3);
     if popup_width == 0 || popup_height == 0 {
         return;
@@ -1376,12 +1468,28 @@ fn render_completions_popup(
                     .fg(colors.status_bar_text)
                     .bg(colors.status_bar_bg)
             };
+            let desc = crate::commands::help_for(cmd).unwrap_or("");
+            let text = if desc.is_empty() {
+                cmd.to_string()
+            } else {
+                format!("{:<18} {}", cmd, desc)
+            };
             Line::from(Span::styled(
-                truncate_chars(cmd, popup_width.saturating_sub(4) as usize),
+                truncate_chars(&text, popup_width.saturating_sub(4) as usize),
                 style,
             ))
         })
         .collect();
+
+    let title = if completions.len() > visible_cap {
+        format!(
+            " Slash Commands ({}/{}) ↑↓ scroll Tab accept ",
+            end,
+            completions.len()
+        )
+    } else {
+        " Slash Commands ".to_string()
+    };
 
     let paragraph = Paragraph::new(Text::from(items))
         .block(
@@ -1389,7 +1497,7 @@ fn render_completions_popup(
                 .borders(Borders::ALL)
                 .style(Style::default().bg(colors.status_bar_bg))
                 .border_style(Style::default().fg(colors.status_bar_strong))
-                .title(" Slash Completions "),
+                .title(title),
         )
         .wrap(Wrap { trim: true });
     frame.render_widget(Clear, popup);
@@ -1692,10 +1800,15 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                 break;
                             }
 
-                            // Ctrl+Enter or Alt+Enter submits the input
-                            let is_submit = (key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+                            // Ctrl+Enter / Alt+Enter submits. For slash commands, Enter submits too.
+                            let is_submit_combo = (key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
                                 || key.modifiers.contains(crossterm::event::KeyModifiers::ALT))
                                 && key.code == crossterm::event::KeyCode::Enter;
+                            let is_slash_enter = key.code == crossterm::event::KeyCode::Enter
+                                && key.modifiers.is_empty()
+                                && state.input.starts_with('/')
+                                && !state.input.contains('\n');
+                            let is_submit = is_submit_combo || is_slash_enter;
 
                             if is_submit {
                                 let input = state.input.clone();
@@ -1723,6 +1836,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                         Err(e) => {
                                             state.processing = false;
                                             state.status_message = format!("Error: {}", e);
+                                            app.push_ui_assistant(format!("Error: {}", e));
                                         }
                                     }
                                 }

@@ -433,7 +433,11 @@ impl App {
                 }
                 if result.interrupted {
                     tracing::info!("Agent loop returned interrupted=true (graceful stop)");
-                    println!("[Agent execution interrupted]");
+                    if self.stream_handle.is_some() {
+                        self.push_ui_assistant("[Agent execution interrupted]");
+                    } else {
+                        println!("[Agent execution interrupted]");
+                    }
                 } else if !result.finished_naturally {
                     tracing::warn!(
                         "Agent stopped after {} turns (did not finish naturally)",
@@ -451,7 +455,11 @@ impl App {
                 } else {
                     tracing::info!("Agent interrupted by user");
                 }
-                println!("[Agent execution interrupted]");
+                if self.stream_handle.is_some() {
+                    self.push_ui_assistant("[Agent execution interrupted]");
+                } else {
+                    println!("[Agent execution interrupted]");
+                }
             }
             Err(e) => {
                 if let Some(handle) = &self.stream_handle {

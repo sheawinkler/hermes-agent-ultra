@@ -91,9 +91,10 @@ use tokio::sync::{broadcast, mpsc};
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+    let effective_command = cli.effective_command();
 
     // Initialize tracing
-    init_tracing(cli.verbose);
+    init_tracing(cli.verbose, matches!(effective_command, CliCommand::Hermes));
     if let Err(err) = hydrate_provider_env_from_vault_for_cli(&cli).await {
         tracing::warn!("Secret-vault hydration skipped: {}", err);
     }
@@ -107,7 +108,7 @@ async fn main() {
 
     tracing::debug!("Hermes Agent starting");
 
-    let result = match cli.effective_command() {
+    let result = match effective_command {
         CliCommand::Hermes => run_interactive(cli).await,
         CliCommand::Chat {
             query,
@@ -369,8 +370,26 @@ async fn main() {
 }
 
 /// Initialize the tracing subscriber with env filter.
-fn init_tracing(verbose: bool) {
-    let default = if verbose { "debug" } else { "warn" };
+fn init_tracing(verbose: bool, interactive_tui: bool) {
+    let default = if interactive_tui {
+        if verbose {
+            "info"
+        } else {
+            "error"
+        }
+    } else if verbose {
+        "debug"
+    } else {
+        "warn"
+    };
+    if interactive_tui
+        && std::env::var("HERMES_TUI_ALLOW_STDERR_LOGS")
+            .ok()
+            .as_deref()
+            != Some("1")
+    {
+        std::env::set_var("RUST_LOG", default);
+    }
     init_telemetry_from_env("hermes-cli", default);
 }
 
