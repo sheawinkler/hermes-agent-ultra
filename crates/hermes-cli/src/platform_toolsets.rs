@@ -76,6 +76,26 @@ pub fn resolve_platform_tool_names(
         }
     }
 
+    // Merge explicit tool toggles from config:
+    // - `enabled` acts as additive allow-list entries.
+    // - `disabled` always removes entries.
+    for tool_name in &config.tools_config.enabled {
+        let trimmed = tool_name.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if registry.get_tool(trimmed).is_some() {
+            names.insert(trimmed.to_string());
+        }
+    }
+    for tool_name in &config.tools_config.disabled {
+        let trimmed = tool_name.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        names.remove(trimmed);
+    }
+
     let mut out: Vec<String> = names.into_iter().collect();
     out.sort();
     out
@@ -215,5 +235,28 @@ mod tests {
         let names = resolve_platform_tool_names(&cfg, "discord", &reg);
         assert!(names.contains(&"send_message".to_string()));
         assert!(names.contains(&"terminal".to_string()));
+    }
+
+    #[test]
+    fn tools_config_enabled_adds_tools_outside_platform_toolset() {
+        let mut cfg = GatewayConfig::default();
+        cfg.platform_toolsets
+            .insert("cli".to_string(), vec!["web".to_string()]);
+        cfg.tools_config.enabled = vec!["terminal".to_string()];
+        let reg = registry_with_minimal_tools();
+        let names = resolve_platform_tool_names(&cfg, "cli", &reg);
+        assert!(names.contains(&"web_search".to_string()));
+        assert!(names.contains(&"terminal".to_string()));
+    }
+
+    #[test]
+    fn tools_config_disabled_removes_even_if_platform_enables() {
+        let mut cfg = GatewayConfig::default();
+        cfg.platform_toolsets
+            .insert("cli".to_string(), vec!["hermes-cli".to_string()]);
+        cfg.tools_config.disabled = vec!["terminal".to_string()];
+        let reg = registry_with_minimal_tools();
+        let names = resolve_platform_tool_names(&cfg, "cli", &reg);
+        assert!(!names.contains(&"terminal".to_string()));
     }
 }
