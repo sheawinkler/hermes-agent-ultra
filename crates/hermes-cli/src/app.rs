@@ -54,6 +54,10 @@ pub struct App {
     /// Conversation messages for the current session.
     pub messages: Vec<hermes_core::Message>,
 
+    /// UI-only transcript messages (slash commands, local notices), anchored
+    /// to a conversation index so they do not pollute model context.
+    pub ui_messages: Vec<UiTranscriptMessage>,
+
     /// Unique identifier for the current session.
     pub session_id: String,
 
@@ -103,6 +107,15 @@ pub struct SessionInfo {
     pub personality: Option<String>,
     pub message_count: usize,
     pub created_at: String,
+}
+
+/// A TUI-local transcript message anchored to a conversation position.
+#[derive(Debug, Clone)]
+pub struct UiTranscriptMessage {
+    /// Conversation message count at insertion time.
+    pub insert_at: usize,
+    /// Rendered message payload.
+    pub message: hermes_core::Message,
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +214,7 @@ impl App {
             tool_registry,
             tool_schemas,
             messages: Vec::new(),
+            ui_messages: Vec::new(),
             session_id: Uuid::new_v4().to_string(),
             running: true,
             current_model,
@@ -252,6 +266,9 @@ impl App {
         self.history_index = self.input_history.len();
 
         if trimmed.starts_with('/') {
+            if self.stream_handle.is_some() {
+                self.push_ui_user(trimmed);
+            }
             // Parse the slash command and its arguments
             let parts: Vec<&str> = trimmed.splitn(2, ' ').collect();
             let cmd = parts[0];
@@ -288,6 +305,10 @@ impl App {
             return self.handle_input(&format!("/{}", trimmed)).await;
         };
 
+        if self.stream_handle.is_some() {
+            self.push_ui_user(trimmed);
+        }
+
         let args: Vec<&str> = parts
             .get(1)
             .map(|s| s.split_whitespace().collect())
@@ -304,6 +325,7 @@ impl App {
     pub fn new_session(&mut self) {
         self.session_id = Uuid::new_v4().to_string();
         self.messages.clear();
+        self.ui_messages.clear();
         self.input_history.clear();
         self.history_index = 0;
     }
@@ -311,6 +333,7 @@ impl App {
     /// Reset the current session (clear messages but keep session ID).
     pub fn reset_session(&mut self) {
         self.messages.clear();
+        self.ui_messages.clear();
         self.input_history.clear();
         self.history_index = 0;
     }
@@ -334,6 +357,7 @@ impl App {
             self.messages.push(last_user_msg);
             // Re-run the agent
             self.run_agent().await?;
+            self.prune_ui_after_current_messages();
         }
 
         Ok(())
@@ -349,6 +373,7 @@ impl App {
         {
             // Remove everything from the last user message onward
             self.messages.truncate(idx);
+            self.prune_ui_after_current_messages();
         }
     }
 
@@ -402,6 +427,7 @@ impl App {
         match result {
             Ok(result) => {
                 self.messages = result.messages;
+                self.prune_ui_after_current_messages();
                 if let Some(handle) = &self.stream_handle {
                     handle.send_done();
                 }
@@ -436,6 +462,46 @@ impl App {
         }
 
         Ok(())
+    }
+
+    /// Append a UI-only message anchored to the current conversation size.
+    pub fn push_ui_message(&mut self, message: hermes_core::Message) {
+        self.ui_messages.push(UiTranscriptMessage {
+            insert_at: self.messages.len(),
+            message,
+        });
+    }
+
+    /// Append a UI-only user transcript line.
+    pub fn push_ui_user(&mut self, text: impl Into<String>) {
+        self.push_ui_message(hermes_core::Message::user(text.into()));
+    }
+
+    /// Append a UI-only assistant transcript line.
+    pub fn push_ui_assistant(&mut self, text: impl Into<String>) {
+        self.push_ui_message(hermes_core::Message::assistant(text.into()));
+    }
+
+    /// Build the merged transcript for TUI rendering.
+    ///
+    /// This includes durable conversation history and UI-only events in
+    /// chronological order, while preserving model-facing context purity.
+    pub fn transcript_messages(&self) -> Vec<hermes_core::Message> {
+        let mut merged = Vec::with_capacity(self.messages.len() + self.ui_messages.len());
+        for idx in 0..=self.messages.len() {
+            for ui in self.ui_messages.iter().filter(|m| m.insert_at == idx) {
+                merged.push(ui.message.clone());
+            }
+            if idx < self.messages.len() {
+                merged.push(self.messages[idx].clone());
+            }
+        }
+        merged
+    }
+
+    fn prune_ui_after_current_messages(&mut self) {
+        let cap = self.messages.len();
+        self.ui_messages.retain(|m| m.insert_at <= cap);
     }
 
     /// Get a serializable snapshot of the current session info.

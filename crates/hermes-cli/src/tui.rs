@@ -20,7 +20,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph, Wrap};
 use ratatui::Frame;
 use tokio::sync::mpsc;
 
@@ -791,54 +791,47 @@ pub fn render(frame: &mut Frame, app: &App, state: &TuiState, theme: &Theme) {
         size,
     );
 
-    // Layout: header, messages, completions (optional), input, status bar
-    let header_height = 2;
+    // Layout: header, messages, input, status bar
+    let header_height = 1;
     let composer_lines = state.input.matches('\n').count() as u16 + 1;
     let input_height = (composer_lines + 2).clamp(3, 6);
-    let completion_rows = state.completions.len().min(6) as u16;
-    let completion_height = if state.completions.is_empty() {
-        0
-    } else {
-        completion_rows + 2
-    };
     let status_height = 1;
 
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(header_height),     // header
-            Constraint::Min(4),                    // messages
-            Constraint::Length(completion_height), // completions
-            Constraint::Length(input_height),      // input
-            Constraint::Length(status_height),     // status
+            Constraint::Length(header_height), // header
+            Constraint::Min(5),                // messages
+            Constraint::Length(input_height),  // input
+            Constraint::Length(status_height), // status
         ])
         .split(size);
 
     let header_area = vertical[0];
     let messages_area = vertical[1];
-    let completions_area = vertical[2];
-    let input_area = vertical[3];
-    let status_area = vertical[4];
+    let input_area = vertical[2];
+    let status_area = vertical[3];
 
     render_header(frame, app, header_area, &colors);
 
     // --- Render message history ---
     render_messages(frame, app, state, messages_area, &resolved, &colors);
 
-    // --- Render completions ---
-    if !state.completions.is_empty() {
-        render_completions(
-            frame,
-            &state.completions,
-            state.completion_index,
-            completions_area,
-            &colors,
-        );
-    }
-
     // --- Render input area ---
     if let Some(pos) = render_input(frame, state, input_area, &colors) {
         frame.set_cursor_position(pos);
+    }
+
+    // --- Render completions as popup above composer ---
+    if !state.completions.is_empty() {
+        render_completions_popup(
+            frame,
+            &state.completions,
+            state.completion_index,
+            messages_area,
+            input_area,
+            &colors,
+        );
     }
 
     // --- Render status bar ---
@@ -847,63 +840,17 @@ pub fn render(frame: &mut Frame, app: &App, state: &TuiState, theme: &Theme) {
 
 fn render_header(frame: &mut Frame, app: &App, area: Rect, colors: &crate::theme::RatatuiColors) {
     let session_short = &app.session_id[..8.min(app.session_id.len())];
-    let text = Text::from(vec![
-        Line::from(vec![
-            Span::styled(
-                " HERMES ",
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(colors.status_bar_good)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                " AGENT ",
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(colors.warning)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                " ULTRA ",
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(colors.status_bar_strong)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                format!("   SESSION {session_short}"),
-                Style::default()
-                    .fg(colors.status_bar_text)
-                    .bg(colors.status_bar_bg),
-            ),
-        ]),
-        Line::from(vec![
-            Span::styled(
-                "  Ctrl+Enter send",
-                Style::default()
-                    .fg(colors.status_bar_text)
-                    .bg(colors.status_bar_bg),
-            ),
-            Span::styled(
-                "  •  Ctrl/Alt+←/→ word nav",
-                Style::default()
-                    .fg(colors.status_bar_dim)
-                    .bg(colors.status_bar_bg),
-            ),
-            Span::styled(
-                "  •  Ctrl+W delete word",
-                Style::default()
-                    .fg(colors.status_bar_dim)
-                    .bg(colors.status_bar_bg),
-            ),
-            Span::styled(
-                "  •  PgUp/PgDn scroll",
-                Style::default()
-                    .fg(colors.status_bar_dim)
-                    .bg(colors.status_bar_bg),
-            ),
-        ]),
-    ]);
+    let title = format!(
+        " HERMES AGENT ULTRA  •  session {}  •  Ctrl+Enter send  •  / for commands",
+        session_short
+    );
+    let text = Text::from(vec![Line::from(vec![Span::styled(
+        truncate_chars(&title, area.width.saturating_sub(1) as usize),
+        Style::default()
+            .fg(colors.status_bar_text)
+            .bg(colors.status_bar_bg)
+            .add_modifier(Modifier::BOLD),
+    )])]);
     let title = Paragraph::new(text)
         .block(Block::default().style(Style::default().bg(colors.status_bar_bg)));
     frame.render_widget(title, area);
@@ -915,27 +862,34 @@ fn role_visuals(
     styles: &crate::theme::ResolvedStyles,
     colors: &crate::theme::RatatuiColors,
 ) -> (&'static str, &'static str, Style, Style) {
+    let role_bg = colors.background;
     match role {
         hermes_core::MessageRole::User => (
             "◆",
             "USER",
-            styles.user_input,
-            styles.user_input.remove_modifier(Modifier::BOLD),
+            styles.user_input.bg(role_bg),
+            styles
+                .user_input
+                .remove_modifier(Modifier::BOLD)
+                .bg(role_bg),
         ),
         hermes_core::MessageRole::Assistant => (
             "●",
             "HERMES",
-            styles.assistant_response,
-            styles.assistant_response,
+            styles.assistant_response.bg(role_bg),
+            styles.assistant_response.bg(role_bg),
         ),
-        hermes_core::MessageRole::System => {
-            ("◇", "SYSTEM", styles.system_message, styles.system_message)
-        }
+        hermes_core::MessageRole::System => (
+            "◇",
+            "SYSTEM",
+            styles.system_message.bg(role_bg),
+            styles.system_message.bg(role_bg),
+        ),
         hermes_core::MessageRole::Tool => (
             "◈",
             "TOOL",
-            styles.tool_call,
-            Style::default().fg(colors.status_bar_text),
+            styles.tool_call.bg(role_bg),
+            Style::default().fg(colors.status_bar_text).bg(role_bg),
         ),
     }
 }
@@ -1006,19 +960,27 @@ fn render_assistant_markdown_lines(
     let mut rendered: Vec<Line<'static>> = Vec::new();
     let mut in_code_block = false;
     let mut code_lang = String::new();
-    let code_frame_style = Style::default().fg(colors.status_bar_dim);
-    let code_text_style = Style::default().fg(colors.status_bar_text);
+    let code_frame_style = Style::default()
+        .fg(colors.status_bar_dim)
+        .bg(colors.background);
+    let code_text_style = Style::default()
+        .fg(colors.status_bar_text)
+        .bg(colors.background);
     let heading_style = Style::default()
         .fg(colors.status_bar_strong)
+        .bg(colors.background)
         .add_modifier(Modifier::BOLD);
     let bullet_style = Style::default()
         .fg(colors.accent)
+        .bg(colors.background)
         .add_modifier(Modifier::BOLD);
     let quote_style = Style::default()
         .fg(colors.status_bar_dim)
+        .bg(colors.background)
         .add_modifier(Modifier::ITALIC);
     let inline_code_style = Style::default()
         .fg(colors.accent)
+        .bg(colors.background)
         .add_modifier(Modifier::BOLD);
 
     for raw in content.lines() {
@@ -1069,7 +1031,9 @@ fn render_assistant_markdown_lines(
                 rendered.push(Line::from(vec![
                     Span::styled(
                         format!("    {} ", "#".repeat(heading_level)),
-                        Style::default().fg(colors.status_bar_dim),
+                        Style::default()
+                            .fg(colors.status_bar_dim)
+                            .bg(colors.background),
                     ),
                     Span::styled(rest.to_string(), heading_style),
                 ]));
@@ -1094,7 +1058,10 @@ fn render_assistant_markdown_lines(
         {
             rendered.push(Line::from(vec![
                 Span::styled("    • ", bullet_style),
-                Span::styled(body.to_string(), styles.assistant_response),
+                Span::styled(
+                    body.to_string(),
+                    styles.assistant_response.bg(colors.background),
+                ),
             ]));
             continue;
         }
@@ -1102,7 +1069,10 @@ fn render_assistant_markdown_lines(
         if let Some((marker, body)) = parse_markdown_numbered_marker(trimmed) {
             rendered.push(Line::from(vec![
                 Span::styled(format!("    {marker} "), bullet_style),
-                Span::styled(body.to_string(), styles.assistant_response),
+                Span::styled(
+                    body.to_string(),
+                    styles.assistant_response.bg(colors.background),
+                ),
             ]));
             continue;
         }
@@ -1129,9 +1099,11 @@ fn build_transcript_lines(
     state: &TuiState,
     styles: &crate::theme::ResolvedStyles,
     colors: &crate::theme::RatatuiColors,
+    content_width: u16,
 ) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut rendered_messages = 0usize;
+    let divider = transcript_divider(content_width);
 
     for msg in messages {
         // Hide internal orchestration/system payloads from the chat transcript.
@@ -1145,7 +1117,7 @@ fn build_transcript_lines(
         let (glyph, label, label_style, body_style) = role_visuals(msg.role, styles, colors);
         lines.push(Line::from(vec![
             Span::styled(
-                format!(" {} ", glyph),
+                format!(" ╭ {} ", glyph),
                 label_style.add_modifier(Modifier::BOLD),
             ),
             Span::styled(label.to_string(), label_style.add_modifier(Modifier::BOLD)),
@@ -1171,7 +1143,9 @@ fn build_transcript_lines(
                     if all_lines.len() > 8 {
                         lines.push(Line::from(vec![Span::styled(
                             format!("    … {} more lines", all_lines.len() - 8),
-                            Style::default().fg(colors.status_bar_dim),
+                            Style::default()
+                                .fg(colors.status_bar_dim)
+                                .bg(colors.background),
                         )]));
                     }
                 }
@@ -1198,13 +1172,16 @@ fn build_transcript_lines(
             {
                 lines.push(Line::from(vec![Span::styled(
                     "    🤔 reasoning",
-                    Style::default().fg(colors.status_bar_dim),
+                    Style::default()
+                        .fg(colors.status_bar_dim)
+                        .bg(colors.background),
                 )]));
                 for line in reasoning.lines() {
                     lines.push(Line::from(vec![Span::styled(
                         format!("      {}", line.trim_end()),
                         Style::default()
                             .fg(colors.status_bar_dim)
+                            .bg(colors.background)
                             .add_modifier(Modifier::ITALIC),
                     )]));
                 }
@@ -1222,12 +1199,23 @@ fn build_transcript_lines(
                         format!("{emoji} {} {}", tc.function.name, preview)
                     };
                     lines.push(Line::from(vec![
-                        Span::styled("    ↳ ", Style::default().fg(colors.status_bar_dim)),
+                        Span::styled(
+                            "    ↳ ",
+                            Style::default()
+                                .fg(colors.status_bar_dim)
+                                .bg(colors.background),
+                        ),
                         Span::styled(summary, styles.tool_call),
                     ]));
                 }
             }
         }
+        lines.push(Line::from(vec![Span::styled(
+            divider.clone(),
+            Style::default()
+                .fg(colors.status_bar_dim)
+                .bg(colors.background),
+        )]));
     }
 
     // Streaming buffer (partial assistant response)
@@ -1237,7 +1225,7 @@ fn build_transcript_lines(
         }
         lines.push(Line::from(vec![
             Span::styled(
-                " ● ",
+                " ╭ ● ",
                 styles.assistant_response.add_modifier(Modifier::BOLD),
             ),
             Span::styled(
@@ -1254,7 +1242,14 @@ fn build_transcript_lines(
             "    ▌",
             Style::default()
                 .fg(colors.accent)
+                .bg(colors.background)
                 .add_modifier(Modifier::BOLD),
+        )]));
+        lines.push(Line::from(vec![Span::styled(
+            divider,
+            Style::default()
+                .fg(colors.status_bar_dim)
+                .bg(colors.background),
         )]));
     }
 
@@ -1263,6 +1258,7 @@ fn build_transcript_lines(
             " Start chatting — your messages and Hermes replies will appear here.",
             Style::default()
                 .fg(colors.status_bar_dim)
+                .bg(colors.background)
                 .add_modifier(Modifier::ITALIC),
         )]));
     }
@@ -1277,16 +1273,24 @@ fn render_messages(
     styles: &crate::theme::ResolvedStyles,
     colors: &crate::theme::RatatuiColors,
 ) {
-    let lines = build_transcript_lines(&app.messages, state, styles, colors);
+    let title = if state.scroll_offset > 0 {
+        format!(" Conversation (+{}) ", state.scroll_offset)
+    } else {
+        " Conversation ".to_string()
+    };
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Conversation ")
+        .title(title)
+        .style(Style::default().bg(colors.background))
         .border_style(Style::default().fg(colors.status_bar_dim));
     let inner = block.inner(area);
     if inner.width == 0 || inner.height == 0 {
+        frame.render_widget(Clear, area);
         frame.render_widget(block, area);
         return;
     }
+    let transcript = app.transcript_messages();
+    let lines = build_transcript_lines(&transcript, state, styles, colors, inner.width);
 
     let viewport_rows = usize::from(inner.height.max(1));
     let max_hidden_from_bottom = lines.len().saturating_sub(viewport_rows);
@@ -1306,18 +1310,22 @@ fn render_messages(
         .block(block)
         .wrap(Wrap { trim: false });
 
+    frame.render_widget(Clear, area);
     frame.render_widget(paragraph, area);
 }
 
-/// Render the auto-completion suggestions.
-fn render_completions(
+/// Render slash-command completions as a popup over the conversation panel.
+fn render_completions_popup(
     frame: &mut Frame,
     completions: &[String],
     selected: Option<usize>,
-    area: Rect,
+    messages_area: Rect,
+    input_area: Rect,
     colors: &crate::theme::RatatuiColors,
 ) {
-    let inner_rows = usize::from(area.height.saturating_sub(2));
+    let max_height = 8usize;
+    let visible_cap = completions.len().min(max_height);
+    let inner_rows = visible_cap.max(1);
     if inner_rows == 0 {
         return;
     }
@@ -1328,6 +1336,30 @@ fn render_completions(
         }
     }
     let end = (start + inner_rows).min(completions.len());
+    let max_item_width = completions[start..end]
+        .iter()
+        .map(|c| c.chars().count())
+        .max()
+        .unwrap_or(0);
+    let popup_width = (max_item_width as u16 + 8).clamp(28, messages_area.width.saturating_sub(2));
+    let popup_height = (end.saturating_sub(start) as u16 + 2).max(3);
+    if popup_width == 0 || popup_height == 0 {
+        return;
+    }
+    let right_bound = messages_area.x + messages_area.width.saturating_sub(1);
+    let mut x = input_area.x.saturating_add(1);
+    if x + popup_width > right_bound {
+        x = right_bound.saturating_sub(popup_width);
+    }
+    let min_y = messages_area.y.saturating_add(1);
+    let y = input_area.y.saturating_sub(popup_height).max(min_y);
+    let popup = Rect {
+        x,
+        y,
+        width: popup_width,
+        height: popup_height,
+    };
+
     let items: Vec<Line<'static>> = completions
         .iter()
         .enumerate()
@@ -1340,9 +1372,14 @@ fn render_completions(
                     .bg(colors.status_bar_strong)
                     .add_modifier(Modifier::BOLD)
             } else {
-                Style::default().fg(colors.status_bar_dim)
+                Style::default()
+                    .fg(colors.status_bar_text)
+                    .bg(colors.status_bar_bg)
             };
-            Line::from(Span::styled(cmd.clone(), style))
+            Line::from(Span::styled(
+                truncate_chars(cmd, popup_width.saturating_sub(4) as usize),
+                style,
+            ))
         })
         .collect();
 
@@ -1350,11 +1387,13 @@ fn render_completions(
         .block(
             Block::default()
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(colors.status_bar_dim))
+                .style(Style::default().bg(colors.status_bar_bg))
+                .border_style(Style::default().fg(colors.status_bar_strong))
                 .title(" Slash Completions "),
         )
         .wrap(Wrap { trim: true });
-    frame.render_widget(paragraph, area);
+    frame.render_widget(Clear, popup);
+    frame.render_widget(paragraph, popup);
 }
 
 /// Render the input area (supports multi-line display with wrapping).
@@ -1371,9 +1410,17 @@ fn render_input(
     };
 
     let mode_style = match state.mode {
-        InputMode::Normal => Style::default().fg(Color::White).bg(Color::DarkGray),
-        InputMode::Insert => Style::default().fg(Color::Black).bg(colors.success),
-        InputMode::Command => Style::default().fg(Color::Black).bg(colors.accent),
+        InputMode::Normal => Style::default()
+            .fg(colors.status_bar_dim)
+            .bg(colors.background),
+        InputMode::Insert => Style::default()
+            .fg(colors.status_bar_good)
+            .bg(colors.background)
+            .add_modifier(Modifier::BOLD),
+        InputMode::Command => Style::default()
+            .fg(colors.accent)
+            .bg(colors.background)
+            .add_modifier(Modifier::BOLD),
     };
 
     let history_prefix = if state.history_search_active {
@@ -1391,9 +1438,10 @@ fn render_input(
     let input_body_style = if show_placeholder {
         Style::default()
             .fg(colors.status_bar_dim)
+            .bg(colors.background)
             .add_modifier(Modifier::ITALIC)
     } else {
-        Style::default().fg(colors.foreground)
+        Style::default().fg(colors.foreground).bg(colors.background)
     };
 
     // For multi-line, show line count indicator
@@ -1407,7 +1455,8 @@ fn render_input(
 
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Composer ")
+        .title(" Message ")
+        .style(Style::default().bg(colors.background))
         .border_style(Style::default().fg(colors.status_bar_strong));
     let prompt_glyph = "›";
     let paragraph = Paragraph::new(Text::from(vec![Line::from(vec![
@@ -1426,6 +1475,7 @@ fn render_input(
     .block(block.clone())
     .wrap(Wrap { trim: false });
 
+    frame.render_widget(Clear, area);
     frame.render_widget(paragraph, area);
 
     if state.mode == InputMode::Normal {
@@ -1442,10 +1492,21 @@ fn render_input(
     rendered_before_cursor.push_str(&state.input[..state.cursor_position.min(state.input.len())]);
 
     let width = inner.width as usize;
+    if width == 0 {
+        return None;
+    }
     let prefix_width =
         mode_indicator.chars().count() + line_indicator_width + " │ ".chars().count() + 2;
-    let mut x = prefix_width;
+    let mut x = 0usize;
     let mut y = 0usize;
+
+    for _ in 0..prefix_width {
+        if x >= width {
+            y += 1;
+            x = 0;
+        }
+        x += 1;
+    }
 
     for ch in rendered_before_cursor.chars() {
         if ch == '\n' {
@@ -1465,11 +1526,12 @@ fn render_input(
         x %= width;
     }
     if y >= inner.height as usize {
-        return None;
+        y = inner.height.saturating_sub(1) as usize;
+        x = width.saturating_sub(1);
     }
 
     Some(Position {
-        x: inner.x + x as u16,
+        x: inner.x + x.min(width.saturating_sub(1)) as u16,
         y: inner.y + y as u16,
     })
 }
@@ -1514,65 +1576,51 @@ fn render_status(
         String::new()
     };
 
-    let status_message_style = status_message_style(&state.status_message, colors);
+    let base = Style::default()
+        .fg(colors.status_bar_text)
+        .bg(colors.status_bar_bg);
 
-    let status_bar = Paragraph::new(Line::from(vec![
-        Span::styled(
-            format!(" {} {} ", processing_indicator, state.mode),
-            Style::default()
-                .fg(colors.status_bar_strong)
-                .bg(colors.status_bar_bg)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            "◆ ",
-            Style::default()
-                .fg(colors.status_bar_dim)
-                .bg(colors.status_bar_bg),
-        ),
-        Span::styled(
-            format!("Model: {} ", model),
-            Style::default()
-                .fg(colors.status_bar_text)
-                .bg(colors.status_bar_bg),
-        ),
-        Span::styled(
-            "◆ ",
-            Style::default()
-                .fg(colors.status_bar_dim)
-                .bg(colors.status_bar_bg),
-        ),
-        Span::styled(
-            format!("Session: {} ", session),
-            Style::default()
-                .fg(colors.status_bar_text)
-                .bg(colors.status_bar_bg),
-        ),
-        Span::styled(
-            "◆ ",
-            Style::default()
-                .fg(colors.status_bar_dim)
-                .bg(colors.status_bar_bg),
-        ),
-        Span::styled(
-            format!("Messages: {} ", msg_count),
-            Style::default()
-                .fg(colors.status_bar_good)
-                .bg(colors.status_bar_bg),
-        ),
-        Span::styled(
-            "◆ ",
-            Style::default()
-                .fg(colors.status_bar_dim)
-                .bg(colors.status_bar_bg),
-        ),
-        Span::styled(
-            format!("{}{}", state.status_message, scroll_hint),
-            status_message_style,
-        ),
-    ]));
-
+    let mut status_text = format!(
+        "{} {} | {} | {} msgs | {}",
+        processing_indicator, state.mode, model, msg_count, session
+    );
+    if !state.status_message.is_empty() || !scroll_hint.is_empty() {
+        status_text.push_str(" | ");
+        status_text.push_str(&state.status_message);
+        status_text.push_str(&scroll_hint);
+    }
+    let clipped = truncate_chars(&status_text, area.width.saturating_sub(1) as usize);
+    let line_style = if state.status_message.is_empty() {
+        base
+    } else {
+        status_message_style(&state.status_message, colors).bg(colors.status_bar_bg)
+    };
+    let status_bar = Paragraph::new(Line::from(Span::styled(clipped, line_style)))
+        .block(Block::default().style(Style::default().bg(colors.status_bar_bg)));
     frame.render_widget(status_bar, area);
+}
+
+fn transcript_divider(content_width: u16) -> String {
+    let width = usize::from(content_width.max(12));
+    let rule = "─".repeat(width.saturating_sub(3).max(8));
+    format!(" ╰{}", rule)
+}
+
+fn truncate_chars(text: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    let char_count = text.chars().count();
+    if char_count <= max_chars {
+        return text.to_string();
+    }
+    if max_chars <= 1 {
+        return "…".to_string();
+    }
+    let take = max_chars.saturating_sub(1);
+    let mut out: String = text.chars().take(take).collect();
+    out.push('…');
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -1919,7 +1967,7 @@ mod tests {
             Message::user("reply with 1"),
             Message::assistant("1"),
         ];
-        let rendered = build_transcript_lines(&messages, &state, &styles, &colors);
+        let rendered = build_transcript_lines(&messages, &state, &styles, &colors, 80);
         let rendered_text = rendered
             .iter()
             .map(|line| line.to_string())
@@ -1939,7 +1987,7 @@ mod tests {
         let colors = theme.colors.to_ratatui_colors();
         let styles = theme.resolved_styles();
         let state = TuiState::default();
-        let rendered = build_transcript_lines(&[], &state, &styles, &colors);
+        let rendered = build_transcript_lines(&[], &state, &styles, &colors, 80);
         let rendered_text = rendered
             .iter()
             .map(|line| line.to_string())
