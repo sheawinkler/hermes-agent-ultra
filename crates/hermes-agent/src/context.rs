@@ -435,6 +435,47 @@ Prioritize thoughtful dialogue, concise synthesis, and grounded follow-up questi
 Use one focused question at a time to help the user clarify goals, assumptions, or emotions before advising.\n\
 Balance empathy with factual precision and actionable guidance.";
 
+const BUILTIN_PERSONALITY_SECURITY_AUDITOR: &str =
+    "You are operating in the `security-auditor` persona.\n\
+Prioritize threat modeling, abuse-path detection, and least-privilege recommendations.\n\
+For every meaningful change, identify probable attack surfaces, data exposure risk, and concrete mitigations.\n\
+Separate confirmed vulnerabilities from hypotheses and provide verification steps for each claim.";
+
+const BUILTIN_PERSONALITY_RELEASE_MANAGER: &str =
+    "You are operating in the `release-manager` persona.\n\
+Prioritize production readiness, rollback safety, and explicit release gates.\n\
+Frame decisions with launch criteria, test coverage confidence, operational risk, and contingency plan.\n\
+When uncertainty remains, recommend the smallest safe release unit and next validation step.";
+
+const BUILTIN_PERSONALITY_OPS_SRE: &str = "You are operating in the `ops-sre` persona.\n\
+Prioritize reliability, observability, and measurable service behavior.\n\
+Start incident/problem analysis from signals (logs, metrics, traces), then isolate likely failure domains.\n\
+Recommend changes that reduce blast radius, improve recovery time, and keep runbooks actionable.";
+
+const BUILTIN_PERSONALITY_MCP_INTEGRATOR: &str =
+    "You are operating in the `mcp-integrator` persona.\n\
+Prioritize connector compatibility, capability mapping, and deterministic tool interfaces.\n\
+When integrating providers or plugins, reason explicitly about protocol contracts, auth flow, and failure handling.\n\
+Favor minimal, testable integration steps with clear schema/version boundaries.";
+
+const BUILTIN_PERSONALITY_QUANT_RESEARCHER: &str =
+    "You are operating in the `quant-researcher` persona.\n\
+Prioritize hypothesis-driven analysis, risk-adjusted thinking, and falsifiable experiment design.\n\
+For strategy questions, define assumptions, market regime sensitivity, and evaluation metrics before conclusions.\n\
+Never present profitability as guaranteed; separate observed edge from speculative inference.";
+
+const BUILTIN_PERSONALITY_PERFORMANCE_ENGINEER: &str =
+    "You are operating in the `performance-engineer` persona.\n\
+Prioritize latency, throughput, and resource-efficiency constraints.\n\
+Use profiling-first diagnosis, quantify bottlenecks, and propose benchmarkable optimizations.\n\
+Prefer changes that preserve correctness while improving p50/p95/p99 behavior under realistic load.";
+
+const BUILTIN_PERSONALITY_RESEARCH_SCOUT: &str =
+    "You are operating in the `research-scout` persona.\n\
+Prioritize evidence discovery, source quality, and synthesis clarity.\n\
+For novel or uncertain topics, gather multiple primary sources, extract convergent facts, and mark disagreement areas.\n\
+Return concise findings with recommended next experiments or validation checks.";
+
 const BUILTIN_PERSONALITY_NAMES: &[&str] = &[
     "coder",
     "writer",
@@ -445,6 +486,13 @@ const BUILTIN_PERSONALITY_NAMES: &[&str] = &[
     "companion",
     "decision-coach",
     "reflective",
+    "security-auditor",
+    "release-manager",
+    "ops-sre",
+    "mcp-integrator",
+    "quant-researcher",
+    "performance-engineer",
+    "research-scout",
 ];
 
 const BUILTIN_PERSONALITY_DESCRIPTIONS: &[(&str, &str)] = &[
@@ -484,6 +532,34 @@ const BUILTIN_PERSONALITY_DESCRIPTIONS: &[(&str, &str)] = &[
         "reflective",
         "Use when clarifying goals or emotions before committing to a recommendation.",
     ),
+    (
+        "security-auditor",
+        "Use when you need threat modeling, abuse-path checks, and concrete security mitigations.",
+    ),
+    (
+        "release-manager",
+        "Use when you need launch gates, rollback planning, and production-readiness decisions.",
+    ),
+    (
+        "ops-sre",
+        "Use when debugging reliability issues through logs/metrics and improving operational resilience.",
+    ),
+    (
+        "mcp-integrator",
+        "Use when wiring connectors/tools and validating protocol contracts, auth, and compatibility.",
+    ),
+    (
+        "quant-researcher",
+        "Use when evaluating strategy hypotheses with risk-aware metrics and falsifiable tests.",
+    ),
+    (
+        "performance-engineer",
+        "Use when optimizing latency/throughput with profiling-backed, benchmarkable changes.",
+    ),
+    (
+        "research-scout",
+        "Use when rapidly synthesizing high-quality sources and planning next validation steps.",
+    ),
 ];
 
 /// Load the SOUL.md personality file from `~/.hermes/SOUL.md`.
@@ -514,6 +590,15 @@ fn builtin_personality(name: &str) -> Option<&'static str> {
         "companion" => Some(BUILTIN_PERSONALITY_COMPANION),
         "decision-coach" | "decision_coach" => Some(BUILTIN_PERSONALITY_DECISION_COACH),
         "reflective" => Some(BUILTIN_PERSONALITY_REFLECTIVE),
+        "security-auditor" | "security_auditor" => Some(BUILTIN_PERSONALITY_SECURITY_AUDITOR),
+        "release-manager" | "release_manager" => Some(BUILTIN_PERSONALITY_RELEASE_MANAGER),
+        "ops-sre" | "ops_sre" => Some(BUILTIN_PERSONALITY_OPS_SRE),
+        "mcp-integrator" | "mcp_integrator" => Some(BUILTIN_PERSONALITY_MCP_INTEGRATOR),
+        "quant-researcher" | "quant_researcher" => Some(BUILTIN_PERSONALITY_QUANT_RESEARCHER),
+        "performance-engineer" | "performance_engineer" => {
+            Some(BUILTIN_PERSONALITY_PERFORMANCE_ENGINEER)
+        }
+        "research-scout" | "research_scout" => Some(BUILTIN_PERSONALITY_RESEARCH_SCOUT),
         _ => None,
     }
 }
@@ -1200,11 +1285,67 @@ mod tests {
     }
 
     #[test]
+    fn test_persona_snapshot_security_auditor() {
+        let p = resolve_personality("security-auditor", None).unwrap();
+        assert!(p.contains("`security-auditor` persona"));
+        assert!(p.contains("threat modeling"));
+    }
+
+    #[test]
+    fn test_persona_snapshot_release_manager() {
+        let p = resolve_personality("release-manager", None).unwrap();
+        assert!(p.contains("`release-manager` persona"));
+        assert!(p.contains("rollback"));
+    }
+
+    #[test]
+    fn test_persona_snapshot_ops_sre() {
+        let p = resolve_personality("ops-sre", None).unwrap();
+        assert!(p.contains("`ops-sre` persona"));
+        assert!(p.contains("observability"));
+    }
+
+    #[test]
+    fn test_persona_snapshot_mcp_integrator() {
+        let p = resolve_personality("mcp-integrator", None).unwrap();
+        assert!(p.contains("`mcp-integrator` persona"));
+        assert!(p.contains("protocol contracts"));
+    }
+
+    #[test]
+    fn test_persona_snapshot_quant_researcher() {
+        let p = resolve_personality("quant-researcher", None).unwrap();
+        assert!(p.contains("`quant-researcher` persona"));
+        assert!(p.contains("risk-adjusted"));
+    }
+
+    #[test]
+    fn test_persona_snapshot_performance_engineer() {
+        let p = resolve_personality("performance-engineer", None).unwrap();
+        assert!(p.contains("`performance-engineer` persona"));
+        assert!(p.contains("profiling-first"));
+    }
+
+    #[test]
+    fn test_persona_snapshot_research_scout() {
+        let p = resolve_personality("research-scout", None).unwrap();
+        assert!(p.contains("`research-scout` persona"));
+        assert!(p.contains("source quality"));
+    }
+
+    #[test]
     fn test_builtin_personality_names_contains_new_modes() {
         let names = builtin_personality_names();
         assert!(names.contains(&"companion"));
         assert!(names.contains(&"decision-coach"));
         assert!(names.contains(&"reflective"));
+        assert!(names.contains(&"security-auditor"));
+        assert!(names.contains(&"release-manager"));
+        assert!(names.contains(&"ops-sre"));
+        assert!(names.contains(&"mcp-integrator"));
+        assert!(names.contains(&"quant-researcher"));
+        assert!(names.contains(&"performance-engineer"));
+        assert!(names.contains(&"research-scout"));
     }
 
     #[test]
