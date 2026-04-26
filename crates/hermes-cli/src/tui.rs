@@ -157,7 +157,7 @@ pub struct TuiState {
     pub completions: Vec<String>,
     /// Currently selected completion index (if any).
     pub completion_index: Option<usize>,
-    /// Scroll offset for the message history.
+    /// Scroll offset from newest transcript content (0 = newest).
     pub scroll_offset: u16,
     /// Whether the agent is currently processing.
     pub processing: bool,
@@ -262,6 +262,15 @@ impl TuiState {
     fn handle_normal_key(&mut self, key: KeyEvent, _app: &mut App) -> bool {
         use crossterm::event::KeyCode;
         match key.code {
+            KeyCode::PageUp => {
+                self.scroll_offset = self.scroll_offset.saturating_add(8);
+            }
+            KeyCode::PageDown => {
+                self.scroll_offset = self.scroll_offset.saturating_sub(8);
+            }
+            KeyCode::End => {
+                self.scroll_offset = 0;
+            }
             KeyCode::Char('i') => {
                 self.mode = InputMode::Insert;
             }
@@ -282,6 +291,29 @@ impl TuiState {
         use crossterm::event::{KeyCode, KeyModifiers};
         let mods = key.modifiers;
         match key.code {
+            // Scroll transcript without leaving insert mode.
+            KeyCode::PageUp => {
+                self.scroll_offset = self.scroll_offset.saturating_add(8);
+                false
+            }
+            KeyCode::PageDown => {
+                self.scroll_offset = self.scroll_offset.saturating_sub(8);
+                false
+            }
+            // Fine-grained transcript scroll.
+            KeyCode::Up if mods.contains(KeyModifiers::CONTROL) => {
+                self.scroll_offset = self.scroll_offset.saturating_add(1);
+                false
+            }
+            KeyCode::Down if mods.contains(KeyModifiers::CONTROL) => {
+                self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                false
+            }
+            // Jump back to newest transcript content.
+            KeyCode::End if mods.contains(KeyModifiers::CONTROL) => {
+                self.scroll_offset = 0;
+                false
+            }
             // Ctrl+Enter or Alt+Enter → submit
             KeyCode::Enter
                 if mods.contains(KeyModifiers::CONTROL) || mods.contains(KeyModifiers::ALT) =>
@@ -862,6 +894,12 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect, colors: &crate::theme
                     .fg(colors.status_bar_dim)
                     .bg(colors.status_bar_bg),
             ),
+            Span::styled(
+                "  •  PgUp/PgDn scroll",
+                Style::default()
+                    .fg(colors.status_bar_dim)
+                    .bg(colors.status_bar_bg),
+            ),
         ]),
     ]);
     let title = Paragraph::new(text)
@@ -1084,19 +1122,24 @@ fn render_assistant_markdown_lines(
     rendered
 }
 
-fn render_messages(
-    frame: &mut Frame,
-    app: &App,
+fn build_transcript_lines(
+    messages: &[hermes_core::Message],
     state: &TuiState,
-    area: Rect,
     styles: &crate::theme::ResolvedStyles,
     colors: &crate::theme::RatatuiColors,
-) {
+) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
-    for (idx, msg) in app.messages.iter().enumerate() {
-        if idx > 0 {
+    let mut rendered_messages = 0usize;
+
+    for msg in messages {
+        // Hide internal orchestration/system payloads from the chat transcript.
+        if matches!(msg.role, hermes_core::MessageRole::System) {
+            continue;
+        }
+        if rendered_messages > 0 {
             lines.push(Line::from(String::new()));
         }
+        rendered_messages += 1;
         let (glyph, label, label_style, body_style) = role_visuals(msg.role, styles, colors);
         lines.push(Line::from(vec![
             Span::styled(
@@ -1213,10 +1256,36 @@ fn render_messages(
         )]));
     }
 
-    let paragraph = Paragraph::new(Text::from(lines))
+    if lines.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            " Start chatting — your messages and Hermes replies will appear here.",
+            Style::default()
+                .fg(colors.status_bar_dim)
+                .add_modifier(Modifier::ITALIC),
+        )]));
+    }
+    lines
+}
+
+fn render_messages(
+    frame: &mut Frame,
+    app: &App,
+    state: &TuiState,
+    area: Rect,
+    styles: &crate::theme::ResolvedStyles,
+    colors: &crate::theme::RatatuiColors,
+) {
+    let lines = build_transcript_lines(&app.messages, state, styles, colors);
+    let viewport_rows = usize::from(area.height.max(1));
+    let max_hidden_from_bottom = lines.len().saturating_sub(viewport_rows);
+    let hidden_from_bottom = usize::from(state.scroll_offset).min(max_hidden_from_bottom);
+    let end = lines.len().saturating_sub(hidden_from_bottom);
+    let start = end.saturating_sub(viewport_rows);
+    let visible_lines: Vec<Line<'static>> = lines[start..end].to_vec();
+
+    let paragraph = Paragraph::new(Text::from(visible_lines))
         .block(Block::default().borders(Borders::NONE))
-        .wrap(Wrap { trim: false })
-        .scroll((state.scroll_offset, 0));
+        .wrap(Wrap { trim: false });
 
     frame.render_widget(paragraph, area);
 }
@@ -1407,6 +1476,11 @@ fn render_status(
     let model = &app.current_model;
     let session = &app.session_id[..8.min(app.session_id.len())];
     let msg_count = app.messages.len();
+    let scroll_hint = if state.scroll_offset > 0 {
+        format!(" (history +{})", state.scroll_offset)
+    } else {
+        String::new()
+    };
 
     let status_message_style = status_message_style(&state.status_message, colors);
 
@@ -1460,7 +1534,10 @@ fn render_status(
                 .fg(colors.status_bar_dim)
                 .bg(colors.status_bar_bg),
         ),
-        Span::styled(state.status_message.clone(), status_message_style),
+        Span::styled(
+            format!("{}{}", state.status_message, scroll_hint),
+            status_message_style,
+        ),
     ]));
 
     frame.render_widget(status_bar, area);
@@ -1544,6 +1621,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                 let input = state.input.clone();
                                 state.input.clear();
                                 state.cursor_position = 0;
+                                state.scroll_offset = 0;
 
                                 if !input.is_empty() {
                                     state.processing = true;
@@ -1673,6 +1751,7 @@ impl From<mpsc::UnboundedSender<Event>> for StreamHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hermes_core::Message;
 
     #[test]
     fn test_input_mode_display() {
@@ -1795,5 +1874,45 @@ mod tests {
         state.input.drain(start..state.cursor_position);
         state.cursor_position = start;
         assert_eq!(state.input, "hello brave new ");
+    }
+
+    #[test]
+    fn test_transcript_hides_system_messages() {
+        let theme = Theme::default_theme();
+        let colors = theme.colors.to_ratatui_colors();
+        let styles = theme.resolved_styles();
+        let state = TuiState::default();
+        let messages = vec![
+            Message::system("internal system payload"),
+            Message::user("reply with 1"),
+            Message::assistant("1"),
+        ];
+        let rendered = build_transcript_lines(&messages, &state, &styles, &colors);
+        let rendered_text = rendered
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!rendered_text.contains("SYSTEM"));
+        assert!(!rendered_text.contains("internal system payload"));
+        assert!(rendered_text.contains("USER"));
+        assert!(rendered_text.contains("HERMES"));
+        assert!(rendered_text.contains("reply with 1"));
+        assert!(rendered_text.contains("1"));
+    }
+
+    #[test]
+    fn test_transcript_placeholder_shows_when_empty() {
+        let theme = Theme::default_theme();
+        let colors = theme.colors.to_ratatui_colors();
+        let styles = theme.resolved_styles();
+        let state = TuiState::default();
+        let rendered = build_transcript_lines(&[], &state, &styles, &colors);
+        let rendered_text = rendered
+            .iter()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(rendered_text.contains("Start chatting"));
     }
 }
