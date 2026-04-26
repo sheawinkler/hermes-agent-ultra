@@ -77,7 +77,28 @@ pub fn curses_select(title: &str, items: &[String], initial_index: usize) -> Sel
         return numbered_select_fallback(title, items, clamped_initial);
     }
 
-    match curses_select_inner(title, items, clamped_initial) {
+    match curses_select_inner(title, items, clamped_initial, true) {
+        Ok(result) => result,
+        Err(_) => numbered_select_fallback(title, items, clamped_initial),
+    }
+}
+
+/// Run a single-select list inside an already-active TUI/raw-mode session.
+///
+/// Unlike `curses_select`, this does not enter/leave alternate-screen or toggle
+/// raw mode. It only draws over the current terminal and restores cursor state.
+pub fn curses_select_embedded(title: &str, items: &[String], initial_index: usize) -> SelectResult {
+    if items.is_empty() {
+        return SelectResult {
+            index: 0,
+            confirmed: false,
+        };
+    }
+    let clamped_initial = initial_index.min(items.len().saturating_sub(1));
+    if !atty_is_tty() {
+        return numbered_select_fallback(title, items, clamped_initial);
+    }
+    match curses_select_inner(title, items, clamped_initial, false) {
         Ok(result) => result,
         Err(_) => numbered_select_fallback(title, items, clamped_initial),
     }
@@ -342,13 +363,18 @@ fn curses_select_inner(
     title: &str,
     items: &[String],
     initial_index: usize,
+    manage_terminal: bool,
 ) -> Result<SelectResult, io::Error> {
     let mut cursor_pos = initial_index;
     let mut scroll_offset: usize = 0;
     let mut stdout = io::stdout();
 
-    enable_raw_mode()?;
-    execute!(stdout, terminal::EnterAlternateScreen, cursor::Hide)?;
+    if manage_terminal {
+        enable_raw_mode()?;
+        execute!(stdout, terminal::EnterAlternateScreen, cursor::Hide)?;
+    } else {
+        execute!(stdout, cursor::Hide)?;
+    }
 
     let result = loop {
         let (cols, rows) = terminal::size().unwrap_or((80, 24));
@@ -437,8 +463,12 @@ fn curses_select_inner(
         }
     };
 
-    execute!(stdout, cursor::Show, terminal::LeaveAlternateScreen)?;
-    disable_raw_mode()?;
+    if manage_terminal {
+        execute!(stdout, cursor::Show, terminal::LeaveAlternateScreen)?;
+        disable_raw_mode()?;
+    } else {
+        execute!(stdout, cursor::Show)?;
+    }
 
     Ok(result)
 }
