@@ -6,7 +6,6 @@
 use std::process::Stdio;
 use std::sync::Arc;
 
-use crossterm::{cursor, execute, terminal};
 use hermes_core::AgentError;
 use regex::Regex;
 
@@ -223,8 +222,7 @@ fn split_provider_model(provider_model: &str) -> (&str, &str) {
 
 /// Run `curses_select` safely from both plain CLI and active TUI sessions.
 ///
-/// In TUI mode, we temporarily suspend ratatui's alternate-screen/raw-mode
-/// ownership before invoking the standalone picker, then restore it.
+/// In TUI mode, use an embedded selector that does not toggle terminal mode.
 fn run_model_picker_select(
     app: &App,
     title: &str,
@@ -232,18 +230,7 @@ fn run_model_picker_select(
     initial_index: usize,
 ) -> crate::SelectResult {
     if app.stream_handle.is_some() {
-        let mut stdout = std::io::stdout();
-        let _ = terminal::disable_raw_mode();
-        let _ = execute!(stdout, cursor::Show, terminal::LeaveAlternateScreen);
-        let result = crate::curses_select(title, items, initial_index);
-        let _ = terminal::enable_raw_mode();
-        let _ = execute!(
-            stdout,
-            terminal::EnterAlternateScreen,
-            cursor::Hide,
-            terminal::Clear(terminal::ClearType::All)
-        );
-        result
+        crate::curses_select_embedded(title, items, initial_index)
     } else {
         crate::curses_select(title, items, initial_index)
     }
