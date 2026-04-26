@@ -6852,6 +6852,48 @@ fn setup_provider_defaults() -> Vec<SetupModelOption> {
     providers
 }
 
+fn setup_default_model_pick_index(
+    selected_provider: &str,
+    current_provider_model: &str,
+    displayed_suggested_models: &[String],
+) -> usize {
+    if displayed_suggested_models.is_empty() {
+        return 0;
+    }
+    let normalized_target = current_provider_model.trim().to_ascii_lowercase();
+    let target_model_id = current_provider_model
+        .split_once(':')
+        .map(|(_, model)| model.trim().to_ascii_lowercase())
+        .unwrap_or_else(|| current_provider_model.trim().to_ascii_lowercase());
+
+    if let Some(idx) = displayed_suggested_models.iter().position(|candidate| {
+        let candidate_norm = candidate.trim().to_ascii_lowercase();
+        if candidate_norm == normalized_target {
+            return true;
+        }
+        if let Some((provider, model)) = candidate_norm.split_once(':') {
+            if provider == selected_provider && model == target_model_id {
+                return true;
+            }
+        }
+        candidate_norm == target_model_id
+    }) {
+        return idx;
+    }
+
+    if selected_provider == "nous" {
+        if let Some(idx) = displayed_suggested_models.iter().position(|candidate| {
+            candidate
+                .trim()
+                .eq_ignore_ascii_case("moonshotai/kimi-k2.6")
+        }) {
+            return idx;
+        }
+    }
+
+    0
+}
+
 fn setup_provider_display(provider: &str) -> &'static str {
     match provider {
         "openai" => "OpenAI",
@@ -7436,7 +7478,10 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
         } else {
             format!("Select {} model", selected_provider_label)
         };
-        let suggested_pick = hermes_cli::curses_select(&model_title, &suggested_labels, 0);
+        let default_model_index =
+            setup_default_model_pick_index(&selected_provider, &model, &displayed_suggested_models);
+        let suggested_pick =
+            hermes_cli::curses_select(&model_title, &suggested_labels, default_model_index);
         if suggested_pick.confirmed && suggested_pick.index < displayed_suggested_models.len() {
             let candidate = &displayed_suggested_models[suggested_pick.index];
             model = if candidate.contains(':') {
@@ -9336,6 +9381,39 @@ mod tests {
             );
         }
         assert!(seen.contains("nous"));
+    }
+
+    #[test]
+    fn setup_default_model_pick_index_matches_provider_prefixed_target() {
+        let suggested = vec![
+            "nousresearch/hermes-3-llama-3.1-405b".to_string(),
+            "openai/gpt-5.5-pro".to_string(),
+            "moonshotai/kimi-k2.6".to_string(),
+        ];
+        let idx = setup_default_model_pick_index("nous", "nous:openai/gpt-5.5-pro", &suggested);
+        assert_eq!(idx, 1);
+    }
+
+    #[test]
+    fn setup_default_model_pick_index_uses_nous_kimi_fallback_when_target_missing() {
+        let suggested = vec![
+            "nousresearch/hermes-3-llama-3.1-405b".to_string(),
+            "moonshotai/kimi-k2.6".to_string(),
+            "openai/gpt-5.5".to_string(),
+        ];
+        let idx = setup_default_model_pick_index("nous", "nous:nonexistent/model", &suggested);
+        assert_eq!(idx, 1);
+    }
+
+    #[test]
+    fn setup_default_model_pick_index_falls_back_to_zero_for_non_nous() {
+        let suggested = vec![
+            "gpt-4o".to_string(),
+            "gpt-4o-mini".to_string(),
+            "gpt-5.4".to_string(),
+        ];
+        let idx = setup_default_model_pick_index("openai", "openai:not-real", &suggested);
+        assert_eq!(idx, 0);
     }
 
     #[test]
