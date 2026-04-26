@@ -7447,7 +7447,11 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
 
     // 7. Prompt for personality (full setup only).
     let personality = if full_setup {
-        print!("\nPersonality (default, concise, creative, technical) [default]: ");
+        let builtin_personalities = hermes_agent::builtin_personality_names();
+        print!(
+            "\nPersonality (default, {}) [default]: ",
+            builtin_personalities.join(", ")
+        );
         io::stdout().flush().ok();
         let mut personality = String::new();
         reader.read_line(&mut personality).ok();
@@ -7455,6 +7459,17 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
         if personality.is_empty() {
             "default".to_string()
         } else {
+            if !personality.contains(char::is_whitespace)
+                && !personality.eq_ignore_ascii_case("default")
+                && !builtin_personalities
+                    .iter()
+                    .any(|name| name.eq_ignore_ascii_case(personality))
+            {
+                println!(
+                    "  ! '{}' is not built-in. Hermes will look for personalities/{}.md.",
+                    personality, personality
+                );
+            }
             personality.to_string()
         }
     } else {

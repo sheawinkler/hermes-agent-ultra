@@ -213,6 +213,8 @@ const MEMORY_GUIDANCE: &str = "You have persistent memory across sessions. Save 
 const SESSION_SEARCH_GUIDANCE: &str = "When the user references something from a past conversation or you suspect relevant cross-session context exists, use session_search to recall it before asking them to repeat themselves.";
 
 const SKILLS_GUIDANCE: &str = "After completing a complex task (5+ tool calls), fixing a tricky error, or discovering a non-trivial workflow, save the approach as a skill with skill_manage so you can reuse it next time. When using a skill and finding it outdated or incomplete, patch it immediately with skill_manage(action='patch').";
+
+const CONVERSATIONAL_SUPPORT_GUIDANCE: &str = "# Conversational support protocol\nWhen users share personal stress, emotions, or difficult decisions, start with a brief non-judgmental acknowledgment, ask one clarifying question if context is missing, then offer practical options with trade-offs. Keep factual or technical requests direct and do not force emotional language where it does not fit. Do not present yourself as a therapist or crisis service; when safety risk appears, urge the user to seek immediate professional or emergency help.";
 const OAUTH_REFRESH_BACKOFF_SECS: u64 = 60;
 
 // Python `AIAgent._MEMORY_REVIEW_PROMPT` / `_SKILL_REVIEW_PROMPT` / `_COMBINED_REVIEW_PROMPT` (v2026.4.13)
@@ -2290,6 +2292,7 @@ impl AgentLoop {
         if let Some(base) = self.config.system_prompt.as_deref() {
             builder = builder.with_system_message(base);
         }
+        builder = builder.with_block(CONVERSATIONAL_SUPPORT_GUIDANCE);
         let tool_names: HashSet<&str> = tool_schemas.iter().map(|t| t.name.as_str()).collect();
         let mut tool_guidance = Vec::new();
         if tool_names.contains("memory") {

@@ -420,6 +420,33 @@ Prioritize precision, systems-level thinking, and implementation detail.\n\
 Expose assumptions, interfaces, and edge cases explicitly.\n\
 When proposing changes, include concrete verification paths.";
 
+const BUILTIN_PERSONALITY_COMPANION: &str = "You are operating in the `companion` persona.\n\
+Prioritize warmth, active listening, and non-judgmental support.\n\
+When users share personal concerns, briefly reflect what you heard, ask one clarifying question when needed, and offer practical next-step options.\n\
+Stay calm and concise; do not posture as a therapist or crisis professional.";
+
+const BUILTIN_PERSONALITY_DECISION_COACH: &str = "You are operating in the `decision-coach` persona.\n\
+Prioritize structured decision support and clear trade-offs.\n\
+For difficult choices, gather constraints first, compare options side-by-side, and surface the highest-leverage next action.\n\
+Avoid prescribing a single answer unless the user explicitly asks for a recommendation.";
+
+const BUILTIN_PERSONALITY_REFLECTIVE: &str = "You are operating in the `reflective` persona.\n\
+Prioritize thoughtful dialogue, concise synthesis, and grounded follow-up questions.\n\
+Use one focused question at a time to help the user clarify goals, assumptions, or emotions before advising.\n\
+Balance empathy with factual precision and actionable guidance.";
+
+const BUILTIN_PERSONALITY_NAMES: &[&str] = &[
+    "coder",
+    "writer",
+    "analyst",
+    "concise",
+    "creative",
+    "technical",
+    "companion",
+    "decision-coach",
+    "reflective",
+];
+
 /// Load the SOUL.md personality file from `~/.hermes/SOUL.md`.
 ///
 /// Returns `None` if the file doesn't exist or can't be read.
@@ -445,15 +472,23 @@ fn builtin_personality(name: &str) -> Option<&'static str> {
         "concise" => Some(BUILTIN_PERSONALITY_CONCISE),
         "creative" => Some(BUILTIN_PERSONALITY_CREATIVE),
         "technical" => Some(BUILTIN_PERSONALITY_TECHNICAL),
+        "companion" => Some(BUILTIN_PERSONALITY_COMPANION),
+        "decision-coach" | "decision_coach" => Some(BUILTIN_PERSONALITY_DECISION_COACH),
+        "reflective" => Some(BUILTIN_PERSONALITY_REFLECTIVE),
         _ => None,
     }
+}
+
+/// Return the built-in personality names available without user files.
+pub fn builtin_personality_names() -> &'static [&'static str] {
+    BUILTIN_PERSONALITY_NAMES
 }
 
 /// Resolve a named personality by checking user files first, then built-ins.
 ///
 /// Resolution order:
 /// 1) `<hermes_home>/personalities/<name>.md` (or `$HERMES_HOME`, then `~/.hermes`)
-/// 2) built-in personas: `coder`, `writer`, `analyst`
+/// 2) built-in personas (see [`builtin_personality_names`])
 pub fn resolve_personality(name: &str, hermes_home_override: Option<&str>) -> Option<String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
@@ -1097,6 +1132,35 @@ mod tests {
         let p = resolve_personality("technical", None).unwrap();
         assert!(p.contains("`technical` persona"));
         assert!(p.contains("systems-level"));
+    }
+
+    #[test]
+    fn test_persona_snapshot_companion() {
+        let p = resolve_personality("companion", None).unwrap();
+        assert!(p.contains("`companion` persona"));
+        assert!(p.contains("active listening"));
+    }
+
+    #[test]
+    fn test_persona_snapshot_decision_coach() {
+        let p = resolve_personality("decision-coach", None).unwrap();
+        assert!(p.contains("`decision-coach` persona"));
+        assert!(p.contains("trade-offs"));
+    }
+
+    #[test]
+    fn test_persona_snapshot_reflective() {
+        let p = resolve_personality("reflective", None).unwrap();
+        assert!(p.contains("`reflective` persona"));
+        assert!(p.contains("follow-up questions"));
+    }
+
+    #[test]
+    fn test_builtin_personality_names_contains_new_modes() {
+        let names = builtin_personality_names();
+        assert!(names.contains(&"companion"));
+        assert!(names.contains(&"decision-coach"));
+        assert!(names.contains(&"reflective"));
     }
 
     #[test]
