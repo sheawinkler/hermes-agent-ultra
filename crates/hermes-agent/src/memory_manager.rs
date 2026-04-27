@@ -666,7 +666,7 @@ fn score_memory_candidate(
     candidate: &FusedMemoryCandidate,
     terms: &[String],
     weights: &HashMap<String, f64>,
-) -> f64 {
+) -> (f64, f64) {
     let content_lc = candidate.content.to_ascii_lowercase();
     let provider_weight = weights
         .get(&candidate.provider.to_ascii_lowercase())
@@ -682,27 +682,46 @@ fn score_memory_candidate(
         term_hits / terms.len() as f64
     };
     let length_score = (candidate.content.len() as f64 / 1200.0).min(1.0) * 0.1;
-    provider_weight + term_score + length_score
+    let score = provider_weight + term_score + length_score;
+    let max_weight = weights.values().copied().fold(1.0_f64, f64::max);
+    let confidence = ((provider_weight / max_weight) * 0.65 + term_score * 0.35).clamp(0.0, 1.0);
+    (score, confidence)
 }
 
 fn fuse_memory_candidates(candidates: Vec<FusedMemoryCandidate>, query: &str) -> Vec<String> {
     let terms = query_terms(query);
     let weights = memory_fusion_weights();
-    let mut scored: Vec<(f64, FusedMemoryCandidate)> = candidates
+    let mut scored: Vec<(f64, f64, FusedMemoryCandidate)> = candidates
         .into_iter()
-        .map(|entry| (score_memory_candidate(&entry, &terms, &weights), entry))
+        .map(|entry| {
+            let (score, confidence) = score_memory_candidate(&entry, &terms, &weights);
+            (score, confidence, entry)
+        })
         .collect();
-    scored.sort_by(|a, b| b.0.total_cmp(&a.0));
+    scored.sort_by(|a, b| {
+        b.0.total_cmp(&a.0)
+            .then_with(|| b.1.total_cmp(&a.1))
+            .then_with(|| a.2.provider.cmp(&b.2.provider))
+            .then_with(|| {
+                canonical_memory_key(&a.2.content).cmp(&canonical_memory_key(&b.2.content))
+            })
+    });
 
     let mut seen = std::collections::HashSet::new();
     let mut fused = Vec::new();
     let top_k = memory_fusion_top_k();
-    for (_score, entry) in scored {
+    for (score, confidence, entry) in scored {
         let key = canonical_memory_key(&entry.content);
         if key.is_empty() || !seen.insert(key) {
             continue;
         }
-        fused.push(format!("[{}] {}", entry.provider, entry.content.trim()));
+        fused.push(format!(
+            "[{} score={:.3} conf={:.2}] {}",
+            entry.provider,
+            score,
+            confidence,
+            entry.content.trim()
+        ));
         if fused.len() >= top_k {
             break;
         }
@@ -889,6 +908,8 @@ mod tests {
         let fused = fuse_memory_candidates(candidates, "Need rust tokio context");
         assert_eq!(fused.len(), 2);
         assert!(fused[0].contains("Rust"));
+        assert!(fused[0].contains("score="));
+        assert!(fused[0].contains("conf="));
     }
 
     #[test]
