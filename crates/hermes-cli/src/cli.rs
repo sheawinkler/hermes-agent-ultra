@@ -168,6 +168,21 @@ pub enum CliCommand {
         json: bool,
     },
 
+    /// Compute and optionally apply smart-routing policy overrides from learned route health.
+    RouteAutotune {
+        /// Action: show/plan/inspect/apply/reset/clear
+        action: Option<String>,
+        /// Persist generated overrides to route-autotune.env.
+        #[arg(long)]
+        apply: bool,
+        /// Fail with non-zero status when health evidence is insufficient.
+        #[arg(long)]
+        strict: bool,
+        /// Print machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Build an incident support bundle with replay/provenance diagnostics.
     IncidentPack {
         /// Optional existing doctor snapshot path.
@@ -796,6 +811,33 @@ mod tests {
                 assert!(json);
             }
             _ => panic!("expected route-health command"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_route_autotune_apply() {
+        let cli = Cli::try_parse_from(vec![
+            "hermes",
+            "route-autotune",
+            "apply",
+            "--apply",
+            "--strict",
+            "--json",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(CliCommand::RouteAutotune {
+                action,
+                apply,
+                strict,
+                json,
+            }) => {
+                assert_eq!(action.as_deref(), Some("apply"));
+                assert!(apply);
+                assert!(strict);
+                assert!(json);
+            }
+            _ => panic!("expected route-autotune command"),
         }
     }
 
