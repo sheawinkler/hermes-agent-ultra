@@ -9,7 +9,7 @@
 //! - Theme/skin engine support (9.8)
 
 use std::io::Stdout;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::cursor::Show;
 use crossterm::event::{Event as CrosstermEvent, KeyEvent, MouseEvent};
@@ -207,6 +207,18 @@ pub struct TuiState {
     pub spinner_frame: usize,
     /// Tool output sections with fold state (tool_name, output, is_expanded).
     pub tool_outputs: Vec<ToolOutputSection>,
+    /// Recent lifecycle/activity rows (newest at end).
+    pub recent_activity: Vec<String>,
+    /// Active tool names currently running.
+    pub active_tools: Vec<String>,
+    /// Live thinking preview accumulated during stream.
+    pub live_thinking: String,
+    /// Last known token usage (prompt, completion, total).
+    pub last_usage: Option<(u64, u64, u64)>,
+    /// Sticky prompt hint shown while scrolling history.
+    pub sticky_prompt: String,
+    /// Number of queued/running background jobs.
+    pub background_jobs_running: usize,
 }
 
 /// A section of tool output that can be folded/expanded.
@@ -271,11 +283,74 @@ impl Default for TuiState {
             history_search_query: String::new(),
             spinner_frame: 0,
             tool_outputs: Vec::new(),
+            recent_activity: Vec::new(),
+            active_tools: Vec::new(),
+            live_thinking: String::new(),
+            last_usage: None,
+            sticky_prompt: String::new(),
+            background_jobs_running: 0,
         }
     }
 }
 
 impl TuiState {
+    fn push_activity(&mut self, text: impl Into<String>) {
+        let trimmed = text.into().trim().to_string();
+        if trimmed.is_empty() {
+            return;
+        }
+        self.recent_activity.push(trimmed);
+        const MAX_EVENTS: usize = 16;
+        if self.recent_activity.len() > MAX_EVENTS {
+            let remove = self.recent_activity.len() - MAX_EVENTS;
+            self.recent_activity.drain(0..remove);
+        }
+    }
+
+    fn append_live_thinking(&mut self, chunk: &str) {
+        let chunk = chunk.trim();
+        if chunk.is_empty() {
+            return;
+        }
+        if !self.live_thinking.is_empty() {
+            self.live_thinking.push(' ');
+        }
+        self.live_thinking.push_str(chunk);
+        const MAX_CHARS: usize = 260;
+        if self.live_thinking.chars().count() > MAX_CHARS {
+            let tail: String = self
+                .live_thinking
+                .chars()
+                .rev()
+                .take(MAX_CHARS.saturating_sub(1))
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect();
+            self.live_thinking = format!("…{}", tail);
+        }
+    }
+
+    fn refresh_sticky_prompt(&mut self, app: &App) {
+        if self.scroll_offset == 0 {
+            self.sticky_prompt.clear();
+            return;
+        }
+        let transcript = app.transcript_messages();
+        let prompt = transcript
+            .iter()
+            .rev()
+            .find(|m| m.role == hermes_core::MessageRole::User)
+            .and_then(|m| m.content.as_deref())
+            .unwrap_or("")
+            .trim();
+        self.sticky_prompt = if prompt.is_empty() {
+            String::new()
+        } else {
+            truncate_chars(prompt, 120)
+        };
+    }
+
     /// Handle a key event and return whether the app should quit.
     pub fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> bool {
         match self.mode {
@@ -635,27 +710,39 @@ pub fn render(frame: &mut Frame, app: &App, state: &TuiState, theme: &Theme) {
     let header_height = 1;
     let composer_lines = state.input.matches('\n').count() as u16 + 1;
     let input_height = (composer_lines + 2).clamp(3, 6);
+    let show_live_details = state.processing
+        || !state.active_tools.is_empty()
+        || !state.recent_activity.is_empty()
+        || !state.live_thinking.is_empty()
+        || state.last_usage.is_some();
+    let details_height = if show_live_details { 5 } else { 0 };
     let status_height = 1;
 
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(header_height), // header
-            Constraint::Min(5),                // messages
-            Constraint::Length(input_height),  // input
-            Constraint::Length(status_height), // status
+            Constraint::Length(header_height),  // header
+            Constraint::Min(5),                 // messages
+            Constraint::Length(details_height), // live details
+            Constraint::Length(input_height),   // input
+            Constraint::Length(status_height),  // status
         ])
         .split(size);
 
     let header_area = vertical[0];
     let messages_area = vertical[1];
-    let input_area = vertical[2];
-    let status_area = vertical[3];
+    let details_area = vertical[2];
+    let input_area = vertical[3];
+    let status_area = vertical[4];
 
     render_header(frame, app, header_area, &colors);
 
     // --- Render message history ---
     render_messages(frame, app, state, messages_area, &resolved, &colors);
+
+    if show_live_details {
+        render_live_details(frame, state, details_area, &colors);
+    }
 
     // --- Render input area ---
     if let Some(pos) = render_input(frame, state, input_area, &colors) {
@@ -702,6 +789,111 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect, colors: &crate::theme
     let title = Paragraph::new(text)
         .block(Block::default().style(Style::default().bg(colors.status_bar_bg)));
     frame.render_widget(title, area);
+}
+
+fn render_live_details(
+    frame: &mut Frame,
+    state: &TuiState,
+    area: Rect,
+    colors: &crate::theme::RatatuiColors,
+) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Live Details ")
+        .style(Style::default().bg(colors.background))
+        .border_style(Style::default().fg(colors.status_bar_dim));
+    let mut rows: Vec<Line<'static>> = Vec::new();
+
+    if !state.active_tools.is_empty() {
+        rows.push(Line::from(vec![
+            Span::styled(
+                " tools: ",
+                Style::default()
+                    .fg(colors.status_bar_dim)
+                    .bg(colors.background),
+            ),
+            Span::styled(
+                truncate_chars(&state.active_tools.join(", "), 120),
+                Style::default()
+                    .fg(colors.status_bar_strong)
+                    .bg(colors.background)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+    } else if state.processing {
+        rows.push(Line::from(vec![Span::styled(
+            " tools: awaiting tool events…",
+            Style::default()
+                .fg(colors.status_bar_dim)
+                .bg(colors.background),
+        )]));
+    }
+
+    if !state.live_thinking.is_empty() {
+        rows.push(Line::from(vec![
+            Span::styled(
+                " thinking: ",
+                Style::default()
+                    .fg(colors.status_bar_dim)
+                    .bg(colors.background),
+            ),
+            Span::styled(
+                truncate_chars(&state.live_thinking, 140),
+                Style::default().fg(colors.accent).bg(colors.background),
+            ),
+        ]));
+    }
+
+    if let Some((prompt, completion, total)) = state.last_usage {
+        rows.push(Line::from(vec![
+            Span::styled(
+                " usage: ",
+                Style::default()
+                    .fg(colors.status_bar_dim)
+                    .bg(colors.background),
+            ),
+            Span::styled(
+                format!("in={} out={} total={}", prompt, completion, total),
+                Style::default()
+                    .fg(colors.status_bar_text)
+                    .bg(colors.background),
+            ),
+        ]));
+    }
+
+    for event in state.recent_activity.iter().rev().take(2).rev() {
+        rows.push(Line::from(vec![
+            Span::styled(
+                " • ",
+                Style::default().fg(colors.accent).bg(colors.background),
+            ),
+            Span::styled(
+                truncate_chars(event, 140),
+                Style::default()
+                    .fg(colors.status_bar_text)
+                    .bg(colors.background),
+            ),
+        ]));
+    }
+
+    if rows.is_empty() {
+        rows.push(Line::from(vec![Span::styled(
+            " waiting for activity…",
+            Style::default()
+                .fg(colors.status_bar_dim)
+                .bg(colors.background)
+                .add_modifier(Modifier::ITALIC),
+        )]));
+    }
+
+    let paragraph = Paragraph::new(Text::from(rows))
+        .block(block)
+        .wrap(Wrap { trim: true });
+    frame.render_widget(Clear, area);
+    frame.render_widget(paragraph, area);
 }
 
 /// Render the message history area.
@@ -1484,6 +1676,15 @@ fn render_status(
         "{} {} | {} | {} msgs | {}",
         processing_indicator, state.mode, model, msg_count, session
     );
+    if state.background_jobs_running > 0 {
+        status_text.push_str(&format!(" | bg:{}", state.background_jobs_running));
+    }
+    if !state.sticky_prompt.is_empty() {
+        status_text.push_str(&format!(
+            " | ↳ {}",
+            truncate_chars(&state.sticky_prompt, 40)
+        ));
+    }
     if !state.status_message.is_empty() || !scroll_hint.is_empty() {
         status_text.push_str(" | ");
         status_text.push_str(&state.status_message);
@@ -1524,7 +1725,8 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
 }
 
 fn is_ctrl_c(key: &KeyEvent) -> bool {
-    key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+    key.modifiers
+        .contains(crossterm::event::KeyModifiers::CONTROL)
         && key.code == crossterm::event::KeyCode::Char('c')
 }
 
@@ -1539,6 +1741,9 @@ fn is_ctrl_c(key: &KeyEvent) -> bool {
 pub async fn run(mut app: App) -> Result<(), AgentError> {
     let mut tui = Tui::new().map_err(|e| AgentError::Config(e.to_string()))?;
     let mut state = TuiState::default();
+    let mut last_jobs_refresh = Instant::now()
+        .checked_sub(Duration::from_secs(2))
+        .unwrap_or_else(Instant::now);
     app.set_stream_handle(Some(StreamHandle::from(tui.event_sender())));
 
     // Spawn crossterm event reader
@@ -1567,6 +1772,15 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
 
     // Main event loop
     while app.running {
+        if last_jobs_refresh.elapsed() >= Duration::from_secs(1) {
+            state.background_jobs_running = app.running_background_job_count();
+            last_jobs_refresh = Instant::now();
+        }
+        state.refresh_sticky_prompt(&app);
+        if state.processing {
+            state.tick_spinner();
+        }
+
         // Render
         let active_theme = tui.theme().clone();
         tui.terminal
@@ -1674,6 +1888,88 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                         state.stream_needs_break = true;
                                     }
                                 }
+                                if let Some(ui_event) = extra.get("ui_event").and_then(|v| v.as_str()) {
+                                    match ui_event {
+                                        "tool_start" => {
+                                            let tool = extra
+                                                .get("tool")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("tool")
+                                                .trim()
+                                                .to_string();
+                                            if !tool.is_empty()
+                                                && !state.active_tools.iter().any(|t| t == &tool)
+                                            {
+                                                state.active_tools.push(tool.clone());
+                                            }
+                                            let args_preview = extra
+                                                .get("args_preview")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("")
+                                                .trim();
+                                            if args_preview.is_empty() {
+                                                state.push_activity(format!("▶ {}", tool));
+                                            } else {
+                                                state.push_activity(format!("▶ {} {}", tool, args_preview));
+                                            }
+                                        }
+                                        "tool_complete" => {
+                                            let tool = extra
+                                                .get("tool")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("tool")
+                                                .trim()
+                                                .to_string();
+                                            if let Some(idx) =
+                                                state.active_tools.iter().position(|t| t == &tool)
+                                            {
+                                                state.active_tools.remove(idx);
+                                            }
+                                            let result_preview = extra
+                                                .get("result_preview")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("")
+                                                .trim();
+                                            if result_preview.is_empty() {
+                                                state.push_activity(format!("✓ {}", tool));
+                                            } else {
+                                                state.push_activity(format!(
+                                                    "✓ {} {}",
+                                                    tool, result_preview
+                                                ));
+                                            }
+                                        }
+                                        "status" => {
+                                            let event_type = extra
+                                                .get("event_type")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("status")
+                                                .trim();
+                                            let message = extra
+                                                .get("message")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("")
+                                                .trim();
+                                            if !message.is_empty() {
+                                                state.push_activity(format!(
+                                                    "[{}] {}",
+                                                    event_type, message
+                                                ));
+                                            }
+                                        }
+                                        "thinking" => {
+                                            if let Some(text) =
+                                                extra.get("text").and_then(|v| v.as_str())
+                                            {
+                                                state.append_live_thinking(text);
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                if let Some(thinking) = extra.get("thinking").and_then(|v| v.as_str()) {
+                                    state.append_live_thinking(thinking);
+                                }
                             }
                             if let Some(content) = delta.content {
                                 if !state.stream_muted {
@@ -1685,12 +1981,17 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                 }
                             }
                         }
+                        if let Some(usage) = chunk.usage {
+                            state.last_usage =
+                                Some((usage.prompt_tokens, usage.completion_tokens, usage.total_tokens));
+                        }
                     }
                     Some(Event::AgentDone) => {
                         state.processing = false;
                         state.stream_buffer.clear();
                         state.stream_muted = false;
                         state.stream_needs_break = false;
+                        state.active_tools.clear();
                         state.status_message.clear();
                     }
                     Some(Event::Interrupt) => {
@@ -1698,6 +1999,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         state.stream_buffer.clear();
                         state.stream_muted = false;
                         state.stream_needs_break = false;
+                        state.active_tools.clear();
                     }
                     None => {
                         // Channel closed
@@ -1822,6 +2124,32 @@ mod tests {
         let event = Event::Message("hello".to_string());
         let debug_str = format!("{:?}", event);
         assert!(debug_str.contains("hello"));
+    }
+
+    #[test]
+    fn test_activity_ring_buffer_caps_size() {
+        let mut state = TuiState::default();
+        for i in 0..30 {
+            state.push_activity(format!("event-{i}"));
+        }
+        assert_eq!(state.recent_activity.len(), 16);
+        assert_eq!(
+            state.recent_activity.first().map(String::as_str),
+            Some("event-14")
+        );
+        assert_eq!(
+            state.recent_activity.last().map(String::as_str),
+            Some("event-29")
+        );
+    }
+
+    #[test]
+    fn test_append_live_thinking_is_capped() {
+        let mut state = TuiState::default();
+        let long = "x".repeat(400);
+        state.append_live_thinking(&long);
+        assert!(state.live_thinking.chars().count() <= 260);
+        assert!(state.live_thinking.starts_with('…'));
     }
 
     #[test]

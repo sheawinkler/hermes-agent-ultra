@@ -5,7 +5,7 @@
 //! slash commands, and session management.
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,9 @@ use hermes_agent::providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
 };
 use hermes_agent::sub_agent_orchestrator::SubAgentOrchestrator;
-use hermes_agent::{AgentConfig, AgentLoop, InterruptController, SessionPersistence};
+use hermes_agent::{
+    AgentCallbacks, AgentConfig, AgentLoop, InterruptController, SessionPersistence,
+};
 use hermes_config::{cron_dir, hermes_home as hermes_home_dir, load_config, GatewayConfig};
 use hermes_core::ToolSchema;
 use hermes_core::{AgentError, LlmProvider};
@@ -81,6 +83,8 @@ pub struct App {
 
     /// Optional TUI streaming sink for incremental chunks.
     pub stream_handle: Option<StreamHandle>,
+    /// Shared streaming sink used by agent callbacks for progress events.
+    stream_handle_shared: Arc<StdMutex<Option<StreamHandle>>>,
 }
 
 impl std::fmt::Debug for App {
@@ -123,6 +127,102 @@ pub struct UiTranscriptMessage {
 // ---------------------------------------------------------------------------
 
 impl App {
+    fn push_stream_extra_event(
+        shared: &Arc<StdMutex<Option<StreamHandle>>>,
+        payload: serde_json::Value,
+    ) {
+        if let Ok(guard) = shared.lock() {
+            if let Some(handle) = guard.clone() {
+                handle.send_chunk(hermes_core::StreamChunk {
+                    delta: Some(hermes_core::StreamDelta {
+                        content: None,
+                        tool_calls: None,
+                        extra: Some(payload),
+                    }),
+                    finish_reason: None,
+                    usage: None,
+                });
+            }
+        }
+    }
+
+    fn preview_for_status(raw: &str, max_chars: usize) -> String {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return String::new();
+        }
+        let collapsed = trimmed.split_whitespace().collect::<Vec<_>>().join(" ");
+        if collapsed.chars().count() <= max_chars {
+            collapsed
+        } else {
+            let mut out: String = collapsed
+                .chars()
+                .take(max_chars.saturating_sub(1))
+                .collect();
+            out.push('…');
+            out
+        }
+    }
+
+    fn stream_callbacks(shared: Arc<StdMutex<Option<StreamHandle>>>) -> AgentCallbacks {
+        let thinking_shared = shared.clone();
+        let tool_start_shared = shared.clone();
+        let tool_done_shared = shared.clone();
+        let status_shared = shared;
+        AgentCallbacks {
+            on_thinking: Some(Box::new(move |thinking: &str| {
+                let preview = App::preview_for_status(thinking, 220);
+                if preview.is_empty() {
+                    return;
+                }
+                App::push_stream_extra_event(
+                    &thinking_shared,
+                    serde_json::json!({
+                        "ui_event": "thinking",
+                        "text": preview,
+                    }),
+                );
+            })),
+            on_tool_start: Some(Box::new(move |tool: &str, args: &Value| {
+                let arg_preview = App::preview_for_status(&args.to_string(), 140);
+                App::push_stream_extra_event(
+                    &tool_start_shared,
+                    serde_json::json!({
+                        "ui_event": "tool_start",
+                        "tool": tool,
+                        "args_preview": arg_preview,
+                    }),
+                );
+            })),
+            on_tool_complete: Some(Box::new(move |tool: &str, content: &str| {
+                let preview = App::preview_for_status(content, 160);
+                App::push_stream_extra_event(
+                    &tool_done_shared,
+                    serde_json::json!({
+                        "ui_event": "tool_complete",
+                        "tool": tool,
+                        "result_preview": preview,
+                    }),
+                );
+            })),
+            status_callback: Some(Arc::new(move |event_type: &str, message: &str| {
+                let preview = App::preview_for_status(message, 200);
+                if preview.is_empty() {
+                    return;
+                }
+                App::push_stream_extra_event(
+                    &status_shared,
+                    serde_json::json!({
+                        "ui_event": "status",
+                        "event_type": event_type,
+                        "message": preview,
+                    }),
+                );
+            })),
+            ..AgentCallbacks::default()
+        }
+    }
+
     /// Create a new `App` from the parsed CLI arguments.
     ///
     /// This loads (or creates) the gateway configuration, builds a tool
@@ -180,6 +280,8 @@ impl App {
         let current_personality = config.personality.clone();
 
         let tool_registry = Arc::new(ToolRegistry::new());
+        let stream_handle_shared: Arc<StdMutex<Option<StreamHandle>>> =
+            Arc::new(StdMutex::new(None));
         let terminal_backend = build_terminal_backend(&config);
         let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
         let skill_provider: Arc<dyn hermes_core::SkillProvider> =
@@ -203,7 +305,8 @@ impl App {
         let agent_config = build_agent_config(&config, &current_model);
         let provider = build_provider(&config, &current_model);
 
-        let agent_inner = AgentLoop::new(agent_config, agent_tool_registry, provider);
+        let agent_inner = AgentLoop::new(agent_config, agent_tool_registry, provider)
+            .with_callbacks(Self::stream_callbacks(stream_handle_shared.clone()));
         let hermes_home = hermes_home_dir();
         let orchestrator = Arc::new(SubAgentOrchestrator::from_parent(&agent_inner, hermes_home));
         let agent = Arc::new(agent_inner.with_sub_agent_orchestrator(orchestrator));
@@ -223,11 +326,15 @@ impl App {
             history_index: 0,
             interrupt_controller: InterruptController::new(),
             stream_handle: None,
+            stream_handle_shared,
         })
     }
 
     /// Attach a streaming handle (used by TUI mode).
     pub fn set_stream_handle(&mut self, handle: Option<StreamHandle>) {
+        if let Ok(mut guard) = self.stream_handle_shared.lock() {
+            *guard = handle.clone();
+        }
         self.stream_handle = handle;
     }
 
@@ -385,7 +492,8 @@ impl App {
         let agent_config = build_agent_config(&self.config, &self.current_model);
         let agent_tool_registry = Arc::new(bridge_tool_registry(&self.tool_registry));
 
-        let agent_inner = AgentLoop::new(agent_config, agent_tool_registry, provider);
+        let agent_inner = AgentLoop::new(agent_config, agent_tool_registry, provider)
+            .with_callbacks(Self::stream_callbacks(self.stream_handle_shared.clone()));
         let hermes_home = hermes_home_dir();
         let orchestrator = Arc::new(SubAgentOrchestrator::from_parent(&agent_inner, hermes_home));
         self.agent = Arc::new(agent_inner.with_sub_agent_orchestrator(orchestrator));
@@ -510,6 +618,36 @@ impl App {
     fn prune_ui_after_current_messages(&mut self) {
         let cap = self.messages.len();
         self.ui_messages.retain(|m| m.insert_at <= cap);
+    }
+
+    /// Count background jobs currently queued/running.
+    pub fn running_background_job_count(&self) -> usize {
+        let jobs_dir = hermes_config::hermes_home().join("background_jobs");
+        let mut active = 0usize;
+        let entries = match std::fs::read_dir(jobs_dir) {
+            Ok(entries) => entries,
+            Err(_) => return 0,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|v| v.to_str()) != Some("json") {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(value) = serde_json::from_str::<serde_json::Value>(&content) else {
+                continue;
+            };
+            let status = value
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default();
+            if matches!(status, "queued" | "running") {
+                active += 1;
+            }
+        }
+        active
     }
 
     /// Get a serializable snapshot of the current session info.
