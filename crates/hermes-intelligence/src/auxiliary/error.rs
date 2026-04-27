@@ -97,6 +97,18 @@ const CONNECTION_KEYWORDS: &[&str] = &[
     "eof while",
 ];
 
+/// Substrings that indicate a provider rejected a request parameter.
+const UNSUPPORTED_PARAM_KEYWORDS: &[&str] = &[
+    "unsupported parameter",
+    "unsupported_parameter",
+    "not supported",
+    "does not support",
+    "unknown parameter",
+    "unrecognized request argument",
+    "unrecognized parameter",
+    "invalid parameter",
+];
+
 /// Returns `true` if the error looks like a payment / credit exhaustion
 /// failure that warrants trying the next provider in the chain.
 pub fn is_payment_error(err: &AgentError) -> bool {
@@ -109,6 +121,24 @@ pub fn is_payment_error(err: &AgentError) -> bool {
 pub fn is_connection_error(err: &AgentError) -> bool {
     let msg = err.to_string().to_lowercase();
     CONNECTION_KEYWORDS.iter().any(|kw| msg.contains(kw))
+}
+
+/// Returns `true` when the provider rejected a specific request parameter.
+pub fn is_unsupported_parameter_error(err: &AgentError, param: &str) -> bool {
+    let param_lower = param.trim().to_lowercase();
+    if param_lower.is_empty() {
+        return false;
+    }
+    let msg = err.to_string().to_lowercase();
+    if !msg.contains(&param_lower) {
+        return false;
+    }
+    UNSUPPORTED_PARAM_KEYWORDS.iter().any(|kw| msg.contains(kw))
+}
+
+/// Backward-compatible convenience wrapper for `temperature` rejections.
+pub fn is_unsupported_temperature_error(err: &AgentError) -> bool {
+    is_unsupported_parameter_error(err, "temperature")
 }
 
 /// Convenience: returns `true` iff [`is_payment_error`] OR [`is_connection_error`].
@@ -144,5 +174,39 @@ mod tests {
         assert!(!should_fallback(&err("invalid api key")));
         assert!(!should_fallback(&err("model not found")));
         assert!(!should_fallback(&err("HTTP 400 bad request")));
+    }
+
+    #[test]
+    fn detects_unsupported_parameter_errors() {
+        assert!(is_unsupported_parameter_error(
+            &err("HTTP 400: Unsupported parameter: temperature"),
+            "temperature"
+        ));
+        assert!(is_unsupported_parameter_error(
+            &err("Unknown parameter: max_tokens"),
+            "max_tokens"
+        ));
+        assert!(is_unsupported_parameter_error(
+            &err("Invalid parameter: top_p is not supported"),
+            "top_p"
+        ));
+        assert!(!is_unsupported_parameter_error(
+            &err("temperature must be between 0 and 2"),
+            "temperature"
+        ));
+        assert!(!is_unsupported_parameter_error(
+            &err("Unsupported parameter: max_tokens"),
+            ""
+        ));
+    }
+
+    #[test]
+    fn temperature_wrapper_delegates_to_generic_detector() {
+        assert!(is_unsupported_temperature_error(&err(
+            "HTTP 400: unsupported_parameter on temperature"
+        )));
+        assert!(!is_unsupported_temperature_error(&err(
+            "HTTP 400: unsupported parameter: max_tokens"
+        )));
     }
 }
