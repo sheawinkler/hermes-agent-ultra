@@ -9,6 +9,7 @@ fork-specific history.
   - One-shot upstream sync (`fetch -> strategy apply -> test -> push`)
   - Default mode: create a sync branch and open a PR
   - Supports `--draft-pr` for safer review-first PR creation
+  - Supports `--pr-labels` to apply metadata/risk labels on the created PR
   - Supports `--strategy merge|cherry-pick`
   - Supports strict risk gating via `--strict-risk-gate`
   - Emits timestamped reports under `.sync-reports/`
@@ -26,6 +27,7 @@ fork-specific history.
 bash scripts/sync-upstream.sh --dry-run
 bash scripts/sync-upstream.sh
 bash scripts/sync-upstream.sh --draft-pr
+bash scripts/sync-upstream.sh --draft-pr --pr-labels "upstream-sync,parity-sync,risk-reviewed"
 ```
 
 Cherry-pick mode for linear upstream replay:
@@ -82,6 +84,7 @@ Default report path:
   - Optional override target repo string: `EXPECTED_UPSTREAM_REPO=<owner/repo>`.
 - Requires a clean working tree.
 - `gh` CLI is optional; without it the script still pushes the sync branch. Conflict issue auto-creation is disabled when `gh` is unavailable.
+- Sync PR bodies now include parity queue summary, drift artifact paths, and test guidance for merge reviewers.
 - Cron entry exports `REPO_ROOT` explicitly so the wrapper runs against the
   intended repository path.
 - On conflicts, the script writes `.sync-reports/upstream-sync-<timestamp>-conflict.txt`.
