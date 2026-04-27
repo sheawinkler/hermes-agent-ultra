@@ -122,6 +122,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/save", "Save current session to disk"),
     ("/load", "Load a saved session"),
     ("/background", "Run a task in the background"),
+    ("/mouse", "Toggle mouse interactions in the TUI"),
     ("/verbose", "Toggle verbose mode"),
     ("/statusbar", "Toggle status bar visibility"),
     ("/sb", "Alias for /statusbar"),
@@ -334,6 +335,7 @@ pub async fn handle_slash_command(
         "/save" => handle_save_command(app, args),
         "/load" => handle_load_command(app, args),
         "/background" => handle_background_command(app, args),
+        "/mouse" => handle_mouse_command(app, args),
         "/verbose" => handle_verbose_command(app),
         "/statusbar" => handle_statusbar_command(app),
         "/yolo" => handle_yolo_command(app),
@@ -1653,6 +1655,59 @@ fn handle_statusbar_command(app: &mut App) -> Result<CommandResult, AgentError> 
         app,
         "Status bar is always enabled in the current TUI renderer.",
     );
+    Ok(CommandResult::Handled)
+}
+
+fn parse_toggle_arg(raw: Option<&str>, current: bool) -> Result<bool, &'static str> {
+    let Some(raw) = raw else {
+        return Ok(!current);
+    };
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "" | "toggle" => Ok(!current),
+        "on" | "true" | "yes" | "1" => Ok(true),
+        "off" | "false" | "no" | "0" => Ok(false),
+        _ => Err("Usage: /mouse [on|off|toggle]"),
+    }
+}
+
+fn handle_mouse_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    if args.len() >= 2 && args[0].eq_ignore_ascii_case("set") {
+        match parse_toggle_arg(args.get(1).copied(), app.mouse_enabled()) {
+            Ok(next) => {
+                app.set_mouse_enabled(next);
+                std::env::set_var("HERMES_TUI_MOUSE", if next { "1" } else { "0" });
+                emit_command_output(
+                    app,
+                    format!("Mouse interactions: {}", if next { "ON" } else { "OFF" }),
+                );
+            }
+            Err(usage) => emit_command_output(app, usage),
+        }
+        return Ok(CommandResult::Handled);
+    }
+
+    if args.is_empty() || args[0].eq_ignore_ascii_case("status") {
+        emit_command_output(
+            app,
+            format!(
+                "Mouse interactions: {} (use `/mouse on` or `/mouse off`)",
+                if app.mouse_enabled() { "ON" } else { "OFF" }
+            ),
+        );
+        return Ok(CommandResult::Handled);
+    }
+
+    match parse_toggle_arg(args.first().copied(), app.mouse_enabled()) {
+        Ok(next) => {
+            app.set_mouse_enabled(next);
+            std::env::set_var("HERMES_TUI_MOUSE", if next { "1" } else { "0" });
+            emit_command_output(
+                app,
+                format!("Mouse interactions: {}", if next { "ON" } else { "OFF" }),
+            );
+        }
+        Err(usage) => emit_command_output(app, usage),
+    }
     Ok(CommandResult::Handled)
 }
 
@@ -5707,6 +5762,18 @@ mod tests {
         let providers = vec!["openai", "nous", "anthropic"];
         let req = parse_model_switch_request(&["gpt-4o"], &providers);
         assert_eq!(req, ModelSwitchRequest::SetDirect("gpt-4o".to_string()));
+    }
+
+    #[test]
+    fn parse_toggle_arg_supports_status_and_explicit_values() {
+        assert_eq!(parse_toggle_arg(None, true).expect("toggle"), false);
+        assert_eq!(
+            parse_toggle_arg(Some("toggle"), false).expect("toggle"),
+            true
+        );
+        assert_eq!(parse_toggle_arg(Some("on"), false).expect("on"), true);
+        assert_eq!(parse_toggle_arg(Some("off"), true).expect("off"), false);
+        assert!(parse_toggle_arg(Some("bad-value"), true).is_err());
     }
 
     #[test]
