@@ -70,8 +70,7 @@ pub const TOOLSET_VOICE: &[&str] = &["transcription", "voice_mode"];
 /// Security helpers.
 pub const TOOLSET_SECURITY: &[&str] = &["osv_check", "url_safety"];
 /// System utility helpers.
-pub const TOOLSET_SYSTEM: &[&str] =
-    &["env_passthrough", "credential_files", "tool_result_storage"];
+pub const TOOLSET_SYSTEM: &[&str] = &["env_passthrough", "credential_files", "tool_result_storage"];
 /// Mixture-of-agents workflow.
 pub const TOOLSET_MIXTURE_OF_AGENTS: &[&str] = &["mixture_of_agents"];
 
