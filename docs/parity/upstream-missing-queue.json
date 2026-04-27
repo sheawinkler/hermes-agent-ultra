@@ -4391,13 +4391,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/main.py",
         "tests/hermes_cli/test_tui_npm_install.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "Rust-native TUI (ratatui) has no Node/Ink bundle dependency path; upstream ink rebuild fix not applicable.",
       "owner": "",
       "sha": "0738b80833c12eb6127caa97279a5db83e0f7b54",
       "subject": "fix(tui): rebuild when ink bundle is missing",
@@ -4918,7 +4918,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tui_gateway/server.py",
         "ui-tui/packages/hermes-ink/src/ink/components/AlternateScreen.tsx",
@@ -4931,7 +4931,7 @@
         "ui-tui/src/gatewayTypes.ts"
       ],
       "files_touched": 9,
-      "notes": "",
+      "notes": "Implemented in Rust via commit 432f2dd4: /mouse command + runtime mouse event gating.",
       "owner": "",
       "sha": "1c8ce33d51088ada132f15c6fdf34a6b7247ba5d",
       "subject": "fix(tui): proactive mouse disable on ConPTY + /mouse toggle command",
@@ -5014,13 +5014,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "hermes_cli/tools_config.py",
         "tests/hermes_cli/test_tools_config.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "Numeric platform_toolsets normalization ported in Rust loader commit 415c7fbd; no_mcp sentinel path is Python-UI specific and not present in Rust config flow.",
       "owner": "",
       "sha": "9d7b64b5dd394a60df7d38824256e2f213eac5c6",
       "subject": "fix(tools): normalize numeric entries and clear stale no_mcp in _save_platform_tools",
@@ -5028,12 +5028,12 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "cli.py"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "Covered by startup/runtime model-provider sync fix in 466c6d5d.",
       "owner": "",
       "sha": "9fde22d2333986758c85a8ea1524d3fdb3a3f418",
       "subject": "fix the reset of model change by /model.",
@@ -10186,7 +10186,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     }
   ],
-  "generated_at_utc": "2026-04-27T07:34:24.449688+00:00",
+  "generated_at_utc": "2026-04-27T07:35:36.691666+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -10194,9 +10194,9 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 336,
-      "ported": 32,
-      "superseded": 307
+      "pending": 332,
+      "ported": 35,
+      "superseded": 308
     },
     "by_target_ticket": {
       "20": 242,
