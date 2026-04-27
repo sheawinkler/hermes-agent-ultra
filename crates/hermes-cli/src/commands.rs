@@ -412,6 +412,15 @@ fn split_provider_model(provider_model: &str) -> (&str, &str) {
         .unwrap_or(("openai", provider_model))
 }
 
+fn normalize_model_target(current_model: &str, raw: &str) -> Result<String, AgentError> {
+    let trimmed = raw.trim();
+    if trimmed.contains(':') {
+        return normalize_provider_model(trimmed);
+    }
+    let (provider, _) = split_provider_model(current_model);
+    normalize_provider_model(&format!("{}:{}", provider.trim(), trimmed))
+}
+
 /// Run `curses_select` safely from both plain CLI and active TUI sessions.
 ///
 /// In TUI mode, use an embedded selector that does not toggle terminal mode.
@@ -464,7 +473,7 @@ async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandRes
     let known_providers = curated_provider_slugs();
     match parse_model_switch_request(args, &known_providers) {
         ModelSwitchRequest::SetDirect(raw) => {
-            let provider_model = normalize_provider_model(&raw)?;
+            let provider_model = normalize_model_target(&app.current_model, &raw)?;
             app.switch_model(&provider_model);
             emit_command_output(app, format!("Model switched to: {}", provider_model));
         }
@@ -5762,6 +5771,20 @@ mod tests {
         let providers = vec!["openai", "nous", "anthropic"];
         let req = parse_model_switch_request(&["gpt-4o"], &providers);
         assert_eq!(req, ModelSwitchRequest::SetDirect("gpt-4o".to_string()));
+    }
+
+    #[test]
+    fn normalize_model_target_uses_current_provider_for_bare_model() {
+        let normalized = normalize_model_target("nous:moonshotai/kimi-k2.6", "openai/gpt-5.5")
+            .expect("normalize");
+        assert_eq!(normalized, "nous:openai/gpt-5.5");
+    }
+
+    #[test]
+    fn normalize_model_target_keeps_explicit_provider_model() {
+        let normalized = normalize_model_target("nous:moonshotai/kimi-k2.6", "openai:gpt-5.4")
+            .expect("normalize");
+        assert_eq!(normalized, "openai:gpt-5.4");
     }
 
     #[test]

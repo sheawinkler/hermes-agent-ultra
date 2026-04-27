@@ -1371,6 +1371,17 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
         .llm_providers
         .get(provider_name.as_str())
         .or_else(|| config.llm_providers.get(runtime_provider.as_str()));
+    let provider_config = provider_config.or_else(|| {
+        config.llm_providers.iter().find_map(|(name, cfg)| {
+            if name.eq_ignore_ascii_case(provider_name.as_str())
+                || name.eq_ignore_ascii_case(runtime_provider.as_str())
+            {
+                Some(cfg)
+            } else {
+                None
+            }
+        })
+    });
 
     let default_base_url = provider_default_base_url(provider_name.as_str())
         .or_else(|| provider_default_base_url(runtime_provider.as_str()));
