@@ -234,12 +234,33 @@ impl PickerModal {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 struct TranscriptCache {
     fingerprint: u64,
     width: u16,
     lines: Vec<Line<'static>>,
     total_messages: usize,
+    rendered_messages: usize,
+    message_fingerprints: Vec<u64>,
+    show_timestamps: bool,
+    view_density: ViewDensity,
+    had_streaming: bool,
+}
+
+impl Default for TranscriptCache {
+    fn default() -> Self {
+        Self {
+            fingerprint: 0,
+            width: 0,
+            lines: Vec::new(),
+            total_messages: 0,
+            rendered_messages: 0,
+            message_fingerprints: Vec::new(),
+            show_timestamps: false,
+            view_density: ViewDensity::Detailed,
+            had_streaming: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1551,6 +1572,17 @@ fn transcript_fingerprint(messages: &[hermes_core::Message], state: &TuiState, w
     hasher.finish()
 }
 
+fn transcript_message_fingerprints(messages: &[hermes_core::Message]) -> Vec<u64> {
+    messages.iter().map(message_fingerprint).collect()
+}
+
+fn count_renderable_messages(messages: &[hermes_core::Message]) -> usize {
+    messages
+        .iter()
+        .filter(|msg| !matches!(msg.role, hermes_core::MessageRole::System))
+        .count()
+}
+
 fn render_assistant_markdown_lines(
     content: &str,
     styles: &crate::theme::ResolvedStyles,
@@ -1735,6 +1767,162 @@ fn render_assistant_markdown_lines(
     rendered
 }
 
+fn append_transcript_message_lines(
+    lines: &mut Vec<Line<'static>>,
+    msg: &hermes_core::Message,
+    msg_idx: usize,
+    rendered_messages: &mut usize,
+    state: &mut TuiState,
+    styles: &crate::theme::ResolvedStyles,
+    colors: &crate::theme::RatatuiColors,
+    divider: &str,
+) {
+    // Hide internal orchestration/system payloads from the chat transcript.
+    if matches!(msg.role, hermes_core::MessageRole::System) {
+        return;
+    }
+    if *rendered_messages > 0 && matches!(state.view_density, ViewDensity::Detailed) {
+        lines.push(Line::from(String::new()));
+    }
+    *rendered_messages += 1;
+    let (glyph, label, label_style, body_style) = role_visuals(msg.role, styles, colors);
+    let stamp = if state.show_timestamps {
+        let fp = message_fingerprint(msg);
+        state
+            .message_time_labels
+            .entry(fp)
+            .or_insert_with(|| Local::now().format("%H:%M:%S").to_string())
+            .clone()
+    } else {
+        String::new()
+    };
+    let label_text = if stamp.is_empty() {
+        label.to_string()
+    } else {
+        format!("{label}  {stamp}")
+    };
+    lines.push(Line::from(vec![
+        Span::styled(
+            format!(" ╭ {} ", glyph),
+            label_style.add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(label_text, label_style.add_modifier(Modifier::BOLD)),
+    ]));
+
+    if let Some(content) = msg.content.as_deref() {
+        match msg.role {
+            hermes_core::MessageRole::Assistant => {
+                lines.extend(render_assistant_markdown_lines(content, styles, colors));
+            }
+            hermes_core::MessageRole::Tool => {
+                let card_key = format!("tool:{msg_idx}");
+                let expanded = state.expanded_tool_cards.contains(&card_key)
+                    || state.expanded_tool_cards.contains("__all__")
+                    || matches!(state.view_density, ViewDensity::Detailed);
+                let all_lines: Vec<&str> = content.lines().collect();
+                let shown = if expanded { 32 } else { 5 };
+                lines.push(Line::from(vec![Span::styled(
+                    format!(
+                        "    [tool card: {} | {} lines | Ctrl+E toggles]",
+                        if expanded { "expanded" } else { "collapsed" },
+                        all_lines.len()
+                    ),
+                    Style::default()
+                        .fg(colors.status_bar_dim)
+                        .bg(colors.background),
+                )]));
+                for line in all_lines.iter().take(shown) {
+                    lines.push(render_inline_with_code(
+                        "    ",
+                        line,
+                        styles.tool_result,
+                        Style::default()
+                            .fg(colors.accent)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
+                if all_lines.len() > shown {
+                    lines.push(Line::from(vec![Span::styled(
+                        format!("    … {} more lines", all_lines.len() - shown),
+                        Style::default()
+                            .fg(colors.status_bar_dim)
+                            .bg(colors.background),
+                    )]));
+                }
+            }
+            _ => {
+                for line in content.lines() {
+                    lines.push(render_inline_with_code(
+                        "    ",
+                        line,
+                        body_style,
+                        Style::default()
+                            .fg(colors.accent)
+                            .add_modifier(Modifier::BOLD),
+                    ));
+                }
+            }
+        }
+    }
+
+    if msg.role == hermes_core::MessageRole::Assistant {
+        if matches!(state.view_density, ViewDensity::Detailed) {
+            if let Some(reasoning) = msg
+                .reasoning_content
+                .as_ref()
+                .filter(|s| !s.trim().is_empty())
+            {
+                lines.push(Line::from(vec![Span::styled(
+                    "    🤔 reasoning",
+                    Style::default()
+                        .fg(colors.status_bar_dim)
+                        .bg(colors.background),
+                )]));
+                for line in reasoning.lines() {
+                    lines.push(Line::from(vec![Span::styled(
+                        format!("      {}", line.trim_end()),
+                        Style::default()
+                            .fg(colors.status_bar_dim)
+                            .bg(colors.background)
+                            .add_modifier(Modifier::ITALIC),
+                    )]));
+                }
+            }
+        }
+        if let Some(tool_calls) = msg.tool_calls.as_ref() {
+            for tc in tool_calls {
+                let args = serde_json::from_str::<serde_json::Value>(&tc.function.arguments)
+                    .unwrap_or_else(|_| serde_json::Value::Null);
+                let preview =
+                    build_tool_preview_from_value(&tc.function.name, &args, 44).unwrap_or_default();
+                let emoji = tool_emoji(&tc.function.name);
+                let summary = if preview.is_empty() {
+                    format!("{emoji} {}", tc.function.name)
+                } else {
+                    format!("{emoji} {} {}", tc.function.name, preview)
+                };
+                lines.push(Line::from(vec![
+                    Span::styled(
+                        "    ↳ ",
+                        Style::default()
+                            .fg(colors.status_bar_dim)
+                            .bg(colors.background),
+                    ),
+                    Span::styled(summary, styles.tool_call),
+                ]));
+            }
+        }
+    }
+    if matches!(state.view_density, ViewDensity::Detailed) {
+        lines.push(Line::from(vec![Span::styled(
+            divider.to_string(),
+            Style::default()
+                .fg(colors.status_bar_dim)
+                .bg(colors.background),
+        )]));
+    }
+}
+
 fn build_transcript_lines(
     messages: &[hermes_core::Message],
     state: &mut TuiState,
@@ -1747,150 +1935,16 @@ fn build_transcript_lines(
     let divider = transcript_divider(content_width);
 
     for (msg_idx, msg) in messages.iter().enumerate() {
-        // Hide internal orchestration/system payloads from the chat transcript.
-        if matches!(msg.role, hermes_core::MessageRole::System) {
-            continue;
-        }
-        if rendered_messages > 0 && matches!(state.view_density, ViewDensity::Detailed) {
-            lines.push(Line::from(String::new()));
-        }
-        rendered_messages += 1;
-        let (glyph, label, label_style, body_style) = role_visuals(msg.role, styles, colors);
-        let stamp = if state.show_timestamps {
-            let fp = message_fingerprint(msg);
-            state
-                .message_time_labels
-                .entry(fp)
-                .or_insert_with(|| Local::now().format("%H:%M:%S").to_string())
-                .clone()
-        } else {
-            String::new()
-        };
-        let label_text = if stamp.is_empty() {
-            label.to_string()
-        } else {
-            format!("{label}  {stamp}")
-        };
-        lines.push(Line::from(vec![
-            Span::styled(
-                format!(" ╭ {} ", glyph),
-                label_style.add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(label_text, label_style.add_modifier(Modifier::BOLD)),
-        ]));
-
-        if let Some(content) = msg.content.as_deref() {
-            match msg.role {
-                hermes_core::MessageRole::Assistant => {
-                    lines.extend(render_assistant_markdown_lines(content, styles, colors));
-                }
-                hermes_core::MessageRole::Tool => {
-                    let card_key = format!("tool:{msg_idx}");
-                    let expanded = state.expanded_tool_cards.contains(&card_key)
-                        || state.expanded_tool_cards.contains("__all__")
-                        || matches!(state.view_density, ViewDensity::Detailed);
-                    let all_lines: Vec<&str> = content.lines().collect();
-                    let shown = if expanded { 32 } else { 5 };
-                    lines.push(Line::from(vec![Span::styled(
-                        format!(
-                            "    [tool card: {} | {} lines | Ctrl+E toggles]",
-                            if expanded { "expanded" } else { "collapsed" },
-                            all_lines.len()
-                        ),
-                        Style::default()
-                            .fg(colors.status_bar_dim)
-                            .bg(colors.background),
-                    )]));
-                    for line in all_lines.iter().take(shown) {
-                        lines.push(render_inline_with_code(
-                            "    ",
-                            line,
-                            styles.tool_result,
-                            Style::default()
-                                .fg(colors.accent)
-                                .add_modifier(Modifier::BOLD),
-                        ));
-                    }
-                    if all_lines.len() > shown {
-                        lines.push(Line::from(vec![Span::styled(
-                            format!("    … {} more lines", all_lines.len() - shown),
-                            Style::default()
-                                .fg(colors.status_bar_dim)
-                                .bg(colors.background),
-                        )]));
-                    }
-                }
-                _ => {
-                    for line in content.lines() {
-                        lines.push(render_inline_with_code(
-                            "    ",
-                            line,
-                            body_style,
-                            Style::default()
-                                .fg(colors.accent)
-                                .add_modifier(Modifier::BOLD),
-                        ));
-                    }
-                }
-            }
-        }
-
-        if msg.role == hermes_core::MessageRole::Assistant {
-            if matches!(state.view_density, ViewDensity::Detailed) {
-                if let Some(reasoning) = msg
-                    .reasoning_content
-                    .as_ref()
-                    .filter(|s| !s.trim().is_empty())
-                {
-                    lines.push(Line::from(vec![Span::styled(
-                        "    🤔 reasoning",
-                        Style::default()
-                            .fg(colors.status_bar_dim)
-                            .bg(colors.background),
-                    )]));
-                    for line in reasoning.lines() {
-                        lines.push(Line::from(vec![Span::styled(
-                            format!("      {}", line.trim_end()),
-                            Style::default()
-                                .fg(colors.status_bar_dim)
-                                .bg(colors.background)
-                                .add_modifier(Modifier::ITALIC),
-                        )]));
-                    }
-                }
-            }
-            if let Some(tool_calls) = msg.tool_calls.as_ref() {
-                for tc in tool_calls {
-                    let args = serde_json::from_str::<serde_json::Value>(&tc.function.arguments)
-                        .unwrap_or_else(|_| serde_json::Value::Null);
-                    let preview = build_tool_preview_from_value(&tc.function.name, &args, 44)
-                        .unwrap_or_default();
-                    let emoji = tool_emoji(&tc.function.name);
-                    let summary = if preview.is_empty() {
-                        format!("{emoji} {}", tc.function.name)
-                    } else {
-                        format!("{emoji} {} {}", tc.function.name, preview)
-                    };
-                    lines.push(Line::from(vec![
-                        Span::styled(
-                            "    ↳ ",
-                            Style::default()
-                                .fg(colors.status_bar_dim)
-                                .bg(colors.background),
-                        ),
-                        Span::styled(summary, styles.tool_call),
-                    ]));
-                }
-            }
-        }
-        if matches!(state.view_density, ViewDensity::Detailed) {
-            lines.push(Line::from(vec![Span::styled(
-                divider.clone(),
-                Style::default()
-                    .fg(colors.status_bar_dim)
-                    .bg(colors.background),
-            )]));
-        }
+        append_transcript_message_lines(
+            &mut lines,
+            msg,
+            msg_idx,
+            &mut rendered_messages,
+            state,
+            styles,
+            colors,
+            &divider,
+        );
     }
 
     // Streaming buffer (partial assistant response)
@@ -2000,45 +2054,95 @@ fn render_messages(
     let transcript = app.transcript_messages();
     let viewport_rows = usize::from(inner.height.max(1));
     let fingerprint = transcript_fingerprint(&transcript, state, inner.width);
+    let message_fingerprints = transcript_message_fingerprints(&transcript);
     if state.transcript_cache.fingerprint != fingerprint
         || state.transcript_cache.width != inner.width
     {
-        let prev_width = state.transcript_cache.width;
-        let prev_lines = state.transcript_cache.lines.clone();
-        let prev_len = prev_lines.len();
-        let prev_anchor_line = if prev_width != 0
-            && prev_width != inner.width
-            && state.scroll_offset > 0
-            && prev_len > 0
-        {
-            let old_view_rows = viewport_rows.min(prev_len.max(1));
-            let max_hidden = prev_len.saturating_sub(old_view_rows);
-            let hidden = usize::from(state.scroll_offset).min(max_hidden);
-            let old_end = prev_len.saturating_sub(hidden);
-            let old_start = old_end.saturating_sub(old_view_rows);
-            prev_lines.get(old_start).map(Line::to_string)
-        } else {
-            None
-        };
+        let cache = &state.transcript_cache;
+        let can_incremental_append = !cache.had_streaming
+            && state.stream_buffer.is_empty()
+            && cache.width == inner.width
+            && cache.total_messages > 0
+            && transcript.len() > cache.total_messages
+            && cache.show_timestamps == state.show_timestamps
+            && cache.view_density == state.view_density
+            && cache.message_fingerprints.len() == cache.total_messages
+            && message_fingerprints.starts_with(&cache.message_fingerprints);
 
-        let new_lines = build_transcript_lines(&transcript, state, styles, colors, inner.width);
-        if let Some(anchor_text) = prev_anchor_line {
-            if let Some(new_idx) = new_lines
-                .iter()
-                .position(|line| line.to_string() == anchor_text)
-            {
-                let new_len = new_lines.len();
-                let visible = viewport_rows.min(new_len.max(1));
-                let new_hidden = new_len.saturating_sub((new_idx + visible).min(new_len));
-                state.scroll_offset = new_hidden.min(u16::MAX as usize) as u16;
+        if can_incremental_append {
+            let start_idx = state.transcript_cache.total_messages;
+            let mut lines = std::mem::take(&mut state.transcript_cache.lines);
+            let mut rendered_messages = state.transcript_cache.rendered_messages;
+            let divider = transcript_divider(inner.width);
+            for (msg_idx, msg) in transcript.iter().enumerate().skip(start_idx) {
+                append_transcript_message_lines(
+                    &mut lines,
+                    msg,
+                    msg_idx,
+                    &mut rendered_messages,
+                    state,
+                    styles,
+                    colors,
+                    &divider,
+                );
             }
+            state.transcript_cache = TranscriptCache {
+                fingerprint,
+                width: inner.width,
+                total_messages: transcript.len(),
+                rendered_messages,
+                message_fingerprints,
+                show_timestamps: state.show_timestamps,
+                view_density: state.view_density,
+                had_streaming: false,
+                lines,
+            };
+        } else {
+            let prev_width = state.transcript_cache.width;
+            let prev_len = state.transcript_cache.lines.len();
+            let prev_anchor_line = if prev_width != 0
+                && prev_width != inner.width
+                && state.scroll_offset > 0
+                && prev_len > 0
+            {
+                let old_view_rows = viewport_rows.min(prev_len.max(1));
+                let max_hidden = prev_len.saturating_sub(old_view_rows);
+                let hidden = usize::from(state.scroll_offset).min(max_hidden);
+                let old_end = prev_len.saturating_sub(hidden);
+                let old_start = old_end.saturating_sub(old_view_rows);
+                state
+                    .transcript_cache
+                    .lines
+                    .get(old_start)
+                    .map(Line::to_string)
+            } else {
+                None
+            };
+
+            let new_lines = build_transcript_lines(&transcript, state, styles, colors, inner.width);
+            if let Some(anchor_text) = prev_anchor_line {
+                if let Some(new_idx) = new_lines
+                    .iter()
+                    .position(|line| line.to_string() == anchor_text)
+                {
+                    let new_len = new_lines.len();
+                    let visible = viewport_rows.min(new_len.max(1));
+                    let new_hidden = new_len.saturating_sub((new_idx + visible).min(new_len));
+                    state.scroll_offset = new_hidden.min(u16::MAX as usize) as u16;
+                }
+            }
+            state.transcript_cache = TranscriptCache {
+                fingerprint,
+                width: inner.width,
+                total_messages: transcript.len(),
+                rendered_messages: count_renderable_messages(&transcript),
+                message_fingerprints,
+                show_timestamps: state.show_timestamps,
+                view_density: state.view_density,
+                had_streaming: !state.stream_buffer.is_empty(),
+                lines: new_lines,
+            };
         }
-        state.transcript_cache = TranscriptCache {
-            fingerprint,
-            width: inner.width,
-            total_messages: transcript.len(),
-            lines: new_lines,
-        };
     }
     let lines = &state.transcript_cache.lines;
 
@@ -3319,5 +3423,47 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         assert!(rendered_text.contains("Start chatting"));
+    }
+
+    #[test]
+    fn test_count_renderable_messages_ignores_system() {
+        let messages = vec![
+            Message::system("hidden"),
+            Message::user("u"),
+            Message::assistant("a"),
+        ];
+        assert_eq!(count_renderable_messages(&messages), 2);
+    }
+
+    #[test]
+    fn test_append_message_renderer_matches_full_builder() {
+        let theme = Theme::default_theme();
+        let colors = theme.colors.to_ratatui_colors();
+        let styles = theme.resolved_styles();
+        let messages = vec![Message::user("hello"), Message::assistant("world")];
+
+        let mut full_state = TuiState::default();
+        let full = build_transcript_lines(&messages, &mut full_state, &styles, &colors, 80);
+
+        let mut inc_state = TuiState::default();
+        let divider = transcript_divider(80);
+        let mut lines = Vec::new();
+        let mut rendered = 0usize;
+        for (idx, msg) in messages.iter().enumerate() {
+            append_transcript_message_lines(
+                &mut lines,
+                msg,
+                idx,
+                &mut rendered,
+                &mut inc_state,
+                &styles,
+                &colors,
+                &divider,
+            );
+        }
+
+        let as_text =
+            |v: &[Line<'static>]| -> Vec<String> { v.iter().map(Line::to_string).collect() };
+        assert_eq!(as_text(&full), as_text(&lines));
     }
 }
