@@ -68,6 +68,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/skills", "List available skills"),
     ("/skill", "Alias for /skills"),
     ("/tools", "List registered tools"),
+    (
+        "/toolcards",
+        "Inline tool-card controls (e.g. `/toolcards export`)",
+    ),
     ("/toolsets", "Show configured toolsets by platform"),
     ("/plugins", "List plugin bundles and status"),
     ("/mcp", "List configured MCP servers"),
@@ -158,13 +162,73 @@ fn merged_skill_taps(custom_taps: &[String]) -> Vec<String> {
 /// Return auto-completion suggestions for a partial slash command.
 pub fn autocomplete(partial: &str) -> Vec<&'static str> {
     let mut seen = HashSet::new();
-    let lower = partial.to_lowercase();
-    SLASH_COMMANDS
-        .iter()
-        .filter(|(cmd, _)| partial.is_empty() || cmd.starts_with(&lower))
-        .map(|(cmd, _)| *cmd)
-        .filter(|cmd| seen.insert(*cmd))
-        .collect()
+    let mut ranked: Vec<(&'static str, i32)> = Vec::new();
+    let query = partial.trim().to_ascii_lowercase();
+    for (cmd, desc) in SLASH_COMMANDS {
+        if !seen.insert(*cmd) {
+            continue;
+        }
+        if let Some(score) = command_match_score(&query, cmd, desc) {
+            ranked.push((cmd, score));
+        }
+    }
+    ranked.sort_by(|(a_cmd, a_score), (b_cmd, b_score)| {
+        b_score.cmp(a_score).then_with(|| a_cmd.cmp(b_cmd))
+    });
+    ranked.into_iter().map(|(cmd, _)| cmd).collect()
+}
+
+fn command_match_score(query: &str, cmd: &str, desc: &str) -> Option<i32> {
+    if query.is_empty() || query == "/" {
+        return Some(10);
+    }
+    let cmd_l = cmd.to_ascii_lowercase();
+    let desc_l = desc.to_ascii_lowercase();
+    if cmd_l == query {
+        return Some(1200);
+    }
+    if cmd_l.starts_with(query) {
+        return Some(1000 - (cmd_l.len().saturating_sub(query.len()) as i32));
+    }
+    if cmd_l.contains(query) {
+        return Some(850 - (cmd_l.len().saturating_sub(query.len()) as i32));
+    }
+    if let Some(pos) = desc_l.find(query.trim_start_matches('/')) {
+        return Some(700 - pos as i32);
+    }
+    let subseq = subsequence_score(query.trim_start_matches('/'), cmd_l.trim_start_matches('/'));
+    if subseq > 0 {
+        return Some(500 + subseq);
+    }
+    None
+}
+
+fn subsequence_score(needle: &str, haystack: &str) -> i32 {
+    if needle.is_empty() || haystack.is_empty() {
+        return 0;
+    }
+    let mut score = 0i32;
+    let mut idx = 0usize;
+    let chars: Vec<char> = haystack.chars().collect();
+    for ch in needle.chars() {
+        let mut found = false;
+        while idx < chars.len() {
+            if chars[idx] == ch {
+                score += 2;
+                if idx > 0 && chars[idx - 1] == '-' {
+                    score += 1;
+                }
+                idx += 1;
+                found = true;
+                break;
+            }
+            idx += 1;
+        }
+        if !found {
+            return 0;
+        }
+    }
+    score
 }
 
 /// Return the help text for a specific slash command.
@@ -240,6 +304,7 @@ pub async fn handle_slash_command(
         }
         "/skills" => handle_skills_command(app),
         "/tools" => handle_tools_command(app),
+        "/toolcards" => handle_toolcards_command(app, args),
         "/toolsets" => handle_toolsets_command(app),
         "/plugins" => handle_plugins_command(app),
         "/mcp" => handle_mcp_command(app),
@@ -293,6 +358,18 @@ pub async fn handle_slash_command(
             Ok(CommandResult::Handled)
         }
     }
+}
+
+fn handle_toolcards_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let action = args.first().copied().unwrap_or("help");
+    let msg = match action {
+        "export" => {
+            "Tool-card export is handled by the interactive TUI modal loop. In TUI, run `/toolcards export` to write `~/.hermes-agent-ultra/logs/toolcards-export.txt`.".to_string()
+        }
+        _ => "Tool-card controls:\n  /toolcards export   Export current tool-card transcript".to_string(),
+    };
+    emit_command_output(app, msg);
+    Ok(CommandResult::Handled)
 }
 
 // ---------------------------------------------------------------------------
@@ -1191,7 +1268,7 @@ fn handle_runtime_ui_mode_command(
             "Fast mode compatibility command received (`{}`).\nCurrent model: {}\nTip: switch to a lower-latency model via `/model`.",
             arg, app.current_model
         ),
-        "/skin" => "Skin/themes are active via `HERMES_THEME` (default: ultra-neon).".to_string(),
+        "/skin" => "Skin/themes are selected with `HERMES_THEME`.\nAvailable built-ins: ultra-neon, ultra-amber, ultra-ice, ultra-hc, dark, light.".to_string(),
         "/voice" => "Voice mode uses provider/platform capabilities; no separate TUI voice engine is active in this session.".to_string(),
         _ => "Unsupported runtime UI mode command.".to_string(),
     };
@@ -5478,9 +5555,22 @@ mod tests {
     }
 
     #[test]
+    fn test_autocomplete_fuzzy_prefers_close_matches() {
+        let results = autocomplete("/mdl");
+        assert!(!results.is_empty());
+        assert_eq!(results[0], "/model");
+    }
+
+    #[test]
+    fn test_autocomplete_matches_description_terms() {
+        let results = autocomplete("/quota");
+        assert!(results.contains(&"/gquota"));
+    }
+
+    #[test]
     fn test_autocomplete_exact() {
         let results = autocomplete("/help");
-        assert_eq!(results.len(), 1);
+        assert!(!results.is_empty());
         assert_eq!(results[0], "/help");
     }
 

@@ -8,9 +8,11 @@
 //! - Status bar with model/session info (9.6)
 //! - Theme/skin engine support (9.8)
 
+use std::collections::{HashMap, HashSet};
 use std::io::Stdout;
 use std::time::{Duration, Instant};
 
+use chrono::Local;
 use crossterm::cursor::Show;
 use crossterm::event::{Event as CrosstermEvent, KeyEvent, MouseEvent};
 use crossterm::terminal::{
@@ -83,6 +85,168 @@ impl std::fmt::Display for InputMode {
             InputMode::Command => write!(f, "COMMAND"),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ViewDensity {
+    Compact,
+    Detailed,
+}
+
+#[derive(Debug, Clone)]
+enum PickerKind {
+    ModelProvider,
+    ModelForProvider { provider: String },
+    Personality,
+}
+
+#[derive(Debug, Clone)]
+struct PickerItem {
+    label: String,
+    detail: String,
+    value: String,
+}
+
+#[derive(Debug, Clone)]
+struct PickerModal {
+    kind: PickerKind,
+    title: String,
+    query: String,
+    items: Vec<PickerItem>,
+    filtered_indices: Vec<usize>,
+    selected_filtered: usize,
+    page_size: usize,
+    allow_multi: bool,
+    selected_values: HashSet<String>,
+}
+
+impl PickerModal {
+    fn new(kind: PickerKind, title: impl Into<String>, items: Vec<PickerItem>) -> Self {
+        let mut this = Self {
+            kind,
+            title: title.into(),
+            query: String::new(),
+            items,
+            filtered_indices: Vec::new(),
+            selected_filtered: 0,
+            page_size: 10,
+            allow_multi: false,
+            selected_values: HashSet::new(),
+        };
+        this.refresh_filter();
+        this
+    }
+
+    fn refresh_filter(&mut self) {
+        let needle = self.query.trim().to_ascii_lowercase();
+        if needle.is_empty() {
+            self.filtered_indices = (0..self.items.len()).collect();
+        } else {
+            let mut ranked: Vec<(usize, i32)> = self
+                .items
+                .iter()
+                .enumerate()
+                .filter_map(|(idx, item)| {
+                    let label = item.label.to_ascii_lowercase();
+                    let detail = item.detail.to_ascii_lowercase();
+                    if label == needle {
+                        return Some((idx, 1200));
+                    }
+                    if label.starts_with(&needle) {
+                        return Some((
+                            idx,
+                            1000 - (label.len().saturating_sub(needle.len()) as i32),
+                        ));
+                    }
+                    if label.contains(&needle) {
+                        return Some((idx, 850));
+                    }
+                    if detail.contains(&needle) {
+                        return Some((idx, 700));
+                    }
+                    let subseq = fuzzy_subsequence_score(&needle, &label);
+                    if subseq > 0 {
+                        return Some((idx, 500 + subseq));
+                    }
+                    None
+                })
+                .collect();
+            ranked.sort_by(|(a_idx, a_score), (b_idx, b_score)| {
+                b_score
+                    .cmp(a_score)
+                    .then_with(|| self.items[*a_idx].label.cmp(&self.items[*b_idx].label))
+            });
+            self.filtered_indices = ranked.into_iter().map(|(idx, _)| idx).collect();
+        }
+        if self.filtered_indices.is_empty() {
+            self.selected_filtered = 0;
+        } else if self.selected_filtered >= self.filtered_indices.len() {
+            self.selected_filtered = self.filtered_indices.len() - 1;
+        }
+    }
+
+    fn selected_item(&self) -> Option<&PickerItem> {
+        let idx = self.filtered_indices.get(self.selected_filtered).copied()?;
+        self.items.get(idx)
+    }
+
+    fn move_selection(&mut self, delta: isize) {
+        if self.filtered_indices.is_empty() {
+            self.selected_filtered = 0;
+            return;
+        }
+        let len = self.filtered_indices.len() as isize;
+        let mut next = self.selected_filtered as isize + delta;
+        while next < 0 {
+            next += len;
+        }
+        next %= len;
+        self.selected_filtered = next as usize;
+    }
+
+    fn page_move(&mut self, pages: isize) {
+        let step = self.page_size.max(1) as isize;
+        self.move_selection(pages * step);
+    }
+
+    fn visible_window(&self) -> (usize, usize) {
+        if self.filtered_indices.is_empty() {
+            return (0, 0);
+        }
+        let rows = self.page_size.max(1);
+        let mut start = 0usize;
+        if self.selected_filtered >= rows {
+            start = self.selected_filtered + 1 - rows;
+        }
+        let end = (start + rows).min(self.filtered_indices.len());
+        (start, end)
+    }
+
+    fn toggle_selected(&mut self) {
+        if !self.allow_multi {
+            return;
+        }
+        if let Some(value) = self.selected_item().map(|item| item.value.clone()) {
+            if !self.selected_values.insert(value.clone()) {
+                self.selected_values.remove(&value);
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct TranscriptCache {
+    fingerprint: u64,
+    width: u16,
+    lines: Vec<Line<'static>>,
+    total_messages: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ModalAction {
+    None,
+    Close,
+    Confirm,
 }
 
 // ---------------------------------------------------------------------------
@@ -219,6 +383,20 @@ pub struct TuiState {
     pub sticky_prompt: String,
     /// Number of queued/running background jobs.
     pub background_jobs_running: usize,
+    /// Whether the right-side live activity lane is open.
+    pub activity_lane_open: bool,
+    /// Whether transcript headers show timestamp labels.
+    pub show_timestamps: bool,
+    /// Transcript density mode.
+    pub view_density: ViewDensity,
+    /// Active picker modal state.
+    modal: Option<PickerModal>,
+    /// Cached transcript render to reduce full rebuild churn.
+    transcript_cache: TranscriptCache,
+    /// Expand state for tool cards by transcript key.
+    expanded_tool_cards: HashSet<String>,
+    /// Stable timestamp labels keyed by message fingerprint.
+    message_time_labels: HashMap<u64, String>,
 }
 
 /// A section of tool output that can be folded/expanded.
@@ -289,6 +467,13 @@ impl Default for TuiState {
             last_usage: None,
             sticky_prompt: String::new(),
             background_jobs_running: 0,
+            activity_lane_open: true,
+            show_timestamps: false,
+            view_density: ViewDensity::Detailed,
+            modal: None,
+            transcript_cache: TranscriptCache::default(),
+            expanded_tool_cards: HashSet::new(),
+            message_time_labels: HashMap::new(),
         }
     }
 }
@@ -351,6 +536,78 @@ impl TuiState {
         };
     }
 
+    fn open_modal(&mut self, modal: PickerModal) {
+        self.modal = Some(modal);
+        self.mode = InputMode::Insert;
+    }
+
+    fn close_modal(&mut self) {
+        self.modal = None;
+    }
+
+    fn modal_active(&self) -> bool {
+        self.modal.is_some()
+    }
+
+    fn handle_modal_key(&mut self, key: KeyEvent) -> ModalAction {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        let Some(modal) = self.modal.as_mut() else {
+            return ModalAction::None;
+        };
+        match key.code {
+            KeyCode::Esc => ModalAction::Close,
+            KeyCode::Enter => ModalAction::Confirm,
+            KeyCode::Up => {
+                modal.move_selection(-1);
+                ModalAction::None
+            }
+            KeyCode::Down => {
+                modal.move_selection(1);
+                ModalAction::None
+            }
+            KeyCode::PageUp => {
+                modal.page_move(-1);
+                ModalAction::None
+            }
+            KeyCode::PageDown => {
+                modal.page_move(1);
+                ModalAction::None
+            }
+            KeyCode::Home => {
+                modal.selected_filtered = 0;
+                ModalAction::None
+            }
+            KeyCode::End => {
+                if !modal.filtered_indices.is_empty() {
+                    modal.selected_filtered = modal.filtered_indices.len() - 1;
+                }
+                ModalAction::None
+            }
+            KeyCode::Char(' ') => {
+                modal.toggle_selected();
+                ModalAction::None
+            }
+            KeyCode::Backspace => {
+                modal.query.pop();
+                modal.refresh_filter();
+                ModalAction::None
+            }
+            KeyCode::Char('u') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                modal.query.clear();
+                modal.refresh_filter();
+                ModalAction::None
+            }
+            KeyCode::Char(ch)
+                if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
+            {
+                modal.query.push(ch);
+                modal.refresh_filter();
+                ModalAction::None
+            }
+            _ => ModalAction::None,
+        }
+    }
+
     /// Handle a key event and return whether the app should quit.
     pub fn handle_key(&mut self, key: KeyEvent, app: &mut App) -> bool {
         match self.mode {
@@ -391,6 +648,57 @@ impl TuiState {
     fn handle_insert_key(&mut self, key: KeyEvent, app: &mut App) -> bool {
         use crossterm::event::{KeyCode, KeyModifiers};
         let mods = key.modifiers;
+        if mods.contains(KeyModifiers::CONTROL) {
+            match key.code {
+                KeyCode::Char('l') => {
+                    self.activity_lane_open = !self.activity_lane_open;
+                    self.status_message = if self.activity_lane_open {
+                        "Activity lane enabled".to_string()
+                    } else {
+                        "Activity lane hidden".to_string()
+                    };
+                    return false;
+                }
+                KeyCode::Char('d') => {
+                    self.view_density = match self.view_density {
+                        ViewDensity::Compact => ViewDensity::Detailed,
+                        ViewDensity::Detailed => ViewDensity::Compact,
+                    };
+                    self.status_message = match self.view_density {
+                        ViewDensity::Compact => "Compact transcript mode".to_string(),
+                        ViewDensity::Detailed => "Detailed transcript mode".to_string(),
+                    };
+                    return false;
+                }
+                KeyCode::Char('t') => {
+                    self.show_timestamps = !self.show_timestamps;
+                    self.status_message = if self.show_timestamps {
+                        "Timestamps visible".to_string()
+                    } else {
+                        "Timestamps hidden".to_string()
+                    };
+                    return false;
+                }
+                KeyCode::Char('e') => {
+                    if self.expanded_tool_cards.insert("__all__".to_string()) {
+                        self.status_message = "Expanded tool cards".to_string();
+                    } else {
+                        self.expanded_tool_cards.remove("__all__");
+                        self.status_message = "Collapsed tool cards".to_string();
+                    }
+                    return false;
+                }
+                KeyCode::Left => {
+                    self.move_cursor_word_left();
+                    return false;
+                }
+                KeyCode::Right => {
+                    self.move_cursor_word_right();
+                    return false;
+                }
+                _ => {}
+            }
+        }
         let completion_nav_active = self.input.starts_with('/')
             && !self.completions.is_empty()
             && !self.history_search_active;
@@ -411,6 +719,16 @@ impl TuiState {
                 }
                 KeyCode::PageDown => {
                     self.move_completion_selection(6);
+                    return false;
+                }
+                KeyCode::Home => {
+                    self.completion_index = Some(0);
+                    return false;
+                }
+                KeyCode::End => {
+                    if !self.completions.is_empty() {
+                        self.completion_index = Some(self.completions.len() - 1);
+                    }
                     return false;
                 }
                 _ => {}
@@ -647,6 +965,50 @@ impl TuiState {
         self.sync_from_textarea(&textarea);
     }
 
+    fn move_cursor_word_left(&mut self) {
+        if self.cursor_position == 0 || self.input.is_empty() {
+            self.cursor_position = 0;
+            return;
+        }
+        let chars: Vec<(usize, char)> = self.input.char_indices().collect();
+        let mut idx = chars
+            .iter()
+            .position(|(byte, _)| *byte >= self.cursor_position)
+            .unwrap_or(chars.len());
+        if idx > 0 && chars[idx - 1].1.is_whitespace() {
+            while idx > 0 && chars[idx - 1].1.is_whitespace() {
+                idx -= 1;
+            }
+        }
+        while idx > 0 && !chars[idx - 1].1.is_whitespace() {
+            idx -= 1;
+        }
+        self.cursor_position = chars.get(idx).map(|(b, _)| *b).unwrap_or(0);
+    }
+
+    fn move_cursor_word_right(&mut self) {
+        if self.input.is_empty() {
+            self.cursor_position = 0;
+            return;
+        }
+        let chars: Vec<(usize, char)> = self.input.char_indices().collect();
+        let mut idx = chars
+            .iter()
+            .position(|(byte, _)| *byte > self.cursor_position)
+            .unwrap_or(chars.len());
+        while idx < chars.len() && chars[idx].1.is_whitespace() {
+            idx += 1;
+        }
+        while idx < chars.len() && !chars[idx].1.is_whitespace() {
+            idx += 1;
+        }
+        self.cursor_position = if idx >= chars.len() {
+            self.input.len()
+        } else {
+            chars[idx].0
+        };
+    }
+
     fn move_completion_selection(&mut self, delta: isize) {
         if self.completions.is_empty() {
             self.completion_index = None;
@@ -693,7 +1055,7 @@ impl TuiState {
 // ---------------------------------------------------------------------------
 
 /// Render the full TUI frame.
-pub fn render(frame: &mut Frame, app: &App, state: &TuiState, theme: &Theme) {
+pub fn render(frame: &mut Frame, app: &App, state: &mut TuiState, theme: &Theme) {
     let resolved = theme.resolved_styles();
     let colors = theme.colors.to_ratatui_colors();
 
@@ -706,41 +1068,52 @@ pub fn render(frame: &mut Frame, app: &App, state: &TuiState, theme: &Theme) {
         size,
     );
 
-    // Layout: header, messages, input, status bar
+    // Layout: header, body, input, status bar
     let header_height = 1;
     let composer_lines = state.input.matches('\n').count() as u16 + 1;
     let input_height = (composer_lines + 2).clamp(3, 6);
-    let show_live_details = state.processing
-        || !state.active_tools.is_empty()
-        || !state.recent_activity.is_empty()
-        || !state.live_thinking.is_empty()
-        || state.last_usage.is_some();
-    let details_height = if show_live_details { 5 } else { 0 };
     let status_height = 1;
 
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(header_height),  // header
-            Constraint::Min(5),                 // messages
-            Constraint::Length(details_height), // live details
-            Constraint::Length(input_height),   // input
-            Constraint::Length(status_height),  // status
+            Constraint::Length(header_height), // header
+            Constraint::Min(5),                // body
+            Constraint::Length(input_height),  // input
+            Constraint::Length(status_height), // status
         ])
         .split(size);
 
     let header_area = vertical[0];
-    let messages_area = vertical[1];
-    let details_area = vertical[2];
-    let input_area = vertical[3];
-    let status_area = vertical[4];
+    let body_area = vertical[1];
+    let input_area = vertical[2];
+    let status_area = vertical[3];
+
+    let details_enabled = state.activity_lane_open && body_area.width >= 86;
+    let body_split = if details_enabled {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(20), Constraint::Length(38)])
+            .split(body_area)
+    } else {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Min(20)])
+            .split(body_area)
+    };
+    let messages_area = body_split[0];
+    let details_area = if details_enabled {
+        Some(body_split[1])
+    } else {
+        None
+    };
 
     render_header(frame, app, header_area, &colors);
 
     // --- Render message history ---
     render_messages(frame, app, state, messages_area, &resolved, &colors);
 
-    if show_live_details {
+    if let Some(details_area) = details_area {
         render_live_details(frame, state, details_area, &colors);
     }
 
@@ -761,6 +1134,10 @@ pub fn render(frame: &mut Frame, app: &App, state: &TuiState, theme: &Theme) {
         );
     }
 
+    if let Some(modal) = state.modal.as_ref() {
+        render_picker_modal(frame, modal, &colors);
+    }
+
     // --- Render status bar ---
     render_status(frame, app, state, status_area, &colors);
 }
@@ -776,7 +1153,7 @@ fn should_render_completions_popup(state: &TuiState) -> bool {
 fn render_header(frame: &mut Frame, app: &App, area: Rect, colors: &crate::theme::RatatuiColors) {
     let session_short = &app.session_id[..8.min(app.session_id.len())];
     let title = format!(
-        " HERMES AGENT ULTRA  •  session {}  •  Ctrl+Enter send  •  / for commands",
+        " HERMES AGENT ULTRA  •  session {}  •  Ctrl+Enter send  •  / commands  •  Ctrl+L lane  •  Ctrl+D density  •  Ctrl+T timestamps",
         session_short
     );
     let text = Text::from(vec![Line::from(vec![Span::styled(
@@ -802,7 +1179,7 @@ fn render_live_details(
     }
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Live Details ")
+        .title(" Activity Lane ")
         .style(Style::default().bg(colors.background))
         .border_style(Style::default().fg(colors.status_bar_dim));
     let mut rows: Vec<Line<'static>> = Vec::new();
@@ -864,14 +1241,21 @@ fn render_live_details(
         ]));
     }
 
-    for event in state.recent_activity.iter().rev().take(2).rev() {
+    let recent_cap = area.height.saturating_sub(rows.len() as u16 + 3) as usize;
+    for event in state
+        .recent_activity
+        .iter()
+        .rev()
+        .take(recent_cap.max(2))
+        .rev()
+    {
         rows.push(Line::from(vec![
             Span::styled(
                 " • ",
                 Style::default().fg(colors.accent).bg(colors.background),
             ),
             Span::styled(
-                truncate_chars(event, 140),
+                truncate_chars(event, area.width.saturating_sub(8) as usize),
                 Style::default()
                     .fg(colors.status_bar_text)
                     .bg(colors.background),
@@ -888,6 +1272,13 @@ fn render_live_details(
                 .add_modifier(Modifier::ITALIC),
         )]));
     }
+    rows.push(Line::from(vec![Span::styled(
+        " Ctrl+L toggle lane",
+        Style::default()
+            .fg(colors.status_bar_dim)
+            .bg(colors.background)
+            .add_modifier(Modifier::ITALIC),
+    )]));
 
     let paragraph = Paragraph::new(Text::from(rows))
         .block(block)
@@ -992,6 +1383,174 @@ fn parse_markdown_numbered_marker(line: &str) -> Option<(&str, &str)> {
     None
 }
 
+fn keyword_set_for_lang(lang: &str) -> &'static [&'static str] {
+    match lang.trim().to_ascii_lowercase().as_str() {
+        "rust" | "rs" => &[
+            "fn", "let", "mut", "pub", "impl", "struct", "enum", "match", "if", "else", "for",
+            "while", "loop", "return", "async", "await", "use", "mod", "trait", "where",
+        ],
+        "python" | "py" => &[
+            "def", "class", "if", "elif", "else", "for", "while", "return", "import", "from",
+            "with", "as", "try", "except", "finally", "lambda", "yield", "async", "await",
+        ],
+        "javascript" | "js" | "typescript" | "ts" => &[
+            "function", "const", "let", "var", "if", "else", "for", "while", "return", "class",
+            "import", "export", "await", "async", "switch", "case", "break", "new",
+        ],
+        "json" => &[],
+        "bash" | "sh" | "zsh" => &[
+            "if", "then", "else", "fi", "for", "do", "done", "case", "esac", "function", "echo",
+            "export",
+        ],
+        _ => &[],
+    }
+}
+
+fn render_highlighted_code_line(
+    line: &str,
+    lang: &str,
+    colors: &crate::theme::RatatuiColors,
+) -> Line<'static> {
+    let default_style = Style::default()
+        .fg(colors.status_bar_text)
+        .bg(colors.background);
+    let keyword_style = Style::default()
+        .fg(colors.accent)
+        .bg(colors.background)
+        .add_modifier(Modifier::BOLD);
+    let string_style = Style::default()
+        .fg(colors.status_bar_warn)
+        .bg(colors.background);
+    let number_style = Style::default()
+        .fg(colors.status_bar_good)
+        .bg(colors.background);
+    let punctuation_style = Style::default()
+        .fg(colors.status_bar_dim)
+        .bg(colors.background);
+    let mut spans: Vec<Span<'static>> = vec![Span::styled(
+        "    │ ",
+        Style::default()
+            .fg(colors.status_bar_dim)
+            .bg(colors.background),
+    )];
+    let keywords = keyword_set_for_lang(lang);
+    let mut token = String::new();
+    let mut in_string = false;
+    let mut quote_char = '\0';
+    let flush_token =
+        |spans: &mut Vec<Span<'static>>, token: &mut String, style: Style, keywords: &[&str]| {
+            if token.is_empty() {
+                return;
+            }
+            let tok = std::mem::take(token);
+            let tok_style = if keywords.iter().any(|kw| kw.eq_ignore_ascii_case(&tok)) {
+                style
+            } else if tok.chars().all(|ch| ch.is_ascii_digit()) {
+                Style::default()
+                    .fg(Color::Cyan)
+                    .bg(style.bg.unwrap_or(Color::Reset))
+            } else {
+                default_style
+            };
+            spans.push(Span::styled(tok, tok_style));
+        };
+
+    for ch in line.chars() {
+        if in_string {
+            token.push(ch);
+            if ch == quote_char {
+                spans.push(Span::styled(std::mem::take(&mut token), string_style));
+                in_string = false;
+                quote_char = '\0';
+            }
+            continue;
+        }
+        if ch == '"' || ch == '\'' {
+            flush_token(&mut spans, &mut token, keyword_style, keywords);
+            in_string = true;
+            quote_char = ch;
+            token.push(ch);
+            continue;
+        }
+        if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+            token.push(ch);
+            continue;
+        }
+        flush_token(&mut spans, &mut token, keyword_style, keywords);
+        if ch.is_ascii_digit() {
+            spans.push(Span::styled(ch.to_string(), number_style));
+        } else if ch.is_whitespace() {
+            spans.push(Span::styled(ch.to_string(), default_style));
+        } else {
+            spans.push(Span::styled(ch.to_string(), punctuation_style));
+        }
+    }
+    flush_token(&mut spans, &mut token, keyword_style, keywords);
+    if in_string && !token.is_empty() {
+        spans.push(Span::styled(token, string_style));
+    }
+    Line::from(spans)
+}
+
+fn parse_table_cells(line: &str) -> Option<Vec<String>> {
+    let trimmed = line.trim();
+    if !trimmed.contains('|') {
+        return None;
+    }
+    let cells: Vec<String> = trimmed
+        .split('|')
+        .map(str::trim)
+        .filter(|cell| !cell.is_empty())
+        .map(ToString::to_string)
+        .collect();
+    if cells.len() < 2 {
+        return None;
+    }
+    Some(cells)
+}
+
+fn content_width_for_table_row(cells: usize, min_per_cell: usize) -> usize {
+    cells.saturating_mul(min_per_cell).max(8)
+}
+
+fn message_fingerprint(msg: &hermes_core::Message) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    let role_tag = match msg.role {
+        hermes_core::MessageRole::System => "system",
+        hermes_core::MessageRole::User => "user",
+        hermes_core::MessageRole::Assistant => "assistant",
+        hermes_core::MessageRole::Tool => "tool",
+    };
+    role_tag.hash(&mut hasher);
+    msg.content.hash(&mut hasher);
+    msg.tool_call_id.hash(&mut hasher);
+    msg.reasoning_content.hash(&mut hasher);
+    if let Some(calls) = msg.tool_calls.as_ref() {
+        for tc in calls {
+            tc.id.hash(&mut hasher);
+            tc.function.name.hash(&mut hasher);
+            tc.function.arguments.hash(&mut hasher);
+        }
+    }
+    hasher.finish()
+}
+
+fn transcript_fingerprint(messages: &[hermes_core::Message], state: &TuiState, width: u16) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    width.hash(&mut hasher);
+    state.stream_buffer.hash(&mut hasher);
+    state.show_timestamps.hash(&mut hasher);
+    state.view_density.hash(&mut hasher);
+    for msg in messages {
+        message_fingerprint(msg).hash(&mut hasher);
+    }
+    hasher.finish()
+}
+
 fn render_assistant_markdown_lines(
     content: &str,
     styles: &crate::theme::ResolvedStyles,
@@ -1002,9 +1561,6 @@ fn render_assistant_markdown_lines(
     let mut code_lang = String::new();
     let code_frame_style = Style::default()
         .fg(colors.status_bar_dim)
-        .bg(colors.background);
-    let code_text_style = Style::default()
-        .fg(colors.status_bar_text)
         .bg(colors.background);
     let heading_style = Style::default()
         .fg(colors.status_bar_strong)
@@ -1052,10 +1608,7 @@ fn render_assistant_markdown_lines(
         }
 
         if in_code_block {
-            rendered.push(Line::from(vec![
-                Span::styled("    │ ", code_frame_style),
-                Span::styled(raw.to_string(), code_text_style),
-            ]));
+            rendered.push(render_highlighted_code_line(raw, &code_lang, colors));
             continue;
         }
 
@@ -1106,6 +1659,54 @@ fn render_assistant_markdown_lines(
             continue;
         }
 
+        if let Some(cells) = parse_table_cells(trimmed) {
+            let separator = cells
+                .iter()
+                .all(|cell| cell.chars().all(|ch| ch == '-' || ch == ':'));
+            if separator {
+                rendered.push(Line::from(vec![Span::styled(
+                    format!(
+                        "    ├{}┤",
+                        "─".repeat(content_width_for_table_row(cells.len(), 16))
+                    ),
+                    Style::default()
+                        .fg(colors.status_bar_dim)
+                        .bg(colors.background),
+                )]));
+                continue;
+            }
+            let mut row_spans: Vec<Span<'static>> = vec![Span::styled(
+                "    │ ",
+                Style::default()
+                    .fg(colors.status_bar_dim)
+                    .bg(colors.background),
+            )];
+            for (idx, cell) in cells.iter().enumerate() {
+                if idx > 0 {
+                    row_spans.push(Span::styled(
+                        " │ ",
+                        Style::default()
+                            .fg(colors.status_bar_dim)
+                            .bg(colors.background),
+                    ));
+                }
+                row_spans.push(Span::styled(
+                    truncate_chars(cell, 24),
+                    Style::default()
+                        .fg(colors.status_bar_text)
+                        .bg(colors.background),
+                ));
+            }
+            row_spans.push(Span::styled(
+                " │",
+                Style::default()
+                    .fg(colors.status_bar_dim)
+                    .bg(colors.background),
+            ));
+            rendered.push(Line::from(row_spans));
+            continue;
+        }
+
         if let Some((marker, body)) = parse_markdown_numbered_marker(trimmed) {
             rendered.push(Line::from(vec![
                 Span::styled(format!("    {marker} "), bullet_style),
@@ -1136,7 +1737,7 @@ fn render_assistant_markdown_lines(
 
 fn build_transcript_lines(
     messages: &[hermes_core::Message],
-    state: &TuiState,
+    state: &mut TuiState,
     styles: &crate::theme::ResolvedStyles,
     colors: &crate::theme::RatatuiColors,
     content_width: u16,
@@ -1145,22 +1746,37 @@ fn build_transcript_lines(
     let mut rendered_messages = 0usize;
     let divider = transcript_divider(content_width);
 
-    for msg in messages {
+    for (msg_idx, msg) in messages.iter().enumerate() {
         // Hide internal orchestration/system payloads from the chat transcript.
         if matches!(msg.role, hermes_core::MessageRole::System) {
             continue;
         }
-        if rendered_messages > 0 {
+        if rendered_messages > 0 && matches!(state.view_density, ViewDensity::Detailed) {
             lines.push(Line::from(String::new()));
         }
         rendered_messages += 1;
         let (glyph, label, label_style, body_style) = role_visuals(msg.role, styles, colors);
+        let stamp = if state.show_timestamps {
+            let fp = message_fingerprint(msg);
+            state
+                .message_time_labels
+                .entry(fp)
+                .or_insert_with(|| Local::now().format("%H:%M:%S").to_string())
+                .clone()
+        } else {
+            String::new()
+        };
+        let label_text = if stamp.is_empty() {
+            label.to_string()
+        } else {
+            format!("{label}  {stamp}")
+        };
         lines.push(Line::from(vec![
             Span::styled(
                 format!(" ╭ {} ", glyph),
                 label_style.add_modifier(Modifier::BOLD),
             ),
-            Span::styled(label.to_string(), label_style.add_modifier(Modifier::BOLD)),
+            Span::styled(label_text, label_style.add_modifier(Modifier::BOLD)),
         ]));
 
         if let Some(content) = msg.content.as_deref() {
@@ -1169,8 +1785,23 @@ fn build_transcript_lines(
                     lines.extend(render_assistant_markdown_lines(content, styles, colors));
                 }
                 hermes_core::MessageRole::Tool => {
+                    let card_key = format!("tool:{msg_idx}");
+                    let expanded = state.expanded_tool_cards.contains(&card_key)
+                        || state.expanded_tool_cards.contains("__all__")
+                        || matches!(state.view_density, ViewDensity::Detailed);
                     let all_lines: Vec<&str> = content.lines().collect();
-                    for line in all_lines.iter().take(8) {
+                    let shown = if expanded { 32 } else { 5 };
+                    lines.push(Line::from(vec![Span::styled(
+                        format!(
+                            "    [tool card: {} | {} lines | Ctrl+E toggles]",
+                            if expanded { "expanded" } else { "collapsed" },
+                            all_lines.len()
+                        ),
+                        Style::default()
+                            .fg(colors.status_bar_dim)
+                            .bg(colors.background),
+                    )]));
+                    for line in all_lines.iter().take(shown) {
                         lines.push(render_inline_with_code(
                             "    ",
                             line,
@@ -1180,9 +1811,9 @@ fn build_transcript_lines(
                                 .add_modifier(Modifier::BOLD),
                         ));
                     }
-                    if all_lines.len() > 8 {
+                    if all_lines.len() > shown {
                         lines.push(Line::from(vec![Span::styled(
-                            format!("    … {} more lines", all_lines.len() - 8),
+                            format!("    … {} more lines", all_lines.len() - shown),
                             Style::default()
                                 .fg(colors.status_bar_dim)
                                 .bg(colors.background),
@@ -1205,25 +1836,27 @@ fn build_transcript_lines(
         }
 
         if msg.role == hermes_core::MessageRole::Assistant {
-            if let Some(reasoning) = msg
-                .reasoning_content
-                .as_ref()
-                .filter(|s| !s.trim().is_empty())
-            {
-                lines.push(Line::from(vec![Span::styled(
-                    "    🤔 reasoning",
-                    Style::default()
-                        .fg(colors.status_bar_dim)
-                        .bg(colors.background),
-                )]));
-                for line in reasoning.lines() {
+            if matches!(state.view_density, ViewDensity::Detailed) {
+                if let Some(reasoning) = msg
+                    .reasoning_content
+                    .as_ref()
+                    .filter(|s| !s.trim().is_empty())
+                {
                     lines.push(Line::from(vec![Span::styled(
-                        format!("      {}", line.trim_end()),
+                        "    🤔 reasoning",
                         Style::default()
                             .fg(colors.status_bar_dim)
-                            .bg(colors.background)
-                            .add_modifier(Modifier::ITALIC),
+                            .bg(colors.background),
                     )]));
+                    for line in reasoning.lines() {
+                        lines.push(Line::from(vec![Span::styled(
+                            format!("      {}", line.trim_end()),
+                            Style::default()
+                                .fg(colors.status_bar_dim)
+                                .bg(colors.background)
+                                .add_modifier(Modifier::ITALIC),
+                        )]));
+                    }
                 }
             }
             if let Some(tool_calls) = msg.tool_calls.as_ref() {
@@ -1250,12 +1883,14 @@ fn build_transcript_lines(
                 }
             }
         }
-        lines.push(Line::from(vec![Span::styled(
-            divider.clone(),
-            Style::default()
-                .fg(colors.status_bar_dim)
-                .bg(colors.background),
-        )]));
+        if matches!(state.view_density, ViewDensity::Detailed) {
+            lines.push(Line::from(vec![Span::styled(
+                divider.clone(),
+                Style::default()
+                    .fg(colors.status_bar_dim)
+                    .bg(colors.background),
+            )]));
+        }
     }
 
     // Streaming buffer (partial assistant response)
@@ -1341,7 +1976,7 @@ fn build_transcript_lines(
 fn render_messages(
     frame: &mut Frame,
     app: &App,
-    state: &TuiState,
+    state: &mut TuiState,
     area: Rect,
     styles: &crate::theme::ResolvedStyles,
     colors: &crate::theme::RatatuiColors,
@@ -1363,9 +1998,50 @@ fn render_messages(
         return;
     }
     let transcript = app.transcript_messages();
-    let lines = build_transcript_lines(&transcript, state, styles, colors, inner.width);
-
     let viewport_rows = usize::from(inner.height.max(1));
+    let fingerprint = transcript_fingerprint(&transcript, state, inner.width);
+    if state.transcript_cache.fingerprint != fingerprint
+        || state.transcript_cache.width != inner.width
+    {
+        let prev_width = state.transcript_cache.width;
+        let prev_lines = state.transcript_cache.lines.clone();
+        let prev_len = prev_lines.len();
+        let prev_anchor_line = if prev_width != 0
+            && prev_width != inner.width
+            && state.scroll_offset > 0
+            && prev_len > 0
+        {
+            let old_view_rows = viewport_rows.min(prev_len.max(1));
+            let max_hidden = prev_len.saturating_sub(old_view_rows);
+            let hidden = usize::from(state.scroll_offset).min(max_hidden);
+            let old_end = prev_len.saturating_sub(hidden);
+            let old_start = old_end.saturating_sub(old_view_rows);
+            prev_lines.get(old_start).map(Line::to_string)
+        } else {
+            None
+        };
+
+        let new_lines = build_transcript_lines(&transcript, state, styles, colors, inner.width);
+        if let Some(anchor_text) = prev_anchor_line {
+            if let Some(new_idx) = new_lines
+                .iter()
+                .position(|line| line.to_string() == anchor_text)
+            {
+                let new_len = new_lines.len();
+                let visible = viewport_rows.min(new_len.max(1));
+                let new_hidden = new_len.saturating_sub((new_idx + visible).min(new_len));
+                state.scroll_offset = new_hidden.min(u16::MAX as usize) as u16;
+            }
+        }
+        state.transcript_cache = TranscriptCache {
+            fingerprint,
+            width: inner.width,
+            total_messages: transcript.len(),
+            lines: new_lines,
+        };
+    }
+    let lines = &state.transcript_cache.lines;
+
     let max_hidden_from_bottom = lines.len().saturating_sub(viewport_rows);
     let hidden_from_bottom = usize::from(state.scroll_offset).min(max_hidden_from_bottom);
     let end = lines.len().saturating_sub(hidden_from_bottom);
@@ -1541,6 +2217,166 @@ fn render_completions_popup(
     }
 }
 
+fn render_picker_modal(
+    frame: &mut Frame,
+    modal: &PickerModal,
+    colors: &crate::theme::RatatuiColors,
+) {
+    let area = frame.area();
+    if area.width < 20 || area.height < 8 {
+        return;
+    }
+    let width = (area.width.saturating_sub(6)).min(110).max(48);
+    let height = (area.height.saturating_sub(4)).min(22).max(10);
+    let popup = Rect {
+        x: area.x + (area.width.saturating_sub(width)) / 2,
+        y: area.y + (area.height.saturating_sub(height)) / 2,
+        width,
+        height,
+    };
+    frame.render_widget(Clear, popup);
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(format!(" {} ", modal.title))
+        .style(Style::default().bg(colors.status_bar_bg))
+        .border_style(Style::default().fg(colors.status_bar_strong));
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+    if inner.width == 0 || inner.height == 0 {
+        return;
+    }
+
+    let footer_height = 2u16;
+    let query_height = 1u16;
+    let rows_height = inner.height.saturating_sub(footer_height + query_height);
+    let rows_area = Rect {
+        x: inner.x,
+        y: inner.y,
+        width: inner.width,
+        height: rows_height,
+    };
+    let query_area = Rect {
+        x: inner.x,
+        y: inner.y + rows_height,
+        width: inner.width,
+        height: query_height,
+    };
+    let footer_area = Rect {
+        x: inner.x,
+        y: inner.y + rows_height + query_height,
+        width: inner.width,
+        height: footer_height,
+    };
+
+    let (start, end) = modal.visible_window();
+    let items: Vec<Line<'static>> = if modal.filtered_indices.is_empty() {
+        vec![Line::from(vec![Span::styled(
+            "No matches for current search query.",
+            Style::default()
+                .fg(colors.status_bar_dim)
+                .bg(colors.status_bar_bg)
+                .add_modifier(Modifier::ITALIC),
+        )])]
+    } else {
+        modal
+            .filtered_indices
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(end.saturating_sub(start))
+            .map(|(filtered_idx, item_idx)| {
+                let item = &modal.items[*item_idx];
+                let selected = filtered_idx == modal.selected_filtered;
+                let selected_marker = if selected { "▶" } else { " " };
+                let multi_marker = if modal.allow_multi {
+                    if modal.selected_values.contains(&item.value) {
+                        "■ "
+                    } else {
+                        "□ "
+                    }
+                } else {
+                    ""
+                };
+                let row_style = if selected {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(colors.status_bar_strong)
+                        .add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default()
+                        .fg(colors.status_bar_text)
+                        .bg(colors.status_bar_bg)
+                };
+                let detail_style = if selected {
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(colors.status_bar_strong)
+                } else {
+                    Style::default()
+                        .fg(colors.status_bar_dim)
+                        .bg(colors.status_bar_bg)
+                };
+                let text = format!("{selected_marker} {multi_marker}{}", item.label);
+                let available = rows_area.width.saturating_sub(2) as usize;
+                let primary = truncate_chars(&text, available);
+                if item.detail.is_empty() {
+                    Line::from(vec![Span::styled(primary, row_style)])
+                } else {
+                    let detail = truncate_chars(
+                        &format!("  {}", item.detail),
+                        rows_area.width.saturating_sub(2) as usize,
+                    );
+                    Line::from(vec![
+                        Span::styled(primary, row_style),
+                        Span::styled("  ", row_style),
+                        Span::styled(detail, detail_style),
+                    ])
+                }
+            })
+            .collect()
+    };
+    frame.render_widget(
+        Paragraph::new(Text::from(items))
+            .style(Style::default().bg(colors.status_bar_bg))
+            .wrap(Wrap { trim: true }),
+        rows_area,
+    );
+
+    let query_line = format!(
+        "Search: {}",
+        if modal.query.is_empty() {
+            "(type to filter)"
+        } else {
+            modal.query.as_str()
+        }
+    );
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![Span::styled(
+            truncate_chars(&query_line, query_area.width as usize),
+            Style::default()
+                .fg(colors.accent)
+                .bg(colors.status_bar_bg)
+                .add_modifier(Modifier::BOLD),
+        )])),
+        query_area,
+    );
+
+    let footer = if modal.allow_multi {
+        "↑↓ move • PgUp/PgDn page • Space toggle • Enter confirm • Esc close"
+    } else {
+        "↑↓ move • PgUp/PgDn page • Enter select • Esc close"
+    };
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![Span::styled(
+            truncate_chars(footer, footer_area.width as usize),
+            Style::default()
+                .fg(colors.status_bar_dim)
+                .bg(colors.status_bar_bg),
+        )])),
+        footer_area,
+    );
+}
+
 /// Render the input area (supports multi-line display with wrapping).
 fn render_input(
     frame: &mut Frame,
@@ -1569,7 +2405,7 @@ fn render_input(
                 Style::default().fg(mode_color).add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                format!("  •  L{} ", line_count),
+                format!("  •  L{}  •  Ctrl+←/→ word-jump ", line_count),
                 Style::default().fg(colors.status_bar_dim),
             ),
         ]))
@@ -1661,7 +2497,10 @@ fn render_status(
     };
     let model = &app.current_model;
     let session = &app.session_id[..8.min(app.session_id.len())];
-    let msg_count = app.messages.len();
+    let msg_count = state
+        .transcript_cache
+        .total_messages
+        .max(app.messages.len());
     let scroll_hint = if state.scroll_offset > 0 {
         format!(" (history +{})", state.scroll_offset)
     } else {
@@ -1676,6 +2515,18 @@ fn render_status(
         "{} {} | {} | {} msgs | {}",
         processing_indicator, state.mode, model, msg_count, session
     );
+    status_text.push_str(match state.view_density {
+        ViewDensity::Compact => " | compact",
+        ViewDensity::Detailed => " | detailed",
+    });
+    if state.show_timestamps {
+        status_text.push_str(" | ts:on");
+    }
+    if state.activity_lane_open {
+        status_text.push_str(" | lane:on");
+    } else {
+        status_text.push_str(" | lane:off");
+    }
     if state.background_jobs_running > 0 {
         status_text.push_str(&format!(" | bg:{}", state.background_jobs_running));
     }
@@ -1724,10 +2575,179 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     out
 }
 
+fn fuzzy_subsequence_score(needle: &str, haystack: &str) -> i32 {
+    if needle.is_empty() || haystack.is_empty() {
+        return 0;
+    }
+    let mut score = 0i32;
+    let mut idx = 0usize;
+    let chars: Vec<char> = haystack.chars().collect();
+    for ch in needle.chars() {
+        let mut found = false;
+        while idx < chars.len() {
+            if chars[idx] == ch {
+                score += 2;
+                if idx > 0 && chars[idx - 1] == '-' {
+                    score += 1;
+                }
+                idx += 1;
+                found = true;
+                break;
+            }
+            idx += 1;
+        }
+        if !found {
+            return 0;
+        }
+    }
+    score
+}
+
 fn is_ctrl_c(key: &KeyEvent) -> bool {
     key.modifiers
         .contains(crossterm::event::KeyModifiers::CONTROL)
         && key.code == crossterm::event::KeyCode::Char('c')
+}
+
+fn parse_slash_parts(input: &str) -> Option<(String, Vec<String>)> {
+    let trimmed = input.trim();
+    if !trimmed.starts_with('/') {
+        return None;
+    }
+    let mut iter = trimmed.split_whitespace();
+    let cmd = iter.next()?.to_string();
+    let args = iter.map(ToString::to_string).collect::<Vec<_>>();
+    Some((cmd, args))
+}
+
+async fn open_model_provider_modal(state: &mut TuiState, app: &App) {
+    let providers = crate::model_switch::curated_provider_slugs();
+    let entries = crate::model_switch::provider_catalog_entries(&providers, 4).await;
+    let mut items: Vec<PickerItem> = Vec::new();
+    for provider in providers {
+        let entry = entries
+            .iter()
+            .find(|entry| entry.provider.eq_ignore_ascii_case(provider));
+        let detail = if let Some(entry) = entry {
+            if entry.models.is_empty() {
+                format!("{} models", entry.total_models)
+            } else {
+                format!(
+                    "{} models • {}",
+                    entry.total_models,
+                    entry.models.join(", ")
+                )
+            }
+        } else {
+            "catalog unavailable".to_string()
+        };
+        items.push(PickerItem {
+            label: provider.to_string(),
+            detail,
+            value: provider.to_string(),
+        });
+    }
+    let mut modal = PickerModal::new(PickerKind::ModelProvider, "Select Provider", items);
+    let (current_provider, _) = app
+        .current_model
+        .split_once(':')
+        .unwrap_or(("openai", app.current_model.as_str()));
+    if let Some(idx) = modal.filtered_indices.iter().position(|item_idx| {
+        modal.items[*item_idx]
+            .value
+            .eq_ignore_ascii_case(current_provider)
+    }) {
+        modal.selected_filtered = idx;
+    }
+    state.open_modal(modal);
+}
+
+async fn open_provider_model_modal(state: &mut TuiState, app: &App, provider: &str) {
+    let models = crate::model_switch::provider_model_ids(provider).await;
+    if models.is_empty() {
+        state.status_message = format!("No models available for provider `{provider}`");
+        return;
+    }
+    let mut items = Vec::with_capacity(models.len());
+    for model in models {
+        items.push(PickerItem {
+            label: model.clone(),
+            detail: format!("{provider}:{model}"),
+            value: model,
+        });
+    }
+    let mut modal = PickerModal::new(
+        PickerKind::ModelForProvider {
+            provider: provider.to_string(),
+        },
+        format!("Select {provider} model"),
+        items,
+    );
+    let (_, current_model_id) = app
+        .current_model
+        .split_once(':')
+        .unwrap_or(("openai", app.current_model.as_str()));
+    if let Some(idx) = modal.filtered_indices.iter().position(|item_idx| {
+        modal.items[*item_idx]
+            .value
+            .eq_ignore_ascii_case(current_model_id)
+    }) {
+        modal.selected_filtered = idx;
+    }
+    state.open_modal(modal);
+}
+
+fn open_personality_modal(state: &mut TuiState, app: &App) {
+    let descriptions = hermes_agent::builtin_personality_descriptions();
+    let mut items = Vec::with_capacity(descriptions.len());
+    for (name, detail) in descriptions {
+        items.push(PickerItem {
+            label: (*name).to_string(),
+            detail: (*detail).to_string(),
+            value: (*name).to_string(),
+        });
+    }
+    let mut modal = PickerModal::new(PickerKind::Personality, "Select Personality", items);
+    if let Some(current) = app.current_personality.as_deref() {
+        if let Some(idx) = modal
+            .filtered_indices
+            .iter()
+            .position(|item_idx| modal.items[*item_idx].value.eq_ignore_ascii_case(current))
+        {
+            modal.selected_filtered = idx;
+        }
+    }
+    state.open_modal(modal);
+}
+
+async fn process_modal_confirm(state: &mut TuiState, app: &mut App) -> Result<(), AgentError> {
+    let Some(modal) = state.modal.clone() else {
+        return Ok(());
+    };
+    let Some(item) = modal.selected_item().cloned() else {
+        state.status_message = "Nothing selected".to_string();
+        return Ok(());
+    };
+    match modal.kind {
+        PickerKind::ModelProvider => {
+            open_provider_model_modal(state, app, &item.value).await;
+            state.status_message = format!("Provider selected: {}", item.value);
+        }
+        PickerKind::ModelForProvider { provider } => {
+            let provider_model = format!("{provider}:{}", item.value.trim());
+            app.switch_model(&provider_model);
+            app.push_ui_assistant(format!("Model switched to: {}", provider_model));
+            state.close_modal();
+            state.status_message = format!("Switched model to {}", provider_model);
+        }
+        PickerKind::Personality => {
+            app.switch_personality(item.value.as_str());
+            app.push_ui_assistant(format!("Switched personality to `{}`.", item.value));
+            state.close_modal();
+            state.status_message = format!("Personality: {}", item.value);
+        }
+    }
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
@@ -1770,27 +2790,38 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
         }
     });
 
+    let mut frame_tick = tokio::time::interval(Duration::from_millis(60));
+    frame_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut needs_redraw = true;
+
     // Main event loop
     while app.running {
-        if last_jobs_refresh.elapsed() >= Duration::from_secs(1) {
-            state.background_jobs_running = app.running_background_job_count();
-            last_jobs_refresh = Instant::now();
-        }
-        state.refresh_sticky_prompt(&app);
-        if state.processing {
-            state.tick_spinner();
+        if needs_redraw {
+            state.refresh_sticky_prompt(&app);
+            let active_theme = tui.theme().clone();
+            tui.terminal
+                .draw(|f| {
+                    render(f, &app, &mut state, &active_theme);
+                })
+                .map_err(|e| AgentError::Config(e.to_string()))?;
+            needs_redraw = false;
         }
 
-        // Render
-        let active_theme = tui.theme().clone();
-        tui.terminal
-            .draw(|f| {
-                render(f, &app, &state, &active_theme);
-            })
-            .map_err(|e| AgentError::Config(e.to_string()))?;
-
-        // Handle events
         tokio::select! {
+            _ = frame_tick.tick() => {
+                let previous_jobs = state.background_jobs_running;
+                if last_jobs_refresh.elapsed() >= Duration::from_secs(1) {
+                    state.background_jobs_running = app.running_background_job_count();
+                    last_jobs_refresh = Instant::now();
+                }
+                if state.processing {
+                    state.tick_spinner();
+                    needs_redraw = true;
+                }
+                if previous_jobs != state.background_jobs_running {
+                    needs_redraw = true;
+                }
+            }
             event = tui.events.recv() => {
                 match event {
                     Some(Event::Key(key)) => {
@@ -1802,43 +2833,93 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                             }
                             app.running = false;
                             break;
-                        } else {
-                            let should_quit = state.handle_key(key, &mut app);
-                            if should_quit {
-                                app.running = false;
-                                break;
+                        }
+
+                        if state.modal_active() {
+                            match state.handle_modal_key(key) {
+                                ModalAction::Close => {
+                                    state.close_modal();
+                                    state.status_message = "Picker closed".to_string();
+                                }
+                                ModalAction::Confirm => {
+                                    process_modal_confirm(&mut state, &mut app).await?;
+                                }
+                                ModalAction::None => {}
                             }
+                            needs_redraw = true;
+                            continue;
+                        }
 
-                            // Ctrl+Enter / Alt+Enter submits. For slash commands, Enter submits too.
-                            let is_submit_combo = (key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
-                                || key.modifiers.contains(crossterm::event::KeyModifiers::ALT))
-                                && key.code == crossterm::event::KeyCode::Enter;
-                            let is_slash_enter = key.code == crossterm::event::KeyCode::Enter
-                                && key.modifiers.is_empty()
-                                && state.input.starts_with('/')
-                                && !state.input.contains('\n');
-                            let is_submit = is_submit_combo || is_slash_enter;
+                        let should_quit = state.handle_key(key, &mut app);
+                        if should_quit {
+                            app.running = false;
+                            break;
+                        }
 
-                            if is_submit {
-                                let input = state.input.clone();
-                                state.input.clear();
-                                state.cursor_position = 0;
-                                state.completions.clear();
-                                state.completion_index = None;
-                                state.scroll_offset = 0;
+                        // Ctrl+Enter / Alt+Enter submits. For slash commands, Enter submits too.
+                        let is_submit_combo = (key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+                            || key.modifiers.contains(crossterm::event::KeyModifiers::ALT))
+                            && key.code == crossterm::event::KeyCode::Enter;
+                        let is_slash_enter = key.code == crossterm::event::KeyCode::Enter
+                            && key.modifiers.is_empty()
+                            && state.input.starts_with('/')
+                            && !state.input.contains('\n');
+                        let is_submit = is_submit_combo || is_slash_enter;
 
-                                if !input.is_empty() {
+                        if is_submit {
+                            let input = state.input.clone();
+                            state.input.clear();
+                            state.cursor_position = 0;
+                            state.completions.clear();
+                            state.completion_index = None;
+                            state.scroll_offset = 0;
+
+                            if !input.is_empty() {
+                                let mut handled_by_tui = false;
+                                if let Some((cmd, args)) = parse_slash_parts(&input) {
+                                    if cmd.eq_ignore_ascii_case("/model") {
+                                        if args.is_empty() || (args.len() == 1 && args[0].eq_ignore_ascii_case("list")) {
+                                            open_model_provider_modal(&mut state, &app).await;
+                                            state.status_message = "Choose provider, then model".to_string();
+                                            handled_by_tui = true;
+                                        } else if args.len() == 1 {
+                                            let providers = crate::model_switch::curated_provider_slugs();
+                                            if providers.iter().any(|p| p.eq_ignore_ascii_case(&args[0])) {
+                                                open_provider_model_modal(&mut state, &app, &args[0].to_ascii_lowercase()).await;
+                                                state.status_message = format!("Choose {} model", args[0].to_ascii_lowercase());
+                                                handled_by_tui = true;
+                                            }
+                                        }
+                                    } else if cmd.eq_ignore_ascii_case("/personality")
+                                        && (args.is_empty() || (args.len() == 1 && args[0].eq_ignore_ascii_case("list")))
+                                    {
+                                        open_personality_modal(&mut state, &app);
+                                        state.status_message = "Choose personality".to_string();
+                                        handled_by_tui = true;
+                                    } else if cmd.eq_ignore_ascii_case("/toolcards")
+                                        && args.first().is_some_and(|a| a.eq_ignore_ascii_case("export"))
+                                    {
+                                        let export_path = hermes_config::hermes_home().join("logs/toolcards-export.txt");
+                                        let mut out = String::new();
+                                        for msg in app.transcript_messages().iter().filter(|m| m.role == hermes_core::MessageRole::Tool) {
+                                            if let Some(content) = msg.content.as_deref() {
+                                                out.push_str(content);
+                                                out.push_str("\n\n---\n\n");
+                                            }
+                                        }
+                                        if let Err(err) = std::fs::write(&export_path, out) {
+                                            state.status_message = format!("Export failed: {}", err);
+                                        } else {
+                                            state.status_message = format!("Exported tool cards to {}", export_path.display());
+                                            app.push_ui_assistant(format!("Exported tool cards to `{}`.", export_path.display()));
+                                        }
+                                        handled_by_tui = true;
+                                    }
+                                }
+
+                                if !handled_by_tui {
                                     state.processing = true;
                                     state.status_message = "Processing...".to_string();
-
-                                    // Re-render before processing
-                                    let active_theme = tui.theme().clone();
-                                    tui.terminal
-                                        .draw(|f| {
-                                            render(f, &app, &state, &active_theme);
-                                        })
-                                        .map_err(|e| AgentError::Config(e.to_string()))?;
-
                                     match app.handle_input(&input).await {
                                         Ok(_) => {
                                             state.processing = false;
@@ -1853,9 +2934,10 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                 }
                             }
                         }
+                        needs_redraw = true;
                     }
                     Some(Event::Resize(_, _)) => {
-                        // Terminal was resized — next render will adapt
+                        needs_redraw = true;
                     }
                     Some(Event::Mouse(mouse)) => {
                         use crossterm::event::MouseEventKind;
@@ -1868,12 +2950,15 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                             }
                             _ => {}
                         }
+                        needs_redraw = true;
                     }
                     Some(Event::Message(msg)) => {
                         state.status_message = msg;
+                        needs_redraw = true;
                     }
                     Some(Event::StreamDelta(delta)) => {
                         state.stream_buffer.push_str(&delta);
+                        needs_redraw = true;
                     }
                     Some(Event::StreamChunk(chunk)) => {
                         if let Some(delta) = chunk.delta {
@@ -1985,6 +3070,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                             state.last_usage =
                                 Some((usage.prompt_tokens, usage.completion_tokens, usage.total_tokens));
                         }
+                        needs_redraw = true;
                     }
                     Some(Event::AgentDone) => {
                         state.processing = false;
@@ -1993,6 +3079,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         state.stream_needs_break = false;
                         state.active_tools.clear();
                         state.status_message.clear();
+                        needs_redraw = true;
                     }
                     Some(Event::Interrupt) => {
                         state.processing = false;
@@ -2000,6 +3087,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         state.stream_muted = false;
                         state.stream_needs_break = false;
                         state.active_tools.clear();
+                        needs_redraw = true;
                     }
                     None => {
                         // Channel closed
@@ -2190,13 +3278,13 @@ mod tests {
         let theme = Theme::default_theme();
         let colors = theme.colors.to_ratatui_colors();
         let styles = theme.resolved_styles();
-        let state = TuiState::default();
+        let mut state = TuiState::default();
         let messages = vec![
             Message::system("internal system payload"),
             Message::user("reply with 1"),
             Message::assistant("1"),
         ];
-        let rendered = build_transcript_lines(&messages, &state, &styles, &colors, 80);
+        let rendered = build_transcript_lines(&messages, &mut state, &styles, &colors, 80);
         let rendered_text = rendered
             .iter()
             .map(|line| line.to_string())
@@ -2215,8 +3303,8 @@ mod tests {
         let theme = Theme::default_theme();
         let colors = theme.colors.to_ratatui_colors();
         let styles = theme.resolved_styles();
-        let state = TuiState::default();
-        let rendered = build_transcript_lines(&[], &state, &styles, &colors, 80);
+        let mut state = TuiState::default();
+        let rendered = build_transcript_lines(&[], &mut state, &styles, &colors, 80);
         let rendered_text = rendered
             .iter()
             .map(|line| line.to_string())
