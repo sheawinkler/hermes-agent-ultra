@@ -236,12 +236,7 @@ impl App {
             .map_err(|e| AgentError::Config(e.to_string()))?;
 
         let mut config = config;
-        if let Some(ref model) = cli.model {
-            config.model = Some(model.clone());
-        }
-        if let Some(ref personality) = cli.personality {
-            config.personality = Some(personality.clone());
-        }
+        apply_cli_runtime_overrides(&mut config, &cli);
 
         if config.sessions.auto_prune {
             let resolved_home = config
@@ -708,6 +703,29 @@ impl App {
     }
 }
 
+fn apply_cli_runtime_overrides(config: &mut GatewayConfig, cli: &Cli) {
+    if let Some(ref model) = cli.model {
+        config.model = Some(model.clone());
+    }
+    if let Some(ref personality) = cli.personality {
+        config.personality = Some(personality.clone());
+    }
+    if let Some(provider) = cli
+        .provider
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        let provider = normalize_runtime_provider_name(provider);
+        let existing_model = config.model.as_deref().unwrap_or("gpt-4o").trim();
+        let model_name = existing_model
+            .split_once(':')
+            .map(|(_, name)| name.trim())
+            .unwrap_or(existing_model);
+        config.model = Some(format!("{provider}:{model_name}"));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -727,6 +745,42 @@ mod tests {
         let back: SessionInfo = serde_json::from_str(&json).unwrap();
         assert_eq!(back.session_id, "test-123");
         assert_eq!(back.model, "gpt-4o");
+    }
+
+    #[test]
+    fn test_apply_cli_runtime_overrides_applies_provider_to_prefixed_model() {
+        let mut cfg = GatewayConfig::default();
+        cfg.model = Some("openai:gpt-4o".to_string());
+        let cli = Cli {
+            command: None,
+            verbose: false,
+            config_dir: None,
+            model: None,
+            provider: Some("nous".to_string()),
+            oneshot: None,
+            personality: None,
+        };
+
+        apply_cli_runtime_overrides(&mut cfg, &cli);
+        assert_eq!(cfg.model.as_deref(), Some("nous:gpt-4o"));
+    }
+
+    #[test]
+    fn test_apply_cli_runtime_overrides_applies_provider_to_bare_model() {
+        let mut cfg = GatewayConfig::default();
+        cfg.model = Some("moonshotai/kimi-k2.6".to_string());
+        let cli = Cli {
+            command: None,
+            verbose: false,
+            config_dir: None,
+            model: None,
+            provider: Some("anthropic".to_string()),
+            oneshot: None,
+            personality: None,
+        };
+
+        apply_cli_runtime_overrides(&mut cfg, &cli);
+        assert_eq!(cfg.model.as_deref(), Some("anthropic:moonshotai/kimi-k2.6"));
     }
 
     #[test]
