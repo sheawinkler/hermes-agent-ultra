@@ -25,6 +25,7 @@ Options:
   --test-cmd <command>      Verification command (default: cargo test -p hermes-gateway)
   --no-pr                   Do not open a PR in branch-pr mode
   --draft-pr                Open PR as draft in branch-pr mode
+  --pr-labels <csv>         Labels to apply on created PR (default: upstream-sync,parity-sync)
   --dry-run                 Show what would happen, emit report, and exit
   -h, --help                Show help
 USAGE
@@ -50,10 +51,12 @@ RUN_TESTS="1"
 TEST_CMD="cargo test -p hermes-gateway"
 CREATE_PR="1"
 PR_DRAFT="0"
+PR_LABELS="${PR_LABELS:-upstream-sync,parity-sync}"
 CREATE_CONFLICT_ISSUE="1"
 CONFLICT_LABEL="upstream-sync-conflict"
 STRICT_RISK_GATE="${STRICT_RISK_GATE:-0}"
 ALLOW_RISK_PATHS="0"
+RISK_MATCH_COUNT="0"
 RISK_PATHS_FILE=""
 DRY_RUN="0"
 REPORT_DIR=""
@@ -127,6 +130,10 @@ while [[ $# -gt 0 ]]; do
     --draft-pr)
       PR_DRAFT="1"
       shift
+      ;;
+    --pr-labels)
+      PR_LABELS="${2:?missing value for --pr-labels}"
+      shift 2
       ;;
     --dry-run)
       DRY_RUN="1"
@@ -223,6 +230,7 @@ create_report_header() {
   append_report "strict_risk_gate: ${STRICT_RISK_GATE}"
   append_report "draft_pr: ${PR_DRAFT}"
   append_report "allow_risk_paths: ${ALLOW_RISK_PATHS}"
+  append_report "pr_labels: ${PR_LABELS}"
   append_report "risk_paths_file: ${RISK_PATHS_FILE}"
   append_report "upstream_url: ${UPSTREAM_URL}"
   append_report "expected_upstream_repo: ${EXPECTED_UPSTREAM_REPO}"
@@ -326,8 +334,10 @@ evaluate_risk_gate() {
 
   if [[ "${#matches[@]}" -eq 0 ]]; then
     append_report "risk_gate_status: pass"
+    RISK_MATCH_COUNT="0"
     return 0
   fi
+  RISK_MATCH_COUNT="${#matches[@]}"
 
   {
     echo "## Strict Risk Gate Matches"
@@ -496,6 +506,45 @@ if [[ "${MODE}" == "direct-main" ]]; then
 fi
 
 if [[ "${CREATE_PR}" == "1" ]]; then
+  PARITY_QUEUE_SUMMARY="$(
+    python3 - <<'PY'
+import json, pathlib
+p = pathlib.Path("docs/parity/upstream-missing-queue.json")
+if not p.exists():
+    print("unavailable")
+else:
+    try:
+        data = json.loads(p.read_text())
+    except Exception:
+        print("unavailable")
+    else:
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            items = data.get("items") or data.get("entries") or []
+        else:
+            items = []
+        total = len(items)
+        queued = 0
+        actionable = 0
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            state = str(item.get("state") or item.get("status") or "").lower()
+            if state in {"queued", "todo", "pending", "open", "in_progress"}:
+                queued += 1
+            cls = str(item.get("classification") or item.get("class") or "").lower()
+            if cls in {"actionable", "functional", "required"}:
+                actionable += 1
+        print(f"total={total}, queued={queued}, actionable={actionable}")
+PY
+  )"
+  DRIFT_ARTIFACTS=(
+    "docs/parity/upstream-missing-queue.json"
+    "docs/parity/upstream-missing-queue.md"
+    "docs/parity/global-parity-proof.json"
+    "${REPORT_FILE}"
+  )
   TITLE="chore: sync upstream ${BASE_BRANCH} (${TIMESTAMP})"
   BODY_FILE="$(mktemp)"
   trap 'rm -f "${BODY_FILE}"' EXIT
@@ -508,6 +557,14 @@ Automated upstream sync.
 - origin sha before sync: \`${ORIGIN_SHA}\`
 - verification: \`${TEST_CMD}\`
 - report: \`${REPORT_FILE}\`
+- parity queue summary: \`${PARITY_QUEUE_SUMMARY}\`
+
+Drift artifacts:
+$(for p in "${DRIFT_ARTIFACTS[@]}"; do printf -- "- \`%s\`\n" "$p"; done)
+
+Test guidance:
+- Run \`cargo test -p hermes-gateway\` (or the configured \`--test-cmd\`) at minimum.
+- If parity drift is detected, regenerate queue/proof artifacts before merge.
 
 Commits pending from upstream at sync start:
 \`\`\`
@@ -518,8 +575,18 @@ PRBODY
   if [[ "${PR_DRAFT}" == "1" ]]; then
     PR_ARGS+=(--draft)
   fi
-  if gh pr create "${PR_ARGS[@]}"; then
-    log "PR created successfully."
+  if PR_URL="$(gh pr create "${PR_ARGS[@]}")"; then
+    log "PR created successfully: ${PR_URL}"
+    IFS=',' read -r -a PR_LABEL_ARRAY <<< "${PR_LABELS}"
+    if [[ "${RISK_MATCH_COUNT}" -gt 0 ]]; then
+      PR_LABEL_ARRAY+=("risk-paths-reviewed")
+    fi
+    for raw_label in "${PR_LABEL_ARRAY[@]}"; do
+      label="$(printf '%s' "${raw_label}" | xargs)"
+      [[ -z "${label}" ]] && continue
+      gh label create "${label}" --color "1D76DB" --description "Automated upstream sync metadata" >/dev/null 2>&1 || true
+      gh pr edit "${PR_URL}" --add-label "${label}" >/dev/null 2>&1 || true
+    done
   else
     log "PR creation failed (branch was pushed). Create PR manually if needed."
   fi
