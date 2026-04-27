@@ -4391,6 +4391,20 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "tests/hermes_cli/test_tui_npm_install.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "0738b80833c12eb6127caa97279a5db83e0f7b54",
+      "subject": "fix(tui): rebuild when ink bundle is missing",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
       "disposition": "superseded",
       "files_sample": [
         "run_agent.py",
@@ -4904,6 +4918,27 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
+      "disposition": "pending",
+      "files_sample": [
+        "tui_gateway/server.py",
+        "ui-tui/packages/hermes-ink/src/ink/components/AlternateScreen.tsx",
+        "ui-tui/packages/hermes-ink/src/ink/ink.tsx",
+        "ui-tui/src/app.tsx",
+        "ui-tui/src/app/interfaces.ts",
+        "ui-tui/src/app/slash/commands/core.ts",
+        "ui-tui/src/app/uiStore.ts",
+        "ui-tui/src/app/useConfigSync.ts",
+        "ui-tui/src/gatewayTypes.ts"
+      ],
+      "files_touched": 9,
+      "notes": "",
+      "owner": "",
+      "sha": "1c8ce33d51088ada132f15c6fdf34a6b7247ba5d",
+      "subject": "fix(tui): proactive mouse disable on ConPTY + /mouse toggle command",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
       "disposition": "superseded",
       "files_sample": [
         "cli-config.yaml.example",
@@ -4931,27 +4966,5246 @@
       "subject": "fix(cli-config): keep delegation overrides commented in example",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli-config.yaml.example",
+        "hermes_cli/config.py",
+        "tests/tools/test_delegate.py",
+        "tools/delegate_tool.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "023b1bff11c2a01a435f1956a0e2ac1773a065f3",
+      "subject": "fix(delegate): resolve subagent approval prompts without deadlocking parent TUI (#15491)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "website/docs/user-guide/features/dashboard-plugins.md",
+        "website/docs/user-guide/features/extending-the-dashboard.md",
+        "website/docs/user-guide/features/web-dashboard.md",
+        "website/sidebars.ts"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "e5647d7863d306c8f479e1da011ebe4a4848d56d",
+      "subject": "docs: consolidate dashboard themes and plugins into Extending the Dashboard (#15530)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/context_compressor.py",
+        "tests/agent/test_context_compressor.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "5401a0080d97cfa61e20749f02ba6b54dbb181bd",
+      "subject": "fix: recalculate token budgets on model switch in ContextCompressor",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/tools_config.py",
+        "tests/hermes_cli/test_tools_config.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "9d7b64b5dd394a60df7d38824256e2f213eac5c6",
+      "subject": "fix(tools): normalize numeric entries and clear stale no_mcp in _save_platform_tools",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "9fde22d2333986758c85a8ea1524d3fdb3a3f418",
+      "subject": "fix the reset of model change by /model.",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "df485628ce02a0972f778088ad5b87f3e8d1411f",
+      "subject": "chore(release): map Readon's git email to GitHub login",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/install.sh"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "f433197f23f9e0307ae44d23cf1964ed2dd94cc2",
+      "subject": "feat(installer): FHS layout for root installs on Linux (#15608)",
+      "target_ticket": 25,
+      "target_ticket_name": "GPAR-06 packaging/docs/install parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cron/jobs.py",
+        "cron/scheduler.py",
+        "tests/cron/test_cron_context_from.py",
+        "tools/cronjob_tools.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "5ac53659234eb26bb3e794f010227dc6605ae9f2",
+      "subject": "feat(cron): add context_from field for cron job output chaining",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/cron/test_cron_context_from.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "e4a91ccb7621576d329dc9bd085cb5c5848cde51",
+      "subject": "test(cron): add PermissionError coverage for context_from",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cron/scheduler.py",
+        "tests/cron/test_cron_context_from.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "eb922228119df0dbac171c96831ac20e5124a7d5",
+      "subject": "fix(cron): silent skip when context_from job has no output yet",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/cron/test_cron_context_from.py",
+        "tools/cronjob_tools.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "0d548d1db94aaad1904d6bbb777a56003750053a",
+      "subject": "fix(cron): wire context_from through the update action",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/tools_config.py",
+        "tests/hermes_cli/test_tools_config.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "9830905dabd57c05270e3e980dae8ddb3587f4c4",
+      "subject": "fix(tools): recover non-configurable toolsets from composite resolution",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/config.py",
+        "hermes_cli/tools_config.py",
+        "model_tools.py",
+        "tests/hermes_cli/test_tools_config.py",
+        "tests/test_toolsets.py",
+        "tests/tools/test_discord_tool.py",
+        "tools/discord_tool.py",
+        "toolsets.py"
+      ],
+      "files_touched": 8,
+      "notes": "",
+      "owner": "",
+      "sha": "81987f0350b68ab5cf8a1c6d1129a523fe32dcf4",
+      "subject": "feat(discord): split discord_server into discord + discord_admin tools",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/hermes_cli/test_tools_config.py",
+        "toolsets.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "db09477b774c7742d137ad8f451bc11895f54ba7",
+      "subject": "feat(feishu): wire feishu doc/drive tools into hermes-feishu composite",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/base.py",
+        "gateway/session.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "0702231dd884f2505af5515564a97b133a169ad1",
+      "subject": "feat(session): add guild_id/parent_chat_id/message_id to SessionSource",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/discord.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "47b02e961cb79f8bef3fdee63028e35e5462ccd9",
+      "subject": "feat(discord): populate guild_id, parent_chat_id, message_id on SessionSource",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/session.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "5ae07e7b5cca5a0020b03506219a6a04bd4c45d6",
+      "subject": "fix(session): gate stale \"no Discord APIs\" note on DISCORD_BOT_TOKEN",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/session.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "591deeb9280e37d6fde9a2b1c0fcfb970319c777",
+      "subject": "feat(session): inject Discord IDs block when discord tool is loaded",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/session.py",
+        "hermes_cli/tools_config.py",
+        "tests/hermes_cli/test_tools_config.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "6ed37e0f42dc226d3b2afe4bc3deaa0d7f4206a5",
+      "subject": "feat(tools): make discord/discord_admin opt-in, Discord-only",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "run_agent.py",
+        "tests/run_agent/test_flush_memories_codex.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "f67a61dc93c8f184923d744aea12fee60d4fc655",
+      "subject": "fix(flush_memories): strip temperature from codex_responses fallback (#15620)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/auxiliary_client.py",
+        "tests/agent/test_unsupported_temperature_retry.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "facea845594a5c1dd9472843a49cfb0d5d83ec60",
+      "subject": "fix(auxiliary): retry without temperature when any provider rejects it",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "b35d692f45d5f8c4d2ba567a64daa38ebba96a1a",
+      "subject": "chore(release): map ash@users.noreply.github.com to ash",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "run_agent.py",
+        "tests/run_agent/test_compression_feasibility.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "f92006ce1cda1a40249fa4d5dd9c663f70a9de8d",
+      "subject": "fix(compression): reserve system+tools headroom when aux binds threshold (#15631)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/auxiliary_client.py",
+        "tests/agent/test_unsupported_parameter_retry.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "3c1c65e7543620bd1620b02957c20dd193ea8e35",
+      "subject": "fix(auxiliary): generalize unsupported-parameter detector and harden max_tokens retry (#15633)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/tools_config.py",
+        "tests/hermes_cli/test_tools_config.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "ac05daa1890279ad5e6b50ea9944f6f337fc88d3",
+      "subject": "fix(tools): dedupe bundled plugin toolsets with built-in entries (#15634)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "6e561ffa6d47af7ba112fce6768301bdc0491b73",
+      "subject": "fix(update): poll is-active instead of one-shot sleep(3) after gateway restart (#15639)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/tools/test_watch_patterns.py",
+        "tools/process_registry.py",
+        "tools/terminal_tool.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "97d54f0e4df5710350ace7025ef977d439590551",
+      "subject": "fix(terminal): three-layer defense against watch_patterns notification spam (#15642)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "plugins/example-dashboard/dashboard/dist/index.js",
+        "plugins/example-dashboard/dashboard/manifest.json",
+        "tests/hermes_cli/test_web_server.py",
+        "web/src/pages/AnalyticsPage.tsx",
+        "web/src/pages/ChatPage.tsx",
+        "web/src/pages/ConfigPage.tsx",
+        "web/src/pages/CronPage.tsx",
+        "web/src/pages/DocsPage.tsx",
+        "web/src/pages/EnvPage.tsx",
+        "web/src/pages/LogsPage.tsx",
+        "web/src/pages/SessionsPage.tsx",
+        "web/src/pages/SkillsPage.tsx",
+        "web/src/plugins/slots.ts",
+        "website/docs/user-guide/features/extending-the-dashboard.md"
+      ],
+      "files_touched": 14,
+      "notes": "",
+      "owner": "",
+      "sha": "af22421e87a741f65d28648fc8289c7c07fab145",
+      "subject": "feat(dashboard): page-scoped plugin slots for built-in pages (#15658)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "website/docs/user-guide/features/extending-the-dashboard.md",
+        "website/docs/user-guide/features/web-dashboard.md"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "cf2fabc40fb699aeaa7384aaf2d04a07194a33ec",
+      "subject": "docs(dashboard): document page-scoped plugin slots (#15662)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "run_agent.py",
+        "tests/run_agent/test_compression_feasibility.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "d635e2df3fd7b0f30c55f055f787b256d2737678",
+      "subject": "fix(compression): pass provider to context length resolver in feasibility check",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/anthropic_adapter.py",
+        "agent/auxiliary_client.py",
+        "cli.py",
+        "gateway/run.py",
+        "gateway/session.py",
+        "hermes_cli/config.py",
+        "hermes_cli/main.py",
+        "plugins/memory/openviking/__init__.py",
+        "run_agent.py",
+        "tests/agent/test_auxiliary_named_custom_providers.py",
+        "tests/agent/test_unsupported_temperature_retry.py",
+        "tests/cli/test_cli_new_session.py",
+        "tests/gateway/test_async_memory_flush.py",
+        "tests/gateway/test_flush_memory_stale_guard.py",
+        "tests/gateway/test_resume_command.py",
+        "tests/gateway/test_session_boundary_hooks.py",
+        "tests/gateway/test_session_boundary_security_state.py",
+        "tests/run_agent/test_compress_focus_plugin_fallback.py",
+        "tests/run_agent/test_compression_feasibility.py",
+        "tests/run_agent/test_flush_memories_codex.py"
+      ],
+      "files_touched": 23,
+      "notes": "",
+      "owner": "",
+      "sha": "ea01bdcebe1fd2e297923626de74dbe529c47bf4",
+      "subject": "refactor(memory): remove flush_memories entirely (#15696)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "hermes_cli/oneshot.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "7c8c031f60da25801f35512072c5c89c652118f3",
+      "subject": "feat: add `hermes -z <prompt>` one-shot mode (#15702)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "hermes_cli/oneshot.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "a9fa73a620db7b2645864ee434a1dbe18d2e5de3",
+      "subject": "feat(oneshot): add --model / --provider / HERMES_INFERENCE_MODEL (#15704)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "5006b2204b329ab017c05c0822c50c13453237f2",
+      "subject": "fix(update): honor RestartSec when polling for gateway respawn (#15707)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/run.py",
+        "run_agent.py",
+        "tests/run_agent/test_stream_interrupt_retry.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "7c17accb29bcff13923a8dbb76a4661ba17fe5ad",
+      "subject": "fix: /stop now immediately aborts streaming retry loop",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/codex_responses_adapter.py",
+        "tests/run_agent/test_provider_parity.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "648b89911f1c9f16feabed1f2551aa7ee4fddfd0",
+      "subject": "fix: use output_text for assistant message content in Codex Responses API (#15690)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "run_agent.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "9daa0620a6bdfc3413b7520a7f5194931e8d97da",
+      "subject": "fix(agent): ordering fix in _copy_reasoning_content_for_api \u2014 cross-provider reasoning isolation",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "tests/hermes_cli/test_tui_resume_flow.py",
+        "tests/test_tui_gateway_server.py",
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "e9c47c70422dc0a3367e325c6974b09d2c5bf9cc",
+      "subject": "fix(tui): honor launch model overrides",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/test_tui_gateway_server.py",
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "57b43fdd4bf9496d4dc3e8e70df382c61f8e18e8",
+      "subject": "fix(tui): preserve provider precedence on startup",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/test_tui_gateway_server.py",
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "4db58d45d4e06fc819b8ff6729548bd9d7d02a8a",
+      "subject": "fix(tui): address startup provider review",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/test_tui_gateway_server.py",
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "2dfcc8087a8e9e8a653be102c69dd85ae78ddccf",
+      "subject": "fix(tui): avoid network lookup during startup",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/models.py",
+        "tests/test_tui_gateway_server.py",
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "e48a497d166bfc32743d503fd00136c9140af5fe",
+      "subject": "fix(tui): share static model detection",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/commands.py",
+        "tests/test_tui_gateway_server.py",
+        "ui-tui/src/__tests__/createSlashHandler.test.ts",
+        "ui-tui/src/app/slash/commands/session.ts",
+        "ui-tui/src/app/slash/commands/setup.ts"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "5e52011de363992247cae6ecff3cb125616b0406",
+      "subject": "fix(tui): bind provider as model alias",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/components/AlternateScreen.tsx",
+        "ui-tui/packages/hermes-ink/src/ink/dom.ts",
+        "ui-tui/packages/hermes-ink/src/ink/termio/osc.test.ts",
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/__tests__/createSlashHandler.test.ts",
+        "ui-tui/src/__tests__/details.test.ts",
+        "ui-tui/src/app.tsx",
+        "ui-tui/src/app/slash/commands/core.ts",
+        "ui-tui/src/app/turnController.ts",
+        "ui-tui/src/app/uiStore.ts",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/components/appChrome.tsx",
+        "ui-tui/src/components/messageLine.tsx",
+        "ui-tui/src/components/thinking.tsx",
+        "ui-tui/src/lib/platform.ts"
+      ],
+      "files_touched": 16,
+      "notes": "",
+      "owner": "",
+      "sha": "48bdd2445e8e794a91141fe4f583a0486f65dc4a",
+      "subject": "fix(tui): apply ui-tui fix pass and restore type-check",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/models.py",
+        "tests/hermes_cli/test_models.py",
+        "tests/test_tui_gateway_server.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "fdcbd2257b2dc6962066aedf61db738b51c69d68",
+      "subject": "fix(tui): resolve startup model aliases statically",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/dom.ts",
+        "ui-tui/src/components/appOverlays.tsx",
+        "ui-tui/src/components/modelPicker.tsx",
+        "ui-tui/src/components/overlayControls.tsx",
+        "ui-tui/src/components/sessionPicker.tsx",
+        "ui-tui/src/components/skillsHub.tsx"
+      ],
+      "files_touched": 6,
+      "notes": "",
+      "owner": "",
+      "sha": "a046483e86016a78feddf9801fdb93f85c53837a",
+      "subject": "fix(tui): share overlay close controls",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/models.py",
+        "tests/test_tui_gateway_server.py",
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "c6fdf48b79ebd336015a24bc52fdd2c1c69a5df5",
+      "subject": "fix(tui): sync inference model after switches",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/appOverlays.tsx",
+        "ui-tui/src/components/modelPicker.tsx",
+        "ui-tui/src/components/overlayControls.tsx",
+        "ui-tui/src/components/sessionPicker.tsx",
+        "ui-tui/src/components/skillsHub.tsx"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "6e83d90eb4904677d530480d41b642362f514026",
+      "subject": "refactor(tui): tighten overlay helpers",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/overlayControls.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "919274b60ef0652039e04a80c561a90c62d3ff28",
+      "subject": "fix(tui): align overlay q shortcut casing",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/platform.test.ts",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/content/hotkeys.ts",
+        "ui-tui/src/lib/platform.ts"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "bcc5362432de766e221e5712721b6e0088f32edc",
+      "subject": "fix(tui): honor client copy shortcut over ssh",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/content/hotkeys.ts",
+        "ui-tui/src/lib/platform.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "a68793b6c4a9fff115ce2712f317034ddf50f1c7",
+      "subject": "refactor(tui): share remote shell detection",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/selection.test.ts",
+        "ui-tui/packages/hermes-ink/src/ink/selection.ts",
+        "ui-tui/src/app/slash/commands/core.ts",
+        "ui-tui/src/app/useInputHandlers.ts"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "876bb600443c0f115d5ea3a5ad8d77f78f3b9388",
+      "subject": "fix(tui): trim whitespace-only selection chrome",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/content/hotkeys.ts"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "132620ba3d23eac2ab7960601e35e29e3f2dbcbf",
+      "subject": "refactor(tui): simplify remote copy hotkey hints",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/selection.test.ts",
+        "ui-tui/packages/hermes-ink/src/ink/selection.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "bba16943f650641b71827483ccc0f6cb341bfc84",
+      "subject": "fix(tui): preserve rendered indentation in selections",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/markdown.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "1735ced93b15f37409109d529a001e25ded40ca6",
+      "subject": "fix(tui): preserve code block indentation in selection",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/screen.ts",
+        "ui-tui/packages/hermes-ink/src/ink/selection.test.ts",
+        "ui-tui/packages/hermes-ink/src/ink/selection.ts",
+        "ui-tui/src/components/markdown.tsx"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "bd66e55a024517d2f6027984896ca62dcc83d7e4",
+      "subject": "fix(tui): track rendered spaces for selection copy",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/screen.ts"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "b1c18e5a41b8cb5f5b6cd1e5894f76e1c9833d8b",
+      "subject": "refactor(tui): format screen imports",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/selection.test.ts",
+        "ui-tui/packages/hermes-ink/src/ink/selection.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "31d7f1951a558fd98e9ca2184d3b5e45aff2cfd9",
+      "subject": "fix(tui): clamp copied selection bounds",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "run_agent.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "88b65cc82a5f7930dcb45592459cc1245bebf94a",
+      "subject": "Update run_agent.py",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "run_agent.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "5ae608152ec420d249b44542051ac27989fd33b0",
+      "subject": "fix: remove has_reasoning guard \u2014 inject empty reasoning_content for DeepSeek/Kimi tool_calls unconditionally",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/mlops/inference/obliteratus/SKILL.md"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "47420a84b9dce2a09e6a71600954c11e148c3242",
+      "subject": "docs(obliteratus): link YouTube video guide in SKILL.md (#15808)",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "website/docs/user-guide/configuration.md",
+        "website/docs/user-guide/messaging/webhooks.md"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "dc4d92f131ee177452f476a7951a3ab52c30242d",
+      "subject": "docs: embed tutorial videos on webhooks + auxiliary models pages (#15809)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "run_agent.py",
+        "tests/run_agent/test_deepseek_reasoning_content_echo.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "ad0ac894783a3e30a617bb252b167926899123e1",
+      "subject": "fix: DeepSeek/Kimi thinking mode requires reasoning_content on ALL assistant messages",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/app/interfaces.ts",
+        "ui-tui/src/app/useComposerState.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "3944b22506609493c3e103f9243fe6b8d6340efe",
+      "subject": "fix(tui): suspend Ink properly when opening $EDITOR via Ctrl+G",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/README.md",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/content/hotkeys.ts"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "c58956a9a282afcbe88210272710165b13ccf853",
+      "subject": "fix(tui): accept Alt+G as Ctrl+G fallback in VSCode/Cursor terminals",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "4c797bfae9732e3dfc8d2d067428f8aad0d607a8",
+      "subject": "fix(cli): accept Alt+G as Ctrl+G fallback in VSCode/Cursor terminals",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_reasoning_command.py",
+        "tests/gateway/test_session_model_override_routing.py",
+        "tests/gateway/test_session_model_reset.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "25ba6a4a74756a34578ffef0ef993a1cd0b0f251",
+      "subject": "fix(gateway): make reasoning session-scoped by default",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/doctor.py",
+        "tests/hermes_cli/test_doctor.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "b2d3308f985f9a81c5bf9fbd60148947595445fb",
+      "subject": "fix(doctor): accept bare custom provider",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "01cf2c65cc729ea8e07b72193903617469997ed3",
+      "subject": "chore(release): map iris@growthpillars.co to irispillars (#15825)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py",
+        "hermes_cli/model_switch.py",
+        "hermes_cli/models.py",
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "2c56dce0edec7352defdb6717b0249423ca453b3",
+      "subject": "fix(model): preserve custom endpoint credentials and accept cloud models not in /v1/models",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "5fac6c3440519210c3a4015c0d7b904b35939473",
+      "subject": "fix(cli): write editor draft to prompt.md so syntax highlighting works",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "tests/hermes_cli/test_custom_provider_model_switch.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "1fdc31b214d854fd7a48dd262a7f56903c58cffe",
+      "subject": "fix(config): preserve custom provider api key refs",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "tests/hermes_cli/test_custom_provider_model_switch.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "8bbeaea6c74da799fa10ca7934835d9b8f9c170b",
+      "subject": "fix(config): broaden api-key ref lookup to templated base_url",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py",
+        "ui-tui/src/app/useComposerState.ts",
+        "ui-tui/src/lib/editor.test.ts",
+        "ui-tui/src/lib/editor.ts"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "db7c5735f070eb297f728bd51916008746464a33",
+      "subject": "fix: prefer vim over nano for $EDITOR fallback (CLI + TUI)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/createSlashHandler.test.ts",
+        "ui-tui/src/app/slash/commands/core.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "1b8ca9254f38b9950bbfeaf9902bd8055e12d068",
+      "subject": "fix(tui): save live transcript from slash command",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/createSlashHandler.test.ts",
+        "ui-tui/src/app/slash/commands/core.ts",
+        "ui-tui/src/gatewayTypes.ts"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "2536a36f6fabd2fbea5bb4fab05dad5628f0ab04",
+      "subject": "fix(tui): route /save through session.save JSON-RPC",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py",
+        "ui-tui/src/lib/editor.test.ts",
+        "ui-tui/src/lib/editor.ts"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "d056b610b797be02762e71dac7524c4e3c63ba16",
+      "subject": "fix: avoid prompt_toolkit complex tempfile bug and prefer nvim first",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py",
+        "ui-tui/src/lib/editor.test.ts",
+        "ui-tui/src/lib/editor.ts"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "7fd8dc0bfbe827d2963d33f8146593470329cbae",
+      "subject": "fix: preserve prompt_toolkit editor picker and mirror it in TUI",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/codex_responses_adapter.py",
+        "agent/transports/__init__.py",
+        "agent/transports/chat_completions.py",
+        "agent/transports/codex.py",
+        "agent/transports/types.py",
+        "gateway/session.py",
+        "hermes_state.py",
+        "run_agent.py",
+        "tests/agent/transports/test_chat_completions.py",
+        "tests/agent/transports/test_codex_transport.py",
+        "tests/agent/transports/test_transport.py",
+        "tests/agent/transports/test_types.py",
+        "tests/run_agent/test_provider_parity.py",
+        "tests/run_agent/test_run_agent_codex_responses.py",
+        "tests/test_hermes_state.py",
+        "website/docs/developer-guide/session-storage.md"
+      ],
+      "files_touched": 16,
+      "notes": "",
+      "owner": "",
+      "sha": "81e01f6ee98124c0cf31f46d5de799623117519b",
+      "subject": "fix(agent): preserve Codex message items for replay",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "4d170134efefa7f05cc4f88c5cdaef39050d97f2",
+      "subject": "chore(release): map nerijusn76@gmail.com to Nerijusas (#15833)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/screen.ts",
+        "ui-tui/src/app/useComposerState.ts",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/lib/editor.test.ts",
+        "ui-tui/src/lib/editor.ts"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "83129e72de7baf202437f31e7158c8c794cdbdb3",
+      "subject": "refactor(tui): tighten editor handoff helpers",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py",
+        "tests/hermes_cli/test_suppress_eio_on_interrupt.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "45e1228a8a5aab89c1f79030a60bb3169831aa86",
+      "subject": "fix(cli): suppress OSError EIO on interrupt shutdown",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "edce7522a51e010b37161e6cf68d3fdd704cfc74",
+      "subject": "chore(release): add AUTHOR_MAP entry for voidborne-d personal email",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/e2e/conftest.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "1d80e92c7efaf53d887b6aca7e34fb6913ccf87e",
+      "subject": "test(discord): add guild to fake e2e messages",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/README.md",
+        "ui-tui/src/app/useComposerState.ts",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/content/hotkeys.ts",
+        "ui-tui/src/lib/editor.test.ts",
+        "ui-tui/src/lib/editor.ts"
+      ],
+      "files_touched": 6,
+      "notes": "",
+      "owner": "",
+      "sha": "14dd8e9a727d8f2c2d010a3c2409c5670facac18",
+      "subject": "fix(tui): address Copilot review on editor handoff",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "dc5e02ea7feff3ada999a6e9feed1e49463e4369",
+      "subject": "feat(cli): implement hermes update --check flag (fixes #10318)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "ce0513dd2e8290ed1788817ddd0c95de12e8c761",
+      "subject": "chore(release): map Feranmi10 personal email",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/api_server.py",
+        "tests/gateway/test_api_server_runs.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "0a15dbdc435cdb2983449110f52d30153afcdc49",
+      "subject": "feat(api_server): add POST /v1/runs/{run_id}/stop endpoint",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/api_server.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "01535a4732a1d9c95ebd3a2473cce690c02ebac2",
+      "subject": "fix(api_server): cap stop-run wait at 5s so interrupt can't hang handler",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "4c591c28193ddb1f10d329dc0ce998e13c1e8638",
+      "subject": "chore(release): map fqsy1416@gmail.com to EKKOLearnAI",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/model_metadata.py",
+        "gateway/run.py",
+        "hermes_cli/config.py",
+        "hermes_cli/model_switch.py",
+        "run_agent.py",
+        "tests/agent/test_model_metadata.py",
+        "tests/gateway/test_session_info.py",
+        "tests/hermes_cli/test_custom_provider_context_length.py",
+        "tests/hermes_cli/test_model_switch_context_display.py"
+      ],
+      "files_touched": 9,
+      "notes": "",
+      "owner": "",
+      "sha": "125de02056eab84362fc91f57bd7041a19860b22",
+      "subject": "fix(context): honor custom_providers context_length on /model switch + bump probe tier to 256K (#15844)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/auth.py",
+        "hermes_cli/config.py",
+        "hermes_cli/main.py",
+        "hermes_cli/models.py",
+        "hermes_cli/providers.py",
+        "hermes_cli/runtime_provider.py"
+      ],
+      "files_touched": 6,
+      "notes": "",
+      "owner": "",
+      "sha": "3a7653dd1f0c7499646d3867822f6a588e49b68c",
+      "subject": "feat: Add Azure Foundry provider with OpenAI/Anthropic API mode selection",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/runtime_provider.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "6ef3a47ce5c02c63563f29da7fa663a7092a02a8",
+      "subject": "fix: use Azure API key directly for Azure endpoints, bypass OAuth token priority chain",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/runtime_provider.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "d8e4c7214e1a482abe506732af2ab3fd31a1c4f0",
+      "subject": "fix: Azure Anthropic short-circuit in resolve_runtime_provider \u2014 bypass custom runtime when provider=anthropic + azure.com URL",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "run_agent.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "7bfa9442dea1ece6a6fe8f9564bb384adbf8a508",
+      "subject": "fix: skip OAuth token refresh for Azure Anthropic endpoints \u2014 prevents ~/.claude/.credentials.json from overwriting Azure key mid-session",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/anthropic_adapter.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "c15064fa372c68d7daa976c56eb48aac14a1bc16",
+      "subject": "fix: pass api-version as default_query param, not in base_url \u2014 SDK was producing malformed URLs like /anthropic?api-version=.../v1/messages",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/auxiliary_client.py",
+        "run_agent.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "24b4b24d79462eb9007ba9864e240038913b0222",
+      "subject": "fix: preserve URL query params for Azure OpenAI and custom endpoints",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "run_agent.py",
+        "tests/run_agent/test_run_agent.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "ac571142841cd3337a59f0b5e5881c4a40f3bf2e",
+      "subject": "fix(agent): support Azure OpenAI gpt-5.x on chat/completions endpoint",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/azure_detect.py",
+        "hermes_cli/main.py",
+        "hermes_cli/runtime_provider.py",
+        "tests/hermes_cli/test_azure_detect.py",
+        "tests/hermes_cli/test_runtime_provider_resolution.py"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "731e1ef8cb69837c6419272bd0d3f05a9179a476",
+      "subject": "feat(azure-foundry): auto-detect transport, models, context length",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py",
+        "website/docs/guides/azure-foundry.md",
+        "website/docs/reference/cli-commands.md",
+        "website/docs/reference/environment-variables.md",
+        "website/docs/user-guide/configuration.md",
+        "website/sidebars.ts"
+      ],
+      "files_touched": 6,
+      "notes": "",
+      "owner": "",
+      "sha": "7c50ed707c424f88f0233374e554e36b80f0a548",
+      "subject": "docs(azure-foundry): add provider guide, env vars, release AUTHOR_MAP",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/tui_gateway/test_protocol.py",
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "91a7a0acbeaf70b9ed03ca6d513f73235bcdcb89",
+      "subject": "fix(tui): restore skills search RPC",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "hermes_cli/setup.py",
+        "tests/hermes_cli/test_setup_noninteractive.py",
+        "tests/hermes_cli/test_setup_reconfigure.py",
+        "website/docs/reference/cli-commands.md"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "a55de5bcd0177bf9515661ddefd5c274a371d61c",
+      "subject": "feat(setup): auto-reconfigure on existing installs (#15879)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/tools/test_cron_approval_mode.py",
+        "tests/tools/test_hardline_blocklist.py",
+        "tests/tools/test_yolo_mode.py",
+        "tools/approval.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "eb28145f368232fedb21f899eb35c18511b2ddea",
+      "subject": "feat(approval): hardline blocklist for unrecoverable commands (#15878)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/hooks.py",
+        "model_tools.py",
+        "tests/test_model_tools.py",
+        "website/docs/guides/build-a-hermes-plugin.md",
+        "website/docs/user-guide/features/hooks.md"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "59b56d445c34e1d4bf797f5345b802c7b5986c72",
+      "subject": "feat(hooks): add duration_ms to post_tool_call + transform_tool_result (#15429)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/textInputWrap.test.ts",
+        "ui-tui/src/__tests__/viewportStore.test.ts",
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/components/appChrome.tsx",
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/components/textInput.tsx",
+        "ui-tui/src/hooks/useVirtualHistory.ts",
+        "ui-tui/src/lib/inputMetrics.ts",
+        "ui-tui/src/lib/viewportStore.ts",
+        "ui-tui/src/types/hermes-ink.d.ts"
+      ],
+      "files_touched": 10,
+      "notes": "",
+      "owner": "",
+      "sha": "db4e4acca0f79d9ebf8230193bb5fd5ec47706c7",
+      "subject": "perf(tui): stabilize long-session scrolling",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/createSlashHandler.test.ts",
+        "ui-tui/src/__tests__/viewportStore.test.ts",
+        "ui-tui/src/components/appChrome.tsx",
+        "ui-tui/src/lib/viewportStore.ts"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "14fcff60c93d8c2564f6c859a4a76beaf1da6515",
+      "subject": "style(tui): apply formatter",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/test_tui_gateway_server.py",
+        "tui_gateway/server.py",
+        "ui-tui/src/__tests__/createSlashHandler.test.ts",
+        "ui-tui/src/app/slash/commands/session.ts",
+        "ui-tui/src/app/useMainApp.ts"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "458ce792d24e98baa65b5c03821fded93ba813de",
+      "subject": "fix(tui): persist model switches by default",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/textInput.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "19d75d1797510072ee19e9db12926781ee98ccd9",
+      "subject": "perf(tui): coalesce composer echo updates",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/textInput.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "9bb3bc422dcfc38358dd0d406e44e9f2cceb0d68",
+      "subject": "perf(tui): optimistically echo simple input",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/textInput.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "5cd41d2b3b1d5b464865a948951d4327a6a42b70",
+      "subject": "perf(tui): widen native input echo",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/app/turnController.ts",
+        "ui-tui/src/app/useSubmission.ts",
+        "ui-tui/src/config/timing.ts"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "ee7ef33b02f0163b63d0fe8600163b2be740e08a",
+      "subject": "fix(tui): queue busy submissions gracefully",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/textInput.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "cd7c5e5606bb583eb9c2ebc4bcb23dd78be043e3",
+      "subject": "perf(tui): defer local input render during echo",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/textInput.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "1c964ed43ff6839f3c7d068cd4a45f4bed0d4cb7",
+      "subject": "fix(tui): rely on native cursor for input",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/components/App.tsx",
+        "ui-tui/packages/hermes-ink/src/ink/components/ScrollBox.tsx",
+        "ui-tui/src/__tests__/interactionMode.test.ts",
+        "ui-tui/src/__tests__/scroll.test.ts",
+        "ui-tui/src/__tests__/virtualHistoryClamp.test.ts",
+        "ui-tui/src/app/interactionMode.ts",
+        "ui-tui/src/app/interfaces.ts",
+        "ui-tui/src/app/scroll.ts",
+        "ui-tui/src/app/turnController.ts",
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/app/useSubmission.ts",
+        "ui-tui/src/components/textInput.tsx",
+        "ui-tui/src/config/limits.ts",
+        "ui-tui/src/config/timing.ts",
+        "ui-tui/src/hooks/useVirtualHistory.ts"
+      ],
+      "files_touched": 15,
+      "notes": "",
+      "owner": "",
+      "sha": "355e0ae960ec031123e8eee8fdecf2b20a506d4d",
+      "subject": "fix(tui): keep streaming progress stable during interaction",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/test_tui_gateway_server.py",
+        "tui_gateway/server.py",
+        "ui-tui/src/__tests__/textInputWrap.test.ts",
+        "ui-tui/src/lib/inputMetrics.ts"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "381121025edf77886eb89203417a248b9978476a",
+      "subject": "fix(tui): address review feedback",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/app/scroll.ts",
+        "ui-tui/src/app/turnController.ts",
+        "ui-tui/src/app/useSubmission.ts",
+        "ui-tui/src/config/timing.ts"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "bbd950efcf203e53d267d2030d7d853e8fee2b86",
+      "subject": "fix(tui): keep stream cadence responsive while typing",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/textInputWrap.test.ts",
+        "ui-tui/src/lib/inputMetrics.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "8f0fa0836f3f6ceadd2d756ad31254336da75b19",
+      "subject": "fix(tui): preserve composer width on narrow panes",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/ink.tsx",
+        "ui-tui/src/app/useSubmission.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "bc1731044260735c2e10c8f3feb3b33c6c0ec8f0",
+      "subject": "fix(tui): smooth selection drag behavior",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/app/createGatewayEventHandler.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "7d68ea9501c5c3a7c98c795bf90d2076c9d0e90b",
+      "subject": "fix(tui): stream legacy thinking deltas visibly",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/ink.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "e16e196c7e0530186f3883104681f36ed3dabc3b",
+      "subject": "fix(tui): keep selection drag responsive",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/appLayout.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "5ac4088856f18d19e9d3d658b6774b5027bc2ea9",
+      "subject": "fix(tui): keep live progress visible while scrolling",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/app/useSubmission.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "7143d22a83a92c3dc3bc32fa49ba3af4af3ecb76",
+      "subject": "fix(tui): keep queued sends in queue UI",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/turnController.ts"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "a0aebad673ff016e7c8e173e60df88b63b12ccc7",
+      "subject": "fix(tui): anchor details to stream timeline",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tui_gateway/server.py",
+        "ui-tui/src/app/slash/commands/session.ts",
+        "ui-tui/src/app/useSubmission.ts",
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/components/textInput.tsx",
+        "ui-tui/src/hooks/useVirtualHistory.ts"
+      ],
+      "files_touched": 6,
+      "notes": "",
+      "owner": "",
+      "sha": "2e6c3c7d23711e8f0bfc0002ae793d0e2b6d65e1",
+      "subject": "fix(tui): address follow-up review nits",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/messageLine.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "05dc2eec364529469efec137157ce3f9312b8634",
+      "subject": "fix(tui): tighten timeline detail spacing",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/turnController.ts"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "d91e24547c416ff22f2dd44f779a726ef8a11873",
+      "subject": "fix(tui): attach inline diffs to tool timeline",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/nous_rate_guard.py",
+        "run_agent.py",
+        "tests/agent/test_nous_rate_guard.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "192e7eb21f5e2c4b8ef7b332e4423ea69a979754",
+      "subject": "fix(nous): don't trip cross-session rate breaker on upstream-capacity 429s (#15898)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "run_agent.py",
+        "tests/run_agent/test_review_prompt_class_first.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "76042f586787d7a2af8adb70cca4d2d53bd56bb8",
+      "subject": "feat(review): class-first skill review prompt (#16026)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/model_metadata.py",
+        "tests/agent/test_model_metadata.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "2ccdadcca6296d3a4128830865067c52f5ea2d5d",
+      "subject": "fix(deepseek): bump V4 family context window to 1M tokens",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/model_metadata.py",
+        "cli.py",
+        "tests/agent/test_model_metadata.py",
+        "tests/hermes_cli/test_apply_model_switch_result_context.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "438db0c7b062d5ceeadec5d9de009324ee822467",
+      "subject": "fix(cli): /model picker honors provider-specific context caps (#16030)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/tools/test_mcp_oauth.py",
+        "tools/mcp_oauth.py",
+        "tools/mcp_oauth_manager.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "d09ab8ff13329da1715d20e3fb17d47f499fbc18",
+      "subject": "fix(mcp-oauth): preserve server_url path for protected-resource validation (#16031)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/auth.py",
+        "hermes_cli/config.py",
+        "hermes_cli/main.py",
+        "hermes_cli/model_catalog.py",
+        "hermes_cli/models.py",
+        "scripts/build_model_catalog.py",
+        "tests/hermes_cli/test_model_catalog.py",
+        "website/docs/reference/model-catalog.md",
+        "website/sidebars.ts",
+        "website/static/api/model-catalog.json"
+      ],
+      "files_touched": 10,
+      "notes": "",
+      "owner": "",
+      "sha": "855366909f659e7f11635dc5bfbd279a1d4ef83e",
+      "subject": "feat(models): remote model catalog manifest for OpenRouter + Nous Portal (#16033)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "AGENTS.md",
+        "CHANGELOG.md",
+        "README.md",
+        "ui-tui/packages/hermes-ink/src/ink/ink.tsx",
+        "ui-tui/packages/hermes-ink/src/ink/termio/osc.ts",
+        "web/src/pages/ChatPage.tsx"
+      ],
+      "files_touched": 6,
+      "notes": "",
+      "owner": "",
+      "sha": "a5624203831705454a3c8e2f72b3931f5b9ec74e",
+      "subject": "fix(tui): robust clipboard handling with debug logging and headless detection",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/ink.tsx",
+        "ui-tui/packages/hermes-ink/src/ink/termio/osc.ts",
+        "ui-tui/src/app/slash/commands/core.ts",
+        "web/src/pages/ChatPage.tsx"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "0f3a6f0fb3a1e7c6322af960614cc055f8d32a0c",
+      "subject": "fix(clipboard): dashboard Ctrl+C direct copy; TUI honest feedback; HERMES_TUI_FORCE_OSC52",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "AGENTS.md",
+        "CHANGELOG.md",
+        "README.md"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "2511207cb088e24d0325d5814d9a1b197a7c8ad8",
+      "subject": "chore: revert docs",
+      "target_ticket": 25,
+      "target_ticket_name": "GPAR-06 packaging/docs/install parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/hooks/use-selection.ts",
+        "ui-tui/packages/hermes-ink/src/ink/ink.tsx",
+        "ui-tui/packages/hermes-ink/src/ink/termio/osc.test.ts",
+        "ui-tui/packages/hermes-ink/src/ink/termio/osc.ts",
+        "ui-tui/src/__tests__/createSlashHandler.test.ts",
+        "ui-tui/src/app/interfaces.ts",
+        "ui-tui/src/app/slash/commands/core.ts",
+        "ui-tui/src/types/hermes-ink.d.ts",
+        "web/src/pages/ChatPage.tsx"
+      ],
+      "files_touched": 9,
+      "notes": "",
+      "owner": "",
+      "sha": "e8441c4c0fd993c6876dc40ad25f0e2d2e0b63f7",
+      "subject": "fix(clipboard): report native/tmux success, keep Ctrl+Shift+C on dashboard",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_run_progress_interrupt.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "35c57cc46b88710a98c4d43107b87b4ab828e3eb",
+      "subject": "fix(gateway): suppress tool-progress bubbles after interrupt (#16034)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli-config.yaml.example"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "67dcace412342ff11dff635c3f5002ed205ebabb",
+      "subject": "docs(config): show options in comments for display settings (#16038)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/base.py",
+        "gateway/run.py",
+        "tests/gateway/test_voice_command.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "4bda9dcade8bf1080a6c70841fe862f8c7229c00",
+      "subject": "fix(gateway): honor voice.auto_tts config in auto-TTS gate (#16007) (#16039)",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/onboarding.py",
+        "cli.py",
+        "gateway/run.py",
+        "hermes_cli/config.py",
+        "tests/agent/test_onboarding.py",
+        "tests/gateway/test_busy_session_ack.py",
+        "website/docs/user-guide/cli.md",
+        "website/docs/user-guide/messaging/index.md"
+      ],
+      "files_touched": 8,
+      "notes": "",
+      "owner": "",
+      "sha": "83c1c201f61c607259f5a5f7af32ddbc9c1cc2cc",
+      "subject": "feat(onboarding): contextual first-touch hints for /busy and /verbose (#16046)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/fallback_cmd.py",
+        "hermes_cli/main.py",
+        "tests/hermes_cli/test_fallback_cmd.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "1e37ddc9293cc7b912b1ef85765f4fc93dba7ced",
+      "subject": "feat(cli): add 'hermes fallback' command to manage fallback providers (#16052)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/onboarding.py",
+        "tests/agent/test_onboarding.py",
+        "tests/tui_gateway/test_protocol.py",
+        "tui_gateway/server.py",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/useSubmission.ts",
+        "ui-tui/src/gatewayTypes.ts",
+        "website/docs/user-guide/tui.md"
+      ],
+      "files_touched": 8,
+      "notes": "",
+      "owner": "",
+      "sha": "ffd2621039259ee8419549fedc8739bf1a350436",
+      "subject": "feat(onboarding): port first-touch hints to the TUI (#16054)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/onboarding.py",
+        "tests/agent/test_onboarding.py",
+        "tests/tui_gateway/test_protocol.py",
+        "tui_gateway/server.py",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/useSubmission.ts",
+        "ui-tui/src/gatewayTypes.ts",
+        "website/docs/user-guide/tui.md"
+      ],
+      "files_touched": 8,
+      "notes": "",
+      "owner": "",
+      "sha": "9a7026049088ef6545053313d71856703ff933f6",
+      "subject": "Revert \"feat(onboarding): port first-touch hints to the TUI (#16054)\" (#16062)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py",
+        "gateway/platforms/discord.py",
+        "gateway/run.py",
+        "hermes_cli/commands.py",
+        "hermes_cli/tips.py",
+        "skills/autonomous-ai-agents/hermes-agent/SKILL.md",
+        "tui_gateway/server.py",
+        "ui-tui/README.md",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/slash/commands/session.ts",
+        "ui-tui/src/gatewayTypes.ts",
+        "web/src/lib/gatewayClient.ts",
+        "website/docs/reference/slash-commands.md",
+        "website/docs/user-guide/skills/bundled/autonomous-ai-agents/autonomous-ai-agents-hermes-agent.md"
+      ],
+      "files_touched": 14,
+      "notes": "",
+      "owner": "",
+      "sha": "7fa70b6c87224543430e4a99c7126f50e4d1190f",
+      "subject": "refactor: /btw is now an alias for /background (#16053)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_running_agent_session_toggles.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "70f56e7605c36885622c0741537e8a9ee5edd68f",
+      "subject": "fix(gateway): let /btw dispatch mid-turn instead of being rejected",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/run.py",
+        "run_agent.py",
+        "tests/gateway/test_running_agent_session_toggles.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "454d883e6977419854cf26138b93b118871d36d7",
+      "subject": "refactor: drop persist_session plumbing + fix broken btw mid-turn bypass (#16075)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py",
+        "docs/hermes-kanban-v1-spec.pdf",
+        "gateway/run.py",
+        "hermes_cli/commands.py",
+        "hermes_cli/kanban.py",
+        "hermes_cli/kanban_db.py",
+        "hermes_cli/main.py",
+        "skills/devops/kanban-orchestrator/SKILL.md",
+        "skills/devops/kanban-worker/SKILL.md",
+        "tests/hermes_cli/test_kanban_cli.py",
+        "tests/hermes_cli/test_kanban_db.py",
+        "website/docs/reference/cli-commands.md",
+        "website/docs/user-guide/features/kanban.md",
+        "website/sidebars.ts"
+      ],
+      "files_touched": 14,
+      "notes": "",
+      "owner": "",
+      "sha": "15937a6b4654a331ce5fd5b1052baad82f9319fd",
+      "subject": "feat(kanban): durable multi-profile collaboration board (#16081)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "run_agent.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "63bf7a29b6a3eb03d37b749decbd6a5d9a70543b",
+      "subject": "fix(run_agent): prevent reasoning_content regression in DeepSeek/Kimi tool-call replay",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "c5196f1fc2f44c28ed58bf5318d5597d6890f3fe",
+      "subject": "chore(release): map focusflow.app.help@gmail.com to yes999zc",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "docker/entrypoint.sh"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "9ef1ae138ab349004c9cceec19b32b7bce59d544",
+      "subject": "fix(docker): don't chown config.yaml after gosu drop (#15865) (#16096)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py",
+        "docs/hermes-kanban-v1-spec.pdf",
+        "gateway/run.py",
+        "hermes_cli/commands.py",
+        "hermes_cli/kanban.py",
+        "hermes_cli/kanban_db.py",
+        "hermes_cli/main.py",
+        "skills/devops/kanban-orchestrator/SKILL.md",
+        "skills/devops/kanban-worker/SKILL.md",
+        "tests/hermes_cli/test_kanban_cli.py",
+        "tests/hermes_cli/test_kanban_db.py",
+        "website/docs/reference/cli-commands.md",
+        "website/docs/user-guide/features/kanban.md",
+        "website/sidebars.ts"
+      ],
+      "files_touched": 14,
+      "notes": "",
+      "owner": "",
+      "sha": "06f81752ed40d5f0e780bee01fbba8947ce5007a",
+      "subject": "Revert \"feat(kanban): durable multi-profile collaboration board (#16081)\" (#16098)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "run_agent.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "e3901d5b257d5ac3f58420c3fb55aaa536fc56ac",
+      "subject": "fix(run_agent): background review fork inherits parent's live runtime (#16099)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/credential_pool.py",
+        "hermes_cli/auth.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "8443998dc3bf89e453152389bec79351d2cae710",
+      "subject": "fix(auth): resolve API keys from ~/.hermes/.env and credential_pool",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/tools/test_credential_pool_env_fallback.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "27f4dba5ceef6e93597d8767d3f745bd9ecbdd52",
+      "subject": "test: add unit tests for credential pool env fallback",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/credential_pool.py",
+        "hermes_cli/auth.py",
+        "tests/tools/test_credential_pool_env_fallback.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "f2d655529a7d9228d8eff30447d88442d9054032",
+      "subject": "fix(auth): hoist get_env_value import + strengthen .env fallback tests",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/skill_commands.py",
+        "cron/scheduler.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "d7a346824626cb3d89578d1c56e5bc79bc2c93ff",
+      "subject": "fix(prompts): replace [SYSTEM: with [IMPORTANT: to avoid Azure content filter",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py",
+        "gateway/run.py",
+        "scripts/release.py",
+        "tools/process_registry.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "20cb706e034e551a6df8f6f3ff798888ee5793e7",
+      "subject": "chore: extend [SYSTEM:\u2192[IMPORTANT: rename + AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_agent_cache.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "de24315978cc69fd0932e141bedef6b8f28e4b88",
+      "subject": "fix(gateway): preserve inactivity clock on interrupt-recursive cached-agent turns (#15654)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_agent_cache.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "4e356098d21a29a4f86c8c55c0caef9b90d10307",
+      "subject": "fixup! fix(gateway): preserve inactivity clock on interrupt-recursive cached-agent turns (#15654)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "eaa7e2db670ba0879bc040c22c39d5abb39b897c",
+      "subject": "feat(cli,tui): surface /queue, /bg, /steer in agent-running placeholder (#16118)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/app/turnController.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "6814646b364aa37c27734faf37339770d1889123",
+      "subject": "fix(tui): avoid duplicating flushed stream text",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "hermes_cli/skills_hub.py",
+        "tests/hermes_cli/test_skills_hub.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "0e2a53eab2ac7a937b2ce2a089b07c18f8e30bcf",
+      "subject": "feat(skills): show enabled/disabled status in 'skills list' (#16129)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/config.py",
+        "tests/tools/test_browser_hybrid_routing.py",
+        "tools/browser_tool.py",
+        "website/docs/user-guide/features/browser.md"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "42c076d349e7a737355b37035ca415a79c719c4b",
+      "subject": "feat(browser): auto-spawn local Chromium for LAN/localhost URLs in cloud mode (#16136)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py",
+        "hermes_state.py",
+        "scripts/release.py",
+        "tests/cli/test_branch_command.py",
+        "tests/test_hermes_state.py"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "0824ba6a9db8c5e92d4fe2e7ee5bc086844b336e",
+      "subject": "fix(/branch): redirect session_log_file and expose branch sessions in list (#14854) (#16150)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py",
+        "tests/test_tui_gateway_server.py",
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "9662e3218a7fdb33efc3bdfe79247c6c5097ef86",
+      "subject": "fix(tui): call maybe_auto_title for TUI sessions (#15949) (#16151)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/feeds/DESCRIPTION.md",
+        "website/scripts/extract-skills.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "93977675135acb9370167392542241e9650a69e8",
+      "subject": "chore(skills): remove empty feeds category (#16153)",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "website/docs/user-guide/configuration.md"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "9be83728a67c794daa20c553919f4869675a2edc",
+      "subject": "docs(docker-backend): clarify container is shared across sessions, not per-session (#16158)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/ink.tsx",
+        "ui-tui/src/__tests__/createSlashHandler.test.ts",
+        "ui-tui/src/__tests__/details.test.ts",
+        "ui-tui/src/app/interfaces.ts",
+        "ui-tui/src/app/slash/commands/core.ts",
+        "ui-tui/src/app/uiStore.ts",
+        "ui-tui/src/app/useConfigSync.ts",
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/components/messageLine.tsx",
+        "ui-tui/src/components/thinking.tsx",
+        "ui-tui/src/domain/details.ts"
+      ],
+      "files_touched": 12,
+      "notes": "",
+      "owner": "",
+      "sha": "a8fcd1c742f459a6d8ed506786f48e406d481b1e",
+      "subject": "fix(tui): apply details mode live",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/slack.py",
+        "hermes_cli/commands.py",
+        "hermes_cli/main.py",
+        "hermes_cli/setup.py",
+        "hermes_cli/slack_cli.py",
+        "tests/gateway/test_slack.py",
+        "tests/hermes_cli/test_commands.py",
+        "website/docs/reference/cli-commands.md",
+        "website/docs/user-guide/messaging/slack.md"
+      ],
+      "files_touched": 9,
+      "notes": "",
+      "owner": "",
+      "sha": "087e74d4d79505e37669159a9557f9d3dc7b664a",
+      "subject": "feat(slack): register every gateway command as a native slash (Discord/Telegram parity) (#16164)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/test_tui_gateway_server.py",
+        "tui_gateway/server.py",
+        "ui-tui/src/components/textInput.tsx"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "4a21920b5ec558e992a36306e08c262430e3bc9d",
+      "subject": "fix(tui): address copilot review nits",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/app/turnController.ts",
+        "ui-tui/src/components/thinking.tsx"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "bb59d3bac24888912c34e046573e1e2ccf492ecb",
+      "subject": "fix(tui): preserve completed thinking panel",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/events/cmd-shortcuts.test.ts",
+        "ui-tui/packages/hermes-ink/src/ink/events/input-event.ts",
+        "ui-tui/packages/hermes-ink/src/ink/terminal.ts",
+        "ui-tui/src/components/textInput.tsx"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "015f6c825df2e877af5d9811b1ff016d188ab551",
+      "subject": "fix(tui): support modified enter for multiline input",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/thinking.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "2be5e181a987d7e07cba55c5d8b0e1a17597c0e7",
+      "subject": "fix(tui): keep thinking color theme-neutral",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/tools/test_shared_container_task_id.py",
+        "tools/code_execution_tool.py",
+        "tools/file_tools.py",
+        "tools/terminal_tool.py",
+        "website/docs/user-guide/configuration.md"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "5b2c59559a00dff919701be4211db8d288deb20a",
+      "subject": "feat(terminal): collapse subagent task_ids to shared container (#16177)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_queue_consumption.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "1dfcc2ffc33444c6cfbf90c973be673d426cac94",
+      "subject": "fix(gateway): /queue is now a true FIFO \u2014 each invocation gets its own turn (#16175)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/run.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "d993a3f450aab9c845867adb59f550d6ed07afcd",
+      "subject": "fix(gateway): use /hermes sethome in onboarding hint on Slack",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/gateway/test_status_command.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "c730f6cc0b1c093f3fb129a5aff33a8f3ea1c3b7",
+      "subject": "test(gateway): cover Slack vs non-Slack home-channel onboarding hint",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "ae7687cdc5e678188e20bfab1757a0292ac6a955",
+      "subject": "chore(release): map zhiyanliu in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/interactionMode.test.ts",
+        "ui-tui/src/app/interactionMode.ts",
+        "ui-tui/src/app/useSubmission.ts",
+        "ui-tui/src/config/timing.ts",
+        "ui-tui/src/lib/viewportStore.ts"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "a8bfe72d359d4e049984dd26a27185ce1e63e64c",
+      "subject": "fix(tui): address latest review feedback",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/__tests__/reasoning.test.ts",
+        "ui-tui/src/lib/text.ts"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "c9f7b703ddb1971acb573bfe6a8890584e9442be",
+      "subject": "fix(tui): filter thinking status noise",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/app/useSubmission.ts"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "a30ffbe1d4498505a5bebda2960ec16053a9c7fb",
+      "subject": "fix(tui): show queued prompts when drained",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/lib/text.ts",
+        "ui-tui/src/lib/viewportStore.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "7b5b524fc71e210ebe778c22234518ea3ef40588",
+      "subject": "refactor(tui): clean thinking and viewport helpers",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/config.py",
+        "tests/gateway/test_slack_mention.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "b1be86ef96706cada99b1fa04673d301b98d5325",
+      "subject": "fix(gateway): bridge slack.reply_in_thread config",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/slack.py",
+        "tests/gateway/test_slack_mention.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "4b5a88d714ee519ca95aad2fcca442c16293fcc2",
+      "subject": "fix(slack): honor reply_in_thread=false for top-level channel messages",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/appLayout.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "3d21f97422cd51153bd0c073f189ae07aa1830b1",
+      "subject": "fix(tui): keep live tool state before stream segments",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/app/turnController.ts",
+        "ui-tui/src/components/appLayout.tsx"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "350ee1bf2332e52dee464f156d586dd9ff35851a",
+      "subject": "refactor(tui): render progress in ordered stream timeline",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "scripts/install.sh"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "897dc3a2bb3028cc21b6d227b1845f4990e42e07",
+      "subject": "fix(install+update): add /usr/local/bin PATH guard for RHEL root non-login shells (#16191)",
+      "target_ticket": 25,
+      "target_ticket_name": "GPAR-06 packaging/docs/install parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/config.py",
+        "gateway/platforms/slack.py",
+        "tests/gateway/test_slack_mention.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "aea4a90f0ea3e889f6af52a7463c4ea4203faf42",
+      "subject": "feat(slack): add opt-in slack.strict_mention gate for channel threads",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/slack.py",
+        "tests/gateway/test_slack_mention.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "50dd67c6808fb0c86297298adbf207db9a03a626",
+      "subject": "fix(slack): skip _mentioned_threads registration when strict_mention is on",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "878c196738eceeea0908fd0f03bafd49639cd359",
+      "subject": "chore(release): map hhhonzik in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/conftest.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "4d119bb62acddf75669d3a5c79e3cc5b40d93a05",
+      "subject": "test: blank platform-gating env vars in hermetic fixture",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/models.py",
+        "website/static/api/model-catalog.json"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "541cd732e822cebe51ccd8ca5f64b4a4332c8809",
+      "subject": "chore(models): drop deepseek from OpenRouter and Nous Portal curated picker lists (#16197)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/channel_directory.py",
+        "gateway/run.py",
+        "tests/gateway/test_channel_directory.py",
+        "tests/tools/test_send_message_tool.py",
+        "tools/send_message_tool.py"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "802c7acb813b9845cd2b6aefeaf193e7176908f3",
+      "subject": "fix(Slack): resolve Slack channels by raw ID and enumerate joined channels",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/tools/test_send_message_tool.py",
+        "tools/send_message_tool.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "75d3eaa0e4b9c602933b2ad269f0ea0f593b5d2d",
+      "subject": "fix(slack): exclude U/W user IDs from explicit target regex",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "6a3102f9d4695a4e8f8ed0d774352968413ab9e2",
+      "subject": "chore(release): map hhuang91 in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py",
+        "tests/cli/test_cli_approval_ui.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "10e36188da379c1ceb6e703f2603579e7564c15a",
+      "subject": "fix(cli): wire approvals in background tasks",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/slack.py",
+        "tests/gateway/test_slack.py",
+        "tests/gateway/test_slack_approval_buttons.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "c0d25df31132f5b8e1932424ac06510c8da662c5",
+      "subject": "fix(slack): preserve thread-parent context when cron/bot posted the parent",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/slack.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "f414df3a56dc605a8fcfb4c86b0e407584e84ee3",
+      "subject": "fix(slack): include team_id in thread-context cache key",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/slack.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "f9885130b42d3b34e0289f91cafed736f67dae97",
+      "subject": "fix(slack): download files in Slack Connect channels",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "edadeaf495c7094a7a9f4934d7df7b1e3fd2259e",
+      "subject": "chore(release): map Satoshi-agi and kunlabs in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "run_agent.py",
+        "tests/run_agent/test_background_review.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "2d86e97a7e2c6f4af4595072a53ae13a56d44464",
+      "subject": "fix(run_agent): shut down background review memory providers",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "run_agent.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "36e352afa73ba13a488405cc1d51d90092ae4103",
+      "subject": "preserve the original comment",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "aa7b5acfcd4794d55aedb5c6be5e9138187a5be8",
+      "subject": "pass attribution check",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/run_agent/test_background_review.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "45bfcb9e71b4071567d2dfe0c844a881de43242a",
+      "subject": "test: update bare-agent helper for live-runtime attrs added by #16099",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/slack.py",
+        "tests/gateway/test_media_download_retry.py",
+        "tests/gateway/test_slack.py",
+        "website/docs/user-guide/messaging/slack.md"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "778fd1898ecf300d52674a1b8b91e6d731a0c898",
+      "subject": "fix(slack): surface attachment access diagnostics",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_shutdown_cache_cleanup.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "bf05b8f4a2ddeeb1c3f656d02f4d17f5f221d01c",
+      "subject": "fix(gateway): clean up cached agents on shutdown (#11205)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "plugins/memory/hindsight/__init__.py",
+        "tests/plugins/memory/test_hindsight_provider.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "18beb69b4996591cfae3233131e8dc37018f3423",
+      "subject": "fix(memory): close embedded Hindsight async client cleanly",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "822b507a729c78fea9cdaacb1f71416e57ab9ebd",
+      "subject": "chore(release): map maxims-oss in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/tools_config.py",
+        "tests/hermes_cli/test_tools_config.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "4921b269450b9c1648057559224d465fb1c58d62",
+      "subject": "fix(cron): keep homeassistant toolset enabled when HASS_TOKEN is set (#16208)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/slack.py",
+        "gateway/session.py",
+        "tests/gateway/test_session.py",
+        "tests/gateway/test_slack.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "6087e04043c491c0b66dda1b287cc72d3a5492c7",
+      "subject": "fix(slack): extract rich_text quotes/lists and link unfurl previews",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "755a2804247d7cb21991c421af471ecbdb72124d",
+      "subject": "chore(release): map Wang-tianhao in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_state.py",
+        "tests/test_hermes_state.py",
+        "tests/test_tui_gateway_server.py",
+        "tui_gateway/server.py",
+        "ui-tui/src/__tests__/messages.test.ts",
+        "ui-tui/src/__tests__/text.test.ts",
+        "ui-tui/src/app/turnController.ts",
+        "ui-tui/src/components/messageLine.tsx",
+        "ui-tui/src/components/thinking.tsx",
+        "ui-tui/src/config/limits.ts",
+        "ui-tui/src/lib/text.ts"
+      ],
+      "files_touched": 11,
+      "notes": "",
+      "owner": "",
+      "sha": "d4dde6b5f26a4b96db66a170a70e0d29413cc8a8",
+      "subject": "fix(tui): restore resumed transcript lineage",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/components/ScrollBox.tsx",
+        "ui-tui/packages/hermes-ink/src/ink/events/input-event.ts",
+        "ui-tui/packages/hermes-ink/src/ink/ink.tsx",
+        "ui-tui/packages/hermes-ink/src/ink/termio/osc.ts",
+        "ui-tui/scripts/profile-tui.mjs",
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/__tests__/scroll.test.ts",
+        "ui-tui/src/__tests__/turnStore.test.ts",
+        "ui-tui/src/__tests__/virtualHistoryClamp.test.ts",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/interfaces.ts",
+        "ui-tui/src/app/slash/commands/core.ts",
+        "ui-tui/src/app/turnStore.ts",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/app/useSubmission.ts",
+        "ui-tui/src/components/appChrome.tsx",
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/components/streamingAssistant.tsx",
+        "ui-tui/src/components/textInput.tsx"
+      ],
+      "files_touched": 28,
+      "notes": "",
+      "owner": "",
+      "sha": "a7831b63dbc493c1f506e6c09e420d79cf554c08",
+      "subject": "fix(tui): stabilize live progress rendering",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/components/todoPanel.tsx",
+        "ui-tui/src/lib/liveLayout.test.ts",
+        "ui-tui/src/lib/liveLayout.ts",
+        "ui-tui/src/lib/todo.test.ts",
+        "ui-tui/src/lib/todo.ts"
+      ],
+      "files_touched": 6,
+      "notes": "",
+      "owner": "",
+      "sha": "3271ffbd80f43d149d4939d0897ba80a971bcd53",
+      "subject": "fix(tui): pin todo panel above live output",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/lib/liveLayout.test.ts",
+        "ui-tui/src/lib/liveLayout.ts",
+        "ui-tui/src/lib/messages.test.ts",
+        "ui-tui/src/lib/messages.ts"
+      ],
+      "files_touched": 6,
+      "notes": "",
+      "owner": "",
+      "sha": "cf8439263ae4d85102176f1bc170624faec6ebed",
+      "subject": "fix(tui): keep todo pinned outside transcript",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/appLayout.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "cee4036e8b434e8821bb0d19b574eab8b67c29c0",
+      "subject": "fix(tui): merge tool shelves in transcript",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/turnStore.test.ts"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "64de685d3ff4320d1284b91a100770ab4dd4c233",
+      "subject": "test(tui): remove stale turn freeze experiment",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/text.test.ts",
+        "ui-tui/src/lib/text.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "6a3873942fef72c871c5f3eae38126e24853db14",
+      "subject": "fix(tui): format thinking paragraphs",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/stateIsolation.test.ts",
+        "ui-tui/src/app/useLongRunToolCharms.ts",
+        "ui-tui/src/app/useMainApp.ts"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "f6846205cce3d5ad54952dc70cd3f77c09cc165d",
+      "subject": "fix(tui): isolate turn state from app render",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/app/useLongRunToolCharms.ts",
+        "ui-tui/src/app/useMainApp.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "a30db69dd576f874b0e821fc3af4d3d421134057",
+      "subject": "chore(tui): clean live progress lint",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "tests/hermes_cli/test_tui_resume_flow.py",
+        "ui-tui/src/__tests__/useSessionLifecycle.test.ts",
+        "ui-tui/src/app/useSessionLifecycle.ts"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "1566f1eeccfffd3b72ac70777d70014bd050084a",
+      "subject": "fix(tui): report actual session on exit",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/turnStore.test.ts",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/turnController.ts",
+        "ui-tui/src/app/turnStore.ts",
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/components/messageLine.tsx",
+        "ui-tui/src/components/streamingAssistant.tsx",
+        "ui-tui/src/components/todoPanel.tsx",
+        "ui-tui/src/lib/liveLayout.ts",
+        "ui-tui/src/lib/liveProgress.test.ts",
+        "ui-tui/src/lib/liveProgress.ts",
+        "ui-tui/src/lib/messages.test.ts",
+        "ui-tui/src/lib/messages.ts",
+        "ui-tui/src/types.ts"
+      ],
+      "files_touched": 14,
+      "notes": "",
+      "owner": "",
+      "sha": "f5552f92e2b935a2f404cb7cee3179927ab143fd",
+      "subject": "fix(tui): stabilize live todo progress",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/lib/liveLayout.test.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "a5319fb7afb2decd3f1f510fc4cac3601d1d3b42",
+      "subject": "test(tui): cover live todo completion flow",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/app/turnController.ts",
+        "ui-tui/src/components/messageLine.tsx"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "4d3e3a738dabddf1dda336efd796f4710640e153",
+      "subject": "chore(tui): sort imports",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/lib/liveProgress.test.ts",
+        "ui-tui/src/lib/liveProgress.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "4943ea2a7c4220251b52099fae7a9b01813b272a",
+      "subject": "fix(tui): merge tools into contextual shelves",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/agentsOverlay.tsx",
+        "ui-tui/src/components/appChrome.tsx",
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/components/streamingAssistant.tsx",
+        "ui-tui/src/lib/liveProgress.test.ts",
+        "ui-tui/src/lib/liveProgress.ts"
+      ],
+      "files_touched": 6,
+      "notes": "",
+      "owner": "",
+      "sha": "319c1c1691847d2df20e79cdd708b56b6f92a54c",
+      "subject": "fix(tui): inline todo in transcript, group across thinking",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/babel.compiler.config.cjs",
+        "ui-tui/package-lock.json",
+        "ui-tui/package.json",
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/__tests__/turnStore.test.ts",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/turnStore.ts",
+        "ui-tui/src/components/messageLine.tsx",
+        "ui-tui/src/components/todoPanel.tsx",
+        "ui-tui/src/hooks/useVirtualHistory.ts",
+        "ui-tui/src/lib/liveProgress.ts",
+        "ui-tui/src/types.ts"
+      ],
+      "files_touched": 12,
+      "notes": "",
+      "owner": "",
+      "sha": "c78b528125c597ae41d624b4fc87125fc0d29d9c",
+      "subject": "feat(tui): archive todos at turn end with incomplete hint",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/babel.compiler.config.cjs",
+        "ui-tui/eslint.config.mjs",
+        "ui-tui/package.json",
+        "ui-tui/src/components/todoPanel.tsx"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "b36007b24679214746787f450b192f47f13c0c16",
+      "subject": "feat(tui): allow collapsing archived todo panels",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "tests/hermes_cli/test_resolve_last_session.py",
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/lib/perfPane.tsx"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "bde89c169bdcc7d34839a8706b142929782c615f",
+      "subject": "fix(cli): -c picks the most recently used session",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/streamingMarkdown.test.ts",
+        "ui-tui/src/components/messageLine.tsx",
+        "ui-tui/src/components/streamingMarkdown.tsx"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "debae25f1c4b7e7e47600a249c662fb880b26522",
+      "subject": "perf(tui): incremental markdown during streaming",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_state.py",
+        "tests/hermes_cli/test_resolve_last_session.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "cb7cfba6ded3b071be74d3218d96741f12c7e56b",
+      "subject": "fix(cli): surface last_active in search_sessions so -c works",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/__tests__/turnStore.test.ts",
+        "ui-tui/src/app/turnStore.ts",
+        "ui-tui/src/components/messageLine.tsx",
+        "ui-tui/src/components/todoPanel.tsx",
+        "ui-tui/src/types.ts"
+      ],
+      "files_touched": 6,
+      "notes": "",
+      "owner": "",
+      "sha": "2259eac49e5ee78b4549fd225317a18958f35891",
+      "subject": "feat(tui): collapse completed todo panel on turn end",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/components/appLayout.tsx"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "69ff2010509fd81f01af533ca47ab4881ea9eeee",
+      "subject": "feat(tui): anchor todo panel above streaming output",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/profile-tui.py",
+        "ui-tui/src/entry.tsx",
+        "ui-tui/src/lib/perfPane.tsx",
+        "ui-tui/src/types/hermes-ink.d.ts"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "71eee2664022d97a0d509f25c867b30ad1f4e904",
+      "subject": "perf(tui): full-pipeline instrumentation + profiling harness",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/entry-exports.ts",
+        "ui-tui/packages/hermes-ink/src/ink/render-node-to-output.ts",
+        "ui-tui/src/lib/perfPane.tsx",
+        "ui-tui/src/types/hermes-ink.d.ts"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "cd7a200e6c05d3295027cd231165e2a8b892956b",
+      "subject": "perf(tui): instrument scroll fast-path decline reasons",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/streamingMarkdown.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "7242361a6937c7caa34ffbeb55a12276800568da",
+      "subject": "fix(tui): wrap streaming markdown split in column Box",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/deferredMarkdown.tsx",
+        "ui-tui/src/components/messageLine.tsx"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "4a9070c9ac24ea8a205825bd8533b5c7b022904e",
+      "subject": "perf(tui): defer Md upgrade for fresh-mounted assistant rows",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/config/limits.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "7ca16eea56a5f9f79a91ef1eeff3ce763693c745",
+      "subject": "perf(tui): scroll one row at a time per wheel event, half-viewport per pageUp",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/deferredMarkdown.tsx",
+        "ui-tui/src/components/messageLine.tsx",
+        "ui-tui/src/components/thinking.tsx"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "d3dedf10aaefb14fc2f3f03c109bf4f87c43a1cf",
+      "subject": "revert(tui): drop DeferredMd, profiling showed it was neutral",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/profile-tui.py",
+        "ui-tui/packages/hermes-ink/src/ink/frame.ts",
+        "ui-tui/packages/hermes-ink/src/ink/ink.tsx",
+        "ui-tui/packages/hermes-ink/src/ink/terminal.ts",
+        "ui-tui/src/lib/perfPane.tsx",
+        "ui-tui/src/types/hermes-ink.d.ts"
+      ],
+      "files_touched": 6,
+      "notes": "",
+      "owner": "",
+      "sha": "f823535db21585b0b604f9f48c41baaadcdaa12a",
+      "subject": "perf(tui): instrument stdout drain \u2014 rule out terminal parse bottleneck",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/profile-tui.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "82f842277e8b6b9a87d3fc9572f9054fb31d8339",
+      "subject": "perf(tui): profile harness gains --loop, --save, --compare",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/software-development/node-inspect-debugger/SKILL.md",
+        "skills/software-development/python-debugpy/SKILL.md"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "8d2b08342cbb5c4d8a339726c70229d4ca49a0bf",
+      "subject": "Add node-inspect-debugger and python-debugpy skills",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/config/env.ts"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "9a46feb9bd43daad5910aa204d3eb93135259099",
+      "subject": "experiment(tui): HERMES_TUI_INLINE flag to skip AlternateScreen",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/software-development/hermes-agent-skill-authoring/SKILL.md"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "4cdb6962ca3f5555229628d10232bd05012e6681",
+      "subject": "Add hermes-agent-skill-authoring skill",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/software-development/debugging-hermes-tui-commands/SKILL.md"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "0cd98499bb1e14833bb36b0e784abdc97b29a8b8",
+      "subject": "Promote debugging-hermes-tui-commands to in-repo skill",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/entry-exports.ts",
+        "ui-tui/src/__tests__/wheelAccel.test.ts",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/lib/wheelAccel.ts",
+        "ui-tui/src/types/hermes-ink.d.ts"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "4395c2b0073fe4bab4509fcd5967f1709a73e930",
+      "subject": "feat(tui): port claude-code's wheel accel state machine",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/components/fpsOverlay.tsx",
+        "ui-tui/src/config/env.ts",
+        "ui-tui/src/entry.tsx",
+        "ui-tui/src/lib/fpsStore.ts"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "85e9a23efbd0b884c770056a9fec13ee14ea313f",
+      "subject": "feat(tui): HERMES_TUI_FPS=1 shows live fps counter",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/config.py",
+        "gateway/platforms/base.py",
+        "gateway/platforms/telegram.py",
+        "gateway/run.py",
+        "gateway/stream_consumer.py",
+        "tests/gateway/test_stream_consumer_fresh_final.py",
+        "website/docs/user-guide/configuration.md"
+      ],
+      "files_touched": 7,
+      "notes": "",
+      "owner": "",
+      "sha": "b16f9d438ba18cb433a94a47dd99a05abc808d0a",
+      "subject": "feat(telegram): send fresh finals for stale preview streams (port openclaw#72038) (#16261)",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/output.ts",
+        "ui-tui/packages/hermes-ink/src/ink/stringWidth.ts",
+        "ui-tui/packages/hermes-ink/src/ink/wrap-text.ts",
+        "ui-tui/packages/hermes-ink/src/utils/sliceAnsi.ts",
+        "ui-tui/src/__tests__/text.test.ts",
+        "ui-tui/src/__tests__/virtualHeights.test.ts",
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/components/markdown.tsx",
+        "ui-tui/src/components/messageLine.tsx",
+        "ui-tui/src/config/limits.ts",
+        "ui-tui/src/hooks/useVirtualHistory.ts",
+        "ui-tui/src/lib/text.ts",
+        "ui-tui/src/lib/virtualHeights.ts"
+      ],
+      "files_touched": 14,
+      "notes": "",
+      "owner": "",
+      "sha": "c370e2e1e503d0009843cd517c66945baf096e01",
+      "subject": "perf(tui): cache stringWidth/wrapText/sliceAnsi + skip-slice when line fits clip",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/index.d.ts",
+        "ui-tui/packages/hermes-ink/src/entry-exports.ts",
+        "ui-tui/packages/hermes-ink/src/ink/cache-eviction.ts",
+        "ui-tui/packages/hermes-ink/src/ink/line-width-cache.ts",
+        "ui-tui/packages/hermes-ink/src/ink/stringWidth.ts",
+        "ui-tui/packages/hermes-ink/src/ink/wrap-text.ts",
+        "ui-tui/packages/hermes-ink/src/utils/sliceAnsi.ts",
+        "ui-tui/src/app/useSessionLifecycle.ts",
+        "ui-tui/src/lib/memoryMonitor.ts",
+        "ui-tui/src/types/hermes-ink.d.ts"
+      ],
+      "files_touched": 10,
+      "notes": "",
+      "owner": "",
+      "sha": "25767513f2f290547372ec0c1b051c0ce62fe51b",
+      "subject": "perf(tui): unified Ink cache eviction on memory pressure + session reset",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/components/appLayout.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "b115ea62da2c8bb5c1dc627bbc2d6e426bbc9dda",
+      "subject": "feat(tui): anchor LiveTodoPanel to latest user message row",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/render-node-to-output.ts",
+        "ui-tui/packages/hermes-ink/src/ink/stringWidth.ts",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/lib/perfPane.tsx",
+        "ui-tui/src/lib/virtualHeights.ts",
+        "ui-tui/src/lib/wheelAccel.ts",
+        "ui-tui/src/types/hermes-ink.d.ts"
+      ],
+      "files_touched": 7,
+      "notes": "",
+      "owner": "",
+      "sha": "527ac351b476faec88c3b3f71a04ae335d1e7d91",
+      "subject": "fix(tui): address Copilot review comments",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/base.py",
+        "gateway/platforms/slack.py",
+        "gateway/run.py",
+        "tests/gateway/test_media_download_retry.py",
+        "tests/gateway/test_slack.py"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "e818ec520aa258214333ed0e11057ef8bc840038",
+      "subject": "fix(slack): harden attachment handling",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "5db6db891c5ebaa9e40e015946b946d4df1f12fe",
+      "subject": "chore(release): map ghostmfr in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cron/scheduler.py",
+        "tests/tools/test_mcp_stability.py",
+        "tools/mcp_tool.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "930494d6874992ccca04141517837998da1122a2",
+      "subject": "fix(cron): reap orphaned MCP stdio subprocesses after each tick",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "87477756fd4030db853758a572b6840bbfb58aa9",
+      "subject": "chore(release): map Ito-69 in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/onboarding.py",
+        "cli-config.yaml.example",
+        "cli.py",
+        "gateway/run.py",
+        "hermes_cli/commands.py",
+        "hermes_cli/config.py",
+        "hermes_cli/tips.py",
+        "hermes_cli/web_server.py",
+        "tests/agent/test_onboarding.py",
+        "tests/cli/test_busy_input_mode_command.py",
+        "tests/gateway/test_busy_session_ack.py",
+        "tests/gateway/test_restart_drain.py",
+        "website/docs/user-guide/cli.md",
+        "website/docs/user-guide/messaging/index.md"
+      ],
+      "files_touched": 14,
+      "notes": "",
+      "owner": "",
+      "sha": "635253b9185f1d65dae7df17421daf0dfbc0f576",
+      "subject": "feat(busy): add 'steer' as a third display.busy_input_mode option (#16279)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/config.py",
+        "gateway/platforms/base.py",
+        "gateway/platforms/discord.py",
+        "gateway/platforms/slack.py",
+        "tests/gateway/test_slack_channel_skills.py",
+        "website/docs/user-guide/messaging/slack.md"
+      ],
+      "files_touched": 6,
+      "notes": "",
+      "owner": "",
+      "sha": "8fb861ea6ed799a50904ee13b275150097ecd47f",
+      "subject": "feat(gateway/slack): support channel_skill_bindings",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "2a0fc97c76b92faf6740e50b89b2f83c2e2c0e0b",
+      "subject": "chore(release): map mewwts in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/tools/test_browser_ssrf_local.py",
+        "tests/tools/test_url_safety.py",
+        "tools/browser_tool.py",
+        "tools/url_safety.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "7317d69f19148584782df1a35ff2290cca1a19fe",
+      "subject": "fix(security): treat quoted false as false in browser SSRF guards",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "plugins/memory/hindsight/__init__.py",
+        "tests/plugins/memory/test_hindsight_provider.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "0ba6471dd1914662e8ce81aeefc9bb1594d03c8d",
+      "subject": "fix: recover hindsight embedded daemon after idle shutdown",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py",
+        "gateway/run.py",
+        "hermes_cli/main.py",
+        "hermes_state.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "3b60abb6bb7eb6ae50f8c51927f5cfac1deddde7",
+      "subject": "fix(sessions): delete on-disk transcript files during prune and delete (#3015)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/hermes_cli/test_sessions_delete.py",
+        "tests/test_hermes_state.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "cd2aee36ca75feced321820bd0db45dacf378f47",
+      "subject": "test(sessions): wire sessions_dir through auto-prune + file-cleanup regression tests",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/mirror.py",
+        "tests/gateway/test_mirror.py",
+        "tests/tools/test_send_message_tool.py",
+        "tools/send_message_tool.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "fd474d0f00d270d8c11f0ae68e7f75d2953b638e",
+      "subject": "fix(gateway): avoid cross-user mirror writes in per-user group sessions",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/config.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "a01e767b249b311cd50f891ca923bbf250e4b4c4",
+      "subject": "fix(gateway): respect config.yaml slack.enabled when SLACK_BOT_TOKEN env var is set",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/display_config.py",
+        "tests/gateway/test_display_config.py",
+        "tests/gateway/test_verbose_command.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "7eaad06a87f5997074627956091b2e23fbbe1185",
+      "subject": "fix(gateway): default Slack tool_progress to off",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/base.py",
+        "gateway/platforms/slack.py",
+        "tests/gateway/test_slack.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "55f212a7a2bf11abcc42f2d8abbb0bd1efd86c22",
+      "subject": "fix(slack): honor NO_PROXY for Slack transport",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "bdc1adf711dcee01c1c5c46bca7805541857ab11",
+      "subject": "chore(release): map haru398801, badgerbees, xnbi in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/entry-exports.ts",
+        "ui-tui/packages/hermes-ink/src/ink/cache-eviction.ts",
+        "ui-tui/packages/hermes-ink/src/ink/ink.tsx",
+        "ui-tui/packages/hermes-ink/src/ink/line-width-cache.ts",
+        "ui-tui/packages/hermes-ink/src/ink/lru.ts",
+        "ui-tui/packages/hermes-ink/src/ink/output.ts",
+        "ui-tui/packages/hermes-ink/src/ink/render-node-to-output.ts",
+        "ui-tui/packages/hermes-ink/src/ink/stringWidth.ts",
+        "ui-tui/packages/hermes-ink/src/ink/terminal.ts",
+        "ui-tui/packages/hermes-ink/src/ink/wrap-text.ts",
+        "ui-tui/packages/hermes-ink/src/utils/sliceAnsi.ts",
+        "ui-tui/src/__tests__/virtualHeights.test.ts",
+        "ui-tui/src/__tests__/wheelAccel.test.ts",
+        "ui-tui/src/app/turnStore.ts",
+        "ui-tui/src/app/useInputHandlers.ts",
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/app/useSessionLifecycle.ts",
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/components/fpsOverlay.tsx",
+        "ui-tui/src/components/markdown.tsx"
+      ],
+      "files_touched": 32,
+      "notes": "",
+      "owner": "",
+      "sha": "b1c49d5e73b85ee1713e5041c336364af46b3677",
+      "subject": "chore(tui): /clean recent perf work \u2014 KISS/DRY pass",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_session_boundary_security_state.py",
+        "tests/gateway/test_update_streaming.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "bdaf56a94d5bb651c07746143ae844f4b4960ae5",
+      "subject": "fix(gateway): bypass slash commands during pending update prompts",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_update_streaming.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "90c84c6dba01633c424dd9b8deaa94d0c3caa4e3",
+      "subject": "fix(gateway): unblock update subprocess on recognized-command bypass",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "tests/hermes_cli/test_web_ui_build.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "5b5a53a155857e63ec7f7eeb373049ad224fc92f",
+      "subject": "fix(cli): check hermes_cli/web_dist/ not web/dist/ for build staleness",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "f01e4402a97fde5e0b3f2dea1812fcdbed509dbb",
+      "subject": "chore(release): map georgeglessner in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/productivity/airtable/SKILL.md"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "c997183f535289e24ce43e4f24c656b39ceae63f",
+      "subject": "feat(skills): add bundled Airtable productivity skill",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/productivity/airtable/SKILL.md"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "0d4247d9bf0d4cbb32ff872825e57757bbee9717",
+      "subject": "fix(skills/airtable): use .env credential pattern matching notion/linear",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/config.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "55e9329ee6f6066bc6a89349d43379c46921cc58",
+      "subject": "feat(config): register bundled-skill API keys in OPTIONAL_ENV_VARS",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py",
+        "website/docs/reference/skills-catalog.md"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "0bef0b9416783ecc221b5ac9346049a604e1e83d",
+      "subject": "chore: docs + attribution for airtable skill",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/productivity/airtable/SKILL.md",
+        "website/docs/reference/skills-catalog.md"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "7e3c8a31f0f39ea910ebc8b4d91947a3d129c52a",
+      "subject": "feat(skills/airtable): tailor skill to Hermes idioms + expand cookbook",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py",
+        "hermes_cli/main.py",
+        "tests/cli/test_save_conversation_location.py",
+        "tests/gateway/test_session_list_allowed_sources.py",
+        "tests/hermes_cli/test_session_browse.py",
+        "tests/hermes_cli/test_setup_ollama_cloud_force_refresh.py",
+        "tui_gateway/server.py",
+        "ui-tui/src/components/sessionPicker.tsx"
+      ],
+      "files_touched": 8,
+      "notes": "",
+      "owner": "",
+      "sha": "5eb6cd82b206674388d7d029917307c8af826cd5",
+      "subject": "fix(sessions): /save lands under $HERMES_HOME, widen browse+TUI picker, force-refresh ollama-cloud on setup (#16296)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/prompt_builder.py",
+        "cli-config.yaml.example",
+        "cron/scheduler.py",
+        "gateway/config.py",
+        "gateway/platforms/__init__.py",
+        "gateway/platforms/yuanbao.py",
+        "gateway/platforms/yuanbao_media.py",
+        "gateway/platforms/yuanbao_proto.py",
+        "gateway/platforms/yuanbao_sticker.py",
+        "gateway/run.py",
+        "gateway/session.py",
+        "hermes_cli/gateway.py",
+        "hermes_cli/platforms.py",
+        "hermes_cli/setup.py",
+        "hermes_cli/status.py",
+        "hermes_cli/tools_config.py",
+        "scripts/release.py",
+        "skills/yuanbao/SKILL.md",
+        "tests/test_yuanbao_integration.py",
+        "tests/test_yuanbao_markdown.py"
+      ],
+      "files_touched": 28,
+      "notes": "",
+      "owner": "",
+      "sha": "ab6879634e397bd9d0ba7da4bf93390f6921efa5",
+      "subject": "yuanbao platform (#16298)",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "34eb1aaa9a80baf1524d8b87ea78a07702d4aa90",
+      "subject": "fix(update): use npm ci to stop rewriting package-lock on every update (#16295)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/helpers.py",
+        "tests/gateway/test_message_deduplicator.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "cebf95854bf5ee577930a7566a1dc07968821d72",
+      "subject": "Fix MessageDeduplicator max_size enforcement",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_logging.py",
+        "tests/test_hermes_logging.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "88a85d30c1cf7c8731564bf5bd0ace243214c551",
+      "subject": "fix(logging): attach gateway log after cli init",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_session_model_reset.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "00c6480a05e314b6bdf2dc2788ff4b8e4fe39edd",
+      "subject": "fix(gateway): clear stale pending model note on session reset",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/run.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "77d4766602ef68c15de9721ab3b8014e87007a6b",
+      "subject": "fix(gateway): clear pending model note on auto-reset paths too",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "36b13709f528c1dc92cefa9d2bbeeeba5cbde6a5",
+      "subject": "chore(release): map johnncenae in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/nous_subscription.py",
+        "tests/hermes_cli/test_nous_subscription.py",
+        "tests/tools/test_tool_backend_helpers.py",
+        "tools/tool_backend_helpers.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "f66ebe64e86b813e1954da462322a794e71b89eb",
+      "subject": "fix(cli): coerce use_gateway config flags in tool routing",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/tools_config.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "87610ce3808df360fe4cee8488d32363a2a152ac",
+      "subject": "fix(tools): coerce quoted use_gateway in image_gen UI detection",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "ebad6d3f1e3a8e8a7a16bf2592a4aa77131c03e2",
+      "subject": "chore(release): map yoimexex@gmail.com -> Yoimex",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/tools/test_session_search.py",
+        "tools/session_search_tool.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "dbe5015566e1c17fb97ee81d55b804450543423e",
+      "subject": "fix(session-search): exclude current lineage root deterministically in recent mode",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/productivity/maps/scripts/maps_client.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "e504a599fef591f69bf0669111626944c6fbd254",
+      "subject": "Update maps_client.py",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/productivity/maps/scripts/maps_client.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "419535f07f4046c60b05b15e3ed9bba30c9527e8",
+      "subject": "Update maps_client.py",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/tools/test_file_read_guards.py",
+        "tools/file_tools.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "a32b325d068947ae82116b0e3506c33c51998147",
+      "subject": "fix(tools): invalidate read_file dedup cache on write_file and patch",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/tools/test_file_read_guards.py",
+        "tools/file_tools.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "977d5f56c9ffef6922efb83da76342165d9d3767",
+      "subject": "fix(file-tools): keep read dedup status out of file content",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tests/tools/test_file_read_guards.py",
+        "tools/file_tools.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "ced8f44cd2241b67cdef43fdfe92578a9ab7ce5d",
+      "subject": "fix(file-tools): broaden dedup-status write guard to cover small wrappers",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py",
+        "gateway/run.py",
+        "hermes_cli/config.py",
+        "tests/tools/test_checkpoint_manager.py",
+        "tools/checkpoint_manager.py",
+        "website/docs/user-guide/checkpoints-and-rollback.md"
+      ],
+      "files_touched": 6,
+      "notes": "",
+      "owner": "",
+      "sha": "478444c262b9a9600e2ba1a063ecf1852d7481f4",
+      "subject": "feat(checkpoints): auto-prune orphan and stale shadow repos at startup (#16303)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "run_agent.py",
+        "tests/run_agent/test_compression_boundary_hook.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "e85b75251620df4ac630644f61aa6928cc494197",
+      "subject": "fix: signal compression boundary to context engine",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "cb51baeceb84fe6b64db94f553ea7c82a5d54dfd",
+      "subject": "chore(release): map Tosko4 in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/babel.compiler.config.cjs",
+        "ui-tui/eslint.config.mjs",
+        "ui-tui/packages/hermes-ink/src/ink/components/App.tsx",
+        "ui-tui/packages/hermes-ink/src/ink/components/ScrollBox.tsx",
+        "ui-tui/packages/hermes-ink/src/ink/events/input-event.ts",
+        "ui-tui/packages/hermes-ink/src/ink/frame.ts",
+        "ui-tui/packages/hermes-ink/src/ink/termio/osc.ts",
+        "ui-tui/scripts/profile-tui.mjs"
+      ],
+      "files_touched": 8,
+      "notes": "",
+      "owner": "",
+      "sha": "2e4b65b9f54fa16be73e56baab162f4ca46be0ae",
+      "subject": "chore(tui): clean remaining Ink perf scaffolding",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_state.py",
+        "tui_gateway/server.py",
+        "ui-tui/packages/hermes-ink/src/ink/cache-eviction.ts"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "dda12775f219a20278df2e8c757995222060a309",
+      "subject": "fix(tui): address Copilot review follow-ups",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "hermes_cli/web_server.py",
+        "tests/hermes_cli/test_tui_resume_flow.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "625c31fcea41295a1ac6f006067b619c28d15144",
+      "subject": "fix(tui): run built TUI with production React by default",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/lib/perfPane.tsx"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "b51c528613e36d08160fde2510ec54c470633390",
+      "subject": "fix(tui): address virtual row and perf log review notes",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tui_gateway/server.py",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/turnController.ts"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "c2ca02fcff89a3fadae20e13cc85ba3fc70b68b8",
+      "subject": "fix(tui): stabilize live todo panel count and anchor position",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tui_gateway/server.py",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/turnController.ts"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "635948d0e02ac7cd71ba9c3c0dffcbbdf8fcf2a7",
+      "subject": "chore(tui): tighten todo-fix comments, drop dead archive call",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/profile-tui.py",
+        "ui-tui/packages/hermes-ink/index.d.ts",
+        "ui-tui/packages/hermes-ink/src/entry-exports.ts",
+        "ui-tui/packages/hermes-ink/src/ink/cache-eviction.ts",
+        "ui-tui/packages/hermes-ink/src/ink/render-node-to-output.ts",
+        "ui-tui/src/__tests__/turnStore.test.ts",
+        "ui-tui/src/app/slash/commands/ops.ts",
+        "ui-tui/src/app/turnStore.ts",
+        "ui-tui/src/app/useMainApp.ts",
+        "ui-tui/src/app/useSubmission.ts",
+        "ui-tui/src/components/thinking.tsx",
+        "ui-tui/src/gatewayTypes.ts",
+        "ui-tui/src/lib/liveLayout.test.ts",
+        "ui-tui/src/lib/liveLayout.ts",
+        "ui-tui/src/lib/virtualHeights.ts",
+        "ui-tui/src/types/hermes-ink.d.ts"
+      ],
+      "files_touched": 16,
+      "notes": "",
+      "owner": "",
+      "sha": "ffa33e53f6b2943624cd95365ba1a0f8bc8362c5",
+      "subject": "chore(tui): remove dead branch cleanup code",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/lib/viewportStore.ts"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "d81b1cd86ccf0c7e64d6550227f988e6591f172d",
+      "subject": "chore: uptick",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "ui-tui/src/__tests__/viewportStore.test.ts"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "de790eaceb65337458dacdd414ac57168c0f6332",
+      "subject": "test(tui): align viewport snapshot key test with quantization",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "hermes_state.py",
+        "tests/hermes_cli/test_resolve_last_session.py"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "c23463fce97db276dff71389f77af44a0fde6625",
+      "subject": "chore(tui): keep MRU resume split out of perf PR",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "tests/hermes_cli/test_tui_resume_flow.py",
+        "ui-tui/src/__tests__/useSessionLifecycle.test.ts",
+        "ui-tui/src/app/useSessionLifecycle.ts"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "3e1664923df8f5244ed36426f02364ad9637cffd",
+      "subject": "Revert \"fix(tui): report actual session on exit\"",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/timeouts.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "16e243e067e5b2c37d7df70774ceb5e12bb0197b",
+      "subject": "fix(timeouts): guard load_config() call against runtime exceptions",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/timeouts.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "366351b94deabd1a6c13e5d5e1dc967ccebc02ca",
+      "subject": "refactor(timeouts): drop redundant ImportError in except clause",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/whatsapp_identity.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "91512b821074cd481864565322b1fec74f30434c",
+      "subject": "fix(whatsapp_identity): guard against path traversal and silent mapping errors",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/whatsapp_identity.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "6993e566badca33a9380855845dbd2bbf6bd5de0",
+      "subject": "fix(whatsapp_identity): pin identifier regex to ASCII, clarify it's defense-in-depth",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/shell_hooks.py",
+        "tests/agent/test_shell_hooks_consent.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "e19854d8937611536f905d01892ffacbfdd9cc2c",
+      "subject": "fix(shell_hooks): parse hooks_auto_accept as strict bool/string, not bool() (#16322)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "tools/discord_tool.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "b288934dffcc3f38938931e2947e9e49c8602b34",
+      "subject": "fix(discord_tool): coerce limit parameter to int before min() call",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "nix/tui.nix"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "d308ae27e178501607a79c2d63f46821591d6838",
+      "subject": "fix(nix): refresh tui npm deps hash",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "hermes_cli/skills_hub.py",
+        "tests/hermes_cli/test_skills_hub.py",
+        "tests/tools/test_skills_hub.py",
+        "tools/skills_hub.py"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "9c416e20abf31632d768682deac35e49f4214a10",
+      "subject": "feat(skills): install skills from a direct HTTP(S) URL (#16323)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/prompt_builder.py",
+        "skills/autonomous-ai-agents/hermes-agent/SKILL.md",
+        "tools/browser_tool.py",
+        "tools/delegate_tool.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "517f30b0435c7f30d3204941888c83766033cd72",
+      "subject": "improve(agent): guidance for plain-text URLs, subagent language/verification, hermes-config routing (#16325)",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/onboarding.py",
+        "cli.py",
+        "optional-skills/migration/openclaw-migration/scripts/openclaw_to_hermes.py",
+        "tests/agent/test_onboarding.py",
+        "tests/skills/test_openclaw_migration.py"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "6c87371815f8c23e7d1d4595f7a90d884b6a4d54",
+      "subject": "fix(openclaw-migration): case-preserving brand rewrite + one-time ~/.openclaw residue banner (#16327)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/productivity/google-workspace/scripts/setup.py",
+        "tests/skills/test_google_oauth_setup.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "898ccfd667065937ad86331528a424a8d5e7aa88",
+      "subject": "fix(skills): honor scope query from Google OAuth redirect URL",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "859e09b7ced2332de353d4f35636abb98e92b87a",
+      "subject": "chore(release): map xiahu889889@proton.me to xiahu88988",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/autonomous-ai-agents/hermes-agent/SKILL.md",
+        "website/docs/guides/work-with-skills.md",
+        "website/docs/reference/cli-commands.md",
+        "website/docs/user-guide/features/skills.md"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "235bfb192b91cbb496f5f635d3fffaa9174abd1d",
+      "subject": "docs(skills): document URL install across features, reference, guide, and hermes-agent skill (#16355)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/models.py",
+        "hermes_cli/runtime_provider.py",
+        "tests/hermes_cli/test_model_validation.py",
+        "tests/hermes_cli/test_runtime_provider_resolution.py",
+        "website/docs/guides/azure-foundry.md"
+      ],
+      "files_touched": 5,
+      "notes": "",
+      "owner": "",
+      "sha": "c5781d50c70487ede1297553dff909b4a8388493",
+      "subject": "fix(azure-foundry): auto-route gpt-5.x / codex / o-series to Responses API (#16361)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cron/jobs.py",
+        "tests/cron/test_jobs.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "7c63c246137df0468a2c0207c693063caf95412b",
+      "subject": "fix(cron): don't silently disable recurring cron jobs when croniter is missing (#16368)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "cli.py",
+        "tests/cli/test_cli_bracketed_paste_sanitizer.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "a0fe73bada33e573cf164660a07caaeac5c1e3d6",
+      "subject": "fix(cli): strip leaked bracketed-paste wrappers",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "3e68809fe0c502532782ddeabd9b3b5c2ac92714",
+      "subject": "chore(release): map romanornr noreply email",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/context_compressor.py",
+        "tests/agent/test_context_compressor.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "cfc8befe65b929e7e4d3d071c778894fcfba4e7f",
+      "subject": "fix(compressor): use text char sum for multimodal token estimation in _find_tail_cut_by_tokens",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/context_compressor.py",
+        "tests/agent/test_context_compressor.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "943465235ee8e33f903e34b964ec6bfe5b7cffbf",
+      "subject": "fix(compressor): guard against bare-string items in multimodal content list",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/context_compressor.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "bda2dbc29edc3f807bbc003227a428ec2a5245b2",
+      "subject": "fix(compressor): apply bare-string guard to protect-tail boundary scan",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "agent/title_generator.py",
+        "cli.py",
+        "gateway/run.py",
+        "tests/agent/test_title_generator.py"
+      ],
+      "files_touched": 4,
+      "notes": "",
+      "owner": "",
+      "sha": "4a2ee6c162cf6dbf745a260359c60912328a3d97",
+      "subject": "fix(title-gen): surface auxiliary failures via _emit_auxiliary_failure",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/matrix.py",
+        "tests/gateway/test_matrix.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "af3d5150c1a62d2acf3138897d5ea13644369ce7",
+      "subject": "fix(matrix): close 'hall of mirrors' pairing + echo loop (#15763) (#16374)",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/creative/claude-design/SKILL.md"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "8c5d3a99d67f3036716ea3b03b74bf37369c489e",
+      "subject": "feat(skills): add claude-design HTML artifact skill",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/creative/claude-design/SKILL.md",
+        "skills/creative/design-md/SKILL.md",
+        "skills/creative/popular-web-designs/SKILL.md"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "55be532369e957db372574fa86e30edca090fd53",
+      "subject": "docs(skills): clarify when to use claude-design vs popular-web-designs vs design-md",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "",
+      "owner": "",
+      "sha": "a131c134bc6ce8d92c475ecdeec85547db38ee80",
+      "subject": "chore(release): map BadTechBandit in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/creative/claude-design/SKILL.md",
+        "skills/creative/design-md/SKILL.md",
+        "skills/creative/popular-web-designs/SKILL.md"
+      ],
+      "files_touched": 3,
+      "notes": "",
+      "owner": "",
+      "sha": "7d586ddb426fe2424960b972ff27e93e42a53aed",
+      "subject": "docs(skills): trim design skill descriptions to <=60 chars + inline cross-ref",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/apple/apple-notes/SKILL.md",
+        "skills/apple/apple-reminders/SKILL.md",
+        "skills/apple/findmy/SKILL.md",
+        "skills/autonomous-ai-agents/claude-code/SKILL.md",
+        "skills/autonomous-ai-agents/codex/SKILL.md",
+        "skills/autonomous-ai-agents/hermes-agent/SKILL.md",
+        "skills/autonomous-ai-agents/opencode/SKILL.md",
+        "skills/creative/architecture-diagram/SKILL.md",
+        "skills/creative/ascii-art/SKILL.md",
+        "skills/creative/ascii-video/SKILL.md",
+        "skills/creative/baoyu-comic/SKILL.md",
+        "skills/creative/baoyu-infographic/SKILL.md",
+        "skills/creative/creative-ideation/SKILL.md",
+        "skills/creative/excalidraw/SKILL.md",
+        "skills/creative/manim-video/SKILL.md",
+        "skills/creative/p5js/SKILL.md",
+        "skills/creative/pixel-art/SKILL.md",
+        "skills/creative/songwriting-and-ai-music/SKILL.md",
+        "skills/data-science/jupyter-live-kernel/SKILL.md",
+        "skills/devops/webhook-subscriptions/SKILL.md"
+      ],
+      "files_touched": 74,
+      "notes": "",
+      "owner": "",
+      "sha": "e3921e7ca4a6a98c00841eb72d9bcc9b9ac99185",
+      "subject": "docs(skills): compress 74 built-in skill descriptions to <=60 chars",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "skills/autonomous-ai-agents/codex/SKILL.md",
+        "skills/creative/ascii-video/SKILL.md",
+        "skills/creative/creative-ideation/SKILL.md",
+        "skills/creative/excalidraw/SKILL.md",
+        "skills/creative/manim-video/SKILL.md",
+        "skills/creative/p5js/SKILL.md",
+        "skills/media/gif-search/SKILL.md",
+        "skills/media/heartmula/SKILL.md",
+        "skills/media/youtube-content/SKILL.md",
+        "skills/mlops/evaluation/lm-evaluation-harness/SKILL.md",
+        "skills/mlops/inference/obliteratus/SKILL.md",
+        "skills/mlops/inference/vllm/SKILL.md",
+        "skills/mlops/training/axolotl/SKILL.md",
+        "skills/productivity/powerpoint/SKILL.md"
+      ],
+      "files_touched": 14,
+      "notes": "",
+      "owner": "",
+      "sha": "9f1b1977bca3db59e7e269eb9701c0da73dbe2bf",
+      "subject": "docs(skills): salvage dropped trigger content into skill bodies",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "tests/hermes_cli/test_custom_provider_model_switch.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "8258f4dcb7c7398d4d597d453def6aec0fb22c41",
+      "subject": "fix(model): avoid persisting key_env-resolved secrets to providers entry (#16372)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "pending",
+      "files_sample": [
+        "gateway/platforms/telegram.py",
+        "tests/gateway/test_telegram_group_gating.py"
+      ],
+      "files_touched": 2,
+      "notes": "",
+      "owner": "",
+      "sha": "3ff3dfb5ac97c7a746d2c54a9b8eefb9f6279a75",
+      "subject": "fix(telegram): accept /cmd@botname from bot menu in groups",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     }
   ],
-  "generated_at_utc": "2026-04-25T03:40:12.254705+00:00",
+  "generated_at_utc": "2026-04-27T07:17:25.333873+00:00",
   "refs": {
-    "local_ref": "origin/main",
-    "range": "origin/main..upstream/main",
+    "local_ref": "main",
+    "range": "main..upstream/main",
     "upstream_ref": "upstream/main"
   },
   "summary": {
     "by_disposition": {
+      "pending": 341,
       "ported": 27,
       "superseded": 307
     },
     "by_target_ticket": {
-      "20": 132,
-      "21": 4,
-      "22": 60,
-      "23": 22,
-      "25": 3,
-      "26": 113
+      "20": 242,
+      "21": 21,
+      "22": 181,
+      "23": 42,
+      "25": 6,
+      "26": 183
     },
-    "total_commits": 334
+    "total_commits": 675
   }
 }
