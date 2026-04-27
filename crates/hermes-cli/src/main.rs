@@ -179,10 +179,11 @@ async fn main() {
         CliCommand::Setup => run_setup(cli).await,
         CliCommand::Doctor {
             deep,
+            self_heal,
             snapshot,
             snapshot_path,
             bundle,
-        } => run_doctor(cli, deep, snapshot, snapshot_path, bundle).await,
+        } => run_doctor(cli, deep, self_heal, snapshot, snapshot_path, bundle).await,
         CliCommand::Update => run_update().await,
         CliCommand::Status => run_status(cli).await,
         CliCommand::Dashboard {
@@ -7691,6 +7692,7 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
 async fn run_doctor(
     cli: Cli,
     deep: bool,
+    self_heal: bool,
     snapshot: bool,
     snapshot_path: Option<String>,
     bundle: bool,
@@ -7700,6 +7702,27 @@ async fn run_doctor(
 
     let mut checks: Vec<serde_json::Value> = Vec::new();
     let config_dir = hermes_config::hermes_home();
+    let self_heal_actions = if self_heal {
+        println!("Self-heal actions:");
+        let actions = run_doctor_self_heal(&cli);
+        for action in &actions {
+            let status = action
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let detail = action.get("detail").and_then(|v| v.as_str()).unwrap_or("");
+            println!("  - {}: {}", status, detail);
+        }
+        println!();
+        checks.push(serde_json::json!({
+            "name": "self_heal",
+            "ok": actions.iter().all(|a| a.get("ok").and_then(|v| v.as_bool()).unwrap_or(false)),
+            "actions": actions,
+        }));
+        actions
+    } else {
+        Vec::new()
+    };
 
     let config_dir_ok = config_dir.exists();
     print!("Config directory ({})... ", config_dir.display());
@@ -7951,6 +7974,8 @@ async fn run_doctor(
     let snapshot_payload = serde_json::json!({
         "generated_at": chrono::Utc::now().to_rfc3339(),
         "deep": deep,
+        "self_heal": self_heal,
+        "self_heal_actions": self_heal_actions,
         "state_root": hermes_state_root(&cli).display().to_string(),
         "checks": checks,
         "config_summary": config_summary,
@@ -7973,6 +7998,121 @@ async fn run_doctor(
 
     println!("\nDone.");
     Ok(())
+}
+
+fn run_doctor_self_heal(cli: &Cli) -> Vec<serde_json::Value> {
+    let mut actions = Vec::new();
+    let state_root = hermes_state_root(cli);
+    let required_dirs = [
+        state_root.clone(),
+        state_root.join("profiles"),
+        state_root.join("sessions"),
+        state_root.join("logs"),
+        state_root.join("skills"),
+        state_root.join("auth"),
+        state_root.join("snapshots"),
+    ];
+
+    for dir in required_dirs {
+        if dir.exists() {
+            actions.push(serde_json::json!({
+                "ok": true,
+                "status": "exists",
+                "detail": format!("directory {}", dir.display()),
+            }));
+            continue;
+        }
+        match std::fs::create_dir_all(&dir) {
+            Ok(_) => actions.push(serde_json::json!({
+                "ok": true,
+                "status": "created",
+                "detail": format!("directory {}", dir.display()),
+            })),
+            Err(err) => actions.push(serde_json::json!({
+                "ok": false,
+                "status": "error",
+                "detail": format!("directory {}: {}", dir.display(), err),
+            })),
+        }
+    }
+
+    let pid_path = gateway_pid_path_for_cli(cli);
+    if pid_path.exists() {
+        match read_gateway_pid(&pid_path) {
+            Some(pid) if !gateway_pid_is_alive(pid) => match std::fs::remove_file(&pid_path) {
+                Ok(_) => actions.push(serde_json::json!({
+                    "ok": true,
+                    "status": "fixed",
+                    "detail": format!("removed stale gateway pid file {} (pid {})", pid_path.display(), pid),
+                })),
+                Err(err) => actions.push(serde_json::json!({
+                    "ok": false,
+                    "status": "error",
+                    "detail": format!("remove stale pid {} failed: {}", pid_path.display(), err),
+                })),
+            },
+            Some(pid) => actions.push(serde_json::json!({
+                "ok": true,
+                "status": "noop",
+                "detail": format!("gateway pid {} is active", pid),
+            })),
+            None => actions.push(serde_json::json!({
+                "ok": true,
+                "status": "noop",
+                "detail": format!("pid file {} is unreadable; left unchanged", pid_path.display()),
+            })),
+        }
+    }
+
+    let vault_path = secret_vault_path_for_cli(cli);
+    if vault_path.exists() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            match std::fs::metadata(&vault_path) {
+                Ok(meta) => {
+                    let mode = meta.permissions().mode() & 0o777;
+                    if mode != 0o600 {
+                        let mut perms = meta.permissions();
+                        perms.set_mode(0o600);
+                        match std::fs::set_permissions(&vault_path, perms) {
+                            Ok(_) => actions.push(serde_json::json!({
+                                "ok": true,
+                                "status": "fixed",
+                                "detail": format!("normalized permissions on {} to 600", vault_path.display()),
+                            })),
+                            Err(err) => actions.push(serde_json::json!({
+                                "ok": false,
+                                "status": "error",
+                                "detail": format!("set permissions on {} failed: {}", vault_path.display(), err),
+                            })),
+                        }
+                    } else {
+                        actions.push(serde_json::json!({
+                            "ok": true,
+                            "status": "noop",
+                            "detail": format!("permissions already secure on {}", vault_path.display()),
+                        }));
+                    }
+                }
+                Err(err) => actions.push(serde_json::json!({
+                    "ok": false,
+                    "status": "error",
+                    "detail": format!("metadata {} failed: {}", vault_path.display(), err),
+                })),
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            actions.push(serde_json::json!({
+                "ok": true,
+                "status": "noop",
+                "detail": format!("permission normalization skipped on non-unix for {}", vault_path.display()),
+            }));
+        }
+    }
+
+    actions
 }
 
 fn write_doctor_snapshot(
@@ -10091,6 +10231,60 @@ mod tests {
         let names = gateway.adapter_names().await;
         assert!(names.contains(&"qqbot".to_string()));
         assert!(names.contains(&"wecom_callback".to_string()));
+    }
+
+    #[test]
+    fn doctor_self_heal_creates_missing_state_dirs() {
+        use clap::Parser;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cfg = tmp.path().join("cfg");
+        let cli = Cli::parse_from([
+            "hermes-ultra",
+            "--config-dir",
+            cfg.to_str().expect("utf8 path"),
+            "doctor",
+        ]);
+        let state_root = hermes_state_root(&cli);
+        assert!(!state_root.join("profiles").exists());
+
+        let actions = run_doctor_self_heal(&cli);
+        assert!(state_root.join("profiles").exists());
+        assert!(state_root.join("sessions").exists());
+        assert!(state_root.join("logs").exists());
+        assert!(actions
+            .iter()
+            .any(|entry| entry.get("status").and_then(|v| v.as_str()) == Some("created")));
+    }
+
+    #[test]
+    fn doctor_self_heal_removes_stale_gateway_pid_file() {
+        use clap::Parser;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cfg = tmp.path().join("cfg");
+        let cli = Cli::parse_from([
+            "hermes-ultra",
+            "--config-dir",
+            cfg.to_str().expect("utf8 path"),
+            "doctor",
+        ]);
+        let pid_path = gateway_pid_path_for_cli(&cli);
+        if let Some(parent) = pid_path.parent() {
+            std::fs::create_dir_all(parent).expect("mkdir pid dir");
+        }
+        std::fs::write(&pid_path, "999999").expect("write stale pid");
+        assert!(pid_path.exists());
+
+        let actions = run_doctor_self_heal(&cli);
+        assert!(!pid_path.exists(), "stale pid file should be removed");
+        assert!(actions.iter().any(|entry| {
+            entry
+                .get("detail")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .contains("removed stale gateway pid file")
+        }));
     }
 
     #[test]

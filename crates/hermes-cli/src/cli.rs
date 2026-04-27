@@ -101,6 +101,9 @@ pub enum CliCommand {
         /// Run deeper diagnostics (gateway/runtime/memory endpoints).
         #[arg(long)]
         deep: bool,
+        /// Perform safe local remediations (state dirs, stale pid, token perms).
+        #[arg(long)]
+        self_heal: bool,
         /// Write a machine-readable doctor snapshot JSON.
         #[arg(long)]
         snapshot: bool,
@@ -634,6 +637,7 @@ mod tests {
             cli.command,
             Some(CliCommand::Doctor {
                 deep: false,
+                self_heal: false,
                 snapshot: false,
                 snapshot_path: None,
                 bundle: false
@@ -656,11 +660,13 @@ mod tests {
         match cli.command {
             Some(CliCommand::Doctor {
                 deep,
+                self_heal,
                 snapshot,
                 snapshot_path,
                 bundle,
             }) => {
                 assert!(deep);
+                assert!(!self_heal);
                 assert!(snapshot);
                 assert!(bundle);
                 assert_eq!(snapshot_path.as_deref(), Some("/tmp/doctor.json"));
