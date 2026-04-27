@@ -79,7 +79,7 @@ use hermes_gateway::tool_backends::ClarifyDispatcher;
 use hermes_gateway::{DmManager, Gateway, GatewayRuntimeContext, SessionManager};
 use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_telemetry::init_telemetry_from_env;
-use hermes_tools::ToolRegistry;
+use hermes_tools::{default_tool_policy_counters_path, load_tool_policy_counters, ToolRegistry};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
@@ -185,9 +185,15 @@ async fn main() {
             bundle,
         } => run_doctor(cli, deep, self_heal, snapshot, snapshot_path, bundle).await,
         CliCommand::Update => run_update().await,
-        CliCommand::VerifyProvenance { path, signature } => {
-            run_verify_provenance(cli, path, signature).await
-        }
+        CliCommand::EliteCheck { json, strict } => run_elite_check(cli, json, strict).await,
+        CliCommand::VerifyProvenance {
+            path,
+            signature,
+            strict,
+            json,
+        } => run_verify_provenance(cli, path, signature, strict, json).await,
+        CliCommand::RotateProvenanceKey { json } => run_rotate_provenance_key(cli, json).await,
+        CliCommand::RouteLearning { action, json } => run_route_learning(cli, action, json).await,
         CliCommand::Status => run_status(cli).await,
         CliCommand::Dashboard {
             host,
@@ -7692,6 +7698,74 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
 }
 
 /// Handle `hermes doctor`.
+fn build_elite_doctor_diagnostics(cli: &Cli) -> serde_json::Value {
+    let provenance_path = provenance_key_path_for_cli(cli);
+    let provenance_exists = provenance_path.exists();
+    let provenance_key_id = if provenance_exists {
+        load_or_create_provenance_key(cli, false).ok().map(|key| {
+            let digest = Sha256::digest(&key);
+            let full = hex::encode(digest);
+            full.chars().take(16).collect::<String>()
+        })
+    } else {
+        None
+    };
+
+    let route_path = route_learning_state_path_for_cli(cli);
+    let route_state = load_route_learning_state_for_cli(&route_path).ok();
+    let route_entries = route_state
+        .as_ref()
+        .map(|state| state.entries.len())
+        .unwrap_or(0usize);
+
+    let policy_counters_path = default_tool_policy_counters_path();
+    let policy_counters = load_tool_policy_counters(&policy_counters_path).unwrap_or_default();
+    let policy_mode = std::env::var("HERMES_TOOL_POLICY_MODE")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "enforce".to_string());
+    let policy_preset = std::env::var("HERMES_TOOL_POLICY_PRESET")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "balanced".to_string());
+
+    let elite_gate_script = std::env::var("HERMES_ELITE_GATE_CMD")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "python3 scripts/run-elite-sync-gate.py".to_string());
+    let gate_available = {
+        let script_path = std::env::current_dir()
+            .ok()
+            .map(|cwd| cwd.join("scripts").join("run-elite-sync-gate.py"));
+        script_path.as_ref().map(|p| p.exists()).unwrap_or(false)
+    };
+
+    serde_json::json!({
+        "provenance": {
+            "path": provenance_path.display().to_string(),
+            "exists": provenance_exists,
+            "key_id": provenance_key_id,
+        },
+        "route_learning": {
+            "path": route_path.display().to_string(),
+            "entries": route_entries,
+            "ttl_secs": route_learning_ttl_secs(),
+            "half_life_secs": route_learning_half_life_secs(),
+            "saved_at_unix_ms": route_state.as_ref().map(|s| s.saved_at_unix_ms),
+        },
+        "tool_policy": {
+            "mode": policy_mode,
+            "preset": policy_preset,
+            "counters_path": policy_counters_path.display().to_string(),
+            "counters": policy_counters,
+        },
+        "elite_gate": {
+            "command": elite_gate_script,
+            "script_available": gate_available,
+        }
+    })
+}
+
 async fn run_doctor(
     cli: Cli,
     deep: bool,
@@ -7974,6 +8048,42 @@ async fn run_doctor(
         }));
     }
 
+    let elite = build_elite_doctor_diagnostics(&cli);
+    println!("\nElite diagnostics:");
+    println!(
+        "  provenance key... {}",
+        if elite["provenance"]["exists"].as_bool().unwrap_or(false) {
+            "✓"
+        } else {
+            "✗"
+        }
+    );
+    println!(
+        "  route-learning entries... {}",
+        elite["route_learning"]["entries"].as_u64().unwrap_or(0)
+    );
+    println!(
+        "  tool-policy mode/preset... {}/{}",
+        elite["tool_policy"]["mode"].as_str().unwrap_or("unknown"),
+        elite["tool_policy"]["preset"].as_str().unwrap_or("unknown")
+    );
+    println!(
+        "  elite gate script... {}",
+        if elite["elite_gate"]["script_available"]
+            .as_bool()
+            .unwrap_or(false)
+        {
+            "✓"
+        } else {
+            "✗"
+        }
+    );
+    checks.push(serde_json::json!({
+        "name": "elite_diagnostics",
+        "ok": true,
+        "details": elite,
+    }));
+
     let snapshot_payload = serde_json::json!({
         "generated_at": chrono::Utc::now().to_rfc3339(),
         "deep": deep,
@@ -7982,6 +8092,7 @@ async fn run_doctor(
         "state_root": hermes_state_root(&cli).display().to_string(),
         "checks": checks,
         "config_summary": config_summary,
+        "elite": build_elite_doctor_diagnostics(&cli),
     });
 
     let mut snapshot_written: Option<PathBuf> = None;
@@ -8175,9 +8286,26 @@ struct ProvenanceSignature {
 #[derive(Debug, Clone, serde::Serialize)]
 struct ProvenanceVerification {
     ok: bool,
+    code: String,
     key_id: Option<String>,
     artifact_sha256: Option<String>,
     reason: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+struct RouteLearningStatsRecord {
+    samples: u32,
+    success_rate: f64,
+    avg_latency_ms: f64,
+    consecutive_failures: u32,
+    updated_at_unix_ms: i64,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, Default)]
+struct RouteLearningStateRecord {
+    schema_version: u32,
+    saved_at_unix_ms: i64,
+    entries: std::collections::HashMap<String, RouteLearningStatsRecord>,
 }
 
 fn provenance_key_path_for_cli(cli: &Cli) -> PathBuf {
@@ -8311,20 +8439,62 @@ fn verify_artifact_provenance(
 ) -> Result<ProvenanceVerification, AgentError> {
     use hmac::Mac as _;
 
-    let bytes = std::fs::read(artifact_path)
-        .map_err(|e| AgentError::Io(format!("read {}: {}", artifact_path.display(), e)))?;
+    let bytes = match std::fs::read(artifact_path) {
+        Ok(value) => value,
+        Err(err) => {
+            return Ok(ProvenanceVerification {
+                ok: false,
+                code: "artifact_read_error".to_string(),
+                key_id: None,
+                artifact_sha256: None,
+                reason: Some(format!("read {}: {}", artifact_path.display(), err)),
+            });
+        }
+    };
     let sidecar_path = signature_path
         .map(PathBuf::from)
         .unwrap_or_else(|| provenance_sidecar_path_for_artifact(artifact_path));
-    let sidecar_raw = std::fs::read_to_string(&sidecar_path)
-        .map_err(|e| AgentError::Io(format!("read {}: {}", sidecar_path.display(), e)))?;
-    let sig: ProvenanceSignature = serde_json::from_str(&sidecar_raw)
-        .map_err(|e| AgentError::Config(format!("parse {}: {}", sidecar_path.display(), e)))?;
-    let key = load_or_create_provenance_key(cli, false)?;
+    let sidecar_raw = match std::fs::read_to_string(&sidecar_path) {
+        Ok(value) => value,
+        Err(err) => {
+            return Ok(ProvenanceVerification {
+                ok: false,
+                code: "signature_read_error".to_string(),
+                key_id: None,
+                artifact_sha256: None,
+                reason: Some(format!("read {}: {}", sidecar_path.display(), err)),
+            });
+        }
+    };
+    let sig: ProvenanceSignature = match serde_json::from_str(&sidecar_raw) {
+        Ok(value) => value,
+        Err(err) => {
+            return Ok(ProvenanceVerification {
+                ok: false,
+                code: "signature_parse_error".to_string(),
+                key_id: None,
+                artifact_sha256: None,
+                reason: Some(format!("parse {}: {}", sidecar_path.display(), err)),
+            });
+        }
+    };
+    let key = match load_or_create_provenance_key(cli, false) {
+        Ok(value) => value,
+        Err(err) => {
+            return Ok(ProvenanceVerification {
+                ok: false,
+                code: "key_unavailable".to_string(),
+                key_id: Some(sig.key_id),
+                artifact_sha256: Some(sig.artifact_sha256),
+                reason: Some(err.to_string()),
+            });
+        }
+    };
     let artifact_sha = hex::encode(Sha256::digest(&bytes));
     if artifact_sha != sig.artifact_sha256 {
         return Ok(ProvenanceVerification {
             ok: false,
+            code: "artifact_sha256_mismatch".to_string(),
             key_id: Some(sig.key_id),
             artifact_sha256: Some(artifact_sha),
             reason: Some("artifact_sha256 mismatch".to_string()),
@@ -8337,6 +8507,7 @@ fn verify_artifact_provenance(
     if expected != sig.signature_hex {
         return Ok(ProvenanceVerification {
             ok: false,
+            code: "signature_mismatch".to_string(),
             key_id: Some(sig.key_id),
             artifact_sha256: Some(sig.artifact_sha256),
             reason: Some("signature mismatch".to_string()),
@@ -8344,6 +8515,7 @@ fn verify_artifact_provenance(
     }
     Ok(ProvenanceVerification {
         ok: true,
+        code: "ok".to_string(),
         key_id: Some(sig.key_id),
         artifact_sha256: Some(sig.artifact_sha256),
         reason: None,
@@ -8582,10 +8754,43 @@ async fn run_update() -> Result<(), AgentError> {
     Ok(())
 }
 
+async fn run_elite_check(_cli: Cli, json: bool, strict: bool) -> Result<(), AgentError> {
+    let base_cmd = std::env::var("HERMES_ELITE_GATE_CMD")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "python3 scripts/run-elite-sync-gate.py --repo-root .".to_string());
+    let mut cmdline = base_cmd;
+    if json {
+        cmdline.push_str(" --json");
+    }
+    let output = tokio::process::Command::new("bash")
+        .args(["-lc", &cmdline])
+        .output()
+        .await
+        .map_err(|e| AgentError::Io(format!("elite-check command failed to start: {}", e)))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stdout.trim().is_empty() {
+        println!("{}", stdout.trim_end());
+    }
+    if !stderr.trim().is_empty() {
+        eprintln!("{}", stderr.trim_end());
+    }
+    if strict && !output.status.success() {
+        return Err(AgentError::Config(format!(
+            "elite-check failed (status={})",
+            output.status
+        )));
+    }
+    Ok(())
+}
+
 async fn run_verify_provenance(
     cli: Cli,
     path: String,
     signature: Option<String>,
+    strict: bool,
+    json: bool,
 ) -> Result<(), AgentError> {
     let artifact = PathBuf::from(path);
     let signature_path = signature
@@ -8593,24 +8798,284 @@ async fn run_verify_provenance(
         .map(PathBuf::from)
         .or_else(|| Some(provenance_sidecar_path_for_artifact(&artifact)));
     let verification = verify_artifact_provenance(&cli, &artifact, signature_path.as_deref())?;
+    let rendered = if json {
+        serde_json::to_string(&verification)
+            .map_err(|e| AgentError::Config(format!("serialize verification: {}", e)))?
+    } else {
+        serde_json::to_string_pretty(&verification)
+            .map_err(|e| AgentError::Config(format!("serialize verification: {}", e)))?
+    };
     if verification.ok {
-        println!("Provenance verification: ✓");
+        if !json {
+            println!("Provenance verification: ✓");
+        }
+        println!("{rendered}");
+        return Ok(());
+    }
+    if !json {
+        println!("Provenance verification: ✗");
+    }
+    println!("{rendered}");
+    if strict {
+        return Err(AgentError::Config(
+            verification.reason.clone().unwrap_or_else(|| {
+                format!("provenance verification failed ({})", verification.code)
+            }),
+        ));
+    }
+    Ok(())
+}
+
+fn route_learning_state_path_for_cli(cli: &Cli) -> PathBuf {
+    hermes_state_root(cli)
+        .join("logs")
+        .join("route-learning.json")
+}
+
+fn route_learning_ttl_secs() -> i64 {
+    std::env::var("HERMES_SMART_ROUTING_LEARNING_TTL_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .filter(|v| *v >= 0)
+        .unwrap_or(7 * 24 * 60 * 60)
+}
+
+fn route_learning_half_life_secs() -> i64 {
+    std::env::var("HERMES_SMART_ROUTING_LEARNING_HALF_LIFE_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .filter(|v| *v >= 0)
+        .unwrap_or(24 * 60 * 60)
+}
+
+fn route_learning_effective_stats(
+    stats: &RouteLearningStatsRecord,
+    now_ms: i64,
+) -> Option<RouteLearningStatsRecord> {
+    if stats.samples == 0 {
+        return None;
+    }
+    let mut out = stats.clone();
+    if out.updated_at_unix_ms <= 0 {
+        return Some(out);
+    }
+    let age_ms = now_ms.saturating_sub(out.updated_at_unix_ms).max(0);
+    let ttl_secs = route_learning_ttl_secs();
+    if ttl_secs > 0 && age_ms >= ttl_secs.saturating_mul(1000) {
+        return None;
+    }
+    let half_life_secs = route_learning_half_life_secs();
+    if half_life_secs <= 0 || age_ms <= 0 {
+        return Some(out);
+    }
+    let half_life_ms = (half_life_secs.saturating_mul(1000)) as f64;
+    let decay = (0.5_f64)
+        .powf((age_ms as f64) / half_life_ms)
+        .clamp(0.0, 1.0);
+    let baseline_success = 0.90;
+    let baseline_latency = 1800.0;
+    out.success_rate = baseline_success + (out.success_rate - baseline_success) * decay;
+    out.avg_latency_ms = baseline_latency + (out.avg_latency_ms - baseline_latency) * decay;
+    out.consecutive_failures = ((out.consecutive_failures as f64) * decay).round() as u32;
+    out.samples = ((out.samples as f64) * decay).round().max(1.0) as u32;
+    Some(out)
+}
+
+fn route_learning_score(stats: &RouteLearningStatsRecord) -> f64 {
+    let success_rate = stats.success_rate;
+    let latency_score = (1.0 / (1.0 + (stats.avg_latency_ms / 2500.0))).clamp(0.05, 1.0);
+    let failure_penalty = (stats.consecutive_failures as f64 * 0.08).min(0.35);
+    let exploration_bonus = {
+        let coverage = (stats.samples.min(20) as f64) / 20.0;
+        (1.0 - coverage) * 0.03
+    };
+    (success_rate * 0.60) + (latency_score * 0.30) + exploration_bonus - failure_penalty
+}
+
+fn load_route_learning_state_for_cli(path: &Path) -> Result<RouteLearningStateRecord, AgentError> {
+    if !path.exists() {
+        return Ok(RouteLearningStateRecord {
+            schema_version: 1,
+            saved_at_unix_ms: chrono::Utc::now().timestamp_millis(),
+            entries: std::collections::HashMap::new(),
+        });
+    }
+    let raw = std::fs::read_to_string(path)
+        .map_err(|e| AgentError::Io(format!("read {}: {}", path.display(), e)))?;
+    serde_json::from_str(&raw)
+        .map_err(|e| AgentError::Config(format!("parse {}: {}", path.display(), e)))
+}
+
+async fn run_route_learning(
+    cli: Cli,
+    action: Option<String>,
+    json: bool,
+) -> Result<(), AgentError> {
+    let action = action
+        .as_deref()
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "show".to_string());
+    let path = route_learning_state_path_for_cli(&cli);
+    match action.as_str() {
+        "reset" | "clear" => {
+            if path.exists() {
+                std::fs::remove_file(&path)
+                    .map_err(|e| AgentError::Io(format!("remove {}: {}", path.display(), e)))?;
+            }
+            let payload = serde_json::json!({
+                "ok": true,
+                "action": action,
+                "path": path.display().to_string(),
+            });
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
+                );
+            } else {
+                println!("Route-learning state cleared: {}", path.display());
+            }
+            return Ok(());
+        }
+        "show" | "list" | "inspect" => {}
+        _ => {
+            return Err(AgentError::Config(format!(
+                "route-learning: unsupported action '{}'; use show/list/inspect/reset/clear",
+                action
+            )))
+        }
+    }
+
+    let state = load_route_learning_state_for_cli(&path)?;
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let mut rows: Vec<(String, RouteLearningStatsRecord, f64)> = state
+        .entries
+        .iter()
+        .filter_map(|(key, stats)| {
+            route_learning_effective_stats(stats, now_ms).map(|effective| {
+                (
+                    key.clone(),
+                    effective.clone(),
+                    route_learning_score(&effective),
+                )
+            })
+        })
+        .collect();
+    rows.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+
+    if json {
+        let body = serde_json::json!({
+            "path": path.display().to_string(),
+            "ttl_secs": route_learning_ttl_secs(),
+            "half_life_secs": route_learning_half_life_secs(),
+            "saved_at_unix_ms": state.saved_at_unix_ms,
+            "entries": rows.iter().map(|(key, stats, score)| {
+                serde_json::json!({
+                    "key": key,
+                    "score": score,
+                    "stats": stats,
+                })
+            }).collect::<Vec<_>>(),
+        });
         println!(
             "{}",
-            serde_json::to_string_pretty(&verification)
-                .map_err(|e| AgentError::Config(format!("serialize verification: {}", e)))?
+            serde_json::to_string_pretty(&body)
+                .map_err(|e| AgentError::Config(format!("serialize route-learning json: {}", e)))?
         );
         return Ok(());
     }
-    println!("Provenance verification: ✗");
+
+    println!("Route-learning state: {}", path.display());
     println!(
-        "{}",
-        serde_json::to_string_pretty(&verification)
-            .map_err(|e| AgentError::Config(format!("serialize verification: {}", e)))?
+        "TTL={}s half_life={}s entries={}",
+        route_learning_ttl_secs(),
+        route_learning_half_life_secs(),
+        rows.len()
     );
-    Err(AgentError::Config(verification.reason.unwrap_or_else(
-        || "provenance verification failed".to_string(),
-    )))
+    if rows.is_empty() {
+        println!("(no learned routes yet)");
+        return Ok(());
+    }
+    println!();
+    println!(
+        "{:<42}  {:>7}  {:>8}  {:>10}  {:>8}  {:>14}",
+        "ROUTE", "SCORE", "SUCCESS", "LAT_MS", "FAILURES", "UPDATED_AT_MS"
+    );
+    for (key, stats, score) in rows {
+        println!(
+            "{:<42}  {:>7.3}  {:>7.2}%  {:>10.1}  {:>8}  {:>14}",
+            key,
+            score,
+            stats.success_rate * 100.0,
+            stats.avg_latency_ms,
+            stats.consecutive_failures,
+            stats.updated_at_unix_ms
+        );
+    }
+    Ok(())
+}
+
+async fn run_rotate_provenance_key(cli: Cli, json: bool) -> Result<(), AgentError> {
+    let path = provenance_key_path_for_cli(&cli);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AgentError::Io(format!("mkdir {}: {}", parent.display(), e)))?;
+    }
+
+    let archived_path = if path.exists() {
+        let archived = path.with_file_name(format!(
+            "provenance.key.{}.bak",
+            chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
+        ));
+        std::fs::rename(&path, &archived)
+            .map_err(|e| AgentError::Io(format!("archive {}: {}", path.display(), e)))?;
+        Some(archived)
+    } else {
+        None
+    };
+
+    let mut key_bytes = [0u8; 32];
+    OsRng.fill_bytes(&mut key_bytes);
+    let key_hex = hex::encode(key_bytes);
+    std::fs::write(&path, format!("{key_hex}\n"))
+        .map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&path)
+            .map_err(|e| AgentError::Io(format!("metadata {}: {}", path.display(), e)))?
+            .permissions();
+        perms.set_mode(0o600);
+        let _ = std::fs::set_permissions(&path, perms);
+    }
+
+    let key_id = {
+        let digest = Sha256::digest(key_bytes);
+        let full = hex::encode(digest);
+        full.chars().take(16).collect::<String>()
+    };
+    let payload = serde_json::json!({
+        "ok": true,
+        "key_path": path.display().to_string(),
+        "key_id": key_id,
+        "archived_previous_key": archived_path.as_ref().map(|p| p.display().to_string()),
+    });
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&payload)
+                .map_err(|e| AgentError::Config(format!("serialize rotate response: {}", e)))?
+        );
+    } else {
+        println!("Rotated provenance signing key.");
+        println!("Active key: {}", path.display());
+        if let Some(prev) = archived_path {
+            println!("Archived previous key: {}", prev.display());
+        }
+        println!("New key id: {}", key_id);
+    }
+    Ok(())
 }
 
 /// Handle `hermes status`.
@@ -8654,6 +9119,27 @@ async fn run_status(cli: Cli) -> Result<(), AgentError> {
 
     let config_dir = hermes_config::hermes_home();
     println!("\nConfig dir: {}", config_dir.display());
+
+    let policy_mode = std::env::var("HERMES_TOOL_POLICY_MODE")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "enforce".to_string());
+    let policy_preset = std::env::var("HERMES_TOOL_POLICY_PRESET")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "balanced".to_string());
+    let policy_counters_path = default_tool_policy_counters_path();
+    let policy_counters = load_tool_policy_counters(&policy_counters_path).unwrap_or_default();
+    println!(
+        "Tool policy: mode={} preset={} counters(allow={}, deny={}, audit={}, simulate={}, would_block={})",
+        policy_mode,
+        policy_preset,
+        policy_counters.allow,
+        policy_counters.deny,
+        policy_counters.audit_only,
+        policy_counters.simulate,
+        policy_counters.would_block,
+    );
 
     // Check for active sessions
     let sessions_dir = config_dir.join("sessions");
@@ -10128,6 +10614,7 @@ mod tests {
         let verified =
             verify_artifact_provenance(&cli, &artifact, Some(sidecar.as_path())).expect("verify");
         assert!(verified.ok, "verification should pass");
+        assert_eq!(verified.code, "ok");
         assert!(verified.reason.is_none(), "no reason on success");
     }
 
@@ -10155,6 +10642,7 @@ mod tests {
         let verified =
             verify_artifact_provenance(&cli, &artifact, Some(sidecar.as_path())).expect("verify");
         assert!(!verified.ok, "tamper must fail");
+        assert_eq!(verified.code, "artifact_sha256_mismatch");
         assert_eq!(verified.reason.as_deref(), Some("artifact_sha256 mismatch"));
     }
 
@@ -10177,10 +10665,9 @@ mod tests {
         let sig = sign_artifact_bytes(&cli, body, true).expect("sign");
         let sidecar = write_provenance_sidecar(&artifact, &sig).expect("sidecar");
 
-        let mut parsed: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(&sidecar).expect("read sidecar"),
-        )
-        .expect("parse sidecar");
+        let mut parsed: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&sidecar).expect("read sidecar"))
+                .expect("parse sidecar");
         parsed["signature_hex"] = serde_json::json!("deadbeef");
         std::fs::write(
             &sidecar,
@@ -10191,7 +10678,72 @@ mod tests {
         let verified =
             verify_artifact_provenance(&cli, &artifact, Some(sidecar.as_path())).expect("verify");
         assert!(!verified.ok, "signature mismatch must fail");
+        assert_eq!(verified.code, "signature_mismatch");
         assert_eq!(verified.reason.as_deref(), Some("signature mismatch"));
+    }
+
+    #[test]
+    fn provenance_verify_detects_missing_sidecar_with_code() {
+        use clap::Parser;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let config_dir = tmp.path().join("cfg");
+        std::fs::create_dir_all(&config_dir).expect("create cfg dir");
+        let cli = Cli::parse_from([
+            "hermes-agent-ultra",
+            "--config-dir",
+            config_dir.to_str().expect("cfg path utf8"),
+        ]);
+
+        let artifact = tmp.path().join("doctor-snapshot.json");
+        std::fs::write(&artifact, b"{\"ok\":true}").expect("write artifact");
+
+        let verified = verify_artifact_provenance(&cli, &artifact, None).expect("verify");
+        assert!(!verified.ok, "missing sidecar must fail");
+        assert_eq!(verified.code, "signature_read_error");
+        assert!(verified
+            .reason
+            .as_deref()
+            .unwrap_or("")
+            .contains(".sig.json"));
+    }
+
+    #[tokio::test]
+    async fn rotate_provenance_key_archives_previous_key_and_rekeys() {
+        use clap::Parser;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let config_dir = tmp.path().join("cfg");
+        std::fs::create_dir_all(&config_dir).expect("create cfg dir");
+        let cli = Cli::parse_from([
+            "hermes-agent-ultra",
+            "--config-dir",
+            config_dir.to_str().expect("cfg path utf8"),
+        ]);
+
+        let old_key = load_or_create_provenance_key(&cli, true).expect("create key");
+        run_rotate_provenance_key(cli.clone(), true)
+            .await
+            .expect("rotate key");
+        let new_key = load_or_create_provenance_key(&cli, false).expect("load rotated key");
+        assert_ne!(old_key, new_key, "rotation must change active key bytes");
+
+        let auth_dir = provenance_key_path_for_cli(&cli)
+            .parent()
+            .expect("key path parent")
+            .to_path_buf();
+        let archived_count = std::fs::read_dir(auth_dir)
+            .expect("read auth dir")
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("provenance.key.")
+                    && entry.file_name().to_string_lossy().ends_with(".bak")
+            })
+            .count();
+        assert!(archived_count >= 1, "rotation should archive previous key");
     }
 
     #[test]
@@ -10630,6 +11182,25 @@ mod tests {
                 .unwrap_or("")
                 .contains("removed stale gateway pid file")
         }));
+    }
+
+    #[test]
+    fn doctor_elite_diagnostics_payload_has_required_sections() {
+        use clap::Parser;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cfg = tmp.path().join("cfg");
+        let cli = Cli::parse_from([
+            "hermes-ultra",
+            "--config-dir",
+            cfg.to_str().expect("utf8 path"),
+            "doctor",
+        ]);
+        let payload = build_elite_doctor_diagnostics(&cli);
+        assert!(payload.get("provenance").is_some());
+        assert!(payload.get("route_learning").is_some());
+        assert!(payload.get("tool_policy").is_some());
+        assert!(payload.get("elite_gate").is_some());
     }
 
     #[test]

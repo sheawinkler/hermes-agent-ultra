@@ -12,6 +12,7 @@ fork-specific history.
   - Supports `--pr-labels` to apply metadata/risk labels on the created PR
   - Runs adversarial regression gate by default (`scripts/run-redteam-gate.py`)
   - Supports `--no-redteam-gate` and `--redteam-cmd` overrides
+  - Supports optional consolidated elite gate: `--elite-gate` / `--elite-cmd`
   - Supports `--strategy merge|cherry-pick`
   - Supports strict risk gating via `--strict-risk-gate`
   - Emits timestamped reports under `.sync-reports/`
@@ -28,6 +29,11 @@ fork-specific history.
 - `scripts/run-zero-copy-hotpath-bench.py`
   - Runs zero-copy policy hot-path benchmark test and captures ns/eval evidence
   - Emits JSON diagnostics under `.sync-reports/zero-copy-hotpath-<timestamp>.json`
+- `scripts/run-elite-sync-gate.py`
+  - Runs red-team + adapter chaos + zero-copy hot-path checks as one gate
+  - Emits JSON diagnostics under `.sync-reports/elite-sync-gate-<timestamp>.json`
+- `scripts/compare-adapter-chaos-reports.py`
+  - Compares chaos reports and fails on attempts/fallback/outcome regressions
 
 ## One-shot Manual Sync
 
@@ -39,6 +45,8 @@ bash scripts/sync-upstream.sh --draft-pr --pr-labels "upstream-sync,parity-sync,
 bash scripts/sync-upstream.sh --redteam-cmd "python3 scripts/run-redteam-gate.py --suite scripts/redteam-cases.json"
 python3 scripts/run-adapter-chaos-harness.py --repo-root .
 python3 scripts/run-zero-copy-hotpath-bench.py --repo-root .
+python3 scripts/run-elite-sync-gate.py --repo-root .
+bash scripts/sync-upstream.sh --elite-gate
 ```
 
 Cherry-pick mode for linear upstream replay:
@@ -97,6 +105,7 @@ Default report path:
 - `gh` CLI is optional; without it the script still pushes the sync branch. Conflict issue auto-creation is disabled when `gh` is unavailable.
 - Sync PR bodies now include parity queue summary, drift artifact paths, and test guidance for merge reviewers.
 - Sync report includes `redteam_report` when adversarial gate runs.
+- Sync report includes `elite_report` when consolidated elite gate runs.
 - Cron entry exports `REPO_ROOT` explicitly so the wrapper runs against the
   intended repository path.
 - On conflicts, the script writes `.sync-reports/upstream-sync-<timestamp>-conflict.txt`.

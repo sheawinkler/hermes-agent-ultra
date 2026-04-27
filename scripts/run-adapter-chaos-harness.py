@@ -51,6 +51,23 @@ def extract_failure_excerpt(stdout: str, stderr: str) -> str:
     return combined[-2000:]
 
 
+def extract_scenario_runs(stdout: str) -> list[dict]:
+    marker = "adapter chaos harness results:"
+    for line in stdout.splitlines():
+        if marker not in line:
+            continue
+        _, payload = line.split(marker, 1)
+        payload = payload.strip()
+        try:
+            data = json.loads(payload)
+        except Exception:
+            return []
+        if isinstance(data, list):
+            return [entry for entry in data if isinstance(entry, dict)]
+        return []
+    return []
+
+
 def main() -> int:
     args = parse_args()
     repo_root = pathlib.Path(args.repo_root).expanduser().resolve()
@@ -81,7 +98,25 @@ def main() -> int:
         "passed": proc.returncode == 0,
         "stdout_tail": proc.stdout[-8000:],
         "stderr_tail": proc.stderr[-8000:],
+        "scenario_runs": extract_scenario_runs(proc.stdout),
     }
+    if report["scenario_runs"]:
+        report["scenario_summary"] = {
+            "count": len(report["scenario_runs"]),
+            "max_attempts": max(
+                int(entry.get("actual", {}).get("attempts", 0))
+                for entry in report["scenario_runs"]
+            ),
+            "max_fallback_calls": max(
+                int(entry.get("actual", {}).get("fallback_calls", 0))
+                for entry in report["scenario_runs"]
+            ),
+            "error_outcomes": sum(
+                1
+                for entry in report["scenario_runs"]
+                if str(entry.get("actual", {}).get("outcome", "")).lower() != "success"
+            ),
+        }
     if proc.returncode != 0:
         report["failure_excerpt"] = extract_failure_excerpt(proc.stdout, proc.stderr)
 
