@@ -162,6 +162,13 @@ Ultra ships with explicit runtime controls:
 - MCP capability and sandbox policy boundaries
 - bounded output and context shaping protections
 
+Tool policy supports four modes via `HERMES_TOOL_POLICY_MODE`:
+
+- `off`: bypass policy checks
+- `audit`: allow execution, annotate violations
+- `simulate`: allow execution and always attach `_tool_policy_simulation` metadata showing would-allow/would-block outcome
+- `enforce`: block disallowed tool calls
+
 ## Parity and Upstream Maintenance
 
 This repository tracks upstream Hermes parity and intentionally retains Ultra-only enhancements.
