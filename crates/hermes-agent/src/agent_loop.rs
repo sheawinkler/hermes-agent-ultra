@@ -903,12 +903,20 @@ struct GovernorRuntimeState {
     consecutive_error_turns: u32,
 }
 
-#[derive(Debug, Clone, Default, Serialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct RouteLearningStats {
     samples: u32,
     success_rate: f64,
     avg_latency_ms: f64,
     consecutive_failures: u32,
+    updated_at_unix_ms: i64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+struct RouteLearningState {
+    schema_version: u32,
+    saved_at_unix_ms: i64,
+    entries: HashMap<String, RouteLearningStats>,
 }
 
 #[derive(Debug, Clone)]
@@ -1155,7 +1163,12 @@ fn governor_error_critical_rate() -> f64 {
 fn smart_routing_learning_enabled() -> bool {
     std::env::var("HERMES_SMART_ROUTING_LEARNING_ENABLED")
         .ok()
-        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .map(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
         .unwrap_or(true)
 }
 
@@ -1181,6 +1194,51 @@ fn smart_routing_learning_switch_margin() -> f64 {
         .and_then(|v| v.trim().parse::<f64>().ok())
         .filter(|v| (0.0..=0.50).contains(v))
         .unwrap_or(0.03)
+}
+
+fn smart_routing_learning_ttl_secs() -> i64 {
+    std::env::var("HERMES_SMART_ROUTING_LEARNING_TTL_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .filter(|v| *v >= 0)
+        .unwrap_or(7 * 24 * 60 * 60)
+}
+
+fn smart_routing_learning_half_life_secs() -> i64 {
+    std::env::var("HERMES_SMART_ROUTING_LEARNING_HALF_LIFE_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<i64>().ok())
+        .filter(|v| *v >= 0)
+        .unwrap_or(24 * 60 * 60)
+}
+
+fn now_unix_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
+fn default_route_learning_home(config: &AgentConfig) -> PathBuf {
+    config
+        .hermes_home
+        .as_deref()
+        .map(PathBuf::from)
+        .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
+        .or_else(|| {
+            std::env::var("HERMES_AGENT_ULTRA_HOME")
+                .ok()
+                .map(PathBuf::from)
+        })
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|home| PathBuf::from(home).join(".hermes-agent-ultra"))
+        })
+        .unwrap_or_else(|| PathBuf::from(".hermes-agent-ultra"))
+}
+
+fn route_learning_state_path(config: &AgentConfig) -> PathBuf {
+    default_route_learning_home(config)
+        .join("logs")
+        .join("route-learning.json")
 }
 
 fn push_window_u64(window: &mut VecDeque<u64>, value: u64, limit: usize) {
@@ -1422,6 +1480,7 @@ impl AgentLoop {
         tool_registry: Arc<ToolRegistry>,
         llm_provider: Arc<dyn LlmProvider>,
     ) -> Self {
+        let route_learning = Arc::new(Mutex::new(Self::load_route_learning_state(&config)));
         let code_index = Self::init_code_index(&config);
         let lsp_context = Self::build_lsp_context_config(&config);
         Self {
@@ -1439,7 +1498,7 @@ impl AgentLoop {
             sub_agent_orchestrator: None,
             code_index,
             lsp_context,
-            route_learning: Arc::new(Mutex::new(HashMap::new())),
+            route_learning,
         }
     }
 
@@ -1450,6 +1509,7 @@ impl AgentLoop {
         llm_provider: Arc<dyn LlmProvider>,
         interrupt: InterruptController,
     ) -> Self {
+        let route_learning = Arc::new(Mutex::new(Self::load_route_learning_state(&config)));
         let code_index = Self::init_code_index(&config);
         let lsp_context = Self::build_lsp_context_config(&config);
         Self {
@@ -1467,7 +1527,7 @@ impl AgentLoop {
             sub_agent_orchestrator: None,
             code_index,
             lsp_context,
-            route_learning: Arc::new(Mutex::new(HashMap::new())),
+            route_learning,
         }
     }
 
@@ -1493,6 +1553,119 @@ impl AgentLoop {
         cfg.enabled = cfg.enabled && config.lsp_context_enabled;
         cfg.max_chars = config.lsp_context_max_chars.max(400);
         cfg
+    }
+
+    fn load_route_learning_state(config: &AgentConfig) -> HashMap<String, RouteLearningStats> {
+        if !smart_routing_learning_enabled() {
+            return HashMap::new();
+        }
+        let path = route_learning_state_path(config);
+        let raw = match std::fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(_) => return HashMap::new(),
+        };
+        let parsed: RouteLearningState = match serde_json::from_str(&raw) {
+            Ok(state) => state,
+            Err(err) => {
+                tracing::warn!(
+                    path = %path.display(),
+                    error = %err,
+                    "failed to parse route-learning state; starting empty"
+                );
+                return HashMap::new();
+            }
+        };
+        let mut entries = parsed.entries;
+        let now_ms = now_unix_ms();
+        let _ = Self::prune_route_learning_locked(&mut entries, now_ms);
+        entries
+    }
+
+    fn save_route_learning_state(&self, entries: &HashMap<String, RouteLearningStats>) {
+        let path = route_learning_state_path(&self.config);
+        if let Some(parent) = path.parent() {
+            if let Err(err) = std::fs::create_dir_all(parent) {
+                tracing::warn!(
+                    path = %parent.display(),
+                    error = %err,
+                    "failed to create route-learning state directory"
+                );
+                return;
+            }
+        }
+        let body = RouteLearningState {
+            schema_version: 1,
+            saved_at_unix_ms: now_unix_ms(),
+            entries: entries.clone(),
+        };
+        let serialized = match serde_json::to_vec_pretty(&body) {
+            Ok(value) => value,
+            Err(err) => {
+                tracing::warn!(error = %err, "failed to serialize route-learning state");
+                return;
+            }
+        };
+        let tmp = path.with_extension("json.tmp");
+        if let Err(err) = std::fs::write(&tmp, serialized) {
+            tracing::warn!(
+                path = %tmp.display(),
+                error = %err,
+                "failed to write route-learning state temp file"
+            );
+            return;
+        }
+        if let Err(err) = std::fs::rename(&tmp, &path) {
+            tracing::warn!(
+                path = %path.display(),
+                error = %err,
+                "failed to move route-learning state into place"
+            );
+        }
+    }
+
+    fn route_learning_effective_stats(
+        stats: &RouteLearningStats,
+        now_ms: i64,
+    ) -> Option<RouteLearningStats> {
+        if stats.samples == 0 {
+            return None;
+        }
+        let mut out = stats.clone();
+        if out.updated_at_unix_ms <= 0 {
+            return Some(out);
+        }
+        let age_ms = now_ms.saturating_sub(out.updated_at_unix_ms).max(0);
+        let ttl_secs = smart_routing_learning_ttl_secs();
+        if ttl_secs > 0 {
+            let ttl_ms = ttl_secs.saturating_mul(1000);
+            if age_ms >= ttl_ms {
+                return None;
+            }
+        }
+        let half_life_secs = smart_routing_learning_half_life_secs();
+        if half_life_secs <= 0 || age_ms <= 0 {
+            return Some(out);
+        }
+        let half_life_ms = (half_life_secs.saturating_mul(1000)) as f64;
+        let decay = (0.5_f64)
+            .powf((age_ms as f64) / half_life_ms)
+            .clamp(0.0, 1.0);
+        let baseline_success = 0.90;
+        let baseline_latency = 1800.0;
+        out.success_rate = baseline_success + (out.success_rate - baseline_success) * decay;
+        out.avg_latency_ms = baseline_latency + (out.avg_latency_ms - baseline_latency) * decay;
+        out.consecutive_failures = ((out.consecutive_failures as f64) * decay).round() as u32;
+        out.samples = ((out.samples as f64) * decay).round().max(1.0) as u32;
+        Some(out)
+    }
+
+    fn prune_route_learning_locked(
+        map: &mut HashMap<String, RouteLearningStats>,
+        now_ms: i64,
+    ) -> bool {
+        let before = map.len();
+        map.retain(|_, stats| Self::route_learning_effective_stats(stats, now_ms).is_some());
+        map.len() != before
     }
 
     /// Attach an in-process sub-agent orchestrator. When set, `delegate_task`
@@ -5356,7 +5529,11 @@ impl AgentLoop {
             .filter(|s| !s.is_empty())
             .unwrap_or(inferred_provider.as_str())
             .to_ascii_lowercase();
-        format!("{}:{}", provider, inferred_model.trim().to_ascii_lowercase())
+        format!(
+            "{}:{}",
+            provider,
+            inferred_model.trim().to_ascii_lowercase()
+        )
     }
 
     fn route_learning_key_for_route(
@@ -5375,10 +5552,27 @@ impl AgentLoop {
     }
 
     fn route_learning_stats_for_key(&self, key: &str) -> Option<RouteLearningStats> {
-        self.route_learning
-            .lock()
-            .ok()
-            .and_then(|m| m.get(key).cloned())
+        let now_ms = now_unix_ms();
+        let mut persist_snapshot: Option<HashMap<String, RouteLearningStats>> = None;
+        let stats = if let Ok(mut map) = self.route_learning.lock() {
+            let mut changed = Self::prune_route_learning_locked(&mut map, now_ms);
+            let out = map
+                .get(key)
+                .and_then(|stats| Self::route_learning_effective_stats(stats, now_ms));
+            if out.is_none() && map.remove(key).is_some() {
+                changed = true;
+            }
+            if changed {
+                persist_snapshot = Some(map.clone());
+            }
+            out
+        } else {
+            None
+        };
+        if let Some(snapshot) = persist_snapshot {
+            self.save_route_learning_state(&snapshot);
+        }
+        stats
     }
 
     fn route_learning_score(stats: Option<&RouteLearningStats>, cheap_bias: f64) -> f64 {
@@ -5410,7 +5604,10 @@ impl AgentLoop {
         }
         let key = self.route_learning_key_for_route(route, response_model);
         let alpha = smart_routing_learning_alpha();
+        let mut persist_snapshot: Option<HashMap<String, RouteLearningStats>> = None;
         if let Ok(mut map) = self.route_learning.lock() {
+            let now_ms = now_unix_ms();
+            let _ = Self::prune_route_learning_locked(&mut map, now_ms);
             let entry = map.entry(key).or_insert_with(RouteLearningStats::default);
             entry.samples = entry.samples.saturating_add(1);
             if entry.samples == 1 {
@@ -5427,6 +5624,11 @@ impl AgentLoop {
             } else {
                 entry.consecutive_failures = entry.consecutive_failures.saturating_add(1);
             }
+            entry.updated_at_unix_ms = now_ms;
+            persist_snapshot = Some(map.clone());
+        }
+        if let Some(snapshot) = persist_snapshot {
+            self.save_route_learning_state(&snapshot);
         }
     }
 
@@ -5438,9 +5640,13 @@ impl AgentLoop {
         let key = self.route_learning_key_for_route(route, response_model);
         let stats = self.route_learning_stats_for_key(&key);
         let score = Self::route_learning_score(stats.as_ref(), 0.0);
+        let ttl_secs = smart_routing_learning_ttl_secs();
+        let half_life_secs = smart_routing_learning_half_life_secs();
         serde_json::json!({
             "key": key,
             "enabled": smart_routing_learning_enabled(),
+            "ttl_secs": ttl_secs,
+            "half_life_secs": half_life_secs,
             "score": score,
             "stats": stats,
         })
@@ -5465,8 +5671,8 @@ impl AgentLoop {
             } => {
                 let primary_key =
                     self.route_learning_key(primary.provider.as_deref(), primary.model.as_str());
-                let cheap_key =
-                    self.route_learning_key(Some(runtime.provider.as_str()), runtime.model.as_str());
+                let cheap_key = self
+                    .route_learning_key(Some(runtime.provider.as_str()), runtime.model.as_str());
                 let primary_stats = self.route_learning_stats_for_key(&primary_key);
                 let cheap_stats = self.route_learning_stats_for_key(&cheap_key);
                 let primary_score = Self::route_learning_score(primary_stats.as_ref(), 0.0);
@@ -6463,7 +6669,8 @@ mod tests {
             match step.kind.as_str() {
                 "success" => Ok(hermes_core::LlmResponse {
                     message: Message::assistant(
-                        step.message.unwrap_or_else(|| format!("ok-{}", self.scenario_id)),
+                        step.message
+                            .unwrap_or_else(|| format!("ok-{}", self.scenario_id)),
                     ),
                     usage: None,
                     model: "chaos".to_string(),
@@ -6473,14 +6680,16 @@ mod tests {
                     step.message
                         .unwrap_or_else(|| "request timeout".to_string()),
                 )),
-                "http_5xx" => Err(AgentError::LlmApi(
-                    step.message
-                        .unwrap_or_else(|| "API error 500: synthetic upstream fault".to_string()),
-                )),
-                "rate_limit" => Err(AgentError::LlmApi(
-                    step.message
-                        .unwrap_or_else(|| "API error 429: synthetic rate limit".to_string()),
-                )),
+                "http_5xx" => {
+                    Err(AgentError::LlmApi(step.message.unwrap_or_else(|| {
+                        "API error 500: synthetic upstream fault".to_string()
+                    })))
+                }
+                "rate_limit" => {
+                    Err(AgentError::LlmApi(step.message.unwrap_or_else(|| {
+                        "API error 429: synthetic rate limit".to_string()
+                    })))
+                }
                 other => Err(AgentError::LlmApi(format!(
                     "unsupported chaos step '{}' in scenario '{}'",
                     other, self.scenario_id
@@ -6537,7 +6746,10 @@ mod tests {
     fn chaos_harness_fixture_is_seeded_and_unique() {
         let fixture = load_chaos_harness_fixture();
         assert_eq!(fixture.schema_version, 1, "unexpected fixture schema");
-        assert!(!fixture.scenarios.is_empty(), "chaos fixture must not be empty");
+        assert!(
+            !fixture.scenarios.is_empty(),
+            "chaos fixture must not be empty"
+        );
         let mut ids = std::collections::HashSet::new();
         let mut seeds = std::collections::HashSet::new();
         for scenario in fixture.scenarios {
@@ -7472,6 +7684,7 @@ mod tests {
                     success_rate: 0.98,
                     avg_latency_ms: 900.0,
                     consecutive_failures: 0,
+                    updated_at_unix_ms: now_unix_ms(),
                 },
             );
             m.insert(
@@ -7481,10 +7694,12 @@ mod tests {
                     success_rate: 0.35,
                     avg_latency_ms: 3800.0,
                     consecutive_failures: 3,
+                    updated_at_unix_ms: now_unix_ms(),
                 },
             );
         }
-        let selected = agent.resolve_smart_runtime_route(&[Message::user("summarize today's work")]);
+        let selected =
+            agent.resolve_smart_runtime_route(&[Message::user("summarize today's work")]);
         assert!(
             selected.is_none(),
             "online learning should keep primary when cheap route is unstable"
@@ -7528,11 +7743,10 @@ mod tests {
             }
         }
 
-        let agent = AgentLoop::new(
-            AgentConfig::default(),
-            Arc::new(ToolRegistry::new()),
-            Arc::new(DummyProvider),
-        );
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut cfg = AgentConfig::default();
+        cfg.hermes_home = Some(tmp.path().to_string_lossy().to_string());
+        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), Arc::new(DummyProvider));
         agent.update_route_learning(None, Some("openai:gpt-4o"), 2100, false);
         agent.update_route_learning(None, Some("openai:gpt-4o"), 900, true);
         let snapshot = agent.route_learning_snapshot(None, Some("openai:gpt-4o"));
@@ -7541,6 +7755,156 @@ mod tests {
         assert_eq!(snapshot["stats"]["samples"], 2);
         assert!(snapshot["stats"]["success_rate"].as_f64().unwrap_or(0.0) > 0.0);
         assert!(snapshot["stats"]["avg_latency_ms"].as_f64().unwrap_or(0.0) > 0.0);
+    }
+
+    #[test]
+    fn test_route_learning_persists_across_agent_restarts() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut cfg = AgentConfig::default();
+        cfg.hermes_home = Some(tmp.path().to_string_lossy().to_string());
+
+        let agent = AgentLoop::new(
+            cfg.clone(),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        agent.update_route_learning(None, Some("openai:gpt-4o"), 1200, true);
+        let persisted_path = route_learning_state_path(&cfg);
+        assert!(
+            persisted_path.exists(),
+            "route-learning state file must exist"
+        );
+
+        let reloaded = AgentLoop::new(
+            cfg.clone(),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let snapshot = reloaded.route_learning_snapshot(None, Some("openai:gpt-4o"));
+        assert_eq!(snapshot["key"], "openai:gpt-4o");
+        assert!(snapshot["stats"]["samples"].as_u64().unwrap_or(0) >= 1);
+    }
+
+    #[test]
+    fn test_route_learning_malformed_file_is_safe_fallback() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut cfg = AgentConfig::default();
+        cfg.hermes_home = Some(tmp.path().to_string_lossy().to_string());
+        let state_path = route_learning_state_path(&cfg);
+        std::fs::create_dir_all(
+            state_path
+                .parent()
+                .expect("route-learning path should have a parent"),
+        )
+        .expect("create route-learning dir");
+        std::fs::write(&state_path, "{ this-is-invalid-json")
+            .expect("write malformed route-learning file");
+
+        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), Arc::new(DummyProvider));
+        let snapshot = agent.route_learning_snapshot(None, Some("openai:gpt-4o"));
+        assert!(
+            snapshot["stats"].is_null(),
+            "malformed state must fall back cleanly"
+        );
+    }
+
+    #[test]
+    fn test_route_learning_decay_and_ttl() {
+        let now_ms = now_unix_ms();
+        let stale = RouteLearningStats {
+            samples: 10,
+            success_rate: 0.05,
+            avg_latency_ms: 9900.0,
+            consecutive_failures: 9,
+            updated_at_unix_ms: now_ms - (8 * 24 * 60 * 60 * 1000),
+        };
+        assert!(
+            AgentLoop::route_learning_effective_stats(&stale, now_ms).is_none(),
+            "stale route entries must expire by ttl"
+        );
+
+        let recent = RouteLearningStats {
+            samples: 10,
+            success_rate: 0.20,
+            avg_latency_ms: 4000.0,
+            consecutive_failures: 4,
+            updated_at_unix_ms: now_ms - (12 * 60 * 60 * 1000),
+        };
+        let adjusted = AgentLoop::route_learning_effective_stats(&recent, now_ms)
+            .expect("recent entry should not expire");
+        assert!(adjusted.success_rate > recent.success_rate);
+        assert!(adjusted.avg_latency_ms < recent.avg_latency_ms);
+        assert!(adjusted.samples <= recent.samples);
     }
 
     #[test]
