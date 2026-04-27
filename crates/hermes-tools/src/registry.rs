@@ -14,7 +14,8 @@ use serde_json::Value;
 use tracing::warn;
 
 use crate::tool_policy::{
-    annotate_policy_audit, annotate_policy_simulation, ToolPolicyDecision, ToolPolicyEngine,
+    annotate_policy_audit, annotate_policy_simulation, default_tool_policy_counters_path,
+    persist_tool_policy_counters, ToolPolicyCounters, ToolPolicyDecision, ToolPolicyEngine,
 };
 
 // ---------------------------------------------------------------------------
@@ -57,6 +58,8 @@ pub struct ToolRegistryInner {
     pub global_max_result_size_chars: usize,
     /// Centralized policy engine for tool-call governance.
     pub policy: ToolPolicyEngine,
+    /// Runtime counters for policy outcomes (allow/deny/audit/simulate).
+    pub policy_counters: ToolPolicyCounters,
 }
 
 /// Thread-safe wrapper around `ToolRegistryInner`.
@@ -73,6 +76,7 @@ impl ToolRegistry {
                 tools: HashMap::new(),
                 global_max_result_size_chars: 50_000,
                 policy: ToolPolicyEngine::from_env(),
+                policy_counters: ToolPolicyCounters::default(),
             })),
         }
     }
@@ -84,6 +88,7 @@ impl ToolRegistry {
                 tools: HashMap::new(),
                 global_max_result_size_chars: max,
                 policy: ToolPolicyEngine::from_env(),
+                policy_counters: ToolPolicyCounters::default(),
             })),
         }
     }
@@ -92,6 +97,12 @@ impl ToolRegistry {
     pub fn set_policy(&self, policy: ToolPolicyEngine) {
         let mut inner = self.inner.lock().unwrap();
         inner.policy = policy;
+    }
+
+    /// Snapshot current policy counters.
+    pub fn policy_counters(&self) -> ToolPolicyCounters {
+        let inner = self.inner.lock().unwrap();
+        inner.policy_counters.clone()
     }
 
     /// Register a new tool.
@@ -165,9 +176,6 @@ impl ToolRegistry {
                 None => return Self::tool_error(&format!("Tool not found: {}", name)),
             };
             let decision = inner.policy.evaluate(name, &params);
-            if !decision.allow {
-                return Self::tool_policy_error(name, &decision);
-            }
             (
                 Arc::clone(&entry.handler),
                 entry
@@ -176,6 +184,10 @@ impl ToolRegistry {
                 decision,
             )
         };
+        self.record_policy_decision(&policy_decision);
+        if !policy_decision.allow {
+            return Self::tool_policy_error(name, &policy_decision);
+        }
         maybe_log_audit(name, &policy_decision);
 
         // Use tokio to run the async handler
@@ -214,6 +226,7 @@ impl ToolRegistry {
                 None => return Self::tool_error(&format!("Tool not found: {}", name)),
             }
         };
+        self.record_policy_decision(&policy_decision);
         if !policy_decision.allow {
             return Self::tool_policy_error(name, &policy_decision);
         }
@@ -314,12 +327,37 @@ impl ToolRegistry {
     /// Format a tool result. If the result looks like JSON, pass it through;
     /// otherwise wrap it as `{"result": "..."}`.
     pub fn tool_result(data: &str) -> String {
-        if data.starts_with('{') || data.starts_with('[') {
+        if looks_like_json(data) {
             // Assume already JSON-ish, pass through
             data.to_string()
         } else {
             serde_json::json!({ "result": data }).to_string()
         }
+    }
+
+    fn record_policy_decision(&self, decision: &ToolPolicyDecision) {
+        let counters_snapshot = {
+            let mut inner = self.inner.lock().unwrap();
+            if decision.allow {
+                inner.policy_counters.allow = inner.policy_counters.allow.saturating_add(1);
+            } else {
+                inner.policy_counters.deny = inner.policy_counters.deny.saturating_add(1);
+            }
+            if decision.audited_only {
+                inner.policy_counters.audit_only =
+                    inner.policy_counters.audit_only.saturating_add(1);
+            }
+            if decision.simulated {
+                inner.policy_counters.simulate = inner.policy_counters.simulate.saturating_add(1);
+            }
+            if decision.would_block {
+                inner.policy_counters.would_block =
+                    inner.policy_counters.would_block.saturating_add(1);
+            }
+            inner.policy_counters.clone()
+        };
+        let _ =
+            persist_tool_policy_counters(&default_tool_policy_counters_path(), &counters_snapshot);
     }
 }
 
@@ -367,6 +405,18 @@ fn maybe_annotate_audit(output: String, decision: &ToolPolicyDecision) -> String
     }
 }
 
+fn looks_like_json(data: &str) -> bool {
+    let bytes = data.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= bytes.len() {
+        return false;
+    }
+    matches!(bytes[i], b'{' | b'[')
+}
+
 impl Default for ToolRegistry {
     fn default() -> Self {
         Self::new()
@@ -391,6 +441,7 @@ mod tests {
     use async_trait::async_trait;
     use hermes_core::{tool_schema, JsonSchema, ToolError};
     use serde_json::json;
+    use std::time::Instant;
 
     use crate::tool_policy::{ToolPolicyEngine, ToolPolicyMode};
 
@@ -454,6 +505,11 @@ mod tests {
         let json_result = ToolRegistry::tool_result(r#"{"key": "val"}"#);
         let parsed: Value = serde_json::from_str(&json_result).unwrap();
         assert_eq!(parsed["key"], "val");
+
+        // JSON with whitespace prefix still passes through.
+        let spaced = ToolRegistry::tool_result("  [1,2,3]");
+        let parsed: Value = serde_json::from_str(&spaced).unwrap();
+        assert_eq!(parsed.as_array().map(|a| a.len()), Some(3));
     }
 
     #[test]
@@ -598,5 +654,66 @@ mod tests {
         assert_eq!(parsed["_tool_policy_simulation"]["mode"], "simulate");
         assert_eq!(parsed["_tool_policy_simulation"]["would_block"], true);
         assert_eq!(parsed["_tool_policy_simulation"]["code"], "tool_denylisted");
+    }
+
+    #[test]
+    fn policy_counters_track_dispatch_outcomes() {
+        let registry = ToolRegistry::new();
+        let handler = Arc::new(EchoHandler);
+        let schema = handler.schema();
+        registry.register(
+            "echo",
+            "test",
+            schema,
+            handler,
+            Arc::new(|| true),
+            vec![],
+            false,
+            "Echo",
+            "🔊",
+            None,
+        );
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+
+        registry
+            .set_policy(ToolPolicyEngine::new(ToolPolicyMode::Enforce).with_denylist(&["echo"]));
+        let _ = rt.block_on(async { registry.dispatch_async("echo", json!({"k":"v"})).await });
+        let counters = registry.policy_counters();
+        assert_eq!(counters.deny, 1);
+        assert_eq!(counters.would_block, 1);
+
+        registry
+            .set_policy(ToolPolicyEngine::new(ToolPolicyMode::Simulate).with_denylist(&["echo"]));
+        let _ = rt.block_on(async { registry.dispatch_async("echo", json!({"k":"v"})).await });
+        let counters = registry.policy_counters();
+        assert_eq!(counters.allow, 1);
+        assert_eq!(counters.simulate, 1);
+        assert_eq!(counters.audit_only, 1);
+        assert_eq!(counters.would_block, 2);
+    }
+
+    #[test]
+    fn tool_result_fast_path_benchmark_report() {
+        let payload = r#"{"alpha":1,"beta":2,"nested":{"k":"v","arr":[1,2,3]}}"#;
+        let warmup = 1_000usize;
+        for _ in 0..warmup {
+            let _ = ToolRegistry::tool_result(payload);
+            let _ = ToolRegistry::tool_result("plain result text");
+        }
+
+        let iters = 20_000usize;
+        let start = Instant::now();
+        for _ in 0..iters {
+            let _ = ToolRegistry::tool_result(payload);
+            let _ = ToolRegistry::tool_result("plain result text");
+        }
+        let elapsed = start.elapsed();
+        let ns_per_op = elapsed.as_nanos() / (iters as u128 * 2);
+        println!("registry_tool_result_ns_per_op={}", ns_per_op);
+        assert!(
+            ns_per_op < 300_000,
+            "registry tool_result fast-path regressed: {} ns/op",
+            ns_per_op
+        );
     }
 }

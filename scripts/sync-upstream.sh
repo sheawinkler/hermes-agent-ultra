@@ -26,6 +26,9 @@ Options:
   --redteam-gate            Run adversarial red-team gate after verification (default)
   --no-redteam-gate         Skip adversarial red-team gate
   --redteam-cmd <command>   Red-team gate command (default: python3 scripts/run-redteam-gate.py)
+  --elite-gate              Run consolidated elite sync gate (optional)
+  --no-elite-gate           Skip consolidated elite sync gate (default)
+  --elite-cmd <command>     Elite gate command (default: python3 scripts/run-elite-sync-gate.py)
   --no-pr                   Do not open a PR in branch-pr mode
   --draft-pr                Open PR as draft in branch-pr mode
   --pr-labels <csv>         Labels to apply on created PR (default: upstream-sync,parity-sync)
@@ -54,6 +57,8 @@ RUN_TESTS="1"
 TEST_CMD="cargo test -p hermes-gateway"
 RUN_REDTEAM_GATE="${RUN_REDTEAM_GATE:-1}"
 REDTEAM_CMD="${REDTEAM_CMD:-python3 scripts/run-redteam-gate.py}"
+RUN_ELITE_GATE="${RUN_ELITE_GATE:-0}"
+ELITE_CMD="${ELITE_CMD:-python3 scripts/run-elite-sync-gate.py}"
 CREATE_PR="1"
 PR_DRAFT="0"
 PR_LABELS="${PR_LABELS:-upstream-sync,parity-sync}"
@@ -138,6 +143,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --redteam-cmd)
       REDTEAM_CMD="${2:?missing value for --redteam-cmd}"
+      shift 2
+      ;;
+    --elite-gate)
+      RUN_ELITE_GATE="1"
+      shift
+      ;;
+    --no-elite-gate)
+      RUN_ELITE_GATE="0"
+      shift
+      ;;
+    --elite-cmd)
+      ELITE_CMD="${2:?missing value for --elite-cmd}"
       shift 2
       ;;
     --no-pr)
@@ -247,6 +264,8 @@ create_report_header() {
   append_report "strict_risk_gate: ${STRICT_RISK_GATE}"
   append_report "run_redteam_gate: ${RUN_REDTEAM_GATE}"
   append_report "redteam_cmd: ${REDTEAM_CMD}"
+  append_report "run_elite_gate: ${RUN_ELITE_GATE}"
+  append_report "elite_cmd: ${ELITE_CMD}"
   append_report "draft_pr: ${PR_DRAFT}"
   append_report "allow_risk_paths: ${ALLOW_RISK_PATHS}"
   append_report "pr_labels: ${PR_LABELS}"
@@ -523,6 +542,22 @@ if [[ "${RUN_REDTEAM_GATE}" == "1" ]]; then
     REDTEAM_REPORT_LINE="$(printf '%s\n' "${REDTEAM_OUTPUT}" | awk '/\[redteam-gate\] Report: /{line=$0} END{print line}')"
     REDTEAM_REPORT_PATH="${REDTEAM_REPORT_LINE#*Report: }"
     append_report "redteam_report: ${REDTEAM_REPORT_PATH}"
+  fi
+fi
+
+if [[ "${RUN_ELITE_GATE}" == "1" ]]; then
+  log "Running elite gate: ${ELITE_CMD}"
+  ELITE_OUTPUT="$(bash -lc "${ELITE_CMD}" 2>&1)" || {
+    append_report "status: elite-gate-failed"
+    append_report "elite_output: ${ELITE_OUTPUT//$'\n'/\\n}"
+    printf '%s\n' "${ELITE_OUTPUT}"
+    die "Elite gate failed"
+  }
+  printf '%s\n' "${ELITE_OUTPUT}"
+  if [[ "${ELITE_OUTPUT}" == *"[elite-sync-gate] Report: "* ]]; then
+    ELITE_REPORT_LINE="$(printf '%s\n' "${ELITE_OUTPUT}" | awk '/\[elite-sync-gate\] Report: /{line=$0} END{print line}')"
+    ELITE_REPORT_PATH="${ELITE_REPORT_LINE#*Report: }"
+    append_report "elite_report: ${ELITE_REPORT_PATH}"
   fi
 fi
 

@@ -118,6 +118,16 @@ pub enum CliCommand {
     /// Check for updates.
     Update,
 
+    /// Run consolidated elite diagnostics and release gates.
+    EliteCheck {
+        /// Print machine-readable JSON only.
+        #[arg(long)]
+        json: bool,
+        /// Return non-zero on any failing elite gate.
+        #[arg(long)]
+        strict: bool,
+    },
+
     /// Verify signed provenance sidecar for an artifact.
     VerifyProvenance {
         /// Artifact path to verify (e.g. doctor snapshot or replay manifest).
@@ -759,6 +769,18 @@ mod tests {
     fn cli_parse_status() {
         let cli = Cli::try_parse_from(vec!["hermes", "status"]).unwrap();
         assert!(matches!(cli.command, Some(CliCommand::Status)));
+    }
+
+    #[test]
+    fn cli_parse_elite_check() {
+        let cli = Cli::try_parse_from(vec!["hermes", "elite-check", "--json", "--strict"]).unwrap();
+        match cli.command {
+            Some(CliCommand::EliteCheck { json, strict }) => {
+                assert!(json);
+                assert!(strict);
+            }
+            _ => panic!("Expected EliteCheck command"),
+        }
     }
 
     #[test]

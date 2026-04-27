@@ -6770,8 +6770,19 @@ mod tests {
     async fn chaos_harness_profiles_verify_retry_and_fallback() {
         let fixture = load_chaos_harness_fixture();
         let mut diagnostics = Vec::new();
+        let mut runs = Vec::new();
         for scenario in fixture.scenarios {
             let run = run_chaos_harness_scenario(&scenario).await;
+            runs.push(serde_json::json!({
+                "scenario": scenario.id,
+                "seed": scenario.seed,
+                "actual": {
+                    "outcome": run.outcome,
+                    "attempts": run.attempts,
+                    "fallback_calls": run.fallback_calls,
+                    "error": run.error,
+                }
+            }));
             let mut mismatches = Vec::new();
 
             if run.outcome != scenario.expected.outcome {
@@ -6817,6 +6828,11 @@ mod tests {
                 }));
             }
         }
+
+        println!(
+            "adapter chaos harness results: {}",
+            serde_json::to_string(&runs).expect("serialize chaos runs")
+        );
 
         assert!(
             diagnostics.is_empty(),
