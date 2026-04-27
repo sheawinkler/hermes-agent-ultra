@@ -25,6 +25,9 @@ fork-specific history.
 - `scripts/run-adapter-chaos-harness.py`
   - Runs deterministic adapter chaos scenarios (timeout/5xx/rate-limit)
   - Emits JSON diagnostics under `.sync-reports/adapter-chaos-<timestamp>.json`
+- `scripts/run-zero-copy-hotpath-bench.py`
+  - Runs zero-copy policy hot-path benchmark test and captures ns/eval evidence
+  - Emits JSON diagnostics under `.sync-reports/zero-copy-hotpath-<timestamp>.json`
 
 ## One-shot Manual Sync
 
@@ -35,6 +38,7 @@ bash scripts/sync-upstream.sh --draft-pr
 bash scripts/sync-upstream.sh --draft-pr --pr-labels "upstream-sync,parity-sync,risk-reviewed"
 bash scripts/sync-upstream.sh --redteam-cmd "python3 scripts/run-redteam-gate.py --suite scripts/redteam-cases.json"
 python3 scripts/run-adapter-chaos-harness.py --repo-root .
+python3 scripts/run-zero-copy-hotpath-bench.py --repo-root .
 ```
 
 Cherry-pick mode for linear upstream replay:
