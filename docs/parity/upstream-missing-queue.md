@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-27T07:57:54.246236+00:00`
+Generated: `2026-04-27T08:01:12.277794+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `675`.
 
@@ -15,8 +15,8 @@ Generated: `2026-04-27T07:57:54.246236+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 324 |
-| ported | 41 |
+| pending | 320 |
+| ported | 45 |
 | superseded | 310 |
 
 ## First 100 Pending Commits
@@ -46,16 +46,12 @@ Generated: `2026-04-27T07:57:54.246236+00:00`
 | `5006b2204b32` | #26 | fix(update): honor RestartSec when polling for gateway respawn (#15707) |
 | `7c17accb29bc` | #20 | fix: /stop now immediately aborts streaming retry loop |
 | `9daa0620a6bd` | #26 | fix(agent): ordering fix in _copy_reasoning_content_for_api — cross-provider reasoning isolation |
-| `e9c47c70422d` | #20 | fix(tui): honor launch model overrides |
-| `57b43fdd4bf9` | #20 | fix(tui): preserve provider precedence on startup |
 | `4db58d45d4e0` | #20 | fix(tui): address startup provider review |
 | `2dfcc8087a8e` | #20 | fix(tui): avoid network lookup during startup |
 | `e48a497d166b` | #20 | fix(tui): share static model detection |
-| `5e52011de363` | #22 | fix(tui): bind provider as model alias |
 | `48bdd2445e8e` | #22 | fix(tui): apply ui-tui fix pass and restore type-check |
 | `fdcbd2257b2d` | #20 | fix(tui): resolve startup model aliases statically |
 | `a046483e8601` | #22 | fix(tui): share overlay close controls |
-| `c6fdf48b79eb` | #20 | fix(tui): sync inference model after switches |
 | `6e83d90eb490` | #22 | refactor(tui): tighten overlay helpers |
 | `919274b60ef0` | #22 | fix(tui): align overlay q shortcut casing |
 | `bcc5362432de` | #22 | fix(tui): honor client copy shortcut over ssh |
@@ -123,4 +119,8 @@ Generated: `2026-04-27T07:57:54.246236+00:00`
 | `1c964ed43ff6` | #22 | fix(tui): rely on native cursor for input |
 | `355e0ae960ec` | #22 | fix(tui): keep streaming progress stable during interaction |
 | `381121025edf` | #22 | fix(tui): address review feedback |
+| `bbd950efcf20` | #22 | fix(tui): keep stream cadence responsive while typing |
+| `8f0fa0836f3f` | #22 | fix(tui): preserve composer width on narrow panes |
+| `bc1731044260` | #22 | fix(tui): smooth selection drag behavior |
+| `7d68ea9501c5` | #22 | fix(tui): stream legacy thinking deltas visibly |
 
