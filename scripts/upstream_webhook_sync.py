@@ -862,6 +862,7 @@ def run_sync_for_event(
     skip_tests: bool,
     no_pr: bool,
     draft_pr: bool,
+    pr_labels: str,
     timeout_sec: int,
 ) -> tuple[int, str, str]:
     sync_script = os.path.join(repo_root, "scripts", "sync-upstream.sh")
@@ -891,6 +892,8 @@ def run_sync_for_event(
         cmd.append("--no-pr")
     if draft_pr:
         cmd.append("--draft-pr")
+    if pr_labels.strip():
+        cmd.extend(["--pr-labels", pr_labels.strip()])
 
     LOG.info(
         "running sync for delivery=%s repo=%s ref=%s after=%s",
@@ -1081,6 +1084,7 @@ def worker_loop(args: argparse.Namespace) -> int:
                 skip_tests=args.no_tests,
                 no_pr=args.no_pr,
                 draft_pr=args.draft_pr,
+                pr_labels=args.pr_labels,
                 timeout_sec=args.sync_timeout_sec,
             )
             outcome = parse_report_status(report_path)
@@ -1155,6 +1159,7 @@ def worker_loop(args: argparse.Namespace) -> int:
                 skip_tests=args.no_tests,
                 no_pr=args.no_pr,
                 draft_pr=args.draft_pr,
+                pr_labels=args.pr_labels,
                 timeout_sec=args.sync_timeout_sec,
             )
             outcome = parse_report_status(report_path)
@@ -1229,6 +1234,7 @@ def worker_loop(args: argparse.Namespace) -> int:
             skip_tests=args.no_tests,
             no_pr=args.no_pr,
             draft_pr=args.draft_pr,
+            pr_labels=args.pr_labels,
             timeout_sec=args.sync_timeout_sec,
         )
         outcome = parse_report_status(report_path)
@@ -1323,6 +1329,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Open sync PRs as draft (ignored when --no-pr is set)",
+    )
+    worker.add_argument(
+        "--pr-labels",
+        default=os.environ.get("UPSTREAM_SYNC_PR_LABELS", "upstream-sync,parity-sync"),
+        help="Comma-separated labels applied to created sync PRs.",
     )
     worker.add_argument(
         "--disable-parity-drift-check",

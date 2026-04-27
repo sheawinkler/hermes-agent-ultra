@@ -82,6 +82,7 @@ use hermes_telemetry::init_telemetry_from_env;
 use hermes_tools::ToolRegistry;
 use rand::rngs::OsRng;
 use rand::RngCore;
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -178,10 +179,11 @@ async fn main() {
         CliCommand::Setup => run_setup(cli).await,
         CliCommand::Doctor {
             deep,
+            self_heal,
             snapshot,
             snapshot_path,
             bundle,
-        } => run_doctor(cli, deep, snapshot, snapshot_path, bundle).await,
+        } => run_doctor(cli, deep, self_heal, snapshot, snapshot_path, bundle).await,
         CliCommand::Update => run_update().await,
         CliCommand::Status => run_status(cli).await,
         CliCommand::Dashboard {
@@ -7690,6 +7692,7 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
 async fn run_doctor(
     cli: Cli,
     deep: bool,
+    self_heal: bool,
     snapshot: bool,
     snapshot_path: Option<String>,
     bundle: bool,
@@ -7699,6 +7702,27 @@ async fn run_doctor(
 
     let mut checks: Vec<serde_json::Value> = Vec::new();
     let config_dir = hermes_config::hermes_home();
+    let self_heal_actions = if self_heal {
+        println!("Self-heal actions:");
+        let actions = run_doctor_self_heal(&cli);
+        for action in &actions {
+            let status = action
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let detail = action.get("detail").and_then(|v| v.as_str()).unwrap_or("");
+            println!("  - {}: {}", status, detail);
+        }
+        println!();
+        checks.push(serde_json::json!({
+            "name": "self_heal",
+            "ok": actions.iter().all(|a| a.get("ok").and_then(|v| v.as_bool()).unwrap_or(false)),
+            "actions": actions,
+        }));
+        actions
+    } else {
+        Vec::new()
+    };
 
     let config_dir_ok = config_dir.exists();
     print!("Config directory ({})... ", config_dir.display());
@@ -7921,25 +7945,37 @@ async fn run_doctor(
         }));
 
         let replay_dir = hermes_state_root(&cli).join("logs").join("replay");
+        let replay_summaries = replay_integrity_summaries(&replay_dir, 5);
         let replay_count = std::fs::read_dir(&replay_dir)
-            .map(|it| it.filter_map(|e| e.ok()).count())
+            .map(|it| {
+                it.filter_map(|e| e.ok().filter(|e| e.path().is_file()).map(|_| ()))
+                    .count()
+            })
             .unwrap_or(0usize);
+        let replay_chain_ok = replay_summaries
+            .iter()
+            .all(|entry| entry.hash_chain_ok && entry.invalid_lines == 0);
         println!(
-            "  replay traces... {} ({} files)",
+            "  replay traces... {} ({} files, chain {})",
             if replay_count > 0 { "✓" } else { "(none)" },
-            replay_count
+            replay_count,
+            if replay_chain_ok { "ok" } else { "warn" }
         );
         checks.push(serde_json::json!({
             "name": "replay_traces",
             "ok": true,
             "dir": replay_dir.display().to_string(),
-            "count": replay_count
+            "count": replay_count,
+            "chain_ok": replay_chain_ok,
+            "summaries": replay_summaries
         }));
     }
 
     let snapshot_payload = serde_json::json!({
         "generated_at": chrono::Utc::now().to_rfc3339(),
         "deep": deep,
+        "self_heal": self_heal,
+        "self_heal_actions": self_heal_actions,
         "state_root": hermes_state_root(&cli).display().to_string(),
         "checks": checks,
         "config_summary": config_summary,
@@ -7964,6 +8000,121 @@ async fn run_doctor(
     Ok(())
 }
 
+fn run_doctor_self_heal(cli: &Cli) -> Vec<serde_json::Value> {
+    let mut actions = Vec::new();
+    let state_root = hermes_state_root(cli);
+    let required_dirs = [
+        state_root.clone(),
+        state_root.join("profiles"),
+        state_root.join("sessions"),
+        state_root.join("logs"),
+        state_root.join("skills"),
+        state_root.join("auth"),
+        state_root.join("snapshots"),
+    ];
+
+    for dir in required_dirs {
+        if dir.exists() {
+            actions.push(serde_json::json!({
+                "ok": true,
+                "status": "exists",
+                "detail": format!("directory {}", dir.display()),
+            }));
+            continue;
+        }
+        match std::fs::create_dir_all(&dir) {
+            Ok(_) => actions.push(serde_json::json!({
+                "ok": true,
+                "status": "created",
+                "detail": format!("directory {}", dir.display()),
+            })),
+            Err(err) => actions.push(serde_json::json!({
+                "ok": false,
+                "status": "error",
+                "detail": format!("directory {}: {}", dir.display(), err),
+            })),
+        }
+    }
+
+    let pid_path = gateway_pid_path_for_cli(cli);
+    if pid_path.exists() {
+        match read_gateway_pid(&pid_path) {
+            Some(pid) if !gateway_pid_is_alive(pid) => match std::fs::remove_file(&pid_path) {
+                Ok(_) => actions.push(serde_json::json!({
+                    "ok": true,
+                    "status": "fixed",
+                    "detail": format!("removed stale gateway pid file {} (pid {})", pid_path.display(), pid),
+                })),
+                Err(err) => actions.push(serde_json::json!({
+                    "ok": false,
+                    "status": "error",
+                    "detail": format!("remove stale pid {} failed: {}", pid_path.display(), err),
+                })),
+            },
+            Some(pid) => actions.push(serde_json::json!({
+                "ok": true,
+                "status": "noop",
+                "detail": format!("gateway pid {} is active", pid),
+            })),
+            None => actions.push(serde_json::json!({
+                "ok": true,
+                "status": "noop",
+                "detail": format!("pid file {} is unreadable; left unchanged", pid_path.display()),
+            })),
+        }
+    }
+
+    let vault_path = secret_vault_path_for_cli(cli);
+    if vault_path.exists() {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            match std::fs::metadata(&vault_path) {
+                Ok(meta) => {
+                    let mode = meta.permissions().mode() & 0o777;
+                    if mode != 0o600 {
+                        let mut perms = meta.permissions();
+                        perms.set_mode(0o600);
+                        match std::fs::set_permissions(&vault_path, perms) {
+                            Ok(_) => actions.push(serde_json::json!({
+                                "ok": true,
+                                "status": "fixed",
+                                "detail": format!("normalized permissions on {} to 600", vault_path.display()),
+                            })),
+                            Err(err) => actions.push(serde_json::json!({
+                                "ok": false,
+                                "status": "error",
+                                "detail": format!("set permissions on {} failed: {}", vault_path.display(), err),
+                            })),
+                        }
+                    } else {
+                        actions.push(serde_json::json!({
+                            "ok": true,
+                            "status": "noop",
+                            "detail": format!("permissions already secure on {}", vault_path.display()),
+                        }));
+                    }
+                }
+                Err(err) => actions.push(serde_json::json!({
+                    "ok": false,
+                    "status": "error",
+                    "detail": format!("metadata {} failed: {}", vault_path.display(), err),
+                })),
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            actions.push(serde_json::json!({
+                "ok": true,
+                "status": "noop",
+                "detail": format!("permission normalization skipped on non-unix for {}", vault_path.display()),
+            }));
+        }
+    }
+
+    actions
+}
+
 fn write_doctor_snapshot(
     cli: &Cli,
     snapshot_payload: &serde_json::Value,
@@ -7986,6 +8137,125 @@ fn write_doctor_snapshot(
     std::fs::write(&path, body)
         .map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))?;
     Ok(path)
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+struct ReplayIntegritySummary {
+    file: String,
+    checksum_sha256: Option<String>,
+    events: usize,
+    invalid_lines: usize,
+    hash_chain_ok: bool,
+    last_event_hash: Option<String>,
+}
+
+fn sha256_file_hex(path: &Path) -> Option<String> {
+    let bytes = std::fs::read(path).ok()?;
+    let digest = Sha256::digest(&bytes);
+    Some(digest.iter().map(|b| format!("{:02x}", b)).collect())
+}
+
+fn replay_integrity_for_file(path: &Path) -> ReplayIntegritySummary {
+    let mut events = 0usize;
+    let mut invalid_lines = 0usize;
+    let mut hash_chain_ok = true;
+    let mut last_event_hash: Option<String> = None;
+    let mut last_seq: Option<u64> = None;
+
+    if let Ok(body) = std::fs::read_to_string(path) {
+        for line in body.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let parsed: serde_json::Value = match serde_json::from_str(trimmed) {
+                Ok(v) => v,
+                Err(_) => {
+                    invalid_lines = invalid_lines.saturating_add(1);
+                    hash_chain_ok = false;
+                    continue;
+                }
+            };
+            events = events.saturating_add(1);
+            let seq = parsed.get("seq").and_then(|v| v.as_u64());
+            if let (Some(prev), Some(cur_seq)) = (last_seq, seq) {
+                if cur_seq != prev.saturating_add(1) {
+                    hash_chain_ok = false;
+                }
+            }
+            if let Some(cur_seq) = seq {
+                last_seq = Some(cur_seq);
+            }
+            let prev_hash = parsed
+                .get("prev_hash")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            let event_hash = parsed
+                .get("event_hash")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+            if let (Some(expected_prev), Some(actual_prev)) =
+                (last_event_hash.as_ref(), prev_hash.as_ref())
+            {
+                if expected_prev != actual_prev {
+                    hash_chain_ok = false;
+                }
+            }
+            if event_hash.is_none() {
+                hash_chain_ok = false;
+            }
+            last_event_hash = event_hash.or(last_event_hash);
+        }
+    } else {
+        invalid_lines = 1;
+        hash_chain_ok = false;
+    }
+
+    ReplayIntegritySummary {
+        file: path
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.display().to_string()),
+        checksum_sha256: sha256_file_hex(path),
+        events,
+        invalid_lines,
+        hash_chain_ok,
+        last_event_hash,
+    }
+}
+
+fn replay_integrity_summaries(replay_dir: &Path, limit: usize) -> Vec<ReplayIntegritySummary> {
+    if !replay_dir.exists() {
+        return Vec::new();
+    }
+    let mut files: Vec<PathBuf> = std::fs::read_dir(replay_dir)
+        .map(|rd| {
+            rd.filter_map(|entry| entry.ok())
+                .map(|entry| entry.path())
+                .filter(|path| path.is_file())
+                .collect()
+        })
+        .unwrap_or_default();
+    files.sort();
+    files.reverse();
+    files
+        .into_iter()
+        .take(limit)
+        .map(|path| replay_integrity_for_file(&path))
+        .collect()
+}
+
+fn replay_manifest_json(summaries: &[ReplayIntegritySummary]) -> serde_json::Value {
+    serde_json::json!({
+        "generated_at": chrono::Utc::now().to_rfc3339(),
+        "files": summaries,
+        "totals": {
+            "files": summaries.len(),
+            "events": summaries.iter().map(|s| s.events).sum::<usize>(),
+            "invalid_lines": summaries.iter().map(|s| s.invalid_lines).sum::<usize>(),
+            "hash_chain_ok": summaries.iter().all(|s| s.hash_chain_ok && s.invalid_lines == 0),
+        }
+    })
 }
 
 fn build_doctor_support_bundle(cli: &Cli, snapshot_path: &Path) -> Result<PathBuf, AgentError> {
@@ -8038,6 +8308,7 @@ fn build_doctor_support_bundle(cli: &Cli, snapshot_path: &Path) -> Result<PathBu
     }
 
     let replay_dir = state_root.join("logs").join("replay");
+    let mut replay_manifest_entries: Vec<ReplayIntegritySummary> = Vec::new();
     if replay_dir.exists() {
         let mut replay_files: Vec<PathBuf> = std::fs::read_dir(&replay_dir)
             .map(|rd| rd.filter_map(|e| e.ok()).map(|e| e.path()).collect())
@@ -8046,6 +8317,7 @@ fn build_doctor_support_bundle(cli: &Cli, snapshot_path: &Path) -> Result<PathBu
         replay_files.reverse();
         for path in replay_files.into_iter().take(5) {
             if path.is_file() {
+                replay_manifest_entries.push(replay_integrity_for_file(&path));
                 let name = format!(
                     "doctor/replay/{}",
                     path.file_name()
@@ -8057,6 +8329,20 @@ fn build_doctor_support_bundle(cli: &Cli, snapshot_path: &Path) -> Result<PathBu
             }
         }
     }
+
+    let manifest = replay_manifest_json(&replay_manifest_entries);
+    let manifest_body = serde_json::to_vec_pretty(&manifest)
+        .map_err(|e| AgentError::Config(format!("serialize replay manifest: {}", e)))?;
+    let mut manifest_header = tar::Header::new_gnu();
+    manifest_header.set_mode(0o644);
+    manifest_header.set_size(manifest_body.len() as u64);
+    manifest_header.set_cksum();
+    tar.append_data(
+        &mut manifest_header,
+        "doctor/replay/manifest.json",
+        manifest_body.as_slice(),
+    )
+    .map_err(|e| AgentError::Io(format!("append replay manifest: {}", e)))?;
 
     tar.finish()
         .map_err(|e| AgentError::Io(format!("finalize {}: {}", bundle_path.display(), e)))?;
@@ -9945,5 +10231,103 @@ mod tests {
         let names = gateway.adapter_names().await;
         assert!(names.contains(&"qqbot".to_string()));
         assert!(names.contains(&"wecom_callback".to_string()));
+    }
+
+    #[test]
+    fn doctor_self_heal_creates_missing_state_dirs() {
+        use clap::Parser;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cfg = tmp.path().join("cfg");
+        let cli = Cli::parse_from([
+            "hermes-ultra",
+            "--config-dir",
+            cfg.to_str().expect("utf8 path"),
+            "doctor",
+        ]);
+        let state_root = hermes_state_root(&cli);
+        assert!(!state_root.join("profiles").exists());
+
+        let actions = run_doctor_self_heal(&cli);
+        assert!(state_root.join("profiles").exists());
+        assert!(state_root.join("sessions").exists());
+        assert!(state_root.join("logs").exists());
+        assert!(actions
+            .iter()
+            .any(|entry| entry.get("status").and_then(|v| v.as_str()) == Some("created")));
+    }
+
+    #[test]
+    fn doctor_self_heal_removes_stale_gateway_pid_file() {
+        use clap::Parser;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cfg = tmp.path().join("cfg");
+        let cli = Cli::parse_from([
+            "hermes-ultra",
+            "--config-dir",
+            cfg.to_str().expect("utf8 path"),
+            "doctor",
+        ]);
+        let pid_path = gateway_pid_path_for_cli(&cli);
+        if let Some(parent) = pid_path.parent() {
+            std::fs::create_dir_all(parent).expect("mkdir pid dir");
+        }
+        std::fs::write(&pid_path, "999999").expect("write stale pid");
+        assert!(pid_path.exists());
+
+        let actions = run_doctor_self_heal(&cli);
+        assert!(!pid_path.exists(), "stale pid file should be removed");
+        assert!(actions.iter().any(|entry| {
+            entry
+                .get("detail")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .contains("removed stale gateway pid file")
+        }));
+    }
+
+    #[test]
+    fn replay_integrity_detects_chain_break() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let replay = tmp.path().join("session.jsonl");
+        std::fs::write(
+            &replay,
+            r#"{"seq":1,"event":"a","prev_hash":"seed","event_hash":"h1","payload":{"ok":true}}
+{"seq":2,"event":"b","prev_hash":"BROKEN","event_hash":"h2","payload":{"ok":true}}
+"#,
+        )
+        .expect("write replay");
+
+        let summary = replay_integrity_for_file(&replay);
+        assert_eq!(summary.events, 2);
+        assert!(!summary.hash_chain_ok);
+    }
+
+    #[test]
+    fn replay_manifest_aggregates_counts() {
+        let items = vec![
+            ReplayIntegritySummary {
+                file: "a.jsonl".to_string(),
+                checksum_sha256: Some("abc".to_string()),
+                events: 3,
+                invalid_lines: 0,
+                hash_chain_ok: true,
+                last_event_hash: Some("h1".to_string()),
+            },
+            ReplayIntegritySummary {
+                file: "b.jsonl".to_string(),
+                checksum_sha256: Some("def".to_string()),
+                events: 2,
+                invalid_lines: 1,
+                hash_chain_ok: false,
+                last_event_hash: Some("h2".to_string()),
+            },
+        ];
+        let manifest = replay_manifest_json(&items);
+        assert_eq!(manifest["totals"]["files"], 2);
+        assert_eq!(manifest["totals"]["events"], 5);
+        assert_eq!(manifest["totals"]["invalid_lines"], 1);
+        assert_eq!(manifest["totals"]["hash_chain_ok"], false);
     }
 }

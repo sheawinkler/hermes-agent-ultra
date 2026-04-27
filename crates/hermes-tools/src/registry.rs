@@ -164,10 +164,7 @@ impl ToolRegistry {
             };
             let decision = inner.policy.evaluate(name, &params);
             if !decision.allow {
-                return Self::tool_error(&format!(
-                    "Blocked by tool policy: {}",
-                    decision.reason.unwrap_or_else(|| "policy deny".to_string())
-                ));
+                return Self::tool_policy_error(name, &decision);
             }
             (
                 Arc::clone(&entry.handler),
@@ -216,13 +213,7 @@ impl ToolRegistry {
             }
         };
         if !policy_decision.allow {
-            return Self::tool_error(&format!(
-                "Blocked by tool policy: {}",
-                policy_decision
-                    .reason
-                    .clone()
-                    .unwrap_or_else(|| "policy deny".to_string())
-            ));
+            return Self::tool_policy_error(name, &policy_decision);
         }
         maybe_log_audit(name, &policy_decision);
 
@@ -299,6 +290,23 @@ impl ToolRegistry {
     /// Format an error as JSON: `{"error": "msg"}`.
     pub fn tool_error(msg: &str) -> String {
         serde_json::json!({ "error": msg }).to_string()
+    }
+
+    fn tool_policy_error(tool_name: &str, decision: &ToolPolicyDecision) -> String {
+        serde_json::json!({
+            "error": format!(
+                "Blocked by tool policy: {}",
+                decision.reason.as_deref().unwrap_or("policy deny")
+            ),
+            "policy": {
+                "tool": tool_name,
+                "mode": decision.mode.as_str(),
+                "decision": "deny",
+                "code": decision.code.as_deref().unwrap_or("policy_deny"),
+                "reason": decision.reason.as_deref().unwrap_or("policy deny"),
+            }
+        })
+        .to_string()
     }
 
     /// Format a tool result. If the result looks like JSON, pass it through;
@@ -506,6 +514,10 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().expect("runtime");
         let result = rt.block_on(async { registry.dispatch_async("echo", json!({"k":"v"})).await });
         assert!(result.contains("Blocked by tool policy"));
+        let parsed: Value = serde_json::from_str(&result).expect("json output");
+        assert_eq!(parsed["policy"]["tool"], "echo");
+        assert_eq!(parsed["policy"]["decision"], "deny");
+        assert_eq!(parsed["policy"]["mode"], "enforce");
     }
 
     #[test]
