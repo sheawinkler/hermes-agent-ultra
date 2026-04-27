@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-27T07:48:07.794476+00:00`
+Generated: `2026-04-27T07:53:17.751028+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `675`.
 
@@ -15,9 +15,9 @@ Generated: `2026-04-27T07:48:07.794476+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 328 |
-| ported | 38 |
-| superseded | 309 |
+| pending | 326 |
+| ported | 39 |
+| superseded | 310 |
 
 ## First 100 Pending Commits
 
@@ -25,7 +25,6 @@ Generated: `2026-04-27T07:48:07.794476+00:00`
 | --- | ---: | --- |
 | `023b1bff11c2` | #20 | fix(delegate): resolve subagent approval prompts without deadlocking parent TUI (#15491) |
 | `e5647d7863d3` | #22 | docs: consolidate dashboard themes and plugins into Extending the Dashboard (#15530) |
-| `5401a0080d97` | #20 | fix: recalculate token budgets on model switch in ContextCompressor |
 | `df485628ce02` | #26 | chore(release): map Readon's git email to GitHub login |
 | `9830905dabd5` | #20 | fix(tools): recover non-configurable toolsets from composite resolution |
 | `81987f0350b6` | #20 | feat(discord): split discord_server into discord + discord_admin tools |
@@ -81,7 +80,6 @@ Generated: `2026-04-27T07:48:07.794476+00:00`
 | `25ba6a4a7475` | #20 | fix(gateway): make reasoning session-scoped by default |
 | `b2d3308f985f` | #20 | fix(doctor): accept bare custom provider |
 | `01cf2c65cc72` | #26 | chore(release): map iris@growthpillars.co to irispillars (#15825) |
-| `2c56dce0edec` | #26 | fix(model): preserve custom endpoint credentials and accept cloud models not in /v1/models |
 | `5fac6c344051` | #26 | fix(cli): write editor draft to prompt.md so syntax highlighting works |
 | `1fdc31b214d8` | #20 | fix(config): preserve custom provider api key refs |
 | `8bbeaea6c74d` | #20 | fix(config): broaden api-key ref lookup to templated base_url |
@@ -123,4 +121,6 @@ Generated: `2026-04-27T07:48:07.794476+00:00`
 | `9bb3bc422dcf` | #22 | perf(tui): optimistically echo simple input |
 | `5cd41d2b3b1d` | #22 | perf(tui): widen native input echo |
 | `ee7ef33b02f0` | #22 | fix(tui): queue busy submissions gracefully |
+| `cd7c5e5606bb` | #22 | perf(tui): defer local input render during echo |
+| `1c964ed43ff6` | #22 | fix(tui): rely on native cursor for input |
 
