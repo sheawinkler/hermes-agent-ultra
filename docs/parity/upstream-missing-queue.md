@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-27T07:53:17.751028+00:00`
+Generated: `2026-04-27T07:57:54.246236+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `675`.
 
@@ -15,8 +15,8 @@ Generated: `2026-04-27T07:53:17.751028+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 326 |
-| ported | 39 |
+| pending | 324 |
+| ported | 41 |
 | superseded | 310 |
 
 ## First 100 Pending Commits
@@ -43,8 +43,6 @@ Generated: `2026-04-27T07:53:17.751028+00:00`
 | `cf2fabc40fb6` | #22 | docs(dashboard): document page-scoped plugin slots (#15662) |
 | `d635e2df3fd7` | #20 | fix(compression): pass provider to context length resolver in feasibility check |
 | `ea01bdcebe1f` | #20 | refactor(memory): remove flush_memories entirely (#15696) |
-| `7c8c031f60da` | #26 | feat: add `hermes -z <prompt>` one-shot mode (#15702) |
-| `a9fa73a620db` | #26 | feat(oneshot): add --model / --provider / HERMES_INFERENCE_MODEL (#15704) |
 | `5006b2204b32` | #26 | fix(update): honor RestartSec when polling for gateway respawn (#15707) |
 | `7c17accb29bc` | #20 | fix: /stop now immediately aborts streaming retry loop |
 | `9daa0620a6bd` | #26 | fix(agent): ordering fix in _copy_reasoning_content_for_api — cross-provider reasoning isolation |
@@ -123,4 +121,6 @@ Generated: `2026-04-27T07:53:17.751028+00:00`
 | `ee7ef33b02f0` | #22 | fix(tui): queue busy submissions gracefully |
 | `cd7c5e5606bb` | #22 | perf(tui): defer local input render during echo |
 | `1c964ed43ff6` | #22 | fix(tui): rely on native cursor for input |
+| `355e0ae960ec` | #22 | fix(tui): keep streaming progress stable during interaction |
+| `381121025edf` | #22 | fix(tui): address review feedback |
 
