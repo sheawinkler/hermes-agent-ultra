@@ -1669,11 +1669,64 @@ fn print_help(app: &mut App) {
 // CLI subcommand handlers (dispatched from main.rs)
 // ---------------------------------------------------------------------------
 
+fn resolve_cli_chat_provider_model(
+    config_model: Option<&str>,
+    model_override: Option<&str>,
+    provider_override: Option<&str>,
+) -> Result<String, AgentError> {
+    let provider_override = provider_override
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(|v| v.to_ascii_lowercase());
+    let model_override = model_override.map(str::trim).filter(|v| !v.is_empty());
+
+    let mut current_model = config_model
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("gpt-4o")
+        .to_string();
+
+    if let Some(model) = model_override {
+        current_model = model.to_string();
+    }
+    if let Some(provider) = provider_override.as_deref() {
+        if let Some((_, model_name)) = current_model.split_once(':') {
+            current_model = format!("{provider}:{}", model_name.trim());
+        } else {
+            current_model = format!("{provider}:{}", current_model.trim());
+        }
+    }
+    if !current_model.contains(':') {
+        current_model = normalize_provider_model(&current_model)?;
+    }
+    Ok(current_model)
+}
+
+fn apply_cli_chat_runtime_env(provider_model: &str) {
+    let provider_model = provider_model.trim();
+    if provider_model.is_empty() {
+        return;
+    }
+    std::env::set_var("HERMES_MODEL", provider_model);
+    std::env::set_var("HERMES_INFERENCE_MODEL", provider_model);
+    if let Some((provider, _)) = provider_model.split_once(':') {
+        let provider = provider.trim();
+        if !provider.is_empty() {
+            std::env::set_var("HERMES_INFERENCE_PROVIDER", provider);
+            if std::env::var_os("HERMES_TUI_PROVIDER").is_some() {
+                std::env::set_var("HERMES_TUI_PROVIDER", provider);
+            }
+        }
+    }
+}
+
 /// Handle `hermes chat [--query ...] [--preload-skill ...] [--yolo]`.
 pub async fn handle_cli_chat(
     query: Option<String>,
     preload_skill: Option<String>,
     yolo: bool,
+    model_override: Option<String>,
+    provider_override: Option<String>,
 ) -> Result<(), hermes_core::AgentError> {
     use crate::runtime_tool_wiring::{wire_cron_scheduler_backend, wire_stdio_clarify_backend};
     use crate::terminal_backend::build_terminal_backend;
@@ -1698,7 +1751,12 @@ pub async fn handle_cli_chat(
         config.approval.require_approval = false;
     }
 
-    let current_model = config.model.clone().unwrap_or_else(|| "gpt-4o".to_string());
+    let current_model = resolve_cli_chat_provider_model(
+        config.model.as_deref(),
+        model_override.as_deref(),
+        provider_override.as_deref(),
+    )?;
+    apply_cli_chat_runtime_env(&current_model);
 
     let tool_registry = Arc::new(ToolRegistry::new());
     let terminal_backend = build_terminal_backend(&config);
@@ -5649,6 +5707,69 @@ mod tests {
         let providers = vec!["openai", "nous", "anthropic"];
         let req = parse_model_switch_request(&["gpt-4o"], &providers);
         assert_eq!(req, ModelSwitchRequest::SetDirect("gpt-4o".to_string()));
+    }
+
+    #[test]
+    fn resolve_cli_chat_provider_model_defaults_to_config_when_no_overrides() {
+        let resolved =
+            resolve_cli_chat_provider_model(Some("nous:moonshotai/kimi-k2.6"), None, None)
+                .expect("resolve");
+        assert_eq!(resolved, "nous:moonshotai/kimi-k2.6");
+    }
+
+    #[test]
+    fn resolve_cli_chat_provider_model_applies_provider_override() {
+        let resolved = resolve_cli_chat_provider_model(Some("gpt-4o"), None, Some("anthropic"))
+            .expect("resolve");
+        assert_eq!(resolved, "anthropic:gpt-4o");
+    }
+
+    #[test]
+    fn resolve_cli_chat_provider_model_prefers_model_override_with_provider_prefix() {
+        let resolved = resolve_cli_chat_provider_model(
+            Some("openai:gpt-4o"),
+            Some("moonshotai/kimi-k2.6"),
+            Some("nous"),
+        )
+        .expect("resolve");
+        assert_eq!(resolved, "nous:moonshotai/kimi-k2.6");
+    }
+
+    #[test]
+    fn apply_cli_chat_runtime_env_sets_provider_model() {
+        let keys = [
+            "HERMES_MODEL",
+            "HERMES_INFERENCE_MODEL",
+            "HERMES_INFERENCE_PROVIDER",
+            "HERMES_TUI_PROVIDER",
+        ];
+        for key in keys {
+            std::env::remove_var(key);
+        }
+        std::env::set_var("HERMES_TUI_PROVIDER", "openai");
+
+        apply_cli_chat_runtime_env("nous:openai/gpt-5.5");
+
+        assert_eq!(
+            std::env::var("HERMES_MODEL").ok().as_deref(),
+            Some("nous:openai/gpt-5.5")
+        );
+        assert_eq!(
+            std::env::var("HERMES_INFERENCE_MODEL").ok().as_deref(),
+            Some("nous:openai/gpt-5.5")
+        );
+        assert_eq!(
+            std::env::var("HERMES_INFERENCE_PROVIDER").ok().as_deref(),
+            Some("nous")
+        );
+        assert_eq!(
+            std::env::var("HERMES_TUI_PROVIDER").ok().as_deref(),
+            Some("nous")
+        );
+
+        for key in keys {
+            std::env::remove_var(key);
+        }
     }
 
     #[test]

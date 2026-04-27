@@ -92,6 +92,8 @@ use tokio::sync::{broadcast, mpsc};
 async fn main() {
     let cli = Cli::parse();
     let effective_command = cli.effective_command();
+    let global_model_override = cli.model.clone();
+    let global_provider_override = cli.provider.clone();
 
     // Initialize tracing
     init_tracing(cli.verbose, matches!(effective_command, CliCommand::Hermes));
@@ -108,13 +110,38 @@ async fn main() {
 
     tracing::debug!("Hermes Agent starting");
 
+    if let Some(prompt) = cli.oneshot.clone() {
+        let result = hermes_cli::commands::handle_cli_chat(
+            Some(prompt),
+            None,
+            false,
+            global_model_override.clone(),
+            global_provider_override.clone(),
+        )
+        .await;
+        if let Err(e) = result {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
+
     let result = match effective_command {
         CliCommand::Hermes => run_interactive(cli).await,
         CliCommand::Chat {
             query,
             preload_skill,
             yolo,
-        } => hermes_cli::commands::handle_cli_chat(query, preload_skill, yolo).await,
+        } => {
+            hermes_cli::commands::handle_cli_chat(
+                query,
+                preload_skill,
+                yolo,
+                global_model_override.clone(),
+                global_provider_override.clone(),
+            )
+            .await
+        }
         CliCommand::Model { provider_model } => run_model(cli, provider_model).await,
         CliCommand::Tools {
             action,

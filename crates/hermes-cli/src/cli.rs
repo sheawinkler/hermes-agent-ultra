@@ -542,6 +542,14 @@ pub struct Cli {
     #[arg(short = 'm', long, global = true)]
     pub model: Option<String>,
 
+    /// Override the provider for this invocation (e.g. "nous", "anthropic").
+    #[arg(long, global = true)]
+    pub provider: Option<String>,
+
+    /// One-shot prompt mode (non-interactive), aliasing upstream `-z`.
+    #[arg(short = 'z', long, global = true)]
+    pub oneshot: Option<String>,
+
     /// Override the personality / persona.
     #[arg(short = 'p', long, global = true)]
     pub personality: Option<String>,
@@ -566,6 +574,8 @@ mod tests {
         assert!(!cli.verbose);
         assert!(cli.config_dir.is_none());
         assert!(cli.model.is_none());
+        assert!(cli.provider.is_none());
+        assert!(cli.oneshot.is_none());
     }
 
     #[test]
@@ -595,6 +605,20 @@ mod tests {
     fn cli_parse_model_flag() {
         let cli = Cli::try_parse_from(vec!["hermes", "-m", "claude-3-opus"]).unwrap();
         assert_eq!(cli.model.as_deref(), Some("claude-3-opus"));
+    }
+
+    #[test]
+    fn cli_parse_provider_and_oneshot_flags() {
+        let cli = Cli::try_parse_from(vec![
+            "hermes",
+            "--provider",
+            "anthropic",
+            "-z",
+            "reply with 1",
+        ])
+        .unwrap();
+        assert_eq!(cli.provider.as_deref(), Some("anthropic"));
+        assert_eq!(cli.oneshot.as_deref(), Some("reply with 1"));
     }
 
     #[test]
