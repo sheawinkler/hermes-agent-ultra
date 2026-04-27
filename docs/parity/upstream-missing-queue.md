@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-27T07:35:36.691666+00:00`
+Generated: `2026-04-27T07:45:22.132173+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `675`.
 
@@ -15,9 +15,9 @@ Generated: `2026-04-27T07:35:36.691666+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 332 |
-| ported | 35 |
-| superseded | 308 |
+| pending | 329 |
+| ported | 37 |
+| superseded | 309 |
 
 ## First 100 Pending Commits
 
@@ -35,11 +35,8 @@ Generated: `2026-04-27T07:35:36.691666+00:00`
 | `5ae07e7b5cca` | #26 | fix(session): gate stale "no Discord APIs" note on DISCORD_BOT_TOKEN |
 | `591deeb9280e` | #26 | feat(session): inject Discord IDs block when discord tool is loaded |
 | `6ed37e0f42dc` | #20 | feat(tools): make discord/discord_admin opt-in, Discord-only |
-| `f67a61dc93c8` | #20 | fix(flush_memories): strip temperature from codex_responses fallback (#15620) |
-| `facea845594a` | #20 | fix(auxiliary): retry without temperature when any provider rejects it |
 | `b35d692f45d5` | #26 | chore(release): map ash@users.noreply.github.com to ash |
 | `f92006ce1cda` | #20 | fix(compression): reserve system+tools headroom when aux binds threshold (#15631) |
-| `3c1c65e75436` | #20 | fix(auxiliary): generalize unsupported-parameter detector and harden max_tokens retry (#15633) |
 | `ac05daa18902` | #20 | fix(tools): dedupe bundled plugin toolsets with built-in entries (#15634) |
 | `6e561ffa6d47` | #26 | fix(update): poll is-active instead of one-shot sleep(3) after gateway restart (#15639) |
 | `97d54f0e4df5` | #20 | fix(terminal): three-layer defense against watch_patterns notification spam (#15642) |
@@ -123,4 +120,7 @@ Generated: `2026-04-27T07:35:36.691666+00:00`
 | `db4e4acca0f7` | #22 | perf(tui): stabilize long-session scrolling |
 | `14fcff60c93d` | #22 | style(tui): apply formatter |
 | `458ce792d24e` | #22 | fix(tui): persist model switches by default |
+| `19d75d179751` | #22 | perf(tui): coalesce composer echo updates |
+| `9bb3bc422dcf` | #22 | perf(tui): optimistically echo simple input |
+| `5cd41d2b3b1d` | #22 | perf(tui): widen native input echo |
 
