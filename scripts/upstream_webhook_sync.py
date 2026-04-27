@@ -867,6 +867,7 @@ def run_sync_for_event(
     redteam_cmd: str,
     run_elite_gate: bool,
     elite_cmd: str,
+    elite_rollback_cmd: str,
     timeout_sec: int,
 ) -> tuple[int, str, str]:
     sync_script = os.path.join(repo_root, "scripts", "sync-upstream.sh")
@@ -904,6 +905,8 @@ def run_sync_for_event(
         cmd.append("--no-elite-gate")
     if elite_cmd.strip():
         cmd.extend(["--elite-cmd", elite_cmd.strip()])
+    if elite_rollback_cmd.strip():
+        cmd.extend(["--elite-rollback-cmd", elite_rollback_cmd.strip()])
     if no_pr:
         cmd.append("--no-pr")
     if draft_pr:
@@ -1105,6 +1108,7 @@ def worker_loop(args: argparse.Namespace) -> int:
                 redteam_cmd=args.redteam_cmd,
                 run_elite_gate=args.elite_gate,
                 elite_cmd=args.elite_cmd,
+                elite_rollback_cmd=args.elite_rollback_cmd,
                 timeout_sec=args.sync_timeout_sec,
             )
             outcome = parse_report_status(report_path)
@@ -1184,6 +1188,7 @@ def worker_loop(args: argparse.Namespace) -> int:
                 redteam_cmd=args.redteam_cmd,
                 run_elite_gate=args.elite_gate,
                 elite_cmd=args.elite_cmd,
+                elite_rollback_cmd=args.elite_rollback_cmd,
                 timeout_sec=args.sync_timeout_sec,
             )
             outcome = parse_report_status(report_path)
@@ -1263,6 +1268,7 @@ def worker_loop(args: argparse.Namespace) -> int:
             redteam_cmd=args.redteam_cmd,
             run_elite_gate=args.elite_gate,
             elite_cmd=args.elite_cmd,
+            elite_rollback_cmd=args.elite_rollback_cmd,
             timeout_sec=args.sync_timeout_sec,
         )
         outcome = parse_report_status(report_path)
@@ -1372,6 +1378,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--elite-cmd",
         default=os.environ.get("UPSTREAM_SYNC_ELITE_CMD", "python3 scripts/run-elite-sync-gate.py"),
         help="Command used for consolidated elite gate.",
+    )
+    worker.add_argument(
+        "--elite-rollback-cmd",
+        default=os.environ.get("UPSTREAM_SYNC_ELITE_ROLLBACK_CMD", ""),
+        help="Optional rollback command forwarded to sync-upstream --elite-rollback-cmd.",
     )
     worker.add_argument("--no-pr", action="store_true", default=False)
     worker.add_argument(

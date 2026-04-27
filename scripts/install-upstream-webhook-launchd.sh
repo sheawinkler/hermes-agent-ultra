@@ -145,6 +145,9 @@ UPSTREAM_SYNC_PATH=/github/upstream-sync
 
 UPSTREAM_SYNC_STRATEGY=merge
 UPSTREAM_SYNC_STRICT_RISK_GATE=1
+UPSTREAM_SYNC_ELITE_GATE=0
+UPSTREAM_SYNC_ELITE_CMD=python3 scripts/run-elite-sync-gate.py
+UPSTREAM_SYNC_ELITE_ROLLBACK_CMD=
 UPSTREAM_SYNC_ALLOW_RISK_PATHS=0
 UPSTREAM_SYNC_NO_TESTS=0
 UPSTREAM_SYNC_NO_PR=0
@@ -188,6 +191,9 @@ ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_GLOBAL_PARITY_PARENT_ISSUE" "19"
 ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_GLOBAL_PARITY_LABELS" "parity,parity-upkeep"
 ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_GLOBAL_PARITY_OPEN_ISSUES" "1"
 ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_GLOBAL_PARITY_MAX_QUEUE_COMMITS" "0"
+ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_ELITE_GATE" "0"
+ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_ELITE_CMD" "python3 scripts/run-elite-sync-gate.py"
+ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_ELITE_ROLLBACK_CMD" ""
 if grep -qE '^UPSTREAM_SYNC_EXPECTED_REPO=Lumio-Research/hermes-agent-rs$' "${ENV_FILE}"; then
   upsert_env_key "${ENV_FILE}" "UPSTREAM_SYNC_EXPECTED_REPO" "NousResearch/hermes-agent"
 fi

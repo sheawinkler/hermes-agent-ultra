@@ -72,6 +72,9 @@ GLOBAL_PARITY_PARENT_ISSUE="${UPSTREAM_SYNC_GLOBAL_PARITY_PARENT_ISSUE:-19}"
 GLOBAL_PARITY_LABELS="${UPSTREAM_SYNC_GLOBAL_PARITY_LABELS:-parity,parity-upkeep}"
 GLOBAL_PARITY_OPEN_ISSUES="${UPSTREAM_SYNC_GLOBAL_PARITY_OPEN_ISSUES:-1}"
 GLOBAL_PARITY_MAX_QUEUE_COMMITS="${UPSTREAM_SYNC_GLOBAL_PARITY_MAX_QUEUE_COMMITS:-0}"
+ELITE_GATE="${UPSTREAM_SYNC_ELITE_GATE:-0}"
+ELITE_CMD="${UPSTREAM_SYNC_ELITE_CMD:-python3 scripts/run-elite-sync-gate.py}"
+ELITE_ROLLBACK_CMD="${UPSTREAM_SYNC_ELITE_ROLLBACK_CMD:-}"
 
 ARGS=(
   worker
@@ -134,6 +137,15 @@ if [[ "${GLOBAL_PARITY_DISABLE}" == "1" || "${GLOBAL_PARITY_DISABLE}" == "true" 
 fi
 if [[ "${GLOBAL_PARITY_OPEN_ISSUES}" == "0" || "${GLOBAL_PARITY_OPEN_ISSUES}" == "false" ]]; then
   ARGS+=(--no-global-parity-open-issues)
+fi
+if [[ "${ELITE_GATE}" == "1" || "${ELITE_GATE}" == "true" ]]; then
+  ARGS+=(--elite-gate)
+  if [[ -n "${ELITE_CMD}" ]]; then
+    ARGS+=(--elite-cmd "${ELITE_CMD}")
+  fi
+  if [[ -n "${ELITE_ROLLBACK_CMD}" ]]; then
+    ARGS+=(--elite-rollback-cmd "${ELITE_ROLLBACK_CMD}")
+  fi
 fi
 
 if [[ -n "${UPSTREAM_SYNC_ASSIST_CMD:-}" ]]; then
