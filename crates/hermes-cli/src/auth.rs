@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
@@ -163,6 +163,19 @@ pub struct OpenAiOAuthImport {
     pub source_path: PathBuf,
 }
 
+#[derive(Debug, Clone)]
+pub struct AnthropicOAuthImport {
+    pub state: AnthropicOAuthState,
+    pub source_path: PathBuf,
+    pub source: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct NousOAuthImport {
+    pub state: NousAuthState,
+    pub source_path: PathBuf,
+}
+
 #[derive(Debug, Deserialize)]
 struct ExternalOpenAiAuthFile {
     #[serde(default)]
@@ -181,6 +194,22 @@ struct ExternalOpenAiAuthTokens {
     refresh_token: Option<String>,
     #[serde(default)]
     id_token: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExternalClaudeCredentialsFile {
+    #[serde(default, rename = "claudeAiOauth")]
+    claude_ai_oauth: Option<ExternalClaudeOauthState>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExternalClaudeOauthState {
+    #[serde(default, rename = "accessToken")]
+    access_token: Option<String>,
+    #[serde(default, rename = "refreshToken")]
+    refresh_token: Option<String>,
+    #[serde(default, rename = "expiresAt")]
+    expires_at_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -465,13 +494,24 @@ pub fn save_openai_auth_state(state: &CodexAuthState) -> Result<PathBuf, AgentEr
     save_provider_auth_state("openai", value)
 }
 
-fn openai_oauth_discovery_paths() -> Vec<PathBuf> {
+fn existing_unique_paths(candidates: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut seen = HashSet::new();
+    candidates
+        .into_iter()
+        .filter(|path| path.is_file())
+        .filter(|path| seen.insert(path.clone()))
+        .collect()
+}
+
+fn openai_oauth_discovery_paths(extra_env_vars: &[&str]) -> Vec<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
-    for env_name in [
+    let mut env_names = vec![
         "HERMES_OPENAI_OAUTH_FILE",
         "HERMES_CODEX_AUTH_FILE",
         "CODEX_AUTH_FILE",
-    ] {
+    ];
+    env_names.extend_from_slice(extra_env_vars);
+    for env_name in env_names {
         if let Ok(path) = std::env::var(env_name) {
             let trimmed = path.trim();
             if !trimmed.is_empty() {
@@ -483,12 +523,25 @@ fn openai_oauth_discovery_paths() -> Vec<PathBuf> {
         candidates.push(home.join(".codex").join("auth.json"));
         candidates.push(home.join(".pi").join("agent").join("auth.json"));
     }
-    let mut seen = std::collections::HashSet::new();
-    candidates
-        .into_iter()
-        .filter(|path| path.is_file())
-        .filter(|path| seen.insert(path.clone()))
-        .collect()
+    existing_unique_paths(candidates)
+}
+
+fn hermes_auth_store_discovery_paths() -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    for env_name in ["HERMES_AUTH_FILE"] {
+        if let Ok(path) = std::env::var(env_name) {
+            let trimmed = path.trim();
+            if !trimmed.is_empty() {
+                candidates.push(PathBuf::from(trimmed));
+            }
+        }
+    }
+    candidates.push(auth_json_path());
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(".hermes").join("auth.json"));
+        candidates.push(home.join(".hermes-agent-ultra").join("auth.json"));
+    }
+    existing_unique_paths(candidates)
 }
 
 fn decode_jwt_exp_seconds(token: &str) -> Option<i64> {
@@ -498,7 +551,7 @@ fn decode_jwt_exp_seconds(token: &str) -> Option<i64> {
     json.get("exp").and_then(value_as_i64)
 }
 
-fn load_openai_oauth_import_from_path(path: &Path) -> Option<OpenAiOAuthImport> {
+fn load_openai_oauth_import_from_path(path: &Path, base_url: &str) -> Option<OpenAiOAuthImport> {
     let raw = std::fs::read_to_string(path).ok()?;
     let parsed: ExternalOpenAiAuthFile = serde_json::from_str(&raw).ok()?;
     let tokens = parsed.tokens?;
@@ -527,7 +580,7 @@ fn load_openai_oauth_import_from_path(path: &Path) -> Option<OpenAiOAuthImport> 
             refresh_token,
             expires_in,
         },
-        base_url: DEFAULT_OPENAI_BASE_URL.to_string(),
+        base_url: base_url.to_string(),
         last_refresh: parsed
             .last_refresh
             .as_deref()
@@ -535,8 +588,8 @@ fn load_openai_oauth_import_from_path(path: &Path) -> Option<OpenAiOAuthImport> 
             .filter(|s| !s.is_empty())
             .map(str::to_string)
             .unwrap_or_else(|| Utc::now().to_rfc3339()),
-        auth_mode: parsed.auth_mode,
-        source: Some("discovered".to_string()),
+        auth_mode: parsed.auth_mode.or_else(|| Some("chatgpt".to_string())),
+        source: Some("discovered_external".to_string()),
     };
     Some(OpenAiOAuthImport {
         state,
@@ -545,8 +598,281 @@ fn load_openai_oauth_import_from_path(path: &Path) -> Option<OpenAiOAuthImport> 
 }
 
 pub fn discover_existing_openai_oauth() -> Result<Option<OpenAiOAuthImport>, AgentError> {
-    for path in openai_oauth_discovery_paths() {
-        if let Some(imported) = load_openai_oauth_import_from_path(&path) {
+    for path in openai_oauth_discovery_paths(&[]) {
+        if let Some(imported) = load_openai_oauth_import_from_path(&path, DEFAULT_OPENAI_BASE_URL) {
+            return Ok(Some(imported));
+        }
+    }
+    Ok(None)
+}
+
+fn read_provider_auth_state_from_store_path(path: &Path, provider: &str) -> Option<Value> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let parsed: Value = serde_json::from_str(&raw).ok()?;
+    parsed
+        .get("providers")
+        .and_then(Value::as_object)
+        .and_then(|providers| providers.get(provider))
+        .cloned()
+}
+
+fn load_codex_oauth_import_from_store(path: &Path) -> Option<OpenAiOAuthImport> {
+    let value = read_provider_auth_state_from_store_path(path, "openai-codex")?;
+    let mut state: CodexAuthState = serde_json::from_value(value).ok()?;
+    if state.tokens.access_token.trim().is_empty() {
+        return None;
+    }
+    if state.base_url.trim().is_empty() {
+        state.base_url = DEFAULT_CODEX_BASE_URL.to_string();
+    }
+    if state.last_refresh.trim().is_empty() {
+        state.last_refresh = Utc::now().to_rfc3339();
+    }
+    if state
+        .auth_mode
+        .as_deref()
+        .map(str::trim)
+        .is_none_or(|v| v.is_empty())
+    {
+        state.auth_mode = Some("chatgpt".to_string());
+    }
+    if state
+        .source
+        .as_deref()
+        .map(str::trim)
+        .is_none_or(|v| v.is_empty())
+    {
+        state.source = Some("discovered_auth_store".to_string());
+    }
+    Some(OpenAiOAuthImport {
+        state,
+        source_path: path.to_path_buf(),
+    })
+}
+
+pub fn discover_existing_openai_codex_oauth() -> Result<Option<OpenAiOAuthImport>, AgentError> {
+    for path in openai_oauth_discovery_paths(&["HERMES_OPENAI_CODEX_OAUTH_FILE"]) {
+        if let Some(imported) = load_openai_oauth_import_from_path(&path, DEFAULT_CODEX_BASE_URL) {
+            return Ok(Some(imported));
+        }
+    }
+    for path in hermes_auth_store_discovery_paths() {
+        if let Some(imported) = load_codex_oauth_import_from_store(&path) {
+            return Ok(Some(imported));
+        }
+    }
+    Ok(None)
+}
+
+fn anthropic_oauth_discovery_paths() -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    for env_name in [
+        "HERMES_ANTHROPIC_OAUTH_FILE",
+        "CLAUDE_CODE_CREDENTIALS_FILE",
+        "HERMES_CLAUDE_CREDENTIALS_FILE",
+    ] {
+        if let Ok(path) = std::env::var(env_name) {
+            let trimmed = path.trim();
+            if !trimmed.is_empty() {
+                candidates.push(PathBuf::from(trimmed));
+            }
+        }
+    }
+    if let Ok(claude_config_dir) = std::env::var("CLAUDE_CONFIG_DIR") {
+        let trimmed = claude_config_dir.trim();
+        if !trimmed.is_empty() {
+            candidates.push(PathBuf::from(trimmed).join(".credentials.json"));
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(".claude").join(".credentials.json"));
+        candidates.push(home.join(".hermes").join(".anthropic_oauth.json"));
+    }
+    existing_unique_paths(candidates)
+}
+
+fn normalize_unix_millis(timestamp: i64) -> i64 {
+    if timestamp > 0 && timestamp < 10_000_000_000 {
+        timestamp.saturating_mul(1000)
+    } else {
+        timestamp
+    }
+}
+
+fn load_anthropic_oauth_import_from_path(path: &Path) -> Option<AnthropicOAuthImport> {
+    let raw = std::fs::read_to_string(path).ok()?;
+
+    if let Ok(parsed) = serde_json::from_str::<ExternalClaudeCredentialsFile>(&raw) {
+        if let Some(oauth) = parsed.claude_ai_oauth {
+            let access_token = oauth
+                .access_token
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())?
+                .to_string();
+            let refresh_token = oauth
+                .refresh_token
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string);
+            let expires_at_ms = oauth.expires_at_ms.map(normalize_unix_millis);
+            return Some(AnthropicOAuthImport {
+                state: AnthropicOAuthState {
+                    access_token,
+                    refresh_token,
+                    expires_at_ms,
+                },
+                source_path: path.to_path_buf(),
+                source: "claude_code_credentials_file".to_string(),
+            });
+        }
+    }
+
+    let parsed: Value = serde_json::from_str(&raw).ok()?;
+    let object = parsed.as_object()?;
+    let access_token = object
+        .get("access_token")
+        .or_else(|| object.get("api_key"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?
+        .to_string();
+    let refresh_token = object
+        .get("refresh_token")
+        .or_else(|| object.get("refreshToken"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let expires_at_ms = object
+        .get("expires_at_ms")
+        .or_else(|| object.get("expiresAt"))
+        .or_else(|| object.get("expires"))
+        .and_then(value_as_i64)
+        .map(normalize_unix_millis);
+    let source = object
+        .get("source")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("discovered_external")
+        .to_string();
+    Some(AnthropicOAuthImport {
+        state: AnthropicOAuthState {
+            access_token,
+            refresh_token,
+            expires_at_ms,
+        },
+        source_path: path.to_path_buf(),
+        source,
+    })
+}
+
+fn load_anthropic_oauth_import_from_store(path: &Path) -> Option<AnthropicOAuthImport> {
+    let value = read_provider_auth_state_from_store_path(path, "anthropic")?;
+    let object = value.as_object()?;
+    let access_token = object
+        .get("access_token")
+        .or_else(|| object.get("api_key"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?
+        .to_string();
+    let refresh_token = object
+        .get("refresh_token")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let expires_at_ms = object
+        .get("expires_at_ms")
+        .or_else(|| object.get("expires"))
+        .and_then(value_as_i64)
+        .map(normalize_unix_millis);
+    let source = object
+        .get("source")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("hermes_pkce")
+        .to_string();
+    Some(AnthropicOAuthImport {
+        state: AnthropicOAuthState {
+            access_token,
+            refresh_token,
+            expires_at_ms,
+        },
+        source_path: path.to_path_buf(),
+        source,
+    })
+}
+
+pub fn discover_existing_anthropic_oauth() -> Result<Option<AnthropicOAuthImport>, AgentError> {
+    for path in anthropic_oauth_discovery_paths() {
+        if let Some(imported) = load_anthropic_oauth_import_from_path(&path) {
+            return Ok(Some(imported));
+        }
+    }
+    for path in hermes_auth_store_discovery_paths() {
+        if let Some(imported) = load_anthropic_oauth_import_from_store(&path) {
+            return Ok(Some(imported));
+        }
+    }
+    Ok(None)
+}
+
+fn nous_oauth_discovery_paths() -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    for env_name in ["HERMES_NOUS_OAUTH_FILE"] {
+        if let Ok(path) = std::env::var(env_name) {
+            let trimmed = path.trim();
+            if !trimmed.is_empty() {
+                candidates.push(PathBuf::from(trimmed));
+            }
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(".hermes").join(".nous_oauth.json"));
+    }
+    existing_unique_paths(candidates)
+}
+
+fn parse_nous_oauth_state(value: Value) -> Option<NousAuthState> {
+    let state: NousAuthState = serde_json::from_value(value).ok()?;
+    if state.runtime_api_key().is_none() {
+        return None;
+    }
+    Some(state)
+}
+
+fn load_nous_oauth_import_from_path(path: &Path) -> Option<NousOAuthImport> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let parsed: Value = serde_json::from_str(&raw).ok()?;
+    let state = parse_nous_oauth_state(parsed)?;
+    Some(NousOAuthImport {
+        state,
+        source_path: path.to_path_buf(),
+    })
+}
+
+fn load_nous_oauth_import_from_store(path: &Path) -> Option<NousOAuthImport> {
+    let value = read_provider_auth_state_from_store_path(path, "nous")?;
+    let state = parse_nous_oauth_state(value)?;
+    Some(NousOAuthImport {
+        state,
+        source_path: path.to_path_buf(),
+    })
+}
+
+pub fn discover_existing_nous_oauth() -> Result<Option<NousOAuthImport>, AgentError> {
+    for path in nous_oauth_discovery_paths() {
+        if let Some(imported) = load_nous_oauth_import_from_path(&path) {
+            return Ok(Some(imported));
+        }
+    }
+    for path in hermes_auth_store_discovery_paths() {
+        if let Some(imported) = load_nous_oauth_import_from_store(&path) {
             return Ok(Some(imported));
         }
     }
@@ -2366,6 +2692,8 @@ mod tests {
     use std::sync::Mutex;
 
     static OPENAI_ENV_LOCK: Mutex<()> = Mutex::new(());
+    static ANTHROPIC_ENV_LOCK: Mutex<()> = Mutex::new(());
+    static NOUS_ENV_LOCK: Mutex<()> = Mutex::new(());
     static QWEN_ENV_LOCK: Mutex<()> = Mutex::new(());
     static GEMINI_ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -2444,6 +2772,128 @@ mod tests {
             "expected imported token TTL from id_token exp"
         );
         std::env::remove_var("HERMES_OPENAI_OAUTH_FILE");
+    }
+
+    #[test]
+    fn discover_existing_openai_codex_oauth_reads_env_path() {
+        let _guard = OPENAI_ENV_LOCK.lock().expect("lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let auth_path = tmp.path().join("codex-auth.json");
+        let exp = Utc::now().timestamp() + 3600;
+        let payload = serde_json::json!({ "exp": exp });
+        let payload_b64 =
+            BASE64_URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).expect("payload json"));
+        let id_token = format!("header.{}.sig", payload_b64);
+        let raw = serde_json::json!({
+            "auth_mode": "chatgpt",
+            "last_refresh": "2026-04-27T00:00:00Z",
+            "tokens": {
+                "access_token": "codex-access",
+                "refresh_token": "codex-refresh",
+                "id_token": id_token,
+            }
+        });
+        std::fs::write(
+            &auth_path,
+            serde_json::to_string_pretty(&raw).expect("serialize auth fixture"),
+        )
+        .expect("write auth fixture");
+        std::env::set_var(
+            "HERMES_OPENAI_CODEX_OAUTH_FILE",
+            auth_path.to_string_lossy().to_string(),
+        );
+
+        let imported = discover_existing_openai_codex_oauth()
+            .expect("discover")
+            .expect("imported");
+        assert_eq!(imported.source_path, auth_path);
+        assert_eq!(imported.state.tokens.access_token, "codex-access");
+        assert_eq!(
+            imported.state.tokens.refresh_token.as_deref(),
+            Some("codex-refresh")
+        );
+        assert_eq!(imported.state.base_url, DEFAULT_CODEX_BASE_URL.to_string());
+        assert_eq!(imported.state.auth_mode.as_deref(), Some("chatgpt"));
+        std::env::remove_var("HERMES_OPENAI_CODEX_OAUTH_FILE");
+    }
+
+    #[test]
+    fn discover_existing_anthropic_oauth_reads_claude_credentials_file() {
+        let _guard = ANTHROPIC_ENV_LOCK.lock().expect("lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cred_path = tmp.path().join(".credentials.json");
+        let expires_at = Utc::now().timestamp_millis() + 3600_000;
+        let raw = serde_json::json!({
+            "claudeAiOauth": {
+                "accessToken": "ant-access",
+                "refreshToken": "ant-refresh",
+                "expiresAt": expires_at,
+            }
+        });
+        std::fs::write(
+            &cred_path,
+            serde_json::to_string_pretty(&raw).expect("serialize credentials"),
+        )
+        .expect("write credentials");
+        std::env::set_var(
+            "CLAUDE_CODE_CREDENTIALS_FILE",
+            cred_path.to_string_lossy().to_string(),
+        );
+
+        let imported = discover_existing_anthropic_oauth()
+            .expect("discover")
+            .expect("imported");
+        assert_eq!(imported.source_path, cred_path);
+        assert_eq!(imported.source, "claude_code_credentials_file");
+        assert_eq!(imported.state.access_token, "ant-access");
+        assert_eq!(imported.state.refresh_token.as_deref(), Some("ant-refresh"));
+        assert_eq!(imported.state.expires_at_ms, Some(expires_at));
+        std::env::remove_var("CLAUDE_CODE_CREDENTIALS_FILE");
+    }
+
+    #[test]
+    fn discover_existing_nous_oauth_reads_auth_store_provider_state() {
+        let _guard = NOUS_ENV_LOCK.lock().expect("lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let auth_store = tmp.path().join("auth.json");
+        let raw = serde_json::json!({
+            "version": 1,
+            "providers": {
+                "nous": {
+                    "portal_base_url": DEFAULT_NOUS_PORTAL_URL,
+                    "inference_base_url": DEFAULT_NOUS_INFERENCE_URL,
+                    "client_id": DEFAULT_NOUS_CLIENT_ID,
+                    "scope": DEFAULT_NOUS_SCOPE,
+                    "token_type": "Bearer",
+                    "access_token": "nous-access",
+                    "refresh_token": "nous-refresh",
+                    "obtained_at": "2026-04-27T00:00:00Z",
+                    "agent_key": "nous-agent-key"
+                }
+            }
+        });
+        std::fs::write(
+            &auth_store,
+            serde_json::to_string_pretty(&raw).expect("serialize auth store"),
+        )
+        .expect("write auth store");
+        std::env::set_var("HERMES_AUTH_FILE", auth_store.to_string_lossy().to_string());
+        std::env::remove_var("HERMES_NOUS_OAUTH_FILE");
+
+        let imported = discover_existing_nous_oauth()
+            .expect("discover")
+            .expect("imported");
+        assert_eq!(imported.source_path, auth_store);
+        assert_eq!(imported.state.access_token, "nous-access");
+        assert_eq!(
+            imported.state.refresh_token.as_deref(),
+            Some("nous-refresh")
+        );
+        assert_eq!(
+            imported.state.runtime_api_key().as_deref(),
+            Some("nous-agent-key")
+        );
+        std::env::remove_var("HERMES_AUTH_FILE");
     }
 
     #[test]
