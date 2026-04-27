@@ -13,7 +13,9 @@ use hermes_core::{ToolHandler, ToolSchema};
 use serde_json::Value;
 use tracing::warn;
 
-use crate::tool_policy::{annotate_policy_audit, ToolPolicyDecision, ToolPolicyEngine};
+use crate::tool_policy::{
+    annotate_policy_audit, annotate_policy_simulation, ToolPolicyDecision, ToolPolicyEngine,
+};
 
 // ---------------------------------------------------------------------------
 // ToolEntry
@@ -328,11 +330,31 @@ fn maybe_log_audit(tool_name: &str, decision: &ToolPolicyDecision) {
             tool_name,
             decision.reason.as_deref().unwrap_or("no reason supplied")
         );
+    } else if decision.simulated {
+        warn!(
+            "Tool policy simulation for '{}': {}",
+            tool_name,
+            decision.reason.as_deref().unwrap_or("simulation"),
+        );
     }
 }
 
 fn maybe_annotate_audit(output: String, decision: &ToolPolicyDecision) -> String {
-    if decision.audited_only {
+    if decision.simulated {
+        annotate_policy_simulation(
+            &output,
+            decision
+                .reason
+                .as_deref()
+                .unwrap_or(if decision.would_block {
+                    "simulation: would block"
+                } else {
+                    "simulation: would allow"
+                }),
+            decision.would_block,
+            decision.code.as_deref(),
+        )
+    } else if decision.audited_only {
         annotate_policy_audit(
             &output,
             decision
@@ -547,5 +569,34 @@ mod tests {
             .unwrap_or("")
             .contains("allowlist"));
         assert_eq!(parsed["k"], "v");
+    }
+
+    #[tokio::test]
+    async fn dispatch_simulation_mode_attaches_policy_metadata() {
+        let registry = ToolRegistry::new();
+        let handler = Arc::new(EchoHandler);
+        let schema = handler.schema();
+        registry.register(
+            "echo",
+            "test",
+            schema,
+            handler,
+            Arc::new(|| true),
+            vec![],
+            false,
+            "Echo tool",
+            "🔊",
+            None,
+        );
+        registry
+            .set_policy(ToolPolicyEngine::new(ToolPolicyMode::Simulate).with_denylist(&["echo"]));
+        let out = registry
+            .dispatch_async("echo", json!({"msg":"hello"}))
+            .await;
+        let parsed: Value = serde_json::from_str(&out).expect("json");
+        assert_eq!(parsed["msg"], "hello");
+        assert_eq!(parsed["_tool_policy_simulation"]["mode"], "simulate");
+        assert_eq!(parsed["_tool_policy_simulation"]["would_block"], true);
+        assert_eq!(parsed["_tool_policy_simulation"]["code"], "tool_denylisted");
     }
 }
