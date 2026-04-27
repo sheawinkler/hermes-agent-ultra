@@ -5520,7 +5520,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "hermes_cli/main.py",
         "tests/hermes_cli/test_tui_resume_flow.py",
@@ -5528,22 +5528,22 @@
         "tui_gateway/server.py"
       ],
       "files_touched": 4,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in c082f8da + existing App::new flow; launch model overrides are applied before startup model resolution.",
+      "owner": "codex",
       "sha": "e9c47c70422dc0a3367e325c6974b09d2c5bf9cc",
       "subject": "fix(tui): honor launch model overrides",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tests/test_tui_gateway_server.py",
         "tui_gateway/server.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in c082f8da; interactive startup now honors provider precedence (--provider) when deriving effective model.",
+      "owner": "codex",
       "sha": "57b43fdd4bf9496d4dc3e8e70df382c61f8e18e8",
       "subject": "fix(tui): preserve provider precedence on startup",
       "target_ticket": 20,
@@ -5593,7 +5593,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "hermes_cli/commands.py",
         "tests/test_tui_gateway_server.py",
@@ -5602,8 +5602,8 @@
         "ui-tui/src/app/slash/commands/setup.ts"
       ],
       "files_touched": 5,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in resolve_startup_model: provider slug selection binds provider as model alias during startup resolution.",
+      "owner": "codex",
       "sha": "5e52011de363992247cae6ecff3cb125616b0406",
       "subject": "fix(tui): bind provider as model alias",
       "target_ticket": 22,
@@ -5671,15 +5671,15 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "hermes_cli/models.py",
         "tests/test_tui_gateway_server.py",
         "tui_gateway/server.py"
       ],
       "files_touched": 3,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in existing Rust flow: switch_model calls sync_runtime_model_env so HERMES_INFERENCE_MODEL/HERMES_INFERENCE_PROVIDER stay synced after switches.",
+      "owner": "codex",
       "sha": "c6fdf48b79ebd336015a24bc52fdd2c1c69a5df5",
       "subject": "fix(tui): sync inference model after switches",
       "target_ticket": 20,
@@ -10186,7 +10186,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     }
   ],
-  "generated_at_utc": "2026-04-27T07:57:54.246236+00:00",
+  "generated_at_utc": "2026-04-27T08:01:12.277794+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -10194,8 +10194,8 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 324,
-      "ported": 41,
+      "pending": 320,
+      "ported": 45,
       "superseded": 310
     },
     "by_target_ticket": {
