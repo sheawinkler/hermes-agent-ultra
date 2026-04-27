@@ -25,6 +25,7 @@ that needs manual coding.
 - `scripts/upstream_webhook_sync.py worker`
   - Consumes queue event
   - Runs `scripts/sync-upstream.sh` with strict risk gate
+  - Runs adversarial red-team gate by default (disable with `--no-redteam-gate`)
   - Passes PR labels (`--pr-labels`) through to sync script for auto-labeled parity PRs
   - Runs CLI command/action parity drift check (`HEAD` vs `upstream/main` or event SHA)
   - Runs full global parity audit chain (matrix/status/intent/adapter/divergence/queue/proof)
@@ -126,7 +127,8 @@ python3 scripts/upstream_webhook_sync.py worker \
   --strategy merge \
   --strict-risk-gate \
   --draft-pr \
-  --pr-labels upstream-sync,parity-sync
+  --pr-labels upstream-sync,parity-sync \
+  --redteam-cmd "python3 scripts/run-redteam-gate.py"
 ```
 
 Optional parity drift flags:

@@ -10,6 +10,8 @@ fork-specific history.
   - Default mode: create a sync branch and open a PR
   - Supports `--draft-pr` for safer review-first PR creation
   - Supports `--pr-labels` to apply metadata/risk labels on the created PR
+  - Runs adversarial regression gate by default (`scripts/run-redteam-gate.py`)
+  - Supports `--no-redteam-gate` and `--redteam-cmd` overrides
   - Supports `--strategy merge|cherry-pick`
   - Supports strict risk gating via `--strict-risk-gate`
   - Emits timestamped reports under `.sync-reports/`
@@ -28,6 +30,7 @@ bash scripts/sync-upstream.sh --dry-run
 bash scripts/sync-upstream.sh
 bash scripts/sync-upstream.sh --draft-pr
 bash scripts/sync-upstream.sh --draft-pr --pr-labels "upstream-sync,parity-sync,risk-reviewed"
+bash scripts/sync-upstream.sh --redteam-cmd "python3 scripts/run-redteam-gate.py --suite scripts/redteam-cases.json"
 ```
 
 Cherry-pick mode for linear upstream replay:
@@ -85,6 +88,7 @@ Default report path:
 - Requires a clean working tree.
 - `gh` CLI is optional; without it the script still pushes the sync branch. Conflict issue auto-creation is disabled when `gh` is unavailable.
 - Sync PR bodies now include parity queue summary, drift artifact paths, and test guidance for merge reviewers.
+- Sync report includes `redteam_report` when adversarial gate runs.
 - Cron entry exports `REPO_ROOT` explicitly so the wrapper runs against the
   intended repository path.
 - On conflicts, the script writes `.sync-reports/upstream-sync-<timestamp>-conflict.txt`.
