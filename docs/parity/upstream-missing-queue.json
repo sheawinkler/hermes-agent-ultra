@@ -5240,28 +5240,28 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "run_agent.py",
         "tests/run_agent/test_flush_memories_codex.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "superseded by c758f46e; Rust auxiliary retries now strip/retry unsupported temperature generically and no python flush fallback path exists.",
+      "owner": "codex",
       "sha": "f67a61dc93c8f184923d744aea12fee60d4fc655",
       "subject": "fix(flush_memories): strip temperature from codex_responses fallback (#15620)",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "agent/auxiliary_client.py",
         "tests/agent/test_unsupported_temperature_retry.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in c758f46e (Rust auxiliary retries: unsupported temperature).",
+      "owner": "codex",
       "sha": "facea845594a5c1dd9472843a49cfb0d5d83ec60",
       "subject": "fix(auxiliary): retry without temperature when any provider rejects it",
       "target_ticket": 20,
@@ -5295,14 +5295,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "agent/auxiliary_client.py",
         "tests/agent/test_unsupported_parameter_retry.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in c758f46e (generic unsupported-parameter detector + max_tokens hardening).",
+      "owner": "codex",
       "sha": "3c1c65e7543620bd1620b02957c20dd193ea8e35",
       "subject": "fix(auxiliary): generalize unsupported-parameter detector and harden max_tokens retry (#15633)",
       "target_ticket": 20,
@@ -10186,7 +10186,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     }
   ],
-  "generated_at_utc": "2026-04-27T07:35:36.691666+00:00",
+  "generated_at_utc": "2026-04-27T07:45:22.132173+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -10194,9 +10194,9 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 332,
-      "ported": 35,
-      "superseded": 308
+      "pending": 329,
+      "ported": 37,
+      "superseded": 309
     },
     "by_target_ticket": {
       "20": 242,
