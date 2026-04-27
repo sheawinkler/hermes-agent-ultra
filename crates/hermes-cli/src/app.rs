@@ -85,6 +85,8 @@ pub struct App {
     pub stream_handle: Option<StreamHandle>,
     /// Shared streaming sink used by agent callbacks for progress events.
     stream_handle_shared: Arc<StdMutex<Option<StreamHandle>>>,
+    /// Whether TUI mouse events are enabled.
+    pub mouse_enabled: bool,
 }
 
 impl std::fmt::Debug for App {
@@ -95,6 +97,7 @@ impl std::fmt::Debug for App {
             .field("current_model", &self.current_model)
             .field("current_personality", &self.current_personality)
             .field("history_index", &self.history_index)
+            .field("mouse_enabled", &self.mouse_enabled)
             .finish_non_exhaustive()
     }
 }
@@ -330,6 +333,7 @@ impl App {
             interrupt_controller: InterruptController::new(),
             stream_handle: None,
             stream_handle_shared,
+            mouse_enabled: default_mouse_enabled(),
         })
     }
 
@@ -339,6 +343,16 @@ impl App {
             *guard = handle.clone();
         }
         self.stream_handle = handle;
+    }
+
+    /// Enable/disable TUI mouse handling.
+    pub fn set_mouse_enabled(&mut self, enabled: bool) {
+        self.mouse_enabled = enabled;
+    }
+
+    /// Current TUI mouse handling state.
+    pub fn mouse_enabled(&self) -> bool {
+        self.mouse_enabled
     }
 
     /// Run the interactive REPL loop.
@@ -959,6 +973,20 @@ mod tests {
         );
         assert_eq!(normalize_runtime_provider_name("opencode"), "opencode-zen");
     }
+
+    #[test]
+    fn test_default_mouse_enabled_respects_env_override() {
+        std::env::remove_var("HERMES_TUI_MOUSE");
+        assert!(default_mouse_enabled());
+
+        std::env::set_var("HERMES_TUI_MOUSE", "off");
+        assert!(!default_mouse_enabled());
+
+        std::env::set_var("HERMES_TUI_MOUSE", "1");
+        assert!(default_mouse_enabled());
+
+        std::env::remove_var("HERMES_TUI_MOUSE");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1213,6 +1241,16 @@ fn resolve_api_key_literal_or_env_ref(value: &str) -> Option<String> {
         return std::env::var(env_ref).ok().filter(|v| !v.trim().is_empty());
     }
     Some(trimmed.to_string())
+}
+
+fn default_mouse_enabled() -> bool {
+    match std::env::var("HERMES_TUI_MOUSE") {
+        Ok(value) => !matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "off" | "no"
+        ),
+        Err(_) => true,
+    }
 }
 
 /// Resolve API key / token for a named LLM provider from well-known environment variables.

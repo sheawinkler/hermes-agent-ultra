@@ -2530,6 +2530,11 @@ fn render_status(
     if state.background_jobs_running > 0 {
         status_text.push_str(&format!(" | bg:{}", state.background_jobs_running));
     }
+    status_text.push_str(if app.mouse_enabled() {
+        " | mouse:on"
+    } else {
+        " | mouse:off"
+    });
     if !state.sticky_prompt.is_empty() {
         status_text.push_str(&format!(
             " | ↳ {}",
@@ -2940,6 +2945,9 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         needs_redraw = true;
                     }
                     Some(Event::Mouse(mouse)) => {
+                        if !app.mouse_enabled() {
+                            continue;
+                        }
                         use crossterm::event::MouseEventKind;
                         match mouse.kind {
                             MouseEventKind::ScrollUp => {
