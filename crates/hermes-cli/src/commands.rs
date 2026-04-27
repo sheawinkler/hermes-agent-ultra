@@ -1752,6 +1752,13 @@ fn resolve_cli_chat_provider_model(
 
     if let Some(model) = model_override {
         current_model = model.to_string();
+    } else if provider_override.is_none() {
+        if let Ok(model_env) = std::env::var("HERMES_INFERENCE_MODEL") {
+            let model_env = model_env.trim();
+            if !model_env.is_empty() {
+                current_model = model_env.to_string();
+            }
+        }
     }
     if let Some(provider) = provider_override.as_deref() {
         if let Some((_, model_name)) = current_model.split_once(':') {
@@ -5823,6 +5830,15 @@ mod tests {
         )
         .expect("resolve");
         assert_eq!(resolved, "nous:moonshotai/kimi-k2.6");
+    }
+
+    #[test]
+    fn resolve_cli_chat_provider_model_uses_inference_model_env_when_no_flag_override() {
+        std::env::set_var("HERMES_INFERENCE_MODEL", "nous:moonshotai/kimi-k2.6");
+        let resolved =
+            resolve_cli_chat_provider_model(Some("openai:gpt-4o"), None, None).expect("resolve");
+        assert_eq!(resolved, "nous:moonshotai/kimi-k2.6");
+        std::env::remove_var("HERMES_INFERENCE_MODEL");
     }
 
     #[test]
