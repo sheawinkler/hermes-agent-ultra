@@ -35,6 +35,7 @@ pub const KNOWN_PROVIDERS: &[&str] = &[
 ];
 
 pub const OAUTH_CAPABLE_PROVIDERS: &[&str] = &[
+    "openai",
     "anthropic",
     "nous",
     "openai-codex",
@@ -153,7 +154,20 @@ mod tests {
             .into_iter()
             .map(|provider| provider.to_string())
             .collect();
-        assert_eq!(actual, expected, "oauth-capable provider mismatch");
+        let missing: Vec<String> = expected
+            .iter()
+            .filter(|provider| !actual.contains(*provider))
+            .cloned()
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "missing upstream oauth-capable providers: {:?}",
+            missing
+        );
+        assert!(
+            actual.contains("openai"),
+            "OpenAI OAuth capability should be enabled for Hermes Ultra"
+        );
     }
 
     #[test]

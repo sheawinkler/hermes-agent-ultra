@@ -21,6 +21,7 @@ pub const DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS: u32 = 30 * 60;
 
 pub const DEFAULT_CODEX_ISSUER: &str = "https://auth.openai.com";
 pub const DEFAULT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
+pub const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 pub const CODEX_OAUTH_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 pub const CODEX_OAUTH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
 pub const ANTHROPIC_OAUTH_AUTHORIZE_URL: &str = "https://claude.ai/oauth/authorize";
@@ -430,6 +431,12 @@ pub fn save_codex_auth_state(state: &CodexAuthState) -> Result<PathBuf, AgentErr
     let value = serde_json::to_value(state)
         .map_err(|e| AgentError::Config(format!("encode state: {}", e)))?;
     save_provider_auth_state("openai-codex", value)
+}
+
+pub fn save_openai_auth_state(state: &CodexAuthState) -> Result<PathBuf, AgentError> {
+    let value = serde_json::to_value(state)
+        .map_err(|e| AgentError::Config(format!("encode state: {}", e)))?;
+    save_provider_auth_state("openai", value)
 }
 
 fn qwen_cli_auth_path() -> PathBuf {
@@ -2208,6 +2215,20 @@ pub async fn login_openai_codex_device_code(
         auth_mode: Some("chatgpt".to_string()),
         source: Some("device_code".to_string()),
     })
+}
+
+pub async fn login_openai_device_code(
+    options: CodexDeviceCodeOptions,
+) -> Result<CodexAuthState, AgentError> {
+    let mut state = login_openai_codex_device_code(options).await?;
+    state.base_url = std::env::var("HERMES_OPENAI_BASE_URL")
+        .ok()
+        .map(|v| v.trim().trim_end_matches('/').to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| DEFAULT_OPENAI_BASE_URL.to_string());
+    state.auth_mode = Some("openai".to_string());
+    state.source = Some("device_code".to_string());
+    Ok(state)
 }
 
 /// Human-readable line after a successful non-OAuth LLM login (API key stored in token store).
