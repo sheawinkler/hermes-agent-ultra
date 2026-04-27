@@ -3,7 +3,7 @@
 //! Implements the interactive terminal interface with:
 //! - Message history rendering (9.1, 9.4)
 //! - Input area with slash command auto-completion (9.2)
-//! - Ctrl+C interrupt for tool execution (9.3)
+//! - Ctrl+C immediate exit back to parent terminal (with interrupt signal) (9.3)
 //! - Streaming output display (9.5)
 //! - Status bar with model/session info (9.6)
 //! - Theme/skin engine support (9.8)
@@ -1523,6 +1523,11 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     out
 }
 
+fn is_ctrl_c(key: &KeyEvent) -> bool {
+    key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
+        && key.code == crossterm::event::KeyCode::Char('c')
+}
+
 // ---------------------------------------------------------------------------
 // Main TUI run loop
 // ---------------------------------------------------------------------------
@@ -1575,21 +1580,14 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
             event = tui.events.recv() => {
                 match event {
                     Some(Event::Key(key)) => {
-                        // Handle Ctrl+C interrupt (Requirement 9.3)
-                        if key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
-                            && key.code == crossterm::event::KeyCode::Char('c')
-                        {
+                        // Ctrl+C always exits back to parent terminal. If work is in flight,
+                        // emit interrupt first so in-progress tools can stop gracefully.
+                        if is_ctrl_c(&key) {
                             if state.processing {
-                                // Interrupt current tool execution
-                                state.processing = false;
-                                state.stream_buffer.clear();
-                                state.status_message = "Interrupted".to_string();
                                 tui.event_sender().send(Event::Interrupt).ok();
-                            } else {
-                                // Exit on second Ctrl+C
-                                app.running = false;
-                                break;
                             }
+                            app.running = false;
+                            break;
                         } else {
                             let should_quit = state.handle_key(key, &mut app);
                             if should_quit {
@@ -1832,6 +1830,15 @@ mod tests {
         let handle: StreamHandle = tx.into();
         handle.send_delta("test delta");
         handle.send_done();
+    }
+
+    #[test]
+    fn test_is_ctrl_c_detection() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let ctrl_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL);
+        let plain_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE);
+        assert!(is_ctrl_c(&ctrl_c));
+        assert!(!is_ctrl_c(&plain_c));
     }
 
     #[test]
