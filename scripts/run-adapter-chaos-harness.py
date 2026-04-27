@@ -38,7 +38,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def default_output_path(repo_root: pathlib.Path) -> pathlib.Path:
-    stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
     return repo_root / ".sync-reports" / f"adapter-chaos-{stamp}.json"
 
 
@@ -79,7 +79,7 @@ def main() -> int:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     cmd = shlex.split(args.command)
-    started = dt.datetime.now(dt.UTC)
+    started = dt.datetime.now(dt.timezone.utc)
     proc = subprocess.run(
         cmd,
         cwd=str(repo_root),
@@ -87,7 +87,7 @@ def main() -> int:
         text=True,
         check=False,
     )
-    finished = dt.datetime.now(dt.UTC)
+    finished = dt.datetime.now(dt.timezone.utc)
 
     report = {
         "timestamp_utc": finished.isoformat(timespec="seconds") + "Z",

@@ -34,6 +34,16 @@ def parse_args() -> argparse.Namespace:
         help="Zero-copy hot path benchmark command",
     )
     parser.add_argument(
+        "--parity-diff-cmd",
+        default="python3 scripts/run-differential-parity-gate.py --max-commits-behind 0",
+        help="Differential parity command",
+    )
+    parser.add_argument(
+        "--eval-trend-cmd",
+        default="python3 scripts/run-eval-trend-gate.py --allow-missing-baseline",
+        help="Eval trend gate command",
+    )
+    parser.add_argument(
         "--chaos-baseline",
         default="",
         help="Optional baseline adapter chaos report for regression comparison",
@@ -44,12 +54,17 @@ def parse_args() -> argparse.Namespace:
         help="Chaos compare command",
     )
     parser.add_argument("--report-path", default="", help="Optional explicit report path")
+    parser.add_argument(
+        "--rollback-cmd",
+        default="",
+        help="Optional rollback command to execute when gate fails",
+    )
     parser.add_argument("--json", action="store_true", help="Print JSON report")
     return parser.parse_args()
 
 
 def default_report_path(repo_root: pathlib.Path) -> pathlib.Path:
-    stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
     return repo_root / ".sync-reports" / f"elite-sync-gate-{stamp}.json"
 
 
@@ -115,14 +130,20 @@ def main() -> int:
     redteam_raw = run_shell(args.redteam_cmd, repo_root)
     chaos_raw = run_shell(args.chaos_cmd, repo_root)
     hotpath_raw = run_shell(args.hotpath_cmd, repo_root)
+    parity_raw = run_shell(args.parity_diff_cmd, repo_root)
+    eval_raw = run_shell(args.eval_trend_cmd, repo_root)
 
     redteam = slim(redteam_raw)
     chaos = slim(chaos_raw)
     hotpath = slim(hotpath_raw)
+    parity = slim(parity_raw)
+    eval_trend = slim(eval_raw)
     sections: dict[str, Any] = {
         "redteam": redteam,
         "chaos": chaos,
         "hotpath": hotpath,
+        "parity_differential": parity,
+        "eval_trend": eval_trend,
     }
 
     compare: dict[str, Any] | None = None
@@ -146,8 +167,12 @@ def main() -> int:
             }
 
     gate_ok = all(bool(section.get("ok")) for section in sections.values())
+    rollback: dict[str, Any] | None = None
+    if not gate_ok and args.rollback_cmd.strip():
+        rollback_raw = run_shell(args.rollback_cmd.strip(), repo_root)
+        rollback = slim(rollback_raw)
     report = {
-        "generated_at": dt.datetime.now(dt.UTC).isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "repo_root": str(repo_root),
         "ok": gate_ok,
         "summary": {
@@ -156,6 +181,7 @@ def main() -> int:
             "failed_sections": sum(1 for section in sections.values() if not section.get("ok")),
         },
         "sections": sections,
+        "rollback": rollback,
     }
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     report["report_path"] = str(report_path)
