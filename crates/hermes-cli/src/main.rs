@@ -30,9 +30,11 @@ use hermes_cli::auth::{
 use hermes_cli::cli::{Cli, CliCommand};
 use hermes_cli::config_env::hydrate_env_from_config;
 use hermes_cli::model_switch::{
-    curated_provider_slugs, normalize_provider_model, provider_catalog_entries, provider_model_ids,
+    cached_provider_catalog_status, curated_provider_slugs, normalize_provider_model,
+    provider_catalog_entries, provider_model_ids,
 };
 use hermes_cli::platform_toolsets::{resolve_platform_tool_schemas, tool_definition_summary};
+use hermes_cli::providers::provider_capability_for;
 use hermes_cli::runtime_tool_wiring::{
     wire_cron_scheduler_backend, wire_gateway_clarify_backend, wire_gateway_messaging_backend,
 };
@@ -106,6 +108,13 @@ async fn main() {
         tracing::debug!(
             applied_env_vars = applied,
             "Hydrated environment from config.yaml"
+        );
+    }
+    let route_autotune_applied = apply_route_autotune_env_overrides(&cli);
+    if !route_autotune_applied.is_empty() {
+        tracing::debug!(
+            applied_env_vars = ?route_autotune_applied,
+            "Hydrated environment from route-autotune overrides"
         );
     }
 
@@ -195,6 +204,12 @@ async fn main() {
         CliCommand::RotateProvenanceKey { json } => run_rotate_provenance_key(cli, json).await,
         CliCommand::RouteLearning { action, json } => run_route_learning(cli, action, json).await,
         CliCommand::RouteHealth { action, json } => run_route_health(cli, action, json).await,
+        CliCommand::RouteAutotune {
+            action,
+            apply,
+            strict,
+            json,
+        } => run_route_autotune(cli, action, apply, strict, json).await,
         CliCommand::IncidentPack {
             snapshot,
             output,
@@ -475,7 +490,42 @@ async fn run_model(cli: Cli, provider_model: Option<String>) -> Result<(), Agent
                     } else {
                         String::new()
                     };
-                    println!("  {:<12} — {}{}", entry.provider, preview, suffix);
+                    let mut caps = Vec::new();
+                    if let Some(cap) = provider_capability_for(&entry.provider) {
+                        if cap.oauth_supported {
+                            caps.push("oauth");
+                        }
+                        if cap.models_dev_merged {
+                            caps.push("models.dev");
+                        }
+                        if cap.managed_tools_supported {
+                            caps.push("managed-tools");
+                        }
+                    }
+                    if let Some(cache_status) = cached_provider_catalog_status(&entry.provider) {
+                        if cache_status.verified {
+                            if let Some(age) = cache_status.age_secs {
+                                caps.push(if age < 60 {
+                                    "signed-cache:fresh"
+                                } else {
+                                    "signed-cache"
+                                });
+                            } else {
+                                caps.push("signed-cache");
+                            }
+                        } else {
+                            caps.push("cache-unverified");
+                        }
+                    }
+                    let cap_suffix = if caps.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" [{}]", caps.join(", "))
+                    };
+                    println!(
+                        "  {:<12} — {}{}{}",
+                        entry.provider, preview, suffix, cap_suffix
+                    );
                 }
             }
             println!("\nUsage: hermes model <provider>:<model>");
@@ -934,6 +984,71 @@ fn hermes_state_root(cli: &Cli) -> PathBuf {
 
 fn gateway_pid_path_for_cli(cli: &Cli) -> PathBuf {
     gateway_pid_path_in(hermes_state_root(cli))
+}
+
+const ROUTE_AUTOTUNE_ENV_KEYS: &[&str] = &[
+    "HERMES_SMART_ROUTING_LEARNING_ALPHA",
+    "HERMES_SMART_ROUTING_LEARNING_CHEAP_BIAS",
+    "HERMES_SMART_ROUTING_LEARNING_SWITCH_MARGIN",
+    "HERMES_SMART_ROUTING_LEARNING_TTL_SECS",
+    "HERMES_SMART_ROUTING_LEARNING_HALF_LIFE_SECS",
+];
+
+fn route_autotune_env_path_for_cli(cli: &Cli) -> PathBuf {
+    hermes_state_root(cli)
+        .join("logs")
+        .join("route-autotune.env")
+}
+
+fn parse_simple_env_file(path: &Path) -> std::collections::HashMap<String, String> {
+    let mut out = std::collections::HashMap::new();
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return out;
+    };
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let body = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+        let Some((key, value)) = body.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        if key.is_empty() {
+            continue;
+        }
+        let value = value
+            .trim()
+            .trim_matches('"')
+            .trim_matches('\'')
+            .to_string();
+        out.insert(key.to_string(), value);
+    }
+    out
+}
+
+fn apply_route_autotune_env_overrides(cli: &Cli) -> Vec<String> {
+    let path = route_autotune_env_path_for_cli(cli);
+    if !path.exists() {
+        return Vec::new();
+    }
+    let parsed = parse_simple_env_file(&path);
+    let mut applied = Vec::new();
+    for key in ROUTE_AUTOTUNE_ENV_KEYS {
+        if std::env::var(key)
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .is_some()
+        {
+            continue;
+        }
+        if let Some(value) = parsed.get(*key) {
+            std::env::set_var(key, value);
+            applied.push((*key).to_string());
+        }
+    }
+    applied
 }
 
 fn gateway_lock_path_for_pid_path(pid_path: &Path) -> PathBuf {
@@ -9090,6 +9205,12 @@ fn route_health_state_path_for_cli(cli: &Cli) -> PathBuf {
         .join("route-health.json")
 }
 
+fn route_autotune_state_path_for_cli(cli: &Cli) -> PathBuf {
+    hermes_state_root(cli)
+        .join("logs")
+        .join("route-autotune.json")
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 struct RouteHealthEntry {
     key: String,
@@ -9097,6 +9218,165 @@ struct RouteHealthEntry {
     tier: String,
     reasons: Vec<String>,
     stats: RouteLearningStatsRecord,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct RouteAutotunePlan {
+    generated_at: String,
+    learning_path: String,
+    health_report_path: String,
+    env_path: String,
+    summary: serde_json::Value,
+    confidence: String,
+    reasons: Vec<String>,
+    overrides: std::collections::BTreeMap<String, String>,
+}
+
+fn clamp_f64(value: f64, min: f64, max: f64) -> f64 {
+    value.max(min).min(max)
+}
+
+fn clamp_i64(value: i64, min: i64, max: i64) -> i64 {
+    value.max(min).min(max)
+}
+
+fn build_route_autotune_plan(
+    cli: &Cli,
+    learning_path: &Path,
+    report_path: &Path,
+    entries: &[RouteHealthEntry],
+    summary: &serde_json::Value,
+) -> RouteAutotunePlan {
+    let total = entries.len() as f64;
+    let healthy = summary.get("healthy").and_then(|v| v.as_u64()).unwrap_or(0) as f64;
+    let watch = summary.get("watch").and_then(|v| v.as_u64()).unwrap_or(0) as f64;
+    let degraded = summary
+        .get("degraded")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as f64;
+    let critical = summary
+        .get("critical")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as f64;
+    let avg_score = summary
+        .get("average_score")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+
+    let unhealthy_ratio = if total > 0.0 {
+        (degraded + critical) / total
+    } else {
+        0.0
+    };
+    let watch_ratio = if total > 0.0 { watch / total } else { 0.0 };
+
+    let mut reasons = Vec::new();
+    if total < 3.0 {
+        reasons.push("low_evidence_sample".to_string());
+    }
+    if critical > 0.0 {
+        reasons.push("critical_routes_detected".to_string());
+    } else if degraded > 0.0 {
+        reasons.push("degraded_routes_detected".to_string());
+    } else if watch > 0.0 {
+        reasons.push("watch_routes_detected".to_string());
+    } else if healthy > 0.0 {
+        reasons.push("routes_healthy".to_string());
+    } else {
+        reasons.push("no_routes_learned".to_string());
+    }
+    if avg_score < 0.45 {
+        reasons.push("average_health_low".to_string());
+    } else if avg_score >= 0.75 {
+        reasons.push("average_health_high".to_string());
+    }
+
+    let confidence = if total >= 12.0 {
+        "high"
+    } else if total >= 5.0 {
+        "medium"
+    } else {
+        "low"
+    };
+
+    let cheap_bias = if critical > 0.0 {
+        0.16
+    } else if unhealthy_ratio >= 0.50 {
+        0.14
+    } else if unhealthy_ratio >= 0.25 || watch_ratio > 0.45 {
+        0.11
+    } else if avg_score >= 0.78 {
+        0.06
+    } else {
+        0.08
+    };
+    let switch_margin = if critical > 0.0 {
+        0.07
+    } else if degraded > 0.0 {
+        0.05
+    } else if watch > 0.0 {
+        0.04
+    } else {
+        0.03
+    };
+    let alpha = if critical > 0.0 {
+        0.35
+    } else if degraded > 0.0 {
+        0.28
+    } else if watch > 0.0 {
+        0.24
+    } else {
+        0.20
+    };
+    let ttl_secs = if critical > 0.0 {
+        5 * 24 * 60 * 60
+    } else if degraded > 0.0 {
+        6 * 24 * 60 * 60
+    } else {
+        7 * 24 * 60 * 60
+    };
+    let half_life_secs = if critical > 0.0 {
+        12 * 60 * 60
+    } else if degraded > 0.0 {
+        18 * 60 * 60
+    } else if watch > 0.0 {
+        22 * 60 * 60
+    } else {
+        24 * 60 * 60
+    };
+
+    let mut overrides = std::collections::BTreeMap::new();
+    overrides.insert(
+        "HERMES_SMART_ROUTING_LEARNING_ALPHA".to_string(),
+        format!("{:.3}", clamp_f64(alpha, 0.01, 1.0)),
+    );
+    overrides.insert(
+        "HERMES_SMART_ROUTING_LEARNING_CHEAP_BIAS".to_string(),
+        format!("{:.3}", clamp_f64(cheap_bias, -0.50, 0.50)),
+    );
+    overrides.insert(
+        "HERMES_SMART_ROUTING_LEARNING_SWITCH_MARGIN".to_string(),
+        format!("{:.3}", clamp_f64(switch_margin, 0.0, 0.50)),
+    );
+    overrides.insert(
+        "HERMES_SMART_ROUTING_LEARNING_TTL_SECS".to_string(),
+        clamp_i64(ttl_secs, 0, 30 * 24 * 60 * 60).to_string(),
+    );
+    overrides.insert(
+        "HERMES_SMART_ROUTING_LEARNING_HALF_LIFE_SECS".to_string(),
+        clamp_i64(half_life_secs, 0, 30 * 24 * 60 * 60).to_string(),
+    );
+
+    RouteAutotunePlan {
+        generated_at: chrono::Utc::now().to_rfc3339(),
+        learning_path: learning_path.display().to_string(),
+        health_report_path: report_path.display().to_string(),
+        env_path: route_autotune_env_path_for_cli(cli).display().to_string(),
+        summary: summary.clone(),
+        confidence: confidence.to_string(),
+        reasons,
+        overrides,
+    }
 }
 
 fn route_health_tier(stats: &RouteLearningStatsRecord, score: f64) -> (String, Vec<String>, f64) {
@@ -9300,6 +9580,213 @@ async fn run_route_health(cli: Cli, action: Option<String>, json: bool) -> Resul
                 failures
             );
         }
+    }
+    Ok(())
+}
+
+async fn run_route_autotune(
+    cli: Cli,
+    action: Option<String>,
+    apply: bool,
+    strict: bool,
+    json: bool,
+) -> Result<(), AgentError> {
+    let action = action
+        .as_deref()
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "show".to_string());
+    let route_report_path = route_health_state_path_for_cli(&cli);
+    let autotune_state_path = route_autotune_state_path_for_cli(&cli);
+    let autotune_env_path = route_autotune_env_path_for_cli(&cli);
+
+    match action.as_str() {
+        "reset" | "clear" => {
+            if autotune_state_path.exists() {
+                std::fs::remove_file(&autotune_state_path).map_err(|e| {
+                    AgentError::Io(format!("remove {}: {}", autotune_state_path.display(), e))
+                })?;
+            }
+            if autotune_env_path.exists() {
+                std::fs::remove_file(&autotune_env_path).map_err(|e| {
+                    AgentError::Io(format!("remove {}: {}", autotune_env_path.display(), e))
+                })?;
+            }
+            let payload = serde_json::json!({
+                "ok": true,
+                "action": action,
+                "state_path": autotune_state_path.display().to_string(),
+                "env_path": autotune_env_path.display().to_string(),
+            });
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string())
+                );
+            } else {
+                println!("Route-autotune artifacts cleared.");
+                println!("State: {}", autotune_state_path.display());
+                println!("Env:   {}", autotune_env_path.display());
+            }
+            return Ok(());
+        }
+        "show" | "list" | "inspect" | "plan" | "apply" => {}
+        _ => {
+            return Err(AgentError::Config(format!(
+            "route-autotune: unsupported action '{}'; use show/list/inspect/plan/apply/reset/clear",
+            action
+        )))
+        }
+    }
+
+    let learning_path = route_learning_state_path_for_cli(&cli);
+    let state = load_route_learning_state_for_cli(&learning_path)?;
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let mut entries: Vec<RouteHealthEntry> = state
+        .entries
+        .into_iter()
+        .filter_map(|(key, stats)| {
+            route_learning_effective_stats(&stats, now_ms).map(|effective| {
+                let score = route_learning_score(&effective);
+                let (tier, reasons, health_score) = route_health_tier(&effective, score);
+                RouteHealthEntry {
+                    key,
+                    health_score,
+                    tier,
+                    reasons,
+                    stats: effective,
+                }
+            })
+        })
+        .collect();
+    entries.sort_by(|a, b| {
+        b.health_score
+            .partial_cmp(&a.health_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.key.cmp(&b.key))
+    });
+
+    let healthy = entries.iter().filter(|e| e.tier == "healthy").count();
+    let watch = entries.iter().filter(|e| e.tier == "watch").count();
+    let degraded = entries.iter().filter(|e| e.tier == "degraded").count();
+    let critical = entries.iter().filter(|e| e.tier == "critical").count();
+    let overall = if critical > 0 {
+        "critical"
+    } else if degraded > 0 {
+        "degraded"
+    } else if watch > 0 {
+        "watch"
+    } else if healthy > 0 {
+        "healthy"
+    } else {
+        "unknown"
+    };
+    let avg_score = if entries.is_empty() {
+        0.0
+    } else {
+        entries.iter().map(|e| e.health_score).sum::<f64>() / (entries.len() as f64)
+    };
+
+    let summary = serde_json::json!({
+        "entries": entries.len(),
+        "overall": overall,
+        "average_score": avg_score,
+        "healthy": healthy,
+        "watch": watch,
+        "degraded": degraded,
+        "critical": critical,
+    });
+    let plan =
+        build_route_autotune_plan(&cli, &learning_path, &route_report_path, &entries, &summary);
+    if strict && plan.confidence == "low" {
+        return Err(AgentError::Config(
+            "route-autotune strict mode requires at least 5 learned routes".to_string(),
+        ));
+    }
+
+    if let Some(parent) = autotune_state_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AgentError::Io(format!("mkdir {}: {}", parent.display(), e)))?;
+    }
+    std::fs::write(
+        &autotune_state_path,
+        serde_json::to_string_pretty(&plan)
+            .map_err(|e| AgentError::Config(format!("serialize route-autotune plan: {}", e)))?,
+    )
+    .map_err(|e| AgentError::Io(format!("write {}: {}", autotune_state_path.display(), e)))?;
+
+    let should_apply = apply || action == "apply";
+    if should_apply {
+        if let Some(parent) = autotune_env_path.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| AgentError::Io(format!("mkdir {}: {}", parent.display(), e)))?;
+        }
+        let mut body = String::new();
+        body.push_str("# Hermes Agent Ultra route-autotune overrides\n");
+        body.push_str(&format!("# generated_at={}\n", plan.generated_at));
+        for (key, value) in &plan.overrides {
+            body.push_str(&format!("{key}={value}\n"));
+        }
+        std::fs::write(&autotune_env_path, body)
+            .map_err(|e| AgentError::Io(format!("write {}: {}", autotune_env_path.display(), e)))?;
+    }
+
+    let payload = serde_json::json!({
+        "ok": true,
+        "action": action,
+        "applied": should_apply,
+        "strict": strict,
+        "state_path": autotune_state_path.display().to_string(),
+        "env_path": autotune_env_path.display().to_string(),
+        "plan": plan,
+    });
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&payload)
+                .map_err(|e| AgentError::Config(format!("serialize route-autotune json: {}", e)))?
+        );
+        return Ok(());
+    }
+
+    println!("Route-autotune plan: {}", autotune_state_path.display());
+    println!(
+        "Overall={} entries={} avg_score={:.3} confidence={} applied={}",
+        payload["plan"]["summary"]["overall"]
+            .as_str()
+            .unwrap_or("unknown"),
+        payload["plan"]["summary"]["entries"].as_u64().unwrap_or(0),
+        payload["plan"]["summary"]["average_score"]
+            .as_f64()
+            .unwrap_or(0.0),
+        payload["plan"]["confidence"].as_str().unwrap_or("low"),
+        if should_apply { "yes" } else { "no" },
+    );
+    if let Some(reasons) = payload["plan"]["reasons"].as_array() {
+        if !reasons.is_empty() {
+            println!(
+                "Reasons: {}",
+                reasons
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+        }
+    }
+    println!("\nSuggested overrides:");
+    if let Some(obj) = payload["plan"]["overrides"].as_object() {
+        for (key, value) in obj {
+            println!("  {:<44} {}", key, value.as_str().unwrap_or(""));
+        }
+    }
+    if should_apply {
+        println!(
+            "\nApplied overrides file: {} (loaded automatically on next start unless env explicitly overrides a key)",
+            autotune_env_path.display()
+        );
+    } else {
+        println!("\nRun `hermes route-autotune apply --apply` to persist these overrides.");
     }
     Ok(())
 }
@@ -11660,5 +12147,126 @@ mod tests {
         assert_eq!(manifest["totals"]["events"], 5);
         assert_eq!(manifest["totals"]["invalid_lines"], 1);
         assert_eq!(manifest["totals"]["hash_chain_ok"], false);
+    }
+
+    #[test]
+    fn parse_simple_env_file_supports_export_lines() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let env_path = tmp.path().join("route-autotune.env");
+        std::fs::write(
+            &env_path,
+            "# comment\nexport HERMES_SMART_ROUTING_LEARNING_ALPHA=0.240\nHERMES_SMART_ROUTING_LEARNING_CHEAP_BIAS=0.110\n",
+        )
+        .expect("write env");
+        let parsed = parse_simple_env_file(&env_path);
+        assert_eq!(
+            parsed
+                .get("HERMES_SMART_ROUTING_LEARNING_ALPHA")
+                .map(String::as_str),
+            Some("0.240")
+        );
+        assert_eq!(
+            parsed
+                .get("HERMES_SMART_ROUTING_LEARNING_CHEAP_BIAS")
+                .map(String::as_str),
+            Some("0.110")
+        );
+    }
+
+    #[test]
+    fn apply_route_autotune_env_overrides_sets_missing_keys_only() {
+        use clap::Parser;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cfg = tmp.path().join("cfg");
+        let cli = Cli::parse_from([
+            "hermes-ultra",
+            "--config-dir",
+            cfg.to_str().expect("utf8 path"),
+            "status",
+        ]);
+        let env_path = route_autotune_env_path_for_cli(&cli);
+        if let Some(parent) = env_path.parent() {
+            std::fs::create_dir_all(parent).expect("mkdir");
+        }
+        std::fs::write(
+            &env_path,
+            "HERMES_SMART_ROUTING_LEARNING_ALPHA=0.300\nHERMES_SMART_ROUTING_LEARNING_SWITCH_MARGIN=0.050\n",
+        )
+        .expect("write env");
+
+        std::env::remove_var("HERMES_SMART_ROUTING_LEARNING_ALPHA");
+        std::env::set_var("HERMES_SMART_ROUTING_LEARNING_SWITCH_MARGIN", "0.999");
+        let applied = apply_route_autotune_env_overrides(&cli);
+        assert!(applied
+            .iter()
+            .any(|k| k == "HERMES_SMART_ROUTING_LEARNING_ALPHA"));
+        assert_eq!(
+            std::env::var("HERMES_SMART_ROUTING_LEARNING_ALPHA").ok(),
+            Some("0.300".to_string())
+        );
+        assert_eq!(
+            std::env::var("HERMES_SMART_ROUTING_LEARNING_SWITCH_MARGIN").ok(),
+            Some("0.999".to_string()),
+            "explicit env var should not be overridden"
+        );
+        std::env::remove_var("HERMES_SMART_ROUTING_LEARNING_ALPHA");
+        std::env::remove_var("HERMES_SMART_ROUTING_LEARNING_SWITCH_MARGIN");
+    }
+
+    #[test]
+    fn build_route_autotune_plan_raises_bias_for_critical_health() {
+        use clap::Parser;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cfg = tmp.path().join("cfg");
+        let cli = Cli::parse_from([
+            "hermes-ultra",
+            "--config-dir",
+            cfg.to_str().expect("utf8 path"),
+            "status",
+        ]);
+        let entry = RouteHealthEntry {
+            key: "openai:gpt-4o".to_string(),
+            health_score: 0.2,
+            tier: "critical".to_string(),
+            reasons: vec!["failure_streak_critical".to_string()],
+            stats: RouteLearningStatsRecord {
+                samples: 9,
+                success_rate: 0.4,
+                avg_latency_ms: 5200.0,
+                consecutive_failures: 7,
+                updated_at_unix_ms: chrono::Utc::now().timestamp_millis(),
+            },
+        };
+        let summary = serde_json::json!({
+            "entries": 1,
+            "overall": "critical",
+            "average_score": 0.2,
+            "healthy": 0,
+            "watch": 0,
+            "degraded": 0,
+            "critical": 1
+        });
+        let plan = build_route_autotune_plan(
+            &cli,
+            Path::new("/tmp/route-learning.json"),
+            Path::new("/tmp/route-health.json"),
+            &[entry],
+            &summary,
+        );
+        let cheap_bias = plan
+            .overrides
+            .get("HERMES_SMART_ROUTING_LEARNING_CHEAP_BIAS")
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        let switch_margin = plan
+            .overrides
+            .get("HERMES_SMART_ROUTING_LEARNING_SWITCH_MARGIN")
+            .and_then(|v| v.parse::<f64>().ok())
+            .unwrap_or(0.0);
+        assert!(cheap_bias >= 0.14);
+        assert!(switch_margin >= 0.05);
+        assert_eq!(plan.confidence, "low");
     }
 }

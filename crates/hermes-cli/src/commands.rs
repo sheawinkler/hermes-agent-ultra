@@ -5743,7 +5743,16 @@ pub fn handle_cli_version() -> Result<(), hermes_core::AgentError> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Mutex, OnceLock};
+
     use super::*;
+
+    fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env test lock")
+    }
 
     #[test]
     fn test_autocomplete_empty() {
@@ -5914,6 +5923,7 @@ mod tests {
 
     #[test]
     fn resolve_cli_chat_provider_model_uses_inference_model_env_when_no_flag_override() {
+        let _lock = env_test_lock();
         std::env::set_var("HERMES_INFERENCE_MODEL", "nous:moonshotai/kimi-k2.6");
         let resolved =
             resolve_cli_chat_provider_model(Some("openai:gpt-4o"), None, None).expect("resolve");
@@ -5923,6 +5933,7 @@ mod tests {
 
     #[test]
     fn apply_cli_chat_runtime_env_sets_provider_model() {
+        let _lock = env_test_lock();
         let keys = [
             "HERMES_MODEL",
             "HERMES_INFERENCE_MODEL",
