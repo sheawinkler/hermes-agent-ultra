@@ -194,6 +194,12 @@ async fn main() {
         } => run_verify_provenance(cli, path, signature, strict, json).await,
         CliCommand::RotateProvenanceKey { json } => run_rotate_provenance_key(cli, json).await,
         CliCommand::RouteLearning { action, json } => run_route_learning(cli, action, json).await,
+        CliCommand::RouteHealth { action, json } => run_route_health(cli, action, json).await,
+        CliCommand::IncidentPack {
+            snapshot,
+            output,
+            json,
+        } => run_incident_pack(cli, snapshot, output, json).await,
         CliCommand::Status => run_status(cli).await,
         CliCommand::Dashboard {
             host,
@@ -7717,6 +7723,11 @@ fn build_elite_doctor_diagnostics(cli: &Cli) -> serde_json::Value {
         .as_ref()
         .map(|state| state.entries.len())
         .unwrap_or(0usize);
+    let route_health_path = route_health_state_path_for_cli(cli);
+    let route_health_summary = std::fs::read_to_string(&route_health_path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|value| value.get("summary").cloned());
 
     let policy_counters_path = default_tool_policy_counters_path();
     let policy_counters = load_tool_policy_counters(&policy_counters_path).unwrap_or_default();
@@ -7752,6 +7763,11 @@ fn build_elite_doctor_diagnostics(cli: &Cli) -> serde_json::Value {
             "ttl_secs": route_learning_ttl_secs(),
             "half_life_secs": route_learning_half_life_secs(),
             "saved_at_unix_ms": route_state.as_ref().map(|s| s.saved_at_unix_ms),
+        },
+        "route_health": {
+            "path": route_health_path.display().to_string(),
+            "available": route_health_summary.is_some(),
+            "summary": route_health_summary,
         },
         "tool_policy": {
             "mode": policy_mode,
@@ -8061,6 +8077,19 @@ async fn run_doctor(
     println!(
         "  route-learning entries... {}",
         elite["route_learning"]["entries"].as_u64().unwrap_or(0)
+    );
+    println!(
+        "  route-health... {}",
+        if elite["route_health"]["available"]
+            .as_bool()
+            .unwrap_or(false)
+        {
+            elite["route_health"]["summary"]["overall"]
+                .as_str()
+                .unwrap_or("available")
+        } else {
+            "(not generated)"
+        }
     );
     println!(
         "  tool-policy mode/preset... {}/{}",
@@ -8629,8 +8658,20 @@ fn replay_integrity_summaries(replay_dir: &Path, limit: usize) -> Vec<ReplayInte
 }
 
 fn replay_manifest_json(summaries: &[ReplayIntegritySummary]) -> serde_json::Value {
+    let generated_at = if std::env::var("HERMES_DETERMINISTIC_ARTIFACTS")
+        .ok()
+        .map(|v| {
+            let n = v.trim().to_ascii_lowercase();
+            n == "1" || n == "true" || n == "yes" || n == "on"
+        })
+        .unwrap_or(true)
+    {
+        "1970-01-01T00:00:00Z".to_string()
+    } else {
+        chrono::Utc::now().to_rfc3339()
+    };
     serde_json::json!({
-        "generated_at": chrono::Utc::now().to_rfc3339(),
+        "generated_at": generated_at,
         "files": summaries,
         "totals": {
             "files": summaries.len(),
@@ -8641,36 +8682,65 @@ fn replay_manifest_json(summaries: &[ReplayIntegritySummary]) -> serde_json::Val
     })
 }
 
-fn build_doctor_support_bundle(cli: &Cli, snapshot_path: &Path) -> Result<PathBuf, AgentError> {
+fn append_bundle_bytes(
+    tar: &mut tar::Builder<flate2::write::GzEncoder<std::fs::File>>,
+    name: &str,
+    bytes: &[u8],
+    deterministic: bool,
+) -> Result<(), AgentError> {
+    let mut header = tar::Header::new_gnu();
+    header.set_mode(0o644);
+    header.set_size(bytes.len() as u64);
+    if deterministic {
+        header.set_mtime(0);
+        header.set_uid(0);
+        header.set_gid(0);
+    }
+    header.set_cksum();
+    tar.append_data(&mut header, name, bytes)
+        .map_err(|e| AgentError::Io(format!("append {}: {}", name, e)))
+}
+
+fn build_doctor_support_bundle_with_options(
+    cli: &Cli,
+    snapshot_path: &Path,
+    output_path: Option<&Path>,
+    deterministic: bool,
+) -> Result<PathBuf, AgentError> {
     let reports_dir = debug_reports_dir_for_cli(cli);
     std::fs::create_dir_all(&reports_dir)
         .map_err(|e| AgentError::Io(format!("mkdir {}: {}", reports_dir.display(), e)))?;
-    let bundle_path = reports_dir.join(format!(
-        "support-bundle-{}.tar.gz",
-        chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
-    ));
+    let bundle_path = output_path.map(PathBuf::from).unwrap_or_else(|| {
+        reports_dir.join(format!(
+            "support-bundle-{}.tar.gz",
+            chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
+        ))
+    });
+    if let Some(parent) = bundle_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AgentError::Io(format!("mkdir {}: {}", parent.display(), e)))?;
+    }
     let file = std::fs::File::create(&bundle_path)
         .map_err(|e| AgentError::Io(format!("create {}: {}", bundle_path.display(), e)))?;
     let encoder = flate2::write::GzEncoder::new(file, flate2::Compression::default());
     let mut tar = tar::Builder::new(encoder);
 
-    tar.append_path_with_name(snapshot_path, "doctor/snapshot.json")
-        .map_err(|e| {
-            AgentError::Io(format!(
-                "append snapshot {}: {}",
-                snapshot_path.display(),
-                e
-            ))
-        })?;
+    let snapshot_bytes = std::fs::read(snapshot_path)
+        .map_err(|e| AgentError::Io(format!("read {}: {}", snapshot_path.display(), e)))?;
+    append_bundle_bytes(
+        &mut tar,
+        "doctor/snapshot.json",
+        &snapshot_bytes,
+        deterministic,
+    )?;
 
     let report = collect_debug_report(cli, 200)?;
-    let report_bytes = report.as_bytes();
-    let mut header = tar::Header::new_gnu();
-    header.set_mode(0o644);
-    header.set_size(report_bytes.len() as u64);
-    header.set_cksum();
-    tar.append_data(&mut header, "doctor/debug-report.md", report_bytes)
-        .map_err(|e| AgentError::Io(format!("append debug report: {}", e)))?;
+    append_bundle_bytes(
+        &mut tar,
+        "doctor/debug-report.md",
+        report.as_bytes(),
+        deterministic,
+    )?;
 
     let state_root = hermes_state_root(cli);
     let log_files = [
@@ -8685,8 +8755,9 @@ fn build_doctor_support_bundle(cli: &Cli, snapshot_path: &Path) -> Result<PathBu
     ];
     for (name, path) in log_files {
         if path.exists() {
-            tar.append_path_with_name(&path, format!("doctor/{name}"))
-                .map_err(|e| AgentError::Io(format!("append {}: {}", path.display(), e)))?;
+            let bytes = std::fs::read(&path)
+                .map_err(|e| AgentError::Io(format!("read {}: {}", path.display(), e)))?;
+            append_bundle_bytes(&mut tar, &format!("doctor/{name}"), &bytes, deterministic)?;
         }
     }
 
@@ -8707,8 +8778,9 @@ fn build_doctor_support_bundle(cli: &Cli, snapshot_path: &Path) -> Result<PathBu
                         .map(|s| s.to_string_lossy().to_string())
                         .unwrap_or_else(|| "replay.jsonl".to_string())
                 );
-                tar.append_path_with_name(&path, name)
-                    .map_err(|e| AgentError::Io(format!("append {}: {}", path.display(), e)))?;
+                let bytes = std::fs::read(&path)
+                    .map_err(|e| AgentError::Io(format!("read {}: {}", path.display(), e)))?;
+                append_bundle_bytes(&mut tar, &name, &bytes, deterministic)?;
             }
         }
     }
@@ -8716,35 +8788,31 @@ fn build_doctor_support_bundle(cli: &Cli, snapshot_path: &Path) -> Result<PathBu
     let manifest = replay_manifest_json(&replay_manifest_entries);
     let manifest_body = serde_json::to_vec_pretty(&manifest)
         .map_err(|e| AgentError::Config(format!("serialize replay manifest: {}", e)))?;
-    let mut manifest_header = tar::Header::new_gnu();
-    manifest_header.set_mode(0o644);
-    manifest_header.set_size(manifest_body.len() as u64);
-    manifest_header.set_cksum();
-    tar.append_data(
-        &mut manifest_header,
+    append_bundle_bytes(
+        &mut tar,
         "doctor/replay/manifest.json",
         manifest_body.as_slice(),
-    )
-    .map_err(|e| AgentError::Io(format!("append replay manifest: {}", e)))?;
+        deterministic,
+    )?;
 
     if let Ok(sig) = sign_artifact_bytes(cli, &manifest_body, true) {
         let sig_body = serde_json::to_vec_pretty(&sig)
             .map_err(|e| AgentError::Config(format!("serialize replay signature: {}", e)))?;
-        let mut sig_header = tar::Header::new_gnu();
-        sig_header.set_mode(0o644);
-        sig_header.set_size(sig_body.len() as u64);
-        sig_header.set_cksum();
-        tar.append_data(
-            &mut sig_header,
+        append_bundle_bytes(
+            &mut tar,
             "doctor/replay/manifest.sig.json",
             sig_body.as_slice(),
-        )
-        .map_err(|e| AgentError::Io(format!("append replay signature: {}", e)))?;
+            deterministic,
+        )?;
     }
 
     tar.finish()
         .map_err(|e| AgentError::Io(format!("finalize {}: {}", bundle_path.display(), e)))?;
     Ok(bundle_path)
+}
+
+fn build_doctor_support_bundle(cli: &Cli, snapshot_path: &Path) -> Result<PathBuf, AgentError> {
+    build_doctor_support_bundle_with_options(cli, snapshot_path, None, false)
 }
 
 /// Handle `hermes update`.
@@ -9016,6 +9084,305 @@ async fn run_route_learning(
     Ok(())
 }
 
+fn route_health_state_path_for_cli(cli: &Cli) -> PathBuf {
+    hermes_state_root(cli)
+        .join("logs")
+        .join("route-health.json")
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct RouteHealthEntry {
+    key: String,
+    health_score: f64,
+    tier: String,
+    reasons: Vec<String>,
+    stats: RouteLearningStatsRecord,
+}
+
+fn route_health_tier(stats: &RouteLearningStatsRecord, score: f64) -> (String, Vec<String>, f64) {
+    let mut reasons = Vec::new();
+    if stats.success_rate < 0.55 {
+        reasons.push("low_success_rate".to_string());
+    } else if stats.success_rate < 0.72 {
+        reasons.push("recovering_success_rate".to_string());
+    }
+    if stats.consecutive_failures >= 5 {
+        reasons.push("failure_streak_critical".to_string());
+    } else if stats.consecutive_failures >= 3 {
+        reasons.push("failure_streak_watch".to_string());
+    }
+    if stats.avg_latency_ms > 5000.0 {
+        reasons.push("high_latency".to_string());
+    } else if stats.avg_latency_ms > 3000.0 {
+        reasons.push("latency_watch".to_string());
+    }
+
+    let health_score = ((score + 0.30) / 1.20).clamp(0.0, 1.0);
+    let tier = if stats.consecutive_failures >= 5 || stats.success_rate < 0.55 {
+        "critical"
+    } else if health_score >= 0.72 {
+        "healthy"
+    } else if health_score >= 0.52 {
+        "watch"
+    } else if health_score >= 0.35 {
+        "degraded"
+    } else {
+        "critical"
+    };
+    (tier.to_string(), reasons, health_score)
+}
+
+async fn run_route_health(cli: Cli, action: Option<String>, json: bool) -> Result<(), AgentError> {
+    let action = action
+        .as_deref()
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "show".to_string());
+    let report_path = route_health_state_path_for_cli(&cli);
+
+    match action.as_str() {
+        "reset" | "clear" => {
+            if report_path.exists() {
+                std::fs::remove_file(&report_path).map_err(|e| {
+                    AgentError::Io(format!("remove {}: {}", report_path.display(), e))
+                })?;
+            }
+            let payload = serde_json::json!({
+                "ok": true,
+                "action": action,
+                "path": report_path.display().to_string(),
+            });
+            if json {
+                println!(
+                    "{}",
+                    serde_json::to_string(&payload).unwrap_or_else(|_| "{}".to_string())
+                );
+            } else {
+                println!("Route-health report cleared: {}", report_path.display());
+            }
+            return Ok(());
+        }
+        "show" | "list" | "inspect" => {}
+        _ => {
+            return Err(AgentError::Config(format!(
+                "route-health: unsupported action '{}'; use show/list/inspect/reset/clear",
+                action
+            )))
+        }
+    }
+
+    let learning_path = route_learning_state_path_for_cli(&cli);
+    let state = load_route_learning_state_for_cli(&learning_path)?;
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let mut entries: Vec<RouteHealthEntry> = state
+        .entries
+        .into_iter()
+        .filter_map(|(key, stats)| {
+            route_learning_effective_stats(&stats, now_ms).map(|effective| {
+                let score = route_learning_score(&effective);
+                let (tier, reasons, health_score) = route_health_tier(&effective, score);
+                RouteHealthEntry {
+                    key,
+                    health_score,
+                    tier,
+                    reasons,
+                    stats: effective,
+                }
+            })
+        })
+        .collect();
+    entries.sort_by(|a, b| {
+        b.health_score
+            .partial_cmp(&a.health_score)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.key.cmp(&b.key))
+    });
+
+    let healthy = entries.iter().filter(|e| e.tier == "healthy").count();
+    let watch = entries.iter().filter(|e| e.tier == "watch").count();
+    let degraded = entries.iter().filter(|e| e.tier == "degraded").count();
+    let critical = entries.iter().filter(|e| e.tier == "critical").count();
+    let overall = if critical > 0 {
+        "critical"
+    } else if degraded > 0 {
+        "degraded"
+    } else if watch > 0 {
+        "watch"
+    } else if healthy > 0 {
+        "healthy"
+    } else {
+        "unknown"
+    };
+    let avg_score = if entries.is_empty() {
+        0.0
+    } else {
+        entries.iter().map(|e| e.health_score).sum::<f64>() / (entries.len() as f64)
+    };
+
+    let payload = serde_json::json!({
+        "generated_at": chrono::Utc::now().to_rfc3339(),
+        "path": report_path.display().to_string(),
+        "learning_path": learning_path.display().to_string(),
+        "summary": {
+            "entries": entries.len(),
+            "overall": overall,
+            "average_score": avg_score,
+            "healthy": healthy,
+            "watch": watch,
+            "degraded": degraded,
+            "critical": critical,
+        },
+        "entries": entries,
+    });
+
+    if let Some(parent) = report_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AgentError::Io(format!("mkdir {}: {}", parent.display(), e)))?;
+    }
+    let body = serde_json::to_string_pretty(&payload)
+        .map_err(|e| AgentError::Config(format!("serialize route-health: {}", e)))?;
+    std::fs::write(&report_path, body)
+        .map_err(|e| AgentError::Io(format!("write {}: {}", report_path.display(), e)))?;
+
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&payload)
+                .map_err(|e| AgentError::Config(format!("serialize route-health json: {}", e)))?
+        );
+        return Ok(());
+    }
+
+    println!("Route-health report: {}", report_path.display());
+    println!(
+        "Overall={} entries={} avg_score={:.3} (healthy={} watch={} degraded={} critical={})",
+        overall,
+        payload["summary"]["entries"].as_u64().unwrap_or(0),
+        avg_score,
+        healthy,
+        watch,
+        degraded,
+        critical
+    );
+    if let Some(items) = payload["entries"].as_array() {
+        if items.is_empty() {
+            println!("(no routes learned yet)");
+            return Ok(());
+        }
+        println!(
+            "{:<42}  {:>7}  {:<9}  {:>8}  {:>10}  {:>8}",
+            "ROUTE", "HEALTH", "TIER", "SUCCESS", "LAT_MS", "FAILURES"
+        );
+        for item in items {
+            let key = item["key"].as_str().unwrap_or("");
+            let health = item["health_score"].as_f64().unwrap_or(0.0);
+            let tier = item["tier"].as_str().unwrap_or("unknown");
+            let stats = item["stats"].as_object();
+            let success = stats
+                .and_then(|s| s.get("success_rate"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            let latency = stats
+                .and_then(|s| s.get("avg_latency_ms"))
+                .and_then(|v| v.as_f64())
+                .unwrap_or(0.0);
+            let failures = stats
+                .and_then(|s| s.get("consecutive_failures"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0);
+            println!(
+                "{:<42}  {:>7.3}  {:<9}  {:>7.2}%  {:>10.1}  {:>8}",
+                key,
+                health,
+                tier,
+                success * 100.0,
+                latency,
+                failures
+            );
+        }
+    }
+    Ok(())
+}
+
+async fn run_incident_pack(
+    cli: Cli,
+    snapshot: Option<String>,
+    output: Option<String>,
+    json: bool,
+) -> Result<(), AgentError> {
+    let snapshot_path = if let Some(path) = snapshot
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+    {
+        if !path.exists() {
+            return Err(AgentError::Config(format!(
+                "incident-pack snapshot not found: {}",
+                path.display()
+            )));
+        }
+        path
+    } else {
+        let payload = serde_json::json!({
+            "generated_at": chrono::Utc::now().to_rfc3339(),
+            "mode": "incident_pack_snapshot",
+            "state_root": hermes_state_root(&cli).display().to_string(),
+            "elite": build_elite_doctor_diagnostics(&cli),
+        });
+        let out = write_doctor_snapshot(&cli, &payload, None)?;
+        if let Ok(snapshot_bytes) = std::fs::read(&out) {
+            if let Ok(sig) = sign_artifact_bytes(&cli, &snapshot_bytes, true) {
+                let _ = write_provenance_sidecar(&out, &sig);
+            }
+        }
+        out
+    };
+
+    let output_path = output
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from);
+    let bundle = build_doctor_support_bundle_with_options(
+        &cli,
+        &snapshot_path,
+        output_path.as_deref(),
+        true,
+    )?;
+
+    let bundle_sig_path = if let Ok(bundle_bytes) = std::fs::read(&bundle) {
+        sign_artifact_bytes(&cli, &bundle_bytes, true)
+            .ok()
+            .and_then(|sig| write_provenance_sidecar(&bundle, &sig).ok())
+            .map(|p| p.display().to_string())
+    } else {
+        None
+    };
+
+    let payload = serde_json::json!({
+        "ok": true,
+        "deterministic": true,
+        "snapshot": snapshot_path.display().to_string(),
+        "bundle": bundle.display().to_string(),
+        "bundle_signature": bundle_sig_path,
+    });
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&payload)
+                .map_err(|e| AgentError::Config(format!("serialize incident-pack json: {}", e)))?
+        );
+    } else {
+        println!("Incident pack created: {}", bundle.display());
+        println!("Snapshot: {}", snapshot_path.display());
+        if let Some(sig) = payload["bundle_signature"].as_str() {
+            println!("Bundle signature: {}", sig);
+        }
+    }
+    Ok(())
+}
+
 async fn run_rotate_provenance_key(cli: Cli, json: bool) -> Result<(), AgentError> {
     let path = provenance_key_path_for_cli(&cli);
     if let Some(parent) = path.parent() {
@@ -9140,6 +9507,38 @@ async fn run_status(cli: Cli) -> Result<(), AgentError> {
         policy_counters.simulate,
         policy_counters.would_block,
     );
+
+    let route_health_path = route_health_state_path_for_cli(&cli);
+    if route_health_path.exists() {
+        match std::fs::read_to_string(&route_health_path)
+            .ok()
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        {
+            Some(v) => {
+                let summary = v.get("summary").cloned().unwrap_or_default();
+                println!(
+                    "Route health: overall={} entries={} avg_score={:.3}",
+                    summary
+                        .get("overall")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("unknown"),
+                    summary.get("entries").and_then(|x| x.as_u64()).unwrap_or(0),
+                    summary
+                        .get("average_score")
+                        .and_then(|x| x.as_f64())
+                        .unwrap_or(0.0),
+                );
+            }
+            None => {
+                println!(
+                    "Route health: unavailable (failed to parse {})",
+                    route_health_path.display()
+                );
+            }
+        }
+    } else {
+        println!("Route health: (not generated) run `hermes route-health` to compute.");
+    }
 
     // Check for active sessions
     let sessions_dir = config_dir.join("sessions");
@@ -11199,8 +11598,24 @@ mod tests {
         let payload = build_elite_doctor_diagnostics(&cli);
         assert!(payload.get("provenance").is_some());
         assert!(payload.get("route_learning").is_some());
+        assert!(payload.get("route_health").is_some());
         assert!(payload.get("tool_policy").is_some());
         assert!(payload.get("elite_gate").is_some());
+    }
+
+    #[test]
+    fn route_health_tier_marks_failure_streak_critical() {
+        let stats = RouteLearningStatsRecord {
+            samples: 8,
+            success_rate: 0.61,
+            avg_latency_ms: 2200.0,
+            consecutive_failures: 6,
+            updated_at_unix_ms: 1_700_000_000_000,
+        };
+        let (tier, reasons, score) = route_health_tier(&stats, route_learning_score(&stats));
+        assert_eq!(tier, "critical");
+        assert!(reasons.iter().any(|r| r == "failure_streak_critical"));
+        assert!(score >= 0.0);
     }
 
     #[test]
