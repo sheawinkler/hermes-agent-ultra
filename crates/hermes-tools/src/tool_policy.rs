@@ -15,6 +15,7 @@ use serde_json::Value;
 pub enum ToolPolicyMode {
     Off,
     Audit,
+    Simulate,
     Enforce,
 }
 
@@ -23,6 +24,7 @@ impl ToolPolicyMode {
         match self {
             Self::Off => "off",
             Self::Audit => "audit",
+            Self::Simulate => "simulate",
             Self::Enforce => "enforce",
         }
     }
@@ -31,6 +33,7 @@ impl ToolPolicyMode {
         match raw.trim().to_ascii_lowercase().as_str() {
             "off" => Self::Off,
             "audit" => Self::Audit,
+            "simulate" => Self::Simulate,
             _ => Self::Enforce,
         }
     }
@@ -52,6 +55,8 @@ pub struct ToolPolicyDecision {
     pub audited_only: bool,
     pub mode: ToolPolicyMode,
     pub code: Option<String>,
+    pub simulated: bool,
+    pub would_block: bool,
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -211,6 +216,8 @@ impl ToolPolicyEngine {
                 audited_only: false,
                 mode: self.mode,
                 code: None,
+                simulated: false,
+                would_block: false,
             };
         }
 
@@ -231,15 +238,15 @@ impl ToolPolicyEngine {
                     Ok(()) if counter.len > self.max_param_bytes => {
                         deny_reason = Some(format!(
                             "tool params exceed max bytes: {} > {}",
-                            counter.len,
-                            self.max_param_bytes
+                            counter.len, self.max_param_bytes
                         ));
                         deny_code = Some("params_too_large".to_string());
                     }
                     Ok(()) => {}
                     Err(_) => {
-                        deny_reason =
-                            Some("tool params could not be serialized for policy check".to_string());
+                        deny_reason = Some(
+                            "tool params could not be serialized for policy check".to_string(),
+                        );
                         deny_code = Some("params_not_serializable".to_string());
                     }
                 }
@@ -266,8 +273,9 @@ impl ToolPolicyEngine {
                         }
                     }
                     Err(_) => {
-                        deny_reason =
-                            Some("tool params could not be serialized for policy check".to_string());
+                        deny_reason = Some(
+                            "tool params could not be serialized for policy check".to_string(),
+                        );
                         deny_code = Some("params_not_serializable".to_string());
                     }
                 }
@@ -275,13 +283,29 @@ impl ToolPolicyEngine {
         }
 
         match deny_reason {
-            None => ToolPolicyDecision {
-                allow: true,
-                reason: None,
-                audited_only: false,
-                mode: self.mode,
-                code: None,
-            },
+            None => {
+                if matches!(self.mode, ToolPolicyMode::Simulate) {
+                    ToolPolicyDecision {
+                        allow: true,
+                        reason: Some("simulation: tool call would be allowed".to_string()),
+                        audited_only: false,
+                        mode: self.mode,
+                        code: Some("simulation_allow".to_string()),
+                        simulated: true,
+                        would_block: false,
+                    }
+                } else {
+                    ToolPolicyDecision {
+                        allow: true,
+                        reason: None,
+                        audited_only: false,
+                        mode: self.mode,
+                        code: None,
+                        simulated: false,
+                        would_block: false,
+                    }
+                }
+            }
             Some(reason) => {
                 if matches!(self.mode, ToolPolicyMode::Audit) {
                     ToolPolicyDecision {
@@ -290,6 +314,18 @@ impl ToolPolicyEngine {
                         audited_only: true,
                         mode: self.mode,
                         code: deny_code,
+                        simulated: false,
+                        would_block: true,
+                    }
+                } else if matches!(self.mode, ToolPolicyMode::Simulate) {
+                    ToolPolicyDecision {
+                        allow: true,
+                        reason: Some(format!("simulation: would block - {}", reason)),
+                        audited_only: true,
+                        mode: self.mode,
+                        code: deny_code,
+                        simulated: true,
+                        would_block: true,
                     }
                 } else {
                     ToolPolicyDecision {
@@ -298,6 +334,8 @@ impl ToolPolicyEngine {
                         audited_only: false,
                         mode: self.mode,
                         code: deny_code,
+                        simulated: false,
+                        would_block: true,
                     }
                 }
             }
@@ -344,6 +382,46 @@ pub fn annotate_policy_audit(result: &str, reason: &str) -> String {
     .to_string()
 }
 
+pub fn annotate_policy_simulation(
+    result: &str,
+    reason: &str,
+    would_block: bool,
+    code: Option<&str>,
+) -> String {
+    let simulation = serde_json::json!({
+        "mode": "simulate",
+        "would_block": would_block,
+        "reason": reason,
+        "code": code.unwrap_or(if would_block { "simulation_would_block" } else { "simulation_allow" }),
+    });
+    if let Ok(mut value) = serde_json::from_str::<Value>(result) {
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("_tool_policy_simulation".to_string(), simulation);
+            if would_block {
+                obj.insert(
+                    "_tool_policy_warning".to_string(),
+                    Value::String(reason.to_string()),
+                );
+            }
+            return value.to_string();
+        }
+    }
+    if would_block {
+        serde_json::json!({
+            "result": result,
+            "_tool_policy_warning": reason,
+            "_tool_policy_simulation": simulation,
+        })
+        .to_string()
+    } else {
+        serde_json::json!({
+            "result": result,
+            "_tool_policy_simulation": simulation,
+        })
+        .to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,6 +437,8 @@ mod tests {
         assert!(!decision.audited_only);
         assert_eq!(decision.mode, ToolPolicyMode::Enforce);
         assert_eq!(decision.code.as_deref(), Some("tool_denylisted"));
+        assert!(!decision.simulated);
+        assert!(decision.would_block);
         assert!(decision
             .reason
             .as_deref()
@@ -376,6 +456,8 @@ mod tests {
         assert!(decision.audited_only);
         assert_eq!(decision.mode, ToolPolicyMode::Audit);
         assert_eq!(decision.code.as_deref(), Some("tool_not_allowlisted"));
+        assert!(!decision.simulated);
+        assert!(decision.would_block);
         assert!(decision.reason.is_some());
     }
 
@@ -503,5 +585,39 @@ mod tests {
         let parsed: Value = serde_json::from_str(&out).expect("valid json");
         assert_eq!(parsed["ok"], true);
         assert_eq!(parsed["_tool_policy_warning"], "policy audit");
+    }
+
+    #[test]
+    fn policy_simulate_mode_allows_and_marks_would_block() {
+        let policy = ToolPolicyEngine::new(ToolPolicyMode::Simulate).with_denylist(&["terminal"]);
+        let decision = policy.evaluate("terminal", &serde_json::json!({"cmd":"ls"}));
+        assert!(decision.allow, "simulate mode should not block execution");
+        assert!(decision.audited_only);
+        assert!(decision.simulated);
+        assert!(decision.would_block);
+        assert!(decision
+            .reason
+            .as_deref()
+            .unwrap_or("")
+            .contains("would block"));
+    }
+
+    #[test]
+    fn annotate_policy_simulation_attaches_metadata() {
+        let out = annotate_policy_simulation(
+            r#"{"ok":true}"#,
+            "simulation: would block - tool 'terminal' is denylisted",
+            true,
+            Some("tool_denylisted"),
+        );
+        let parsed: Value = serde_json::from_str(&out).expect("valid json");
+        assert_eq!(parsed["ok"], true);
+        assert_eq!(parsed["_tool_policy_simulation"]["mode"], "simulate");
+        assert_eq!(parsed["_tool_policy_simulation"]["would_block"], true);
+        assert_eq!(parsed["_tool_policy_simulation"]["code"], "tool_denylisted");
+        assert!(parsed["_tool_policy_warning"]
+            .as_str()
+            .unwrap_or("")
+            .contains("would block"));
     }
 }
