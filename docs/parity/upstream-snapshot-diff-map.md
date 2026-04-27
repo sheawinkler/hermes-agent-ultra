@@ -1,39 +1,39 @@
 # Upstream Snapshot Diff Map
 
-Generated: `2026-04-23T18:11:17.041756+00:00`
+Generated: `2026-04-27T07:30:15.500479+00:00`
 
 - Compared refs: `main` vs `upstream/main`
-- Total diff entries: `2700`
-- Status counts: `A=2283`, `D=407`, `M=10`
+- Total diff entries: `3033`
+- Status counts: `A=2603`, `D=420`, `M=10`
 
 ## Prefix Groups
 
 | Prefix | Total | A | M | D | Classification |
 | --- | ---: | ---: | ---: | ---: | --- |
-| `tests` | 724 | 724 | 0 | 0 | `needs_rust_implementation_review` |
-| `skills` | 473 | 473 | 0 | 0 | `needs_rust_implementation_review` |
-| `crates` | 344 | 0 | 0 | 344 | `intentional_divergence_rust_primary` |
-| `ui-tui` | 254 | 254 | 0 | 0 | `needs_rust_implementation_review` |
-| `optional-skills` | 191 | 189 | 2 | 0 | `needs_rust_implementation_review` |
-| `website` | 150 | 150 | 0 | 0 | `needs_rust_implementation_review` |
-| `tools` | 79 | 79 | 0 | 0 | `needs_rust_implementation_review` |
-| `web` | 64 | 64 | 0 | 0 | `needs_rust_implementation_review` |
-| `hermes_cli` | 51 | 51 | 0 | 0 | `needs_rust_implementation_review` |
-| `gateway` | 49 | 49 | 0 | 0 | `needs_rust_implementation_review` |
-| `agent` | 48 | 48 | 0 | 0 | `needs_rust_implementation_review` |
-| `plugins` | 44 | 44 | 0 | 0 | `needs_rust_implementation_review` |
+| `tests` | 794 | 794 | 0 | 0 | `needs_rust_implementation_review` |
+| `skills` | 483 | 483 | 0 | 0 | `needs_rust_implementation_review` |
+| `crates` | 352 | 0 | 0 | 352 | `intentional_divergence_rust_primary` |
+| `ui-tui` | 291 | 291 | 0 | 0 | `needs_rust_implementation_review` |
+| `website` | 290 | 290 | 0 | 0 | `needs_rust_implementation_review` |
+| `optional-skills` | 192 | 189 | 0 | 3 | `needs_rust_implementation_review` |
+| `web` | 92 | 92 | 0 | 0 | `needs_rust_implementation_review` |
+| `tools` | 84 | 84 | 0 | 0 | `needs_rust_implementation_review` |
+| `hermes_cli` | 58 | 58 | 0 | 0 | `needs_rust_implementation_review` |
+| `gateway` | 54 | 54 | 0 | 0 | `needs_rust_implementation_review` |
+| `plugins` | 54 | 54 | 0 | 0 | `needs_rust_implementation_review` |
+| `agent` | 51 | 51 | 0 | 0 | `needs_rust_implementation_review` |
 | `environments` | 43 | 43 | 0 | 0 | `needs_rust_implementation_review` |
-| `scripts` | 41 | 16 | 1 | 24 | `selective_adopt_review` |
-| `docs` | 27 | 0 | 0 | 27 | `manual_review_required` |
+| `scripts` | 43 | 18 | 1 | 24 | `selective_adopt_review` |
+| `docs` | 29 | 0 | 0 | 29 | `manual_review_required` |
 | `.github` | 19 | 16 | 0 | 3 | `selective_adopt_review` |
 | `acp_adapter` | 9 | 9 | 0 | 0 | `needs_rust_implementation_review` |
 | `nix` | 9 | 9 | 0 | 0 | `selective_adopt_review` |
-| `tui_gateway` | 5 | 5 | 0 | 0 | `needs_rust_implementation_review` |
+| `tui_gateway` | 8 | 8 | 0 | 0 | `needs_rust_implementation_review` |
 | `datagen-config-examples` | 4 | 4 | 0 | 0 | `manual_review_required` |
 | `cron` | 3 | 3 | 0 | 0 | `needs_rust_implementation_review` |
 | `.plans` | 2 | 2 | 0 | 0 | `manual_review_required` |
 | `acp_registry` | 2 | 2 | 0 | 0 | `manual_review_required` |
-| `docker` | 2 | 2 | 0 | 0 | `selective_adopt_review` |
+| `docker` | 2 | 1 | 1 | 0 | `selective_adopt_review` |
 | `packaging` | 2 | 1 | 1 | 0 | `selective_adopt_review` |
 | `.ci` | 1 | 0 | 0 | 1 | `manual_review_required` |
 | `.dockerignore` | 1 | 1 | 0 | 0 | `manual_review_required` |
@@ -57,6 +57,7 @@ Generated: `2026-04-23T18:11:17.041756+00:00`
 | `README_KO.md` | 1 | 0 | 0 | 1 | `manual_review_required` |
 | `README_ZH.md` | 1 | 0 | 0 | 1 | `manual_review_required` |
 | `RELEASE_v0.10.0.md` | 1 | 1 | 0 | 0 | `manual_review_required` |
+| `RELEASE_v0.11.0.md` | 1 | 1 | 0 | 0 | `manual_review_required` |
 | `RELEASE_v0.2.0.md` | 1 | 1 | 0 | 0 | `manual_review_required` |
 | `RELEASE_v0.3.0.md` | 1 | 1 | 0 | 0 | `manual_review_required` |
 | `RELEASE_v0.4.0.md` | 1 | 1 | 0 | 0 | `manual_review_required` |
@@ -72,6 +73,7 @@ Generated: `2026-04-23T18:11:17.041756+00:00`
 | `cli-config.yaml.example` | 1 | 1 | 0 | 0 | `manual_review_required` |
 | `cli.py` | 1 | 1 | 0 | 0 | `manual_review_required` |
 | `constraints-termux.txt` | 1 | 1 | 0 | 0 | `manual_review_required` |
+| `docker-compose.yml` | 1 | 0 | 1 | 0 | `manual_review_required` |
 | `flake.lock` | 1 | 1 | 0 | 0 | `manual_review_required` |
 | `flake.nix` | 1 | 0 | 1 | 0 | `selective_adopt_review` |
 | `hermes` | 1 | 1 | 0 | 0 | `manual_review_required` |
@@ -101,11 +103,11 @@ Generated: `2026-04-23T18:11:17.041756+00:00`
 
 | Tranche | Total | Status Counts |
 | --- | ---: | --- |
-| `infra_surface` | 73 | `A=44, D=27, M=2` |
-| `runtime_surface` | 271 | `A=271` |
-| `rust_divergence` | 346 | `D=346` |
-| `ux_surface` | 1132 | `A=1130, M=2` |
-| `validation_surface` | 767 | `A=767` |
+| `infra_surface` | 75 | `A=45, D=27, M=3` |
+| `runtime_surface` | 301 | `A=301` |
+| `rust_divergence` | 354 | `D=354` |
+| `ux_surface` | 1348 | `A=1345, D=3` |
+| `validation_surface` | 837 | `A=837` |
 
 ## Notes
 

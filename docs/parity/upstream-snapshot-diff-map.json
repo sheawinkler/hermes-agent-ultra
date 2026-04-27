@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-04-23T18:11:17.041756+00:00",
+  "generated_at_utc": "2026-04-27T07:30:15.500479+00:00",
   "groups": [
     {
       "classification": "needs_rust_implementation_review",
@@ -20,12 +20,12 @@
         "tests/acp/test_tools.py",
         "tests/agent/__init__.py",
         "tests/agent/test_anthropic_adapter.py",
-        "tests/agent/test_auxiliary_client.py"
+        "tests/agent/test_anthropic_keychain.py"
       ],
       "status_counts": {
-        "A": 724
+        "A": 794
       },
-      "total": 724
+      "total": 794
     },
     {
       "classification": "needs_rust_implementation_review",
@@ -49,9 +49,9 @@
         "skills/creative/ascii-video/README.md"
       ],
       "status_counts": {
-        "A": 473
+        "A": 483
       },
-      "total": 473
+      "total": 483
     },
     {
       "classification": "intentional_divergence_rust_primary",
@@ -71,13 +71,13 @@
         "crates/hermes-agent/src/api_bridge.rs",
         "crates/hermes-agent/src/auxiliary_builder.rs",
         "crates/hermes-agent/src/budget.rs",
-        "crates/hermes-agent/src/compression.rs",
-        "crates/hermes-agent/src/context.rs"
+        "crates/hermes-agent/src/code_index.rs",
+        "crates/hermes-agent/src/compression.rs"
       ],
       "status_counts": {
-        "D": 344
+        "D": 352
       },
-      "total": 344
+      "total": 352
     },
     {
       "classification": "needs_rust_implementation_review",
@@ -87,6 +87,7 @@
         "ui-tui/.gitignore",
         "ui-tui/.prettierrc",
         "ui-tui/README.md",
+        "ui-tui/babel.compiler.config.cjs",
         "ui-tui/eslint.config.mjs",
         "ui-tui/package-lock.json",
         "ui-tui/package.json",
@@ -97,13 +98,38 @@
         "ui-tui/packages/hermes-ink/package.json",
         "ui-tui/packages/hermes-ink/src/bootstrap/state.ts",
         "ui-tui/packages/hermes-ink/src/entry-exports.ts",
-        "ui-tui/packages/hermes-ink/src/hooks/use-stderr.ts",
-        "ui-tui/packages/hermes-ink/src/hooks/use-stdout.ts"
+        "ui-tui/packages/hermes-ink/src/hooks/use-stderr.ts"
       ],
       "status_counts": {
-        "A": 254
+        "A": 291
       },
-      "total": 254
+      "total": 291
+    },
+    {
+      "classification": "needs_rust_implementation_review",
+      "prefix": "website",
+      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
+      "sample_paths": [
+        "website/.gitignore",
+        "website/README.md",
+        "website/docs/developer-guide/_category_.json",
+        "website/docs/developer-guide/acp-internals.md",
+        "website/docs/developer-guide/adding-platform-adapters.md",
+        "website/docs/developer-guide/adding-providers.md",
+        "website/docs/developer-guide/adding-tools.md",
+        "website/docs/developer-guide/agent-loop.md",
+        "website/docs/developer-guide/architecture.md",
+        "website/docs/developer-guide/browser-supervisor.md",
+        "website/docs/developer-guide/context-compression-and-caching.md",
+        "website/docs/developer-guide/context-engine-plugin.md",
+        "website/docs/developer-guide/contributing.md",
+        "website/docs/developer-guide/creating-skills.md",
+        "website/docs/developer-guide/cron-internals.md"
+      ],
+      "status_counts": {
+        "A": 290
+      },
+      "total": 290
     },
     {
       "classification": "needs_rust_implementation_review",
@@ -120,43 +146,43 @@
         "optional-skills/blockchain/solana/scripts/solana_client.py",
         "optional-skills/communication/DESCRIPTION.md",
         "optional-skills/communication/one-three-one-rule/SKILL.md",
+        "optional-skills/creative/DESCRIPTION.md",
         "optional-skills/creative/blender-mcp/SKILL.md",
         "optional-skills/creative/concept-diagrams/SKILL.md",
         "optional-skills/creative/concept-diagrams/examples/apartment-floor-plan-conversion.md",
-        "optional-skills/creative/concept-diagrams/examples/automated-password-reset-flow.md",
-        "optional-skills/creative/concept-diagrams/examples/autonomous-llm-research-agent-flow.md"
+        "optional-skills/creative/concept-diagrams/examples/automated-password-reset-flow.md"
       ],
       "status_counts": {
         "A": 189,
-        "M": 2
+        "D": 3
       },
-      "total": 191
+      "total": 192
     },
     {
       "classification": "needs_rust_implementation_review",
-      "prefix": "website",
+      "prefix": "web",
       "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
       "sample_paths": [
-        "website/.gitignore",
-        "website/README.md",
-        "website/docs/developer-guide/_category_.json",
-        "website/docs/developer-guide/acp-internals.md",
-        "website/docs/developer-guide/adding-platform-adapters.md",
-        "website/docs/developer-guide/adding-providers.md",
-        "website/docs/developer-guide/adding-tools.md",
-        "website/docs/developer-guide/agent-loop.md",
-        "website/docs/developer-guide/architecture.md",
-        "website/docs/developer-guide/context-compression-and-caching.md",
-        "website/docs/developer-guide/context-engine-plugin.md",
-        "website/docs/developer-guide/contributing.md",
-        "website/docs/developer-guide/creating-skills.md",
-        "website/docs/developer-guide/cron-internals.md",
-        "website/docs/developer-guide/environments.md"
+        "web/README.md",
+        "web/eslint.config.js",
+        "web/index.html",
+        "web/package-lock.json",
+        "web/package.json",
+        "web/public/favicon.ico",
+        "web/public/fonts-terminal/JetBrainsMono-Bold.woff2",
+        "web/public/fonts-terminal/JetBrainsMono-Italic.woff2",
+        "web/public/fonts-terminal/JetBrainsMono-Regular.woff2",
+        "web/public/fonts/Collapse-Bold.woff2",
+        "web/public/fonts/Collapse-Regular.woff2",
+        "web/public/fonts/Mondwest-Regular.woff2",
+        "web/public/fonts/RulesCompressed-Medium.woff2",
+        "web/public/fonts/RulesCompressed-Regular.woff2",
+        "web/public/fonts/RulesExpanded-Bold.woff2"
       ],
       "status_counts": {
-        "A": 150
+        "A": 92
       },
-      "total": 150
+      "total": 92
     },
     {
       "classification": "needs_rust_implementation_review",
@@ -170,45 +196,19 @@
         "tools/browser_camofox.py",
         "tools/browser_camofox_state.py",
         "tools/browser_cdp_tool.py",
+        "tools/browser_dialog_tool.py",
         "tools/browser_providers/__init__.py",
         "tools/browser_providers/base.py",
         "tools/browser_providers/browser_use.py",
         "tools/browser_providers/browserbase.py",
         "tools/browser_providers/firecrawl.py",
-        "tools/browser_tool.py",
-        "tools/budget_config.py",
-        "tools/checkpoint_manager.py"
+        "tools/browser_supervisor.py",
+        "tools/browser_tool.py"
       ],
       "status_counts": {
-        "A": 79
+        "A": 84
       },
-      "total": 79
-    },
-    {
-      "classification": "needs_rust_implementation_review",
-      "prefix": "web",
-      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
-      "sample_paths": [
-        "web/README.md",
-        "web/eslint.config.js",
-        "web/index.html",
-        "web/package-lock.json",
-        "web/package.json",
-        "web/public/favicon.ico",
-        "web/public/fonts/Collapse-Bold.woff2",
-        "web/public/fonts/Collapse-Regular.woff2",
-        "web/public/fonts/Mondwest-Regular.woff2",
-        "web/public/fonts/RulesCompressed-Medium.woff2",
-        "web/public/fonts/RulesCompressed-Regular.woff2",
-        "web/public/fonts/RulesExpanded-Bold.woff2",
-        "web/public/fonts/RulesExpanded-Regular.woff2",
-        "web/src/App.tsx",
-        "web/src/components/AutoField.tsx"
-      ],
-      "status_counts": {
-        "A": 64
-      },
-      "total": 64
+      "total": 84
     },
     {
       "classification": "needs_rust_implementation_review",
@@ -218,6 +218,7 @@
         "hermes_cli/__init__.py",
         "hermes_cli/auth.py",
         "hermes_cli/auth_commands.py",
+        "hermes_cli/azure_detect.py",
         "hermes_cli/backup.py",
         "hermes_cli/banner.py",
         "hermes_cli/callbacks.py",
@@ -228,13 +229,12 @@
         "hermes_cli/colors.py",
         "hermes_cli/commands.py",
         "hermes_cli/completion.py",
-        "hermes_cli/config.py",
-        "hermes_cli/copilot_auth.py"
+        "hermes_cli/config.py"
       ],
       "status_counts": {
-        "A": 51
+        "A": 58
       },
-      "total": 51
+      "total": 58
     },
     {
       "classification": "needs_rust_implementation_review",
@@ -258,9 +258,35 @@
         "gateway/platforms/bluebubbles.py"
       ],
       "status_counts": {
-        "A": 49
+        "A": 54
       },
-      "total": 49
+      "total": 54
+    },
+    {
+      "classification": "needs_rust_implementation_review",
+      "prefix": "plugins",
+      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
+      "sample_paths": [
+        "plugins/__init__.py",
+        "plugins/context_engine/__init__.py",
+        "plugins/disk-cleanup/README.md",
+        "plugins/disk-cleanup/__init__.py",
+        "plugins/disk-cleanup/disk_cleanup.py",
+        "plugins/disk-cleanup/plugin.yaml",
+        "plugins/example-dashboard/dashboard/dist/index.js",
+        "plugins/example-dashboard/dashboard/manifest.json",
+        "plugins/example-dashboard/dashboard/plugin_api.py",
+        "plugins/image_gen/openai-codex/__init__.py",
+        "plugins/image_gen/openai-codex/plugin.yaml",
+        "plugins/image_gen/openai/__init__.py",
+        "plugins/image_gen/openai/plugin.yaml",
+        "plugins/image_gen/xai/__init__.py",
+        "plugins/image_gen/xai/plugin.yaml"
+      ],
+      "status_counts": {
+        "A": 54
+      },
+      "total": 54
     },
     {
       "classification": "needs_rust_implementation_review",
@@ -284,35 +310,9 @@
         "agent/file_safety.py"
       ],
       "status_counts": {
-        "A": 48
+        "A": 51
       },
-      "total": 48
-    },
-    {
-      "classification": "needs_rust_implementation_review",
-      "prefix": "plugins",
-      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
-      "sample_paths": [
-        "plugins/__init__.py",
-        "plugins/context_engine/__init__.py",
-        "plugins/disk-cleanup/README.md",
-        "plugins/disk-cleanup/__init__.py",
-        "plugins/disk-cleanup/disk_cleanup.py",
-        "plugins/disk-cleanup/plugin.yaml",
-        "plugins/example-dashboard/dashboard/dist/index.js",
-        "plugins/example-dashboard/dashboard/manifest.json",
-        "plugins/example-dashboard/dashboard/plugin_api.py",
-        "plugins/image_gen/openai-codex/__init__.py",
-        "plugins/image_gen/openai-codex/plugin.yaml",
-        "plugins/image_gen/openai/__init__.py",
-        "plugins/image_gen/openai/plugin.yaml",
-        "plugins/memory/__init__.py",
-        "plugins/memory/byterover/README.md"
-      ],
-      "status_counts": {
-        "A": 44
-      },
-      "total": 44
+      "total": 51
     },
     {
       "classification": "needs_rust_implementation_review",
@@ -345,6 +345,7 @@
       "prefix": "scripts",
       "rationale": "Installer/packaging/docs/infra deltas may be partially applicable and should be reviewed.",
       "sample_paths": [
+        "scripts/build_model_catalog.py",
         "scripts/build_skills_index.py",
         "scripts/check-runtime-placeholders.sh",
         "scripts/clippy-warning-gate.sh",
@@ -358,15 +359,14 @@
         "scripts/generate-test-intent-mapping.py",
         "scripts/generate-upstream-patch-queue.py",
         "scripts/generate-upstream-snapshot-diff-map.py",
-        "scripts/generate-workstream-status.py",
-        "scripts/git-hooks/pre-commit"
+        "scripts/generate-workstream-status.py"
       ],
       "status_counts": {
-        "A": 16,
+        "A": 18,
         "D": 24,
         "M": 1
       },
-      "total": 41
+      "total": 43
     },
     {
       "classification": "manual_review_required",
@@ -390,9 +390,9 @@
         "docs/parity/parity-matrix.json"
       ],
       "status_counts": {
-        "D": 27
+        "D": 29
       },
-      "total": 27
+      "total": 29
     },
     {
       "classification": "selective_adopt_review",
@@ -468,14 +468,17 @@
       "sample_paths": [
         "tui_gateway/__init__.py",
         "tui_gateway/entry.py",
+        "tui_gateway/event_publisher.py",
         "tui_gateway/render.py",
         "tui_gateway/server.py",
-        "tui_gateway/slash_worker.py"
+        "tui_gateway/slash_worker.py",
+        "tui_gateway/transport.py",
+        "tui_gateway/ws.py"
       ],
       "status_counts": {
-        "A": 5
+        "A": 8
       },
-      "total": 5
+      "total": 8
     },
     {
       "classification": "manual_review_required",
@@ -541,7 +544,8 @@
         "docker/entrypoint.sh"
       ],
       "status_counts": {
-        "A": 2
+        "A": 1,
+        "M": 1
       },
       "total": 2
     },
@@ -825,6 +829,18 @@
     },
     {
       "classification": "manual_review_required",
+      "prefix": "RELEASE_v0.11.0.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "RELEASE_v0.11.0.md"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
       "prefix": "RELEASE_v0.2.0.md",
       "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
       "sample_paths": [
@@ -1000,6 +1016,18 @@
       ],
       "status_counts": {
         "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "docker-compose.yml",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "docker-compose.yml"
+      ],
+      "status_counts": {
+        "M": 1
       },
       "total": 1
     },
@@ -1297,13 +1325,13 @@
     "upstream_ref": "upstream/main"
   },
   "summary": {
-    "group_count": 86,
+    "group_count": 88,
     "status_counts": {
-      "A": 2283,
-      "D": 407,
+      "A": 2603,
+      "D": 420,
       "M": 10
     },
-    "total_entries": 2700
+    "total_entries": 3033
   },
   "tranche_summary": {
     "infra_surface": {
@@ -1315,11 +1343,11 @@
         "scripts"
       ],
       "status_counts": {
-        "A": 44,
+        "A": 45,
         "D": 27,
-        "M": 2
+        "M": 3
       },
-      "total": 73
+      "total": 75
     },
     "runtime_surface": {
       "prefixes": [
@@ -1330,9 +1358,9 @@
         "tools"
       ],
       "status_counts": {
-        "A": 271
+        "A": 301
       },
-      "total": 271
+      "total": 301
     },
     "rust_divergence": {
       "prefixes": [
@@ -1341,9 +1369,9 @@
         "crates"
       ],
       "status_counts": {
-        "D": 346
+        "D": 354
       },
-      "total": 346
+      "total": 354
     },
     "ux_surface": {
       "prefixes": [
@@ -1354,10 +1382,10 @@
         "website"
       ],
       "status_counts": {
-        "A": 1130,
-        "M": 2
+        "A": 1345,
+        "D": 3
       },
-      "total": 1132
+      "total": 1348
     },
     "validation_surface": {
       "prefixes": [
@@ -1365,9 +1393,9 @@
         "tests"
       ],
       "status_counts": {
-        "A": 767
+        "A": 837
       },
-      "total": 767
+      "total": 837
     }
   }
 }
