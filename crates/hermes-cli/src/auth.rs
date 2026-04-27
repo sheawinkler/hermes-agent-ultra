@@ -157,6 +157,32 @@ pub struct CodexTokens {
     pub expires_in: Option<i64>,
 }
 
+#[derive(Debug, Clone)]
+pub struct OpenAiOAuthImport {
+    pub state: CodexAuthState,
+    pub source_path: PathBuf,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExternalOpenAiAuthFile {
+    #[serde(default)]
+    auth_mode: Option<String>,
+    #[serde(default)]
+    last_refresh: Option<String>,
+    #[serde(default)]
+    tokens: Option<ExternalOpenAiAuthTokens>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ExternalOpenAiAuthTokens {
+    #[serde(default)]
+    access_token: Option<String>,
+    #[serde(default)]
+    refresh_token: Option<String>,
+    #[serde(default)]
+    id_token: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AuthStore {
     #[serde(default = "default_auth_store_version")]
@@ -437,6 +463,94 @@ pub fn save_openai_auth_state(state: &CodexAuthState) -> Result<PathBuf, AgentEr
     let value = serde_json::to_value(state)
         .map_err(|e| AgentError::Config(format!("encode state: {}", e)))?;
     save_provider_auth_state("openai", value)
+}
+
+fn openai_oauth_discovery_paths() -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    for env_name in [
+        "HERMES_OPENAI_OAUTH_FILE",
+        "HERMES_CODEX_AUTH_FILE",
+        "CODEX_AUTH_FILE",
+    ] {
+        if let Ok(path) = std::env::var(env_name) {
+            let trimmed = path.trim();
+            if !trimmed.is_empty() {
+                candidates.push(PathBuf::from(trimmed));
+            }
+        }
+    }
+    if let Some(home) = dirs::home_dir() {
+        candidates.push(home.join(".codex").join("auth.json"));
+        candidates.push(home.join(".pi").join("agent").join("auth.json"));
+    }
+    let mut seen = std::collections::HashSet::new();
+    candidates
+        .into_iter()
+        .filter(|path| path.is_file())
+        .filter(|path| seen.insert(path.clone()))
+        .collect()
+}
+
+fn decode_jwt_exp_seconds(token: &str) -> Option<i64> {
+    let payload = token.split('.').nth(1)?;
+    let decoded = BASE64_URL_SAFE_NO_PAD.decode(payload).ok()?;
+    let json: Value = serde_json::from_slice(&decoded).ok()?;
+    json.get("exp").and_then(value_as_i64)
+}
+
+fn load_openai_oauth_import_from_path(path: &Path) -> Option<OpenAiOAuthImport> {
+    let raw = std::fs::read_to_string(path).ok()?;
+    let parsed: ExternalOpenAiAuthFile = serde_json::from_str(&raw).ok()?;
+    let tokens = parsed.tokens?;
+    let access_token = tokens
+        .access_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?
+        .to_string();
+    let refresh_token = tokens
+        .refresh_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let now_secs = Utc::now().timestamp();
+    let expires_in = tokens
+        .id_token
+        .as_deref()
+        .and_then(|jwt| decode_jwt_exp_seconds(jwt))
+        .map(|exp| exp - now_secs)
+        .filter(|remaining| *remaining > 0);
+    let state = CodexAuthState {
+        tokens: CodexTokens {
+            access_token,
+            refresh_token,
+            expires_in,
+        },
+        base_url: DEFAULT_OPENAI_BASE_URL.to_string(),
+        last_refresh: parsed
+            .last_refresh
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| Utc::now().to_rfc3339()),
+        auth_mode: parsed.auth_mode,
+        source: Some("discovered".to_string()),
+    };
+    Some(OpenAiOAuthImport {
+        state,
+        source_path: path.to_path_buf(),
+    })
+}
+
+pub fn discover_existing_openai_oauth() -> Result<Option<OpenAiOAuthImport>, AgentError> {
+    for path in openai_oauth_discovery_paths() {
+        if let Some(imported) = load_openai_oauth_import_from_path(&path) {
+            return Ok(Some(imported));
+        }
+    }
+    Ok(None)
 }
 
 fn qwen_cli_auth_path() -> PathBuf {
@@ -2251,6 +2365,7 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    static OPENAI_ENV_LOCK: Mutex<()> = Mutex::new(());
     static QWEN_ENV_LOCK: Mutex<()> = Mutex::new(());
     static GEMINI_ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -2282,6 +2397,53 @@ mod tests {
         let provider = format!("missing-{}", uuid::Uuid::new_v4().simple());
         let removed = clear_provider_auth_state(&provider).expect("clear");
         assert!(!removed);
+    }
+
+    #[test]
+    fn discover_existing_openai_oauth_reads_env_path() {
+        let _guard = OPENAI_ENV_LOCK.lock().expect("lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let auth_path = tmp.path().join("codex-auth.json");
+        let exp = Utc::now().timestamp() + 3600;
+        let payload = serde_json::json!({ "exp": exp });
+        let payload_b64 =
+            BASE64_URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload).expect("payload json"));
+        let id_token = format!("header.{}.sig", payload_b64);
+        let raw = serde_json::json!({
+            "auth_mode": "chatgpt",
+            "last_refresh": "2026-04-27T00:00:00Z",
+            "tokens": {
+                "access_token": "openai-access",
+                "refresh_token": "openai-refresh",
+                "id_token": id_token,
+            }
+        });
+        std::fs::write(
+            &auth_path,
+            serde_json::to_string_pretty(&raw).expect("serialize auth fixture"),
+        )
+        .expect("write auth fixture");
+        std::env::set_var(
+            "HERMES_OPENAI_OAUTH_FILE",
+            auth_path.to_string_lossy().to_string(),
+        );
+
+        let imported = discover_existing_openai_oauth()
+            .expect("discover")
+            .expect("imported");
+        assert_eq!(imported.source_path, auth_path);
+        assert_eq!(imported.state.tokens.access_token, "openai-access");
+        assert_eq!(
+            imported.state.tokens.refresh_token.as_deref(),
+            Some("openai-refresh")
+        );
+        assert_eq!(imported.state.base_url, DEFAULT_OPENAI_BASE_URL.to_string());
+        assert_eq!(imported.state.auth_mode.as_deref(), Some("chatgpt"));
+        assert!(
+            imported.state.tokens.expires_in.unwrap_or_default() > 100,
+            "expected imported token TTL from id_token exp"
+        );
+        std::env::remove_var("HERMES_OPENAI_OAUTH_FILE");
     }
 
     #[test]
