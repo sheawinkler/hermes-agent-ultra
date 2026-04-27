@@ -5493,14 +5493,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "agent/codex_responses_adapter.py",
         "tests/run_agent/test_provider_parity.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in 56352726 (Rust Codex Responses input conversion now uses input_text for user + output_text for assistant content parts).",
+      "owner": "codex",
       "sha": "648b89911f1c9f16feabed1f2551aa7ee4fddfd0",
       "subject": "fix: use output_text for assistant message content in Codex Responses API (#15690)",
       "target_ticket": 20,
@@ -10186,7 +10186,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     }
   ],
-  "generated_at_utc": "2026-04-27T07:45:22.132173+00:00",
+  "generated_at_utc": "2026-04-27T07:48:07.794476+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -10194,8 +10194,8 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 329,
-      "ported": 37,
+      "pending": 328,
+      "ported": 38,
       "superseded": 309
     },
     "by_target_ticket": {

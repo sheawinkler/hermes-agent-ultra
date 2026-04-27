@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-27T07:45:22.132173+00:00`
+Generated: `2026-04-27T07:48:07.794476+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `675`.
 
@@ -15,8 +15,8 @@ Generated: `2026-04-27T07:45:22.132173+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 329 |
-| ported | 37 |
+| pending | 328 |
+| ported | 38 |
 | superseded | 309 |
 
 ## First 100 Pending Commits
@@ -48,7 +48,6 @@ Generated: `2026-04-27T07:45:22.132173+00:00`
 | `a9fa73a620db` | #26 | feat(oneshot): add --model / --provider / HERMES_INFERENCE_MODEL (#15704) |
 | `5006b2204b32` | #26 | fix(update): honor RestartSec when polling for gateway respawn (#15707) |
 | `7c17accb29bc` | #20 | fix: /stop now immediately aborts streaming retry loop |
-| `648b89911f1c` | #20 | fix: use output_text for assistant message content in Codex Responses API (#15690) |
 | `9daa0620a6bd` | #26 | fix(agent): ordering fix in _copy_reasoning_content_for_api — cross-provider reasoning isolation |
 | `e9c47c70422d` | #20 | fix(tui): honor launch model overrides |
 | `57b43fdd4bf9` | #20 | fix(tui): preserve provider precedence on startup |
@@ -123,4 +122,5 @@ Generated: `2026-04-27T07:45:22.132173+00:00`
 | `19d75d179751` | #22 | perf(tui): coalesce composer echo updates |
 | `9bb3bc422dcf` | #22 | perf(tui): optimistically echo simple input |
 | `5cd41d2b3b1d` | #22 | perf(tui): widen native input echo |
+| `ee7ef33b02f0` | #22 | fix(tui): queue busy submissions gracefully |
 
