@@ -131,7 +131,8 @@ python3 scripts/upstream_webhook_sync.py worker \
   --pr-labels upstream-sync,parity-sync \
   --redteam-cmd "python3 scripts/run-redteam-gate.py" \
   --elite-gate \
-  --elite-cmd "python3 scripts/run-elite-sync-gate.py"
+  --elite-cmd "python3 scripts/run-elite-sync-gate.py" \
+  --elite-rollback-cmd "git reset --hard origin/main"
 ```
 
 Optional parity drift flags:
@@ -227,6 +228,9 @@ The installer creates:
 Relevant env keys in `~/.hermes-agent-ultra/upstream-webhook-sync.env`:
 
 - `UPSTREAM_SYNC_DISABLE_PARITY_DRIFT_CHECK=0|1`
+- `UPSTREAM_SYNC_ELITE_GATE=0|1`
+- `UPSTREAM_SYNC_ELITE_CMD=python3 scripts/run-elite-sync-gate.py`
+- `UPSTREAM_SYNC_ELITE_ROLLBACK_CMD=<optional rollback command>`
 - `UPSTREAM_SYNC_PARITY_UPSTREAM_REF=upstream/main`
 - `UPSTREAM_SYNC_PARITY_PARENT_ISSUE=13`
 - `UPSTREAM_SYNC_PARITY_LABELS=parity,parity-upkeep`

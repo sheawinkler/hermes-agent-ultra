@@ -159,6 +159,28 @@ pub enum CliCommand {
         json: bool,
     },
 
+    /// Inspect computed smart-router health tiers from learned route telemetry.
+    RouteHealth {
+        /// Action: show/list/reset/clear
+        action: Option<String>,
+        /// Print machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Build an incident support bundle with replay/provenance diagnostics.
+    IncidentPack {
+        /// Optional existing doctor snapshot path.
+        #[arg(long)]
+        snapshot: Option<String>,
+        /// Optional output path override (.tar.gz).
+        #[arg(long)]
+        output: Option<String>,
+        /// Print machine-readable JSON summary.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Show running status (active sessions, model, uptime).
     Status,
 
@@ -762,6 +784,44 @@ mod tests {
                 assert!(json);
             }
             _ => panic!("expected route-learning command"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_route_health_show() {
+        let cli = Cli::try_parse_from(vec!["hermes", "route-health", "show", "--json"]).unwrap();
+        match cli.command {
+            Some(CliCommand::RouteHealth { action, json }) => {
+                assert_eq!(action.as_deref(), Some("show"));
+                assert!(json);
+            }
+            _ => panic!("expected route-health command"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_incident_pack() {
+        let cli = Cli::try_parse_from(vec![
+            "hermes",
+            "incident-pack",
+            "--snapshot",
+            "/tmp/doctor.json",
+            "--output",
+            "/tmp/incident.tar.gz",
+            "--json",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(CliCommand::IncidentPack {
+                snapshot,
+                output,
+                json,
+            }) => {
+                assert_eq!(snapshot.as_deref(), Some("/tmp/doctor.json"));
+                assert_eq!(output.as_deref(), Some("/tmp/incident.tar.gz"));
+                assert!(json);
+            }
+            _ => panic!("expected incident-pack command"),
         }
     }
 

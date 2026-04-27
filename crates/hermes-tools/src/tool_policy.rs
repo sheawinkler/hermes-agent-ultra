@@ -57,6 +57,24 @@ impl ToolPolicyMode {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExecutionSandboxProfile {
+    Strict,
+    Balanced,
+    Dev,
+}
+
+impl ExecutionSandboxProfile {
+    fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "strict" => Some(Self::Strict),
+            "balanced" => Some(Self::Balanced),
+            "dev" | "off" => Some(Self::Dev),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ToolPolicyEngine {
     mode: ToolPolicyMode,
@@ -64,6 +82,7 @@ pub struct ToolPolicyEngine {
     denylist: HashSet<String>,
     deny_param_patterns: Vec<Regex>,
     max_param_bytes: usize,
+    sandbox_profile: ExecutionSandboxProfile,
 }
 
 #[derive(Debug, Clone)]
@@ -119,6 +138,7 @@ impl ToolPolicyEngine {
             denylist: HashSet::new(),
             deny_param_patterns: Vec::new(),
             max_param_bytes: 256 * 1024,
+            sandbox_profile: ExecutionSandboxProfile::Balanced,
         }
     }
 
@@ -150,6 +170,11 @@ impl ToolPolicyEngine {
         if let Ok(value) = std::env::var("HERMES_TOOL_POLICY_MAX_PARAM_BYTES") {
             if let Some(max) = value.trim().parse::<usize>().ok().filter(|v| *v > 0) {
                 policy.max_param_bytes = max;
+            }
+        }
+        if let Ok(value) = std::env::var("HERMES_EXECUTION_SANDBOX_PROFILE") {
+            if let Some(profile) = ExecutionSandboxProfile::parse(&value) {
+                policy.sandbox_profile = profile;
             }
         }
         policy
@@ -191,6 +216,7 @@ impl ToolPolicyEngine {
             denylist,
             deny_param_patterns,
             max_param_bytes,
+            sandbox_profile: ExecutionSandboxProfile::Balanced,
         }
     }
 
@@ -202,6 +228,7 @@ impl ToolPolicyEngine {
                 denylist: HashSet::new(),
                 deny_param_patterns: compile_patterns(&default_deny_patterns()),
                 max_param_bytes: 128 * 1024,
+                sandbox_profile: ExecutionSandboxProfile::Strict,
             },
             ToolPolicyPreset::Balanced => Self {
                 mode: ToolPolicyMode::Enforce,
@@ -209,6 +236,7 @@ impl ToolPolicyEngine {
                 denylist: HashSet::new(),
                 deny_param_patterns: compile_patterns(&default_deny_patterns()),
                 max_param_bytes: 256 * 1024,
+                sandbox_profile: ExecutionSandboxProfile::Balanced,
             },
             ToolPolicyPreset::Dev => Self {
                 mode: ToolPolicyMode::Audit,
@@ -216,6 +244,7 @@ impl ToolPolicyEngine {
                 denylist: HashSet::new(),
                 deny_param_patterns: compile_patterns(&default_deny_patterns()),
                 max_param_bytes: 512 * 1024,
+                sandbox_profile: ExecutionSandboxProfile::Dev,
             },
         }
     }
@@ -226,6 +255,7 @@ impl ToolPolicyEngine {
         self.denylist = layer.denylist;
         self.deny_param_patterns = layer.deny_param_patterns;
         self.max_param_bytes = layer.max_param_bytes;
+        self.sandbox_profile = layer.sandbox_profile;
     }
 
     pub fn with_allowlist(mut self, names: &[&str]) -> Self {
@@ -287,7 +317,12 @@ impl ToolPolicyEngine {
             deny_reason = Some(format!("tool '{}' is not in policy allowlist", tool_name));
             deny_code = Some("tool_not_allowlisted".to_string());
         } else if !params.is_null() {
-            if self.deny_param_patterns.is_empty() {
+            if let Some((reason, code)) =
+                sandbox_profile_violation(self.sandbox_profile, &normalized_name, params)
+            {
+                deny_reason = Some(reason);
+                deny_code = Some(code);
+            } else if self.deny_param_patterns.is_empty() {
                 let mut counter = ByteCounter::default();
                 match serde_json::to_writer(&mut counter, params) {
                     Ok(()) if counter.len > self.max_param_bytes => {
@@ -428,6 +463,75 @@ fn default_deny_patterns() -> Vec<String> {
         r"(?i)bearer\s+[a-z0-9\-_\.]{20,}".to_string(),
         r"(?i)api[_-]?key".to_string(),
     ]
+}
+
+fn command_field_from_params(params: &Value) -> Option<String> {
+    let obj = params.as_object()?;
+    let from_keys = ["cmd", "command", "shell_command", "script"];
+    for key in from_keys {
+        if let Some(raw) = obj.get(key).and_then(|v| v.as_str()) {
+            let trimmed = raw.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_string());
+            }
+        }
+    }
+    if let Some(args) = obj.get("args").and_then(|v| v.as_array()) {
+        let joined = args
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect::<Vec<_>>()
+            .join(" ");
+        if !joined.trim().is_empty() {
+            return Some(joined);
+        }
+    }
+    None
+}
+
+fn sandbox_profile_violation(
+    profile: ExecutionSandboxProfile,
+    tool_name: &str,
+    params: &Value,
+) -> Option<(String, String)> {
+    if matches!(profile, ExecutionSandboxProfile::Dev) {
+        return None;
+    }
+    let command_tools = [
+        "terminal",
+        "bash",
+        "exec_command",
+        "shell",
+        "run_command",
+        "write_stdin",
+    ];
+    if !command_tools.iter().any(|name| *name == tool_name) {
+        return None;
+    }
+    let cmd = command_field_from_params(params)?.to_ascii_lowercase();
+    let strict_patterns = [
+        r"\b(curl|wget|nc|ncat|ssh|scp|rsync)\b",
+        r"\b(eval|source)\b",
+        r"\brm\s+-rf\s+/(?!tmp\b)",
+        r"\bchmod\s+(-r\s+)?7[0-7]{2}\b",
+    ];
+    let balanced_patterns = [r"\brm\s+-rf\s+/(?!tmp\b)", r"\bcurl\s+.*\|\s*(sh|bash)\b"];
+    let patterns = match profile {
+        ExecutionSandboxProfile::Strict => &strict_patterns[..],
+        ExecutionSandboxProfile::Balanced => &balanced_patterns[..],
+        ExecutionSandboxProfile::Dev => &[][..],
+    };
+    for pat in patterns {
+        if let Ok(re) = Regex::new(pat) {
+            if re.is_match(&cmd) {
+                return Some((
+                    format!("sandbox profile blocked command by pattern '{}'", pat),
+                    "sandbox_profile_violation".to_string(),
+                ));
+            }
+        }
+    }
+    None
 }
 
 pub fn default_tool_policy_counters_path() -> PathBuf {
@@ -732,6 +836,7 @@ mod tests {
         let mode_orig = std::env::var("HERMES_TOOL_POLICY_MODE").ok();
         let preset_orig = std::env::var("HERMES_TOOL_POLICY_PRESET").ok();
         let patterns_orig = std::env::var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS").ok();
+        let sandbox_orig = std::env::var("HERMES_EXECUTION_SANDBOX_PROFILE").ok();
 
         std::env::set_var("HERMES_TOOL_POLICY_PRESET", "dev");
         std::env::remove_var("HERMES_TOOL_POLICY_MODE");
@@ -764,6 +869,31 @@ mod tests {
         match patterns_orig {
             Some(v) => std::env::set_var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS", v),
             None => std::env::remove_var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS"),
+        }
+        match sandbox_orig {
+            Some(v) => std::env::set_var("HERMES_EXECUTION_SANDBOX_PROFILE", v),
+            None => std::env::remove_var("HERMES_EXECUTION_SANDBOX_PROFILE"),
+        }
+    }
+
+    #[test]
+    fn strict_sandbox_profile_blocks_remote_command_channels() {
+        let profile_orig = std::env::var("HERMES_EXECUTION_SANDBOX_PROFILE").ok();
+        let preset_orig = std::env::var("HERMES_TOOL_POLICY_PRESET").ok();
+        std::env::set_var("HERMES_TOOL_POLICY_PRESET", "strict");
+        std::env::set_var("HERMES_EXECUTION_SANDBOX_PROFILE", "strict");
+        let policy = ToolPolicyEngine::from_env();
+        let decision = policy.evaluate("terminal", &serde_json::json!({"cmd":"ssh prod-host"}));
+        assert!(!decision.allow);
+        assert_eq!(decision.code.as_deref(), Some("sandbox_profile_violation"));
+
+        match preset_orig {
+            Some(v) => std::env::set_var("HERMES_TOOL_POLICY_PRESET", v),
+            None => std::env::remove_var("HERMES_TOOL_POLICY_PRESET"),
+        }
+        match profile_orig {
+            Some(v) => std::env::set_var("HERMES_EXECUTION_SANDBOX_PROFILE", v),
+            None => std::env::remove_var("HERMES_EXECUTION_SANDBOX_PROFILE"),
         }
     }
 
