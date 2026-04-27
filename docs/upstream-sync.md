@@ -30,8 +30,14 @@ fork-specific history.
   - Runs zero-copy policy hot-path benchmark test and captures ns/eval evidence
   - Emits JSON diagnostics under `.sync-reports/zero-copy-hotpath-<timestamp>.json`
 - `scripts/run-elite-sync-gate.py`
-  - Runs red-team + adapter chaos + zero-copy hot-path checks as one gate
+  - Runs red-team + adapter chaos + zero-copy hot-path + differential parity + eval trend as one gate
   - Emits JSON diagnostics under `.sync-reports/elite-sync-gate-<timestamp>.json`
+- `scripts/run-differential-parity-gate.py`
+  - Compares local CLI command/action surface with `upstream/main`
+  - Emits gate artifact under `.sync-reports/differential-parity-gate-<timestamp>.json`
+- `scripts/run-eval-trend-gate.py`
+  - Compares eval run baselines and enforces regression thresholds
+  - Emits gate artifact under `.sync-reports/eval-trend-gate-<timestamp>.json`
 - `scripts/compare-adapter-chaos-reports.py`
   - Compares chaos reports and fails on attempts/fallback/outcome regressions
 
@@ -47,6 +53,7 @@ python3 scripts/run-adapter-chaos-harness.py --repo-root .
 python3 scripts/run-zero-copy-hotpath-bench.py --repo-root .
 python3 scripts/run-elite-sync-gate.py --repo-root .
 bash scripts/sync-upstream.sh --elite-gate
+bash scripts/sync-upstream.sh --elite-gate --elite-rollback-cmd "git reset --hard origin/main"
 ```
 
 Cherry-pick mode for linear upstream replay:
