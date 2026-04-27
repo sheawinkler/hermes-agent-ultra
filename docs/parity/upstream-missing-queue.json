@@ -5054,12 +5054,12 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "scripts/install.sh"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "Rust installer adaptation in 381e7312: Linux root defaults to /usr/local/bin with explicit override precedence.",
       "owner": "",
       "sha": "f433197f23f9e0307ae44d23cf1964ed2dd94cc2",
       "subject": "feat(installer): FHS layout for root installs on Linux (#15608)",
@@ -5067,7 +5067,7 @@
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "cron/jobs.py",
         "cron/scheduler.py",
@@ -5075,7 +5075,7 @@
         "tools/cronjob_tools.py"
       ],
       "files_touched": 4,
-      "notes": "",
+      "notes": "Rust port in commit f5b76915: context_from field + scheduler prompt chaining + output capture.",
       "owner": "",
       "sha": "5ac53659234eb26bb3e794f010227dc6605ae9f2",
       "subject": "feat(cron): add context_from field for cron job output chaining",
@@ -5083,12 +5083,12 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tests/cron/test_cron_context_from.py"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "Rust tests added in f5b76915 include PermissionError-equivalent silent-skip/invalid ref guards.",
       "owner": "",
       "sha": "e4a91ccb7621576d329dc9bd085cb5c5848cde51",
       "subject": "test(cron): add PermissionError coverage for context_from",
@@ -5096,13 +5096,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "cron/scheduler.py",
         "tests/cron/test_cron_context_from.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "Rust port in f5b76915 uses silent skip when source job has no output.",
       "owner": "",
       "sha": "eb922228119df0dbac171c96831ac20e5124a7d5",
       "subject": "fix(cron): silent skip when context_from job has no output yet",
@@ -5110,13 +5110,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "tests/cron/test_cron_context_from.py",
         "tools/cronjob_tools.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "Rust port in f5b76915 wires context_from through update with clear semantics.",
       "owner": "",
       "sha": "0d548d1db94aaad1904d6bbb777a56003750053a",
       "subject": "fix(cron): wire context_from through the update action",
@@ -10186,7 +10186,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     }
   ],
-  "generated_at_utc": "2026-04-27T07:17:25.333873+00:00",
+  "generated_at_utc": "2026-04-27T07:34:24.449688+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -10194,8 +10194,8 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 341,
-      "ported": 27,
+      "pending": 336,
+      "ported": 32,
       "superseded": 307
     },
     "by_target_ticket": {
