@@ -5437,28 +5437,28 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "hermes_cli/main.py",
         "hermes_cli/oneshot.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "ported in Rust CLI: `-z/--oneshot` one-shot mode is implemented in crates/hermes-cli/src/cli.rs and wired in crates/hermes-cli/src/main.rs.",
+      "owner": "codex",
       "sha": "7c8c031f60da25801f35512072c5c89c652118f3",
       "subject": "feat: add `hermes -z <prompt>` one-shot mode (#15702)",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "hermes_cli/main.py",
         "hermes_cli/oneshot.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "ported via CLI global overrides (`--model`, `--provider`) and env precedence in resolve_cli_chat_provider_model; HERMES_INFERENCE_MODEL honored in 6a81b8a3 when no explicit CLI override is supplied.",
+      "owner": "codex",
       "sha": "a9fa73a620db7b2645864ee434a1dbe18d2e5de3",
       "subject": "feat(oneshot): add --model / --provider / HERMES_INFERENCE_MODEL (#15704)",
       "target_ticket": 26,
@@ -10186,7 +10186,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     }
   ],
-  "generated_at_utc": "2026-04-27T07:53:17.751028+00:00",
+  "generated_at_utc": "2026-04-27T07:57:54.246236+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -10194,8 +10194,8 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 326,
-      "ported": 39,
+      "pending": 324,
+      "ported": 41,
       "superseded": 310
     },
     "by_target_ticket": {
