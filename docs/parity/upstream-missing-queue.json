@@ -5000,14 +5000,14 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "disposition": "pending",
+      "disposition": "superseded",
       "files_sample": [
         "agent/context_compressor.py",
         "tests/agent/test_context_compressor.py"
       ],
       "files_touched": 2,
-      "notes": "",
-      "owner": "",
+      "notes": "superseded in Rust architecture: context compaction is handled by ContextManager path in agent_loop, not python ContextCompressor update_model mutator; stale budget-on-switch bug path is not present as implemented.",
+      "owner": "codex",
       "sha": "5401a0080d97cfa61e20749f02ba6b54dbb181bd",
       "subject": "fix: recalculate token budgets on model switch in ContextCompressor",
       "target_ticket": 20,
@@ -5997,7 +5997,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "disposition": "pending",
+      "disposition": "ported",
       "files_sample": [
         "cli.py",
         "hermes_cli/model_switch.py",
@@ -6005,8 +6005,8 @@
         "tui_gateway/server.py"
       ],
       "files_touched": 4,
-      "notes": "",
-      "owner": "",
+      "notes": "ported via fc2865e2 + existing permissive model acceptance: bare /model switches now preserve current provider; build_provider provider-config lookup is case-insensitive; direct model switches are not blocked by /v1/models probe in Rust flow.",
+      "owner": "codex",
       "sha": "2c56dce0edec7352defdb6717b0249423ca453b3",
       "subject": "fix(model): preserve custom endpoint credentials and accept cloud models not in /v1/models",
       "target_ticket": 26,
@@ -10186,7 +10186,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     }
   ],
-  "generated_at_utc": "2026-04-27T07:48:07.794476+00:00",
+  "generated_at_utc": "2026-04-27T07:53:17.751028+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -10194,9 +10194,9 @@
   },
   "summary": {
     "by_disposition": {
-      "pending": 328,
-      "ported": 38,
-      "superseded": 309
+      "pending": 326,
+      "ported": 39,
+      "superseded": 310
     },
     "by_target_ticket": {
       "20": 242,
