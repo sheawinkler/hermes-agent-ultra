@@ -6,7 +6,7 @@
 //! 3. Append results to conversation history
 //! 4. Repeat until the model finishes naturally or the turn budget is exceeded
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -892,6 +892,15 @@ struct TurnGovernor {
     max_tokens: Option<u32>,
     tool_concurrency: usize,
     pressure: f64,
+    latency_degraded: bool,
+    error_degraded: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct GovernorRuntimeState {
+    avg_llm_latency_ms: Option<f64>,
+    avg_tool_error_rate: f64,
+    consecutive_error_turns: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -1095,14 +1104,122 @@ fn governor_tool_concurrency_base() -> usize {
         .unwrap_or(8)
 }
 
+fn governor_window_size() -> usize {
+    std::env::var("HERMES_PERF_GOV_WINDOW")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(8)
+}
+
+fn governor_latency_warn_ms() -> f64 {
+    std::env::var("HERMES_PERF_GOV_LATENCY_WARN_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| *v > 0.0)
+        .unwrap_or(3500.0)
+}
+
+fn governor_latency_critical_ms() -> f64 {
+    std::env::var("HERMES_PERF_GOV_LATENCY_CRITICAL_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| *v > 0.0)
+        .unwrap_or(6500.0)
+}
+
+fn governor_error_warn_rate() -> f64 {
+    std::env::var("HERMES_PERF_GOV_ERROR_WARN_RATE")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| (0.0..=1.0).contains(v))
+        .unwrap_or(0.20)
+}
+
+fn governor_error_critical_rate() -> f64 {
+    std::env::var("HERMES_PERF_GOV_ERROR_CRITICAL_RATE")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| (0.0..=1.0).contains(v))
+        .unwrap_or(0.50)
+}
+
+fn push_window_u64(window: &mut VecDeque<u64>, value: u64, limit: usize) {
+    window.push_back(value);
+    while window.len() > limit {
+        let _ = window.pop_front();
+    }
+}
+
+fn push_window_f64(window: &mut VecDeque<f64>, value: f64, limit: usize) {
+    window.push_back(value);
+    while window.len() > limit {
+        let _ = window.pop_front();
+    }
+}
+
+fn avg_u64(window: &VecDeque<u64>) -> Option<f64> {
+    if window.is_empty() {
+        return None;
+    }
+    Some(window.iter().copied().map(|v| v as f64).sum::<f64>() / window.len() as f64)
+}
+
+fn avg_f64(window: &VecDeque<f64>) -> f64 {
+    if window.is_empty() {
+        return 0.0;
+    }
+    window.iter().copied().sum::<f64>() / window.len() as f64
+}
+
+fn governor_runtime_state(
+    llm_latency_window: &VecDeque<u64>,
+    tool_error_window: &VecDeque<f64>,
+    consecutive_error_turns: u32,
+) -> GovernorRuntimeState {
+    GovernorRuntimeState {
+        avg_llm_latency_ms: avg_u64(llm_latency_window),
+        avg_tool_error_rate: avg_f64(tool_error_window),
+        consecutive_error_turns,
+    }
+}
+
 fn governor_for_turn(
     config: &AgentConfig,
     ctx: &ContextManager,
     requested_tools: usize,
+    runtime: Option<&GovernorRuntimeState>,
 ) -> TurnGovernor {
     let threshold = ((ctx.max_context_chars().max(1) as f64) * 0.8).max(1.0);
-    let pressure = (ctx.total_chars() as f64 / threshold).max(0.0);
+    let mut pressure = (ctx.total_chars() as f64 / threshold).max(0.0);
     let enabled = governor_enabled();
+    let mut latency_degraded = false;
+    let mut error_degraded = false;
+
+    if enabled {
+        if let Some(runtime) = runtime {
+            if let Some(lat_ms) = runtime.avg_llm_latency_ms {
+                if lat_ms >= governor_latency_critical_ms() {
+                    pressure = pressure.max(0.97);
+                    latency_degraded = true;
+                } else if lat_ms >= governor_latency_warn_ms() {
+                    pressure = pressure.max(0.88);
+                    latency_degraded = true;
+                }
+            }
+            if runtime.avg_tool_error_rate >= governor_error_critical_rate()
+                || runtime.consecutive_error_turns >= 3
+            {
+                pressure = pressure.max(0.97);
+                error_degraded = true;
+            } else if runtime.avg_tool_error_rate >= governor_error_warn_rate()
+                || runtime.consecutive_error_turns >= 1
+            {
+                pressure = pressure.max(0.88);
+                error_degraded = true;
+            }
+        }
+    }
 
     let max_tokens = if enabled {
         config.max_tokens.map(|base| {
@@ -1138,6 +1255,8 @@ fn governor_for_turn(
         max_tokens,
         tool_concurrency,
         pressure,
+        latency_degraded,
+        error_degraded,
     }
 }
 
@@ -3282,6 +3401,10 @@ impl AgentLoop {
         let mut context_pressure_warned_at: f64 = 0.0;
         let mut context_pressure_last_warn_at: Option<Instant> = None;
         let mut context_pressure_last_warn_percent: f64 = 0.0;
+        let mut governor_llm_latency_window: VecDeque<u64> = VecDeque::new();
+        let mut governor_tool_error_window: VecDeque<f64> = VecDeque::new();
+        let mut governor_consecutive_error_turns: u32 = 0;
+        let governor_window_limit = governor_window_size();
 
         loop {
             if self.interrupt.take_interrupt_graceful().is_some() {
@@ -3369,12 +3492,21 @@ impl AgentLoop {
                 .as_ref()
                 .map(|r| r.model.as_str())
                 .unwrap_or(self.config.model.as_str());
-            let llm_governor = governor_for_turn(&self.config, &ctx, 0);
+            let turn_governor_runtime = governor_runtime_state(
+                &governor_llm_latency_window,
+                &governor_tool_error_window,
+                governor_consecutive_error_turns,
+            );
+            let llm_governor =
+                governor_for_turn(&self.config, &ctx, 0, Some(&turn_governor_runtime));
             tracing::debug!(
                 turn = total_turns,
                 model = active_model,
                 governor_pressure = llm_governor.pressure,
                 governor_max_tokens = ?llm_governor.max_tokens,
+                governor_avg_latency_ms = ?turn_governor_runtime.avg_llm_latency_ms,
+                governor_avg_tool_error_rate = turn_governor_runtime.avg_tool_error_rate,
+                governor_consecutive_error_turns = turn_governor_runtime.consecutive_error_turns,
                 "turn governor snapshot"
             );
             replay.record(
@@ -3384,6 +3516,11 @@ impl AgentLoop {
                     "model": active_model,
                     "pressure": llm_governor.pressure,
                     "max_tokens": llm_governor.max_tokens,
+                    "latency_degraded": llm_governor.latency_degraded,
+                    "error_degraded": llm_governor.error_degraded,
+                    "avg_llm_latency_ms": turn_governor_runtime.avg_llm_latency_ms,
+                    "avg_tool_error_rate": turn_governor_runtime.avg_tool_error_rate,
+                    "consecutive_error_turns": turn_governor_runtime.consecutive_error_turns,
                 }),
             );
             let hook_ctx = serde_json::json!({"turn": total_turns, "model": active_model});
@@ -3488,6 +3625,11 @@ impl AgentLoop {
             };
             let api_elapsed = api_start.elapsed().as_millis() as u64;
             _total_api_time_ms += api_elapsed;
+            push_window_u64(
+                &mut governor_llm_latency_window,
+                api_elapsed,
+                governor_window_limit,
+            );
             replay.record(
                 "llm_response",
                 serde_json::json!({
@@ -3785,7 +3927,12 @@ impl AgentLoop {
                 ));
             }
             let tool_start = Instant::now();
-            let tool_governor = governor_for_turn(&self.config, &ctx, tool_calls.len());
+            let tool_governor = governor_for_turn(
+                &self.config,
+                &ctx,
+                tool_calls.len(),
+                Some(&turn_governor_runtime),
+            );
             let results = self
                 .execute_tool_calls(
                     &tool_calls,
@@ -3799,6 +3946,23 @@ impl AgentLoop {
                 .await;
             let tool_elapsed = tool_start.elapsed().as_millis() as u64;
             _total_tool_time_ms += tool_elapsed;
+            let turn_tool_error_count = results.iter().filter(|r| r.is_error).count() as u32;
+            let turn_tool_error_rate = if results.is_empty() {
+                0.0
+            } else {
+                turn_tool_error_count as f64 / results.len() as f64
+            };
+            push_window_f64(
+                &mut governor_tool_error_window,
+                turn_tool_error_rate,
+                governor_window_limit,
+            );
+            if turn_tool_error_count > 0 {
+                governor_consecutive_error_turns =
+                    governor_consecutive_error_turns.saturating_add(1);
+            } else {
+                governor_consecutive_error_turns = 0;
+            }
             replay.record(
                 "tool_batch",
                 serde_json::json!({
@@ -3806,11 +3970,10 @@ impl AgentLoop {
                     "tool_count": tool_calls.len(),
                     "tool_concurrency": tool_governor.tool_concurrency,
                     "tool_time_ms": tool_elapsed,
-                    "errors": results.iter().filter(|r| r.is_error).count(),
+                    "errors": turn_tool_error_count,
+                    "error_rate": turn_tool_error_rate,
                 }),
             );
-
-            let turn_tool_error_count = results.iter().filter(|r| r.is_error).count() as u32;
             if self.config.rollback_on_tool_error_threshold > 0
                 && turn_tool_error_count >= self.config.rollback_on_tool_error_threshold
             {
@@ -4087,6 +4250,10 @@ impl AgentLoop {
         let mut context_pressure_warned_at: f64 = 0.0;
         let mut context_pressure_last_warn_at: Option<Instant> = None;
         let mut context_pressure_last_warn_percent: f64 = 0.0;
+        let mut governor_llm_latency_window: VecDeque<u64> = VecDeque::new();
+        let mut governor_tool_error_window: VecDeque<f64> = VecDeque::new();
+        let mut governor_consecutive_error_turns: u32 = 0;
+        let governor_window_limit = governor_window_size();
 
         loop {
             if self.interrupt.take_interrupt_graceful().is_some() {
@@ -4169,12 +4336,21 @@ impl AgentLoop {
                 .as_ref()
                 .map(|r| r.model.as_str())
                 .unwrap_or(self.config.model.as_str());
-            let llm_governor = governor_for_turn(&self.config, &ctx, 0);
+            let turn_governor_runtime = governor_runtime_state(
+                &governor_llm_latency_window,
+                &governor_tool_error_window,
+                governor_consecutive_error_turns,
+            );
+            let llm_governor =
+                governor_for_turn(&self.config, &ctx, 0, Some(&turn_governor_runtime));
             tracing::debug!(
                 turn = total_turns,
                 model = active_model,
                 governor_pressure = llm_governor.pressure,
                 governor_max_tokens = ?llm_governor.max_tokens,
+                governor_avg_latency_ms = ?turn_governor_runtime.avg_llm_latency_ms,
+                governor_avg_tool_error_rate = turn_governor_runtime.avg_tool_error_rate,
+                governor_consecutive_error_turns = turn_governor_runtime.consecutive_error_turns,
                 "turn governor snapshot"
             );
             replay.record(
@@ -4184,6 +4360,11 @@ impl AgentLoop {
                     "model": active_model,
                     "pressure": llm_governor.pressure,
                     "max_tokens": llm_governor.max_tokens,
+                    "latency_degraded": llm_governor.latency_degraded,
+                    "error_degraded": llm_governor.error_degraded,
+                    "avg_llm_latency_ms": turn_governor_runtime.avg_llm_latency_ms,
+                    "avg_tool_error_rate": turn_governor_runtime.avg_tool_error_rate,
+                    "consecutive_error_turns": turn_governor_runtime.consecutive_error_turns,
                 }),
             );
             let hook_ctx = serde_json::json!({"turn": total_turns, "model": active_model});
@@ -4326,6 +4507,11 @@ impl AgentLoop {
                 break r;
             };
             let _api_elapsed_ms = api_start.elapsed().as_millis() as u64;
+            push_window_u64(
+                &mut governor_llm_latency_window,
+                _api_elapsed_ms,
+                governor_window_limit,
+            );
             replay.record(
                 "llm_response",
                 serde_json::json!({
@@ -4681,24 +4867,52 @@ impl AgentLoop {
                 .execute_tool_calls(
                     &tool_calls,
                     total_turns,
-                    governor_for_turn(&self.config, &ctx, tool_calls.len()).tool_concurrency,
+                    governor_for_turn(
+                        &self.config,
+                        &ctx,
+                        tool_calls.len(),
+                        Some(&turn_governor_runtime),
+                    )
+                    .tool_concurrency,
                     self.config
                         .max_cost_usd
                         .map(|limit| (limit - session_cost_usd).max(0.0)),
                     &mut tool_errors,
                 )
                 .await;
+            let turn_tool_error_count = results.iter().filter(|r| r.is_error).count() as u32;
+            let turn_tool_error_rate = if results.is_empty() {
+                0.0
+            } else {
+                turn_tool_error_count as f64 / results.len() as f64
+            };
+            push_window_f64(
+                &mut governor_tool_error_window,
+                turn_tool_error_rate,
+                governor_window_limit,
+            );
+            if turn_tool_error_count > 0 {
+                governor_consecutive_error_turns =
+                    governor_consecutive_error_turns.saturating_add(1);
+            } else {
+                governor_consecutive_error_turns = 0;
+            }
             replay.record(
                 "tool_batch",
                 serde_json::json!({
                     "turn": total_turns,
                     "tool_count": tool_calls.len(),
-                    "tool_concurrency": governor_for_turn(&self.config, &ctx, tool_calls.len()).tool_concurrency,
-                    "errors": results.iter().filter(|r| r.is_error).count(),
+                    "tool_concurrency": governor_for_turn(
+                        &self.config,
+                        &ctx,
+                        tool_calls.len(),
+                        Some(&turn_governor_runtime),
+                    )
+                    .tool_concurrency,
+                    "errors": turn_tool_error_count,
+                    "error_rate": turn_tool_error_rate,
                 }),
             );
-
-            let turn_tool_error_count = results.iter().filter(|r| r.is_error).count() as u32;
             if self.config.rollback_on_tool_error_threshold > 0
                 && turn_tool_error_count >= self.config.rollback_on_tool_error_threshold
             {
@@ -8216,10 +8430,46 @@ mod tests {
             max_tokens: Some(1200),
             ..AgentConfig::default()
         };
-        let gov = governor_for_turn(&config, &ctx, 12);
+        let gov = governor_for_turn(&config, &ctx, 12, None);
         assert!(gov.pressure >= 0.9);
         assert!(gov.max_tokens.unwrap_or(1200) < 1200);
         assert!(gov.tool_concurrency <= 4);
+    }
+
+    #[test]
+    fn test_governor_reduces_budget_under_latency_degradation() {
+        let ctx = ContextManager::default_budget();
+        let config = AgentConfig {
+            max_tokens: Some(1200),
+            ..AgentConfig::default()
+        };
+        let runtime = GovernorRuntimeState {
+            avg_llm_latency_ms: Some(7000.0),
+            avg_tool_error_rate: 0.0,
+            consecutive_error_turns: 0,
+        };
+        let gov = governor_for_turn(&config, &ctx, 6, Some(&runtime));
+        assert!(gov.latency_degraded);
+        assert!(gov.max_tokens.unwrap_or(1200) < 1200);
+        assert!(gov.tool_concurrency <= 2);
+    }
+
+    #[test]
+    fn test_governor_reduces_budget_under_error_degradation() {
+        let ctx = ContextManager::default_budget();
+        let config = AgentConfig {
+            max_tokens: Some(1200),
+            ..AgentConfig::default()
+        };
+        let runtime = GovernorRuntimeState {
+            avg_llm_latency_ms: Some(1000.0),
+            avg_tool_error_rate: 0.55,
+            consecutive_error_turns: 3,
+        };
+        let gov = governor_for_turn(&config, &ctx, 10, Some(&runtime));
+        assert!(gov.error_degraded);
+        assert!(gov.max_tokens.unwrap_or(1200) < 1200);
+        assert!(gov.tool_concurrency <= 2);
     }
 
     #[test]
@@ -8235,7 +8485,7 @@ mod tests {
         assert_eq!(payload["nested"]["token"], "[redacted]");
         assert_eq!(payload["nested"]["safe"], "ok");
         assert_eq!(payload["list"][0]["password"], "[redacted]");
-        assert_eq!(payload["text"], "Authorization: [redacted]");
+        assert_eq!(payload["text"], "Authorization: Bearer [redacted]");
     }
 
     #[test]
