@@ -125,6 +125,28 @@ pub enum CliCommand {
         /// Optional signature sidecar path override.
         #[arg(long)]
         signature: Option<String>,
+        /// Enforce non-zero failure for any verification violation.
+        #[arg(long)]
+        strict: bool,
+        /// Print compact machine-readable JSON only.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Rotate the local provenance signing key.
+    RotateProvenanceKey {
+        /// Print compact machine-readable JSON only.
+        #[arg(long)]
+        json: bool,
+    },
+
+    /// Inspect or reset smart-routing learning state.
+    RouteLearning {
+        /// Action: show/list/reset/clear
+        action: Option<String>,
+        /// Print machine-readable JSON.
+        #[arg(long)]
+        json: bool,
     },
 
     /// Show running status (active sessions, model, uptime).
@@ -692,14 +714,44 @@ mod tests {
             "/tmp/doctor.json",
             "--signature",
             "/tmp/doctor.sig.json",
+            "--strict",
+            "--json",
         ])
         .unwrap();
         match cli.command {
-            Some(CliCommand::VerifyProvenance { path, signature }) => {
+            Some(CliCommand::VerifyProvenance {
+                path,
+                signature,
+                strict,
+                json,
+            }) => {
                 assert_eq!(path, "/tmp/doctor.json");
                 assert_eq!(signature.as_deref(), Some("/tmp/doctor.sig.json"));
+                assert!(strict);
+                assert!(json);
             }
             _ => panic!("expected verify-provenance command"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_rotate_provenance_key() {
+        let cli = Cli::try_parse_from(vec!["hermes", "rotate-provenance-key", "--json"]).unwrap();
+        match cli.command {
+            Some(CliCommand::RotateProvenanceKey { json }) => assert!(json),
+            _ => panic!("expected rotate-provenance-key command"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_route_learning_reset() {
+        let cli = Cli::try_parse_from(vec!["hermes", "route-learning", "reset", "--json"]).unwrap();
+        match cli.command {
+            Some(CliCommand::RouteLearning { action, json }) => {
+                assert_eq!(action.as_deref(), Some("reset"));
+                assert!(json);
+            }
+            _ => panic!("expected route-learning command"),
         }
     }
 
