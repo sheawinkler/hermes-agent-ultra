@@ -19,6 +19,15 @@ fn as_u64(v: &Value) -> Option<u64> {
     v.as_u64().or_else(|| v.as_i64().map(|i| i as u64))
 }
 
+fn scalar_to_string(v: &Value) -> Option<String> {
+    match v {
+        Value::String(s) => Some(s.clone()),
+        Value::Number(n) => Some(n.to_string()),
+        Value::Bool(b) => Some(b.to_string()),
+        _ => None,
+    }
+}
+
 /// Lift `agent.max_turns` to root `max_turns` when the latter is absent.
 fn lift_agent_max_turns(map: &mut Mapping) {
     let max_key = key("max_turns");
@@ -214,6 +223,48 @@ fn normalize_session_reset(map: &mut Mapping) {
     map.insert(session_key, Value::Mapping(session));
 }
 
+/// Normalize `platform_toolsets` entries so mixed scalar YAML values (e.g.
+/// bare numbers like `12306`) deserialize into `Vec<String>` safely.
+fn normalize_platform_toolsets(map: &mut Mapping) {
+    let ptk = key("platform_toolsets");
+    let Some(Value::Mapping(existing)) = map.remove(&ptk) else {
+        return;
+    };
+
+    let mut normalized = Mapping::new();
+    for (platform, raw_values) in existing {
+        let Some(platform_name) = platform.as_str().map(str::trim).filter(|s| !s.is_empty()) else {
+            continue;
+        };
+
+        let mut out = Vec::new();
+        match raw_values {
+            Value::Sequence(seq) => {
+                for entry in seq {
+                    if let Some(s) = scalar_to_string(&entry) {
+                        let trimmed = s.trim();
+                        if !trimmed.is_empty() {
+                            out.push(Value::String(trimmed.to_string()));
+                        }
+                    }
+                }
+            }
+            other => {
+                if let Some(s) = scalar_to_string(&other) {
+                    let trimmed = s.trim();
+                    if !trimmed.is_empty() {
+                        out.push(Value::String(trimmed.to_string()));
+                    }
+                }
+            }
+        }
+
+        normalized.insert(key(platform_name), Value::Sequence(out));
+    }
+
+    map.insert(ptk, Value::Mapping(normalized));
+}
+
 /// Python often declares `telegram:` / `discord:` at the **root** instead of under `platforms:`.
 fn lift_root_platform_blocks(map: &mut Mapping) {
     const NAMES: &[&str] = &[
@@ -266,6 +317,7 @@ pub(crate) fn normalize_config_yaml_root(map: &mut Mapping) {
     merge_providers_into_llm(map);
     lift_agent_max_turns(map);
     lift_toolsets_to_tools(map);
+    normalize_platform_toolsets(map);
     normalize_session_reset(map);
     lift_root_platform_blocks(map);
 }
@@ -352,5 +404,31 @@ session_reset:
             }
             other => panic!("expected Both, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn platform_toolsets_numeric_entries_normalized_to_strings() {
+        let raw = r#"
+platform_toolsets:
+  cli:
+    - hermes-cli
+    - 12306
+    - true
+  cron: 42
+"#;
+        let mut root: Value = serde_yaml::from_str(raw).unwrap();
+        let Value::Mapping(ref mut m) = root else {
+            panic!();
+        };
+        normalize_config_yaml_root(m);
+        let cfg: crate::config::GatewayConfig = serde_yaml::from_value(root).unwrap();
+
+        let cli = cfg.platform_toolsets.get("cli").expect("cli");
+        assert!(cli.contains(&"hermes-cli".to_string()));
+        assert!(cli.contains(&"12306".to_string()));
+        assert!(cli.contains(&"true".to_string()));
+
+        let cron = cfg.platform_toolsets.get("cron").expect("cron");
+        assert_eq!(cron, &vec!["42".to_string()]);
     }
 }
