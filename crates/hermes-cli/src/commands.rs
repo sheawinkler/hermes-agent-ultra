@@ -99,6 +99,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/stop", "Stop current agent execution"),
     ("/status", "Show session status (model, turns, token count)"),
     ("/agent", "Alias for /status"),
+    ("/ops", "Operator control plane (status + quick controls)"),
     (
         "/platforms",
         "Show enabled gateway/messaging platform adapters",
@@ -322,6 +323,7 @@ pub async fn handle_slash_command(
         "/insights" => handle_insights_command(app),
         "/stop" => handle_stop_command(app),
         "/status" => handle_status_command(app),
+        "/ops" => handle_ops_command(app, args).await,
         "/platforms" => handle_platforms_command(app),
         "/commands" => {
             print_help(app);
@@ -832,6 +834,78 @@ fn handle_status_command(app: &mut App) -> Result<CommandResult, AgentError> {
         ),
     );
     Ok(CommandResult::Handled)
+}
+
+async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    if args.is_empty() || args[0].eq_ignore_ascii_case("status") {
+        let yolo = !app.config.approval.require_approval;
+        let out = format!(
+            "Operator Control Plane\n\
+             \n\
+             Runtime:\n\
+               session:      {}\n\
+               model:        {}\n\
+               personality:  {}\n\
+             \n\
+             Controls:\n\
+               yolo:         {}\n\
+               mouse:        {}\n\
+               statusbar:    ON\n\
+               reasoning:    toggle via `/ops reasoning`\n\
+               verbose:      toggle via `/ops verbose`\n\
+             \n\
+             Quick actions:\n\
+               /ops model [provider|provider:model]\n\
+               /ops personality [list|name]\n\
+               /ops mouse [on|off|toggle]\n\
+               /ops yolo\n\
+               /ops reasoning\n\
+               /ops verbose\n\
+               /ops help",
+            app.session_id,
+            app.current_model,
+            app.current_personality.as_deref().unwrap_or("(none)"),
+            if yolo { "ON" } else { "OFF" },
+            if app.mouse_enabled() { "ON" } else { "OFF" },
+        );
+        emit_command_output(app, out);
+        return Ok(CommandResult::Handled);
+    }
+
+    match args[0].to_ascii_lowercase().as_str() {
+        "help" => {
+            emit_command_output(
+                app,
+                "Operator control plane commands:\n\
+                 - /ops status\n\
+                 - /ops model [provider|provider:model]\n\
+                 - /ops personality [list|name]\n\
+                 - /ops mouse [on|off|toggle]\n\
+                 - /ops yolo\n\
+                 - /ops reasoning\n\
+                 - /ops verbose\n\
+                 - /ops statusbar",
+            );
+            Ok(CommandResult::Handled)
+        }
+        "model" => handle_model_command(app, &args[1..]).await,
+        "personality" => handle_personality_command(app, &args[1..]),
+        "mouse" => handle_mouse_command(app, &args[1..]),
+        "yolo" => handle_yolo_command(app),
+        "reasoning" => handle_reasoning_command(app),
+        "verbose" => handle_verbose_command(app),
+        "statusbar" => handle_statusbar_command(app),
+        other => {
+            emit_command_output(
+                app,
+                format!(
+                    "Unknown /ops target '{}'. Try `/ops help` for available controls.",
+                    other
+                ),
+            );
+            Ok(CommandResult::Handled)
+        }
+    }
 }
 
 fn handle_save_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
@@ -5681,6 +5755,12 @@ mod tests {
     fn test_autocomplete_partial() {
         let results = autocomplete("/m");
         assert!(results.contains(&"/model"));
+    }
+
+    #[test]
+    fn test_autocomplete_ops_control_plane() {
+        let results = autocomplete("/op");
+        assert!(results.contains(&"/ops"));
     }
 
     #[test]

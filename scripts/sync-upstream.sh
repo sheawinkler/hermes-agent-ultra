@@ -29,6 +29,7 @@ Options:
   --elite-gate              Run consolidated elite sync gate (optional)
   --no-elite-gate           Skip consolidated elite sync gate (default)
   --elite-cmd <command>     Elite gate command (default: python3 scripts/run-elite-sync-gate.py)
+  --elite-rollback-cmd <c>  Optional rollback command executed by elite gate on failure
   --no-pr                   Do not open a PR in branch-pr mode
   --draft-pr                Open PR as draft in branch-pr mode
   --pr-labels <csv>         Labels to apply on created PR (default: upstream-sync,parity-sync)
@@ -59,6 +60,7 @@ RUN_REDTEAM_GATE="${RUN_REDTEAM_GATE:-1}"
 REDTEAM_CMD="${REDTEAM_CMD:-python3 scripts/run-redteam-gate.py}"
 RUN_ELITE_GATE="${RUN_ELITE_GATE:-0}"
 ELITE_CMD="${ELITE_CMD:-python3 scripts/run-elite-sync-gate.py}"
+ELITE_ROLLBACK_CMD="${ELITE_ROLLBACK_CMD:-}"
 CREATE_PR="1"
 PR_DRAFT="0"
 PR_LABELS="${PR_LABELS:-upstream-sync,parity-sync}"
@@ -155,6 +157,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --elite-cmd)
       ELITE_CMD="${2:?missing value for --elite-cmd}"
+      shift 2
+      ;;
+    --elite-rollback-cmd)
+      ELITE_ROLLBACK_CMD="${2:?missing value for --elite-rollback-cmd}"
       shift 2
       ;;
     --no-pr)
@@ -266,6 +272,7 @@ create_report_header() {
   append_report "redteam_cmd: ${REDTEAM_CMD}"
   append_report "run_elite_gate: ${RUN_ELITE_GATE}"
   append_report "elite_cmd: ${ELITE_CMD}"
+  append_report "elite_rollback_cmd: ${ELITE_ROLLBACK_CMD}"
   append_report "draft_pr: ${PR_DRAFT}"
   append_report "allow_risk_paths: ${ALLOW_RISK_PATHS}"
   append_report "pr_labels: ${PR_LABELS}"
@@ -546,8 +553,12 @@ if [[ "${RUN_REDTEAM_GATE}" == "1" ]]; then
 fi
 
 if [[ "${RUN_ELITE_GATE}" == "1" ]]; then
-  log "Running elite gate: ${ELITE_CMD}"
-  ELITE_OUTPUT="$(bash -lc "${ELITE_CMD}" 2>&1)" || {
+  ELITE_GATE_CMD="${ELITE_CMD}"
+  if [[ -n "${ELITE_ROLLBACK_CMD}" ]]; then
+    ELITE_GATE_CMD="${ELITE_GATE_CMD} --rollback-cmd $(printf '%q' "${ELITE_ROLLBACK_CMD}")"
+  fi
+  log "Running elite gate: ${ELITE_GATE_CMD}"
+  ELITE_OUTPUT="$(bash -lc "${ELITE_GATE_CMD}" 2>&1)" || {
     append_report "status: elite-gate-failed"
     append_report "elite_output: ${ELITE_OUTPUT//$'\n'/\\n}"
     printf '%s\n' "${ELITE_OUTPUT}"
