@@ -13,15 +13,44 @@ default_install_dir() {
   fi
 }
 
+resolve_install_dir() {
+  if [[ "${INSTALL_DIR_EXPLICIT}" == "true" ]]; then
+    return
+  fi
+
+  if is_termux && [[ -n "${PREFIX:-}" ]]; then
+    INSTALL_DIR="${PREFIX}/bin"
+    return
+  fi
+
+  if [[ "$(uname -s)" == "Linux" ]] && [[ "$(id -u)" -eq 0 ]]; then
+    INSTALL_DIR="/usr/local/bin"
+    ROOT_FHS_LAYOUT=true
+    return
+  fi
+
+  INSTALL_DIR="$(default_install_dir)"
+}
+
 REPO="${REPO:-sheawinkler/hermes-agent-ultra}"
 VERSION="${VERSION:-latest}"
-INSTALL_DIR="${HERMES_INSTALL_DIR:-${INSTALL_DIR:-$(default_install_dir)}}"
+if [[ -n "${HERMES_INSTALL_DIR:-}" ]]; then
+  INSTALL_DIR="${HERMES_INSTALL_DIR}"
+  INSTALL_DIR_EXPLICIT=true
+elif [[ -n "${INSTALL_DIR:-}" ]]; then
+  INSTALL_DIR="${INSTALL_DIR}"
+  INSTALL_DIR_EXPLICIT=true
+else
+  INSTALL_DIR=""
+  INSTALL_DIR_EXPLICIT=false
+fi
 HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 CANONICAL_BIN_NAME="${CANONICAL_BIN_NAME:-hermes-agent-ultra}"
 PRIMARY_BIN_NAME="${PRIMARY_BIN_NAME:-hermes-ultra}"
 LEGACY_BIN_NAME="${LEGACY_BIN_NAME:-hermes}"
 RELEASE_BIN_BASENAME="${RELEASE_BIN_BASENAME:-hermes}"
 RUN_SETUP_MODE="${RUN_SETUP_MODE:-auto}" # auto|always|never
+ROOT_FHS_LAYOUT=false
 POSITIONAL_VERSION=""
 if [[ -t 0 ]]; then
   IS_INTERACTIVE=true
@@ -42,13 +71,13 @@ Options:
   --version TAG          Release tag to install (same as positional version)
   --setup                Run post-install setup flow without prompting
   --skip-setup           Skip post-install setup flow
-  --dir PATH             Install directory for binaries/symlink
+  --dir PATH             Install directory for binaries/symlink (explicit override)
   --hermes-home PATH     Hermes home directory for SOUL.md bootstrap
   -h, --help             Show this help
 
 Environment variables:
   REPO                   GitHub repo slug (default: sheawinkler/hermes-agent-ultra)
-  HERMES_INSTALL_DIR     Destination bin directory (default: ~/.local/bin or $PREFIX/bin on Termux)
+  HERMES_INSTALL_DIR     Destination bin directory (explicit override)
   INSTALL_DIR            Destination bin directory (legacy alias, overridden by HERMES_INSTALL_DIR)
   HERMES_HOME            Hermes config dir for SOUL.md bootstrap (default: $HOME/.hermes)
   CANONICAL_BIN_NAME     Installed binary name (default: hermes-agent-ultra)
@@ -56,6 +85,11 @@ Environment variables:
   LEGACY_BIN_NAME        Compatibility alias symlink name (default: hermes)
   RELEASE_BIN_BASENAME   Tarball executable basename (default: hermes)
   RUN_SETUP_MODE         auto|always|never for setup flow (default: auto)
+
+Defaults:
+  - Linux root install:  /usr/local/bin (FHS-style command location)
+  - User install:         ~/.local/bin
+  - Termux install:       $PREFIX/bin
 EOF
 }
 
@@ -87,6 +121,7 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       INSTALL_DIR="$2"
+      INSTALL_DIR_EXPLICIT=true
       shift 2
       ;;
     --hermes-home)
@@ -231,6 +266,7 @@ need_cmd tar
 need_cmd install
 
 TARGET="$(detect_target)"
+resolve_install_dir
 ASSET_CANDIDATES=("${RELEASE_BIN_BASENAME}-${TARGET}.tar.gz")
 if [[ "$TARGET" == "macos-aarch64" ]]; then
   ASSET_CANDIDATES+=("${RELEASE_BIN_BASENAME}-macos-arm64.tar.gz")
@@ -323,12 +359,16 @@ if command -v "${CANONICAL_BIN_NAME}" >/dev/null 2>&1; then
   fi
 else
   echo "Binary is not currently on PATH."
-  echo "Add this line to your shell config, then restart your shell:"
-  echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
-  echo
-  echo "zsh quick apply:"
-  echo "  echo 'export PATH=\"${INSTALL_DIR}:\$PATH\"' >> ~/.zshrc && source ~/.zshrc"
-  echo "  exec zsh -l"
+  if [[ "${ROOT_FHS_LAYOUT}" == "true" ]]; then
+    echo "/usr/local/bin is usually already on PATH. Open a new shell and try again."
+  else
+    echo "Add this line to your shell config, then restart your shell:"
+    echo "  export PATH=\"${INSTALL_DIR}:\$PATH\""
+    echo
+    echo "zsh quick apply:"
+    echo "  echo 'export PATH=\"${INSTALL_DIR}:\$PATH\"' >> ~/.zshrc && source ~/.zshrc"
+    echo "  exec zsh -l"
+  fi
 fi
 
 BIN_PATH="${INSTALL_DIR}/${CANONICAL_BIN_NAME}"
