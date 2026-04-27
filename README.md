@@ -184,6 +184,26 @@ Primary sync tooling:
 - `scripts/sync-upstream.sh`
 - `scripts/upstream_webhook_sync.py`
 
+## Nightly Elite Gate
+
+Local nightly validation can be scheduled with launchd.
+
+Manual run:
+
+- `scripts/run-nightly-elite-gate.sh`
+
+Install daily schedule (default `03:30` local time):
+
+- `scripts/install-elite-gate-launchd.sh`
+
+Status and logs:
+
+- `scripts/status-elite-gate-launchd.sh --tail 50`
+
+Uninstall:
+
+- `scripts/uninstall-elite-gate-launchd.sh`
+
 ## License, Attribution, and Ownership
 
 - Ultra is distributed under this repository's license and notices.
