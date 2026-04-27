@@ -903,6 +903,14 @@ struct GovernorRuntimeState {
     consecutive_error_turns: u32,
 }
 
+#[derive(Debug, Clone, Default, Serialize)]
+struct RouteLearningStats {
+    samples: u32,
+    success_rate: f64,
+    avg_latency_ms: f64,
+    consecutive_failures: u32,
+}
+
 #[derive(Debug, Clone)]
 struct ReplayRecorder {
     path: Option<PathBuf>,
@@ -1144,6 +1152,37 @@ fn governor_error_critical_rate() -> f64 {
         .unwrap_or(0.50)
 }
 
+fn smart_routing_learning_enabled() -> bool {
+    std::env::var("HERMES_SMART_ROUTING_LEARNING_ENABLED")
+        .ok()
+        .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(true)
+}
+
+fn smart_routing_learning_alpha() -> f64 {
+    std::env::var("HERMES_SMART_ROUTING_LEARNING_ALPHA")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| (0.01..=1.0).contains(v))
+        .unwrap_or(0.20)
+}
+
+fn smart_routing_learning_cheap_bias() -> f64 {
+    std::env::var("HERMES_SMART_ROUTING_LEARNING_CHEAP_BIAS")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| (-0.50..=0.50).contains(v))
+        .unwrap_or(0.08)
+}
+
+fn smart_routing_learning_switch_margin() -> f64 {
+    std::env::var("HERMES_SMART_ROUTING_LEARNING_SWITCH_MARGIN")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .filter(|v| (0.0..=0.50).contains(v))
+        .unwrap_or(0.03)
+}
+
 fn push_window_u64(window: &mut VecDeque<u64>, value: u64, limit: usize) {
     window.push_back(value);
     while window.len() > limit {
@@ -1291,6 +1330,8 @@ pub struct AgentLoop {
     code_index: Option<Arc<Mutex<CodeIndex>>>,
     /// LSP-style context injection controls.
     lsp_context: LspContextConfig,
+    /// Rolling per-route performance state for online smart-routing adaptation.
+    route_learning: Arc<Mutex<HashMap<String, RouteLearningStats>>>,
 }
 
 #[derive(Debug, Clone)]
@@ -1398,6 +1439,7 @@ impl AgentLoop {
             sub_agent_orchestrator: None,
             code_index,
             lsp_context,
+            route_learning: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -1425,6 +1467,7 @@ impl AgentLoop {
             sub_agent_orchestrator: None,
             code_index,
             lsp_context,
+            route_learning: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -3565,7 +3608,16 @@ impl AgentLoop {
                             persist_user_idx,
                         ));
                     }
-                    Err(e) => return Err(e),
+                    Err(e) => {
+                        let api_elapsed = api_start.elapsed().as_millis() as u64;
+                        self.update_route_learning(
+                            turn_runtime_route.as_ref(),
+                            Some(active_model),
+                            api_elapsed,
+                            false,
+                        );
+                        return Err(e);
+                    }
                 };
                 if let Some(ref u) = r.usage {
                     turn_usage_acc = Some(merge_usage(turn_usage_acc, u));
@@ -3625,6 +3677,12 @@ impl AgentLoop {
             };
             let api_elapsed = api_start.elapsed().as_millis() as u64;
             _total_api_time_ms += api_elapsed;
+            self.update_route_learning(
+                turn_runtime_route.as_ref(),
+                Some(response.model.as_str()),
+                api_elapsed,
+                true,
+            );
             push_window_u64(
                 &mut governor_llm_latency_window,
                 api_elapsed,
@@ -3639,6 +3697,10 @@ impl AgentLoop {
                     "api_time_ms": api_elapsed,
                     "tool_call_count": response.message.tool_calls.as_ref().map(|v| v.len()).unwrap_or(0),
                     "has_visible_text": Self::assistant_visible_text(&response.message),
+                    "route_learning": self.route_learning_snapshot(
+                        turn_runtime_route.as_ref(),
+                        Some(response.model.as_str()),
+                    ),
                 }),
             );
 
@@ -4399,10 +4461,10 @@ impl AgentLoop {
                             llm_governor.max_tokens,
                             &*on_chunk,
                         )
-                        .await?
+                        .await
                     {
-                        StreamCollectOutcome::Complete(resp) => resp,
-                        StreamCollectOutcome::Interrupted(partial) => {
+                        Ok(StreamCollectOutcome::Complete(resp)) => resp,
+                        Ok(StreamCollectOutcome::Interrupted(partial)) => {
                             if let Some(ref u) = partial.usage {
                                 accumulated_usage = Some(merge_usage(accumulated_usage.clone(), u));
                                 if let Some(cost) =
@@ -4421,6 +4483,16 @@ impl AgentLoop {
                                 session_started_hooks_fired,
                                 persist_user_idx,
                             ));
+                        }
+                        Err(e) => {
+                            let api_elapsed = api_start.elapsed().as_millis() as u64;
+                            self.update_route_learning(
+                                turn_runtime_route.as_ref(),
+                                Some(active_model),
+                                api_elapsed,
+                                false,
+                            );
+                            return Err(e);
                         }
                     }
                 } else {
@@ -4445,7 +4517,16 @@ impl AgentLoop {
                                 persist_user_idx,
                             ));
                         }
-                        Err(e) => return Err(e),
+                        Err(e) => {
+                            let api_elapsed = api_start.elapsed().as_millis() as u64;
+                            self.update_route_learning(
+                                turn_runtime_route.as_ref(),
+                                Some(active_model),
+                                api_elapsed,
+                                false,
+                            );
+                            return Err(e);
+                        }
                     }
                 };
                 inner_attempt = inner_attempt.saturating_add(1);
@@ -4507,6 +4588,12 @@ impl AgentLoop {
                 break r;
             };
             let _api_elapsed_ms = api_start.elapsed().as_millis() as u64;
+            self.update_route_learning(
+                turn_runtime_route.as_ref(),
+                Some(response.model.as_str()),
+                _api_elapsed_ms,
+                true,
+            );
             push_window_u64(
                 &mut governor_llm_latency_window,
                 _api_elapsed_ms,
@@ -4521,6 +4608,10 @@ impl AgentLoop {
                     "api_time_ms": _api_elapsed_ms,
                     "tool_call_count": response.message.tool_calls.as_ref().map(|v| v.len()).unwrap_or(0),
                     "has_visible_text": Self::assistant_visible_text(&response.message),
+                    "route_learning": self.route_learning_snapshot(
+                        turn_runtime_route.as_ref(),
+                        Some(response.model.as_str()),
+                    ),
                 }),
             );
 
@@ -5258,6 +5349,103 @@ impl AgentLoop {
         })
     }
 
+    fn route_learning_key(&self, provider_hint: Option<&str>, model: &str) -> String {
+        let (inferred_provider, inferred_model) = self.extract_provider_and_model(model);
+        let provider = provider_hint
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(inferred_provider.as_str())
+            .to_ascii_lowercase();
+        format!("{}:{}", provider, inferred_model.trim().to_ascii_lowercase())
+    }
+
+    fn route_learning_key_for_route(
+        &self,
+        route: Option<&TurnRuntimeRoute>,
+        response_model: Option<&str>,
+    ) -> String {
+        if let Some(model) = response_model.map(str::trim).filter(|s| !s.is_empty()) {
+            let provider_hint = route.and_then(|r| r.provider.as_deref());
+            return self.route_learning_key(provider_hint, model);
+        }
+        if let Some(rt) = route {
+            return self.route_learning_key(rt.provider.as_deref(), rt.model.as_str());
+        }
+        self.route_learning_key(self.config.provider.as_deref(), self.config.model.as_str())
+    }
+
+    fn route_learning_stats_for_key(&self, key: &str) -> Option<RouteLearningStats> {
+        self.route_learning
+            .lock()
+            .ok()
+            .and_then(|m| m.get(key).cloned())
+    }
+
+    fn route_learning_score(stats: Option<&RouteLearningStats>, cheap_bias: f64) -> f64 {
+        let success_rate = stats.map(|s| s.success_rate).unwrap_or(0.90);
+        let avg_latency_ms = stats.map(|s| s.avg_latency_ms).unwrap_or(1800.0);
+        let latency_score = (1.0 / (1.0 + (avg_latency_ms / 2500.0))).clamp(0.05, 1.0);
+        let failure_penalty = stats
+            .map(|s| (s.consecutive_failures as f64 * 0.08).min(0.35))
+            .unwrap_or(0.0);
+        let exploration_bonus = stats
+            .map(|s| {
+                let coverage = (s.samples.min(20) as f64) / 20.0;
+                (1.0 - coverage) * 0.03
+            })
+            .unwrap_or(0.03);
+        (success_rate * 0.60) + (latency_score * 0.30) + cheap_bias + exploration_bonus
+            - failure_penalty
+    }
+
+    fn update_route_learning(
+        &self,
+        route: Option<&TurnRuntimeRoute>,
+        response_model: Option<&str>,
+        latency_ms: u64,
+        success: bool,
+    ) {
+        if !smart_routing_learning_enabled() {
+            return;
+        }
+        let key = self.route_learning_key_for_route(route, response_model);
+        let alpha = smart_routing_learning_alpha();
+        if let Ok(mut map) = self.route_learning.lock() {
+            let entry = map.entry(key).or_insert_with(RouteLearningStats::default);
+            entry.samples = entry.samples.saturating_add(1);
+            if entry.samples == 1 {
+                entry.success_rate = if success { 1.0 } else { 0.0 };
+                entry.avg_latency_ms = latency_ms as f64;
+            } else {
+                let observed_success = if success { 1.0 } else { 0.0 };
+                entry.success_rate = (1.0 - alpha) * entry.success_rate + alpha * observed_success;
+                entry.avg_latency_ms =
+                    (1.0 - alpha) * entry.avg_latency_ms + alpha * (latency_ms as f64);
+            }
+            if success {
+                entry.consecutive_failures = 0;
+            } else {
+                entry.consecutive_failures = entry.consecutive_failures.saturating_add(1);
+            }
+        }
+    }
+
+    fn route_learning_snapshot(
+        &self,
+        route: Option<&TurnRuntimeRoute>,
+        response_model: Option<&str>,
+    ) -> Value {
+        let key = self.route_learning_key_for_route(route, response_model);
+        let stats = self.route_learning_stats_for_key(&key);
+        let score = Self::route_learning_score(stats.as_ref(), 0.0);
+        serde_json::json!({
+            "key": key,
+            "enabled": smart_routing_learning_enabled(),
+            "score": score,
+            "stats": stats,
+        })
+    }
+
     fn resolve_smart_runtime_route(&self, messages: &[Message]) -> Option<TurnRuntimeRoute> {
         let text = self.latest_user_text(messages)?;
         let primary = self.primary_runtime_snapshot();
@@ -5275,6 +5463,29 @@ impl AgentLoop {
                 runtime,
                 signature,
             } => {
+                let primary_key =
+                    self.route_learning_key(primary.provider.as_deref(), primary.model.as_str());
+                let cheap_key =
+                    self.route_learning_key(Some(runtime.provider.as_str()), runtime.model.as_str());
+                let primary_stats = self.route_learning_stats_for_key(&primary_key);
+                let cheap_stats = self.route_learning_stats_for_key(&cheap_key);
+                let primary_score = Self::route_learning_score(primary_stats.as_ref(), 0.0);
+                let cheap_score = Self::route_learning_score(
+                    cheap_stats.as_ref(),
+                    smart_routing_learning_cheap_bias(),
+                );
+                let margin = smart_routing_learning_switch_margin();
+                if smart_routing_learning_enabled() && (cheap_score + margin) < primary_score {
+                    tracing::debug!(
+                        primary_key = %primary_key,
+                        cheap_key = %cheap_key,
+                        primary_score,
+                        cheap_score,
+                        margin,
+                        "smart routing online-learning selected primary route"
+                    );
+                    return None;
+                }
                 let cheap = self.config.smart_model_routing.cheap_model.as_ref()?;
                 Some(TurnRuntimeRoute {
                     model,
@@ -5290,8 +5501,11 @@ impl AgentLoop {
                     args: runtime.args.clone(),
                     credential_pool: runtime.credential_pool.clone(),
                     credential_pool_fallback: !runtime.skip_primary_credential_pool_fallback,
-                    route_label: Some(label),
-                    routing_reason: Some("simple_turn".to_string()),
+                    route_label: Some(format!(
+                        "{} [cheap_score={:.3} primary_score={:.3}]",
+                        label, cheap_score, primary_score
+                    )),
+                    routing_reason: Some("simple_turn_online_learning".to_string()),
                     signature,
                 })
             }
@@ -6920,6 +7134,156 @@ mod tests {
             selected.as_ref().map(|r| r.model.as_str()),
             Some("gpt-4o-mini")
         );
+    }
+
+    #[test]
+    fn test_smart_model_routing_online_learning_prefers_primary_when_cheap_unstable() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let mut runtime_providers = HashMap::new();
+        runtime_providers.insert(
+            "openai".to_string(),
+            RuntimeProviderConfig {
+                api_key: Some("sk-test-key".to_string()),
+                api_key_env: None,
+                base_url: None,
+                command: None,
+                args: Vec::new(),
+                oauth_token_url: None,
+                oauth_client_id: None,
+            },
+        );
+        let config = AgentConfig {
+            model: "openai:gpt-4o".to_string(),
+            runtime_providers,
+            smart_model_routing: SmartModelRoutingConfig {
+                enabled: true,
+                max_simple_chars: 160,
+                max_simple_words: 28,
+                cheap_model: Some(CheapModelRouteConfig {
+                    provider: Some("openai".to_string()),
+                    model: Some("gpt-4o-mini".to_string()),
+                    base_url: None,
+                    api_key_env: None,
+                }),
+            },
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        if let Ok(mut m) = agent.route_learning.lock() {
+            m.insert(
+                "openai:gpt-4o".to_string(),
+                RouteLearningStats {
+                    samples: 12,
+                    success_rate: 0.98,
+                    avg_latency_ms: 900.0,
+                    consecutive_failures: 0,
+                },
+            );
+            m.insert(
+                "openai:gpt-4o-mini".to_string(),
+                RouteLearningStats {
+                    samples: 12,
+                    success_rate: 0.35,
+                    avg_latency_ms: 3800.0,
+                    consecutive_failures: 3,
+                },
+            );
+        }
+        let selected = agent.resolve_smart_runtime_route(&[Message::user("summarize today's work")]);
+        assert!(
+            selected.is_none(),
+            "online learning should keep primary when cheap route is unstable"
+        );
+    }
+
+    #[test]
+    fn test_route_learning_updates_after_outcomes() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let agent = AgentLoop::new(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        agent.update_route_learning(None, Some("openai:gpt-4o"), 2100, false);
+        agent.update_route_learning(None, Some("openai:gpt-4o"), 900, true);
+        let snapshot = agent.route_learning_snapshot(None, Some("openai:gpt-4o"));
+        assert_eq!(snapshot["enabled"], true);
+        assert_eq!(snapshot["key"], "openai:gpt-4o");
+        assert_eq!(snapshot["stats"]["samples"], 2);
+        assert!(snapshot["stats"]["success_rate"].as_f64().unwrap_or(0.0) > 0.0);
+        assert!(snapshot["stats"]["avg_latency_ms"].as_f64().unwrap_or(0.0) > 0.0);
     }
 
     #[test]
