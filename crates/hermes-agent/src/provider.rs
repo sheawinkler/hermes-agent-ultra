@@ -254,7 +254,22 @@ impl GenericProvider {
                 for tc in tool_calls.iter_mut() {
                     if let Some(obj) = tc.as_object_mut() {
                         let id = obj.get("id").cloned();
-                        let function = obj.get("function").cloned();
+                        let function = obj.get("function").cloned().or_else(|| {
+                            let name = obj.get("name").and_then(|v| v.as_str())?.to_string();
+                            let args_raw = obj
+                                .get("arguments")
+                                .cloned()
+                                .unwrap_or_else(|| Value::String("{}".to_string()));
+                            let args =
+                                args_raw.as_str().map(|s| s.to_string()).unwrap_or_else(|| {
+                                    serde_json::to_string(&args_raw)
+                                        .unwrap_or_else(|_| "{}".to_string())
+                                });
+                            Some(serde_json::json!({
+                                "name": name,
+                                "arguments": args,
+                            }))
+                        });
                         let mut stripped = serde_json::Map::new();
                         if let Some(v) = id {
                             stripped.insert("id".to_string(), v);
@@ -1757,6 +1772,50 @@ mod tests {
         assert_eq!(rows[0]["function"]["name"], "read_file");
         assert_eq!(rows[0]["function"]["description"], "Read file content");
         assert_eq!(rows[0]["function"]["parameters"]["type"], "object");
+    }
+
+    #[test]
+    fn test_sanitize_messages_for_strict_api_reconstructs_flattened_tool_call_function() {
+        let messages = vec![Message::assistant_with_tool_calls(
+            None,
+            vec![ToolCall {
+                id: "call_123".to_string(),
+                function: FunctionCall {
+                    name: "skills_list".to_string(),
+                    arguments: "{\"category\":\"builtin\"}".to_string(),
+                },
+                extra_content: None,
+            }],
+        )];
+
+        let sanitized = GenericProvider::sanitize_messages_for_strict_api(&messages, true);
+        let tc = &sanitized[0]["tool_calls"][0];
+        assert_eq!(tc["id"], "call_123");
+        assert_eq!(tc["type"], "function");
+        assert_eq!(tc["function"]["name"], "skills_list");
+        assert_eq!(tc["function"]["arguments"], "{\"category\":\"builtin\"}");
+        assert!(tc.get("name").is_none());
+        assert!(tc.get("arguments").is_none());
+    }
+
+    #[test]
+    fn test_sanitize_messages_for_strict_api_disabled_preserves_flattened_shape() {
+        let messages = vec![Message::assistant_with_tool_calls(
+            None,
+            vec![ToolCall {
+                id: "call_abc".to_string(),
+                function: FunctionCall {
+                    name: "read_file".to_string(),
+                    arguments: "{\"path\":\"a.txt\"}".to_string(),
+                },
+                extra_content: None,
+            }],
+        )];
+        let sanitized = GenericProvider::sanitize_messages_for_strict_api(&messages, false);
+        let tc = &sanitized[0]["tool_calls"][0];
+        assert_eq!(tc["name"], "read_file");
+        assert_eq!(tc["arguments"], "{\"path\":\"a.txt\"}");
+        assert!(tc.get("function").is_none());
     }
 
     #[test]
