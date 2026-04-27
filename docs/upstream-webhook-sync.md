@@ -25,6 +25,7 @@ that needs manual coding.
 - `scripts/upstream_webhook_sync.py worker`
   - Consumes queue event
   - Runs `scripts/sync-upstream.sh` with strict risk gate
+  - Passes PR labels (`--pr-labels`) through to sync script for auto-labeled parity PRs
   - Runs CLI command/action parity drift check (`HEAD` vs `upstream/main` or event SHA)
   - Runs full global parity audit chain (matrix/status/intent/adapter/divergence/queue/proof)
   - Emits machine-readable drift artifacts under `.sync-reports/cli-surface-drift-*.json`
@@ -124,7 +125,8 @@ python3 scripts/upstream_webhook_sync.py worker \
   --repo-root /Users/sheawinkler/Documents/Projects/hermes-agent-ultra \
   --strategy merge \
   --strict-risk-gate \
-  --draft-pr
+  --draft-pr \
+  --pr-labels upstream-sync,parity-sync
 ```
 
 Optional parity drift flags:
