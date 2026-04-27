@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-27T07:34:24.449688+00:00`
+Generated: `2026-04-27T07:35:36.691666+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `675`.
 
@@ -15,21 +15,17 @@ Generated: `2026-04-27T07:34:24.449688+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 336 |
-| ported | 32 |
-| superseded | 307 |
+| pending | 332 |
+| ported | 35 |
+| superseded | 308 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `0738b80833c1` | #20 | fix(tui): rebuild when ink bundle is missing |
-| `1c8ce33d5108` | #22 | fix(tui): proactive mouse disable on ConPTY + /mouse toggle command |
 | `023b1bff11c2` | #20 | fix(delegate): resolve subagent approval prompts without deadlocking parent TUI (#15491) |
 | `e5647d7863d3` | #22 | docs: consolidate dashboard themes and plugins into Extending the Dashboard (#15530) |
 | `5401a0080d97` | #20 | fix: recalculate token budgets on model switch in ContextCompressor |
-| `9d7b64b5dd39` | #20 | fix(tools): normalize numeric entries and clear stale no_mcp in _save_platform_tools |
-| `9fde22d23339` | #26 | fix the reset of model change by /model. |
 | `df485628ce02` | #26 | chore(release): map Readon's git email to GitHub login |
 | `9830905dabd5` | #20 | fix(tools): recover non-configurable toolsets from composite resolution |
 | `81987f0350b6` | #20 | feat(discord): split discord_server into discord + discord_admin tools |
@@ -123,4 +119,8 @@ Generated: `2026-04-27T07:34:24.449688+00:00`
 | `91a7a0acbeaf` | #20 | fix(tui): restore skills search RPC |
 | `a55de5bcd017` | #20 | feat(setup): auto-reconfigure on existing installs (#15879) |
 | `eb28145f3682` | #20 | feat(approval): hardline blocklist for unrecoverable commands (#15878) |
+| `59b56d445c34` | #22 | feat(hooks): add duration_ms to post_tool_call + transform_tool_result (#15429) |
+| `db4e4acca0f7` | #22 | perf(tui): stabilize long-session scrolling |
+| `14fcff60c93d` | #22 | style(tui): apply formatter |
+| `458ce792d24e` | #22 | fix(tui): persist model switches by default |
 
