@@ -14,6 +14,21 @@ import time
 from typing import Any
 
 
+SEVERITY_ORDER = {
+    "none": -1,
+    "info": 0,
+    "low": 1,
+    "medium": 2,
+    "high": 3,
+    "critical": 4,
+}
+
+
+def normalize_severity(raw: str | None) -> str:
+    value = str(raw or "").strip().lower()
+    return value if value in SEVERITY_ORDER else "medium"
+
+
 def utc_now() -> str:
     return dt.datetime.now(dt.timezone.utc).isoformat()
 
@@ -35,6 +50,7 @@ def run_command(entry: dict[str, Any], repo_root: pathlib.Path) -> dict[str, Any
         }
 
     timeout_sec = int(entry.get("timeout_sec", 180))
+    severity = normalize_severity(entry.get("severity"))
     started = time.time()
     try:
         proc = subprocess.run(
@@ -50,6 +66,7 @@ def run_command(entry: dict[str, Any], repo_root: pathlib.Path) -> dict[str, Any
         stderr = (proc.stderr or "").strip()
         return {
             "id": entry.get("id", "unknown"),
+            "severity": severity,
             "command": " ".join(shlex.quote(c) for c in cmd),
             "exit_code": proc.returncode,
             "ok": proc.returncode == 0,
@@ -61,6 +78,7 @@ def run_command(entry: dict[str, Any], repo_root: pathlib.Path) -> dict[str, Any
         elapsed_ms = int((time.time() - started) * 1000)
         return {
             "id": entry.get("id", "unknown"),
+            "severity": severity,
             "command": " ".join(shlex.quote(c) for c in cmd),
             "exit_code": 124,
             "ok": False,
@@ -86,7 +104,14 @@ def main() -> int:
         default="",
         help="Optional explicit report JSON path",
     )
+    parser.add_argument(
+        "--max-severity-allowed",
+        default="none",
+        help="Allow failures up to this severity (none|info|low|medium|high|critical).",
+    )
     args = parser.parse_args()
+    max_allowed = normalize_severity(args.max_severity_allowed)
+    max_allowed_rank = SEVERITY_ORDER.get(max_allowed, -1)
 
     repo_root = pathlib.Path(args.repo_root).resolve()
     suite_path = pathlib.Path(args.suite)
@@ -101,20 +126,37 @@ def main() -> int:
     results = [run_command(entry, repo_root) for entry in commands]
     passed = sum(1 for r in results if r.get("ok"))
     failed = len(results) - passed
+    blocking_failures = [
+        result
+        for result in results
+        if not result.get("ok")
+        and SEVERITY_ORDER.get(normalize_severity(result.get("severity")), 2) > max_allowed_rank
+    ]
+    tolerated_failures = [
+        result
+        for result in results
+        if not result.get("ok")
+        and result not in blocking_failures
+    ]
 
     report = {
         "generated_at": utc_now(),
         "suite": suite.get("suite", "redteam"),
         "suite_version": suite.get("version", 1),
+        "max_severity_allowed": max_allowed,
         "repo_root": str(repo_root),
         "suite_file": str(suite_path),
         "summary": {
             "total": len(results),
             "passed": passed,
             "failed": failed,
-            "ok": failed == 0,
+            "failed_blocking": len(blocking_failures),
+            "failed_tolerated": len(tolerated_failures),
+            "ok": len(blocking_failures) == 0,
         },
         "results": results,
+        "blocking_failures": blocking_failures,
+        "tolerated_failures": tolerated_failures,
     }
 
     if args.report_path:
@@ -131,9 +173,11 @@ def main() -> int:
 
     print(f"[redteam-gate] Report: {report_path}")
     print(
-        f"[redteam-gate] Summary: total={len(results)} passed={passed} failed={failed}"
+        f"[redteam-gate] Summary: total={len(results)} passed={passed} "
+        f"failed={failed} blocking={len(blocking_failures)} "
+        f"tolerated={len(tolerated_failures)} max_allowed={max_allowed}"
     )
-    return 0 if failed == 0 else 1
+    return 0 if len(blocking_failures) == 0 else 1
 
 
 if __name__ == "__main__":

@@ -79,7 +79,7 @@ use hermes_gateway::tool_backends::ClarifyDispatcher;
 use hermes_gateway::{DmManager, Gateway, GatewayRuntimeContext, SessionManager};
 use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_telemetry::init_telemetry_from_env;
-use hermes_tools::ToolRegistry;
+use hermes_tools::{default_tool_policy_counters_path, load_tool_policy_counters, ToolRegistry};
 use rand::rngs::OsRng;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
@@ -185,6 +185,7 @@ async fn main() {
             bundle,
         } => run_doctor(cli, deep, self_heal, snapshot, snapshot_path, bundle).await,
         CliCommand::Update => run_update().await,
+        CliCommand::EliteCheck { json, strict } => run_elite_check(cli, json, strict).await,
         CliCommand::VerifyProvenance {
             path,
             signature,
@@ -7697,6 +7698,74 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
 }
 
 /// Handle `hermes doctor`.
+fn build_elite_doctor_diagnostics(cli: &Cli) -> serde_json::Value {
+    let provenance_path = provenance_key_path_for_cli(cli);
+    let provenance_exists = provenance_path.exists();
+    let provenance_key_id = if provenance_exists {
+        load_or_create_provenance_key(cli, false).ok().map(|key| {
+            let digest = Sha256::digest(&key);
+            let full = hex::encode(digest);
+            full.chars().take(16).collect::<String>()
+        })
+    } else {
+        None
+    };
+
+    let route_path = route_learning_state_path_for_cli(cli);
+    let route_state = load_route_learning_state_for_cli(&route_path).ok();
+    let route_entries = route_state
+        .as_ref()
+        .map(|state| state.entries.len())
+        .unwrap_or(0usize);
+
+    let policy_counters_path = default_tool_policy_counters_path();
+    let policy_counters = load_tool_policy_counters(&policy_counters_path).unwrap_or_default();
+    let policy_mode = std::env::var("HERMES_TOOL_POLICY_MODE")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "enforce".to_string());
+    let policy_preset = std::env::var("HERMES_TOOL_POLICY_PRESET")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "balanced".to_string());
+
+    let elite_gate_script = std::env::var("HERMES_ELITE_GATE_CMD")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "python3 scripts/run-elite-sync-gate.py".to_string());
+    let gate_available = {
+        let script_path = std::env::current_dir()
+            .ok()
+            .map(|cwd| cwd.join("scripts").join("run-elite-sync-gate.py"));
+        script_path.as_ref().map(|p| p.exists()).unwrap_or(false)
+    };
+
+    serde_json::json!({
+        "provenance": {
+            "path": provenance_path.display().to_string(),
+            "exists": provenance_exists,
+            "key_id": provenance_key_id,
+        },
+        "route_learning": {
+            "path": route_path.display().to_string(),
+            "entries": route_entries,
+            "ttl_secs": route_learning_ttl_secs(),
+            "half_life_secs": route_learning_half_life_secs(),
+            "saved_at_unix_ms": route_state.as_ref().map(|s| s.saved_at_unix_ms),
+        },
+        "tool_policy": {
+            "mode": policy_mode,
+            "preset": policy_preset,
+            "counters_path": policy_counters_path.display().to_string(),
+            "counters": policy_counters,
+        },
+        "elite_gate": {
+            "command": elite_gate_script,
+            "script_available": gate_available,
+        }
+    })
+}
+
 async fn run_doctor(
     cli: Cli,
     deep: bool,
@@ -7979,6 +8048,42 @@ async fn run_doctor(
         }));
     }
 
+    let elite = build_elite_doctor_diagnostics(&cli);
+    println!("\nElite diagnostics:");
+    println!(
+        "  provenance key... {}",
+        if elite["provenance"]["exists"].as_bool().unwrap_or(false) {
+            "✓"
+        } else {
+            "✗"
+        }
+    );
+    println!(
+        "  route-learning entries... {}",
+        elite["route_learning"]["entries"].as_u64().unwrap_or(0)
+    );
+    println!(
+        "  tool-policy mode/preset... {}/{}",
+        elite["tool_policy"]["mode"].as_str().unwrap_or("unknown"),
+        elite["tool_policy"]["preset"].as_str().unwrap_or("unknown")
+    );
+    println!(
+        "  elite gate script... {}",
+        if elite["elite_gate"]["script_available"]
+            .as_bool()
+            .unwrap_or(false)
+        {
+            "✓"
+        } else {
+            "✗"
+        }
+    );
+    checks.push(serde_json::json!({
+        "name": "elite_diagnostics",
+        "ok": true,
+        "details": elite,
+    }));
+
     let snapshot_payload = serde_json::json!({
         "generated_at": chrono::Utc::now().to_rfc3339(),
         "deep": deep,
@@ -7987,6 +8092,7 @@ async fn run_doctor(
         "state_root": hermes_state_root(&cli).display().to_string(),
         "checks": checks,
         "config_summary": config_summary,
+        "elite": build_elite_doctor_diagnostics(&cli),
     });
 
     let mut snapshot_written: Option<PathBuf> = None;
@@ -8648,6 +8754,37 @@ async fn run_update() -> Result<(), AgentError> {
     Ok(())
 }
 
+async fn run_elite_check(_cli: Cli, json: bool, strict: bool) -> Result<(), AgentError> {
+    let base_cmd = std::env::var("HERMES_ELITE_GATE_CMD")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "python3 scripts/run-elite-sync-gate.py --repo-root .".to_string());
+    let mut cmdline = base_cmd;
+    if json {
+        cmdline.push_str(" --json");
+    }
+    let output = tokio::process::Command::new("bash")
+        .args(["-lc", &cmdline])
+        .output()
+        .await
+        .map_err(|e| AgentError::Io(format!("elite-check command failed to start: {}", e)))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stdout.trim().is_empty() {
+        println!("{}", stdout.trim_end());
+    }
+    if !stderr.trim().is_empty() {
+        eprintln!("{}", stderr.trim_end());
+    }
+    if strict && !output.status.success() {
+        return Err(AgentError::Config(format!(
+            "elite-check failed (status={})",
+            output.status
+        )));
+    }
+    Ok(())
+}
+
 async fn run_verify_provenance(
     cli: Cli,
     path: String,
@@ -8982,6 +9119,27 @@ async fn run_status(cli: Cli) -> Result<(), AgentError> {
 
     let config_dir = hermes_config::hermes_home();
     println!("\nConfig dir: {}", config_dir.display());
+
+    let policy_mode = std::env::var("HERMES_TOOL_POLICY_MODE")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "enforce".to_string());
+    let policy_preset = std::env::var("HERMES_TOOL_POLICY_PRESET")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "balanced".to_string());
+    let policy_counters_path = default_tool_policy_counters_path();
+    let policy_counters = load_tool_policy_counters(&policy_counters_path).unwrap_or_default();
+    println!(
+        "Tool policy: mode={} preset={} counters(allow={}, deny={}, audit={}, simulate={}, would_block={})",
+        policy_mode,
+        policy_preset,
+        policy_counters.allow,
+        policy_counters.deny,
+        policy_counters.audit_only,
+        policy_counters.simulate,
+        policy_counters.would_block,
+    );
 
     // Check for active sessions
     let sessions_dir = config_dir.join("sessions");
@@ -11024,6 +11182,25 @@ mod tests {
                 .unwrap_or("")
                 .contains("removed stale gateway pid file")
         }));
+    }
+
+    #[test]
+    fn doctor_elite_diagnostics_payload_has_required_sections() {
+        use clap::Parser;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cfg = tmp.path().join("cfg");
+        let cli = Cli::parse_from([
+            "hermes-ultra",
+            "--config-dir",
+            cfg.to_str().expect("utf8 path"),
+            "doctor",
+        ]);
+        let payload = build_elite_doctor_diagnostics(&cli);
+        assert!(payload.get("provenance").is_some());
+        assert!(payload.get("route_learning").is_some());
+        assert!(payload.get("tool_policy").is_some());
+        assert!(payload.get("elite_gate").is_some());
     }
 
     #[test]

@@ -23,7 +23,10 @@ pub mod v4a_patch;
 
 // Re-export registry types
 pub use registry::{ToolEntry, ToolEntryInfo, ToolRegistry};
-pub use tool_policy::{ToolPolicyDecision, ToolPolicyEngine, ToolPolicyMode};
+pub use tool_policy::{
+    default_tool_policy_counters_path, load_tool_policy_counters, persist_tool_policy_counters,
+    ToolPolicyCounters, ToolPolicyDecision, ToolPolicyEngine, ToolPolicyMode,
+};
 
 // Re-export toolset types
 pub use toolset::{Toolset, ToolsetError, ToolsetManager};
