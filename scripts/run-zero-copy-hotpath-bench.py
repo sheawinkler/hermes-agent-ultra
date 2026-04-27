@@ -26,7 +26,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def default_output(repo_root: pathlib.Path) -> pathlib.Path:
-    stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
+    stamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%d-%H%M%S")
     return repo_root / ".sync-reports" / f"zero-copy-hotpath-{stamp}.json"
 
 
@@ -43,7 +43,7 @@ def main() -> int:
     output = pathlib.Path(args.output).expanduser().resolve() if args.output else default_output(repo_root)
     output.parent.mkdir(parents=True, exist_ok=True)
 
-    started = dt.datetime.now(dt.UTC)
+    started = dt.datetime.now(dt.timezone.utc)
     proc = subprocess.run(
         shlex.split(args.command),
         cwd=str(repo_root),
@@ -51,7 +51,7 @@ def main() -> int:
         text=True,
         check=False,
     )
-    finished = dt.datetime.now(dt.UTC)
+    finished = dt.datetime.now(dt.timezone.utc)
 
     report = {
         "timestamp_utc": finished.isoformat(timespec="seconds"),

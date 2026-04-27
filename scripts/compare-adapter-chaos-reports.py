@@ -143,7 +143,7 @@ def main() -> int:
         )
 
     report = {
-        "generated_at": dt.datetime.now(dt.UTC).isoformat(),
+        "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "baseline": str(baseline_path),
         "current": str(current_path),
         "ok": len(regressions) == 0,
