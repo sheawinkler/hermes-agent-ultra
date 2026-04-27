@@ -17,11 +17,11 @@ use hermes_cli::app::{
     bridge_tool_registry, build_agent_config, build_provider, provider_api_key_from_env,
 };
 use hermes_cli::auth::{
-    clear_provider_auth_state, get_anthropic_oauth_status, get_gemini_oauth_auth_status,
-    get_qwen_auth_status, login_anthropic_oauth, login_google_gemini_cli_oauth,
-    login_nous_device_code, login_openai_codex_device_code, login_openai_device_code,
-    read_provider_auth_state, resolve_qwen_runtime_credentials, save_codex_auth_state,
-    save_nous_auth_state, save_openai_auth_state, save_provider_auth_state,
+    clear_provider_auth_state, discover_existing_openai_oauth, get_anthropic_oauth_status,
+    get_gemini_oauth_auth_status, get_qwen_auth_status, login_anthropic_oauth,
+    login_google_gemini_cli_oauth, login_nous_device_code, login_openai_codex_device_code,
+    login_openai_device_code, read_provider_auth_state, resolve_qwen_runtime_credentials,
+    save_codex_auth_state, save_nous_auth_state, save_openai_auth_state, save_provider_auth_state,
     AnthropicOAuthLoginOptions, CodexDeviceCodeOptions, GeminiOAuthLoginOptions,
     NousDeviceCodeOptions, ANTHROPIC_OAUTH_CLIENT_ID, ANTHROPIC_OAUTH_TOKEN_URL,
     CODEX_OAUTH_CLIENT_ID, CODEX_OAUTH_TOKEN_URL, DEFAULT_CODEX_BASE_URL, DEFAULT_OPENAI_BASE_URL,
@@ -4949,8 +4949,16 @@ async fn run_auth(
                         return Ok(());
                     }
                     "openai" => {
-                        let state =
-                            login_openai_device_code(CodexDeviceCodeOptions::default()).await?;
+                        let imported = discover_existing_openai_oauth()?;
+                        let state = if let Some(imported) = imported {
+                            println!(
+                                "Detected existing OpenAI OAuth session at {}.",
+                                imported.source_path.display()
+                            );
+                            imported.state
+                        } else {
+                            login_openai_device_code(CodexDeviceCodeOptions::default()).await?
+                        };
                         let auth_path = save_openai_auth_state(&state)?;
                         let expires_at = state
                             .tokens
@@ -5510,7 +5518,16 @@ async fn run_auth(
                 return Ok(());
             }
             if provider == "openai" {
-                let state = login_openai_device_code(CodexDeviceCodeOptions::default()).await?;
+                let imported = discover_existing_openai_oauth()?;
+                let state = if let Some(imported) = imported {
+                    println!(
+                        "Detected existing OpenAI OAuth session at {}.",
+                        imported.source_path.display()
+                    );
+                    imported.state
+                } else {
+                    login_openai_device_code(CodexDeviceCodeOptions::default()).await?
+                };
                 let auth_path = save_openai_auth_state(&state)?;
                 let expires_at = state
                     .tokens
@@ -7503,7 +7520,16 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
                     stored_provider_secret_in_vault = true;
                 }
                 "openai" => {
-                    let state = login_openai_device_code(CodexDeviceCodeOptions::default()).await?;
+                    let imported = discover_existing_openai_oauth()?;
+                    let state = if let Some(imported) = imported {
+                        println!(
+                            "  ✓ Detected existing OpenAI OAuth session: {}",
+                            imported.source_path.display()
+                        );
+                        imported.state
+                    } else {
+                        login_openai_device_code(CodexDeviceCodeOptions::default()).await?
+                    };
                     let auth_path = save_openai_auth_state(&state)?;
                     println!("  ✓ Saved OpenAI OAuth state: {}", auth_path.display());
                     manager
