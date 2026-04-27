@@ -147,6 +147,13 @@ pub struct CronJob {
     /// Optional script content to execute instead of an agent prompt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub script: Option<String>,
+    /// Optional source cron job IDs whose most recent output should be injected
+    /// into this job prompt before execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_from: Option<Vec<String>>,
+    /// Last assistant output captured from this job's most recent successful run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_output: Option<String>,
 }
 
 fn default_job_status() -> JobStatus {
@@ -174,6 +181,8 @@ impl CronJob {
             repeat: None,
             run_count: 0,
             script: None,
+            context_from: None,
+            last_output: None,
         }
     }
 

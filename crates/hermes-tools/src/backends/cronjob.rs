@@ -33,6 +33,7 @@ impl CronjobBackend for SignalCronjobBackend {
         schedule: &str,
         task: &str,
         toolset: Option<&str>,
+        context_from: Option<&serde_json::Value>,
     ) -> Result<String, ToolError> {
         Ok(json!({
             "type": "cronjob_request",
@@ -41,6 +42,7 @@ impl CronjobBackend for SignalCronjobBackend {
             "schedule": schedule,
             "task": task,
             "toolset": toolset,
+            "context_from": context_from.cloned(),
         })
         .to_string())
     }
@@ -59,6 +61,7 @@ impl CronjobBackend for SignalCronjobBackend {
         schedule: Option<&str>,
         task: Option<&str>,
         enabled: Option<bool>,
+        context_from: Option<&serde_json::Value>,
     ) -> Result<String, ToolError> {
         Ok(json!({
             "type": "cronjob_request",
@@ -67,6 +70,7 @@ impl CronjobBackend for SignalCronjobBackend {
             "schedule": schedule,
             "task": task,
             "enabled": enabled,
+            "context_from": context_from.cloned(),
         })
         .to_string())
     }

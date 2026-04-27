@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use chrono::Utc;
-use hermes_core::AgentResult;
+use hermes_core::{AgentResult, MessageRole};
 use tokio::sync::{broadcast, Mutex, Notify};
 use tokio::time::{self, Duration};
 
@@ -29,6 +29,80 @@ fn cron_poll_interval() -> Duration {
         .unwrap_or(60)
         .clamp(1, 300);
     Duration::from_secs(secs)
+}
+
+const MAX_CONTEXT_CHARS: usize = 8_000;
+const MAX_STORED_OUTPUT_CHARS: usize = 32_000;
+
+fn truncate_chars(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.to_string();
+    }
+    s.chars().take(max).collect::<String>() + "…"
+}
+
+fn latest_assistant_output(result: &AgentResult) -> Option<String> {
+    result.messages.iter().rev().find_map(|m| {
+        if m.role == MessageRole::Assistant {
+            m.content.clone().and_then(|c| {
+                let trimmed = c.trim();
+                (!trimmed.is_empty()).then(|| trimmed.to_string())
+            })
+        } else {
+            None
+        }
+    })
+}
+
+fn is_valid_context_job_ref(job_id: &str) -> bool {
+    !job_id.is_empty()
+        && job_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+fn build_context_prefix_for_job(job: &CronJob, jobs: &HashMap<String, CronJob>) -> Option<String> {
+    let Some(context_refs) = job.context_from.as_ref() else {
+        return None;
+    };
+
+    let mut sections = Vec::new();
+    for source_job_id in context_refs {
+        if !is_valid_context_job_ref(source_job_id) {
+            tracing::warn!("context_from: skipping invalid job_id {:?}", source_job_id);
+            continue;
+        }
+        let Some(source_job) = jobs.get(source_job_id) else {
+            continue;
+        };
+        let Some(latest_output) = source_job
+            .last_output
+            .as_ref()
+            .map(|s| s.trim())
+            .filter(|s| !s.is_empty())
+        else {
+            continue;
+        };
+
+        let mut output = latest_output.to_string();
+        if output.chars().count() > MAX_CONTEXT_CHARS {
+            output = format!(
+                "{}\n\n[... output truncated ...]",
+                truncate_chars(latest_output, MAX_CONTEXT_CHARS)
+            );
+        }
+
+        sections.push(format!(
+            "## Output from job '{}'\nThe following is the most recent output from a preceding cron job. Use it as context for your analysis.\n\n```\n{}\n```",
+            source_job_id, output
+        ));
+    }
+
+    if sections.is_empty() {
+        None
+    } else {
+        Some(sections.join("\n\n"))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -192,6 +266,11 @@ impl CronScheduler {
                 for job_id in due_job_ids {
                     let job = guard.get(&job_id).cloned();
                     if let Some(mut job) = job {
+                        let mut runnable_job = job.clone();
+                        if let Some(ctx_prefix) = build_context_prefix_for_job(&job, &guard) {
+                            runnable_job.prompt =
+                                format!("{}\n\n{}", ctx_prefix, runnable_job.prompt);
+                        }
                         drop(guard);
 
                         // Run the job
@@ -200,7 +279,7 @@ impl CronScheduler {
                             job.name.as_deref().unwrap_or(&job.id),
                             job.id
                         );
-                        match runner.run_job(&job).await {
+                        match runner.run_job(&runnable_job).await {
                             Ok(result) => {
                                 tracing::info!(
                                     "Cron job '{}' completed successfully (turns: {})",
@@ -214,6 +293,8 @@ impl CronScheduler {
                                     Ok(&result),
                                 );
                                 job.mark_executed(now);
+                                job.last_output = latest_assistant_output(&result)
+                                    .map(|s| truncate_chars(&s, MAX_STORED_OUTPUT_CHARS));
                             }
                             Err(e) => {
                                 tracing::error!("Cron job '{}' failed: {}", job.id, e);
@@ -432,12 +513,17 @@ impl CronScheduler {
     /// The job is executed regardless of its schedule or status (except
     /// Completed jobs). The run count is not incremented for manual triggers.
     pub async fn run_job(&self, id: &str) -> Result<AgentResult, CronError> {
-        let job = {
+        let (job, runnable_job) = {
             let guard = self.jobs.lock().await;
-            guard
+            let job = guard
                 .get(id)
                 .cloned()
-                .ok_or_else(|| CronError::JobNotFound(id.to_string()))?
+                .ok_or_else(|| CronError::JobNotFound(id.to_string()))?;
+            let mut runnable_job = job.clone();
+            if let Some(ctx_prefix) = build_context_prefix_for_job(&runnable_job, &guard) {
+                runnable_job.prompt = format!("{}\n\n{}", ctx_prefix, runnable_job.prompt);
+            }
+            (job, runnable_job)
         };
 
         if job.status == JobStatus::Completed {
@@ -445,7 +531,7 @@ impl CronScheduler {
         }
 
         tracing::info!("Manually triggering cron job '{}'", id);
-        let run_result = self.runner.run_job(&job).await;
+        let run_result = self.runner.run_job(&runnable_job).await;
         match &run_result {
             Ok(result) => Self::emit_completion(&self.completion_tx, &job, "manual", Ok(result)),
             Err(e) => {
@@ -459,6 +545,8 @@ impl CronScheduler {
             let mut guard = self.jobs.lock().await;
             if let Some(j) = guard.get_mut(id) {
                 j.last_run = Some(Utc::now());
+                j.last_output = latest_assistant_output(&result)
+                    .map(|s| truncate_chars(&s, MAX_STORED_OUTPUT_CHARS));
                 if j.status == JobStatus::Failed {
                     // Reset status to Active on successful manual run
                     j.status = JobStatus::Active;
@@ -514,5 +602,48 @@ mod tests {
         let loaded = sched.get_job(&id).await.expect("get");
         assert_eq!(loaded.prompt, "hello");
         assert_eq!(sched.list_jobs().await.len(), 1);
+    }
+
+    #[test]
+    fn test_build_context_prefix_injects_recent_output() {
+        let source = CronJob {
+            last_output: Some("Latest digest".to_string()),
+            ..CronJob::new("0 * * * *", "collect")
+        };
+        let target = CronJob {
+            context_from: Some(vec![source.id.clone()]),
+            ..CronJob::new("0 * * * *", "summarize")
+        };
+        let mut jobs = HashMap::new();
+        jobs.insert(source.id.clone(), source.clone());
+        jobs.insert(target.id.clone(), target.clone());
+
+        let prefix = build_context_prefix_for_job(&target, &jobs).expect("prefix");
+        assert!(prefix.contains("Output from job"));
+        assert!(prefix.contains("Latest digest"));
+    }
+
+    #[test]
+    fn test_build_context_prefix_silent_when_no_output() {
+        let source = CronJob::new("0 * * * *", "collect");
+        let target = CronJob {
+            context_from: Some(vec![source.id.clone()]),
+            ..CronJob::new("0 * * * *", "summarize")
+        };
+        let mut jobs = HashMap::new();
+        jobs.insert(source.id.clone(), source.clone());
+        jobs.insert(target.id.clone(), target.clone());
+
+        assert!(build_context_prefix_for_job(&target, &jobs).is_none());
+    }
+
+    #[test]
+    fn test_build_context_prefix_skips_invalid_job_ids() {
+        let target = CronJob {
+            context_from: Some(vec!["../../../etc/passwd".to_string()]),
+            ..CronJob::new("0 * * * *", "summarize")
+        };
+        let jobs = HashMap::new();
+        assert!(build_context_prefix_for_job(&target, &jobs).is_none());
     }
 }

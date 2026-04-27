@@ -22,6 +22,7 @@ pub trait CronjobBackend: Send + Sync {
         schedule: &str,
         task: &str,
         toolset: Option<&str>,
+        context_from: Option<&Value>,
     ) -> Result<String, ToolError>;
     /// List all cron jobs.
     async fn list(&self) -> Result<String, ToolError>;
@@ -32,6 +33,7 @@ pub trait CronjobBackend: Send + Sync {
         schedule: Option<&str>,
         task: Option<&str>,
         enabled: Option<bool>,
+        context_from: Option<&Value>,
     ) -> Result<String, ToolError>;
     /// Pause a cron job.
     async fn pause(&self, id: &str) -> Result<String, ToolError>;
@@ -84,7 +86,10 @@ impl ToolHandler for CronjobHandler {
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'task' parameter".into()))?;
                 let toolset = params.get("toolset").and_then(|v| v.as_str());
-                self.backend.create(name, schedule, task, toolset).await
+                let context_from = params.get("context_from");
+                self.backend
+                    .create(name, schedule, task, toolset, context_from)
+                    .await
             }
             "list" => self.backend.list().await,
             "update" => {
@@ -95,7 +100,10 @@ impl ToolHandler for CronjobHandler {
                 let schedule = params.get("schedule").and_then(|v| v.as_str());
                 let task = params.get("task").and_then(|v| v.as_str());
                 let enabled = params.get("enabled").and_then(|v| v.as_bool());
-                self.backend.update(id, schedule, task, enabled).await
+                let context_from = params.get("context_from");
+                self.backend
+                    .update(id, schedule, task, enabled, context_from)
+                    .await
             }
             "pause" => {
                 let id = params
@@ -184,6 +192,26 @@ impl ToolHandler for CronjobHandler {
                 "description": "Whether the cron job is enabled (for update)"
             }),
         );
+        props.insert(
+            "context_from".into(),
+            json!({
+                "oneOf": [
+                    {
+                        "type": "string",
+                        "description": "A single job ID whose most recent output should be injected into this job's prompt."
+                    },
+                    {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "A list of job IDs to use as context in order."
+                    },
+                    {
+                        "type": "null",
+                        "description": "On update, clears any existing context sources."
+                    }
+                ]
+            }),
+        );
 
         tool_schema(
             "cronjob",
@@ -206,6 +234,7 @@ mod tests {
             _schedule: &str,
             _task: &str,
             _toolset: Option<&str>,
+            _context_from: Option<&Value>,
         ) -> Result<String, ToolError> {
             Ok(format!("Created cronjob: {}", name))
         }
@@ -218,6 +247,7 @@ mod tests {
             _schedule: Option<&str>,
             _task: Option<&str>,
             _enabled: Option<bool>,
+            _context_from: Option<&Value>,
         ) -> Result<String, ToolError> {
             Ok(format!("Updated cronjob: {}", id))
         }
