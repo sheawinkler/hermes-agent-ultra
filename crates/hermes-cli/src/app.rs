@@ -276,8 +276,11 @@ impl App {
             }
         }
 
-        let current_model = config.model.clone().unwrap_or_else(|| "gpt-4o".to_string());
+        let configured_model = config.model.clone().unwrap_or_else(|| "gpt-4o".to_string());
+        let current_model = resolve_startup_model(&config, &configured_model);
         let current_personality = config.personality.clone();
+
+        sync_runtime_model_env(&config, &current_model);
 
         let tool_registry = Arc::new(ToolRegistry::new());
         let stream_handle_shared: Arc<StdMutex<Option<StreamHandle>>> =
@@ -487,6 +490,7 @@ impl App {
     /// Switch the active model, rebuilding the provider and agent loop.
     pub fn switch_model(&mut self, provider_model: &str) {
         self.current_model = provider_model.to_string();
+        sync_runtime_model_env(&self.config, &self.current_model);
 
         let provider = build_provider(&self.config, &self.current_model);
         let agent_config = build_agent_config(&self.config, &self.current_model);
@@ -757,6 +761,61 @@ mod tests {
         let (provider, model) = resolve_provider_and_model(&cfg, "step-3.5-flash");
         assert_eq!(provider, "stepfun");
         assert_eq!(model, "step-3.5-flash");
+    }
+
+    #[test]
+    fn test_resolve_startup_model_prefers_provider_runtime_model_for_provider_slug() {
+        let mut cfg = GatewayConfig::default();
+        cfg.llm_providers.insert(
+            "nous".to_string(),
+            LlmProviderConfig {
+                model: Some("moonshotai/kimi-k2.6".to_string()),
+                ..LlmProviderConfig::default()
+            },
+        );
+        let startup = resolve_startup_model(&cfg, "nous");
+        assert_eq!(startup, "nous:moonshotai/kimi-k2.6");
+    }
+
+    #[test]
+    fn test_sync_runtime_model_env_sets_model_and_provider_values() {
+        let mut cfg = GatewayConfig::default();
+        cfg.llm_providers
+            .insert("anthropic".to_string(), LlmProviderConfig::default());
+
+        let keys = [
+            "HERMES_MODEL",
+            "HERMES_INFERENCE_MODEL",
+            "HERMES_INFERENCE_PROVIDER",
+            "HERMES_TUI_PROVIDER",
+        ];
+        for key in keys {
+            std::env::remove_var(key);
+        }
+        std::env::set_var("HERMES_TUI_PROVIDER", "openai");
+
+        sync_runtime_model_env(&cfg, "anthropic:claude-sonnet-4-6");
+
+        assert_eq!(
+            std::env::var("HERMES_MODEL").ok().as_deref(),
+            Some("anthropic:claude-sonnet-4-6")
+        );
+        assert_eq!(
+            std::env::var("HERMES_INFERENCE_MODEL").ok().as_deref(),
+            Some("anthropic:claude-sonnet-4-6")
+        );
+        assert_eq!(
+            std::env::var("HERMES_INFERENCE_PROVIDER").ok().as_deref(),
+            Some("anthropic")
+        );
+        assert_eq!(
+            std::env::var("HERMES_TUI_PROVIDER").ok().as_deref(),
+            Some("anthropic")
+        );
+
+        for key in keys {
+            std::env::remove_var(key);
+        }
     }
 
     #[test]
@@ -1096,6 +1155,53 @@ fn resolve_provider_and_model(config: &GatewayConfig, model: &str) -> (String, S
     }
 
     ("openai".to_string(), trimmed.to_string())
+}
+
+fn resolve_startup_model(config: &GatewayConfig, configured_model: &str) -> String {
+    let raw = configured_model.trim();
+    if raw.is_empty() {
+        return "gpt-4o".to_string();
+    }
+    if raw.contains(':') {
+        return raw.to_string();
+    }
+
+    // If config.model is a provider slug (e.g. "nous"), prefer that provider's
+    // configured runtime model instead of sending the bare slug as a model id.
+    if let Some((provider, provider_cfg)) = config
+        .llm_providers
+        .iter()
+        .find(|(provider, _)| provider.eq_ignore_ascii_case(raw))
+    {
+        if let Some(runtime_model) = provider_cfg
+            .model
+            .as_deref()
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .filter(|m| !m.eq_ignore_ascii_case(provider))
+        {
+            if runtime_model.contains(':') {
+                return runtime_model.to_string();
+            }
+            return format!("{provider}:{runtime_model}");
+        }
+    }
+
+    raw.to_string()
+}
+
+fn sync_runtime_model_env(config: &GatewayConfig, provider_model: &str) {
+    let model = provider_model.trim();
+    if model.is_empty() {
+        return;
+    }
+    let (provider, _) = resolve_provider_and_model(config, model);
+    std::env::set_var("HERMES_MODEL", model);
+    std::env::set_var("HERMES_INFERENCE_MODEL", model);
+    std::env::set_var("HERMES_INFERENCE_PROVIDER", provider.as_str());
+    if std::env::var_os("HERMES_TUI_PROVIDER").is_some() {
+        std::env::set_var("HERMES_TUI_PROVIDER", provider.as_str());
+    }
 }
 
 fn resolve_api_key_literal_or_env_ref(value: &str) -> Option<String> {
