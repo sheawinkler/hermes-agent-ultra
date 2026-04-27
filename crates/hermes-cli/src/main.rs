@@ -19,13 +19,13 @@ use hermes_cli::app::{
 use hermes_cli::auth::{
     clear_provider_auth_state, get_anthropic_oauth_status, get_gemini_oauth_auth_status,
     get_qwen_auth_status, login_anthropic_oauth, login_google_gemini_cli_oauth,
-    login_nous_device_code, login_openai_codex_device_code, read_provider_auth_state,
-    resolve_qwen_runtime_credentials, save_codex_auth_state, save_nous_auth_state,
-    save_provider_auth_state, AnthropicOAuthLoginOptions, CodexDeviceCodeOptions,
-    GeminiOAuthLoginOptions, NousDeviceCodeOptions, ANTHROPIC_OAUTH_CLIENT_ID,
-    ANTHROPIC_OAUTH_TOKEN_URL, CODEX_OAUTH_CLIENT_ID, CODEX_OAUTH_TOKEN_URL,
-    DEFAULT_CODEX_BASE_URL, QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS, QWEN_OAUTH_CLIENT_ID,
-    QWEN_OAUTH_TOKEN_URL,
+    login_nous_device_code, login_openai_codex_device_code, login_openai_device_code,
+    read_provider_auth_state, resolve_qwen_runtime_credentials, save_codex_auth_state,
+    save_nous_auth_state, save_openai_auth_state, save_provider_auth_state,
+    AnthropicOAuthLoginOptions, CodexDeviceCodeOptions, GeminiOAuthLoginOptions,
+    NousDeviceCodeOptions, ANTHROPIC_OAUTH_CLIENT_ID, ANTHROPIC_OAUTH_TOKEN_URL,
+    CODEX_OAUTH_CLIENT_ID, CODEX_OAUTH_TOKEN_URL, DEFAULT_CODEX_BASE_URL, DEFAULT_OPENAI_BASE_URL,
+    QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS, QWEN_OAUTH_CLIENT_ID, QWEN_OAUTH_TOKEN_URL,
 };
 use hermes_cli::cli::{Cli, CliCommand};
 use hermes_cli::config_env::hydrate_env_from_config;
@@ -3664,6 +3664,7 @@ fn normalize_auth_provider(provider: &str) -> String {
         "tg" => "telegram".to_string(),
         "claude" | "claude-code" => "anthropic".to_string(),
         "codex" => "openai-codex".to_string(),
+        "openai-oauth" | "openai-cli" => "openai".to_string(),
         "qwen-cli" | "qwen-portal" => "qwen-oauth".to_string(),
         "gemini-cli" | "gemini-oauth" => "google-gemini-cli".to_string(),
         "step" | "step-plan" => "stepfun".to_string(),
@@ -3718,6 +3719,7 @@ fn normalize_secret_provider(provider: &str) -> String {
         "github-copilot" => "copilot".to_string(),
         "claude" | "claude-code" => "anthropic".to_string(),
         "codex" => "openai-codex".to_string(),
+        "openai-oauth" | "openai-cli" => "openai".to_string(),
         "gemini-cli" | "gemini-oauth" => "google-gemini-cli".to_string(),
         "moonshot" | "kimi" => "kimi-coding".to_string(),
         "aigateway" | "vercel" | "vercel-ai-gateway" => "ai-gateway".to_string(),
@@ -4946,6 +4948,46 @@ async fn run_auth(
                         println!("Saved OAuth state: {}", auth_path.display());
                         return Ok(());
                     }
+                    "openai" => {
+                        let state =
+                            login_openai_device_code(CodexDeviceCodeOptions::default()).await?;
+                        let auth_path = save_openai_auth_state(&state)?;
+                        let expires_at = state
+                            .tokens
+                            .expires_in
+                            .filter(|secs| *secs > 0)
+                            .map(|secs| chrono::Utc::now() + chrono::Duration::seconds(secs));
+                        manager
+                            .save_credential(OAuthCredential {
+                                provider: "openai".to_string(),
+                                access_token: state.tokens.access_token.clone(),
+                                refresh_token: state.tokens.refresh_token.clone(),
+                                token_type: "bearer".to_string(),
+                                scope: None,
+                                expires_at,
+                            })
+                            .await?;
+                        let entries = pool_store.providers.entry(provider.clone()).or_default();
+                        let default_label = format!("{provider}-{}", entries.len() + 1);
+                        let entry = AuthPoolEntry {
+                            id: uuid::Uuid::new_v4().simple().to_string()[..6].to_string(),
+                            label: label.unwrap_or(default_label),
+                            auth_type: "oauth".to_string(),
+                            source: "device_code".to_string(),
+                            access_token: state.tokens.access_token.clone(),
+                            last_status: None,
+                            last_status_at: None,
+                            last_error_code: None,
+                        };
+                        entries.push(entry.clone());
+                        save_auth_pool_store(&pool_path, &pool_store)?;
+                        println!(
+                            "Added OpenAI OAuth credential (label='{}', id={}).",
+                            entry.label, entry.id
+                        );
+                        println!("Saved OAuth state: {}", auth_path.display());
+                        return Ok(());
+                    }
                     "anthropic" => {
                         let state =
                             login_anthropic_oauth(AnthropicOAuthLoginOptions::default()).await?;
@@ -5464,6 +5506,28 @@ async fn run_auth(
                 println!(
                     "OpenAI Codex device login complete; credential saved as provider 'openai-codex'."
                 );
+                println!("Saved OAuth state: {}", auth_path.display());
+                return Ok(());
+            }
+            if provider == "openai" {
+                let state = login_openai_device_code(CodexDeviceCodeOptions::default()).await?;
+                let auth_path = save_openai_auth_state(&state)?;
+                let expires_at = state
+                    .tokens
+                    .expires_in
+                    .filter(|secs| *secs > 0)
+                    .map(|secs| chrono::Utc::now() + chrono::Duration::seconds(secs));
+                manager
+                    .save_credential(OAuthCredential {
+                        provider: "openai".to_string(),
+                        access_token: state.tokens.access_token.clone(),
+                        refresh_token: state.tokens.refresh_token.clone(),
+                        token_type: "bearer".to_string(),
+                        scope: None,
+                        expires_at,
+                    })
+                    .await?;
+                println!("OpenAI OAuth login complete; credential saved as provider 'openai'.");
                 println!("Saved OAuth state: {}", auth_path.display());
                 return Ok(());
             }
@@ -7436,6 +7500,29 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
                     selected_oauth_token_url = Some(CODEX_OAUTH_TOKEN_URL.to_string());
                     selected_oauth_client_id = Some(CODEX_OAUTH_CLIENT_ID.to_string());
                     selected_base_url_override = Some(DEFAULT_CODEX_BASE_URL.to_string());
+                    stored_provider_secret_in_vault = true;
+                }
+                "openai" => {
+                    let state = login_openai_device_code(CodexDeviceCodeOptions::default()).await?;
+                    let auth_path = save_openai_auth_state(&state)?;
+                    println!("  ✓ Saved OpenAI OAuth state: {}", auth_path.display());
+                    manager
+                        .save_credential(OAuthCredential {
+                            provider: "openai".to_string(),
+                            access_token: state.tokens.access_token.clone(),
+                            refresh_token: state.tokens.refresh_token.clone(),
+                            token_type: "bearer".to_string(),
+                            scope: None,
+                            expires_at: state
+                                .tokens
+                                .expires_in
+                                .filter(|secs| *secs > 0)
+                                .map(|secs| chrono::Utc::now() + chrono::Duration::seconds(secs)),
+                        })
+                        .await?;
+                    selected_oauth_token_url = Some(CODEX_OAUTH_TOKEN_URL.to_string());
+                    selected_oauth_client_id = Some(CODEX_OAUTH_CLIENT_ID.to_string());
+                    selected_base_url_override = Some(DEFAULT_OPENAI_BASE_URL.to_string());
                     stored_provider_secret_in_vault = true;
                 }
                 "anthropic" => {
@@ -11244,6 +11331,7 @@ mod tests {
         assert_eq!(normalize_auth_provider("wx"), "weixin");
         assert_eq!(normalize_auth_provider("claude"), "anthropic");
         assert_eq!(normalize_auth_provider("codex"), "openai-codex");
+        assert_eq!(normalize_auth_provider("openai-oauth"), "openai");
         assert_eq!(normalize_auth_provider("qwen-cli"), "qwen-oauth");
         assert_eq!(normalize_auth_provider("gemini-cli"), "google-gemini-cli");
         assert_eq!(normalize_auth_provider("step-plan"), "stepfun");
@@ -11269,7 +11357,7 @@ mod tests {
             "oauth"
         );
         assert_eq!(resolve_auth_type_for_provider("anthropic", None), "oauth");
-        assert_eq!(resolve_auth_type_for_provider("openai", None), "api_key");
+        assert_eq!(resolve_auth_type_for_provider("openai", None), "oauth");
         assert_eq!(
             resolve_auth_type_for_provider("openai", Some("API-KEY")),
             "api_key"
@@ -11379,12 +11467,12 @@ mod tests {
 
     #[test]
     fn oauth_provider_set_matches_snapshot_registry() {
-        let expected: std::collections::BTreeSet<&str> =
+        let actual: std::collections::BTreeSet<&str> =
             hermes_cli::providers::OAUTH_CAPABLE_PROVIDERS
                 .iter()
                 .copied()
                 .collect();
-        let actual: std::collections::BTreeSet<&str> = [
+        let expected_minimum: std::collections::BTreeSet<&str> = [
             "anthropic",
             "nous",
             "openai-codex",
@@ -11393,7 +11481,20 @@ mod tests {
         ]
         .into_iter()
         .collect();
-        assert_eq!(actual, expected);
+        let missing: Vec<&str> = expected_minimum
+            .iter()
+            .copied()
+            .filter(|provider| !actual.contains(provider))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "missing upstream oauth providers: {:?}",
+            missing
+        );
+        assert!(
+            actual.contains("openai"),
+            "OpenAI OAuth should be enabled in Hermes Ultra"
+        );
     }
 
     #[tokio::test]

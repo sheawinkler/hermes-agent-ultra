@@ -2228,6 +2228,7 @@ impl AgentLoop {
 
     fn resolve_oauth_store_api_key(&self, provider: &str) -> Option<String> {
         let provider_key = match provider {
+            "openai" => "openai",
             "openai-codex" | "codex" => "openai-codex",
             "qwen-oauth" => "qwen-oauth",
             "anthropic" | "claude" | "claude-code" => "anthropic",
@@ -2253,6 +2254,8 @@ impl AgentLoop {
 
     async fn refresh_oauth_store_tokens_if_needed(&self) {
         // Keep this list explicit so behavior is deterministic and parity-scoped.
+        self.refresh_single_oauth_store_token_if_needed("openai")
+            .await;
         self.refresh_single_oauth_store_token_if_needed("openai-codex")
             .await;
         self.refresh_single_oauth_store_token_if_needed("qwen-oauth")
@@ -2340,6 +2343,10 @@ impl AgentLoop {
 
         // Env fallback — keeps previous behavior working when config centre is empty.
         let (token_url_env, client_id_env) = match provider_key {
+            "openai" => (
+                "HERMES_OPENAI_OAUTH_TOKEN_URL",
+                "HERMES_OPENAI_OAUTH_CLIENT_ID",
+            ),
             "openai-codex" => (
                 "HERMES_OPENAI_CODEX_OAUTH_TOKEN_URL",
                 "HERMES_OPENAI_CODEX_OAUTH_CLIENT_ID",
@@ -2358,12 +2365,14 @@ impl AgentLoop {
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
             })
-            .or_else(|| {
-                if provider_key == "anthropic" {
-                    Some("https://console.anthropic.com/v1/oauth/token".to_string())
-                } else {
-                    None
-                }
+            .or_else(|| match provider_key {
+                "openai" => std::env::var("HERMES_OPENAI_CODEX_OAUTH_TOKEN_URL")
+                    .ok()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| Some("https://auth.openai.com/oauth/token".to_string())),
+                "anthropic" => Some("https://console.anthropic.com/v1/oauth/token".to_string()),
+                _ => None,
             })?;
         let client_id = cfg_client_id
             .or_else(|| {
@@ -2372,12 +2381,14 @@ impl AgentLoop {
                     .map(|s| s.trim().to_string())
                     .filter(|s| !s.is_empty())
             })
-            .or_else(|| {
-                if provider_key == "anthropic" {
-                    Some("9d1c250a-e61b-44d9-88ed-5944d1962f5e".to_string())
-                } else {
-                    None
-                }
+            .or_else(|| match provider_key {
+                "openai" => std::env::var("HERMES_OPENAI_CODEX_OAUTH_CLIENT_ID")
+                    .ok()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .or_else(|| Some("app_EMoamEEZ73f0CkXaXp7hrann".to_string())),
+                "anthropic" => Some("9d1c250a-e61b-44d9-88ed-5944d1962f5e".to_string()),
+                _ => None,
             })?;
         Some((token_url, client_id))
     }
@@ -8343,6 +8354,96 @@ mod tests {
     }
 
     #[test]
+    fn test_openai_runtime_reads_openai_oauth_token_store_entry() {
+        use futures::stream::BoxStream;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let home = std::env::temp_dir().join(format!("hermes-openai-auth-fixture-{}", nonce));
+        let auth_dir = home.join("auth");
+        std::fs::create_dir_all(&auth_dir).expect("create auth dir");
+        std::fs::write(
+            auth_dir.join("tokens.json"),
+            r#"{
+  "openai": {
+    "provider": "openai",
+    "access_token": "openai-oauth-token",
+    "token_type": "bearer",
+    "refresh_token": null,
+    "scope": null,
+    "expires_at": "2099-01-01T00:00:00Z"
+  }
+}"#,
+        )
+        .expect("write token store");
+
+        let mut runtime_providers = HashMap::new();
+        runtime_providers.insert(
+            "openai".to_string(),
+            RuntimeProviderConfig {
+                api_key: None,
+                api_key_env: None,
+                base_url: None,
+                command: None,
+                args: Vec::new(),
+                oauth_token_url: None,
+                oauth_client_id: None,
+            },
+        );
+
+        let config = AgentConfig {
+            model: "openai:gpt-4o".to_string(),
+            hermes_home: Some(home.to_string_lossy().to_string()),
+            runtime_providers,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(
+            config,
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let resolved = agent.resolve_runtime_api_key("openai", None, None);
+        assert_eq!(resolved.as_deref(), Some("openai-oauth-token"));
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    #[test]
     fn test_self_evolution_skill_counter_ticks_each_iteration() {
         use futures::stream::BoxStream;
         use hermes_core::JsonSchema;
@@ -9367,6 +9468,56 @@ mod tests {
         let (token_url, client_id) = agent.oauth_refresh_config("anthropic").unwrap();
         assert_eq!(token_url, "https://console.anthropic.com/v1/oauth/token");
         assert_eq!(client_id, "9d1c250a-e61b-44d9-88ed-5944d1962f5e");
+    }
+
+    #[test]
+    fn test_oauth_refresh_config_openai_defaults_available() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        std::env::remove_var("HERMES_OPENAI_OAUTH_TOKEN_URL");
+        std::env::remove_var("HERMES_OPENAI_OAUTH_CLIENT_ID");
+        std::env::remove_var("HERMES_OPENAI_CODEX_OAUTH_TOKEN_URL");
+        std::env::remove_var("HERMES_OPENAI_CODEX_OAUTH_CLIENT_ID");
+        let agent = AgentLoop::new(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let (token_url, client_id) = agent.oauth_refresh_config("openai").unwrap();
+        assert_eq!(token_url, "https://auth.openai.com/oauth/token");
+        assert_eq!(client_id, "app_EMoamEEZ73f0CkXaXp7hrann");
     }
 
     #[test]
