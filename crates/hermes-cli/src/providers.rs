@@ -42,12 +42,55 @@ pub const OAUTH_CAPABLE_PROVIDERS: &[&str] = &[
     "google-gemini-cli",
 ];
 
+pub const MODELS_DEV_MERGED_PROVIDERS: &[&str] = &[
+    "opencode-go",
+    "opencode-zen",
+    "deepseek",
+    "kilocode",
+    "fireworks",
+    "mistral",
+    "togetherai",
+    "cohere",
+    "perplexity",
+    "groq",
+    "nvidia",
+    "huggingface",
+    "zai",
+    "gemini",
+    "google",
+];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderCapability {
+    pub id: String,
+    pub oauth_supported: bool,
+    pub models_dev_merged: bool,
+    pub managed_tools_supported: bool,
+}
+
 pub fn known_providers() -> Vec<&'static str> {
     KNOWN_PROVIDERS.to_vec()
 }
 
 pub fn oauth_capable_providers() -> Vec<&'static str> {
     OAUTH_CAPABLE_PROVIDERS.to_vec()
+}
+
+pub fn provider_capability_for(provider: &str) -> Option<ProviderCapability> {
+    let normalized = provider.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+    Some(ProviderCapability {
+        id: normalized.clone(),
+        oauth_supported: OAUTH_CAPABLE_PROVIDERS
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(&normalized)),
+        models_dev_merged: MODELS_DEV_MERGED_PROVIDERS
+            .iter()
+            .any(|candidate| candidate.eq_ignore_ascii_case(&normalized)),
+        managed_tools_supported: normalized == "nous",
+    })
 }
 
 #[cfg(test)]
@@ -57,7 +100,10 @@ mod tests {
 
     use serde::Deserialize;
 
-    use super::{known_providers, oauth_capable_providers};
+    use super::{
+        known_providers, oauth_capable_providers, provider_capability_for,
+        MODELS_DEV_MERGED_PROVIDERS,
+    };
 
     #[derive(Debug, Deserialize)]
     struct ProviderSnapshot {
@@ -118,6 +164,30 @@ mod tests {
             list.len(),
             set.len(),
             "known provider registry contains duplicate ids"
+        );
+    }
+
+    #[test]
+    fn provider_capability_registry_marks_nous_as_oauth_and_managed_tools() {
+        let cap = provider_capability_for("nous").expect("nous capability");
+        assert!(cap.oauth_supported);
+        assert!(cap.managed_tools_supported);
+        assert!(!cap.models_dev_merged);
+    }
+
+    #[test]
+    fn provider_capability_registry_marks_models_dev_merged_providers() {
+        let mut missing = Vec::new();
+        for provider in MODELS_DEV_MERGED_PROVIDERS {
+            let cap = provider_capability_for(provider).expect("capability");
+            if !cap.models_dev_merged {
+                missing.push(provider.to_string());
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "models.dev merged providers missing capability bit: {:?}",
+            missing
         );
     }
 }
