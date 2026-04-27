@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-04-27T07:17:25.333873+00:00`
+Generated: `2026-04-27T07:34:24.449688+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `675`.
 
@@ -15,8 +15,8 @@ Generated: `2026-04-27T07:17:25.333873+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 341 |
-| ported | 27 |
+| pending | 336 |
+| ported | 32 |
 | superseded | 307 |
 
 ## First 100 Pending Commits
@@ -31,11 +31,6 @@ Generated: `2026-04-27T07:17:25.333873+00:00`
 | `9d7b64b5dd39` | #20 | fix(tools): normalize numeric entries and clear stale no_mcp in _save_platform_tools |
 | `9fde22d23339` | #26 | fix the reset of model change by /model. |
 | `df485628ce02` | #26 | chore(release): map Readon's git email to GitHub login |
-| `f433197f23f9` | #25 | feat(installer): FHS layout for root installs on Linux (#15608) |
-| `5ac53659234e` | #20 | feat(cron): add context_from field for cron job output chaining |
-| `e4a91ccb7621` | #20 | test(cron): add PermissionError coverage for context_from |
-| `eb922228119d` | #20 | fix(cron): silent skip when context_from job has no output yet |
-| `0d548d1db94a` | #20 | fix(cron): wire context_from through the update action |
 | `9830905dabd5` | #20 | fix(tools): recover non-configurable toolsets from composite resolution |
 | `81987f0350b6` | #20 | feat(discord): split discord_server into discord + discord_admin tools |
 | `db09477b774c` | #20 | feat(feishu): wire feishu doc/drive tools into hermes-feishu composite |
@@ -123,4 +118,9 @@ Generated: `2026-04-27T07:17:25.333873+00:00`
 | `c15064fa372c` | #26 | fix: pass api-version as default_query param, not in base_url — SDK was producing malformed URLs like /anthropic?api-version=.../v1/messages |
 | `24b4b24d7946` | #26 | fix: preserve URL query params for Azure OpenAI and custom endpoints |
 | `ac571142841c` | #20 | fix(agent): support Azure OpenAI gpt-5.x on chat/completions endpoint |
+| `731e1ef8cb69` | #20 | feat(azure-foundry): auto-detect transport, models, context length |
+| `7c50ed707c42` | #22 | docs(azure-foundry): add provider guide, env vars, release AUTHOR_MAP |
+| `91a7a0acbeaf` | #20 | fix(tui): restore skills search RPC |
+| `a55de5bcd017` | #20 | feat(setup): auto-reconfigure on existing installs (#15879) |
+| `eb28145f3682` | #20 | feat(approval): hardline blocklist for unrecoverable commands (#15878) |
 
