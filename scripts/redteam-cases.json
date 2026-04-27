@@ -1,0 +1,16 @@
+{
+  "suite": "hermes-ultra-redteam",
+  "version": 1,
+  "commands": [
+    {
+      "id": "smart-routing-injection-gate",
+      "cmd": ["cargo", "test", "-p", "hermes-agent", "redteam_", "--", "--nocapture"],
+      "timeout_sec": 180
+    },
+    {
+      "id": "tool-policy-adversarial-payload-gate",
+      "cmd": ["cargo", "test", "-p", "hermes-tools", "redteam_", "--", "--nocapture"],
+      "timeout_sec": 180
+    }
+  ]
+}

@@ -23,6 +23,9 @@ Options:
   --risk-paths-file <path>  Glob pattern file for high-risk path checks
   --no-tests                Skip post-sync verification command
   --test-cmd <command>      Verification command (default: cargo test -p hermes-gateway)
+  --redteam-gate            Run adversarial red-team gate after verification (default)
+  --no-redteam-gate         Skip adversarial red-team gate
+  --redteam-cmd <command>   Red-team gate command (default: python3 scripts/run-redteam-gate.py)
   --no-pr                   Do not open a PR in branch-pr mode
   --draft-pr                Open PR as draft in branch-pr mode
   --pr-labels <csv>         Labels to apply on created PR (default: upstream-sync,parity-sync)
@@ -49,6 +52,8 @@ MODE="branch-pr"
 SYNC_STRATEGY="merge"
 RUN_TESTS="1"
 TEST_CMD="cargo test -p hermes-gateway"
+RUN_REDTEAM_GATE="${RUN_REDTEAM_GATE:-1}"
+REDTEAM_CMD="${REDTEAM_CMD:-python3 scripts/run-redteam-gate.py}"
 CREATE_PR="1"
 PR_DRAFT="0"
 PR_LABELS="${PR_LABELS:-upstream-sync,parity-sync}"
@@ -121,6 +126,18 @@ while [[ $# -gt 0 ]]; do
       ;;
     --test-cmd)
       TEST_CMD="${2:?missing value for --test-cmd}"
+      shift 2
+      ;;
+    --redteam-gate)
+      RUN_REDTEAM_GATE="1"
+      shift
+      ;;
+    --no-redteam-gate)
+      RUN_REDTEAM_GATE="0"
+      shift
+      ;;
+    --redteam-cmd)
+      REDTEAM_CMD="${2:?missing value for --redteam-cmd}"
       shift 2
       ;;
     --no-pr)
@@ -228,6 +245,8 @@ create_report_header() {
   append_report "mode: ${MODE}"
   append_report "strategy: ${SYNC_STRATEGY}"
   append_report "strict_risk_gate: ${STRICT_RISK_GATE}"
+  append_report "run_redteam_gate: ${RUN_REDTEAM_GATE}"
+  append_report "redteam_cmd: ${REDTEAM_CMD}"
   append_report "draft_pr: ${PR_DRAFT}"
   append_report "allow_risk_paths: ${ALLOW_RISK_PATHS}"
   append_report "pr_labels: ${PR_LABELS}"
@@ -489,6 +508,22 @@ fi
 if [[ "${RUN_TESTS}" == "1" ]]; then
   log "Running verification: ${TEST_CMD}"
   bash -lc "${TEST_CMD}"
+fi
+
+if [[ "${RUN_REDTEAM_GATE}" == "1" ]]; then
+  log "Running red-team gate: ${REDTEAM_CMD}"
+  REDTEAM_OUTPUT="$(bash -lc "${REDTEAM_CMD}" 2>&1)" || {
+    append_report "status: redteam-gate-failed"
+    append_report "redteam_output: ${REDTEAM_OUTPUT//$'\n'/\\n}"
+    printf '%s\n' "${REDTEAM_OUTPUT}"
+    die "Red-team gate failed"
+  }
+  printf '%s\n' "${REDTEAM_OUTPUT}"
+  if [[ "${REDTEAM_OUTPUT}" == *"[redteam-gate] Report: "* ]]; then
+    REDTEAM_REPORT_LINE="$(printf '%s\n' "${REDTEAM_OUTPUT}" | awk '/\[redteam-gate\] Report: /{line=$0} END{print line}')"
+    REDTEAM_REPORT_PATH="${REDTEAM_REPORT_LINE#*Report: }"
+    append_report "redteam_report: ${REDTEAM_REPORT_PATH}"
+  fi
 fi
 
 log "Pushing ${SYNC_BRANCH} to ${ORIGIN_REMOTE}..."
