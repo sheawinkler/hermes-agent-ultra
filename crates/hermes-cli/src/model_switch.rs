@@ -1,29 +1,19 @@
 use std::collections::HashSet;
+use std::io::Write;
+use std::path::PathBuf;
 
+use chrono::{DateTime, Utc};
 use hermes_core::AgentError;
 use hermes_intelligence::models_dev::{default_client, ModelsDevClient};
+use hmac::{Hmac, Mac};
+use rand::rngs::OsRng;
+use rand::RngCore;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 
-// Providers where models.dev entries are merged on top of the curated list.
-// Keep openrouter/nous out of this set per upstream behavior.
-const MODELS_DEV_PREFERRED: &[&str] = &[
-    "opencode-go",
-    "opencode-zen",
-    "deepseek",
-    "kilocode",
-    "fireworks",
-    "mistral",
-    "togetherai",
-    "cohere",
-    "perplexity",
-    "groq",
-    "nvidia",
-    "huggingface",
-    "zai",
-    "gemini",
-    "google",
-];
+use crate::providers::provider_capability_for;
 const NOUS_DEFAULT_INFERENCE_BASE_URL: &str = "https://inference-api.nousresearch.com/v1";
+const PROVIDER_CATALOG_CACHE_VERSION: u32 = 1;
 
 const CURATED_PROVIDER_MODELS: &[(&str, &[&str])] = &[
     (
@@ -157,6 +147,204 @@ pub struct ProviderCatalogEntry {
     pub total_models: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogCacheStatus {
+    pub verified: bool,
+    pub age_secs: Option<u64>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct ProviderCatalogCacheRecord {
+    version: u32,
+    provider: String,
+    generated_at: String,
+    models: Vec<String>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+struct ProviderCatalogCacheSignature {
+    version: u32,
+    algorithm: String,
+    key_id: String,
+    payload_sha256: String,
+    signature_hex: String,
+    signed_at: String,
+}
+
+fn catalog_cache_ttl_secs() -> i64 {
+    std::env::var("HERMES_PROVIDER_MODEL_CACHE_TTL_SECS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<i64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(30 * 60)
+}
+
+fn provider_catalog_cache_dir() -> PathBuf {
+    hermes_config::hermes_home()
+        .join("cache")
+        .join("provider-model-catalog")
+}
+
+fn provider_catalog_cache_path(provider: &str) -> PathBuf {
+    provider_catalog_cache_dir().join(format!("{}.json", provider.trim().to_ascii_lowercase()))
+}
+
+fn provider_catalog_signature_path(provider: &str) -> PathBuf {
+    provider_catalog_cache_dir().join(format!("{}.sig.json", provider.trim().to_ascii_lowercase()))
+}
+
+fn parse_hex_key(raw: &str) -> Option<Vec<u8>> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let decoded = hex::decode(trimmed).ok()?;
+    if decoded.len() < 16 {
+        return None;
+    }
+    Some(decoded)
+}
+
+fn ensure_provenance_key() -> Option<Vec<u8>> {
+    if let Ok(raw) = std::env::var("HERMES_PROVENANCE_SIGNING_KEY") {
+        if let Some(key) = parse_hex_key(&raw) {
+            return Some(key);
+        }
+    }
+    let key_path = hermes_config::hermes_home()
+        .join("auth")
+        .join("provenance.key");
+    if let Ok(raw) = std::fs::read_to_string(&key_path) {
+        if let Some(key) = parse_hex_key(&raw) {
+            return Some(key);
+        }
+    }
+
+    let parent = key_path.parent()?;
+    if std::fs::create_dir_all(parent).is_err() {
+        return None;
+    }
+    let mut key = [0u8; 32];
+    OsRng.fill_bytes(&mut key);
+    let encoded = hex::encode(key);
+    if std::fs::write(&key_path, format!("{encoded}\n")).is_err() {
+        return None;
+    }
+    Some(key.to_vec())
+}
+
+fn cache_key_id(key: &[u8]) -> String {
+    let digest = Sha256::digest(key);
+    let hexed = hex::encode(digest);
+    format!("k-{}", &hexed[..16])
+}
+
+fn sign_cache_payload(bytes: &[u8]) -> Option<ProviderCatalogCacheSignature> {
+    let key = ensure_provenance_key()?;
+    let payload_sha = hex::encode(Sha256::digest(bytes));
+    let mut mac = Hmac::<Sha256>::new_from_slice(&key).ok()?;
+    mac.update(payload_sha.as_bytes());
+    let signature_hex = hex::encode(mac.finalize().into_bytes());
+    Some(ProviderCatalogCacheSignature {
+        version: PROVIDER_CATALOG_CACHE_VERSION,
+        algorithm: "hmac-sha256".to_string(),
+        key_id: cache_key_id(&key),
+        payload_sha256: payload_sha,
+        signature_hex,
+        signed_at: Utc::now().to_rfc3339(),
+    })
+}
+
+fn verify_cache_payload(bytes: &[u8], signature: &ProviderCatalogCacheSignature) -> Option<bool> {
+    let key = ensure_provenance_key()?;
+    let payload_sha = hex::encode(Sha256::digest(bytes));
+    if payload_sha != signature.payload_sha256 {
+        return Some(false);
+    }
+    let mut mac = Hmac::<Sha256>::new_from_slice(&key).ok()?;
+    mac.update(payload_sha.as_bytes());
+    let expected = hex::encode(mac.finalize().into_bytes());
+    Some(expected == signature.signature_hex)
+}
+
+fn provider_catalog_cache_status(provider: &str) -> Option<CatalogCacheStatus> {
+    let path = provider_catalog_cache_path(provider);
+    let sig_path = provider_catalog_signature_path(provider);
+    let payload_bytes = std::fs::read(path).ok()?;
+    let payload: ProviderCatalogCacheRecord = serde_json::from_slice(&payload_bytes).ok()?;
+    let sig_raw = std::fs::read_to_string(sig_path).ok()?;
+    let signature: ProviderCatalogCacheSignature = serde_json::from_str(&sig_raw).ok()?;
+    let verified = verify_cache_payload(&payload_bytes, &signature).unwrap_or(false);
+    let age_secs = DateTime::parse_from_rfc3339(&payload.generated_at)
+        .ok()
+        .map(|ts| Utc::now().signed_duration_since(ts.with_timezone(&Utc)))
+        .and_then(|delta| u64::try_from(delta.num_seconds().max(0)).ok());
+    Some(CatalogCacheStatus { verified, age_secs })
+}
+
+pub fn cached_provider_catalog_status(provider: &str) -> Option<CatalogCacheStatus> {
+    provider_catalog_cache_status(provider)
+}
+
+fn load_provider_catalog_cache(provider: &str) -> Option<Vec<String>> {
+    let ttl = catalog_cache_ttl_secs();
+    let status = provider_catalog_cache_status(provider)?;
+    if !status.verified {
+        return None;
+    }
+    if let Some(age) = status.age_secs {
+        if age > ttl as u64 {
+            return None;
+        }
+    }
+    let path = provider_catalog_cache_path(provider);
+    let payload_raw = std::fs::read_to_string(path).ok()?;
+    let payload: ProviderCatalogCacheRecord = serde_json::from_str(&payload_raw).ok()?;
+    if payload.version != PROVIDER_CATALOG_CACHE_VERSION {
+        return None;
+    }
+    let normalized = provider.trim().to_ascii_lowercase();
+    if payload.provider.trim().to_ascii_lowercase() != normalized {
+        return None;
+    }
+    Some(payload.models)
+}
+
+fn persist_provider_catalog_cache(provider: &str, models: &[String]) {
+    let record = ProviderCatalogCacheRecord {
+        version: PROVIDER_CATALOG_CACHE_VERSION,
+        provider: provider.trim().to_ascii_lowercase(),
+        generated_at: Utc::now().to_rfc3339(),
+        models: models.to_vec(),
+    };
+    let Ok(payload_bytes) = serde_json::to_vec_pretty(&record) else {
+        return;
+    };
+    let Some(signature) = sign_cache_payload(&payload_bytes) else {
+        return;
+    };
+    let Ok(sig_bytes) = serde_json::to_vec_pretty(&signature) else {
+        return;
+    };
+    let cache_path = provider_catalog_cache_path(provider);
+    let sig_path = provider_catalog_signature_path(provider);
+    if let Some(parent) = cache_path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let tmp_payload = cache_path.with_extension("json.tmp");
+    let tmp_sig = sig_path.with_extension("sig.json.tmp");
+    if let Ok(mut file) = std::fs::File::create(&tmp_payload) {
+        let _ = file.write_all(&payload_bytes);
+        let _ = file.flush();
+        let _ = std::fs::rename(&tmp_payload, &cache_path);
+    }
+    if let Ok(mut file) = std::fs::File::create(&tmp_sig) {
+        let _ = file.write_all(&sig_bytes);
+        let _ = file.flush();
+        let _ = std::fs::rename(&tmp_sig, &sig_path);
+    }
+}
+
 pub fn normalize_provider_model(input: &str) -> Result<String, AgentError> {
     if input.trim().is_empty() {
         return Err(AgentError::Config("Model cannot be empty".to_string()));
@@ -176,10 +364,9 @@ pub fn curated_provider_slugs() -> Vec<&'static str> {
 }
 
 pub fn is_models_dev_preferred_provider(provider: &str) -> bool {
-    let provider = provider.trim().to_ascii_lowercase();
-    MODELS_DEV_PREFERRED
-        .iter()
-        .any(|candidate| candidate.eq_ignore_ascii_case(&provider))
+    provider_capability_for(provider)
+        .map(|cap| cap.models_dev_merged)
+        .unwrap_or(false)
 }
 
 pub fn merge_with_models_dev(models_dev: &[String], curated: &[&str]) -> Vec<String> {
@@ -318,9 +505,14 @@ pub async fn provider_model_ids_with_client(
     if curated.is_empty() {
         return Vec::new();
     }
-
     let normalized = provider.trim().to_ascii_lowercase();
-    if normalized == "nous" {
+    if let Some(cached) = load_provider_catalog_cache(&normalized) {
+        if !cached.is_empty() {
+            return cached;
+        }
+    }
+
+    let computed = if normalized == "nous" {
         // Nous model picker should always include curated compatibility picks
         // (including kimi-k2.6), then append live/models.dev discoveries.
         let mut seen: HashSet<String> = HashSet::new();
@@ -352,23 +544,24 @@ pub async fn provider_model_ids_with_client(
         }
 
         if merged.is_empty() {
-            return curated.iter().map(|model| model.to_string()).collect();
+            curated.iter().map(|model| model.to_string()).collect()
+        } else {
+            merged
         }
-        return merged;
-    }
-
-    if !is_models_dev_preferred_provider(&normalized) {
-        return curated.iter().map(|model| model.to_string()).collect();
-    }
-
-    // Best-effort refresh: if fetch/list fails or returns empty, curated stays as fallback.
-    client.fetch(false).await;
-    let models_dev = client.list_agentic_models(&normalized);
-    if models_dev.is_empty() {
-        return curated.iter().map(|model| model.to_string()).collect();
-    }
-
-    merge_with_models_dev(&models_dev, curated)
+    } else if !is_models_dev_preferred_provider(&normalized) {
+        curated.iter().map(|model| model.to_string()).collect()
+    } else {
+        // Best-effort refresh: if fetch/list fails or returns empty, curated stays as fallback.
+        client.fetch(false).await;
+        let models_dev = client.list_agentic_models(&normalized);
+        if models_dev.is_empty() {
+            curated.iter().map(|model| model.to_string()).collect()
+        } else {
+            merge_with_models_dev(&models_dev, curated)
+        }
+    };
+    persist_provider_catalog_cache(&normalized, &computed);
+    computed
 }
 
 pub async fn provider_model_ids(provider: &str) -> Vec<String> {
@@ -402,15 +595,25 @@ pub async fn provider_catalog_entries(
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
+    use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use hermes_intelligence::models_dev::ModelsDevClient;
     use serde_json::json;
 
     use super::{
-        is_models_dev_preferred_provider, merge_with_models_dev, provider_catalog_entries,
-        provider_curated_models, provider_model_ids_with_client,
+        cached_provider_catalog_status, is_models_dev_preferred_provider,
+        load_provider_catalog_cache, merge_with_models_dev, persist_provider_catalog_cache,
+        provider_catalog_cache_path, provider_catalog_entries, provider_curated_models,
+        provider_model_ids_with_client,
     };
+
+    fn env_guard() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env lock poisoned")
+    }
 
     fn cache_path(label: &str) -> PathBuf {
         let nanos = SystemTime::now()
@@ -603,5 +806,67 @@ mod tests {
         // Smoke-test the function shape with unknown providers only, avoiding network use.
         let entries = provider_catalog_entries(&["unknown-provider"], 2).await;
         assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn signed_provider_catalog_cache_round_trip_verifies() {
+        let _guard = env_guard();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let prior_home = std::env::var("HERMES_HOME").ok();
+        let prior_signing = std::env::var("HERMES_PROVENANCE_SIGNING_KEY").ok();
+        std::env::set_var("HERMES_HOME", tmp.path());
+        std::env::remove_var("HERMES_PROVENANCE_SIGNING_KEY");
+
+        let models = vec!["gpt-4o".to_string(), "gpt-4o-mini".to_string()];
+        persist_provider_catalog_cache("openai", &models);
+        let loaded = load_provider_catalog_cache("openai").expect("load cache");
+        assert_eq!(loaded, models);
+
+        let status = cached_provider_catalog_status("openai").expect("cache status");
+        assert!(status.verified);
+        if let Some(value) = prior_home {
+            std::env::set_var("HERMES_HOME", value);
+        } else {
+            std::env::remove_var("HERMES_HOME");
+        }
+        if let Some(value) = prior_signing {
+            std::env::set_var("HERMES_PROVENANCE_SIGNING_KEY", value);
+        } else {
+            std::env::remove_var("HERMES_PROVENANCE_SIGNING_KEY");
+        }
+    }
+
+    #[test]
+    fn signed_provider_catalog_cache_detects_tamper() {
+        let _guard = env_guard();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let prior_home = std::env::var("HERMES_HOME").ok();
+        let prior_signing = std::env::var("HERMES_PROVENANCE_SIGNING_KEY").ok();
+        std::env::set_var("HERMES_HOME", tmp.path());
+        std::env::remove_var("HERMES_PROVENANCE_SIGNING_KEY");
+
+        let models = vec!["gpt-4o".to_string()];
+        persist_provider_catalog_cache("openai", &models);
+        let path = provider_catalog_cache_path("openai");
+        let mut raw = std::fs::read_to_string(&path).expect("read cache");
+        raw = raw.replace("gpt-4o", "gpt-4o-tampered");
+        std::fs::write(&path, raw).expect("write tampered cache");
+
+        assert!(
+            load_provider_catalog_cache("openai").is_none(),
+            "tampered payload must fail signature verification"
+        );
+        let status = cached_provider_catalog_status("openai").expect("cache status");
+        assert!(!status.verified);
+        if let Some(value) = prior_home {
+            std::env::set_var("HERMES_HOME", value);
+        } else {
+            std::env::remove_var("HERMES_HOME");
+        }
+        if let Some(value) = prior_signing {
+            std::env::set_var("HERMES_PROVENANCE_SIGNING_KEY", value);
+        } else {
+            std::env::remove_var("HERMES_PROVENANCE_SIGNING_KEY");
+        }
     }
 }
