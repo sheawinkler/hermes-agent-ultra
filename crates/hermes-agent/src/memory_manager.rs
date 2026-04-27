@@ -10,6 +10,8 @@
 //! Corresponds to Python `agent/memory_manager.py`.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::io::Write as _;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use regex::Regex;
@@ -532,6 +534,65 @@ fn memory_fusion_weights() -> HashMap<String, f64> {
     weights
 }
 
+fn memory_fusion_min_confidence() -> f64 {
+    std::env::var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE")
+        .ok()
+        .and_then(|v| v.trim().parse::<f64>().ok())
+        .map(|v| v.clamp(0.0, 1.0))
+        .unwrap_or(0.0)
+}
+
+fn memory_fusion_trace_enabled() -> bool {
+    std::env::var("HERMES_MEMORY_FUSION_TRACE")
+        .ok()
+        .map(|raw| {
+            matches!(
+                raw.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn memory_fusion_trace_path() -> PathBuf {
+    let home = std::env::var("HERMES_HOME")
+        .ok()
+        .or_else(|| std::env::var("HERMES_AGENT_ULTRA_HOME").ok())
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|h| format!("{h}/.hermes-agent-ultra"))
+        })
+        .unwrap_or_else(|| ".hermes-agent-ultra".to_string());
+    PathBuf::from(home)
+        .join("logs")
+        .join("memory-fusion-trace.jsonl")
+}
+
+fn append_memory_fusion_trace(query: &str, considered: usize, selected: &[serde_json::Value]) {
+    if !memory_fusion_trace_enabled() {
+        return;
+    }
+    let path = memory_fusion_trace_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let row = serde_json::json!({
+        "ts": chrono::Utc::now().to_rfc3339(),
+        "query": query,
+        "considered": considered,
+        "selected": selected,
+        "min_confidence": memory_fusion_min_confidence(),
+    });
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = writeln!(file, "{}", row);
+    }
+}
+
 fn memory_graph_depth() -> usize {
     std::env::var("HERMES_MEMORY_GRAPH_DEPTH")
         .ok()
@@ -691,6 +752,8 @@ fn score_memory_candidate(
 fn fuse_memory_candidates(candidates: Vec<FusedMemoryCandidate>, query: &str) -> Vec<String> {
     let terms = query_terms(query);
     let weights = memory_fusion_weights();
+    let min_confidence = memory_fusion_min_confidence();
+    let considered = candidates.len();
     let mut scored: Vec<(f64, f64, FusedMemoryCandidate)> = candidates
         .into_iter()
         .map(|entry| {
@@ -709,12 +772,22 @@ fn fuse_memory_candidates(candidates: Vec<FusedMemoryCandidate>, query: &str) ->
 
     let mut seen = std::collections::HashSet::new();
     let mut fused = Vec::new();
+    let mut trace_rows: Vec<serde_json::Value> = Vec::new();
     let top_k = memory_fusion_top_k();
     for (score, confidence, entry) in scored {
+        if confidence < min_confidence {
+            continue;
+        }
         let key = canonical_memory_key(&entry.content);
         if key.is_empty() || !seen.insert(key) {
             continue;
         }
+        let provider = entry.provider.clone();
+        trace_rows.push(serde_json::json!({
+            "provider": provider,
+            "score": score,
+            "confidence": confidence,
+        }));
         fused.push(format!(
             "[{} score={:.3} conf={:.2}] {}",
             entry.provider,
@@ -726,6 +799,7 @@ fn fuse_memory_candidates(candidates: Vec<FusedMemoryCandidate>, query: &str) ->
             break;
         }
     }
+    append_memory_fusion_trace(query, considered, &trace_rows);
     fused
 }
 
@@ -910,6 +984,29 @@ mod tests {
         assert!(fused[0].contains("Rust"));
         assert!(fused[0].contains("score="));
         assert!(fused[0].contains("conf="));
+    }
+
+    #[test]
+    fn test_fusion_min_confidence_gate_filters_low_confidence() {
+        let orig = std::env::var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE").ok();
+        std::env::set_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE", "0.95");
+        let candidates = vec![
+            FusedMemoryCandidate {
+                provider: "builtin".to_string(),
+                content: "lightweight hint without overlap".to_string(),
+            },
+            FusedMemoryCandidate {
+                provider: "contextlattice".to_string(),
+                content: "Need rust tokio context and repo details".to_string(),
+            },
+        ];
+        let fused = fuse_memory_candidates(candidates, "Need rust tokio context");
+        assert_eq!(fused.len(), 1, "only high-confidence context should remain");
+        assert!(fused[0].contains("contextlattice"));
+        match orig {
+            Some(v) => std::env::set_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE", v),
+            None => std::env::remove_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE"),
+        }
     }
 
     #[test]
