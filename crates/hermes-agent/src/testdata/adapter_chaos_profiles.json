@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "scenarios": [
+    {
+      "id": "timeout_then_success",
+      "seed": 1001,
+      "max_retries": 2,
+      "fallback_model": null,
+      "steps": [
+        { "kind": "timeout", "message": "request timeout while contacting primary adapter" },
+        { "kind": "success", "message": "ok-timeout-recovered" }
+      ],
+      "expected": {
+        "outcome": "success",
+        "attempts": 2,
+        "fallback_calls": 0,
+        "error_contains": null
+      }
+    },
+    {
+      "id": "http_5xx_exhaust_then_fallback",
+      "seed": 1002,
+      "max_retries": 1,
+      "fallback_model": "openrouter:backup-model",
+      "steps": [
+        { "kind": "http_5xx", "message": "API error 500 upstream gateway unavailable" },
+        { "kind": "http_5xx", "message": "API error 502 upstream retryable" },
+        { "kind": "success", "message": "ok-fallback-recovered" }
+      ],
+      "expected": {
+        "outcome": "success",
+        "attempts": 3,
+        "fallback_calls": 1,
+        "error_contains": null
+      }
+    },
+    {
+      "id": "rate_limit_exhaust_without_fallback",
+      "seed": 1003,
+      "max_retries": 1,
+      "fallback_model": null,
+      "steps": [
+        { "kind": "rate_limit", "message": "API error 429 too many requests" },
+        { "kind": "rate_limit", "message": "rate limit exceeded on adapter" }
+      ],
+      "expected": {
+        "outcome": "error",
+        "attempts": 2,
+        "fallback_calls": 0,
+        "error_contains": "rate limit"
+      }
+    }
+  ]
+}
