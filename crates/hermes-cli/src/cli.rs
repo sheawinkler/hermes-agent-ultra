@@ -118,6 +118,15 @@ pub enum CliCommand {
     /// Check for updates.
     Update,
 
+    /// Verify signed provenance sidecar for an artifact.
+    VerifyProvenance {
+        /// Artifact path to verify (e.g. doctor snapshot or replay manifest).
+        path: String,
+        /// Optional signature sidecar path override.
+        #[arg(long)]
+        signature: Option<String>,
+    },
+
     /// Show running status (active sessions, model, uptime).
     Status,
 
@@ -672,6 +681,25 @@ mod tests {
                 assert_eq!(snapshot_path.as_deref(), Some("/tmp/doctor.json"));
             }
             _ => panic!("Expected Doctor command"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_verify_provenance() {
+        let cli = Cli::try_parse_from(vec![
+            "hermes",
+            "verify-provenance",
+            "/tmp/doctor.json",
+            "--signature",
+            "/tmp/doctor.sig.json",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(CliCommand::VerifyProvenance { path, signature }) => {
+                assert_eq!(path, "/tmp/doctor.json");
+                assert_eq!(signature.as_deref(), Some("/tmp/doctor.sig.json"));
+            }
+            _ => panic!("expected verify-provenance command"),
         }
     }
 
