@@ -104,7 +104,10 @@ impl CodexProvider {
                 MessageRole::User => {
                     input.push(serde_json::json!({
                         "role": "user",
-                        "content": msg.content.as_deref().unwrap_or("")
+                        "content": [{
+                            "type": "input_text",
+                            "text": msg.content.as_deref().unwrap_or("")
+                        }]
                     }));
                 }
                 MessageRole::Assistant => {
@@ -112,7 +115,10 @@ impl CodexProvider {
                         if !text.is_empty() {
                             input.push(serde_json::json!({
                                 "role": "assistant",
-                                "content": text
+                                "content": [{
+                                    "type": "output_text",
+                                    "text": text
+                                }]
                             }));
                         }
                     }
@@ -508,6 +514,10 @@ mod tests {
         assert_eq!(input[0]["role"], "system");
         assert_eq!(input[1]["role"], "user");
         assert_eq!(input[2]["role"], "assistant");
+        assert_eq!(input[1]["content"][0]["type"], "input_text");
+        assert_eq!(input[1]["content"][0]["text"], "Hello");
+        assert_eq!(input[2]["content"][0]["type"], "output_text");
+        assert_eq!(input[2]["content"][0]["text"], "Hi!");
     }
 
     #[test]
