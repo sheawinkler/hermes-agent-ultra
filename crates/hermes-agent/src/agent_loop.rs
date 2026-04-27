@@ -6356,6 +6356,263 @@ mod tests {
         );
     }
 
+    #[derive(Debug, Clone, serde::Deserialize)]
+    struct ChaosHarnessStep {
+        kind: String,
+        message: Option<String>,
+    }
+
+    #[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+    struct ChaosHarnessExpectation {
+        outcome: String,
+        attempts: usize,
+        fallback_calls: usize,
+        error_contains: Option<String>,
+    }
+
+    #[derive(Debug, Clone, serde::Deserialize)]
+    struct ChaosHarnessScenario {
+        id: String,
+        seed: u64,
+        max_retries: u32,
+        fallback_model: Option<String>,
+        steps: Vec<ChaosHarnessStep>,
+        expected: ChaosHarnessExpectation,
+    }
+
+    #[derive(Debug, serde::Deserialize)]
+    struct ChaosHarnessFixture {
+        schema_version: u32,
+        scenarios: Vec<ChaosHarnessScenario>,
+    }
+
+    #[derive(Debug)]
+    struct ChaosHarnessRun {
+        outcome: &'static str,
+        attempts: usize,
+        fallback_calls: usize,
+        error: Option<String>,
+    }
+
+    fn load_chaos_harness_fixture() -> ChaosHarnessFixture {
+        serde_json::from_str(include_str!("testdata/adapter_chaos_profiles.json"))
+            .expect("parse adapter chaos fixture")
+    }
+
+    struct ChaosHarnessProvider {
+        scenario_id: String,
+        steps: Vec<ChaosHarnessStep>,
+        call_index: std::sync::atomic::AtomicUsize,
+        seen_models: Arc<std::sync::Mutex<Vec<String>>>,
+    }
+
+    impl ChaosHarnessProvider {
+        fn new(scenario: &ChaosHarnessScenario) -> Self {
+            Self {
+                scenario_id: scenario.id.clone(),
+                steps: scenario.steps.clone(),
+                call_index: std::sync::atomic::AtomicUsize::new(0),
+                seen_models: Arc::new(std::sync::Mutex::new(Vec::new())),
+            }
+        }
+
+        fn attempts(&self) -> usize {
+            self.call_index.load(std::sync::atomic::Ordering::SeqCst)
+        }
+
+        fn fallback_calls(&self, fallback_model: Option<&str>) -> usize {
+            let Some(fallback) = fallback_model else {
+                return 0;
+            };
+            let fallback_name = fallback
+                .split_once(':')
+                .map(|(_, model)| model)
+                .unwrap_or(fallback);
+            self.seen_models
+                .lock()
+                .expect("seen model lock")
+                .iter()
+                .filter(|m| m.as_str() == fallback_name)
+                .count()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for ChaosHarnessProvider {
+        async fn chat_completion(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolSchema],
+            _max_tokens: Option<u32>,
+            _temperature: Option<f64>,
+            model: Option<&str>,
+            _extra_body: Option<&serde_json::Value>,
+        ) -> Result<hermes_core::LlmResponse, AgentError> {
+            let idx = self
+                .call_index
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.seen_models
+                .lock()
+                .expect("seen model lock")
+                .push(model.unwrap_or_default().to_string());
+
+            let step = self.steps.get(idx).cloned().unwrap_or(ChaosHarnessStep {
+                kind: "success".to_string(),
+                message: Some("ok-default".to_string()),
+            });
+            match step.kind.as_str() {
+                "success" => Ok(hermes_core::LlmResponse {
+                    message: Message::assistant(
+                        step.message.unwrap_or_else(|| format!("ok-{}", self.scenario_id)),
+                    ),
+                    usage: None,
+                    model: "chaos".to_string(),
+                    finish_reason: Some("stop".to_string()),
+                }),
+                "timeout" => Err(AgentError::LlmApi(
+                    step.message
+                        .unwrap_or_else(|| "request timeout".to_string()),
+                )),
+                "http_5xx" => Err(AgentError::LlmApi(
+                    step.message
+                        .unwrap_or_else(|| "API error 500: synthetic upstream fault".to_string()),
+                )),
+                "rate_limit" => Err(AgentError::LlmApi(
+                    step.message
+                        .unwrap_or_else(|| "API error 429: synthetic rate limit".to_string()),
+                )),
+                other => Err(AgentError::LlmApi(format!(
+                    "unsupported chaos step '{}' in scenario '{}'",
+                    other, self.scenario_id
+                ))),
+            }
+        }
+
+        fn chat_completion_stream(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolSchema],
+            _max_tokens: Option<u32>,
+            _temperature: Option<f64>,
+            _model: Option<&str>,
+            _extra_body: Option<&serde_json::Value>,
+        ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+            futures::stream::empty().boxed()
+        }
+    }
+
+    async fn run_chaos_harness_scenario(scenario: &ChaosHarnessScenario) -> ChaosHarnessRun {
+        let mut cfg = AgentConfig::default();
+        cfg.model = "nous:primary-model".to_string();
+        cfg.retry.max_retries = scenario.max_retries;
+        cfg.retry.base_delay_ms = 0;
+        cfg.retry.max_delay_ms = 0;
+        cfg.retry.fallback_model = scenario.fallback_model.clone();
+
+        let provider = Arc::new(ChaosHarnessProvider::new(scenario));
+        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider.clone());
+        let mut ctx = ContextManager::new(32);
+        ctx.add_message(Message::user(format!(
+            "chaos scenario {} seed {}",
+            scenario.id, scenario.seed
+        )));
+
+        match agent.call_llm_with_retry_inner(&ctx, &[], None, None).await {
+            Ok(_) => ChaosHarnessRun {
+                outcome: "success",
+                attempts: provider.attempts(),
+                fallback_calls: provider.fallback_calls(scenario.fallback_model.as_deref()),
+                error: None,
+            },
+            Err(err) => ChaosHarnessRun {
+                outcome: "error",
+                attempts: provider.attempts(),
+                fallback_calls: provider.fallback_calls(scenario.fallback_model.as_deref()),
+                error: Some(err.to_string()),
+            },
+        }
+    }
+
+    #[test]
+    fn chaos_harness_fixture_is_seeded_and_unique() {
+        let fixture = load_chaos_harness_fixture();
+        assert_eq!(fixture.schema_version, 1, "unexpected fixture schema");
+        assert!(!fixture.scenarios.is_empty(), "chaos fixture must not be empty");
+        let mut ids = std::collections::HashSet::new();
+        let mut seeds = std::collections::HashSet::new();
+        for scenario in fixture.scenarios {
+            assert!(
+                ids.insert(scenario.id.clone()),
+                "duplicate chaos scenario id: {}",
+                scenario.id
+            );
+            assert!(
+                seeds.insert(scenario.seed),
+                "duplicate chaos scenario seed: {}",
+                scenario.seed
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn chaos_harness_profiles_verify_retry_and_fallback() {
+        let fixture = load_chaos_harness_fixture();
+        let mut diagnostics = Vec::new();
+        for scenario in fixture.scenarios {
+            let run = run_chaos_harness_scenario(&scenario).await;
+            let mut mismatches = Vec::new();
+
+            if run.outcome != scenario.expected.outcome {
+                mismatches.push(format!(
+                    "outcome mismatch expected={} actual={}",
+                    scenario.expected.outcome, run.outcome
+                ));
+            }
+            if run.attempts != scenario.expected.attempts {
+                mismatches.push(format!(
+                    "attempt mismatch expected={} actual={}",
+                    scenario.expected.attempts, run.attempts
+                ));
+            }
+            if run.fallback_calls != scenario.expected.fallback_calls {
+                mismatches.push(format!(
+                    "fallback_calls mismatch expected={} actual={}",
+                    scenario.expected.fallback_calls, run.fallback_calls
+                ));
+            }
+            if let Some(expect_fragment) = scenario.expected.error_contains.as_ref() {
+                let got_error = run.error.as_deref().unwrap_or("");
+                if !got_error.contains(expect_fragment) {
+                    mismatches.push(format!(
+                        "error fragment missing expected='{}' actual='{}'",
+                        expect_fragment, got_error
+                    ));
+                }
+            }
+
+            if !mismatches.is_empty() {
+                diagnostics.push(serde_json::json!({
+                    "scenario": scenario.id,
+                    "seed": scenario.seed,
+                    "expected": scenario.expected,
+                    "actual": {
+                        "outcome": run.outcome,
+                        "attempts": run.attempts,
+                        "fallback_calls": run.fallback_calls,
+                        "error": run.error,
+                    },
+                    "mismatches": mismatches,
+                }));
+            }
+        }
+
+        assert!(
+            diagnostics.is_empty(),
+            "adapter chaos harness mismatches:\n{}",
+            serde_json::to_string_pretty(&diagnostics).expect("serialize diagnostics")
+        );
+    }
+
     #[tokio::test]
     async fn handle_max_iterations_uses_provider_native_model_id() {
         use futures::stream::BoxStream;
