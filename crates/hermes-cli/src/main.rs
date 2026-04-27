@@ -17,14 +17,16 @@ use hermes_cli::app::{
     bridge_tool_registry, build_agent_config, build_provider, provider_api_key_from_env,
 };
 use hermes_cli::auth::{
-    clear_provider_auth_state, discover_existing_openai_oauth, get_anthropic_oauth_status,
-    get_gemini_oauth_auth_status, get_qwen_auth_status, login_anthropic_oauth,
-    login_google_gemini_cli_oauth, login_nous_device_code, login_openai_codex_device_code,
-    login_openai_device_code, read_provider_auth_state, resolve_qwen_runtime_credentials,
-    save_codex_auth_state, save_nous_auth_state, save_openai_auth_state, save_provider_auth_state,
-    AnthropicOAuthLoginOptions, CodexDeviceCodeOptions, GeminiOAuthLoginOptions,
-    NousDeviceCodeOptions, ANTHROPIC_OAUTH_CLIENT_ID, ANTHROPIC_OAUTH_TOKEN_URL,
-    CODEX_OAUTH_CLIENT_ID, CODEX_OAUTH_TOKEN_URL, DEFAULT_CODEX_BASE_URL, DEFAULT_OPENAI_BASE_URL,
+    clear_provider_auth_state, discover_existing_anthropic_oauth, discover_existing_nous_oauth,
+    discover_existing_openai_codex_oauth, discover_existing_openai_oauth,
+    get_anthropic_oauth_status, get_gemini_oauth_auth_status, get_qwen_auth_status,
+    login_anthropic_oauth, login_google_gemini_cli_oauth, login_nous_device_code,
+    login_openai_codex_device_code, login_openai_device_code, read_provider_auth_state,
+    resolve_qwen_runtime_credentials, save_codex_auth_state, save_nous_auth_state,
+    save_openai_auth_state, save_provider_auth_state, AnthropicOAuthLoginOptions,
+    CodexDeviceCodeOptions, GeminiOAuthLoginOptions, NousDeviceCodeOptions,
+    ANTHROPIC_OAUTH_CLIENT_ID, ANTHROPIC_OAUTH_TOKEN_URL, CODEX_OAUTH_CLIENT_ID,
+    CODEX_OAUTH_TOKEN_URL, DEFAULT_CODEX_BASE_URL, DEFAULT_OPENAI_BASE_URL,
     QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS, QWEN_OAUTH_CLIENT_ID, QWEN_OAUTH_TOKEN_URL,
 };
 use hermes_cli::cli::{Cli, CliCommand};
@@ -4866,8 +4868,16 @@ async fn run_auth(
             if auth_type == "oauth" {
                 match provider.as_str() {
                     "nous" => {
-                        let state =
-                            login_nous_device_code(NousDeviceCodeOptions::default()).await?;
+                        let imported = discover_existing_nous_oauth()?;
+                        let state = if let Some(imported) = imported {
+                            println!(
+                                "Detected existing Nous OAuth session at {}.",
+                                imported.source_path.display()
+                            );
+                            imported.state
+                        } else {
+                            login_nous_device_code(NousDeviceCodeOptions::default()).await?
+                        };
                         let auth_path = save_nous_auth_state(&state)?;
                         let runtime_key = state.runtime_api_key().ok_or_else(|| {
                             AgentError::AuthFailed(
@@ -4892,7 +4902,11 @@ async fn run_auth(
                             id: uuid::Uuid::new_v4().simple().to_string()[..6].to_string(),
                             label: label.unwrap_or(default_label),
                             auth_type: "oauth".to_string(),
-                            source: "device_code".to_string(),
+                            source: state
+                                .agent_key_obtained_at
+                                .as_deref()
+                                .map(|_| "device_code".to_string())
+                                .unwrap_or_else(|| "discovered_session".to_string()),
                             access_token: runtime_key,
                             last_status: None,
                             last_status_at: None,
@@ -4908,9 +4922,17 @@ async fn run_auth(
                         return Ok(());
                     }
                     "openai-codex" => {
-                        let state =
+                        let imported = discover_existing_openai_codex_oauth()?;
+                        let state = if let Some(imported) = imported {
+                            println!(
+                                "Detected existing OpenAI Codex OAuth session at {}.",
+                                imported.source_path.display()
+                            );
+                            imported.state
+                        } else {
                             login_openai_codex_device_code(CodexDeviceCodeOptions::default())
-                                .await?;
+                                .await?
+                        };
                         let auth_path = save_codex_auth_state(&state)?;
                         let expires_at = state
                             .tokens
@@ -4933,7 +4955,10 @@ async fn run_auth(
                             id: uuid::Uuid::new_v4().simple().to_string()[..6].to_string(),
                             label: label.unwrap_or(default_label),
                             auth_type: "oauth".to_string(),
-                            source: "device_code".to_string(),
+                            source: state
+                                .source
+                                .clone()
+                                .unwrap_or_else(|| "device_code".to_string()),
                             access_token: state.tokens.access_token.clone(),
                             last_status: None,
                             last_status_at: None,
@@ -4997,8 +5022,20 @@ async fn run_auth(
                         return Ok(());
                     }
                     "anthropic" => {
-                        let state =
-                            login_anthropic_oauth(AnthropicOAuthLoginOptions::default()).await?;
+                        let imported = discover_existing_anthropic_oauth()?;
+                        let (state, source_label) = if let Some(imported) = imported {
+                            println!(
+                                "Detected existing Anthropic OAuth session at {}.",
+                                imported.source_path.display()
+                            );
+                            (imported.state, imported.source)
+                        } else {
+                            (
+                                login_anthropic_oauth(AnthropicOAuthLoginOptions::default())
+                                    .await?,
+                                "hermes_pkce".to_string(),
+                            )
+                        };
                         let access_token = state.access_token.clone();
                         let refresh_token = state.refresh_token.clone();
                         let expires_at_ms = state.expires_at_ms;
@@ -5006,7 +5043,7 @@ async fn run_auth(
                             "access_token": access_token.clone(),
                             "refresh_token": refresh_token.clone(),
                             "expires_at_ms": expires_at_ms,
-                            "source": "hermes_pkce",
+                            "source": source_label.clone(),
                         });
                         let auth_path = save_provider_auth_state("anthropic", auth_state)?;
                         manager
@@ -5025,7 +5062,7 @@ async fn run_auth(
                             id: uuid::Uuid::new_v4().simple().to_string()[..6].to_string(),
                             label: label.unwrap_or(default_label),
                             auth_type: "oauth".to_string(),
-                            source: "hermes_pkce".to_string(),
+                            source: source_label,
                             access_token: access_token.clone(),
                             last_status: None,
                             last_status_at: None,
@@ -5469,7 +5506,16 @@ async fn run_auth(
                 return Ok(());
             }
             if provider == "nous" {
-                let state = login_nous_device_code(NousDeviceCodeOptions::default()).await?;
+                let imported = discover_existing_nous_oauth()?;
+                let state = if let Some(imported) = imported {
+                    println!(
+                        "Detected existing Nous OAuth session at {}.",
+                        imported.source_path.display()
+                    );
+                    imported.state
+                } else {
+                    login_nous_device_code(NousDeviceCodeOptions::default()).await?
+                };
                 let auth_path = save_nous_auth_state(&state)?;
                 let runtime_key = state.runtime_api_key().ok_or_else(|| {
                     AgentError::AuthFailed(
@@ -5488,13 +5534,21 @@ async fn run_auth(
                         expires_at,
                     })
                     .await?;
-                println!("Nous device login complete; credential saved as provider 'nous'.");
+                println!("Nous OAuth credential saved as provider 'nous'.");
                 println!("Saved OAuth state: {}", auth_path.display());
                 return Ok(());
             }
             if provider == "openai-codex" {
-                let state =
-                    login_openai_codex_device_code(CodexDeviceCodeOptions::default()).await?;
+                let imported = discover_existing_openai_codex_oauth()?;
+                let state = if let Some(imported) = imported {
+                    println!(
+                        "Detected existing OpenAI Codex OAuth session at {}.",
+                        imported.source_path.display()
+                    );
+                    imported.state
+                } else {
+                    login_openai_codex_device_code(CodexDeviceCodeOptions::default()).await?
+                };
                 let auth_path = save_codex_auth_state(&state)?;
                 let expires_at = state
                     .tokens
@@ -5511,9 +5565,7 @@ async fn run_auth(
                         expires_at,
                     })
                     .await?;
-                println!(
-                    "OpenAI Codex device login complete; credential saved as provider 'openai-codex'."
-                );
+                println!("OpenAI Codex OAuth credential saved as provider 'openai-codex'.");
                 println!("Saved OAuth state: {}", auth_path.display());
                 return Ok(());
             }
@@ -5549,7 +5601,19 @@ async fn run_auth(
                 return Ok(());
             }
             if provider == "anthropic" {
-                let state = login_anthropic_oauth(AnthropicOAuthLoginOptions::default()).await?;
+                let imported = discover_existing_anthropic_oauth()?;
+                let (state, source_label) = if let Some(imported) = imported {
+                    println!(
+                        "Detected existing Anthropic OAuth session at {}.",
+                        imported.source_path.display()
+                    );
+                    (imported.state, imported.source)
+                } else {
+                    (
+                        login_anthropic_oauth(AnthropicOAuthLoginOptions::default()).await?,
+                        "hermes_pkce".to_string(),
+                    )
+                };
                 let access_token = state.access_token.clone();
                 let refresh_token = state.refresh_token.clone();
                 let expires_at_ms = state.expires_at_ms;
@@ -5557,7 +5621,7 @@ async fn run_auth(
                     "access_token": access_token.clone(),
                     "refresh_token": refresh_token.clone(),
                     "expires_at_ms": expires_at_ms,
-                    "source": "hermes_pkce",
+                    "source": source_label,
                 });
                 let auth_path = save_provider_auth_state("anthropic", auth_state)?;
                 manager
@@ -5570,9 +5634,7 @@ async fn run_auth(
                         expires_at: parse_unix_millis_utc(expires_at_ms),
                     })
                     .await?;
-                println!(
-                    "Anthropic OAuth login complete; credential saved as provider 'anthropic'."
-                );
+                println!("Anthropic OAuth credential saved as provider 'anthropic'.");
                 println!("Saved OAuth state: {}", auth_path.display());
                 return Ok(());
             }
@@ -7464,7 +7526,16 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
             let manager = AuthManager::new(store);
             match selected_provider.as_str() {
                 "nous" => {
-                    let state = login_nous_device_code(NousDeviceCodeOptions::default()).await?;
+                    let imported = discover_existing_nous_oauth()?;
+                    let state = if let Some(imported) = imported {
+                        println!(
+                            "  ✓ Detected existing Nous OAuth session: {}",
+                            imported.source_path.display()
+                        );
+                        imported.state
+                    } else {
+                        login_nous_device_code(NousDeviceCodeOptions::default()).await?
+                    };
                     let auth_path = save_nous_auth_state(&state)?;
                     println!("  ✓ Saved Nous OAuth state: {}", auth_path.display());
                     let runtime_key = state.runtime_api_key().ok_or_else(|| {
@@ -7493,8 +7564,16 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
                     selected_nous_oauth_authenticated = true;
                 }
                 "openai-codex" => {
-                    let state =
-                        login_openai_codex_device_code(CodexDeviceCodeOptions::default()).await?;
+                    let imported = discover_existing_openai_codex_oauth()?;
+                    let state = if let Some(imported) = imported {
+                        println!(
+                            "  ✓ Detected existing OpenAI Codex OAuth session: {}",
+                            imported.source_path.display()
+                        );
+                        imported.state
+                    } else {
+                        login_openai_codex_device_code(CodexDeviceCodeOptions::default()).await?
+                    };
                     let auth_path = save_codex_auth_state(&state)?;
                     println!(
                         "  ✓ Saved OpenAI Codex OAuth state: {}",
@@ -7552,13 +7631,24 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
                     stored_provider_secret_in_vault = true;
                 }
                 "anthropic" => {
-                    let state =
-                        login_anthropic_oauth(AnthropicOAuthLoginOptions::default()).await?;
+                    let imported = discover_existing_anthropic_oauth()?;
+                    let (state, source_label) = if let Some(imported) = imported {
+                        println!(
+                            "  ✓ Detected existing Anthropic OAuth session: {}",
+                            imported.source_path.display()
+                        );
+                        (imported.state, imported.source)
+                    } else {
+                        (
+                            login_anthropic_oauth(AnthropicOAuthLoginOptions::default()).await?,
+                            "hermes_pkce".to_string(),
+                        )
+                    };
                     let auth_state = serde_json::json!({
                         "access_token": state.access_token.clone(),
                         "refresh_token": state.refresh_token.clone(),
                         "expires_at_ms": state.expires_at_ms,
-                        "source": "hermes_pkce",
+                        "source": source_label,
                     });
                     let auth_path = save_provider_auth_state("anthropic", auth_state)?;
                     println!("  ✓ Saved Anthropic OAuth state: {}", auth_path.display());
