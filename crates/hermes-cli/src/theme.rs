@@ -396,6 +396,59 @@ pub fn ultra_neon_theme() -> Theme {
     theme
 }
 
+/// Built-in amber neon variant (high warmth, high contrast).
+pub fn ultra_amber_theme() -> Theme {
+    let mut theme = default_theme();
+    theme.name = "ultra-amber".to_string();
+    theme.colors.accent = "#ffb347".to_string();
+    theme.colors.primary = "#2b1200".to_string();
+    theme.colors.secondary = "#a58662".to_string();
+    theme.colors.background = "#090704".to_string();
+    theme.colors.status_bar_bg = Some("#1f1003".to_string());
+    theme.colors.status_bar_strong = Some("#ffb347".to_string());
+    theme.styles.user_input.fg = Some("#ffd08a".to_string());
+    theme.styles.tool_call.fg = Some("#ffcf73".to_string());
+    theme.styles.tool_result.fg = Some("#56f4b5".to_string());
+    theme
+}
+
+/// Built-in ice neon variant (cool tones, high clarity).
+pub fn ultra_ice_theme() -> Theme {
+    let mut theme = default_theme();
+    theme.name = "ultra-ice".to_string();
+    theme.colors.accent = "#00d5ff".to_string();
+    theme.colors.primary = "#081b2b".to_string();
+    theme.colors.secondary = "#7ea7c1".to_string();
+    theme.colors.background = "#040b10".to_string();
+    theme.colors.status_bar_bg = Some("#071623".to_string());
+    theme.colors.status_bar_strong = Some("#00d5ff".to_string());
+    theme.styles.user_input.fg = Some("#8ee7ff".to_string());
+    theme.styles.tool_call.fg = Some("#54c7ff".to_string());
+    theme.styles.tool_result.fg = Some("#39f4ba".to_string());
+    theme
+}
+
+/// Built-in high-contrast accessibility-first variant.
+pub fn ultra_hc_theme() -> Theme {
+    let mut theme = default_theme();
+    theme.name = "ultra-hc".to_string();
+    theme.colors.accent = "#ffd400".to_string();
+    theme.colors.primary = "#000000".to_string();
+    theme.colors.secondary = "#a9a9a9".to_string();
+    theme.colors.background = "#000000".to_string();
+    theme.colors.foreground = "#ffffff".to_string();
+    theme.colors.status_bar_bg = Some("#111111".to_string());
+    theme.colors.status_bar_text = Some("#ffffff".to_string());
+    theme.colors.status_bar_strong = Some("#ffd400".to_string());
+    theme.colors.status_bar_dim = Some("#b3b3b3".to_string());
+    theme.styles.user_input.fg = Some("#8ad7ff".to_string());
+    theme.styles.assistant_response.fg = Some("#ffffff".to_string());
+    theme.styles.system_message.fg = Some("#c3c3c3".to_string());
+    theme.styles.tool_call.fg = Some("#ffd400".to_string());
+    theme.styles.tool_result.fg = Some("#52ffa8".to_string());
+    theme
+}
+
 /// Built-in light theme.
 pub fn light_theme() -> Theme {
     Theme {
@@ -522,6 +575,13 @@ mod tests {
         let theme = ultra_neon_theme();
         assert_eq!(theme.name, "ultra-neon");
         assert_eq!(theme.colors.accent, "#ff2be3");
+    }
+
+    #[test]
+    fn test_ultra_variants_have_distinct_names() {
+        assert_eq!(ultra_amber_theme().name, "ultra-amber");
+        assert_eq!(ultra_ice_theme().name, "ultra-ice");
+        assert_eq!(ultra_hc_theme().name, "ultra-hc");
     }
 
     #[test]
