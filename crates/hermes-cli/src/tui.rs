@@ -11,6 +11,7 @@
 use std::io::Stdout;
 use std::time::Duration;
 
+use crossterm::cursor::Show;
 use crossterm::event::{Event as CrosstermEvent, KeyEvent, MouseEvent};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
@@ -101,6 +102,8 @@ pub struct Tui {
     event_sender: mpsc::UnboundedSender<Event>,
     /// The active color theme.
     theme: Theme,
+    /// Whether terminal cleanup has already run.
+    restored: bool,
 }
 
 impl Tui {
@@ -119,14 +122,19 @@ impl Tui {
             events: event_receiver,
             event_sender,
             theme: crate::skin_engine::resolve_theme(requested_theme.as_str()),
+            restored: false,
         })
     }
 
     /// Restore the terminal to its original state.
     pub fn restore(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if self.restored {
+            return Ok(());
+        }
         disable_raw_mode()?;
         self.terminal.backend_mut().execute(LeaveAlternateScreen)?;
         self.terminal.show_cursor()?;
+        self.restored = true;
         Ok(())
     }
 
@@ -143,6 +151,19 @@ impl Tui {
     /// Get a reference to the current theme.
     pub fn theme(&self) -> &Theme {
         &self.theme
+    }
+}
+
+impl Drop for Tui {
+    fn drop(&mut self) {
+        if self.restored {
+            return;
+        }
+        let _ = disable_raw_mode();
+        let mut stdout = std::io::stdout();
+        let _ = stdout.execute(LeaveAlternateScreen);
+        let _ = stdout.execute(Show);
+        self.restored = true;
     }
 }
 
@@ -642,7 +663,7 @@ pub fn render(frame: &mut Frame, app: &App, state: &TuiState, theme: &Theme) {
     }
 
     // --- Render completions as popup above composer ---
-    if !state.completions.is_empty() {
+    if should_render_completions_popup(state) {
         render_completions_popup(
             frame,
             &state.completions,
@@ -655,6 +676,14 @@ pub fn render(frame: &mut Frame, app: &App, state: &TuiState, theme: &Theme) {
 
     // --- Render status bar ---
     render_status(frame, app, state, status_area, &colors);
+}
+
+fn should_render_completions_popup(state: &TuiState) -> bool {
+    state.mode != InputMode::Normal
+        && state.input.starts_with('/')
+        && !state.input.contains('\n')
+        && !state.history_search_active
+        && !state.completions.is_empty()
 }
 
 fn render_header(frame: &mut Frame, app: &App, area: Rect, colors: &crate::theme::RatatuiColors) {
@@ -1582,6 +1611,8 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                 let input = state.input.clone();
                                 state.input.clear();
                                 state.cursor_position = 0;
+                                state.completions.clear();
+                                state.completion_index = None;
                                 state.scroll_offset = 0;
 
                                 if !input.is_empty() {
@@ -1773,6 +1804,19 @@ mod tests {
         state.input = "/mod".to_string();
         state.update_completions();
         assert!(state.completions.contains(&"/model".to_string()));
+    }
+
+    #[test]
+    fn test_completion_popup_hidden_when_slash_deleted() {
+        let mut state = TuiState::default();
+        state.input = "/model".to_string();
+        state.update_completions();
+        assert!(should_render_completions_popup(&state));
+
+        state.input.clear();
+        state.refresh_completions();
+        assert!(!should_render_completions_popup(&state));
+        assert!(state.completions.is_empty());
     }
 
     #[test]
