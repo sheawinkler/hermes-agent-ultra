@@ -10,6 +10,7 @@ use tracing::{debug, instrument};
 
 use hermes_core::types::{Skill, SkillMeta};
 
+use crate::guard::SkillGuard;
 use crate::skill::SkillError;
 
 // ---------------------------------------------------------------------------
@@ -263,13 +264,16 @@ impl SkillStore for FileSkillStore {
                     .map_err(|e| SkillError::Io(e.to_string()))?;
 
                 let (fm, content) = Self::parse_skill_file(&raw)?;
-
-                return Ok(Some(Skill {
+                let skill = Skill {
                     name: fm.name,
                     content,
                     category: fm.category,
                     description: fm.description,
-                }));
+                };
+                // Mandatory pre-use security gate.
+                SkillGuard::default().scan_security_only(&skill)?;
+
+                return Ok(Some(skill));
             }
         }
 
