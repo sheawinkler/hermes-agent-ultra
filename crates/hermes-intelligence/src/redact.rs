@@ -54,6 +54,12 @@ static BUILTIN_PATTERNS: LazyLock<Vec<RedactionPattern>> = LazyLock::new(|| {
             regex: Regex::new(r#"(?i)(bearer\s+|token[_\s]*[:=]\s*)[a-zA-Z0-9\-_.]{20,}"#).unwrap(),
             replacement: "[REDACTED_TOKEN]".into(),
         },
+        // Telegram bot tokens: "<digits>:<base64-ish token>"
+        RedactionPattern {
+            name: "telegram_bot_token".into(),
+            regex: Regex::new(r#"\b\d{8,12}:[A-Za-z0-9_-]{30,}\b"#).unwrap(),
+            replacement: "[REDACTED_TELEGRAM_TOKEN]".into(),
+        },
         // Passwords in URLs or assignments
         RedactionPattern {
             name: "password".into(),
@@ -261,10 +267,19 @@ mod tests {
     }
 
     #[test]
+    fn test_redact_telegram_bot_token() {
+        let redactor = Redactor::new();
+        let text = "TELEGRAM_BOT_TOKEN=123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcd1234";
+        let result = redactor.redact(text);
+        assert!(result.contains("[REDACTED_TELEGRAM_TOKEN]"));
+        assert!(!result.contains("123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcd1234"));
+    }
+
+    #[test]
     fn test_redact_message() {
         let redactor = Redactor::new();
         let msg = Message::user(
-            "My email is test@example.com and my key is [REDACTED_API_KEY]",
+            "My email is test@example.com and my key is sk-abc123def456ghi789jkl012mno345",
         );
         let redacted = redactor.redact_message(&msg);
         assert_eq!(redacted.role, MessageRole::User);

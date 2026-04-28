@@ -88,6 +88,10 @@ static SECRET_PATTERNS: LazyLock<Vec<(&'static str, Regex)>> = LazyLock::new(|| 
             Regex::new(r"\bxox[bpras]-[0-9a-zA-Z\-]{10,}\b").unwrap(),
         ),
         (
+            "Telegram bot token",
+            Regex::new(r"\b\d{8,12}:[A-Za-z0-9_-]{30,}\b").unwrap(),
+        ),
+        (
             "Stripe key",
             Regex::new(r"\b[rk]k_live_[0-9a-zA-Z]{24,}\b").unwrap(),
         ),
@@ -352,14 +356,14 @@ mod tests {
         assert!(guard
             .check_write_access(
                 Path::new("config.txt"),
-                "[REDACTED_API_KEY]"
+                "OPENAI_API_KEY=sk-abc123def456ghi789jkl012mno345"
             )
             .is_err());
         // Contains a private key
         assert!(guard
             .check_write_access(
                 Path::new("notes.txt"),
-                "[REDACTED_PRIVATE_KEY_BLOCK]\nsomekey"
+                "-----BEGIN PRIVATE KEY-----\nMIIEvgABCD\n-----END PRIVATE KEY-----"
             )
             .is_err());
     }
@@ -384,18 +388,19 @@ mod tests {
         assert!(guard
             .check_write_access(
                 Path::new("output.txt"),
-                "[REDACTED_API_KEY]"
+                "OPENAI_API_KEY=sk-abc123def456ghi789jkl012mno345"
             )
             .is_ok());
     }
 
     #[test]
     fn test_detect_secrets() {
-        assert!(detect_secrets("[REDACTED_API_KEY]").is_some());
+        assert!(detect_secrets("sk-abc123def456ghi789jkl012mno345").is_some());
         assert!(detect_secrets("-----BEGIN PRIVATE KEY-----\nMIIEvg").is_some());
         assert!(detect_secrets("password = hunter2").is_some());
         assert!(detect_secrets("api_key = 1234567890abcdef").is_some());
-        assert!(detect_secrets("[REDACTED_AWS_ACCESS_KEY_ID]").is_some());
+        assert!(detect_secrets("AKIA1234567890ABCDEF").is_some());
+        assert!(detect_secrets("123456789:ABCDEFGHIJKLMNOPQRSTUVWXYZabcd1234").is_some());
         assert!(detect_secrets("Hello, world!").is_none());
         assert!(detect_secrets("fn main() { println!(\"hello\"); }").is_none());
     }
