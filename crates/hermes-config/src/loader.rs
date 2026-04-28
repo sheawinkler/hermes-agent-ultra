@@ -8,6 +8,7 @@ pub use hermes_core::ConfigError;
 use crate::config::{GatewayConfig, LlmProviderConfig, ProxyConfig};
 use crate::merge::merge_configs;
 use crate::paths;
+use crate::platform::PlatformConfig;
 
 // ---------------------------------------------------------------------------
 // ConfigError conversion helpers
@@ -250,8 +251,37 @@ pub fn load_from_yaml(path: &Path) -> Result<GatewayConfig, ConfigError> {
     if let serde_yaml::Value::Mapping(ref mut m) = root {
         crate::python_yaml_compat::normalize_config_yaml_root(m);
     }
+    mark_platform_enabled_explicit(&mut root, "slack");
     let config: GatewayConfig = serde_yaml::from_value(root).map_err(yaml_to_config_error)?;
     Ok(config)
+}
+
+fn mark_platform_enabled_explicit(root: &mut serde_yaml::Value, platform: &str) {
+    let serde_yaml::Value::Mapping(root_map) = root else {
+        return;
+    };
+    let platforms_key = serde_yaml::Value::String("platforms".to_string());
+    let platform_key = serde_yaml::Value::String(platform.to_string());
+    let enabled_key = serde_yaml::Value::String("enabled".to_string());
+    let extra_key = serde_yaml::Value::String("extra".to_string());
+    let marker_key = serde_yaml::Value::String("_enabled_explicit".to_string());
+
+    let Some(serde_yaml::Value::Mapping(platforms)) = root_map.get_mut(&platforms_key) else {
+        return;
+    };
+    let Some(serde_yaml::Value::Mapping(platform_block)) = platforms.get_mut(&platform_key) else {
+        return;
+    };
+    if !platform_block.contains_key(&enabled_key) {
+        return;
+    }
+
+    let extra_entry = platform_block
+        .entry(extra_key)
+        .or_insert_with(|| serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+    if let serde_yaml::Value::Mapping(extra_map) = extra_entry {
+        extra_map.insert(marker_key, serde_yaml::Value::Bool(true));
+    }
 }
 
 /// Load `config.yaml` from disk if it exists; otherwise return defaults (no env merge).
@@ -850,6 +880,25 @@ pub fn apply_env_overrides(config: &mut GatewayConfig) {
         }
     }
 
+    if let Ok(token) = std::env::var("SLACK_BOT_TOKEN") {
+        let trimmed = token.trim();
+        if !trimmed.is_empty() {
+            let slack = config
+                .platforms
+                .entry("slack".to_string())
+                .or_insert_with(PlatformConfig::default);
+            let enabled_was_explicit = slack
+                .extra
+                .remove("_enabled_explicit")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            if !slack.enabled && !enabled_was_explicit {
+                slack.enabled = true;
+            }
+            slack.token = Some(trimmed.to_string());
+        }
+    }
+
     crate::python_platform_env::apply_python_named_platform_env(config);
 }
 
@@ -1256,6 +1305,68 @@ mod tests {
         unsafe {
             std::env::remove_var("HERMES_OPENAI_CODEX_API_KEY");
             std::env::remove_var("HERMES_QWEN_OAUTH_API_KEY");
+        }
+    }
+
+    #[test]
+    fn apply_env_overrides_slack_env_token_enables_platform_by_default() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        unsafe {
+            std::env::set_var("SLACK_BOT_TOKEN", "xoxb-live-token");
+        }
+
+        let mut cfg = GatewayConfig::default();
+        let slack = cfg
+            .platforms
+            .entry("slack".to_string())
+            .or_insert_with(crate::platform::PlatformConfig::default);
+        slack.enabled = false;
+        slack.extra.insert(
+            "channel_prompts".to_string(),
+            serde_json::json!({"C1":"ops"}),
+        );
+
+        apply_env_overrides(&mut cfg);
+
+        let slack = cfg.platforms.get("slack").expect("slack config");
+        assert!(slack.enabled, "env token should auto-enable slack");
+        assert_eq!(slack.token.as_deref(), Some("xoxb-live-token"));
+
+        unsafe {
+            std::env::remove_var("SLACK_BOT_TOKEN");
+        }
+    }
+
+    #[test]
+    fn apply_env_overrides_slack_env_token_respects_explicit_disable_marker() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+        unsafe {
+            std::env::set_var("SLACK_BOT_TOKEN", "xoxb-live-token");
+        }
+
+        let mut cfg = GatewayConfig::default();
+        let slack = cfg
+            .platforms
+            .entry("slack".to_string())
+            .or_insert_with(crate::platform::PlatformConfig::default);
+        slack.enabled = false;
+        slack
+            .extra
+            .insert("_enabled_explicit".to_string(), serde_json::json!(true));
+
+        apply_env_overrides(&mut cfg);
+
+        let slack = cfg.platforms.get("slack").expect("slack config");
+        assert!(
+            !slack.enabled,
+            "explicitly disabled slack config must remain disabled"
+        );
+        assert_eq!(slack.token.as_deref(), Some("xoxb-live-token"));
+
+        unsafe {
+            std::env::remove_var("SLACK_BOT_TOKEN");
         }
     }
 }
