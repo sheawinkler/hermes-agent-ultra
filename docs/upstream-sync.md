@@ -13,6 +13,8 @@ fork-specific history.
   - Runs adversarial regression gate by default (`scripts/run-redteam-gate.py`)
   - Supports `--no-redteam-gate` and `--redteam-cmd` overrides
   - Supports optional consolidated elite gate: `--elite-gate` / `--elite-cmd`
+  - Refreshes generated parity docs by default (`README` sync status + parity dashboard)
+  - Supports `--no-doc-refresh` and `--doc-refresh-cmd` overrides
   - Supports `--strategy merge|cherry-pick`
   - Supports strict risk gating via `--strict-risk-gate`
   - Emits timestamped reports under `.sync-reports/`
@@ -40,6 +42,10 @@ fork-specific history.
   - Emits gate artifact under `.sync-reports/eval-trend-gate-<timestamp>.json`
 - `scripts/compare-adapter-chaos-reports.py`
   - Compares chaos reports and fails on attempts/fallback/outcome regressions
+- `scripts/generate-readme-sync-status.py`
+  - Regenerates README “Live Upstream Sync Status” block from latest `.sync-reports/upstream-sync-*.txt`
+- `scripts/generate-parity-dashboard.py`
+  - Builds `docs/parity/PARITY_DASHBOARD.md` from parity JSON artifacts
 
 ## One-shot Manual Sync
 
@@ -52,6 +58,8 @@ bash scripts/sync-upstream.sh --redteam-cmd "python3 scripts/run-redteam-gate.py
 python3 scripts/run-adapter-chaos-harness.py --repo-root .
 python3 scripts/run-zero-copy-hotpath-bench.py --repo-root .
 python3 scripts/run-elite-sync-gate.py --repo-root .
+python3 scripts/generate-parity-dashboard.py --repo-root .
+python3 scripts/generate-readme-sync-status.py --repo-root .
 bash scripts/sync-upstream.sh --elite-gate
 bash scripts/sync-upstream.sh --elite-gate --elite-rollback-cmd "git reset --hard origin/main"
 ```

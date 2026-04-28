@@ -65,6 +65,8 @@ cargo install --git https://github.com/sheawinkler/hermes-agent-ultra hermes-cli
 
 ## Quick Start
 
+Need a shorter path? See [README_QUICKSTART.md](./README_QUICKSTART.md).
+
 Setup:
 
 ```bash
@@ -138,11 +140,19 @@ Ultra uses controlled sync workflows, not blind merges.
 - Parity artifacts:
   - `docs/parity/`
   - `.sync-reports/`
+<!-- BEGIN:ULTRA_SYNC_STATUS -->
+### Live Upstream Sync Status (auto-generated)
 
-Current local sync snapshot (fetched on 2026-04-28):
-
-- `origin/main`: `22e5906eaac119e3788109c9554476d2a5ea301f`
-- `upstream/main`: `4bf0e75ae95fe33b47391a73bcf9bf5c128dd75b`
+- Generated at: `20260428-182056`
+- Source report: [`upstream-sync-20260428-182056.txt`](./.sync-reports/upstream-sync-20260428-182056.txt)
+- Sync timestamp (`timestamp_utc`): `20260428-182056`
+- `origin/main` at sync: `22e5906eaac119e3788109c9554476d2a5ea301f`
+- `upstream/main` at sync: `4bf0e75ae95fe33b47391a73bcf9bf5c128dd75b`
+- Pending commits captured in report: `944`
+- Queue summary (`docs/parity/upstream-missing-queue.json`): pending `320`, ported `45`, superseded `310`
+- Parity gates (`docs/parity/global-parity-proof.json`): release `fail`, ci `fail`
+- Workstream snapshot (`docs/parity/workstream-status.json`): `upstream/main` @ `93ddff53e339b859e88d1d1be97624212722b7f1` (generated `2026-04-24T14:52:58-06:00`)
+<!-- END:ULTRA_SYNC_STATUS -->
 
 Note: this repository intentionally tracks parity via queue/gate workflows because upstream and ultra history can diverge materially.
 
