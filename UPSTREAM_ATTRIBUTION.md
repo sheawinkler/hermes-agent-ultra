@@ -17,12 +17,12 @@ This repository is an independent Rust implementation and product line:
 Fetched on `2026-04-28`:
 
 - `origin/main`: `22e5906eaac119e3788109c9554476d2a5ea301f`
-- `upstream/main`: `a3c27b5cd12585b6d9245f07ae5c6ee2d6dbf8ee`
+- `upstream/main`: `4bf0e75ae95fe33b47391a73bcf9bf5c128dd75b`
 - Upstream remote URL: `git@github.com:NousResearch/hermes-agent.git`
 
 The latest sync report is stored at:
 
-- `.sync-reports/upstream-sync-20260428-181846.txt`
+- `.sync-reports/upstream-sync-20260428-182056.txt`
 
 ## Why Sync Uses Queue/Gates
 
