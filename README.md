@@ -105,6 +105,7 @@ Ultra now supports Google's `DESIGN.md` workflow in two ways:
 2. Optional skill bundle included at:
    - `optional-skills/creative/design-md/SKILL.md`
    - `optional-skills/creative/design-md/templates/starter.md`
+   - `optional-skills/creative/embedding-atlas/SKILL.md`
 
 The skill is designed for author/lint/diff/export flows with `@google/design.md`.
 
