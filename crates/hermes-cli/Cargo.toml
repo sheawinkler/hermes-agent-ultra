@@ -85,6 +85,7 @@ hex = "0.4"
 base64 = { workspace = true }
 aes-gcm = "0.10"
 rand = "0.8"
+zip = { version = "2", default-features = false, features = ["deflate"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
