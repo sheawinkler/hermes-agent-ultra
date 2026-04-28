@@ -177,6 +177,7 @@ const DEFAULT_SKILL_TAPS: &[&str] = &[
     "https://github.com/openai/skills::skills",
     "https://github.com/anthropics/skills::skills",
     "https://github.com/VoltAgent/awesome-agent-skills::skills",
+    "https://github.com/mattpocock/skills::skills",
     "https://github.com/github/awesome-copilot::skills",
     "https://github.com/garrytan/gstack::",
     "https://github.com/MiniMax-AI/cli::skill",
@@ -7923,6 +7924,14 @@ mod tests {
         assert!(merged
             .iter()
             .any(|tap| tap == "https://github.com/github/awesome-copilot::skills"));
+    }
+
+    #[test]
+    fn test_mattpocock_default_skill_tap_present_in_merged_list() {
+        let merged = merged_skill_taps(&[]);
+        assert!(merged
+            .iter()
+            .any(|tap| tap == "https://github.com/mattpocock/skills::skills"));
     }
 
     #[test]
