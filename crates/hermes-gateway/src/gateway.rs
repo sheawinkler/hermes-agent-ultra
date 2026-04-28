@@ -72,6 +72,15 @@ fn default_true() -> bool {
     true
 }
 
+fn role_label(role: MessageRole) -> &'static str {
+    match role {
+        MessageRole::System => "system",
+        MessageRole::User => "user",
+        MessageRole::Assistant => "assistant",
+        MessageRole::Tool => "tool",
+    }
+}
+
 // ---------------------------------------------------------------------------
 // IncomingMessage (platform-agnostic)
 // ---------------------------------------------------------------------------
@@ -173,6 +182,12 @@ struct UsageStats {
     input_chars: u64,
     output_chars: u64,
     last_updated_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct CompressionOutcome {
+    removed_messages: usize,
+    summary_warning: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -737,8 +752,15 @@ impl Gateway {
                 Ok(true)
             }
             GatewayCommandResult::CompressContext(_) => {
-                let removed = self.compress_context(session_key, 24).await;
-                let reply = format!("📦 Context compressed. Removed {} old messages.", removed);
+                let outcome = self.compress_context(session_key, 24).await;
+                let mut reply = format!(
+                    "📦 Context compressed. Removed {} old messages.",
+                    outcome.removed_messages
+                );
+                if let Some(warning) = outcome.summary_warning {
+                    reply.push_str("\n\n");
+                    reply.push_str(&warning);
+                }
                 self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
                     .await?;
                 Ok(true)
@@ -1442,28 +1464,87 @@ impl Gateway {
         )
     }
 
-    async fn compress_context(&self, session_key: &str, max_messages: usize) -> usize {
+    fn summarize_removed_messages(messages: &[Message]) -> Result<String, String> {
+        let mut bullets = Vec::new();
+        for msg in messages {
+            let Some(raw) = msg.content.as_ref() else {
+                continue;
+            };
+            let compact = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+            if compact.is_empty() {
+                continue;
+            }
+            let truncated = if compact.chars().count() > 180 {
+                let mut head = compact.chars().take(177).collect::<String>();
+                head.push_str("...");
+                head
+            } else {
+                compact
+            };
+            bullets.push(format!("• {}: {}", role_label(msg.role), truncated));
+            if bullets.len() >= 6 {
+                break;
+            }
+        }
+
+        if bullets.is_empty() {
+            return Err("no textual content available to summarize".to_string());
+        }
+
+        let mut out =
+            String::from("[CONTEXT COMPACTION] Earlier conversation was compacted. Key points:\n");
+        out.push_str(&bullets.join("\n"));
+        Ok(out)
+    }
+
+    async fn compress_context(&self, session_key: &str, max_messages: usize) -> CompressionOutcome {
         let current = self.session_manager.get_messages(session_key).await;
         if current.len() <= max_messages {
-            return 0;
+            return CompressionOutcome::default();
         }
 
         let mut compressed = Vec::new();
+        let mut head_count = 0usize;
         if let Some(first) = current.first() {
             if first.role == MessageRole::System {
                 compressed.push(first.clone());
+                head_count = 1;
             }
         }
         let keep_tail = max_messages.saturating_sub(compressed.len());
         let mut tail: Vec<Message> = current.iter().rev().take(keep_tail).cloned().collect();
         tail.reverse();
+        let tail_start = current.len().saturating_sub(keep_tail);
+        let middle = if tail_start > head_count {
+            &current[head_count..tail_start]
+        } else {
+            &[]
+        };
+        let removed_messages = middle.len();
+
+        let mut summary_warning = None;
+        if removed_messages > 0 {
+            match Self::summarize_removed_messages(middle) {
+                Ok(summary) => compressed.push(Message::assistant(&summary)),
+                Err(err) => {
+                    compressed.push(Message::assistant(&format!(
+                        "[CONTEXT COMPACTION] Summary generation was unavailable. {removed_messages} message(s) were removed to free context space but could not be summarized. Continue from recent messages and current workspace state."
+                    )));
+                    summary_warning = Some(format!(
+                        "⚠️ Context compression summary failed ({err}). {removed_messages} historical message(s) were removed and replaced with a placeholder."
+                    ));
+                }
+            }
+        }
         compressed.extend(tail);
 
-        let removed = current.len().saturating_sub(compressed.len());
         self.session_manager
             .replace_messages(session_key, compressed)
             .await;
-        removed
+        CompressionOutcome {
+            removed_messages,
+            summary_warning,
+        }
     }
 
     async fn build_status_text(&self, session_key: &str) -> String {
@@ -2230,6 +2311,125 @@ mod tests {
 
         let msgs = sent.lock().unwrap();
         assert!(msgs.iter().any(|(_, text)| text.contains("Gateway status")));
+    }
+
+    #[tokio::test]
+    async fn gateway_compress_command_appends_warning_when_summary_unavailable() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("test", adapter).await;
+
+        let session_key = gw
+            .session_manager
+            .compose_session_key("test", "chat1", "user1");
+        let _ = gw
+            .session_manager
+            .get_or_create_session("test", "chat1", "user1")
+            .await;
+        gw.session_manager
+            .add_message(&session_key, Message::system("sys"))
+            .await;
+        for _ in 0..40 {
+            gw.session_manager
+                .add_message(
+                    &session_key,
+                    Message {
+                        role: MessageRole::Tool,
+                        content: None,
+                        tool_calls: None,
+                        tool_call_id: None,
+                        name: None,
+                        reasoning_content: None,
+                        cache_control: None,
+                    },
+                )
+                .await;
+        }
+
+        let incoming = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/compress".into(),
+            message_id: None,
+            is_dm: true,
+        };
+
+        assert!(gw.route_message(&incoming).await.is_ok());
+
+        let msgs = sent.lock().unwrap();
+        let reply = msgs.last().map(|(_, t)| t.clone()).unwrap_or_default();
+        assert!(reply.contains("Context compressed"));
+        assert!(reply.contains("⚠️ Context compression summary failed"));
+        assert!(reply.contains("historical message(s) were removed"));
+    }
+
+    #[tokio::test]
+    async fn gateway_compress_command_emits_summary_without_warning() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("test", adapter).await;
+
+        let session_key = gw
+            .session_manager
+            .compose_session_key("test", "chat1", "user1");
+        let _ = gw
+            .session_manager
+            .get_or_create_session("test", "chat1", "user1")
+            .await;
+        gw.session_manager
+            .add_message(&session_key, Message::system("sys"))
+            .await;
+        for i in 0..40 {
+            let message = if i % 2 == 0 {
+                Message::user(format!("turn {i} content"))
+            } else {
+                Message::assistant(format!("turn {i} content"))
+            };
+            gw.session_manager.add_message(&session_key, message).await;
+        }
+
+        let incoming = IncomingMessage {
+            platform: "test".into(),
+            chat_id: "chat1".into(),
+            user_id: "user1".into(),
+            text: "/compress".into(),
+            message_id: None,
+            is_dm: true,
+        };
+
+        assert!(gw.route_message(&incoming).await.is_ok());
+
+        let msgs = sent.lock().unwrap();
+        let reply = msgs.last().map(|(_, t)| t.clone()).unwrap_or_default();
+        assert!(reply.contains("Context compressed"));
+        assert!(!reply.contains("⚠️"));
+        drop(msgs);
+
+        let updated = gw.session_manager.get_messages(&session_key).await;
+        assert!(
+            updated.iter().any(|m| {
+                m.content
+                    .as_deref()
+                    .unwrap_or("")
+                    .contains("[CONTEXT COMPACTION] Earlier conversation was compacted")
+            }),
+            "summary marker should be persisted into compressed transcript"
+        );
     }
 
     #[tokio::test]
