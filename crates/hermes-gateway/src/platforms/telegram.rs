@@ -18,7 +18,7 @@ use tracing::{info, warn};
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
 
-use crate::adapter::{AdapterProxyConfig, BasePlatformAdapter};
+use crate::adapter::{describe_secret, AdapterProxyConfig, BasePlatformAdapter};
 
 /// Maximum message length for Telegram (4096 characters).
 const MAX_MESSAGE_LENGTH: usize = 4096;
@@ -1111,8 +1111,8 @@ impl TelegramAdapter {
 impl PlatformAdapter for TelegramAdapter {
     async fn start(&self) -> Result<(), GatewayError> {
         info!(
-            "Telegram adapter starting (token: {}...)",
-            &self.config.token[..8.min(self.config.token.len())]
+            "Telegram adapter starting (token: {})",
+            describe_secret(&self.config.token)
         );
         self.base.mark_running();
         Ok(())

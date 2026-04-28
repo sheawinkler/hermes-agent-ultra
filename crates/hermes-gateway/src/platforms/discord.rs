@@ -19,7 +19,7 @@ use tracing::{debug, info, warn};
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
 
-use crate::adapter::{AdapterProxyConfig, BasePlatformAdapter};
+use crate::adapter::{describe_secret, AdapterProxyConfig, BasePlatformAdapter};
 
 /// Maximum message length for Discord (2000 characters).
 const MAX_MESSAGE_LENGTH: usize = 2000;
@@ -1404,8 +1404,8 @@ pub enum DispatchEvent {
 impl PlatformAdapter for DiscordAdapter {
     async fn start(&self) -> Result<(), GatewayError> {
         info!(
-            "Discord adapter starting (token: {}...)",
-            &self.config.token[..8.min(self.config.token.len())]
+            "Discord adapter starting (token: {})",
+            describe_secret(&self.config.token)
         );
         self.base.mark_running();
         Ok(())

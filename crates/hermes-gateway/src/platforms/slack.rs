@@ -20,7 +20,7 @@ use tracing::{debug, info};
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
 
-use crate::adapter::{AdapterProxyConfig, BasePlatformAdapter};
+use crate::adapter::{describe_secret, AdapterProxyConfig, BasePlatformAdapter};
 
 /// Slack Web API base URL.
 const SLACK_API_BASE: &str = "https://slack.com/api";
@@ -1123,8 +1123,8 @@ impl SlackAdapter {
 impl PlatformAdapter for SlackAdapter {
     async fn start(&self) -> Result<(), GatewayError> {
         info!(
-            "Slack adapter starting (token: {}...)",
-            &self.config.token[..8.min(self.config.token.len())]
+            "Slack adapter starting (token: {})",
+            describe_secret(&self.config.token)
         );
         self.base.mark_running();
         Ok(())

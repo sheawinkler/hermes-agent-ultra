@@ -4012,6 +4012,12 @@ fn is_truthy(v: &str) -> bool {
     )
 }
 
+fn secret_stdout_allowed() -> bool {
+    std::env::var("HERMES_ALLOW_SECRET_STDOUT")
+        .ok()
+        .is_some_and(|v| is_truthy(&v))
+}
+
 async fn telegram_bot_token_from_env_or_prompt() -> Result<String, AgentError> {
     if let Ok(t) = std::env::var("TELEGRAM_BOT_TOKEN") {
         let t = t.trim().to_string();
@@ -6083,6 +6089,12 @@ async fn run_secrets(
                 lookup_secret_from_vault(&store, &provider).await
             {
                 if show {
+                    if !secret_stdout_allowed() {
+                        return Err(AgentError::Config(
+                            "Refusing plaintext secret output. Re-run with HERMES_ALLOW_SECRET_STDOUT=1 to opt in."
+                                .into(),
+                        ));
+                    }
                     println!("{secret}");
                 } else {
                     println!("{}", mask_secret(&secret));
@@ -6628,7 +6640,13 @@ async fn run_webhook(
             save_webhook_subscriptions(&subs_path, &subs)?;
             println!("Created webhook subscription: {}", route);
             println!("  URL path: /webhooks/{}", route);
-            println!("  Secret: {}", secret);
+            if secret_stdout_allowed() {
+                println!("  Secret: {}", secret);
+                println!("  (plaintext output enabled via HERMES_ALLOW_SECRET_STDOUT=1)");
+            } else {
+                println!("  Secret: {}", mask_secret(&secret));
+                println!("  (set HERMES_ALLOW_SECRET_STDOUT=1 to reveal plaintext once)");
+            }
             println!("  Deliver: {}", deliver);
         }
         "add" => {
@@ -6842,11 +6860,7 @@ async fn run_lumio(action: Option<String>, model: Option<String>) -> Result<(), 
                 };
                 println!("Lumio: logged in as {}", user);
                 println!("  API: {}", t.base_url);
-                println!(
-                    "  Token: {}...{}",
-                    &t.token[..8.min(t.token.len())],
-                    &t.token[t.token.len().saturating_sub(4)..]
-                );
+                println!("  Token: {}", mask_secret(&t.token));
             }
             None => {
                 println!("Lumio: not logged in");
@@ -11403,6 +11417,16 @@ mod tests {
             DmManager::with_pair_behavior(),
             hermes_gateway::gateway::GatewayConfig::default(),
         ))
+    }
+
+    #[test]
+    fn mask_secret_hides_token_body() {
+        let raw = "abcdefgh1234567890";
+        let masked = mask_secret(raw);
+        assert!(!masked.contains(raw));
+        assert!(masked.starts_with("abcd"));
+        assert!(masked.ends_with("7890"));
+        assert!(masked.contains("***"));
     }
 
     #[test]

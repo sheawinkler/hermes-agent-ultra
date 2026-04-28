@@ -28,6 +28,31 @@ pub enum CommandResult {
     Quit,
 }
 
+fn secret_stdout_allowed() -> bool {
+    std::env::var("HERMES_ALLOW_SECRET_STDOUT")
+        .ok()
+        .is_some_and(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+}
+
+fn mask_secret_value(secret: &str) -> String {
+    if secret.is_empty() {
+        return "(empty)".to_string();
+    }
+    if secret.len() <= 8 {
+        return "*".repeat(secret.len());
+    }
+    format!(
+        "{}***{}",
+        &secret[..4],
+        &secret[secret.len().saturating_sub(4)..]
+    )
+}
+
 // ---------------------------------------------------------------------------
 // Slash commands
 // ---------------------------------------------------------------------------
@@ -5185,7 +5210,17 @@ pub async fn handle_cli_pairing(
                 Ok(dev) => {
                     println!("Device '{}' approved.", dev.device_id);
                     if let Some(secret) = &dev.shared_secret {
-                        println!("  Shared secret: {}", secret);
+                        if secret_stdout_allowed() {
+                            println!("  Shared secret: {}", secret);
+                            println!(
+                                "  (plaintext output enabled via HERMES_ALLOW_SECRET_STDOUT=1)"
+                            );
+                        } else {
+                            println!("  Shared secret: {}", mask_secret_value(secret));
+                            println!(
+                                "  (set HERMES_ALLOW_SECRET_STDOUT=1 to reveal plaintext once)"
+                            );
+                        }
                         println!("  (Store this securely — it will not be shown again)");
                     }
                 }
@@ -6058,5 +6093,28 @@ mod tests {
         );
         assert!(catalog.contains("- `coder`\n  Use when building or debugging code."));
         assert!(catalog.contains("- `writer`\n  Use when drafting polished prose."));
+    }
+
+    #[test]
+    fn secret_stdout_gate_defaults_false() {
+        let _lock = env_test_lock();
+        std::env::remove_var("HERMES_ALLOW_SECRET_STDOUT");
+        assert!(!secret_stdout_allowed());
+    }
+
+    #[test]
+    fn secret_stdout_gate_accepts_truthy_values() {
+        let _lock = env_test_lock();
+        std::env::set_var("HERMES_ALLOW_SECRET_STDOUT", "yes");
+        assert!(secret_stdout_allowed());
+        std::env::remove_var("HERMES_ALLOW_SECRET_STDOUT");
+    }
+
+    #[test]
+    fn mask_secret_value_hides_payload() {
+        let raw = "very-secret-value";
+        let masked = mask_secret_value(raw);
+        assert!(!masked.contains(raw));
+        assert!(masked.contains("***"));
     }
 }

@@ -322,7 +322,7 @@ pub enum CliCommand {
         /// Secret value (used with `set`; if omitted, prompt is shown).
         #[arg(long)]
         value: Option<String>,
-        /// Show full secret value for `get` (default masks output).
+        /// Show full secret value for `get` (requires `HERMES_ALLOW_SECRET_STDOUT=1`; default masks output).
         #[arg(long)]
         show: bool,
     },

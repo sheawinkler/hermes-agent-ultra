@@ -62,6 +62,24 @@ pub struct BasePlatformAdapter {
     pub running: std::sync::atomic::AtomicBool,
 }
 
+/// Return a non-reversible token descriptor suitable for logs.
+///
+/// This avoids logging raw token prefixes/suffixes while still giving operators
+/// enough signal to confirm configuration changes.
+pub fn describe_secret(secret: &str) -> String {
+    let trimmed = secret.trim();
+    if trimmed.is_empty() {
+        return "missing".to_string();
+    }
+    // FNV-1a 64-bit fingerprint (stable, fast, non-cryptographic).
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for &b in trimmed.as_bytes() {
+        hash ^= b as u64;
+        hash = hash.wrapping_mul(0x00000100000001B3);
+    }
+    format!("len={}, fp={hash:016x}", trimmed.chars().count())
+}
+
 impl BasePlatformAdapter {
     /// Create a new `BasePlatformAdapter` with the given token.
     pub fn new(token: impl Into<String>) -> Self {
@@ -171,5 +189,20 @@ mod tests {
         let proxy = AdapterProxyConfig::default();
         assert!(proxy.http_proxy.is_none());
         assert!(proxy.socks_proxy.is_none());
+    }
+
+    #[test]
+    fn describe_secret_masks_value() {
+        let raw = "super-sensitive-token-value";
+        let masked = describe_secret(raw);
+        assert!(!masked.contains(raw));
+        assert!(masked.contains("len="));
+        assert!(masked.contains("fp="));
+    }
+
+    #[test]
+    fn describe_secret_empty() {
+        assert_eq!(describe_secret(""), "missing");
+        assert_eq!(describe_secret("   "), "missing");
     }
 }
