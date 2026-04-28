@@ -11,6 +11,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use bytes::Bytes;
 use hermes_core::AgentError;
 use regex::Regex;
 use serde::Deserialize;
@@ -221,6 +222,12 @@ struct RegistrySkillRecord {
     source: String,
     score: i32,
     install_source: RegistryInstallSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InstallFallbackSource {
+    SkillsSh,
+    Tap,
 }
 
 #[derive(Debug, Deserialize)]
@@ -536,6 +543,30 @@ fn score_registry_match(entry: &HermesSkillsIndexEntry, query: &str) -> i32 {
     0
 }
 
+fn skill_source_priority(source: &str) -> usize {
+    match source.trim().to_ascii_lowercase().as_str() {
+        "official" => 0,
+        "skills.sh" | "skills-sh" => 1,
+        "well-known" => 2,
+        "url" => 3,
+        "github" => 4,
+        "clawhub" => 5,
+        "claude-marketplace" => 6,
+        "lobehub" => 7,
+        _ => 99,
+    }
+}
+
+fn sort_registry_skill_records(records: &mut [RegistrySkillRecord]) {
+    records.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then_with(|| skill_source_priority(&a.source).cmp(&skill_source_priority(&b.source)))
+            .then_with(|| a.source.cmp(&b.source))
+            .then_with(|| a.identifier.cmp(&b.identifier))
+    });
+}
+
 async fn fetch_hermes_skills_index(
     client: &reqwest::Client,
 ) -> Result<Vec<HermesSkillsIndexEntry>, AgentError> {
@@ -649,12 +680,7 @@ async fn search_multi_registry(
         });
     }
 
-    matches.sort_by(|a, b| {
-        b.score
-            .cmp(&a.score)
-            .then_with(|| a.source.cmp(&b.source))
-            .then_with(|| a.identifier.cmp(&b.identifier))
-    });
+    sort_registry_skill_records(&mut matches);
     if matches.len() > limit {
         matches.truncate(limit);
     }
@@ -690,7 +716,7 @@ async fn resolve_skill_via_registry_index(
             identifier: entry.identifier.clone(),
             description: entry.description.clone(),
             source: entry.source.clone(),
-            score: 0,
+            score: score_registry_match(&entry, requested),
             install_source,
         };
         if requested_l == identifier_l
@@ -703,6 +729,9 @@ async fn resolve_skill_via_registry_index(
             fuzzy.push(rec);
         }
     }
+
+    sort_registry_skill_records(&mut exact);
+    sort_registry_skill_records(&mut fuzzy);
 
     if let Some(first) = exact.into_iter().next() {
         return Ok(first);
@@ -762,11 +791,11 @@ fn build_lobehub_skill_markdown(payload: &LobeHubAgentResponse, slug: &str) -> S
     md
 }
 
-fn skill_guard_scan_bundle(files: &[(String, Vec<u8>)]) -> Result<(), AgentError> {
+fn skill_guard_scan_bundle(files: &[(String, Bytes)]) -> Result<(), AgentError> {
     let guard = hermes_skills::SkillGuard::default();
     for (rel_path, bytes) in files {
         // Skip binary files to avoid false positives from compressed payloads.
-        let Ok(text) = std::str::from_utf8(bytes) else {
+        let Ok(text) = std::str::from_utf8(bytes.as_ref()) else {
             continue;
         };
         let probe = hermes_core::types::Skill {
@@ -1048,7 +1077,7 @@ async fn search_skills_via_taps(
 async fn fetch_skill_files_from_github(
     client: &reqwest::Client,
     source: &ResolvedSkillSource,
-) -> Result<Vec<(String, Vec<u8>)>, AgentError> {
+) -> Result<Vec<(String, Bytes)>, AgentError> {
     let tree = github_repo_tree(client, &source.repo, &source.branch).await?;
     let prefix = format!("{}/", source.skill_dir.trim_matches('/'));
     let mut files = Vec::new();
@@ -1089,7 +1118,7 @@ async fn fetch_skill_files_from_github(
             .bytes()
             .await
             .map_err(|e| AgentError::Config(format!("Invalid file payload: {}", e)))?;
-        files.push((rel_path, bytes.to_vec()));
+        files.push((rel_path, bytes));
     }
 
     if !files.iter().any(|(path, _)| path == "SKILL.md") {
@@ -1110,7 +1139,7 @@ async fn fetch_skill_files_from_github(
 async fn fetch_lobehub_skill_files(
     client: &reqwest::Client,
     slug: &str,
-) -> Result<Vec<(String, Vec<u8>)>, AgentError> {
+) -> Result<Vec<(String, Bytes)>, AgentError> {
     let url = format!("https://chat-agents.lobehub.com/{}.json", slug);
     let resp = client
         .get(&url)
@@ -1133,7 +1162,7 @@ async fn fetch_lobehub_skill_files(
         .await
         .map_err(|e| AgentError::Config(format!("Invalid LobeHub payload: {}", e)))?;
     let md = build_lobehub_skill_markdown(&payload, slug);
-    Ok(vec![("SKILL.md".to_string(), md.into_bytes())])
+    Ok(vec![("SKILL.md".to_string(), Bytes::from(md))])
 }
 
 fn detect_archive_format(bytes: &[u8]) -> &'static str {
@@ -1151,7 +1180,7 @@ fn detect_archive_format(bytes: &[u8]) -> &'static str {
     "unknown"
 }
 
-fn extract_clawhub_archive(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, AgentError> {
+fn extract_clawhub_archive(bytes: &[u8]) -> Result<Vec<(String, Bytes)>, AgentError> {
     match detect_archive_format(bytes) {
         "zip" => {
             let cursor = std::io::Cursor::new(bytes);
@@ -1181,7 +1210,7 @@ fn extract_clawhub_archive(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, Agent
                 std::io::Read::read_to_end(&mut file, &mut buf).map_err(|e| {
                     AgentError::Config(format!("Failed to read ClawHub file payload: {}", e))
                 })?;
-                out.push((normalized, buf));
+                out.push((normalized, Bytes::from(buf)));
             }
             Ok(out)
         }
@@ -1213,7 +1242,7 @@ fn extract_clawhub_archive(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, Agent
                 std::io::Read::read_to_end(&mut entry, &mut buf).map_err(|e| {
                     AgentError::Config(format!("Failed to read ClawHub tar payload: {}", e))
                 })?;
-                out.push((normalized, buf));
+                out.push((normalized, Bytes::from(buf)));
             }
             Ok(out)
         }
@@ -1227,7 +1256,7 @@ async fn fetch_clawhub_skill_files(
     client: &reqwest::Client,
     slug: &str,
     version_hint: Option<&str>,
-) -> Result<Vec<(String, Vec<u8>)>, AgentError> {
+) -> Result<Vec<(String, Bytes)>, AgentError> {
     let detail_url = format!("{}/skills/{}", CLAWHUB_API_BASE, slug);
     let detail = client
         .get(&detail_url)
@@ -1508,10 +1537,22 @@ async fn resolve_skills_sh_source(
     )))
 }
 
+async fn resolve_install_via_fallback_router(
+    client: &reqwest::Client,
+    skill_name: &str,
+    taps: &[String],
+) -> Result<(ResolvedSkillSource, InstallFallbackSource), AgentError> {
+    if let Ok(resolved) = resolve_skills_sh_source(client, skill_name).await {
+        return Ok((resolved, InstallFallbackSource::SkillsSh));
+    }
+    let resolved = resolve_skill_via_taps(client, taps, skill_name).await?;
+    Ok((resolved, InstallFallbackSource::Tap))
+}
+
 fn install_skill_files(
     skills_dir: &std::path::Path,
     install_name: &str,
-    files: &[(String, Vec<u8>)],
+    files: &[(String, Bytes)],
 ) -> Result<std::path::PathBuf, AgentError> {
     skill_guard_scan_bundle(files)?;
 
@@ -4200,29 +4241,24 @@ pub async fn handle_cli_skills(
                         }
                     }
                 } else {
-                    // Router-order parity fallback: after index miss, try skills.sh before taps.
-                    if let Ok(resolved) = resolve_skills_sh_source(&client, &skill_name).await {
-                        println!(
+                    let taps_file = hermes_config::hermes_home().join("skill_taps.json");
+                    let taps = merged_skill_taps(&read_skill_taps(&taps_file));
+                    let (resolved, route) =
+                        resolve_install_via_fallback_router(&client, &skill_name, &taps).await?;
+                    match route {
+                        InstallFallbackSource::SkillsSh => println!(
                             "Resolved source [skills.sh fallback]: {}/{} @ {}",
                             resolved.repo, resolved.skill_dir, resolved.branch
-                        );
-                        (
-                            fetch_skill_files_from_github(&client, &resolved).await?,
-                            skill_name.clone(),
-                        )
-                    } else {
-                        let taps_file = hermes_config::hermes_home().join("skill_taps.json");
-                        let taps = merged_skill_taps(&read_skill_taps(&taps_file));
-                        let resolved = resolve_skill_via_taps(&client, &taps, &skill_name).await?;
-                        println!(
+                        ),
+                        InstallFallbackSource::Tap => println!(
                             "Resolved source (tap): {}/{} @ {}",
                             resolved.repo, resolved.skill_dir, resolved.branch
-                        );
-                        (
-                            fetch_skill_files_from_github(&client, &resolved).await?,
-                            skill_name.clone(),
-                        )
+                        ),
                     }
+                    (
+                        fetch_skill_files_from_github(&client, &resolved).await?,
+                        skill_name.clone(),
+                    )
                 }
             };
 
@@ -8012,6 +8048,54 @@ mod tests {
             Some("MiniMax-AI/cli")
         );
         assert_eq!(first.get("path").and_then(|v| v.as_str()), Some("skill/"));
+    }
+
+    #[test]
+    fn sort_registry_skill_records_uses_router_priority_tie_break() {
+        let mut records = vec![
+            RegistrySkillRecord {
+                identifier: "lobehub/a".to_string(),
+                description: "".to_string(),
+                source: "lobehub".to_string(),
+                score: 700,
+                install_source: RegistryInstallSource::LobeHub {
+                    slug: "a".to_string(),
+                },
+            },
+            RegistrySkillRecord {
+                identifier: "skills.sh/b".to_string(),
+                description: "".to_string(),
+                source: "skills.sh".to_string(),
+                score: 700,
+                install_source: RegistryInstallSource::GitHub(ResolvedSkillSource {
+                    repo: "openai/skills".to_string(),
+                    branch: "main".to_string(),
+                    skill_dir: "skills/b".to_string(),
+                }),
+            },
+            RegistrySkillRecord {
+                identifier: "github/c".to_string(),
+                description: "".to_string(),
+                source: "github".to_string(),
+                score: 700,
+                install_source: RegistryInstallSource::GitHub(ResolvedSkillSource {
+                    repo: "openai/skills".to_string(),
+                    branch: "main".to_string(),
+                    skill_dir: "skills/c".to_string(),
+                }),
+            },
+        ];
+
+        sort_registry_skill_records(&mut records);
+        let ordered_sources: Vec<String> = records.into_iter().map(|r| r.source).collect();
+        assert_eq!(
+            ordered_sources,
+            vec![
+                "skills.sh".to_string(),
+                "github".to_string(),
+                "lobehub".to_string()
+            ]
+        );
     }
 
     #[test]
