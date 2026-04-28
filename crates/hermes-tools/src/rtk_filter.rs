@@ -531,4 +531,12 @@ mod tests {
         assert!(dir.path().join("raw.jsonl").exists());
         assert!(dir.path().join("filtered.jsonl").exists());
     }
+
+    #[test]
+    fn redact_secrets_redacts_telegram_style_token() {
+        let text = "telegram=8688122562:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+        let redacted = redact_secrets(text);
+        assert!(!redacted.contains("8688122562:"));
+        assert!(redacted.contains("<redacted>"));
+    }
 }
