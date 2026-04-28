@@ -195,7 +195,18 @@ impl SkillGuard {
             ));
         }
 
-        // 2. Check for dangerous patterns.
+        // 2. Security checks (dangerous patterns + URL validation).
+        self.scan_security_only(skill)?;
+
+        Ok(())
+    }
+
+    /// Security-only scan used for install-time and pre-use gating.
+    ///
+    /// Unlike `validate_skill`, this does not enforce formatting/structure
+    /// requirements and is safe to run against third-party skill bundles.
+    pub fn scan_security_only(&self, skill: &Skill) -> Result<(), SkillError> {
+        // Check built-in dangerous patterns.
         for (regex, reason) in COMPILED_DANGEROUS.iter() {
             if regex.is_match(&skill.content) {
                 return Err(SkillError::GuardViolation(format!(
@@ -217,7 +228,7 @@ impl SkillGuard {
             }
         }
 
-        // 3. Validate any URLs found in the content.
+        // Validate any URLs found in the content.
         self.validate_urls_in_content(&skill.content)?;
 
         Ok(())

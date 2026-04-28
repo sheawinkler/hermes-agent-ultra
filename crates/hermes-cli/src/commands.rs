@@ -174,6 +174,10 @@ const DEFAULT_SKILL_TAPS: &[&str] = &[
 ];
 
 const GITHUB_API_BASE: &str = "https://api.github.com";
+const HERMES_SKILLS_INDEX_URL: &str =
+    "https://hermes-agent.nousresearch.com/docs/api/skills-index.json";
+const SKILLS_SH_SEARCH_URL: &str = "https://skills.sh/api/search";
+const CLAWHUB_API_BASE: &str = "https://clawhub.ai/api/v1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SkillTapSpec {
@@ -186,6 +190,114 @@ struct ResolvedSkillSource {
     repo: String,
     branch: String,
     skill_dir: String,
+}
+
+#[derive(Debug, Clone)]
+enum RegistryInstallSource {
+    GitHub(ResolvedSkillSource),
+    LobeHub {
+        slug: String,
+    },
+    ClawHub {
+        slug: String,
+        version: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone)]
+struct RegistrySkillRecord {
+    identifier: String,
+    description: String,
+    source: String,
+    score: i32,
+    install_source: RegistryInstallSource,
+}
+
+#[derive(Debug, Deserialize)]
+struct HermesSkillsIndexResponse {
+    #[serde(default)]
+    skills: Vec<HermesSkillsIndexEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct HermesSkillsIndexEntry {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    description: String,
+    #[serde(default)]
+    source: String,
+    #[serde(default)]
+    identifier: String,
+    #[serde(default)]
+    repo: String,
+    #[serde(default)]
+    path: String,
+    #[serde(default)]
+    resolved_github_id: Option<String>,
+    #[serde(default)]
+    tags: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SkillsShSearchResponse {
+    #[serde(default)]
+    skills: Vec<SkillsShSearchEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct SkillsShSearchEntry {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    #[serde(rename = "skillId")]
+    skill_id: String,
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    source: String,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+struct LobeHubMeta {
+    #[serde(default)]
+    title: String,
+    #[serde(default)]
+    description: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct LobeHubAgentResponse {
+    #[serde(default)]
+    author: String,
+    #[serde(default)]
+    homepage: String,
+    #[serde(default)]
+    summary: String,
+    #[serde(default)]
+    meta: LobeHubMeta,
+    #[serde(default)]
+    config: LobeHubConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct LobeHubConfig {
+    #[serde(default)]
+    #[serde(rename = "systemRole")]
+    system_role: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ClawHubSkillDetailResponse {
+    #[serde(default)]
+    #[serde(rename = "latestVersion")]
+    latest_version: ClawHubLatestVersion,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct ClawHubLatestVersion {
+    #[serde(default)]
+    version: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -357,6 +469,308 @@ fn ensure_safe_relative_path(path: &str) -> Result<(), AgentError> {
                 path
             )));
         }
+    }
+    Ok(())
+}
+
+fn parse_registry_prefixed_skill(spec: &str) -> Option<(String, String)> {
+    let (prefix, rest) = spec.split_once('/')?;
+    let normalized = prefix.trim().to_ascii_lowercase();
+    let source = match normalized.as_str() {
+        "official" => "official",
+        "github" => "github",
+        "skills.sh" | "skills-sh" => "skills.sh",
+        "lobehub" => "lobehub",
+        "clawhub" => "clawhub",
+        "claude-marketplace" => "claude-marketplace",
+        _ => return None,
+    };
+    let key = rest.trim();
+    if key.is_empty() {
+        return None;
+    }
+    Some((source.to_string(), key.to_string()))
+}
+
+fn score_registry_match(entry: &HermesSkillsIndexEntry, query: &str) -> i32 {
+    let q = query.trim().to_ascii_lowercase();
+    if q.is_empty() {
+        return 0;
+    }
+
+    let name = entry.name.to_ascii_lowercase();
+    let id = entry.identifier.to_ascii_lowercase();
+    let desc = entry.description.to_ascii_lowercase();
+    let tags = entry
+        .tags
+        .iter()
+        .map(|t| t.to_ascii_lowercase())
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    if id == q || name == q {
+        return 1000;
+    }
+    if id.starts_with(&q) || name.starts_with(&q) {
+        return 900;
+    }
+    if id.contains(&q) || name.contains(&q) {
+        return 700;
+    }
+    if tags.contains(&q) {
+        return 550;
+    }
+    if desc.contains(&q) {
+        return 450;
+    }
+    0
+}
+
+async fn fetch_hermes_skills_index(
+    client: &reqwest::Client,
+) -> Result<Vec<HermesSkillsIndexEntry>, AgentError> {
+    let resp = client
+        .get(HERMES_SKILLS_INDEX_URL)
+        .header("Accept", "application/json")
+        .header("User-Agent", "hermes-agent-ultra")
+        .timeout(std::time::Duration::from_secs(25))
+        .send()
+        .await
+        .map_err(|e| AgentError::Config(format!("Skills index request failed: {}", e)))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(AgentError::Config(format!(
+            "Skills index lookup failed ({}): {}",
+            status, body
+        )));
+    }
+    let payload = resp
+        .json::<HermesSkillsIndexResponse>()
+        .await
+        .map_err(|e| AgentError::Config(format!("Invalid skills index response: {}", e)))?;
+    Ok(payload.skills)
+}
+
+fn resolved_source_from_index(entry: &HermesSkillsIndexEntry) -> Option<RegistryInstallSource> {
+    let source = entry.source.to_ascii_lowercase();
+    if source == "lobehub" {
+        let slug = entry
+            .identifier
+            .strip_prefix("lobehub/")
+            .unwrap_or(entry.identifier.as_str())
+            .trim()
+            .to_string();
+        if slug.is_empty() {
+            return None;
+        }
+        return Some(RegistryInstallSource::LobeHub { slug });
+    }
+    if source == "clawhub" {
+        let slug = entry.identifier.trim().to_string();
+        if slug.is_empty() {
+            return None;
+        }
+        return Some(RegistryInstallSource::ClawHub {
+            slug,
+            version: None,
+        });
+    }
+    if source == "official" {
+        let path = entry.path.trim().trim_matches('/');
+        if path.is_empty() {
+            return None;
+        }
+        return Some(RegistryInstallSource::GitHub(ResolvedSkillSource {
+            repo: "nousresearch/hermes-agent".to_string(),
+            branch: "main".to_string(),
+            skill_dir: format!("optional-skills/{}", path),
+        }));
+    }
+
+    if let Some(resolved) = entry.resolved_github_id.as_deref() {
+        if let Some((repo, _, skill_dir)) = parse_explicit_github_skill(resolved) {
+            return Some(RegistryInstallSource::GitHub(ResolvedSkillSource {
+                repo,
+                branch: "main".to_string(),
+                skill_dir,
+            }));
+        }
+    }
+
+    if !entry.repo.trim().is_empty() {
+        let dir = if !entry.path.trim().is_empty() {
+            entry.path.trim_matches('/').to_string()
+        } else {
+            // claude-marketplace entries often point at repo root collections.
+            "skills".to_string()
+        };
+        return Some(RegistryInstallSource::GitHub(ResolvedSkillSource {
+            repo: entry.repo.trim().to_string(),
+            branch: "main".to_string(),
+            skill_dir: dir,
+        }));
+    }
+
+    None
+}
+
+async fn search_multi_registry(
+    client: &reqwest::Client,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<RegistrySkillRecord>, AgentError> {
+    let entries = fetch_hermes_skills_index(client).await?;
+    let mut matches: Vec<RegistrySkillRecord> = Vec::new();
+    for entry in entries {
+        let score = score_registry_match(&entry, query);
+        if score <= 0 {
+            continue;
+        }
+        let Some(install_source) = resolved_source_from_index(&entry) else {
+            continue;
+        };
+        matches.push(RegistrySkillRecord {
+            identifier: entry.identifier.clone(),
+            description: entry.description.clone(),
+            source: entry.source.clone(),
+            score,
+            install_source,
+        });
+    }
+
+    matches.sort_by(|a, b| {
+        b.score
+            .cmp(&a.score)
+            .then_with(|| a.source.cmp(&b.source))
+            .then_with(|| a.identifier.cmp(&b.identifier))
+    });
+    if matches.len() > limit {
+        matches.truncate(limit);
+    }
+    Ok(matches)
+}
+
+async fn resolve_skill_via_registry_index(
+    client: &reqwest::Client,
+    requested: &str,
+    source_hint: Option<&str>,
+) -> Result<RegistrySkillRecord, AgentError> {
+    let entries = fetch_hermes_skills_index(client).await?;
+    let requested_l = requested.trim().to_ascii_lowercase();
+    let source_hint = source_hint.map(|s| s.to_ascii_lowercase());
+
+    let mut exact: Vec<RegistrySkillRecord> = Vec::new();
+    let mut fuzzy: Vec<RegistrySkillRecord> = Vec::new();
+    for entry in entries {
+        if let Some(ref hint) = source_hint {
+            if entry.source.to_ascii_lowercase() != *hint {
+                continue;
+            }
+        }
+        let Some(install_source) = resolved_source_from_index(&entry) else {
+            continue;
+        };
+        let source_l = entry.source.to_ascii_lowercase();
+        let identifier_l = entry.identifier.to_ascii_lowercase();
+        let name_l = entry.name.to_ascii_lowercase();
+        let source_scoped = format!("{}/{}", source_l, name_l);
+        let source_scoped_id = format!("{}/{}", source_l, identifier_l);
+        let rec = RegistrySkillRecord {
+            identifier: entry.identifier.clone(),
+            description: entry.description.clone(),
+            source: entry.source.clone(),
+            score: 0,
+            install_source,
+        };
+        if requested_l == identifier_l
+            || requested_l == name_l
+            || requested_l == source_scoped
+            || requested_l == source_scoped_id
+        {
+            exact.push(rec);
+        } else if identifier_l.contains(&requested_l) || name_l.contains(&requested_l) {
+            fuzzy.push(rec);
+        }
+    }
+
+    if let Some(first) = exact.into_iter().next() {
+        return Ok(first);
+    }
+    if let Some(first) = fuzzy.into_iter().next() {
+        return Ok(first);
+    }
+    Err(AgentError::Config(format!(
+        "Skill '{}' was not found in multi-registry index.",
+        requested
+    )))
+}
+
+fn build_lobehub_skill_markdown(payload: &LobeHubAgentResponse, slug: &str) -> String {
+    let title = if payload.meta.title.trim().is_empty() {
+        slug.to_string()
+    } else {
+        payload.meta.title.trim().to_string()
+    };
+    let description = if payload.meta.description.trim().is_empty() {
+        payload.summary.trim().to_string()
+    } else {
+        payload.meta.description.trim().to_string()
+    };
+    let role = payload.config.system_role.trim();
+
+    let mut md = String::new();
+    md.push_str("---\n");
+    md.push_str(&format!("name: {}\n", slug));
+    if !description.is_empty() {
+        md.push_str(&format!(
+            "description: {}\n",
+            description.replace('\n', " ")
+        ));
+    }
+    md.push_str("category: lobehub\n");
+    md.push_str("---\n\n");
+    md.push_str(&format!("# {}\n\n", title));
+    if !description.is_empty() {
+        md.push_str(&format!("{}\n\n", description));
+    }
+    md.push_str("## Source\n");
+    md.push_str(&format!("- Registry: lobehub\n- Identifier: {}\n", slug));
+    if !payload.author.trim().is_empty() {
+        md.push_str(&format!("- Author: {}\n", payload.author.trim()));
+    }
+    if !payload.homepage.trim().is_empty() {
+        md.push_str(&format!("- Homepage: {}\n", payload.homepage.trim()));
+    }
+    md.push_str("\n## Instructions\n");
+    if role.is_empty() {
+        md.push_str("No system role provided by source registry.\n");
+    } else {
+        md.push_str(role);
+        md.push('\n');
+    }
+    md
+}
+
+fn skill_guard_scan_bundle(files: &[(String, Vec<u8>)]) -> Result<(), AgentError> {
+    let guard = hermes_skills::SkillGuard::default();
+    for (rel_path, bytes) in files {
+        // Skip binary files to avoid false positives from compressed payloads.
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            continue;
+        };
+        let probe = hermes_core::types::Skill {
+            name: rel_path.clone(),
+            content: text.to_string(),
+            category: Some("external".to_string()),
+            description: None,
+        };
+        guard.scan_security_only(&probe).map_err(|e| {
+            AgentError::Config(format!(
+                "Security scan failed for skill bundle file '{}': {}",
+                rel_path, e
+            ))
+        })?;
     }
     Ok(())
 }
@@ -683,11 +1097,414 @@ async fn fetch_skill_files_from_github(
     Ok(files)
 }
 
+async fn fetch_lobehub_skill_files(
+    client: &reqwest::Client,
+    slug: &str,
+) -> Result<Vec<(String, Vec<u8>)>, AgentError> {
+    let url = format!("https://chat-agents.lobehub.com/{}.json", slug);
+    let resp = client
+        .get(&url)
+        .header("Accept", "application/json,text/plain,*/*")
+        .header("User-Agent", "Mozilla/5.0 hermes-agent-ultra")
+        .timeout(std::time::Duration::from_secs(25))
+        .send()
+        .await
+        .map_err(|e| AgentError::Config(format!("LobeHub request failed: {}", e)))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(AgentError::Config(format!(
+            "LobeHub lookup failed for '{}' ({}): {}",
+            slug, status, body
+        )));
+    }
+    let payload = resp
+        .json::<LobeHubAgentResponse>()
+        .await
+        .map_err(|e| AgentError::Config(format!("Invalid LobeHub payload: {}", e)))?;
+    let md = build_lobehub_skill_markdown(&payload, slug);
+    Ok(vec![("SKILL.md".to_string(), md.into_bytes())])
+}
+
+fn detect_archive_format(bytes: &[u8]) -> &'static str {
+    if bytes.len() >= 4
+        && bytes[0] == 0x50
+        && bytes[1] == 0x4B
+        && bytes[2] == 0x03
+        && bytes[3] == 0x04
+    {
+        return "zip";
+    }
+    if bytes.len() >= 2 && bytes[0] == 0x1F && bytes[1] == 0x8B {
+        return "tar.gz";
+    }
+    "unknown"
+}
+
+fn extract_clawhub_archive(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, AgentError> {
+    match detect_archive_format(bytes) {
+        "zip" => {
+            let cursor = std::io::Cursor::new(bytes);
+            let mut zip = zip::ZipArchive::new(cursor).map_err(|e| {
+                AgentError::Config(format!("Failed to parse ClawHub zip payload: {}", e))
+            })?;
+            let mut out = Vec::new();
+            for i in 0..zip.len() {
+                let mut file = zip.by_index(i).map_err(|e| {
+                    AgentError::Config(format!("Failed to read ClawHub zip entry: {}", e))
+                })?;
+                if file.is_dir() {
+                    continue;
+                }
+                let raw_name = file.name().replace('\\', "/");
+                let segments: Vec<&str> = raw_name.split('/').filter(|s| !s.is_empty()).collect();
+                let normalized = if segments.is_empty() {
+                    file.name().to_string()
+                } else if segments.len() == 1 {
+                    segments[0].to_string()
+                } else {
+                    // Drop top-level archive folder if present.
+                    segments[1..].join("/")
+                };
+                ensure_safe_relative_path(&normalized)?;
+                let mut buf = Vec::new();
+                std::io::Read::read_to_end(&mut file, &mut buf).map_err(|e| {
+                    AgentError::Config(format!("Failed to read ClawHub file payload: {}", e))
+                })?;
+                out.push((normalized, buf));
+            }
+            Ok(out)
+        }
+        "tar.gz" => {
+            let decoder = flate2::read::GzDecoder::new(bytes);
+            let mut archive = tar::Archive::new(decoder);
+            let mut out = Vec::new();
+            let entries = archive.entries().map_err(|e| {
+                AgentError::Config(format!("Failed to parse ClawHub tar payload: {}", e))
+            })?;
+            for entry in entries {
+                let mut entry = entry.map_err(|e| {
+                    AgentError::Config(format!("Failed to read ClawHub tar entry: {}", e))
+                })?;
+                if !entry.header().entry_type().is_file() {
+                    continue;
+                }
+                let path = entry
+                    .path()
+                    .map_err(|e| AgentError::Config(format!("Invalid tar entry path: {}", e)))?
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                let normalized = path.split('/').skip(1).collect::<Vec<_>>().join("/");
+                if normalized.is_empty() {
+                    continue;
+                }
+                ensure_safe_relative_path(&normalized)?;
+                let mut buf = Vec::new();
+                std::io::Read::read_to_end(&mut entry, &mut buf).map_err(|e| {
+                    AgentError::Config(format!("Failed to read ClawHub tar payload: {}", e))
+                })?;
+                out.push((normalized, buf));
+            }
+            Ok(out)
+        }
+        _ => Err(AgentError::Config(
+            "Unsupported ClawHub archive format (expected zip or tar.gz).".to_string(),
+        )),
+    }
+}
+
+async fn fetch_clawhub_skill_files(
+    client: &reqwest::Client,
+    slug: &str,
+    version_hint: Option<&str>,
+) -> Result<Vec<(String, Vec<u8>)>, AgentError> {
+    let detail_url = format!("{}/skills/{}", CLAWHUB_API_BASE, slug);
+    let detail = client
+        .get(&detail_url)
+        .header("Accept", "application/json")
+        .header("User-Agent", "Mozilla/5.0 hermes-agent-ultra")
+        .timeout(std::time::Duration::from_secs(25))
+        .send()
+        .await
+        .map_err(|e| AgentError::Config(format!("ClawHub detail request failed: {}", e)))?;
+    if !detail.status().is_success() {
+        let status = detail.status();
+        let body = detail.text().await.unwrap_or_default();
+        return Err(AgentError::Config(format!(
+            "ClawHub detail lookup failed for '{}' ({}): {}",
+            slug, status, body
+        )));
+    }
+    let payload = detail
+        .json::<ClawHubSkillDetailResponse>()
+        .await
+        .map_err(|e| AgentError::Config(format!("Invalid ClawHub detail payload: {}", e)))?;
+    let version = version_hint
+        .filter(|v| !v.trim().is_empty())
+        .map(|v| v.to_string())
+        .or_else(|| {
+            let v = payload.latest_version.version.trim();
+            if v.is_empty() {
+                None
+            } else {
+                Some(v.to_string())
+            }
+        })
+        .ok_or_else(|| {
+            AgentError::Config(format!("No ClawHub version available for '{}'.", slug))
+        })?;
+
+    let download_url = format!(
+        "{}/download?slug={}&version={}",
+        CLAWHUB_API_BASE,
+        urlencoding::encode(slug),
+        urlencoding::encode(&version)
+    );
+    let mut last_err = String::new();
+    for attempt in 1..=4 {
+        let resp = client
+            .get(&download_url)
+            .header("Accept", "*/*")
+            .header("User-Agent", "Mozilla/5.0 hermes-agent-ultra")
+            .timeout(std::time::Duration::from_secs(40))
+            .send()
+            .await
+            .map_err(|e| AgentError::Config(format!("ClawHub download request failed: {}", e)))?;
+        if resp.status().is_success() {
+            let bytes = resp.bytes().await.map_err(|e| {
+                AgentError::Config(format!("Invalid ClawHub download payload: {}", e))
+            })?;
+            return extract_clawhub_archive(&bytes);
+        }
+        if resp.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+            let wait_secs = attempt * 2;
+            tokio::time::sleep(std::time::Duration::from_secs(wait_secs as u64)).await;
+            last_err = "rate limited (429)".to_string();
+            continue;
+        }
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(AgentError::Config(format!(
+            "ClawHub download failed for '{}@{}' ({}): {}",
+            slug, version, status, body
+        )));
+    }
+    Err(AgentError::Config(format!(
+        "ClawHub download for '{}@{}' failed after retries: {}",
+        slug, version, last_err
+    )))
+}
+
+#[derive(Debug, Deserialize)]
+struct ClaudeMarketplaceManifest {
+    #[serde(default)]
+    plugins: Vec<ClaudeMarketplacePlugin>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ClaudeMarketplacePlugin {
+    #[serde(default)]
+    name: String,
+    #[serde(default)]
+    skills: Vec<String>,
+}
+
+async fn fetch_claude_marketplace_manifest(
+    client: &reqwest::Client,
+) -> Result<ClaudeMarketplaceManifest, AgentError> {
+    let url = format!(
+        "{}/repos/anthropics/skills/contents/.claude-plugin/marketplace.json",
+        GITHUB_API_BASE
+    );
+    let resp = github_request(client, &url, "application/vnd.github.v3.raw")
+        .timeout(std::time::Duration::from_secs(20))
+        .send()
+        .await
+        .map_err(|e| AgentError::Config(format!("Claude marketplace request failed: {}", e)))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(AgentError::Config(format!(
+            "Claude marketplace lookup failed ({}): {}",
+            status, body
+        )));
+    }
+    resp.json::<ClaudeMarketplaceManifest>()
+        .await
+        .map_err(|e| AgentError::Config(format!("Invalid Claude marketplace payload: {}", e)))
+}
+
+async fn resolve_claude_marketplace_skill(
+    client: &reqwest::Client,
+    requested: &str,
+) -> Result<ResolvedSkillSource, AgentError> {
+    let manifest = fetch_claude_marketplace_manifest(client).await?;
+    let req = requested.trim().trim_matches('/').to_ascii_lowercase();
+    let mut candidate_paths: Vec<String> = Vec::new();
+    for plugin in manifest.plugins {
+        let plugin_name = plugin.name.to_ascii_lowercase();
+        for skill_path in plugin.skills {
+            let normalized = skill_path
+                .trim()
+                .trim_start_matches("./")
+                .trim_start_matches('/')
+                .to_string();
+            if normalized.is_empty() {
+                continue;
+            }
+            let basename = normalized
+                .split('/')
+                .next_back()
+                .unwrap_or(normalized.as_str())
+                .to_ascii_lowercase();
+            if req == basename
+                || req == normalized.to_ascii_lowercase()
+                || req == format!("{}/{}", plugin_name, basename)
+                || req == format!("{}/{}", plugin_name, normalized.to_ascii_lowercase())
+            {
+                return Ok(ResolvedSkillSource {
+                    repo: "anthropics/skills".to_string(),
+                    branch: "main".to_string(),
+                    skill_dir: normalized,
+                });
+            }
+            if basename.contains(&req) || normalized.to_ascii_lowercase().contains(&req) {
+                candidate_paths.push(normalized);
+            }
+        }
+    }
+    candidate_paths.sort();
+    candidate_paths.dedup();
+    Err(AgentError::Config(format!(
+        "Claude marketplace skill '{}' not found. Suggestions: {}",
+        requested,
+        if candidate_paths.is_empty() {
+            "none".to_string()
+        } else {
+            candidate_paths
+                .into_iter()
+                .take(8)
+                .collect::<Vec<_>>()
+                .join(", ")
+        }
+    )))
+}
+
+async fn resolve_official_skill_source(
+    client: &reqwest::Client,
+    requested: &str,
+) -> Result<ResolvedSkillSource, AgentError> {
+    let req = requested.trim().trim_matches('/');
+    if req.is_empty() {
+        return Err(AgentError::Config(
+            "Missing official skill identifier (e.g., official/security/1password).".to_string(),
+        ));
+    }
+    if req.contains('/') {
+        return Ok(ResolvedSkillSource {
+            repo: "nousresearch/hermes-agent".to_string(),
+            branch: "main".to_string(),
+            skill_dir: format!("optional-skills/{}", req),
+        });
+    }
+    let resolved = resolve_skill_via_registry_index(client, req, Some("official")).await?;
+    match resolved.install_source {
+        RegistryInstallSource::GitHub(source) => Ok(source),
+        _ => Err(AgentError::Config(format!(
+            "Official skill '{}' does not resolve to a GitHub-backed source.",
+            requested
+        ))),
+    }
+}
+
+async fn resolve_skills_sh_source(
+    client: &reqwest::Client,
+    requested: &str,
+) -> Result<ResolvedSkillSource, AgentError> {
+    let req = requested.trim().trim_matches('/');
+    if req.is_empty() {
+        return Err(AgentError::Config(
+            "Missing skills.sh skill identifier.".to_string(),
+        ));
+    }
+    if let Some((repo, _, skill_dir)) = parse_explicit_github_skill(req) {
+        let branch = github_default_branch(client, &repo).await?;
+        return Ok(ResolvedSkillSource {
+            repo,
+            branch,
+            skill_dir,
+        });
+    }
+
+    if let Ok(resolved) = resolve_skill_via_registry_index(client, req, Some("skills.sh")).await {
+        if let RegistryInstallSource::GitHub(source) = resolved.install_source {
+            let branch = github_default_branch(client, &source.repo).await?;
+            return Ok(ResolvedSkillSource { branch, ..source });
+        }
+    }
+
+    let search_resp = client
+        .get(SKILLS_SH_SEARCH_URL)
+        .query(&[("q", req), ("limit", "20")])
+        .header("Accept", "application/json")
+        .header("User-Agent", "hermes-agent-ultra")
+        .timeout(std::time::Duration::from_secs(20))
+        .send()
+        .await
+        .map_err(|e| AgentError::Config(format!("skills.sh search request failed: {}", e)))?;
+    if !search_resp.status().is_success() {
+        let status = search_resp.status();
+        let body = search_resp.text().await.unwrap_or_default();
+        return Err(AgentError::Config(format!(
+            "skills.sh search failed ({}): {}",
+            status, body
+        )));
+    }
+    let payload = search_resp
+        .json::<SkillsShSearchResponse>()
+        .await
+        .map_err(|e| AgentError::Config(format!("Invalid skills.sh payload: {}", e)))?;
+    let req_l = req.to_ascii_lowercase();
+    for hit in payload.skills {
+        let source = hit.source.trim();
+        if source.is_empty() {
+            continue;
+        }
+        let skill_id = if hit.skill_id.trim().is_empty() {
+            hit.name.trim().to_string()
+        } else {
+            hit.skill_id.trim().to_string()
+        };
+        let repo = source.to_string();
+        let branch = github_default_branch(client, &repo).await?;
+        if let Ok(found) = resolve_skill_in_repo(client, &repo, &skill_id, Some("skills")).await {
+            return Ok(found);
+        }
+        if let Ok(found) = resolve_skill_in_repo(client, &repo, &req_l, Some("skills")).await {
+            return Ok(found);
+        }
+        if let Some((repo2, _, dir)) = parse_explicit_github_skill(&hit.id) {
+            return Ok(ResolvedSkillSource {
+                repo: repo2,
+                branch,
+                skill_dir: dir,
+            });
+        }
+    }
+
+    Err(AgentError::Config(format!(
+        "Unable to resolve skills.sh skill '{}'.",
+        requested
+    )))
+}
+
 fn install_skill_files(
     skills_dir: &std::path::Path,
     install_name: &str,
     files: &[(String, Vec<u8>)],
 ) -> Result<std::path::PathBuf, AgentError> {
+    skill_guard_scan_bundle(files)?;
+
     std::fs::create_dir_all(skills_dir)
         .map_err(|e| AgentError::Io(format!("Failed to create skills dir: {}", e)))?;
 
@@ -726,7 +1543,36 @@ fn read_skill_taps(path: &std::path::Path) -> Vec<String> {
         return Vec::new();
     }
     let content = std::fs::read_to_string(path).unwrap_or_else(|_| "[]".to_string());
-    serde_json::from_str(&content).unwrap_or_default()
+    let parsed: Result<serde_json::Value, _> = serde_json::from_str(&content);
+    let Ok(value) = parsed else {
+        return Vec::new();
+    };
+    match value {
+        serde_json::Value::Array(arr) => arr
+            .into_iter()
+            .filter_map(|v| v.as_str().map(|s| s.to_string()))
+            .collect(),
+        serde_json::Value::Object(map) => {
+            let taps = map.get("taps").cloned().unwrap_or(serde_json::Value::Null);
+            match taps {
+                serde_json::Value::Array(arr) => arr
+                    .into_iter()
+                    .filter_map(|item| match item {
+                        serde_json::Value::String(s) => Some(s),
+                        serde_json::Value::Object(obj) => obj
+                            .get("url")
+                            .and_then(|u| u.as_str())
+                            .or_else(|| obj.get("tap").and_then(|u| u.as_str()))
+                            .or_else(|| obj.get("repo").and_then(|u| u.as_str()))
+                            .map(|s| s.to_string()),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            }
+        }
+        _ => Vec::new(),
+    }
 }
 
 fn merged_skill_taps(custom_taps: &[String]) -> Vec<String> {
@@ -2722,9 +3568,29 @@ pub async fn handle_cli_skills(
                 println!("Usage: hermes skills search <query>");
                 return Ok(());
             }
-            println!("Searching Skills Hub for: \"{}\"...", query);
+            println!("Searching registries for: \"{}\"...", query);
             let client = reqwest::Client::new();
             let mut displayed_results = false;
+
+            if let Ok(results) = search_multi_registry(&client, &query, 40).await {
+                if !results.is_empty() {
+                    displayed_results = true;
+                    println!("Multi-registry matches:");
+                    for rec in results {
+                        let short_desc = if rec.description.trim().is_empty() {
+                            "(no description)"
+                        } else {
+                            rec.description.trim()
+                        };
+                        println!("  • [{}] {} — {}", rec.source, rec.identifier, short_desc);
+                    }
+                    println!(
+                        "\nInstall with: hermes skills install <identifier> (example: skills.sh/anthropics/skills/skill-creator)"
+                    );
+                }
+            }
+
+            // Legacy hub path retained for compatibility.
             match client
                 .get("https://skills.hermes.run/api/search")
                 .query(&[("q", &query)])
@@ -2736,10 +3602,12 @@ pub async fn handle_cli_skills(
                     if let Ok(data) = resp.json::<serde_json::Value>().await {
                         if let Some(results) = data.get("results").and_then(|r| r.as_array()) {
                             if results.is_empty() {
-                                println!("No skills found matching \"{}\".", query);
+                                if !displayed_results {
+                                    println!("No skills found matching \"{}\".", query);
+                                }
                             } else {
                                 displayed_results = true;
-                                println!("Found {} skill(s):", results.len());
+                                println!("\nLegacy Skills Hub matches:");
                                 for skill in results {
                                     let name =
                                         skill.get("name").and_then(|n| n.as_str()).unwrap_or("?");
@@ -2756,15 +3624,21 @@ pub async fn handle_cli_skills(
                                 println!("\nInstall with: hermes skills install <name>");
                             }
                         } else {
-                            println!("Unexpected response format from Skills Hub.");
+                            if !displayed_results {
+                                println!("Unexpected response format from Skills Hub.");
+                            }
                         }
                     }
                 }
                 Ok(resp) => {
-                    println!("Skills Hub returned status {}", resp.status());
+                    if !displayed_results {
+                        println!("Skills Hub returned status {}", resp.status());
+                    }
                 }
                 Err(e) => {
-                    println!("Could not reach Skills Hub: {}", e);
+                    if !displayed_results {
+                        println!("Could not reach Skills Hub: {}", e);
+                    }
                 }
             }
             if !displayed_results {
@@ -2795,40 +3669,172 @@ pub async fn handle_cli_skills(
 
             let client = reqwest::Client::new();
             let explicit = parse_explicit_github_skill(&skill_name);
+            let registry_prefixed = parse_registry_prefixed_skill(&skill_name);
 
-            let resolved = if let Some((repo, maybe_branch, skill_dir)) = explicit {
+            let (files, install_seed) = if let Some((repo, maybe_branch, skill_dir)) = explicit {
                 let branch = if let Some(branch) = maybe_branch {
                     branch
                 } else {
                     github_default_branch(&client, &repo).await?
                 };
-                ResolvedSkillSource {
+                let resolved = ResolvedSkillSource {
                     repo,
                     branch,
                     skill_dir,
+                };
+                println!(
+                    "Resolved source: {}/{} @ {}",
+                    resolved.repo, resolved.skill_dir, resolved.branch
+                );
+                (
+                    fetch_skill_files_from_github(&client, &resolved).await?,
+                    skill_name.clone(),
+                )
+            } else if let Some((source, key)) = registry_prefixed {
+                match source.as_str() {
+                    "official" => {
+                        let resolved = resolve_official_skill_source(&client, &key).await?;
+                        println!(
+                            "Resolved official source: {}/{} @ {}",
+                            resolved.repo, resolved.skill_dir, resolved.branch
+                        );
+                        (
+                            fetch_skill_files_from_github(&client, &resolved).await?,
+                            key,
+                        )
+                    }
+                    "skills.sh" => {
+                        let resolved = resolve_skills_sh_source(&client, &key).await?;
+                        println!(
+                            "Resolved skills.sh source: {}/{} @ {}",
+                            resolved.repo, resolved.skill_dir, resolved.branch
+                        );
+                        (
+                            fetch_skill_files_from_github(&client, &resolved).await?,
+                            key,
+                        )
+                    }
+                    "lobehub" => {
+                        println!("Resolved lobehub source: {}", key);
+                        (fetch_lobehub_skill_files(&client, &key).await?, key)
+                    }
+                    "clawhub" => {
+                        println!("Resolved clawhub source: {}", key);
+                        (
+                            fetch_clawhub_skill_files(&client, &key, _requested_version.as_deref())
+                                .await?,
+                            key,
+                        )
+                    }
+                    "claude-marketplace" => {
+                        let resolved = resolve_claude_marketplace_skill(&client, &key).await?;
+                        println!(
+                            "Resolved claude-marketplace source: {}/{} @ {}",
+                            resolved.repo, resolved.skill_dir, resolved.branch
+                        );
+                        (
+                            fetch_skill_files_from_github(&client, &resolved).await?,
+                            key,
+                        )
+                    }
+                    "github" => {
+                        let (repo, maybe_branch, skill_dir) = parse_explicit_github_skill(&key)
+                            .ok_or_else(|| {
+                                AgentError::Config(format!(
+                                    "github/ installs require owner/repo/path, got '{}'",
+                                    key
+                                ))
+                            })?;
+                        let branch = if let Some(branch) = maybe_branch {
+                            branch
+                        } else {
+                            github_default_branch(&client, &repo).await?
+                        };
+                        let resolved = ResolvedSkillSource {
+                            repo,
+                            branch,
+                            skill_dir,
+                        };
+                        println!(
+                            "Resolved github source: {}/{} @ {}",
+                            resolved.repo, resolved.skill_dir, resolved.branch
+                        );
+                        (
+                            fetch_skill_files_from_github(&client, &resolved).await?,
+                            key,
+                        )
+                    }
+                    _ => {
+                        return Err(AgentError::Config(format!(
+                            "Unsupported skill registry source '{}'",
+                            source
+                        )))
+                    }
                 }
             } else if let Some(skill_hint) = _requested_version
                 .as_deref()
                 .filter(|_| looks_like_github_repo_slug(&skill_name))
             {
-                resolve_skill_in_repo(&client, &skill_name, skill_hint, Some("skills")).await?
+                let resolved =
+                    resolve_skill_in_repo(&client, &skill_name, skill_hint, Some("skills")).await?;
+                println!(
+                    "Resolved source: {}/{} @ {}",
+                    resolved.repo, resolved.skill_dir, resolved.branch
+                );
+                (
+                    fetch_skill_files_from_github(&client, &resolved).await?,
+                    skill_name.clone(),
+                )
             } else {
-                let taps_file = hermes_config::hermes_home().join("skill_taps.json");
-                let taps = merged_skill_taps(&read_skill_taps(&taps_file));
-                resolve_skill_via_taps(&client, &taps, &skill_name).await?
+                let from_index = resolve_skill_via_registry_index(&client, &skill_name, None).await;
+                if let Ok(hit) = from_index {
+                    match hit.install_source {
+                        RegistryInstallSource::GitHub(resolved) => {
+                            let branch = github_default_branch(&client, &resolved.repo).await?;
+                            let resolved = ResolvedSkillSource { branch, ..resolved };
+                            println!(
+                                "Resolved source [{}]: {}/{} @ {}",
+                                hit.source, resolved.repo, resolved.skill_dir, resolved.branch
+                            );
+                            (
+                                fetch_skill_files_from_github(&client, &resolved).await?,
+                                hit.identifier,
+                            )
+                        }
+                        RegistryInstallSource::LobeHub { slug } => {
+                            println!("Resolved source [lobehub]: {}", slug);
+                            (fetch_lobehub_skill_files(&client, &slug).await?, slug)
+                        }
+                        RegistryInstallSource::ClawHub { slug, version } => {
+                            println!("Resolved source [clawhub]: {}", slug);
+                            (
+                                fetch_clawhub_skill_files(&client, &slug, version.as_deref())
+                                    .await?,
+                                slug,
+                            )
+                        }
+                    }
+                } else {
+                    let taps_file = hermes_config::hermes_home().join("skill_taps.json");
+                    let taps = merged_skill_taps(&read_skill_taps(&taps_file));
+                    let resolved = resolve_skill_via_taps(&client, &taps, &skill_name).await?;
+                    println!(
+                        "Resolved source (tap): {}/{} @ {}",
+                        resolved.repo, resolved.skill_dir, resolved.branch
+                    );
+                    (
+                        fetch_skill_files_from_github(&client, &resolved).await?,
+                        skill_name.clone(),
+                    )
+                }
             };
 
-            println!(
-                "Resolved source: {}/{} @ {}",
-                resolved.repo, resolved.skill_dir, resolved.branch
+            let install_name = sanitize_skill_install_name(
+                _requested_version
+                    .as_deref()
+                    .filter(|_| looks_like_github_repo_slug(&skill_name))
+                    .unwrap_or(install_seed.as_str()),
             );
-
-            let files = fetch_skill_files_from_github(&client, &resolved).await?;
-            let install_seed = _requested_version
-                .as_deref()
-                .filter(|_| looks_like_github_repo_slug(&skill_name))
-                .unwrap_or(skill_name.as_str());
-            let install_name = sanitize_skill_install_name(install_seed);
             let target = install_skill_files(&skills_dir, &install_name, &files)?;
             println!("Skill '{}' installed to {}", install_name, target.display());
         }

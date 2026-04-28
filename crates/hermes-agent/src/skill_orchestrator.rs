@@ -9,6 +9,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+use hermes_core::types::Skill;
+use hermes_skills::SkillGuard;
 use regex::Regex;
 
 // ---------------------------------------------------------------------------
@@ -101,6 +103,18 @@ fn slugify_skill_name(name: &str) -> String {
     let cleaned = SKILL_INVALID_CHARS.replace_all(&lower, "");
     let deduped = SKILL_MULTI_HYPHEN.replace_all(&cleaned, "-");
     deduped.trim_matches('-').to_string()
+}
+
+fn security_gate_skill_content(name: &str, body: &str) -> Result<(), String> {
+    let probe = Skill {
+        name: name.to_string(),
+        content: body.to_string(),
+        category: Some("external".to_string()),
+        description: None,
+    };
+    SkillGuard::default()
+        .scan_security_only(&probe)
+        .map_err(|e| e.to_string())
 }
 
 // ---------------------------------------------------------------------------
@@ -216,6 +230,10 @@ impl SkillOrchestrator {
         if cmd_name.is_empty() {
             return;
         }
+        if let Err(err) = security_gate_skill_content(&name, body) {
+            tracing::warn!("Skipping skill '{}' due to security policy: {}", name, err);
+            return;
+        }
 
         let skill_dir = skill_md_path
             .parent()
@@ -267,6 +285,12 @@ impl SkillOrchestrator {
         };
 
         let (_, body) = parse_frontmatter(&content);
+        if let Err(err) = security_gate_skill_content(&info.name, body) {
+            return Some(format!(
+                "[Blocked skill '{}' by security policy: {}]",
+                info.name, err
+            ));
+        }
 
         let mut parts = vec![
             format!(
@@ -322,6 +346,15 @@ impl SkillOrchestrator {
                         }
                     };
                     let (_, body) = parse_frontmatter(&content);
+                    if let Err(err) = security_gate_skill_content(&info.name, body) {
+                        tracing::warn!(
+                            "Skipping preloaded skill '{}' due to security policy: {}",
+                            info.name,
+                            err
+                        );
+                        missing.push(identifier.to_string());
+                        continue;
+                    }
 
                     let activation = format!(
                         "[SYSTEM: The user launched this CLI session with the \"{}\" skill \

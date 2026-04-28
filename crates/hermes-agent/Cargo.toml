@@ -10,6 +10,7 @@ description = "Agent loop engine for Hermes Agent"
 hermes-core = { workspace = true }
 hermes-auth = { workspace = true }
 hermes-intelligence = { workspace = true }
+hermes-skills = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
