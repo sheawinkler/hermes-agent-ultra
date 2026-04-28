@@ -14,6 +14,7 @@ pub mod backends;
 pub mod dispatch;
 pub mod register_builtins;
 pub mod registry;
+pub mod rtk_filter;
 pub mod tool_policy;
 pub mod tools;
 pub mod toolset;
@@ -23,6 +24,7 @@ pub mod v4a_patch;
 
 // Re-export registry types
 pub use registry::{ToolEntry, ToolEntryInfo, ToolRegistry};
+pub use rtk_filter::RawModeState;
 pub use tool_policy::{
     default_tool_policy_counters_path, load_tool_policy_counters, persist_tool_policy_counters,
     ToolPolicyCounters, ToolPolicyDecision, ToolPolicyEngine, ToolPolicyMode,

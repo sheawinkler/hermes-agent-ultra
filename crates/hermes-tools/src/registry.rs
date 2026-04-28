@@ -7,12 +7,14 @@
 //! - Dispatch with error catching that always returns JSON
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use hermes_core::{ToolHandler, ToolSchema};
 use serde_json::Value;
 use tracing::warn;
 
+use crate::rtk_filter::{RawModeState, RtkFilterEngine};
 use crate::tool_policy::{
     annotate_policy_audit, annotate_policy_simulation, default_tool_policy_counters_path,
     persist_tool_policy_counters, ToolPolicyCounters, ToolPolicyDecision, ToolPolicyEngine,
@@ -60,6 +62,12 @@ pub struct ToolRegistryInner {
     pub policy: ToolPolicyEngine,
     /// Runtime counters for policy outcomes (allow/deny/audit/simulate).
     pub policy_counters: ToolPolicyCounters,
+    /// RTK-style filter engine for rewrite/filter/log handling.
+    pub rtk_filter: RtkFilterEngine,
+    /// Session-wide raw pass-through mode for tool output.
+    pub rtk_raw_mode: bool,
+    /// One-shot raw pass-through for the next tool call only.
+    pub rtk_raw_once: bool,
 }
 
 /// Thread-safe wrapper around `ToolRegistryInner`.
@@ -77,6 +85,9 @@ impl ToolRegistry {
                 global_max_result_size_chars: 50_000,
                 policy: ToolPolicyEngine::from_env(),
                 policy_counters: ToolPolicyCounters::default(),
+                rtk_filter: RtkFilterEngine::from_env(),
+                rtk_raw_mode: false,
+                rtk_raw_once: false,
             })),
         }
     }
@@ -89,6 +100,9 @@ impl ToolRegistry {
                 global_max_result_size_chars: max,
                 policy: ToolPolicyEngine::from_env(),
                 policy_counters: ToolPolicyCounters::default(),
+                rtk_filter: RtkFilterEngine::from_env(),
+                rtk_raw_mode: false,
+                rtk_raw_once: false,
             })),
         }
     }
@@ -103,6 +117,36 @@ impl ToolRegistry {
     pub fn policy_counters(&self) -> ToolPolicyCounters {
         let inner = self.inner.lock().unwrap();
         inner.policy_counters.clone()
+    }
+
+    /// Enable or disable session-wide raw pass-through mode.
+    pub fn set_raw_mode(&self, enabled: bool) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.rtk_raw_mode = enabled;
+        if enabled {
+            inner.rtk_raw_once = false;
+        }
+    }
+
+    /// Enable one-shot raw pass-through for the next tool dispatch.
+    pub fn set_raw_mode_once(&self) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.rtk_raw_once = true;
+    }
+
+    /// Current raw-mode state.
+    pub fn raw_mode_state(&self) -> RawModeState {
+        let inner = self.inner.lock().unwrap();
+        RawModeState {
+            enabled: inner.rtk_raw_mode,
+            once_pending: inner.rtk_raw_once,
+        }
+    }
+
+    /// RTK dual-log directory.
+    pub fn rtk_log_dir(&self) -> PathBuf {
+        let inner = self.inner.lock().unwrap();
+        inner.rtk_filter.log_dir().to_path_buf()
     }
 
     /// Register a new tool.
@@ -169,19 +213,37 @@ impl ToolRegistry {
     /// On success, returns the tool result string.
     /// On failure, returns a JSON error string: `{"error": "..."}`.
     pub fn dispatch(&self, name: &str, params: Value) -> String {
-        let (handler, max_chars, policy_decision) = {
-            let inner = self.inner.lock().unwrap();
+        let (
+            handler,
+            max_chars,
+            policy_decision,
+            effective_params,
+            raw_bypassed,
+            rewrite_applied,
+            rtk_filter,
+        ) = {
+            let mut inner = self.inner.lock().unwrap();
+            let decision = inner.policy.evaluate(name, &params);
+            let raw_bypassed = inner.rtk_raw_mode || inner.rtk_raw_once;
+            if inner.rtk_raw_once {
+                inner.rtk_raw_once = false;
+            }
+            let (effective_params, rewrite_applied) =
+                inner.rtk_filter.rewrite_params(name, &params, raw_bypassed);
             let entry = match inner.tools.get(name) {
                 Some(e) => e,
                 None => return Self::tool_error(&format!("Tool not found: {}", name)),
             };
-            let decision = inner.policy.evaluate(name, &params);
             (
                 Arc::clone(&entry.handler),
                 entry
                     .max_result_size_chars
                     .unwrap_or(inner.global_max_result_size_chars),
                 decision,
+                effective_params,
+                raw_bypassed,
+                rewrite_applied,
+                inner.rtk_filter.clone(),
             )
         };
         self.record_policy_decision(&policy_decision);
@@ -192,36 +254,65 @@ impl ToolRegistry {
 
         // Use tokio to run the async handler
         let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async { handler.execute(params).await })
+            tokio::runtime::Handle::current()
+                .block_on(async { handler.execute(effective_params.clone()).await })
         });
 
         let output = match result {
             Ok(output) => {
-                if output.len() > max_chars {
-                    Self::tool_result(&format!(
-                        "{}\n\n[... truncated {} characters ...]",
-                        &output[..max_chars],
-                        output.len() - max_chars
-                    ))
-                } else {
-                    Self::tool_result(&output)
-                }
+                let filtered = rtk_filter.filter_and_log(
+                    name,
+                    &effective_params,
+                    &output,
+                    raw_bypassed,
+                    rewrite_applied,
+                );
+                Self::tool_result(&truncate_to_chars(&filtered, max_chars))
             }
-            Err(e) => Self::tool_error(&e.to_string()),
+            Err(e) => {
+                let err_text = e.to_string();
+                let filtered = rtk_filter.filter_and_log(
+                    name,
+                    &effective_params,
+                    &err_text,
+                    raw_bypassed,
+                    rewrite_applied,
+                );
+                Self::tool_error(&truncate_to_chars(&filtered, max_chars))
+            }
         };
         maybe_annotate_audit(output, &policy_decision)
     }
 
     /// Dispatch a tool call asynchronously.
     pub async fn dispatch_async(&self, name: &str, params: Value) -> String {
-        let (handler, max_chars, policy_decision) = {
-            let inner = self.inner.lock().unwrap();
+        let (
+            handler,
+            max_chars,
+            policy_decision,
+            effective_params,
+            raw_bypassed,
+            rewrite_applied,
+            rtk_filter,
+        ) = {
+            let mut inner = self.inner.lock().unwrap();
+            let raw_bypassed = inner.rtk_raw_mode || inner.rtk_raw_once;
+            if inner.rtk_raw_once {
+                inner.rtk_raw_once = false;
+            }
+            let (effective_params, rewrite_applied) =
+                inner.rtk_filter.rewrite_params(name, &params, raw_bypassed);
+            let decision = inner.policy.evaluate(name, &params);
             match inner.tools.get(name) {
                 Some(e) => (
                     Arc::clone(&e.handler),
                     e.max_result_size_chars
                         .unwrap_or(inner.global_max_result_size_chars),
-                    inner.policy.evaluate(name, &params),
+                    decision,
+                    effective_params,
+                    raw_bypassed,
+                    rewrite_applied,
+                    inner.rtk_filter.clone(),
                 ),
                 None => return Self::tool_error(&format!("Tool not found: {}", name)),
             }
@@ -232,19 +323,28 @@ impl ToolRegistry {
         }
         maybe_log_audit(name, &policy_decision);
 
-        let output = match handler.execute(params).await {
+        let output = match handler.execute(effective_params.clone()).await {
             Ok(output) => {
-                if output.len() > max_chars {
-                    Self::tool_result(&format!(
-                        "{}\n\n[... truncated {} characters ...]",
-                        &output[..max_chars],
-                        output.len() - max_chars
-                    ))
-                } else {
-                    Self::tool_result(&output)
-                }
+                let filtered = rtk_filter.filter_and_log(
+                    name,
+                    &effective_params,
+                    &output,
+                    raw_bypassed,
+                    rewrite_applied,
+                );
+                Self::tool_result(&truncate_to_chars(&filtered, max_chars))
             }
-            Err(e) => Self::tool_error(&e.to_string()),
+            Err(e) => {
+                let err_text = e.to_string();
+                let filtered = rtk_filter.filter_and_log(
+                    name,
+                    &effective_params,
+                    &err_text,
+                    raw_bypassed,
+                    rewrite_applied,
+                );
+                Self::tool_error(&truncate_to_chars(&filtered, max_chars))
+            }
         };
         maybe_annotate_audit(output, &policy_decision)
     }
@@ -415,6 +515,22 @@ fn looks_like_json(data: &str) -> bool {
         return false;
     }
     matches!(bytes[i], b'{' | b'[')
+}
+
+fn truncate_to_chars(output: &str, max_chars: usize) -> String {
+    if output.chars().count() <= max_chars {
+        return output.to_string();
+    }
+    let cutoff = output
+        .char_indices()
+        .nth(max_chars)
+        .map(|(idx, _)| idx)
+        .unwrap_or(output.len());
+    format!(
+        "{}\n\n[... truncated {} characters ...]",
+        &output[..cutoff],
+        output.chars().count() - max_chars
+    )
 }
 
 impl Default for ToolRegistry {
