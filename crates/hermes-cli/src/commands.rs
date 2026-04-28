@@ -9,6 +9,7 @@ use std::{collections::HashSet, fmt::Write as _};
 
 use hermes_core::AgentError;
 use regex::Regex;
+use serde::Deserialize;
 
 use crate::app::App;
 use crate::model_switch::{curated_provider_slugs, normalize_provider_model, provider_model_ids};
@@ -164,7 +165,561 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/exit", "Alias for /quit"),
 ];
 
-const DEFAULT_SKILL_TAPS: &[&str] = &["https://github.com/MiniMax-AI/cli"];
+const DEFAULT_SKILL_TAPS: &[&str] = &[
+    "https://github.com/openai/skills::skills",
+    "https://github.com/anthropics/skills::skills",
+    "https://github.com/VoltAgent/awesome-agent-skills::skills",
+    "https://github.com/garrytan/gstack::",
+    "https://github.com/MiniMax-AI/cli::skills",
+];
+
+const GITHUB_API_BASE: &str = "https://api.github.com";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct SkillTapSpec {
+    repo: String,
+    path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ResolvedSkillSource {
+    repo: String,
+    branch: String,
+    skill_dir: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubRepoInfo {
+    default_branch: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct GitHubTreeEntry {
+    path: String,
+    #[serde(rename = "type")]
+    kind: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubTreeResponse {
+    tree: Vec<GitHubTreeEntry>,
+}
+
+fn parse_skill_tap_spec(raw: &str) -> Option<SkillTapSpec> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let (base, override_path) = if let Some((lhs, rhs)) = trimmed.split_once("::") {
+        (lhs.trim(), Some(rhs.trim()))
+    } else {
+        (trimmed, None)
+    };
+
+    let (repo, mut path) = if let Some(rest) = base
+        .strip_prefix("https://github.com/")
+        .or_else(|| base.strip_prefix("http://github.com/"))
+    {
+        let segments: Vec<&str> = rest.split('/').filter(|s| !s.is_empty()).collect();
+        if segments.len() < 2 {
+            return None;
+        }
+        let path = if segments.len() >= 5 && segments[2] == "tree" {
+            segments[4..].join("/")
+        } else {
+            "skills".to_string()
+        };
+        (format!("{}/{}", segments[0], segments[1]), path)
+    } else {
+        let segments: Vec<&str> = base.split('/').filter(|s| !s.is_empty()).collect();
+        if segments.len() < 2 {
+            return None;
+        }
+        let path = if segments.len() > 2 {
+            segments[2..].join("/")
+        } else {
+            "skills".to_string()
+        };
+        (format!("{}/{}", segments[0], segments[1]), path)
+    };
+
+    if let Some(override_path) = override_path {
+        path = override_path.to_string();
+    }
+
+    Some(SkillTapSpec {
+        repo,
+        path: path.trim_matches('/').to_string(),
+    })
+}
+
+fn parse_skill_name_and_version(spec: &str) -> (String, Option<String>) {
+    let trimmed = spec.trim();
+    if let Some((name, version)) = trimmed.rsplit_once('@') {
+        if !name.is_empty() && !version.is_empty() && !name.starts_with("https://") {
+            return (name.to_string(), Some(version.to_string()));
+        }
+    }
+    (trimmed.to_string(), None)
+}
+
+fn looks_like_github_repo_slug(token: &str) -> bool {
+    let parts: Vec<&str> = token.split('/').filter(|s| !s.is_empty()).collect();
+    parts.len() == 2
+}
+
+fn parse_explicit_github_skill(spec: &str) -> Option<(String, Option<String>, String)> {
+    let trimmed = spec.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if let Some(rest) = trimmed
+        .strip_prefix("https://github.com/")
+        .or_else(|| trimmed.strip_prefix("http://github.com/"))
+    {
+        let segments: Vec<&str> = rest.split('/').filter(|s| !s.is_empty()).collect();
+        if segments.len() < 2 {
+            return None;
+        }
+        let repo = format!("{}/{}", segments[0], segments[1]);
+        if segments.len() >= 5 && segments[2] == "tree" {
+            let branch = segments[3].to_string();
+            let path = segments[4..].join("/");
+            if path.is_empty() {
+                return None;
+            }
+            return Some((repo, Some(branch), path));
+        }
+        if segments.len() > 2 {
+            let path = segments[2..].join("/");
+            if path.is_empty() {
+                return None;
+            }
+            return Some((repo, None, path));
+        }
+        return None;
+    }
+
+    let segments: Vec<&str> = trimmed.split('/').filter(|s| !s.is_empty()).collect();
+    if segments.len() >= 3 {
+        let repo = format!("{}/{}", segments[0], segments[1]);
+        let path = segments[2..].join("/");
+        if path.is_empty() {
+            return None;
+        }
+        return Some((repo, None, path));
+    }
+
+    None
+}
+
+fn sanitize_skill_install_name(source: &str) -> String {
+    let raw = source
+        .trim()
+        .split('/')
+        .next_back()
+        .unwrap_or(source)
+        .trim();
+    let mut out = String::new();
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+            out.push(ch);
+        } else if out.ends_with('_') {
+            continue;
+        } else {
+            out.push('_');
+        }
+    }
+    let normalized = out.trim_matches('_').to_string();
+    if normalized.is_empty() {
+        "skill".to_string()
+    } else {
+        normalized
+    }
+}
+
+fn ensure_safe_relative_path(path: &str) -> Result<(), AgentError> {
+    if path.is_empty() {
+        return Err(AgentError::Config("Empty path in skill bundle.".into()));
+    }
+    if path.starts_with('/') || path.contains('\\') {
+        return Err(AgentError::Config(format!(
+            "Unsafe path in skill bundle: {}",
+            path
+        )));
+    }
+    for segment in path.split('/') {
+        if segment.is_empty() || segment == "." || segment == ".." {
+            return Err(AgentError::Config(format!(
+                "Unsafe path segment in skill bundle: {}",
+                path
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn github_request(client: &reqwest::Client, url: &str, accept: &str) -> reqwest::RequestBuilder {
+    let mut req = client
+        .get(url)
+        .header("Accept", accept)
+        .header("User-Agent", "hermes-agent-ultra");
+    if let Ok(token) = std::env::var("GITHUB_TOKEN")
+        .or_else(|_| std::env::var("GH_TOKEN"))
+        .map(|v| v.trim().to_string())
+    {
+        if !token.is_empty() {
+            req = req.bearer_auth(token);
+        }
+    }
+    req
+}
+
+async fn github_default_branch(client: &reqwest::Client, repo: &str) -> Result<String, AgentError> {
+    let url = format!("{}/repos/{}", GITHUB_API_BASE, repo);
+    let resp = github_request(client, &url, "application/vnd.github+json")
+        .timeout(std::time::Duration::from_secs(20))
+        .send()
+        .await
+        .map_err(|e| AgentError::Config(format!("GitHub request failed for {}: {}", repo, e)))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(AgentError::Config(format!(
+            "GitHub repo lookup failed for {} ({}): {}",
+            repo, status, body
+        )));
+    }
+    let payload = resp
+        .json::<GitHubRepoInfo>()
+        .await
+        .map_err(|e| AgentError::Config(format!("Invalid GitHub repo response: {}", e)))?;
+    Ok(payload.default_branch)
+}
+
+async fn github_repo_tree(
+    client: &reqwest::Client,
+    repo: &str,
+    branch: &str,
+) -> Result<Vec<GitHubTreeEntry>, AgentError> {
+    let encoded_branch = urlencoding::encode(branch);
+    let url = format!(
+        "{}/repos/{}/git/trees/{}?recursive=1",
+        GITHUB_API_BASE, repo, encoded_branch
+    );
+    let resp = github_request(client, &url, "application/vnd.github+json")
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| AgentError::Config(format!("GitHub tree request failed: {}", e)))?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        return Err(AgentError::Config(format!(
+            "GitHub tree lookup failed for {repo}@{branch} ({status}): {body}"
+        )));
+    }
+    let payload = resp
+        .json::<GitHubTreeResponse>()
+        .await
+        .map_err(|e| AgentError::Config(format!("Invalid GitHub tree response: {}", e)))?;
+    Ok(payload.tree)
+}
+
+async fn resolve_skill_via_taps(
+    client: &reqwest::Client,
+    taps: &[String],
+    requested_skill: &str,
+) -> Result<ResolvedSkillSource, AgentError> {
+    let mut suggestions: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for tap in taps {
+        let Some(spec) = parse_skill_tap_spec(tap) else {
+            continue;
+        };
+        let branch = match github_default_branch(client, &spec.repo).await {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let tree = match github_repo_tree(client, &spec.repo, &branch).await {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let path_prefix = if spec.path.is_empty() {
+            String::new()
+        } else {
+            format!("{}/", spec.path.trim_matches('/'))
+        };
+        for entry in tree {
+            if entry.kind != "blob" || !entry.path.ends_with("/SKILL.md") {
+                continue;
+            }
+            if !path_prefix.is_empty() && !entry.path.starts_with(&path_prefix) {
+                continue;
+            }
+            let skill_dir = entry.path.trim_end_matches("/SKILL.md");
+            let skill_name = skill_dir
+                .split('/')
+                .next_back()
+                .unwrap_or(skill_dir)
+                .to_string();
+            if skill_name.eq_ignore_ascii_case(requested_skill) {
+                return Ok(ResolvedSkillSource {
+                    repo: spec.repo.clone(),
+                    branch,
+                    skill_dir: skill_dir.to_string(),
+                });
+            }
+            if skill_name
+                .to_ascii_lowercase()
+                .contains(&requested_skill.to_ascii_lowercase())
+            {
+                suggestions.insert(skill_name);
+            }
+        }
+    }
+
+    let suggestion_text = if suggestions.is_empty() {
+        "none".to_string()
+    } else {
+        suggestions
+            .into_iter()
+            .take(8)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    Err(AgentError::Config(format!(
+        "Skill '{}' not found in configured taps. Suggestions: {}",
+        requested_skill, suggestion_text
+    )))
+}
+
+async fn resolve_skill_in_repo(
+    client: &reqwest::Client,
+    repo: &str,
+    requested_skill: &str,
+    preferred_prefix: Option<&str>,
+) -> Result<ResolvedSkillSource, AgentError> {
+    let branch = github_default_branch(client, repo).await?;
+    let tree = github_repo_tree(client, repo, &branch).await?;
+
+    let preferred_prefix = preferred_prefix
+        .map(|v| v.trim_matches('/').to_string())
+        .unwrap_or_default();
+    let mut exact_candidates: Vec<String> = Vec::new();
+    let mut fuzzy_candidates: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+
+    for entry in tree {
+        if entry.kind != "blob" || !entry.path.ends_with("/SKILL.md") {
+            continue;
+        }
+        let skill_dir = entry.path.trim_end_matches("/SKILL.md").to_string();
+        let skill_name = skill_dir
+            .split('/')
+            .next_back()
+            .unwrap_or(skill_dir.as_str())
+            .to_string();
+        if skill_name.eq_ignore_ascii_case(requested_skill) {
+            exact_candidates.push(skill_dir.clone());
+        } else if skill_name
+            .to_ascii_lowercase()
+            .contains(&requested_skill.to_ascii_lowercase())
+        {
+            fuzzy_candidates.insert(skill_name);
+        }
+    }
+
+    if exact_candidates.is_empty() {
+        let suggestion_text = if fuzzy_candidates.is_empty() {
+            "none".to_string()
+        } else {
+            fuzzy_candidates
+                .into_iter()
+                .take(8)
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        return Err(AgentError::Config(format!(
+            "Skill '{}' not found in repo {}. Suggestions: {}",
+            requested_skill, repo, suggestion_text
+        )));
+    }
+
+    exact_candidates.sort_by_key(|candidate| {
+        let preferred = if preferred_prefix.is_empty() {
+            1usize
+        } else if candidate.starts_with(&format!("{}/", preferred_prefix)) {
+            0usize
+        } else {
+            1usize
+        };
+        (preferred, candidate.len(), candidate.clone())
+    });
+    let skill_dir = exact_candidates
+        .into_iter()
+        .next()
+        .ok_or_else(|| AgentError::Config("No matching skill path found.".into()))?;
+
+    Ok(ResolvedSkillSource {
+        repo: repo.to_string(),
+        branch,
+        skill_dir,
+    })
+}
+
+async fn search_skills_via_taps(
+    client: &reqwest::Client,
+    taps: &[String],
+    query: &str,
+    limit: usize,
+) -> Result<Vec<(String, String)>, AgentError> {
+    let query_l = query.to_ascii_lowercase();
+    let mut seen: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut out: Vec<(String, String)> = Vec::new();
+
+    for tap in taps {
+        let Some(spec) = parse_skill_tap_spec(tap) else {
+            continue;
+        };
+        let branch = match github_default_branch(client, &spec.repo).await {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let tree = match github_repo_tree(client, &spec.repo, &branch).await {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        let path_prefix = if spec.path.is_empty() {
+            String::new()
+        } else {
+            format!("{}/", spec.path.trim_matches('/'))
+        };
+        for entry in tree {
+            if entry.kind != "blob" || !entry.path.ends_with("/SKILL.md") {
+                continue;
+            }
+            if !path_prefix.is_empty() && !entry.path.starts_with(&path_prefix) {
+                continue;
+            }
+            let skill_dir = entry.path.trim_end_matches("/SKILL.md");
+            let skill_name = skill_dir.split('/').next_back().unwrap_or(skill_dir);
+            if !skill_name.to_ascii_lowercase().contains(&query_l) {
+                continue;
+            }
+            let key = format!("{}/{}", spec.repo, skill_dir);
+            if seen.insert(key.clone()) {
+                out.push((skill_name.to_string(), key));
+                if out.len() >= limit {
+                    return Ok(out);
+                }
+            }
+        }
+    }
+
+    Ok(out)
+}
+
+async fn fetch_skill_files_from_github(
+    client: &reqwest::Client,
+    source: &ResolvedSkillSource,
+) -> Result<Vec<(String, Vec<u8>)>, AgentError> {
+    let tree = github_repo_tree(client, &source.repo, &source.branch).await?;
+    let prefix = format!("{}/", source.skill_dir.trim_matches('/'));
+    let mut files = Vec::new();
+
+    for entry in tree {
+        if entry.kind != "blob" || !entry.path.starts_with(&prefix) {
+            continue;
+        }
+        let rel_path = entry.path[prefix.len()..].to_string();
+        ensure_safe_relative_path(&rel_path)?;
+        let encoded_path = entry
+            .path
+            .split('/')
+            .map(urlencoding::encode)
+            .collect::<Vec<_>>()
+            .join("/");
+        let url = format!(
+            "{}/repos/{}/contents/{}?ref={}",
+            GITHUB_API_BASE,
+            source.repo,
+            encoded_path,
+            urlencoding::encode(&source.branch)
+        );
+        let resp = github_request(client, &url, "application/vnd.github.v3.raw")
+            .timeout(std::time::Duration::from_secs(25))
+            .send()
+            .await
+            .map_err(|e| AgentError::Config(format!("GitHub file download failed: {}", e)))?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+            return Err(AgentError::Config(format!(
+                "Failed to download {} from {} ({}): {}",
+                rel_path, source.repo, status, body
+            )));
+        }
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| AgentError::Config(format!("Invalid file payload: {}", e)))?;
+        files.push((rel_path, bytes.to_vec()));
+    }
+
+    if !files.iter().any(|(path, _)| path == "SKILL.md") {
+        return Err(AgentError::Config(format!(
+            "Resolved source {}/{} is missing SKILL.md",
+            source.repo, source.skill_dir
+        )));
+    }
+    if files.is_empty() {
+        return Err(AgentError::Config(format!(
+            "No files found at {}/{}",
+            source.repo, source.skill_dir
+        )));
+    }
+    Ok(files)
+}
+
+fn install_skill_files(
+    skills_dir: &std::path::Path,
+    install_name: &str,
+    files: &[(String, Vec<u8>)],
+) -> Result<std::path::PathBuf, AgentError> {
+    std::fs::create_dir_all(skills_dir)
+        .map_err(|e| AgentError::Io(format!("Failed to create skills dir: {}", e)))?;
+
+    let target = skills_dir.join(install_name);
+    if target.exists() {
+        std::fs::remove_dir_all(&target)
+            .map_err(|e| AgentError::Io(format!("Failed to remove existing skill dir: {}", e)))?;
+    }
+    std::fs::create_dir_all(&target)
+        .map_err(|e| AgentError::Io(format!("Failed to create skill dir: {}", e)))?;
+
+    for (rel_path, bytes) in files {
+        ensure_safe_relative_path(rel_path)?;
+        let output = target.join(rel_path);
+        if let Some(parent) = output.parent() {
+            std::fs::create_dir_all(parent)
+                .map_err(|e| AgentError::Io(format!("Failed to create parent dirs: {}", e)))?;
+        }
+        std::fs::write(&output, bytes)
+            .map_err(|e| AgentError::Io(format!("Failed to write {}: {}", output.display(), e)))?;
+    }
+
+    let skill_md = target.join("SKILL.md");
+    if !skill_md.exists() {
+        return Err(AgentError::Config(format!(
+            "Installed skill is missing SKILL.md at {}",
+            skill_md.display()
+        )));
+    }
+
+    Ok(target)
+}
 
 fn read_skill_taps(path: &std::path::Path) -> Vec<String> {
     if !path.exists() {
@@ -2168,7 +2723,9 @@ pub async fn handle_cli_skills(
                 return Ok(());
             }
             println!("Searching Skills Hub for: \"{}\"...", query);
-            match reqwest::Client::new()
+            let client = reqwest::Client::new();
+            let mut displayed_results = false;
+            match client
                 .get("https://skills.hermes.run/api/search")
                 .query(&[("q", &query)])
                 .timeout(std::time::Duration::from_secs(10))
@@ -2181,6 +2738,7 @@ pub async fn handle_cli_skills(
                             if results.is_empty() {
                                 println!("No skills found matching \"{}\".", query);
                             } else {
+                                displayed_results = true;
                                 println!("Found {} skill(s):", results.len());
                                 for skill in results {
                                     let name =
@@ -2207,35 +2765,72 @@ pub async fn handle_cli_skills(
                 }
                 Err(e) => {
                     println!("Could not reach Skills Hub: {}", e);
-                    println!("Check https://hermes.run/skills for manual browsing.");
+                }
+            }
+            if !displayed_results {
+                let taps_file = hermes_config::hermes_home().join("skill_taps.json");
+                let taps = merged_skill_taps(&read_skill_taps(&taps_file));
+                let fallback = search_skills_via_taps(&client, &taps, &query, 20).await?;
+                if fallback.is_empty() {
+                    println!("No tap-backed matches found for \"{}\".", query);
+                } else {
+                    println!("\nTap-backed matches:");
+                    for (name, source) in fallback {
+                        println!("  • {} — {}", name, source);
+                    }
+                    println!(
+                        "\nInstall with: hermes skills install <name> or hermes skills install <owner/repo/path>"
+                    );
                 }
             }
         }
         "install" => {
-            let skill_name = name.ok_or_else(|| {
+            let skill_spec = name.ok_or_else(|| {
                 hermes_core::AgentError::Config(
                     "Missing skill name. Usage: hermes skills install <name>".into(),
                 )
             })?;
+            let (skill_name, _requested_version) = parse_skill_name_and_version(&skill_spec);
             println!("Installing skill: {}", skill_name);
-            let target = skills_dir.join(&skill_name);
-            std::fs::create_dir_all(&target).map_err(|e| {
-                hermes_core::AgentError::Io(format!("Failed to create skill dir: {}", e))
-            })?;
-            let skill_md = target.join("SKILL.md");
-            if !skill_md.exists() {
-                std::fs::write(
-                    &skill_md,
-                    format!(
-                        "# {}\n\nInstalled via CLI. Replace with actual skill content.\n",
-                        skill_name
-                    ),
-                )
-                .map_err(|e| {
-                    hermes_core::AgentError::Io(format!("Failed to write SKILL.md: {}", e))
-                })?;
-            }
-            println!("Skill '{}' installed to {}", skill_name, target.display());
+
+            let client = reqwest::Client::new();
+            let explicit = parse_explicit_github_skill(&skill_name);
+
+            let resolved = if let Some((repo, maybe_branch, skill_dir)) = explicit {
+                let branch = if let Some(branch) = maybe_branch {
+                    branch
+                } else {
+                    github_default_branch(&client, &repo).await?
+                };
+                ResolvedSkillSource {
+                    repo,
+                    branch,
+                    skill_dir,
+                }
+            } else if let Some(skill_hint) = _requested_version
+                .as_deref()
+                .filter(|_| looks_like_github_repo_slug(&skill_name))
+            {
+                resolve_skill_in_repo(&client, &skill_name, skill_hint, Some("skills")).await?
+            } else {
+                let taps_file = hermes_config::hermes_home().join("skill_taps.json");
+                let taps = merged_skill_taps(&read_skill_taps(&taps_file));
+                resolve_skill_via_taps(&client, &taps, &skill_name).await?
+            };
+
+            println!(
+                "Resolved source: {}/{} @ {}",
+                resolved.repo, resolved.skill_dir, resolved.branch
+            );
+
+            let files = fetch_skill_files_from_github(&client, &resolved).await?;
+            let install_seed = _requested_version
+                .as_deref()
+                .filter(|_| looks_like_github_repo_slug(&skill_name))
+                .unwrap_or(skill_name.as_str());
+            let install_name = sanitize_skill_install_name(install_seed);
+            let target = install_skill_files(&skills_dir, &install_name, &files)?;
+            println!("Skill '{}' installed to {}", install_name, target.display());
         }
         "reset" => {
             let skill_name = name.ok_or_else(|| {
@@ -5922,19 +6517,70 @@ mod tests {
         let merged = merged_skill_taps(&[]);
         assert!(merged
             .iter()
-            .any(|tap| tap == "https://github.com/MiniMax-AI/cli"));
+            .any(|tap| tap == "https://github.com/MiniMax-AI/cli::skills"));
     }
 
     #[test]
     fn test_merged_skill_taps_deduplicates_default() {
-        let merged = merged_skill_taps(&vec!["https://github.com/MiniMax-AI/cli".to_string()]);
+        let merged = merged_skill_taps(&vec![
+            "https://github.com/MiniMax-AI/cli::skills".to_string()
+        ]);
         assert_eq!(
             merged
                 .iter()
-                .filter(|tap| tap.as_str() == "https://github.com/MiniMax-AI/cli")
+                .filter(|tap| tap.as_str() == "https://github.com/MiniMax-AI/cli::skills")
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn parse_skill_tap_spec_parses_github_url_with_override() {
+        let parsed =
+            parse_skill_tap_spec("https://github.com/openai/skills::skills").expect("tap parse");
+        assert_eq!(parsed.repo, "openai/skills");
+        assert_eq!(parsed.path, "skills");
+    }
+
+    #[test]
+    fn parse_skill_tap_spec_parses_tree_url() {
+        let parsed = parse_skill_tap_spec("https://github.com/anthropics/skills/tree/main/skills")
+            .expect("tap parse");
+        assert_eq!(parsed.repo, "anthropics/skills");
+        assert_eq!(parsed.path, "skills");
+    }
+
+    #[test]
+    fn parse_explicit_github_skill_owner_repo_path() {
+        let parsed = parse_explicit_github_skill("openai/skills/skills/.system/skill-creator")
+            .expect("explicit parse");
+        assert_eq!(parsed.0, "openai/skills");
+        assert_eq!(parsed.1, None);
+        assert_eq!(parsed.2, "skills/.system/skill-creator");
+    }
+
+    #[test]
+    fn parse_skill_name_and_version_handles_repo_plus_skill() {
+        let (name, suffix) = parse_skill_name_and_version("openai/skills@skill-creator");
+        assert_eq!(name, "openai/skills");
+        assert_eq!(suffix.as_deref(), Some("skill-creator"));
+        assert!(looks_like_github_repo_slug(&name));
+    }
+
+    #[test]
+    fn sanitize_skill_install_name_normalizes_path_tail() {
+        assert_eq!(
+            sanitize_skill_install_name("skills/.system/skill-creator"),
+            "skill-creator"
+        );
+        assert_eq!(sanitize_skill_install_name("bad$name"), "bad_name");
+    }
+
+    #[test]
+    fn ensure_safe_relative_path_rejects_traversal() {
+        assert!(ensure_safe_relative_path("SKILL.md").is_ok());
+        assert!(ensure_safe_relative_path("../SKILL.md").is_err());
+        assert!(ensure_safe_relative_path("nested/../../bad").is_err());
     }
 
     #[test]
