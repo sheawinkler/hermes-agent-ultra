@@ -281,6 +281,9 @@ impl App {
         sync_runtime_model_env(&config, &current_model);
 
         let tool_registry = Arc::new(ToolRegistry::new());
+        if default_rtk_raw_mode() {
+            tool_registry.set_raw_mode(true);
+        }
         let stream_handle_shared: Arc<StdMutex<Option<StreamHandle>>> =
             Arc::new(StdMutex::new(None));
         let terminal_backend = build_terminal_backend(&config);
@@ -1041,6 +1044,20 @@ mod tests {
 
         std::env::remove_var("HERMES_TUI_MOUSE");
     }
+
+    #[test]
+    fn test_default_rtk_raw_mode_respects_env_override() {
+        std::env::remove_var("HERMES_RTK_RAW");
+        assert!(!default_rtk_raw_mode());
+
+        std::env::set_var("HERMES_RTK_RAW", "on");
+        assert!(default_rtk_raw_mode());
+
+        std::env::set_var("HERMES_RTK_RAW", "0");
+        assert!(!default_rtk_raw_mode());
+
+        std::env::remove_var("HERMES_RTK_RAW");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1304,6 +1321,16 @@ fn default_mouse_enabled() -> bool {
             "0" | "false" | "off" | "no"
         ),
         Err(_) => true,
+    }
+}
+
+fn default_rtk_raw_mode() -> bool {
+    match std::env::var("HERMES_RTK_RAW") {
+        Ok(value) => matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "on" | "yes"
+        ),
+        Err(_) => false,
     }
 }
 

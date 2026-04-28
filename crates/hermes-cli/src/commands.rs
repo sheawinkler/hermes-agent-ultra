@@ -129,6 +129,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/sb", "Alias for /statusbar"),
     ("/yolo", "Toggle auto-approve mode"),
     ("/reasoning", "Toggle reasoning display"),
+    ("/raw", "RTK raw-mode controls (status/on/off/toggle/once)"),
     (
         "/policy",
         "Policy lifecycle (needs HERMES_POLICY_ADMIN_TOKEN, same as HTTP X-Hermes-Policy-Admin)",
@@ -342,6 +343,7 @@ pub async fn handle_slash_command(
         "/statusbar" => handle_statusbar_command(app),
         "/yolo" => handle_yolo_command(app),
         "/reasoning" => handle_reasoning_command(app),
+        "/raw" => handle_raw_command(app, args),
         "/policy" => handle_policy_command(app, args),
         "/help" => {
             print_help(app);
@@ -852,6 +854,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                mouse:        {}\n\
                statusbar:    ON\n\
                reasoning:    toggle via `/ops reasoning`\n\
+               raw:          toggle via `/ops raw`\n\
                verbose:      toggle via `/ops verbose`\n\
              \n\
              Quick actions:\n\
@@ -860,6 +863,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                /ops mouse [on|off|toggle]\n\
                /ops yolo\n\
                /ops reasoning\n\
+               /ops raw [on|off|toggle|once]\n\
                /ops verbose\n\
                /ops help",
             app.session_id,
@@ -883,6 +887,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                  - /ops mouse [on|off|toggle]\n\
                  - /ops yolo\n\
                  - /ops reasoning\n\
+                 - /ops raw [on|off|toggle|once]\n\
                  - /ops verbose\n\
                  - /ops statusbar",
             );
@@ -893,6 +898,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
         "mouse" => handle_mouse_command(app, &args[1..]),
         "yolo" => handle_yolo_command(app),
         "reasoning" => handle_reasoning_command(app),
+        "raw" => handle_raw_command(app, &args[1..]),
         "verbose" => handle_verbose_command(app),
         "statusbar" => handle_statusbar_command(app),
         other => {
@@ -1252,6 +1258,61 @@ fn handle_reasoning_command(app: &mut App) -> Result<CommandResult, AgentError> 
             app,
             "Reasoning display: OFF — model reasoning will be hidden.",
         );
+    }
+    Ok(CommandResult::Handled)
+}
+
+fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let state = app.tool_registry.raw_mode_state();
+    let log_dir = app.tool_registry.rtk_log_dir();
+    if args.is_empty() || args[0].eq_ignore_ascii_case("status") {
+        emit_command_output(
+            app,
+            format!(
+                "RTK raw mode: {}{}\nDual logs: {}\nUsage: /raw [on|off|toggle|once|status]",
+                if state.enabled { "ON" } else { "OFF" },
+                if state.once_pending {
+                    " (one-shot pending)"
+                } else {
+                    ""
+                },
+                log_dir.display()
+            ),
+        );
+        return Ok(CommandResult::Handled);
+    }
+
+    match args[0].trim().to_ascii_lowercase().as_str() {
+        "help" => emit_command_output(
+            app,
+            "RTK raw controls:\n  /raw status   Show current mode + log path\n  /raw on       Disable output filtering for all tool calls\n  /raw off      Re-enable RTK output filtering\n  /raw toggle   Toggle global raw mode\n  /raw once     Raw pass-through for next tool call only",
+        ),
+        "once" => {
+            app.tool_registry.set_raw_mode_once();
+            emit_command_output(
+                app,
+                "RTK raw mode armed for next tool call only. It auto-resets after one dispatch.",
+            );
+        }
+        "on" | "off" | "toggle" | "true" | "false" | "yes" | "no" | "1" | "0" => {
+            let next = match args[0].trim().to_ascii_lowercase().as_str() {
+                "on" | "true" | "yes" | "1" => true,
+                "off" | "false" | "no" | "0" => false,
+                "toggle" => !state.enabled,
+                _ => state.enabled,
+            };
+            app.tool_registry.set_raw_mode(next);
+            std::env::set_var("HERMES_RTK_RAW", if next { "1" } else { "0" });
+            emit_command_output(
+                app,
+                format!(
+                    "RTK raw mode: {} (dual logs: {})",
+                    if next { "ON" } else { "OFF" },
+                    log_dir.display()
+                ),
+            );
+        }
+        _ => emit_command_output(app, "Usage: /raw [on|off|toggle|once|status]"),
     }
     Ok(CommandResult::Handled)
 }
@@ -5764,6 +5825,12 @@ mod tests {
     fn test_autocomplete_partial() {
         let results = autocomplete("/m");
         assert!(results.contains(&"/model"));
+    }
+
+    #[test]
+    fn test_autocomplete_includes_raw_controls() {
+        let results = autocomplete("/ra");
+        assert!(results.contains(&"/raw"));
     }
 
     #[test]
