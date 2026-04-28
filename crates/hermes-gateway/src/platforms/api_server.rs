@@ -214,6 +214,11 @@ struct ResponseMailbox {
     pending: HashMap<String, mpsc::Sender<String>>,
 }
 
+#[derive(Default)]
+struct RunCancelRegistry {
+    pending: HashMap<String, Arc<Notify>>,
+}
+
 // ---------------------------------------------------------------------------
 // ApiServerAdapter
 // ---------------------------------------------------------------------------
@@ -224,6 +229,7 @@ pub struct ApiServerAdapter {
     stop_signal: Arc<Notify>,
     shutdown_tx: RwLock<Option<tokio::sync::oneshot::Sender<()>>>,
     mailbox: Arc<RwLock<ResponseMailbox>>,
+    run_cancels: Arc<RwLock<RunCancelRegistry>>,
     inbound_tx: Arc<RwLock<Option<mpsc::Sender<ApiInboundRequest>>>>,
 }
 
@@ -241,6 +247,7 @@ impl ApiServerAdapter {
             stop_signal: Arc::new(Notify::new()),
             shutdown_tx: RwLock::new(None),
             mailbox: Arc::new(RwLock::new(ResponseMailbox::default())),
+            run_cancels: Arc::new(RwLock::new(RunCancelRegistry::default())),
             inbound_tx: Arc::new(RwLock::new(None)),
         }
     }
@@ -339,6 +346,7 @@ impl PlatformAdapter for ApiServerAdapter {
             .map_err(|e| GatewayError::ConnectionFailed(format!("Invalid address: {e}")))?;
 
         let mailbox = self.mailbox.clone();
+        let run_cancels = self.run_cancels.clone();
         let inbound_tx = self.inbound_tx.clone();
         let auth_token = self.config.auth_token.clone();
 
@@ -367,11 +375,20 @@ impl PlatformAdapter for ApiServerAdapter {
                         match accept {
                             Ok((stream, peer)) => {
                                 let mailbox = mailbox.clone();
+                                let run_cancels = run_cancels.clone();
                                 let inbound_tx = inbound_tx.clone();
                                 let auth_token = auth_token.clone();
                                 tokio::spawn(async move {
                                     if let Err(e) =
-                                        handle_connection(stream, peer, mailbox, inbound_tx, auth_token).await
+                                        handle_connection(
+                                            stream,
+                                            peer,
+                                            mailbox,
+                                            run_cancels,
+                                            inbound_tx,
+                                            auth_token,
+                                        )
+                                        .await
                                     {
                                         debug!("API connection error from {peer}: {e}");
                                     }
@@ -477,6 +494,7 @@ async fn handle_connection(
     stream: tokio::net::TcpStream,
     _peer: SocketAddr,
     mailbox: Arc<RwLock<ResponseMailbox>>,
+    run_cancels: Arc<RwLock<RunCancelRegistry>>,
     inbound_tx: Arc<RwLock<Option<mpsc::Sender<ApiInboundRequest>>>>,
     auth_token: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -530,6 +548,47 @@ async fn handle_connection(
         }
     }
 
+    if method == "POST" {
+        if let Some(run_id) = parse_stop_run_path(path) {
+            let stop_waiter = {
+                let guard = run_cancels.read().await;
+                guard.pending.get(run_id).cloned()
+            };
+
+            if let Some(waiter) = stop_waiter {
+                waiter.notify_waiters();
+                let body = serde_json::json!({
+                    "id": run_id,
+                    "object": "run",
+                    "status": "stopped"
+                });
+                let payload = serde_json::to_string(&body)?;
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                    payload.len(),
+                    payload
+                );
+                writer.write_all(resp.as_bytes()).await?;
+            } else {
+                let err = serde_json::json!({
+                    "error": {
+                        "message":"Run not found",
+                        "type":"not_found",
+                        "code":"404"
+                    }
+                });
+                let payload = serde_json::to_string(&err)?;
+                let resp = format!(
+                    "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                    payload.len(),
+                    payload
+                );
+                writer.write_all(resp.as_bytes()).await?;
+            }
+            return Ok(());
+        }
+    }
+
     match (method, path) {
         ("POST", "/v1/chat/completions") | ("POST", "/v1/responses") => {
             let body_str = String::from_utf8_lossy(body_bytes);
@@ -575,9 +634,19 @@ async fn handle_connection(
                     };
 
                     let (reply_tx, mut reply_rx) = mpsc::channel::<String>(1);
+                    let cancel_waiter = Arc::new(Notify::new());
                     {
                         let mut guard = mailbox.write().await;
                         guard.pending.insert(mailbox_key.clone(), reply_tx);
+                    }
+                    {
+                        let mut guard = run_cancels.write().await;
+                        guard
+                            .pending
+                            .insert(request_id.clone(), cancel_waiter.clone());
+                        guard
+                            .pending
+                            .insert(mailbox_key.clone(), cancel_waiter.clone());
                     }
 
                     let maybe_inbound = inbound_tx.read().await.clone();
@@ -621,55 +690,87 @@ async fn handle_connection(
                         return Ok(());
                     }
 
-                    let reply = match tokio::time::timeout(
-                        Duration::from_secs(120),
-                        reply_rx.recv(),
-                    )
-                    .await
-                    {
-                        Ok(Some(msg)) => msg,
-                        Ok(None) => {
+                    let reply = tokio::select! {
+                        _ = cancel_waiter.notified() => {
                             let err = serde_json::json!({
                                 "error": {
-                                    "message":"Gateway closed response channel",
-                                    "type":"internal_error",
-                                    "code":"502"
+                                    "message":"Run stopped",
+                                    "type":"cancelled_error",
+                                    "code":"409"
                                 }
                             });
                             let body = serde_json::to_string(&err)?;
                             let resp = format!(
-                                "HTTP/1.1 502 Bad Gateway\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                                "HTTP/1.1 409 Conflict\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
                                 body.len(),
                                 body
                             );
                             writer.write_all(resp.as_bytes()).await?;
                             let mut guard = mailbox.write().await;
                             guard.pending.remove(&mailbox_key);
+                            let mut cancels = run_cancels.write().await;
+                            cancels.pending.remove(&request_id);
+                            cancels.pending.remove(&mailbox_key);
                             return Ok(());
                         }
-                        Err(_) => {
-                            let err = serde_json::json!({
-                                "error": {
-                                    "message":"Gateway response timeout",
-                                    "type":"timeout_error",
-                                    "code":"504"
+                        timeout_result = tokio::time::timeout(Duration::from_secs(120), reply_rx.recv()) => {
+                            match timeout_result {
+                                Ok(Some(msg)) => msg,
+                                Ok(None) => {
+                                    let err = serde_json::json!({
+                                        "error": {
+                                            "message":"Gateway closed response channel",
+                                            "type":"internal_error",
+                                            "code":"502"
+                                        }
+                                    });
+                                    let body = serde_json::to_string(&err)?;
+                                    let resp = format!(
+                                        "HTTP/1.1 502 Bad Gateway\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                                        body.len(),
+                                        body
+                                    );
+                                    writer.write_all(resp.as_bytes()).await?;
+                                    let mut guard = mailbox.write().await;
+                                    guard.pending.remove(&mailbox_key);
+                                    let mut cancels = run_cancels.write().await;
+                                    cancels.pending.remove(&request_id);
+                                    cancels.pending.remove(&mailbox_key);
+                                    return Ok(());
                                 }
-                            });
-                            let body = serde_json::to_string(&err)?;
-                            let resp = format!(
-                                "HTTP/1.1 504 Gateway Timeout\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
-                                body.len(),
-                                body
-                            );
-                            writer.write_all(resp.as_bytes()).await?;
-                            let mut guard = mailbox.write().await;
-                            guard.pending.remove(&mailbox_key);
-                            return Ok(());
+                                Err(_) => {
+                                    let err = serde_json::json!({
+                                        "error": {
+                                            "message":"Gateway response timeout",
+                                            "type":"timeout_error",
+                                            "code":"504"
+                                        }
+                                    });
+                                    let body = serde_json::to_string(&err)?;
+                                    let resp = format!(
+                                        "HTTP/1.1 504 Gateway Timeout\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+                                        body.len(),
+                                        body
+                                    );
+                                    writer.write_all(resp.as_bytes()).await?;
+                                    let mut guard = mailbox.write().await;
+                                    guard.pending.remove(&mailbox_key);
+                                    let mut cancels = run_cancels.write().await;
+                                    cancels.pending.remove(&request_id);
+                                    cancels.pending.remove(&mailbox_key);
+                                    return Ok(());
+                                }
+                            }
                         }
                     };
 
                     {
                         let mut guard = mailbox.write().await;
+                        guard.pending.remove(&mailbox_key);
+                    }
+                    {
+                        let mut guard = run_cancels.write().await;
+                        guard.pending.remove(&request_id);
                         guard.pending.remove(&mailbox_key);
                     }
 
@@ -791,6 +892,15 @@ fn build_prompt_from_messages(messages: &[ChatMessage]) -> Option<String> {
         None
     } else {
         Some(prompt)
+    }
+}
+
+fn parse_stop_run_path(path: &str) -> Option<&str> {
+    let run_id = path.strip_prefix("/v1/runs/")?.strip_suffix("/stop")?;
+    if run_id.is_empty() {
+        None
+    } else {
+        Some(run_id)
     }
 }
 
@@ -972,5 +1082,20 @@ mod tests {
     fn image_marker_message_without_caption() {
         let marker = image_marker_message("https://cdn.example.com/a.png", Some("   "));
         assert_eq!(marker, "[image] https://cdn.example.com/a.png");
+    }
+
+    #[test]
+    fn parse_stop_run_path_accepts_valid_route() {
+        assert_eq!(
+            parse_stop_run_path("/v1/runs/run_abc123/stop"),
+            Some("run_abc123")
+        );
+    }
+
+    #[test]
+    fn parse_stop_run_path_rejects_invalid_route() {
+        assert_eq!(parse_stop_run_path("/v1/runs//stop"), None);
+        assert_eq!(parse_stop_run_path("/v1/runs/run_abc123"), None);
+        assert_eq!(parse_stop_run_path("/v1/chat/completions"), None);
     }
 }
