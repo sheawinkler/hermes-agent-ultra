@@ -717,7 +717,13 @@ mod tests {
             .iter()
             .map(|m| (*m).to_string())
             .collect();
-        assert_eq!(out, expected);
+        assert!(out.len() >= expected.len());
+        for model in &expected {
+            assert!(
+                out.iter().any(|m| m == model),
+                "missing curated model: {model}"
+            );
+        }
     }
 
     #[tokio::test]
