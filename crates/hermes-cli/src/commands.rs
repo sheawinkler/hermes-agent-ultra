@@ -1537,6 +1537,55 @@ async fn resolve_skills_sh_source(
     )))
 }
 
+async fn search_skills_sh_registry(
+    client: &reqwest::Client,
+    query: &str,
+    limit: usize,
+) -> Result<Vec<(String, String)>, AgentError> {
+    let capped_limit = limit.clamp(1, 50).to_string();
+    let search_resp = client
+        .get(SKILLS_SH_SEARCH_URL)
+        .query(&[("q", query), ("limit", capped_limit.as_str())])
+        .header("Accept", "application/json")
+        .header("User-Agent", "hermes-agent-ultra")
+        .timeout(std::time::Duration::from_secs(20))
+        .send()
+        .await
+        .map_err(|e| AgentError::Config(format!("skills.sh search request failed: {}", e)))?;
+    if !search_resp.status().is_success() {
+        let status = search_resp.status();
+        let body = search_resp.text().await.unwrap_or_default();
+        return Err(AgentError::Config(format!(
+            "skills.sh search failed ({}): {}",
+            status, body
+        )));
+    }
+    let payload = search_resp
+        .json::<SkillsShSearchResponse>()
+        .await
+        .map_err(|e| AgentError::Config(format!("Invalid skills.sh payload: {}", e)))?;
+
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for hit in payload.skills {
+        let id = hit.id.trim();
+        if id.is_empty() {
+            continue;
+        }
+        let identifier = format!("skills.sh/{}", id);
+        if !seen.insert(identifier.clone()) {
+            continue;
+        }
+        let display_name = if hit.name.trim().is_empty() {
+            id.to_string()
+        } else {
+            hit.name.trim().to_string()
+        };
+        out.push((display_name, identifier));
+    }
+    Ok(out)
+}
+
 async fn resolve_install_via_fallback_router(
     client: &reqwest::Client,
     skill_name: &str,
@@ -4064,6 +4113,20 @@ pub async fn handle_cli_skills(
                 Err(e) => {
                     if !displayed_results {
                         println!("Could not reach Skills Hub: {}", e);
+                    }
+                }
+            }
+            if !displayed_results {
+                if let Ok(skills_sh_hits) = search_skills_sh_registry(&client, &query, 20).await {
+                    if !skills_sh_hits.is_empty() {
+                        displayed_results = true;
+                        println!("\nSkills.sh fallback matches:");
+                        for (name, identifier) in skills_sh_hits {
+                            println!("  • {} — {}", name, identifier);
+                        }
+                        println!(
+                            "\nInstall with: hermes skills install skills.sh/<owner/repo/skill>"
+                        );
                     }
                 }
             }
