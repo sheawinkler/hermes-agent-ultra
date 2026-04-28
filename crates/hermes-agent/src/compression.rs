@@ -173,6 +173,10 @@ pub struct ContextCompressor {
     last_prompt_tokens: u64,
     previous_summary: Option<String>,
     failure_cooldown_until: Option<Instant>,
+    summary_model_fallen_back: bool,
+    last_summary_error: Option<String>,
+    last_summary_dropped_count: usize,
+    last_summary_fallback_used: bool,
 }
 
 impl ContextCompressor {
@@ -212,6 +216,10 @@ impl ContextCompressor {
             last_prompt_tokens: 0,
             previous_summary: None,
             failure_cooldown_until: None,
+            summary_model_fallen_back: false,
+            last_summary_error: None,
+            last_summary_dropped_count: 0,
+            last_summary_fallback_used: false,
         }
     }
 
@@ -223,6 +231,21 @@ impl ContextCompressor {
     /// How many compactions this instance has performed.
     pub fn compression_count(&self) -> u64 {
         self.compression_count
+    }
+
+    /// Last summary-generation error captured by this compressor instance.
+    pub fn last_summary_error(&self) -> Option<&str> {
+        self.last_summary_error.as_deref()
+    }
+
+    /// Number of historical messages dropped in the most recent fallback path.
+    pub fn last_summary_dropped_count(&self) -> usize {
+        self.last_summary_dropped_count
+    }
+
+    /// Whether the most recent `compress()` used static fallback text.
+    pub fn last_summary_fallback_used(&self) -> bool {
+        self.last_summary_fallback_used
     }
 
     /// Update the tracked usage from the latest response.
@@ -391,6 +414,7 @@ Write only the summary body. Do not include any preamble or prefix."
         &mut self,
         turns: &[Message],
     ) -> Result<Option<String>, CompressionError> {
+        self.last_summary_error = None;
         if let Some(deadline) = self.failure_cooldown_until {
             let now = Instant::now();
             if now < deadline {
@@ -403,37 +427,66 @@ Write only the summary body. Do not include any preamble or prefix."
         let block = self.serialize_for_summary(turns);
         let prompt = self.build_summary_prompt(&block, budget);
 
-        let mut request =
-            AuxiliaryRequest::new(AuxiliaryTask::Compression, vec![Message::user(prompt)])
-                .with_max_tokens((budget * 2) as u32);
-        if let Some(model) = self.config.summary_model_override.as_ref() {
-            request = request.with_model(model.clone());
-        }
-
-        match self.auxiliary.call(request).await {
-            Ok(resp) => {
-                let body = resp
-                    .text()
-                    .map(|s| s.trim().to_string())
-                    .unwrap_or_default();
-                if body.is_empty() {
-                    self.arm_cooldown();
-                    Ok(None)
-                } else {
-                    self.previous_summary = Some(body.clone());
-                    Ok(Some(with_summary_prefix(&body)))
-                }
+        let mut retry_on_main_pending =
+            self.config.summary_model_override.is_some() && !self.summary_model_fallen_back;
+        loop {
+            let mut request = AuxiliaryRequest::new(
+                AuxiliaryTask::Compression,
+                vec![Message::user(prompt.clone())],
+            )
+            .with_max_tokens((budget * 2) as u32);
+            if let Some(model) = self.config.summary_model_override.as_ref() {
+                request = request.with_model(model.clone());
             }
-            Err(err) => {
-                self.arm_cooldown();
-                if !self.config.quiet_mode {
-                    tracing::warn!(
-                        "Failed to generate context summary: {err}. \
-                         Further summary attempts paused for {:?}.",
-                        SUMMARY_FAILURE_COOLDOWN
-                    );
+
+            match self.auxiliary.call(request).await {
+                Ok(resp) => {
+                    let body = resp
+                        .text()
+                        .map(|s| s.trim().to_string())
+                        .unwrap_or_default();
+                    if body.is_empty() {
+                        self.last_summary_error = Some("empty summary response".to_string());
+                        self.arm_cooldown();
+                        return Ok(None);
+                    } else {
+                        self.previous_summary = Some(body.clone());
+                        self.failure_cooldown_until = None;
+                        self.summary_model_fallen_back = false;
+                        self.last_summary_error = None;
+                        return Ok(Some(with_summary_prefix(&body)));
+                    }
                 }
-                Err(CompressionError::Auxiliary(err))
+                Err(err) => {
+                    let err_text = err.to_string();
+                    if retry_on_main_pending {
+                        retry_on_main_pending = false;
+                        self.summary_model_fallen_back = true;
+                        if let Some(model) = self.config.summary_model_override.as_ref() {
+                            if !self.config.quiet_mode {
+                                tracing::warn!(
+                                    "Summary model '{}' failed ({}). Retrying on main model before giving up.",
+                                    model,
+                                    err_text
+                                );
+                            }
+                        }
+                        self.config.summary_model_override = None;
+                        self.failure_cooldown_until = None;
+                        continue;
+                    }
+
+                    self.last_summary_error = Some(err_text.clone());
+                    self.arm_cooldown();
+                    if !self.config.quiet_mode {
+                        tracing::warn!(
+                            "Failed to generate context summary: {err}. \
+                             Further summary attempts paused for {:?}.",
+                            SUMMARY_FAILURE_COOLDOWN
+                        );
+                    }
+                    return Err(CompressionError::Auxiliary(err));
+                }
             }
         }
     }
@@ -629,6 +682,10 @@ Write only the summary body. Do not include any preamble or prefix."
         messages: Vec<Message>,
         current_tokens: Option<u64>,
     ) -> Vec<Message> {
+        self.last_summary_error = None;
+        self.last_summary_dropped_count = 0;
+        self.last_summary_fallback_used = false;
+
         let n_messages = messages.len();
         let min_for_compress = self.config.protect_first_n + 3 + 1;
         if n_messages <= min_for_compress {
@@ -715,10 +772,12 @@ Write only the summary body. Do not include any preamble or prefix."
                     "Summary generation failed — inserting static fallback context marker"
                 );
             }
+            self.last_summary_dropped_count = n_dropped;
+            self.last_summary_fallback_used = true;
             format!(
                 "{SUMMARY_PREFIX}\nSummary generation was unavailable. {n_dropped} \
-                 conversation turns were removed to free context space but could not be \
-                 summarized. The removed turns contained earlier work in this session. \
+                 message(s) were removed to free context space but could not be \
+                 summarized. The removed messages contained earlier work in this session. \
                  Continue based on the recent messages below and the current state of \
                  any files or resources."
             )
@@ -901,6 +960,7 @@ mod tests {
     use async_trait::async_trait;
     use futures::stream::BoxStream;
     use hermes_core::{LlmProvider, LlmResponse, StreamChunk, ToolSchema, UsageStats};
+    use std::collections::VecDeque;
     use std::sync::Mutex;
 
     // ---------- helpers ----------
@@ -1025,6 +1085,79 @@ mod tests {
             _eb: Option<&serde_json::Value>,
         ) -> Result<LlmResponse, AgentError> {
             Err(AgentError::LlmApi("HTTP 402: insufficient credits".into()))
+        }
+        fn chat_completion_stream(
+            &self,
+            _m: &[Message],
+            _t: &[ToolSchema],
+            _x: Option<u32>,
+            _temp: Option<f64>,
+            _model: Option<&str>,
+            _eb: Option<&serde_json::Value>,
+        ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+            Box::pin(futures::stream::empty())
+        }
+    }
+
+    /// LLM provider that returns a scripted sequence of outcomes.
+    struct SequencedProvider {
+        outcomes: Mutex<VecDeque<Result<String, AgentError>>>,
+        calls: Mutex<usize>,
+    }
+
+    impl SequencedProvider {
+        fn new(outcomes: Vec<Result<String, AgentError>>) -> Arc<Self> {
+            Arc::new(Self {
+                outcomes: Mutex::new(VecDeque::from(outcomes)),
+                calls: Mutex::new(0),
+            })
+        }
+
+        fn call_count(&self) -> usize {
+            *self.calls.lock().unwrap()
+        }
+    }
+
+    #[async_trait]
+    impl LlmProvider for SequencedProvider {
+        async fn chat_completion(
+            &self,
+            _m: &[Message],
+            _t: &[ToolSchema],
+            _x: Option<u32>,
+            _temp: Option<f64>,
+            model: Option<&str>,
+            _eb: Option<&serde_json::Value>,
+        ) -> Result<LlmResponse, AgentError> {
+            *self.calls.lock().unwrap() += 1;
+            let outcome = self
+                .outcomes
+                .lock()
+                .unwrap()
+                .pop_front()
+                .unwrap_or_else(|| Err(AgentError::LlmApi("sequenced provider exhausted".into())));
+            match outcome {
+                Ok(text) => Ok(LlmResponse {
+                    message: Message {
+                        role: MessageRole::Assistant,
+                        content: Some(text),
+                        tool_calls: None,
+                        tool_call_id: None,
+                        name: None,
+                        reasoning_content: None,
+                        cache_control: None,
+                    },
+                    finish_reason: Some("stop".into()),
+                    model: model.unwrap_or("test").to_string(),
+                    usage: Some(UsageStats {
+                        prompt_tokens: 1,
+                        completion_tokens: 1,
+                        total_tokens: 2,
+                        estimated_cost: None,
+                    }),
+                }),
+                Err(err) => Err(err),
+            }
         }
         fn chat_completion_stream(
             &self,
@@ -1212,6 +1345,62 @@ mod tests {
         // Second call within cooldown window short-circuits.
         let err2 = compressor.generate_summary(&turns).await.unwrap_err();
         assert!(matches!(err2, CompressionError::CooldownActive(_)));
+    }
+
+    #[tokio::test]
+    async fn generate_summary_retries_once_on_main_after_aux_failure() {
+        let provider = SequencedProvider::new(vec![
+            Err(AgentError::LlmApi(
+                "HTTP 400: provider rejected model".into(),
+            )),
+            Ok("summary via main model".to_string()),
+        ]);
+        let aux = aux_with_provider(provider.clone());
+        let mut cfg = quiet_config();
+        cfg.summary_model_override = Some("broken-aux-model".to_string());
+        let mut compressor = ContextCompressor::new(cfg, aux);
+        let turns = vec![msg(MessageRole::User, "x")];
+
+        let out = compressor.generate_summary(&turns).await.unwrap();
+        assert!(out.unwrap().contains("summary via main model"));
+        assert_eq!(provider.call_count(), 2);
+        assert_eq!(compressor.last_summary_error(), None);
+    }
+
+    #[tokio::test]
+    async fn generate_summary_with_no_aux_override_does_not_retry() {
+        let provider = SequencedProvider::new(vec![
+            Err(AgentError::LlmApi(
+                "HTTP 400: provider rejected model".into(),
+            )),
+            Ok("should not be reached".to_string()),
+        ]);
+        let aux = aux_with_provider(provider.clone());
+        let mut compressor = ContextCompressor::new(quiet_config(), aux);
+        let turns = vec![msg(MessageRole::User, "x")];
+
+        let err = compressor.generate_summary(&turns).await.unwrap_err();
+        assert!(matches!(err, CompressionError::Auxiliary(_)));
+        assert_eq!(provider.call_count(), 1);
+        assert!(compressor.last_summary_error().is_some());
+    }
+
+    #[tokio::test]
+    async fn generate_summary_only_retries_once_when_both_attempts_fail() {
+        let provider = SequencedProvider::new(vec![
+            Err(AgentError::LlmApi("HTTP 404: model_not_found".into())),
+            Err(AgentError::LlmApi("HTTP 500: upstream exploded".into())),
+        ]);
+        let aux = aux_with_provider(provider.clone());
+        let mut cfg = quiet_config();
+        cfg.summary_model_override = Some("broken-aux-model".to_string());
+        let mut compressor = ContextCompressor::new(cfg, aux);
+        let turns = vec![msg(MessageRole::User, "x")];
+
+        let err = compressor.generate_summary(&turns).await.unwrap_err();
+        assert!(matches!(err, CompressionError::Auxiliary(_)));
+        assert_eq!(provider.call_count(), 2);
+        assert!(compressor.last_summary_error().is_some());
     }
 
     // ---------- sanitiser ----------
@@ -1408,5 +1597,9 @@ mod tests {
             })
             .expect("static fallback banner missing");
         assert!(banner.contains(SUMMARY_PREFIX));
+        assert!(banner.contains("message(s) were removed"));
+        assert!(compressor.last_summary_fallback_used());
+        assert!(compressor.last_summary_dropped_count() > 0);
+        assert!(compressor.last_summary_error().is_some());
     }
 }
