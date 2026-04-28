@@ -417,11 +417,12 @@ async fn health() -> impl IntoResponse {
 }
 
 async fn metrics_prometheus() -> impl IntoResponse {
+    let content_type = format!(
+        "text/plain; version={}; charset=utf-8",
+        env!("CARGO_PKG_VERSION")
+    );
     (
-        [(
-            header::CONTENT_TYPE,
-            "text/plain; version=0.0.4; charset=utf-8",
-        )],
+        [(header::CONTENT_TYPE, content_type)],
         hermes_telemetry::prometheus_text(),
     )
 }

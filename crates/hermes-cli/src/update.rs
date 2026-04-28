@@ -3,7 +3,7 @@
 use hermes_core::AgentError;
 use serde::Deserialize;
 
-const DEFAULT_REPO: &str = "nousresearch/hermes-agent-rust";
+const DEFAULT_REPO: &str = "sheawinkler/hermes-agent-ultra";
 
 #[derive(Debug, Deserialize)]
 struct GitHubRelease {
@@ -22,7 +22,7 @@ pub async fn check_for_updates() -> Result<String, AgentError> {
     let url = format!("https://api.github.com/repos/{}/releases/latest", repo);
 
     let client = reqwest::Client::builder()
-        .user_agent(format!("hermes-agent/{}", env!("CARGO_PKG_VERSION")))
+        .user_agent(format!("hermes-agent-ultra/{}", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| AgentError::Io(e.to_string()))?;
 

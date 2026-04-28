@@ -38,7 +38,7 @@
 
           meta = with pkgs.lib; {
             description = "Hermes Agent – an AI agent framework";
-            homepage = "https://github.com/nousresearch/hermes-agent-rust";
+            homepage = "https://github.com/sheawinkler/hermes-agent-ultra";
             license = licenses.mit;
             mainProgram = "hermes";
           };

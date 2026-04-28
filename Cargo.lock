@@ -1216,7 +1216,7 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "hermes-acp"
-version = "0.0.4"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "hermes-core",
@@ -1229,7 +1229,7 @@ dependencies = [
 
 [[package]]
 name = "hermes-agent"
-version = "0.0.4"
+version = "0.1.0"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -1262,7 +1262,7 @@ dependencies = [
 
 [[package]]
 name = "hermes-auth"
-version = "0.0.4"
+version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "base64",
@@ -1284,7 +1284,7 @@ dependencies = [
 
 [[package]]
 name = "hermes-cli"
-version = "0.0.4"
+version = "0.1.0"
 dependencies = [
  "aes-gcm",
  "assert_cmd",
@@ -1335,7 +1335,7 @@ dependencies = [
 
 [[package]]
 name = "hermes-config"
-version = "0.0.4"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "directories",
@@ -1352,7 +1352,7 @@ dependencies = [
 
 [[package]]
 name = "hermes-core"
-version = "0.0.4"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -1372,7 +1372,7 @@ dependencies = [
 
 [[package]]
 name = "hermes-cron"
-version = "0.0.4"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1395,7 +1395,7 @@ dependencies = [
 
 [[package]]
 name = "hermes-environments"
-version = "0.0.4"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "hermes-config",
@@ -1410,7 +1410,7 @@ dependencies = [
 
 [[package]]
 name = "hermes-eval"
-version = "0.0.4"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1437,7 +1437,7 @@ dependencies = [
 
 [[package]]
 name = "hermes-gateway"
-version = "0.0.4"
+version = "0.1.0"
 dependencies = [
  "aes",
  "async-trait",
@@ -1474,7 +1474,7 @@ dependencies = [
 
 [[package]]
 name = "hermes-http"
-version = "0.0.4"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "axum",
@@ -1499,7 +1499,7 @@ dependencies = [
 
 [[package]]
 name = "hermes-intelligence"
-version = "0.0.4"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -1522,7 +1522,7 @@ dependencies = [
 
 [[package]]
 name = "hermes-mcp"
-version = "0.0.4"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "hermes-core",
@@ -1539,7 +1539,7 @@ dependencies = [
 
 [[package]]
 name = "hermes-parity-tests"
-version = "0.0.4"
+version = "0.1.0"
 dependencies = [
  "clap",
  "hermes-cli",
@@ -1554,7 +1554,7 @@ dependencies = [
 
 [[package]]
 name = "hermes-skills"
-version = "0.0.4"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "base64",
@@ -1579,7 +1579,7 @@ dependencies = [
 
 [[package]]
 name = "hermes-telemetry"
-version = "0.0.4"
+version = "0.1.0"
 dependencies = [
  "once_cell",
  "opentelemetry",
@@ -1594,7 +1594,7 @@ dependencies = [
 
 [[package]]
 name = "hermes-tools"
-version = "0.0.4"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "base64",

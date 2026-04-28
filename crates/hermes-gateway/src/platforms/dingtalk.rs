@@ -162,7 +162,7 @@ impl DingTalkAdapter {
             inner.config.openapi_endpoint.trim_end_matches('/')
         );
         let ua = format!(
-            "DingTalkStream/1.0 SDK/rust-hermes (+https://github.com/nousresearch/hermes-agent-rust)"
+            "DingTalkStream/1.0 SDK/rust-hermes (+https://github.com/sheawinkler/hermes-agent-ultra)"
         );
         let body = serde_json::json!({
             "clientId": inner.config.client_id,
