@@ -6,7 +6,7 @@
 //!
 //! Corresponds to Python `agent/skill_commands.py`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use hermes_core::types::Skill;
@@ -127,6 +127,10 @@ pub struct SkillOrchestrator {
     commands: HashMap<String, SkillCommandInfo>,
     /// Base skills directory (typically `~/.hermes/skills/`).
     skills_dir: PathBuf,
+    /// Explicit allow-list of skill identifiers (`name` and `/command` forms).
+    enabled: HashSet<String>,
+    /// Explicit deny-list of skill identifiers (`name` and `/command` forms).
+    disabled: HashSet<String>,
 }
 
 impl SkillOrchestrator {
@@ -135,6 +139,8 @@ impl SkillOrchestrator {
         Self {
             commands: HashMap::new(),
             skills_dir: skills_dir.into(),
+            enabled: HashSet::new(),
+            disabled: HashSet::new(),
         }
     }
 
@@ -159,6 +165,39 @@ impl SkillOrchestrator {
         self.scan_directory(&self.skills_dir.clone(), &mut seen_names);
 
         &self.commands
+    }
+
+    /// Apply runtime skill filters from config (parity with Python skills gating).
+    pub fn set_enabled_disabled(&mut self, enabled: &[String], disabled: &[String]) {
+        self.enabled = enabled
+            .iter()
+            .map(|s| Self::normalize_skill_selector(s))
+            .filter(|s| !s.is_empty())
+            .collect();
+        self.disabled = disabled
+            .iter()
+            .map(|s| Self::normalize_skill_selector(s))
+            .filter(|s| !s.is_empty())
+            .collect();
+    }
+
+    fn normalize_skill_selector(raw: &str) -> String {
+        raw.trim()
+            .trim_start_matches('/')
+            .replace('_', "-")
+            .to_ascii_lowercase()
+    }
+
+    fn is_skill_allowed(&self, name: &str, cmd_name: &str) -> bool {
+        let name_key = Self::normalize_skill_selector(name);
+        let cmd_key = Self::normalize_skill_selector(cmd_name);
+        if self.disabled.contains(&name_key) || self.disabled.contains(&cmd_key) {
+            return false;
+        }
+        if self.enabled.is_empty() {
+            return true;
+        }
+        self.enabled.contains(&name_key) || self.enabled.contains(&cmd_key)
     }
 
     /// Recursively scan a directory for SKILL.md files.
@@ -228,6 +267,10 @@ impl SkillOrchestrator {
 
         let cmd_name = slugify_skill_name(&name);
         if cmd_name.is_empty() {
+            return;
+        }
+        if !self.is_skill_allowed(&name, &cmd_name) {
+            tracing::debug!("Skipping skill '{}' due to enabled/disabled filters", name);
             return;
         }
         if let Err(err) = security_gate_skill_content(&name, body) {
@@ -502,5 +545,55 @@ mod tests {
         assert_eq!(missing, vec!["nonexistent"]);
         assert!(prompt.contains("Write clean code."));
         assert!(prompt.contains("preloaded"));
+    }
+
+    #[test]
+    fn test_scan_skill_commands_respects_disabled_filters() {
+        let tmp = tempfile::tempdir().unwrap();
+        let alpha_dir = tmp.path().join("alpha");
+        let beta_dir = tmp.path().join("beta");
+        fs::create_dir_all(&alpha_dir).unwrap();
+        fs::create_dir_all(&beta_dir).unwrap();
+        fs::write(
+            alpha_dir.join("SKILL.md"),
+            "---\nname: alpha\ndescription: Alpha skill\n---\nAlpha body",
+        )
+        .unwrap();
+        fs::write(
+            beta_dir.join("SKILL.md"),
+            "---\nname: beta\ndescription: Beta skill\n---\nBeta body",
+        )
+        .unwrap();
+
+        let mut orch = SkillOrchestrator::new(tmp.path());
+        orch.set_enabled_disabled(&[], &["alpha".to_string()]);
+        orch.scan_skill_commands();
+        assert!(!orch.commands.contains_key("/alpha"));
+        assert!(orch.commands.contains_key("/beta"));
+    }
+
+    #[test]
+    fn test_scan_skill_commands_respects_enabled_filters() {
+        let tmp = tempfile::tempdir().unwrap();
+        let alpha_dir = tmp.path().join("alpha");
+        let beta_dir = tmp.path().join("beta");
+        fs::create_dir_all(&alpha_dir).unwrap();
+        fs::create_dir_all(&beta_dir).unwrap();
+        fs::write(
+            alpha_dir.join("SKILL.md"),
+            "---\nname: alpha\ndescription: Alpha skill\n---\nAlpha body",
+        )
+        .unwrap();
+        fs::write(
+            beta_dir.join("SKILL.md"),
+            "---\nname: beta\ndescription: Beta skill\n---\nBeta body",
+        )
+        .unwrap();
+
+        let mut orch = SkillOrchestrator::new(tmp.path());
+        orch.set_enabled_disabled(&["beta".to_string()], &[]);
+        orch.scan_skill_commands();
+        assert!(!orch.commands.contains_key("/alpha"));
+        assert!(orch.commands.contains_key("/beta"));
     }
 }

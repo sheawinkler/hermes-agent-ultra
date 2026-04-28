@@ -1094,6 +1094,8 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         skip_memory,
         skip_context_files,
         platform: Some("cli".to_string()),
+        enabled_skills: config.skills.enabled.clone(),
+        disabled_skills: config.skills.disabled.clone(),
         pass_session_id: true,
         runtime_providers: config
             .llm_providers

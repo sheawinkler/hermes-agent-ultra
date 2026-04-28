@@ -342,6 +342,14 @@ pub struct AgentConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub platform: Option<String>,
 
+    /// Optional allow-list for skill discovery/injection. Empty means allow all.
+    #[serde(default)]
+    pub enabled_skills: Vec<String>,
+
+    /// Optional deny-list for skill discovery/injection.
+    #[serde(default)]
+    pub disabled_skills: Vec<String>,
+
     /// Include session_id in system prompt timestamp block.
     #[serde(default)]
     pub pass_session_id: bool,
@@ -612,6 +620,8 @@ impl Default for AgentConfig {
             smart_model_routing: SmartModelRoutingConfig::default(),
             provider: None,
             platform: None,
+            enabled_skills: Vec::new(),
+            disabled_skills: Vec::new(),
             pass_session_id: false,
             runtime_providers: HashMap::new(),
             ephemeral_system_prompt: None,
@@ -2006,6 +2016,7 @@ impl AgentLoop {
             return None;
         }
         let mut orch = SkillOrchestrator::default_dir();
+        orch.set_enabled_disabled(&self.config.enabled_skills, &self.config.disabled_skills);
         let commands = orch.scan_skill_commands();
         if commands.is_empty() {
             return Some(
