@@ -1547,6 +1547,63 @@ fn install_skill_files(
     Ok(target)
 }
 
+fn normalize_tap_path_for_storage(path: &str) -> String {
+    let normalized = path.trim_matches('/');
+    if normalized.is_empty() {
+        String::new()
+    } else {
+        format!("{}/", normalized)
+    }
+}
+
+fn tap_object_to_string(obj: &serde_json::Map<String, serde_json::Value>) -> Option<String> {
+    if let Some(url) = obj
+        .get("url")
+        .and_then(|u| u.as_str())
+        .or_else(|| obj.get("tap").and_then(|u| u.as_str()))
+    {
+        let trimmed = url.trim();
+        if !trimmed.is_empty() {
+            return Some(trimmed.to_string());
+        }
+    }
+
+    let repo = obj.get("repo").and_then(|v| v.as_str())?;
+    let repo = repo.trim().trim_matches('/');
+    if repo.is_empty() {
+        return None;
+    }
+    let path = obj
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("skills/")
+        .trim()
+        .trim_matches('/');
+    if path.is_empty() {
+        Some(format!("https://github.com/{}::", repo))
+    } else {
+        Some(format!("https://github.com/{}::{}", repo, path))
+    }
+}
+
+fn tap_string_to_object(tap: &str) -> serde_json::Value {
+    if let Some(spec) = parse_skill_tap_spec(tap) {
+        let mut obj = serde_json::Map::new();
+        obj.insert("repo".to_string(), serde_json::Value::String(spec.repo));
+        obj.insert(
+            "path".to_string(),
+            serde_json::Value::String(normalize_tap_path_for_storage(&spec.path)),
+        );
+        obj.insert(
+            "url".to_string(),
+            serde_json::Value::String(tap.to_string()),
+        );
+        serde_json::Value::Object(obj)
+    } else {
+        serde_json::json!({ "url": tap })
+    }
+}
+
 fn read_skill_taps(path: &std::path::Path) -> Vec<String> {
     if !path.exists() {
         return Vec::new();
@@ -1568,12 +1625,7 @@ fn read_skill_taps(path: &std::path::Path) -> Vec<String> {
                     .into_iter()
                     .filter_map(|item| match item {
                         serde_json::Value::String(s) => Some(s),
-                        serde_json::Value::Object(obj) => obj
-                            .get("url")
-                            .and_then(|u| u.as_str())
-                            .or_else(|| obj.get("tap").and_then(|u| u.as_str()))
-                            .or_else(|| obj.get("repo").and_then(|u| u.as_str()))
-                            .map(|s| s.to_string()),
+                        serde_json::Value::Object(obj) => tap_object_to_string(&obj),
                         _ => None,
                     })
                     .collect(),
@@ -1582,6 +1634,18 @@ fn read_skill_taps(path: &std::path::Path) -> Vec<String> {
         }
         _ => Vec::new(),
     }
+}
+
+fn write_skill_taps(path: &std::path::Path, taps: &[String]) -> Result<(), AgentError> {
+    let serialized_taps: Vec<serde_json::Value> =
+        taps.iter().map(|tap| tap_string_to_object(tap)).collect();
+    let payload = serde_json::json!({
+        "taps": serialized_taps
+    });
+    let json =
+        serde_json::to_string_pretty(&payload).map_err(|e| AgentError::Config(e.to_string()))?;
+    std::fs::write(path, format!("{}\n", json)).map_err(|e| AgentError::Io(e.to_string()))?;
+    Ok(())
 }
 
 fn merged_skill_taps(custom_taps: &[String]) -> Vec<String> {
@@ -4135,17 +4199,29 @@ pub async fn handle_cli_skills(
                         }
                     }
                 } else {
-                    let taps_file = hermes_config::hermes_home().join("skill_taps.json");
-                    let taps = merged_skill_taps(&read_skill_taps(&taps_file));
-                    let resolved = resolve_skill_via_taps(&client, &taps, &skill_name).await?;
-                    println!(
-                        "Resolved source (tap): {}/{} @ {}",
-                        resolved.repo, resolved.skill_dir, resolved.branch
-                    );
-                    (
-                        fetch_skill_files_from_github(&client, &resolved).await?,
-                        skill_name.clone(),
-                    )
+                    // Router-order parity fallback: after index miss, try skills.sh before taps.
+                    if let Ok(resolved) = resolve_skills_sh_source(&client, &skill_name).await {
+                        println!(
+                            "Resolved source [skills.sh fallback]: {}/{} @ {}",
+                            resolved.repo, resolved.skill_dir, resolved.branch
+                        );
+                        (
+                            fetch_skill_files_from_github(&client, &resolved).await?,
+                            skill_name.clone(),
+                        )
+                    } else {
+                        let taps_file = hermes_config::hermes_home().join("skill_taps.json");
+                        let taps = merged_skill_taps(&read_skill_taps(&taps_file));
+                        let resolved = resolve_skill_via_taps(&client, &taps, &skill_name).await?;
+                        println!(
+                            "Resolved source (tap): {}/{} @ {}",
+                            resolved.repo, resolved.skill_dir, resolved.branch
+                        );
+                        (
+                            fetch_skill_files_from_github(&client, &resolved).await?,
+                            skill_name.clone(),
+                        )
+                    }
                 }
             };
 
@@ -4699,10 +4775,7 @@ pub async fn handle_cli_skills(
                         println!("Tap already exists: {}", url);
                     } else {
                         taps.push(url.clone());
-                        let json = serde_json::to_string_pretty(&taps)
-                            .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
-                        std::fs::write(&taps_file, json)
-                            .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+                        write_skill_taps(&taps_file, &taps)?;
                         println!("Added tap: {}", url);
                     }
                 }
@@ -4727,10 +4800,7 @@ pub async fn handle_cli_skills(
                     let before_len = taps.len();
                     taps.retain(|t| t != &url);
                     if taps.len() < before_len {
-                        let json = serde_json::to_string_pretty(&taps)
-                            .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
-                        std::fs::write(&taps_file, json)
-                            .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+                        write_skill_taps(&taps_file, &taps)?;
                         println!("Removed tap: {}", url);
                     } else {
                         println!("Tap not found: {}", url);
@@ -7763,6 +7833,7 @@ mod tests {
     use std::sync::{Mutex, OnceLock};
 
     use super::*;
+    use tempfile::tempdir;
 
     fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -7856,9 +7927,8 @@ mod tests {
 
     #[test]
     fn test_merged_skill_taps_deduplicates_default() {
-        let merged = merged_skill_taps(&vec![
-            "https://github.com/MiniMax-AI/cli::skill".to_string()
-        ]);
+        let merged =
+            merged_skill_taps(&vec!["https://github.com/MiniMax-AI/cli::skill".to_string()]);
         assert_eq!(
             merged
                 .iter()
@@ -7882,6 +7952,57 @@ mod tests {
             .expect("tap parse");
         assert_eq!(parsed.repo, "anthropics/skills");
         assert_eq!(parsed.path, "skills");
+    }
+
+    #[test]
+    fn read_skill_taps_accepts_upstream_object_shape() {
+        let tmp = tempdir().expect("tempdir");
+        let path = tmp.path().join("skill_taps.json");
+        std::fs::write(
+            &path,
+            r#"{
+  "taps": [
+    { "repo": "MiniMax-AI/cli", "path": "skill/" },
+    { "repo": "openai/skills", "path": "skills/" },
+    { "repo": "anthropics/skills" },
+    { "url": "https://github.com/garrytan/gstack::" }
+  ]
+}"#,
+        )
+        .expect("write");
+
+        let taps = read_skill_taps(&path);
+        assert!(taps.contains(&"https://github.com/MiniMax-AI/cli::skill".to_string()));
+        assert!(taps.contains(&"https://github.com/openai/skills::skills".to_string()));
+        assert!(taps.contains(&"https://github.com/anthropics/skills::skills".to_string()));
+        assert!(taps.contains(&"https://github.com/garrytan/gstack::".to_string()));
+    }
+
+    #[test]
+    fn write_skill_taps_writes_canonical_object_shape() {
+        let tmp = tempdir().expect("tempdir");
+        let path = tmp.path().join("skill_taps.json");
+        let taps = vec![
+            "https://github.com/MiniMax-AI/cli::skill".to_string(),
+            "https://github.com/github/awesome-copilot::skills".to_string(),
+            "https://github.com/garrytan/gstack::".to_string(),
+        ];
+        write_skill_taps(&path, &taps).expect("write taps");
+
+        let raw = std::fs::read_to_string(&path).expect("read");
+        let value: serde_json::Value = serde_json::from_str(&raw).expect("json");
+        let arr = value
+            .get("taps")
+            .and_then(|v| v.as_array())
+            .expect("taps array");
+        assert_eq!(arr.len(), 3);
+
+        let first = arr[0].as_object().expect("first object");
+        assert_eq!(
+            first.get("repo").and_then(|v| v.as_str()),
+            Some("MiniMax-AI/cli")
+        );
+        assert_eq!(first.get("path").and_then(|v| v.as_str()), Some("skill/"));
     }
 
     #[test]
