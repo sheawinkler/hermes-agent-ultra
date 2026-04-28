@@ -30,6 +30,8 @@ Options:
   --no-elite-gate           Skip consolidated elite sync gate (default)
   --elite-cmd <command>     Elite gate command (default: python3 scripts/run-elite-sync-gate.py)
   --elite-rollback-cmd <c>  Optional rollback command executed by elite gate on failure
+  --no-doc-refresh          Skip generated parity/readme doc refresh
+  --doc-refresh-cmd <cmd>   Override generated docs refresh command
   --no-pr                   Do not open a PR in branch-pr mode
   --draft-pr                Open PR as draft in branch-pr mode
   --pr-labels <csv>         Labels to apply on created PR (default: upstream-sync,parity-sync)
@@ -61,6 +63,8 @@ REDTEAM_CMD="${REDTEAM_CMD:-python3 scripts/run-redteam-gate.py}"
 RUN_ELITE_GATE="${RUN_ELITE_GATE:-0}"
 ELITE_CMD="${ELITE_CMD:-python3 scripts/run-elite-sync-gate.py}"
 ELITE_ROLLBACK_CMD="${ELITE_ROLLBACK_CMD:-}"
+RUN_DOC_REFRESH="${RUN_DOC_REFRESH:-1}"
+DOC_REFRESH_CMD="${DOC_REFRESH_CMD:-python3 scripts/generate-parity-dashboard.py --repo-root . && python3 scripts/generate-readme-sync-status.py --repo-root .}"
 CREATE_PR="1"
 PR_DRAFT="0"
 PR_LABELS="${PR_LABELS:-upstream-sync,parity-sync}"
@@ -161,6 +165,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --elite-rollback-cmd)
       ELITE_ROLLBACK_CMD="${2:?missing value for --elite-rollback-cmd}"
+      shift 2
+      ;;
+    --no-doc-refresh)
+      RUN_DOC_REFRESH="0"
+      shift
+      ;;
+    --doc-refresh-cmd)
+      DOC_REFRESH_CMD="${2:?missing value for --doc-refresh-cmd}"
       shift 2
       ;;
     --no-pr)
@@ -569,6 +581,23 @@ if [[ "${RUN_ELITE_GATE}" == "1" ]]; then
     ELITE_REPORT_LINE="$(printf '%s\n' "${ELITE_OUTPUT}" | awk '/\[elite-sync-gate\] Report: /{line=$0} END{print line}')"
     ELITE_REPORT_PATH="${ELITE_REPORT_LINE#*Report: }"
     append_report "elite_report: ${ELITE_REPORT_PATH}"
+  fi
+fi
+
+if [[ "${RUN_DOC_REFRESH}" == "1" ]]; then
+  log "Refreshing generated parity/readme docs..."
+  DOC_REFRESH_OUTPUT="$(bash -lc "${DOC_REFRESH_CMD}" 2>&1)" || {
+    append_report "status: doc-refresh-failed"
+    append_report "doc_refresh_output: ${DOC_REFRESH_OUTPUT//$'\n'/\\n}"
+    printf '%s\n' "${DOC_REFRESH_OUTPUT}"
+    die "Generated doc refresh failed"
+  }
+  printf '%s\n' "${DOC_REFRESH_OUTPUT}"
+  DOC_CHANGED="$(git status --porcelain -- README.md docs/parity/PARITY_DASHBOARD.md || true)"
+  if [[ -n "${DOC_CHANGED}" ]]; then
+    git add README.md docs/parity/PARITY_DASHBOARD.md
+    git commit -m "chore(sync): refresh parity dashboard and README sync status"
+    append_report "doc_refresh_commit: $(git rev-parse HEAD)"
   fi
 fi
 
