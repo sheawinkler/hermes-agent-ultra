@@ -177,8 +177,9 @@ const DEFAULT_SKILL_TAPS: &[&str] = &[
     "https://github.com/openai/skills::skills",
     "https://github.com/anthropics/skills::skills",
     "https://github.com/VoltAgent/awesome-agent-skills::skills",
+    "https://github.com/github/awesome-copilot::skills",
     "https://github.com/garrytan/gstack::",
-    "https://github.com/MiniMax-AI/cli::skills",
+    "https://github.com/MiniMax-AI/cli::skill",
 ];
 
 const GITHUB_API_BASE: &str = "https://api.github.com";
@@ -7842,18 +7843,26 @@ mod tests {
         let merged = merged_skill_taps(&[]);
         assert!(merged
             .iter()
-            .any(|tap| tap == "https://github.com/MiniMax-AI/cli::skills"));
+            .any(|tap| tap == "https://github.com/MiniMax-AI/cli::skill"));
+    }
+
+    #[test]
+    fn test_autoresearch_default_skill_tap_present_in_merged_list() {
+        let merged = merged_skill_taps(&[]);
+        assert!(merged
+            .iter()
+            .any(|tap| tap == "https://github.com/github/awesome-copilot::skills"));
     }
 
     #[test]
     fn test_merged_skill_taps_deduplicates_default() {
         let merged = merged_skill_taps(&vec![
-            "https://github.com/MiniMax-AI/cli::skills".to_string()
+            "https://github.com/MiniMax-AI/cli::skill".to_string()
         ]);
         assert_eq!(
             merged
                 .iter()
-                .filter(|tap| tap.as_str() == "https://github.com/MiniMax-AI/cli::skills")
+                .filter(|tap| tap.as_str() == "https://github.com/MiniMax-AI/cli::skill")
                 .count(),
             1
         );
