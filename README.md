@@ -3,31 +3,45 @@
 **[English](./README.md)** | **[中文](./README_ZH.md)** | **[日本語](./README_JA.md)** | **[한국어](./README_KO.md)**
 
 ```text
-H E R M E S   A G E N T   U L T R A
+██   ██ ███████ ██████  ███    ███ ███████ ███████
+██   ██ ██      ██   ██ ████  ████ ██      ██
+███████ █████   ██████  ██ ████ ██ █████   ███████
+██   ██ ██      ██   ██ ██  ██  ██ ██           ██
+██   ██ ███████ ██   ██ ██      ██ ███████ ███████
+
+        A G E N T   U L T R A
 ```
 
-Rust-first autonomous agent runtime with upstream Hermes parity and focused Ultra extensions for reliability, observability, and operator control.
+Rust-first autonomous agent runtime with functional parity goals against `NousResearch/hermes-agent`, plus an Ultra reliability, security, and operator-control layer.
 
-## Why This Exists
+## What You Get
 
-Hermes Agent Ultra keeps functional parity with `NousResearch/hermes-agent` while intentionally optimizing the runtime for:
+- Fully Rust-native core runtime (agent loop, tools, gateway, skills, CLI/TUI)
+- Multi-provider inference routing and OAuth-capable provider flows
+- Tool runtime with policy enforcement, MCP integration, cron, and memory backends
+- Parity upkeep system for upstream drift triage and controlled roll-forward
+- Production operations surface (`doctor`, replay traces, sync gates, parity artifacts)
 
-- Rust-native execution paths and reduced runtime drift
-- deterministic operations and stronger incident debugging
-- tighter control over tool and MCP execution boundaries
-- practical deployment for operators who want one binary and clear behavior
+## Why Ultra Exists
 
-## What Is Different in Ultra
+`NousResearch/hermes-agent` is the canonical upstream product surface.  
+Hermes Agent Ultra keeps that surface in scope while focusing on:
 
-Key additions beyond baseline parity:
+- deterministic Rust execution paths
+- explicit safety and policy controls
+- better observability and incident debugging
+- easier operator workflows for long-running local and gateway sessions
 
-- Replay trace recorder with sensitive-field redaction
-- MCP sandbox profiles (`strict`, `balanced`, `relaxed`) plus message size guardrails
-- Tool policy engine (`off`, `audit`, `enforce`) with runtime enforcement hooks
-- Memory fusion scoring across providers (ContextLattice + external sources)
-- Adaptive turn governor (token budget and tool concurrency pressure controls)
-- `doctor --deep --snapshot --bundle` operational support artifacts
-- Upstream sync workflow with draft-PR mode for controlled parity roll-forward
+## Differentiation vs Upstream
+
+Ultra keeps parity work separate from intentional extensions.
+
+- `Runtime policy engine`: enforce/audit/simulate tool policy decisions at runtime
+- `RTK raw-mode controls`: inspect unwrapped tool payloads when debugging integrations
+- `Memory fusion`: ContextLattice + external memory providers with scoring/fusion logic
+- `Advanced sync gates`: differential parity checks, red-team/adversarial gating, elite sync gate
+- `Operational tooling`: deep doctor snapshots, replay traces, queue-based upstream webhook sync
+- `Rust-only implementation strategy`: parity in Rust first; no direct Python runtime vendoring
 
 ## Install
 
@@ -37,7 +51,7 @@ Key additions beyond baseline parity:
 curl -fsSL https://raw.githubusercontent.com/sheawinkler/hermes-agent-ultra/main/scripts/install.sh | bash
 ```
 
-Install to a different path:
+Custom install path:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/sheawinkler/hermes-agent-ultra/main/scripts/install.sh | sudo INSTALL_DIR=/usr/local/bin bash
@@ -49,19 +63,15 @@ curl -fsSL https://raw.githubusercontent.com/sheawinkler/hermes-agent-ultra/main
 cargo install --git https://github.com/sheawinkler/hermes-agent-ultra hermes-cli --locked --bin hermes-agent-ultra --bin hermes-ultra --bin hermes
 ```
 
-## First Run
+## Quick Start
+
+Setup:
 
 ```bash
 hermes-ultra setup
 ```
 
-Setup initializes `~/.hermes-agent-ultra` and can import API keys from legacy `.env` files when present.
-
-`hermes` remains available as a compatibility alias, but `hermes-ultra` is the recommended command.
-
-## Daily Use
-
-Interactive:
+Interactive session:
 
 ```bash
 hermes-ultra
@@ -79,141 +89,95 @@ Gateway mode:
 hermes-ultra gateway --live
 ```
 
-Deep health report with support bundle:
+Deep diagnostics bundle:
 
 ```bash
 hermes-ultra doctor --deep --snapshot --bundle
 ```
 
-## Context Loading and Memory
+## Built-In Context + Memory Behavior
 
-Ultra auto-loads high-value context and memory files:
+Ultra auto-loads high-value project and persona context:
 
-- `SOUL.md` (persona)
+- `SOUL.md`
 - `AGENTS.md`
 - `DESIGN.md`
 - `.hermes.md` / `HERMES.md`
 - `MEMORY.md` / `USER.md`
 
-Subdirectory hint discovery also loads local context files as the agent navigates code paths.
+Subdirectory discovery is enabled so context follows the code path being edited.
 
-## DESIGN.md Support
+## Skills and Registry Surface
 
-Ultra now supports Google's `DESIGN.md` workflow in two ways:
+Skills commands support multi-registry search/install and local tap flows.
 
-1. Native context-file detection (`DESIGN.md`) in workspace and subdirectory discovery.
-2. Optional skill bundle included at:
-   - `optional-skills/creative/design-md/SKILL.md`
-   - `optional-skills/creative/design-md/templates/starter.md`
-   - `optional-skills/creative/embedding-atlas/SKILL.md`
-   - `optional-skills/creative/touchdesigner-mcp/SKILL.md`
+- Registry-aware installs include:
+  - `official/...`
+  - `skills.sh/...`
+  - `github/...`
+  - `lobehub/...`
+  - `clawhub/...`
+  - `claude-marketplace/...`
+- Mandatory skill security scanning runs before install and before use.
 
-The skill is designed for author/lint/diff/export flows with `@google/design.md`.
+## Security Posture
 
-## Core Capabilities
+- Skill content security scanning blocks dangerous patterns and restricted URL targets
+- Policy-controlled tool execution modes: `off`, `audit`, `simulate`, `enforce`
+- Sensitive field redaction in traces/log surfaces
+- Guardrails for path traversal, unsafe file ops, and runtime boundary violations
 
-- Multi-provider LLM routing (OpenAI, Anthropic, OpenRouter-compatible)
-- MCP client/server support
-- Rich tool runtime (file ops, terminal, browser, memory, delegation, messaging, cron)
-- Skills lifecycle (install, update, publish, snapshot)
-- Session persistence and search
-- Gateway adapters and API surfaces for production integration
+## Upstream Sync and Parity Upkeep
 
-## Conversation Modes
+Ultra uses controlled sync workflows, not blind merges.
 
-Pi-style conversation traits are available through built-in personalities:
+- Upstream source of truth: `NousResearch/hermes-agent`
+- Fetch/sync tooling:
+  - `scripts/sync-upstream.sh`
+  - `scripts/upstream_webhook_sync.py`
+- Parity artifacts:
+  - `docs/parity/`
+  - `.sync-reports/`
 
-- `companion`: warm, non-judgmental support with active listening. Use when you want supportive dialogue plus practical next steps.
-- `decision-coach`: structured options + trade-off guidance. Use when choosing between paths and you need constraints made explicit.
-- `reflective`: focused clarifying questions before advice. Use when you want to clarify goals or emotions before acting.
+Current local sync snapshot (fetched on 2026-04-28):
 
-Specialized execution personalities are also built in:
+- `origin/main`: `22e5906eaac119e3788109c9554476d2a5ea301f`
+- `upstream/main`: `4bf0e75ae95fe33b47391a73bcf9bf5c128dd75b`
 
-- `security-auditor`: threat-modeling and abuse-path checks. Use when you want explicit security risks and mitigations.
-- `release-manager`: launch gating and rollback planning. Use when deciding if a change is safe to ship.
-- `ops-sre`: reliability/incident orientation. Use when triaging production issues from logs and metrics.
-- `mcp-integrator`: connector/protocol-first integration. Use when wiring MCP tools, auth, and capability contracts.
-- `quant-researcher`: hypothesis-driven strategy analysis. Use when evaluating trading/market ideas with risk-aware metrics.
-- `performance-engineer`: profiling and benchmark focus. Use when optimizing latency, throughput, and resource cost.
-- `research-scout`: source-driven synthesis. Use when quickly mapping a topic and planning next validation steps.
+Note: this repository intentionally tracks parity via queue/gate workflows because upstream and ultra history can diverge materially.
 
-Use `/personality list` to see all built-ins and `/personality <name>` to switch.
+## Official References and Attribution
 
-## Architecture
+Canonical/official upstream references:
 
-Workspace crates are organized by runtime role:
+- Upstream (official): https://github.com/NousResearch/hermes-agent
+- Ultra (this repository): https://github.com/sheawinkler/hermes-agent-ultra
+- Ultra fork archive (historical): https://github.com/sheawinkler/hermes-agent-rs-fork
 
-- `hermes-agent`: agent loop, provider calls, memory orchestration
-- `hermes-tools`: tool registry and execution backends
-- `hermes-mcp`: MCP transport/client/server flows
-- `hermes-cli`: CLI, TUI, setup, doctor, operator commands
-- `hermes-gateway`: gateway adapters and runtime hooks
-- `hermes-skills`: skill hub/store primitives
-- `hermes-config`: config model and loading
-- `hermes-telemetry`: metrics and instrumentation
+Integrated ecosystem references used in Ultra workflows:
 
-See `crates/` for the full workspace.
+- OpenAI skills repository: https://github.com/openai/skills
+- Anthropic skills repository: https://github.com/anthropics/skills
+- VoltAgent skills aggregation: https://github.com/VoltAgent/awesome-agent-skills
+- Ratatui (TUI foundation): https://github.com/ratatui/ratatui
+- tui-textarea (composer/editor behavior): https://github.com/rhysd/tui-textarea
 
-## Security and Guardrails
+Additional ownership, provenance, and credit notes are maintained in [UPSTREAM_ATTRIBUTION.md](./UPSTREAM_ATTRIBUTION.md).
 
-Ultra ships with explicit runtime controls:
+## Architecture Map
 
-- credential/path safeguards in file and terminal tools
-- prompt-injection scanning for loaded context files
-- policy-driven tool execution gates
-- MCP capability and sandbox policy boundaries
-- bounded output and context shaping protections
+Primary Rust workspace crates:
 
-Tool policy supports four modes via `HERMES_TOOL_POLICY_MODE`:
+- `crates/hermes-agent`: agent loop, memory orchestration, provider control
+- `crates/hermes-tools`: tool registry and execution backends
+- `crates/hermes-cli`: CLI/TUI, setup, model/personality switching, operator commands
+- `crates/hermes-gateway`: gateway adapters and live runtime paths
+- `crates/hermes-skills`: skill storage, guardrails, hub and registry pathways
+- `crates/hermes-mcp`: MCP transport/client/server support
+- `crates/hermes-config`: config model and runtime loading
+- `crates/hermes-telemetry`: tracing and metrics surfaces
 
-- `off`: bypass policy checks
-- `audit`: allow execution, annotate violations
-- `simulate`: allow execution and always attach `_tool_policy_simulation` metadata showing would-allow/would-block outcome
-- `enforce`: block disallowed tool calls
+## License
 
-## Parity and Upstream Maintenance
-
-This repository tracks upstream Hermes parity and intentionally retains Ultra-only enhancements.
-
-Operational model:
-
-- parity analysis + triage in-repo (`docs/parity/`)
-- controlled upstream sync via scripts
-- preserved chronology through regular commits on `main`
-
-Primary sync tooling:
-
-- `scripts/sync-upstream.sh`
-- `scripts/upstream_webhook_sync.py`
-
-## Nightly Elite Gate
-
-Local nightly validation can be scheduled with launchd.
-
-Manual run:
-
-- `scripts/run-nightly-elite-gate.sh`
-
-Install daily schedule (default `03:30` local time):
-
-- `scripts/install-elite-gate-launchd.sh`
-
-Status and logs:
-
-- `scripts/status-elite-gate-launchd.sh --tail 50`
-
-Uninstall:
-
-- `scripts/uninstall-elite-gate-launchd.sh`
-
-## License, Attribution, and Ownership
-
-- Ultra is distributed under this repository's license and notices.
-- Upstream attribution is documented in [UPSTREAM_ATTRIBUTION.md](./UPSTREAM_ATTRIBUTION.md).
-- This repo is an independent implementation and product line owned and operated under the `hermes-agent-ultra` project identity.
-
-## Links
-
-- Ultra repo: https://github.com/sheawinkler/hermes-agent-ultra
-- Upstream repo: https://github.com/NousResearch/hermes-agent
-- Issues: https://github.com/sheawinkler/hermes-agent-ultra/issues
+Distributed under this repository's license and notices.  
+See [LICENSE](./LICENSE), [NOTICE](./NOTICE), and [UPSTREAM_ATTRIBUTION.md](./UPSTREAM_ATTRIBUTION.md).

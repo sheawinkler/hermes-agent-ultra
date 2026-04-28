@@ -123,6 +123,21 @@ Default report path:
 - Default verification command is:
   - `cargo test -p hermes-gateway`
 
+## Diverged / Unrelated History Handling
+
+For Hermes Agent Ultra, upstream and local history may diverge enough that direct
+merge is either non-linear or unrelated.
+
+Recommended handling for this Rust-first repo:
+
+- Always fetch upstream first (`git fetch upstream main --prune`).
+- Use parity queue/gate workflows (`docs/parity/`, `.sync-reports/`) as the
+  source of truth for what needs to be ported.
+- Prefer controlled branch/PR sync with risk gates over direct unrelated-history
+  merges into `main`.
+- Treat direct unrelated-history merge attempts as exceptional recovery actions,
+  not default upkeep behavior.
+
 ## Webhook + Queue Mode
 
 For event-driven sync (push-triggered, not schedule-triggered), see:
