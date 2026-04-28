@@ -83,6 +83,7 @@ hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
 base64 = { workspace = true }
+bytes = { workspace = true }
 aes-gcm = "0.10"
 rand = "0.8"
 zip = { version = "2", default-features = false, features = ["deflate"] }
