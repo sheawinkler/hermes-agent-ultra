@@ -51,6 +51,7 @@ LEGACY_BIN_NAME="${LEGACY_BIN_NAME:-hermes}"
 RELEASE_BIN_BASENAME="${RELEASE_BIN_BASENAME:-hermes}"
 RUN_SETUP_MODE="${RUN_SETUP_MODE:-auto}" # auto|always|never
 ROOT_FHS_LAYOUT=false
+PATH_GUARD_APPLIED=false
 POSITIONAL_VERSION=""
 if [[ -t 0 ]]; then
   IS_INTERACTIVE=true
@@ -267,6 +268,14 @@ need_cmd install
 
 TARGET="$(detect_target)"
 resolve_install_dir
+
+# Keep installer-invoked commands deterministic in non-login shells (e.g. root on RHEL)
+# where /usr/local/bin may not be present in PATH yet.
+if [[ ":${PATH}:" != *":${INSTALL_DIR}:"* ]]; then
+  export PATH="${INSTALL_DIR}:${PATH}"
+  PATH_GUARD_APPLIED=true
+fi
+
 ASSET_CANDIDATES=("${RELEASE_BIN_BASENAME}-${TARGET}.tar.gz")
 if [[ "$TARGET" == "macos-aarch64" ]]; then
   ASSET_CANDIDATES+=("${RELEASE_BIN_BASENAME}-macos-arm64.tar.gz")
@@ -369,6 +378,10 @@ else
     echo "  echo 'export PATH=\"${INSTALL_DIR}:\$PATH\"' >> ~/.zshrc && source ~/.zshrc"
     echo "  exec zsh -l"
   fi
+fi
+
+if [[ "${PATH_GUARD_APPLIED}" == "true" ]]; then
+  echo "PATH guard applied for this install shell: ${INSTALL_DIR}"
 fi
 
 BIN_PATH="${INSTALL_DIR}/${CANONICAL_BIN_NAME}"

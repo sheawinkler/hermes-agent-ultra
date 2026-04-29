@@ -116,7 +116,11 @@ pub enum CliCommand {
     },
 
     /// Check for updates.
-    Update,
+    Update {
+        /// Compatibility flag for upstream parity (`hermes update --check`).
+        #[arg(long)]
+        check: bool,
+    },
 
     /// Run consolidated elite diagnostics and release gates.
     EliteCheck {
@@ -759,6 +763,15 @@ mod tests {
                 assert_eq!(snapshot_path.as_deref(), Some("/tmp/doctor.json"));
             }
             _ => panic!("Expected Doctor command"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_update_with_check_flag() {
+        let cli = Cli::try_parse_from(vec!["hermes", "update", "--check"]).unwrap();
+        match cli.command {
+            Some(CliCommand::Update { check }) => assert!(check),
+            _ => panic!("Expected Update command with --check"),
         }
     }
 
