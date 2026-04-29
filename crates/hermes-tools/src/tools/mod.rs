@@ -8,6 +8,7 @@ pub mod clarify;
 pub mod code_execution;
 pub mod credential_files;
 pub mod cronjob;
+pub mod dashboard_control;
 pub mod delegation;
 pub mod env_passthrough;
 pub mod file;

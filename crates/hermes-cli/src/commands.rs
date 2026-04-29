@@ -136,6 +136,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
         "Show build/parity/upstream snapshot and enabled Ultra features",
     ),
     ("/ops", "Operator control plane (status + quick controls)"),
+    ("/dashboard", "Dashboard control (status|on|off|url)"),
     (
         "/platforms",
         "Show enabled gateway/messaging platform adapters",
@@ -2411,6 +2412,7 @@ pub async fn handle_slash_command(
         "/status" => handle_status_command(app),
         "/about" => handle_about_command(app),
         "/ops" => handle_ops_command(app, args).await,
+        "/dashboard" => handle_dashboard_command(app, args).await,
         "/platforms" => handle_platforms_command(app),
         "/commands" => {
             print_help(app);
@@ -2502,6 +2504,80 @@ fn split_provider_model(provider_model: &str) -> (&str, &str) {
         .unwrap_or(("openai", provider_model))
 }
 
+fn model_catalog_guard_enabled() -> bool {
+    !matches!(
+        std::env::var("HERMES_MODEL_CATALOG_GUARD")
+            .ok()
+            .as_deref()
+            .map(|v| v.trim().to_ascii_lowercase()),
+        Some(v) if matches!(v.as_str(), "0" | "false" | "off" | "no")
+    )
+}
+
+fn resolve_catalog_model_candidate(requested_model: &str, catalog: &[String]) -> Option<String> {
+    if catalog.is_empty() {
+        return None;
+    }
+    let requested_trimmed = requested_model.trim();
+    if requested_trimmed.is_empty() {
+        return catalog.first().cloned();
+    }
+    if let Some(hit) = catalog
+        .iter()
+        .find(|m| m.trim().eq_ignore_ascii_case(requested_trimmed))
+    {
+        return Some(hit.clone());
+    }
+    let requested_lc = requested_trimmed.to_ascii_lowercase();
+    let slash_suffix = format!("/{requested_lc}");
+    if let Some(hit) = catalog.iter().find(|m| {
+        let lower = m.trim().to_ascii_lowercase();
+        lower.ends_with(&slash_suffix) || lower == requested_lc
+    }) {
+        return Some(hit.clone());
+    }
+    catalog.first().cloned()
+}
+
+async fn guard_provider_model_selection(
+    provider_model: &str,
+) -> Result<(String, Option<String>), AgentError> {
+    if !model_catalog_guard_enabled() {
+        return Ok((provider_model.to_string(), None));
+    }
+
+    let (provider, model_id) = split_provider_model(provider_model);
+    let provider = provider.trim().to_ascii_lowercase();
+    if provider.is_empty() {
+        return Ok((provider_model.to_string(), None));
+    }
+    if !curated_provider_slugs()
+        .iter()
+        .any(|slug| slug.eq_ignore_ascii_case(&provider))
+    {
+        return Ok((provider_model.to_string(), None));
+    }
+
+    let catalog = provider_model_ids(&provider).await;
+    if catalog.is_empty() {
+        return Ok((provider_model.to_string(), None));
+    }
+    let Some(candidate) = resolve_catalog_model_candidate(model_id, &catalog) else {
+        return Ok((provider_model.to_string(), None));
+    };
+    let guarded = format!("{}:{}", provider, candidate);
+    if guarded.eq_ignore_ascii_case(provider_model) {
+        return Ok((provider_model.to_string(), None));
+    }
+    Ok((
+        guarded.clone(),
+        Some(format!(
+            "Model catalog guard remapped `{}` -> `{}` based on provider catalog.",
+            provider_model, guarded
+        )),
+    ))
+}
+
 fn normalize_model_target(current_model: &str, raw: &str) -> Result<String, AgentError> {
     let trimmed = raw.trim();
     if trimmed.contains(':') {
@@ -2554,8 +2630,14 @@ async fn pick_model_for_provider(
         return Ok(false);
     }
     let provider_model = format!("{}:{}", provider, models[pick.index].trim());
-    app.switch_model(&provider_model);
-    emit_command_output(app, format!("Model switched to: {}", provider_model));
+    let (guarded, note) = guard_provider_model_selection(&provider_model).await?;
+    app.switch_model(&guarded);
+    let mut msg = format!("Model switched to: {}", guarded);
+    if let Some(n) = note {
+        msg.push_str("\n");
+        msg.push_str(&n);
+    }
+    emit_command_output(app, msg);
     Ok(true)
 }
 
@@ -2564,8 +2646,14 @@ async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandRes
     match parse_model_switch_request(args, &known_providers) {
         ModelSwitchRequest::SetDirect(raw) => {
             let provider_model = normalize_model_target(&app.current_model, &raw)?;
-            app.switch_model(&provider_model);
-            emit_command_output(app, format!("Model switched to: {}", provider_model));
+            let (guarded, note) = guard_provider_model_selection(&provider_model).await?;
+            app.switch_model(&guarded);
+            let mut msg = format!("Model switched to: {}", guarded);
+            if let Some(n) = note {
+                msg.push_str("\n");
+                msg.push_str(&n);
+            }
+            emit_command_output(app, msg);
         }
         ModelSwitchRequest::PickModelFromProvider(provider) => {
             let current_model = app.current_model.clone();
@@ -3380,9 +3468,387 @@ fn handle_about_command(app: &mut App) -> Result<CommandResult, AgentError> {
     Ok(CommandResult::Handled)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SkillsExecutionTier {
+    Trusted,
+    Balanced,
+    Open,
+}
+
+impl SkillsExecutionTier {
+    fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "trusted" => Some(Self::Trusted),
+            "balanced" => Some(Self::Balanced),
+            "open" | "permissive" => Some(Self::Open),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Trusted => "trusted",
+            Self::Balanced => "balanced",
+            Self::Open => "open",
+        }
+    }
+}
+
+fn skills_execution_tier() -> SkillsExecutionTier {
+    std::env::var("HERMES_SKILLS_EXECUTION_TIER")
+        .ok()
+        .as_deref()
+        .and_then(SkillsExecutionTier::parse)
+        .unwrap_or(SkillsExecutionTier::Balanced)
+}
+
+fn skills_tier_bypass_enabled() -> bool {
+    std::env::var("HERMES_SKILLS_TIER_BYPASS")
+        .ok()
+        .is_some_and(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+}
+
+fn skills_action_blocked_by_tier(
+    tier: SkillsExecutionTier,
+    action: &str,
+    name: Option<&str>,
+) -> bool {
+    let name_lc = name.map(|v| v.to_ascii_lowercase());
+    match tier {
+        SkillsExecutionTier::Trusted => {
+            matches!(
+                action,
+                "install" | "update" | "publish" | "uninstall" | "reset" | "subscribe"
+            ) || (action == "tap" && matches!(name_lc.as_deref(), Some("add" | "remove")))
+                || (action == "snapshot" && matches!(name_lc.as_deref(), Some("import")))
+        }
+        SkillsExecutionTier::Balanced => {
+            matches!(action, "publish" | "reset")
+                || (action == "snapshot" && matches!(name_lc.as_deref(), Some("import")))
+        }
+        SkillsExecutionTier::Open => false,
+    }
+}
+
+fn latest_json_report(report_dir: &Path, prefix: &str) -> Option<PathBuf> {
+    let mut reports: Vec<PathBuf> = std::fs::read_dir(report_dir)
+        .ok()?
+        .filter_map(|entry| {
+            let path = entry.ok()?.path();
+            let name = path.file_name()?.to_string_lossy();
+            if name.starts_with(prefix) && name.ends_with(".json") {
+                Some(path)
+            } else {
+                None
+            }
+        })
+        .collect();
+    reports.sort();
+    reports.into_iter().last()
+}
+
+fn summarize_gate_report(path: &Path, key: &str) -> Option<String> {
+    let report = read_json_file(path)?;
+    let ok = report
+        .get("ok")
+        .and_then(|v| v.as_bool())
+        .map(|v| if v { "pass" } else { "fail" })
+        .unwrap_or("unknown");
+    let generated = report
+        .get("generated_at")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    Some(format!(
+        "{}={} @ {} ({})",
+        key,
+        ok,
+        generated,
+        path.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.display().to_string())
+    ))
+}
+
+fn dashboard_status_line_from_payload(payload: &serde_json::Value) -> String {
+    let enabled = payload
+        .get("enabled")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let url = payload.get("url").and_then(|v| v.as_str()).unwrap_or("n/a");
+    format!(
+        "dashboard: {} ({})",
+        if enabled { "ON" } else { "OFF" },
+        url
+    )
+}
+
+async fn handle_dashboard_command(
+    app: &mut App,
+    args: &[&str],
+) -> Result<CommandResult, AgentError> {
+    let action = args
+        .first()
+        .copied()
+        .unwrap_or("status")
+        .to_ascii_lowercase();
+    let mut params = serde_json::json!({
+        "action": action
+    });
+    if let Some(host) = args.get(1) {
+        params["host"] = serde_json::Value::String((*host).to_string());
+    }
+    if let Some(port) = args.get(2).and_then(|raw| raw.parse::<u16>().ok()) {
+        params["port"] = serde_json::json!(port);
+    }
+    if args
+        .iter()
+        .any(|arg| arg.eq_ignore_ascii_case("--insecure"))
+    {
+        params["insecure"] = serde_json::json!(true);
+    }
+
+    let raw = app
+        .tool_registry
+        .dispatch_async("dashboard_control", params)
+        .await;
+    let parsed: serde_json::Value =
+        serde_json::from_str(&raw).unwrap_or_else(|_| serde_json::json!({"result": raw}));
+
+    if let Some(err) = parsed.get("error").and_then(|v| v.as_str()) {
+        emit_command_output(app, format!("Dashboard command failed: {err}"));
+        return Ok(CommandResult::Handled);
+    }
+
+    let rendered = match action.as_str() {
+        "enable" | "on" => format!(
+            "Dashboard enabled at {}\nConfig: {}",
+            parsed
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown"),
+            parsed
+                .get("config_path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+        ),
+        "disable" | "off" => format!(
+            "Dashboard disabled (URL: {})\nConfig: {}",
+            parsed
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown"),
+            parsed
+                .get("config_path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+        ),
+        "url" => format!(
+            "{}\n{}",
+            parsed
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown"),
+            parsed
+                .get("config_path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+        ),
+        _ => format!(
+            "{}\nConfig: {}",
+            dashboard_status_line_from_payload(&parsed),
+            parsed
+                .get("config_path")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown")
+        ),
+    };
+    emit_command_output(app, rendered);
+    Ok(CommandResult::Handled)
+}
+
+async fn run_ops_shell_command(command: &str) -> Result<String, AgentError> {
+    let output = tokio::process::Command::new("bash")
+        .arg("-lc")
+        .arg(command)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .await
+        .map_err(|e| AgentError::Io(format!("ops shell command failed: {e}")))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let mut msg = String::new();
+    if !stdout.is_empty() {
+        msg.push_str(&stdout);
+    }
+    if !stderr.is_empty() {
+        if !msg.is_empty() {
+            msg.push_str("\n\n");
+        }
+        msg.push_str("stderr:\n");
+        msg.push_str(&stderr);
+    }
+    if msg.is_empty() {
+        msg = format!("(exit: {})", output.status);
+    } else if !output.status.success() {
+        msg = format!("(exit: {})\n{}", output.status, msg);
+    }
+    Ok(msg)
+}
+
+fn handle_ops_skills_tier_command(
+    app: &mut App,
+    args: &[&str],
+) -> Result<CommandResult, AgentError> {
+    if args.is_empty() || args[0].eq_ignore_ascii_case("status") {
+        emit_command_output(
+            app,
+            format!(
+                "skills_tier={} (bypass={})",
+                skills_execution_tier().as_str(),
+                if skills_tier_bypass_enabled() {
+                    "ON"
+                } else {
+                    "OFF"
+                }
+            ),
+        );
+        return Ok(CommandResult::Handled);
+    }
+
+    let Some(next) = SkillsExecutionTier::parse(args[0]) else {
+        emit_command_output(
+            app,
+            "Usage: /ops skills-tier [status|trusted|balanced|open]",
+        );
+        return Ok(CommandResult::Handled);
+    };
+    std::env::set_var("HERMES_SKILLS_EXECUTION_TIER", next.as_str());
+    emit_command_output(
+        app,
+        format!(
+            "skills_tier set to '{}' for this runtime process.",
+            next.as_str()
+        ),
+    );
+    Ok(CommandResult::Handled)
+}
+
+async fn handle_ops_gate_command(
+    app: &mut App,
+    args: &[&str],
+) -> Result<CommandResult, AgentError> {
+    let sub = args
+        .first()
+        .copied()
+        .unwrap_or("status")
+        .to_ascii_lowercase();
+    match sub.as_str() {
+        "status" => {
+            if let Some(repo_root) = discover_repo_root_for_about() {
+                let report_dir = repo_root.join(".sync-reports");
+                let eval = latest_json_report(&report_dir, "eval-trend-gate-")
+                    .and_then(|p| summarize_gate_report(&p, "eval_trend"))
+                    .unwrap_or_else(|| "eval_trend=unknown".to_string());
+                let slo = latest_json_report(&report_dir, "slo-auto-rollback-")
+                    .and_then(|p| summarize_gate_report(&p, "slo_rollback"))
+                    .unwrap_or_else(|| "slo_rollback=unknown".to_string());
+                let elite = latest_json_report(&report_dir, "elite-sync-gate-")
+                    .and_then(|p| summarize_gate_report(&p, "elite_sync_gate"))
+                    .unwrap_or_else(|| "elite_sync_gate=unknown".to_string());
+                emit_command_output(app, format!("{}\n{}\n{}", eval, slo, elite));
+            } else {
+                emit_command_output(app, "Gate status unavailable outside source checkout.");
+            }
+            Ok(CommandResult::Handled)
+        }
+        "eval" => {
+            let out = run_ops_shell_command(
+                "python3 scripts/run-eval-trend-gate.py --allow-missing-baseline --json",
+            )
+            .await?;
+            emit_command_output(app, out);
+            Ok(CommandResult::Handled)
+        }
+        "elite" => {
+            let out =
+                run_ops_shell_command("python3 scripts/run-elite-sync-gate.py --json").await?;
+            emit_command_output(app, out);
+            Ok(CommandResult::Handled)
+        }
+        "slo" => {
+            let check_cmd = std::env::var("HERMES_SLO_CHECK_CMD").ok();
+            let rollback_cmd = std::env::var("HERMES_SLO_ROLLBACK_CMD").ok();
+            let (Some(check), Some(rollback)) = (check_cmd, rollback_cmd) else {
+                emit_command_output(
+                    app,
+                    "Set HERMES_SLO_CHECK_CMD and HERMES_SLO_ROLLBACK_CMD, then run `/ops gate slo`.",
+                );
+                return Ok(CommandResult::Handled);
+            };
+            let cmd = format!(
+                "python3 scripts/run-slo-auto-rollback.py --check-cmd {} --rollback-cmd {} --json",
+                shell_escape(&check),
+                shell_escape(&rollback)
+            );
+            let out = run_ops_shell_command(&cmd).await?;
+            emit_command_output(app, out);
+            Ok(CommandResult::Handled)
+        }
+        _ => {
+            emit_command_output(app, "Usage: /ops gate [status|eval|elite|slo]");
+            Ok(CommandResult::Handled)
+        }
+    }
+}
+
+fn shell_escape(input: &str) -> String {
+    let escaped = input.replace('\'', "'\"'\"'");
+    format!("'{}'", escaped)
+}
+
 async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     if args.is_empty() || args[0].eq_ignore_ascii_case("status") {
         let yolo = !app.config.approval.require_approval;
+        let policy_mode = std::env::var("HERMES_TOOL_POLICY_MODE")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| "enforce".to_string());
+        let policy_preset = std::env::var("HERMES_TOOL_POLICY_PRESET")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| "balanced".to_string());
+        let counters = app.tool_registry.policy_counters();
+        let dashboard_status = {
+            let raw = app
+                .tool_registry
+                .dispatch_async("dashboard_control", serde_json::json!({"action":"status"}))
+                .await;
+            let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap_or_else(
+                |_| serde_json::json!({"enabled":false,"url":"unknown","error":"unparseable"}),
+            );
+            dashboard_status_line_from_payload(&parsed)
+        };
+        let gate_status = if let Some(repo_root) = discover_repo_root_for_about() {
+            let report_dir = repo_root.join(".sync-reports");
+            let eval = latest_json_report(&report_dir, "eval-trend-gate-")
+                .and_then(|p| summarize_gate_report(&p, "eval"))
+                .unwrap_or_else(|| "eval=unknown".to_string());
+            let slo = latest_json_report(&report_dir, "slo-auto-rollback-")
+                .and_then(|p| summarize_gate_report(&p, "slo"))
+                .unwrap_or_else(|| "slo=unknown".to_string());
+            format!("{eval}; {slo}")
+        } else {
+            "unavailable (non-source checkout)".to_string()
+        };
+
         let out = format!(
             "Operator Control Plane\n\
              \n\
@@ -3399,6 +3865,13 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                raw:          toggle via `/ops raw`\n\
                verbose:      toggle via `/ops verbose`\n\
              \n\
+             Policy/Gates:\n\
+               tool_policy:  mode={} preset={}\n\
+               policy_counts allow={} deny={} audit_only={} simulate={} would_block={}\n\
+               skills_tier:  {} (bypass={})\n\
+               {}\n\
+               gate_status:  {}\n\
+             \n\
              Quick actions:\n\
                /ops model [provider|provider:model]\n\
                /ops personality [list|name]\n\
@@ -3407,12 +3880,30 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                /ops reasoning\n\
                /ops raw [on|off|toggle|once]\n\
                /ops verbose\n\
+               /ops dashboard [status|on|off|url] [host] [port]\n\
+               /ops skills-tier [status|trusted|balanced|open]\n\
+               /ops gate [status|eval|elite|slo]\n\
                /ops help",
             app.session_id,
             app.current_model,
             app.current_personality.as_deref().unwrap_or("(none)"),
             if yolo { "ON" } else { "OFF" },
             if app.mouse_enabled() { "ON" } else { "OFF" },
+            policy_mode,
+            policy_preset,
+            counters.allow,
+            counters.deny,
+            counters.audit_only,
+            counters.simulate,
+            counters.would_block,
+            skills_execution_tier().as_str(),
+            if skills_tier_bypass_enabled() {
+                "ON"
+            } else {
+                "OFF"
+            },
+            dashboard_status,
+            gate_status,
         );
         emit_command_output(app, out);
         return Ok(CommandResult::Handled);
@@ -3431,7 +3922,10 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                  - /ops reasoning\n\
                  - /ops raw [on|off|toggle|once]\n\
                  - /ops verbose\n\
-                 - /ops statusbar",
+                 - /ops statusbar\n\
+                 - /ops dashboard [status|on|off|url] [host] [port]\n\
+                 - /ops skills-tier [status|trusted|balanced|open]\n\
+                 - /ops gate [status|eval|elite|slo]",
             );
             Ok(CommandResult::Handled)
         }
@@ -3443,6 +3937,9 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
         "raw" => handle_raw_command(app, &args[1..]),
         "verbose" => handle_verbose_command(app),
         "statusbar" => handle_statusbar_command(app),
+        "dashboard" => handle_dashboard_command(app, &args[1..]).await,
+        "skills-tier" => handle_ops_skills_tier_command(app, &args[1..]),
+        "gate" => handle_ops_gate_command(app, &args[1..]).await,
         other => {
             emit_command_output(
                 app,
@@ -4594,6 +5091,20 @@ pub async fn handle_cli_skills(
     name: Option<String>,
     extra: Option<String>,
 ) -> Result<(), hermes_core::AgentError> {
+    let requested_action = action.as_deref().unwrap_or("list");
+    if !skills_tier_bypass_enabled() {
+        let tier = skills_execution_tier();
+        let denied = skills_action_blocked_by_tier(tier, requested_action, name.as_deref());
+
+        if denied {
+            return Err(hermes_core::AgentError::Config(format!(
+                "skills action '{}' is blocked by skills tier '{}'. Use `/ops skills-tier open` or set HERMES_SKILLS_TIER_BYPASS=1 to override intentionally.",
+                requested_action,
+                tier.as_str()
+            )));
+        }
+    }
+
     let skills_dir = hermes_config::hermes_home().join("skills");
 
     match action.as_deref().unwrap_or("list") {
@@ -9205,5 +9716,49 @@ mod tests {
         let masked = mask_secret_value(raw);
         assert!(!masked.contains(raw));
         assert!(masked.contains("***"));
+    }
+
+    #[test]
+    fn resolve_catalog_model_candidate_prefers_suffix_match() {
+        let catalog = vec![
+            "nousresearch/hermes-4-405b".to_string(),
+            "moonshotai/kimi-k2.6".to_string(),
+        ];
+        let chosen = resolve_catalog_model_candidate("kimi-k2.6", &catalog).expect("candidate");
+        assert_eq!(chosen, "moonshotai/kimi-k2.6");
+    }
+
+    #[test]
+    fn skills_action_blocked_by_tier_enforces_expected_matrix() {
+        assert!(skills_action_blocked_by_tier(
+            SkillsExecutionTier::Trusted,
+            "install",
+            None
+        ));
+        assert!(skills_action_blocked_by_tier(
+            SkillsExecutionTier::Trusted,
+            "tap",
+            Some("add")
+        ));
+        assert!(!skills_action_blocked_by_tier(
+            SkillsExecutionTier::Trusted,
+            "list",
+            None
+        ));
+        assert!(skills_action_blocked_by_tier(
+            SkillsExecutionTier::Balanced,
+            "publish",
+            None
+        ));
+        assert!(!skills_action_blocked_by_tier(
+            SkillsExecutionTier::Balanced,
+            "install",
+            None
+        ));
+        assert!(!skills_action_blocked_by_tier(
+            SkillsExecutionTier::Open,
+            "publish",
+            None
+        ));
     }
 }

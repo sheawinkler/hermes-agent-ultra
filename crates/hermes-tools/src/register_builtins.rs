@@ -291,6 +291,15 @@ pub fn register_builtin_tools(
         vec![],
     );
 
+    // -- Dashboard control ---------------------------------------------------
+    reg(
+        registry,
+        "dashboard",
+        Arc::new(crate::tools::dashboard_control::DashboardControlHandler),
+        "🖥️",
+        vec![],
+    );
+
     // -- Home Assistant (4 tools) --------------------------------------------
     {
         let ha_backend: Arc<dyn crate::tools::homeassistant::HomeAssistantBackend> =

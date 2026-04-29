@@ -31,6 +31,7 @@ use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_tools::ToolRegistry;
 
 use crate::cli::Cli;
+use crate::model_switch::provider_model_ids;
 use crate::runtime_tool_wiring::{wire_cron_scheduler_backend, wire_stdio_clarify_backend};
 use crate::terminal_backend::build_terminal_backend;
 use crate::tui::StreamHandle;
@@ -529,67 +530,91 @@ impl App {
     /// Checks the interrupt controller before running and clears it after.
     async fn run_agent(&mut self) -> Result<(), AgentError> {
         self.interrupt_controller.clear_interrupt();
+        let mut remediation_attempted = false;
+        loop {
+            let messages = self.messages.clone();
+            let result = if self.config.streaming.enabled {
+                let stream_handle = self.stream_handle.clone();
+                let stream_cb: Option<Box<dyn Fn(hermes_core::StreamChunk) + Send + Sync>> =
+                    stream_handle.map(|h| {
+                        Box::new(move |chunk: hermes_core::StreamChunk| {
+                            h.send_chunk(chunk);
+                        })
+                            as Box<dyn Fn(hermes_core::StreamChunk) + Send + Sync>
+                    });
+                self.agent
+                    .run_stream(messages, Some(self.tool_schemas.clone()), stream_cb)
+                    .await
+            } else {
+                self.agent
+                    .run(messages, Some(self.tool_schemas.clone()))
+                    .await
+            };
 
-        let messages = self.messages.clone();
-        let result = if self.config.streaming.enabled {
-            let stream_handle = self.stream_handle.clone();
-            let stream_cb: Option<Box<dyn Fn(hermes_core::StreamChunk) + Send + Sync>> =
-                stream_handle.map(|h| {
-                    Box::new(move |chunk: hermes_core::StreamChunk| {
-                        h.send_chunk(chunk);
-                    }) as Box<dyn Fn(hermes_core::StreamChunk) + Send + Sync>
-                });
-            self.agent
-                .run_stream(messages, Some(self.tool_schemas.clone()), stream_cb)
-                .await
-        } else {
-            self.agent
-                .run(messages, Some(self.tool_schemas.clone()))
-                .await
-        };
-
-        match result {
-            Ok(result) => {
-                self.messages = result.messages;
-                self.prune_ui_after_current_messages();
-                if let Some(handle) = &self.stream_handle {
-                    handle.send_done();
+            match result {
+                Ok(result) => {
+                    self.messages = result.messages;
+                    self.prune_ui_after_current_messages();
+                    if let Some(handle) = &self.stream_handle {
+                        handle.send_done();
+                    }
+                    if result.interrupted {
+                        tracing::info!("Agent loop returned interrupted=true (graceful stop)");
+                        if self.stream_handle.is_some() {
+                            self.push_ui_assistant("[Agent execution interrupted]");
+                        } else {
+                            println!("[Agent execution interrupted]");
+                        }
+                    } else if !result.finished_naturally {
+                        tracing::warn!(
+                            "Agent stopped after {} turns (did not finish naturally)",
+                            result.total_turns
+                        );
+                    }
+                    break;
                 }
-                if result.interrupted {
-                    tracing::info!("Agent loop returned interrupted=true (graceful stop)");
+                Err(AgentError::Interrupted { message }) => {
+                    self.interrupt_controller.clear_interrupt();
+                    if let Some(handle) = &self.stream_handle {
+                        handle.send_done();
+                    }
+                    if let Some(redirect) = message {
+                        tracing::info!("Agent interrupted with redirect: {}", redirect);
+                    } else {
+                        tracing::info!("Agent interrupted by user");
+                    }
                     if self.stream_handle.is_some() {
                         self.push_ui_assistant("[Agent execution interrupted]");
                     } else {
                         println!("[Agent execution interrupted]");
                     }
-                } else if !result.finished_naturally {
-                    tracing::warn!(
-                        "Agent stopped after {} turns (did not finish naturally)",
-                        result.total_turns
-                    );
+                    break;
                 }
-            }
-            Err(AgentError::Interrupted { message }) => {
-                self.interrupt_controller.clear_interrupt();
-                if let Some(handle) = &self.stream_handle {
-                    handle.send_done();
+                Err(e) => {
+                    if let Some(handle) = &self.stream_handle {
+                        handle.send_done();
+                    }
+                    if !remediation_attempted {
+                        if let Some((next_model, notice)) =
+                            self.model_auto_remediation_target(&e).await
+                        {
+                            tracing::warn!(
+                                "Model auto-remediation triggered: {} -> {}",
+                                self.current_model,
+                                next_model
+                            );
+                            if self.stream_handle.is_some() {
+                                self.push_ui_assistant(notice.clone());
+                            } else {
+                                println!("{notice}");
+                            }
+                            self.switch_model(&next_model);
+                            remediation_attempted = true;
+                            continue;
+                        }
+                    }
+                    return Err(e);
                 }
-                if let Some(redirect) = message {
-                    tracing::info!("Agent interrupted with redirect: {}", redirect);
-                } else {
-                    tracing::info!("Agent interrupted by user");
-                }
-                if self.stream_handle.is_some() {
-                    self.push_ui_assistant("[Agent execution interrupted]");
-                } else {
-                    println!("[Agent execution interrupted]");
-                }
-            }
-            Err(e) => {
-                if let Some(handle) = &self.stream_handle {
-                    handle.send_done();
-                }
-                return Err(e);
             }
         }
 
@@ -675,6 +700,72 @@ impl App {
             message_count: self.messages.len(),
             created_at: chrono::Utc::now().to_rfc3339(),
         }
+    }
+
+    fn model_auto_remediation_enabled() -> bool {
+        !matches!(
+            std::env::var("HERMES_MODEL_AUTO_REMEDIATE")
+                .ok()
+                .as_deref()
+                .map(|v| v.trim().to_ascii_lowercase()),
+            Some(v) if matches!(v.as_str(), "0" | "false" | "off" | "no")
+        )
+    }
+
+    fn is_model_not_found_error(err: &AgentError) -> bool {
+        let message = match err {
+            AgentError::LlmApi(msg)
+            | AgentError::Config(msg)
+            | AgentError::ToolExecution(msg)
+            | AgentError::Gateway(msg) => msg.to_ascii_lowercase(),
+            _ => return false,
+        };
+        let model_not_found = message.contains("model not found")
+            || message.contains("requested model does not exist")
+            || message.contains("404 not found")
+            || message.contains("openrouter catalog");
+        model_not_found && message.contains("model")
+    }
+
+    async fn model_auto_remediation_target(&self, err: &AgentError) -> Option<(String, String)> {
+        if !Self::model_auto_remediation_enabled() || !Self::is_model_not_found_error(err) {
+            return None;
+        }
+
+        let (provider, current_model_id) = self
+            .current_model
+            .split_once(':')
+            .unwrap_or(("openai", self.current_model.as_str()));
+        let provider = provider.trim().to_ascii_lowercase();
+        if provider.is_empty() {
+            return None;
+        }
+
+        let catalog = provider_model_ids(&provider).await;
+        if catalog.is_empty() {
+            return None;
+        }
+
+        let current_trimmed = current_model_id.trim().to_ascii_lowercase();
+        let slash_suffix = format!("/{}", current_trimmed);
+        let selected = catalog
+            .iter()
+            .find(|m| {
+                let lower = m.trim().to_ascii_lowercase();
+                lower == current_trimmed || lower.ends_with(&slash_suffix)
+            })
+            .cloned()
+            .or_else(|| catalog.first().cloned())?;
+
+        let next_model = format!("{}:{}", provider, selected.trim());
+        if next_model.eq_ignore_ascii_case(&self.current_model) {
+            return None;
+        }
+        let notice = format!(
+            "Model catalog remediation: `{}` failed with not-found; switching to `{}` and retrying once.",
+            self.current_model, next_model
+        );
+        Some((next_model, notice))
     }
 
     /// Navigate backward in input history.
@@ -1057,6 +1148,20 @@ mod tests {
         assert!(!default_rtk_raw_mode());
 
         std::env::remove_var("HERMES_RTK_RAW");
+    }
+
+    #[test]
+    fn test_is_model_not_found_error_detects_provider_404_shape() {
+        let err = AgentError::LlmApi(
+            "API error 404 Not Found: model foo/bar not found in OpenRouter catalog".to_string(),
+        );
+        assert!(App::is_model_not_found_error(&err));
+    }
+
+    #[test]
+    fn test_is_model_not_found_error_ignores_non_catalog_errors() {
+        let err = AgentError::LlmApi("Rate limit exceeded".to_string());
+        assert!(!App::is_model_not_found_error(&err));
     }
 }
 
