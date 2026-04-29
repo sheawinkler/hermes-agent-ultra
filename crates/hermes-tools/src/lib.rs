@@ -53,6 +53,7 @@ pub use tools::clarify::{ClarifyBackend, ClarifyHandler};
 pub use tools::code_execution::{CodeExecutionBackend, ExecuteCodeHandler};
 pub use tools::credential_files::CredentialFilesHandler;
 pub use tools::cronjob::{CronjobBackend, CronjobHandler};
+pub use tools::dashboard_control::DashboardControlHandler;
 pub use tools::delegation::{DelegateTaskHandler, DelegationBackend};
 pub use tools::env_passthrough::EnvPassthroughHandler;
 pub use tools::file::{
