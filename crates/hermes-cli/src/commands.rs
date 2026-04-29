@@ -4965,6 +4965,15 @@ fn apply_cli_chat_runtime_env(provider_model: &str) {
     }
 }
 
+const QUERY_ALLOW_TOOLS_ENV_KEY: &str = "HERMES_QUERY_ALLOW_TOOLS";
+
+fn query_mode_tools_enabled(query_mode: bool, allow_tools_flag: bool) -> bool {
+    if !query_mode {
+        return true;
+    }
+    allow_tools_flag || hermes_config::env_var_enabled(QUERY_ALLOW_TOOLS_ENV_KEY)
+}
+
 /// Handle `hermes chat [--query ...] [--preload-skill ...] [--yolo]`.
 pub async fn handle_cli_chat(
     query: Option<String>,
@@ -4972,6 +4981,7 @@ pub async fn handle_cli_chat(
     yolo: bool,
     model_override: Option<String>,
     provider_override: Option<String>,
+    allow_tools_flag: bool,
 ) -> Result<(), hermes_core::AgentError> {
     use crate::runtime_tool_wiring::{wire_cron_scheduler_backend, wire_stdio_clarify_backend};
     use crate::terminal_backend::build_terminal_backend;
@@ -4996,6 +5006,15 @@ pub async fn handle_cli_chat(
         config.approval.require_approval = false;
     }
 
+    let query_mode = query.is_some();
+    let tools_enabled = query_mode_tools_enabled(query_mode, allow_tools_flag);
+    if query_mode && !tools_enabled {
+        println!(
+            "[Query mode: tools disabled by default. Pass --allow-tools or set {}=1 to enable.]",
+            QUERY_ALLOW_TOOLS_ENV_KEY
+        );
+    }
+
     let current_model = resolve_cli_chat_provider_model(
         config.model.as_deref(),
         model_override.as_deref(),
@@ -5004,24 +5023,27 @@ pub async fn handle_cli_chat(
     apply_cli_chat_runtime_env(&current_model);
 
     let tool_registry = Arc::new(ToolRegistry::new());
-    let terminal_backend = build_terminal_backend(&config);
-    let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
-    let skill_provider: Arc<dyn hermes_core::SkillProvider> =
-        Arc::new(SkillManager::new(skill_store));
-    hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
-    wire_stdio_clarify_backend(&tool_registry);
-    let cron_data_dir = hermes_config::cron_dir();
-    std::fs::create_dir_all(&cron_data_dir)
-        .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
-    let cron_scheduler = Arc::new(cron_scheduler_for_data_dir(cron_data_dir));
-    cron_scheduler
-        .load_persisted_jobs()
-        .await
-        .map_err(|e| hermes_core::AgentError::Config(format!("cron load: {e}")))?;
-    cron_scheduler.start().await;
-    wire_cron_scheduler_backend(&tool_registry, cron_scheduler);
-    let tool_schemas =
-        crate::platform_toolsets::resolve_platform_tool_schemas(&config, "cli", &tool_registry);
+    let tool_schemas = if tools_enabled {
+        let terminal_backend = build_terminal_backend(&config);
+        let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
+        let skill_provider: Arc<dyn hermes_core::SkillProvider> =
+            Arc::new(SkillManager::new(skill_store));
+        hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
+        wire_stdio_clarify_backend(&tool_registry);
+        let cron_data_dir = hermes_config::cron_dir();
+        std::fs::create_dir_all(&cron_data_dir)
+            .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+        let cron_scheduler = Arc::new(cron_scheduler_for_data_dir(cron_data_dir));
+        cron_scheduler
+            .load_persisted_jobs()
+            .await
+            .map_err(|e| hermes_core::AgentError::Config(format!("cron load: {e}")))?;
+        cron_scheduler.start().await;
+        wire_cron_scheduler_backend(&tool_registry, cron_scheduler);
+        crate::platform_toolsets::resolve_platform_tool_schemas(&config, "cli", &tool_registry)
+    } else {
+        Vec::new()
+    };
     let agent_tool_registry = Arc::new(crate::app::bridge_tool_registry(&tool_registry));
 
     let agent_config = crate::app::build_agent_config(&config, &current_model);
@@ -9669,6 +9691,24 @@ mod tests {
         for key in keys {
             std::env::remove_var(key);
         }
+    }
+
+    #[test]
+    fn query_mode_tools_enabled_defaults_off_for_query_mode() {
+        let _lock = env_test_lock();
+        std::env::remove_var("HERMES_QUERY_ALLOW_TOOLS");
+        assert!(!query_mode_tools_enabled(true, false));
+        assert!(query_mode_tools_enabled(false, false));
+    }
+
+    #[test]
+    fn query_mode_tools_enabled_respects_flag_and_env_override() {
+        let _lock = env_test_lock();
+        std::env::remove_var("HERMES_QUERY_ALLOW_TOOLS");
+        assert!(query_mode_tools_enabled(true, true));
+        std::env::set_var("HERMES_QUERY_ALLOW_TOOLS", "1");
+        assert!(query_mode_tools_enabled(true, false));
+        std::env::remove_var("HERMES_QUERY_ALLOW_TOOLS");
     }
 
     #[test]

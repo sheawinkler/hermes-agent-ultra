@@ -99,6 +99,7 @@ async fn main() {
     let effective_command = cli.effective_command();
     let global_model_override = cli.model.clone();
     let global_provider_override = cli.provider.clone();
+    let global_allow_tools_override = cli.allow_tools;
 
     // Initialize tracing
     init_tracing(cli.verbose, matches!(effective_command, CliCommand::Hermes));
@@ -129,6 +130,7 @@ async fn main() {
             false,
             global_model_override.clone(),
             global_provider_override.clone(),
+            global_allow_tools_override,
         )
         .await;
         if let Err(e) = result {
@@ -151,6 +153,7 @@ async fn main() {
                 yolo,
                 global_model_override.clone(),
                 global_provider_override.clone(),
+                global_allow_tools_override,
             )
             .await
         }

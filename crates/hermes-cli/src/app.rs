@@ -852,6 +852,7 @@ mod tests {
             model: None,
             provider: Some("nous".to_string()),
             oneshot: None,
+            allow_tools: false,
             personality: None,
         };
 
@@ -870,6 +871,7 @@ mod tests {
             model: None,
             provider: Some("anthropic".to_string()),
             oneshot: None,
+            allow_tools: false,
             personality: None,
         };
 
