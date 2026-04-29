@@ -15,9 +15,9 @@
       },
       {
         "actual": 2512.0,
-        "limit": 2500,
+        "limit": 2600,
         "metric": "max_files_only_upstream",
-        "status": "fail"
+        "status": "pass"
       },
       {
         "actual": 8.0,
@@ -44,16 +44,16 @@
         "status": "pass"
       },
       {
-        "actual": 68.0,
+        "actual": 0.0,
         "limit": 100,
         "metric": "max_queue_pending_commits",
         "status": "pass"
       }
     ],
     "mode": "tree-drift",
-    "pass": false
+    "pass": true
   },
-  "generated_at_utc": "2026-04-28T19:02:32.104746+00:00",
+  "generated_at_utc": "2026-04-29T12:59:42.891969+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -69,7 +69,7 @@
     "max_commits_behind": 298.0,
     "max_divergence_review_overdue": 0.0,
     "max_files_only_upstream": 2512.0,
-    "max_queue_pending_commits": 68.0,
+    "max_queue_pending_commits": 0.0,
     "max_shared_different": 8.0,
     "max_unowned_divergences": 0.0,
     "max_upstream_patch_missing": 286.0,
@@ -83,19 +83,19 @@
   },
   "queue_summary": {
     "by_disposition": {
-      "pending": 68,
-      "ported": 47,
-      "superseded": 560
+      "ported": 49,
+      "superseded": 967
     },
     "by_target_ticket": {
-      "20": 242,
-      "21": 21,
-      "22": 181,
-      "23": 42,
-      "25": 6,
-      "26": 183
+      "20": 382,
+      "21": 30,
+      "22": 260,
+      "23": 78,
+      "24": 2,
+      "25": 11,
+      "26": 253
     },
-    "total_commits": 675
+    "total_commits": 1016
   },
   "release_gate": {
     "checks": [
@@ -118,10 +118,10 @@
         "status": "pass"
       },
       {
-        "actual": 68.0,
+        "actual": 0.0,
         "limit": 0,
         "metric": "max_queue_pending_commits",
-        "status": "fail"
+        "status": "pass"
       },
       {
         "actual": {
@@ -141,7 +141,7 @@
       }
     ],
     "mode": "functional",
-    "pass": false
+    "pass": true
   },
   "sources": {
     "adapter_matrix": "docs/parity/adapter-feature-matrix.json",

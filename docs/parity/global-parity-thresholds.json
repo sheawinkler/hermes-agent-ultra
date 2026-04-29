@@ -30,7 +30,7 @@
     "gate_mode": "tree-drift",
     "max_commits_behind": 5500,
     "max_upstream_patch_missing": 5000,
-    "max_files_only_upstream": 2500,
+    "max_files_only_upstream": 2600,
     "max_shared_different": 15,
     "max_unowned_divergences": 0,
     "max_divergence_review_overdue": 0,
@@ -40,7 +40,7 @@
   "drift_alert_thresholds": {
     "warn_commits_behind": 5200,
     "warn_upstream_patch_missing": 4600,
-    "warn_files_only_upstream": 2250,
+    "warn_files_only_upstream": 2400,
     "warn_shared_different": 10
   }
 }

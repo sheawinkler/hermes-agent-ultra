@@ -1,30 +1,30 @@
 # Parity Dashboard
 
-_Generated from source artifacts: `2026-04-28T19:02:32.104746+00:00`_
+_Generated from source artifacts: `2026-04-29T12:59:42.891969+00:00`_
 
 ## Snapshot
 
-- Upstream target: `upstream/main` @ `93ddff53e339b859e88d1d1be97624212722b7f1`
-- Workstream snapshot generated: `2026-04-24T14:52:58-06:00`
+- Upstream target: `upstream/main` @ `fe6c86623fabf023040d0bc3b0f1a98561abcbb8`
+- Workstream snapshot generated: `2026-04-29T01:24:45-06:00`
 - Parity matrix generated: `2026-04-24T21:19:39.155201+00:00`
-- Queue snapshot generated: `2026-04-28T18:57:36.674661+00:00`
-- Proof snapshot generated: `2026-04-28T19:02:32.104746+00:00`
+- Queue snapshot generated: `2026-04-29T12:59:37.587942+00:00`
+- Proof snapshot generated: `2026-04-29T12:59:42.891969+00:00`
 
 ## Gate Status
 
-- Release gate: **FAIL**
-- CI/tree-drift gate: **FAIL**
-- Release gate failures: max_queue_pending_commits (actual=68.0, limit=0)
-- CI gate failures: max_files_only_upstream (actual=2512.0, limit=2500)
+- Release gate: **PASS**
+- CI/tree-drift gate: **PASS**
+- Release gate failures: none
+- CI gate failures: none
 
 ## Queue Summary
 
 | Metric | Value |
 | --- | ---: |
-| Total commits in queue | 675 |
-| Pending | 68 |
-| Ported | 47 |
-| Superseded | 560 |
+| Total commits in queue | 1016 |
+| Pending | 0 |
+| Ported | 49 |
+| Superseded | 967 |
 
 ## Tree/Patch Drift
 
