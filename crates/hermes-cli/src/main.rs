@@ -198,7 +198,7 @@ async fn main() {
             snapshot_path,
             bundle,
         } => run_doctor(cli, deep, self_heal, snapshot, snapshot_path, bundle).await,
-        CliCommand::Update => run_update().await,
+        CliCommand::Update { check } => run_update(check).await,
         CliCommand::EliteCheck { json, strict } => run_elite_check(cli, json, strict).await,
         CliCommand::VerifyProvenance {
             path,
@@ -9151,7 +9151,7 @@ fn build_doctor_support_bundle(cli: &Cli, snapshot_path: &Path) -> Result<PathBu
 }
 
 /// Handle `hermes update`.
-async fn run_update() -> Result<(), AgentError> {
+async fn run_update(_check: bool) -> Result<(), AgentError> {
     println!("Hermes Agent v{}", env!("CARGO_PKG_VERSION"));
     println!("{}", hermes_cli::update::check_for_updates().await?);
     Ok(())
