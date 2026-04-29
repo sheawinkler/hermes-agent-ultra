@@ -631,6 +631,12 @@ pub struct Cli {
     #[arg(short = 'z', long, global = true)]
     pub oneshot: Option<String>,
 
+    /// Allow tools in one-shot/query mode (`-z` / `chat --query`).
+    ///
+    /// By default, one-shot/query mode disables tools for deterministic replies.
+    #[arg(long, global = true)]
+    pub allow_tools: bool,
+
     /// Override the personality / persona.
     #[arg(short = 'p', long, global = true)]
     pub personality: Option<String>,
@@ -657,6 +663,7 @@ mod tests {
         assert!(cli.model.is_none());
         assert!(cli.provider.is_none());
         assert!(cli.oneshot.is_none());
+        assert!(!cli.allow_tools);
     }
 
     #[test]
@@ -696,10 +703,12 @@ mod tests {
             "anthropic",
             "-z",
             "reply with 1",
+            "--allow-tools",
         ])
         .unwrap();
         assert_eq!(cli.provider.as_deref(), Some("anthropic"));
         assert_eq!(cli.oneshot.as_deref(), Some("reply with 1"));
+        assert!(cli.allow_tools);
     }
 
     #[test]
