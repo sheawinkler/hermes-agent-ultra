@@ -177,6 +177,8 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
 ];
 
 const DEFAULT_SKILL_TAPS: &[&str] = &[
+    "https://github.com/NousResearch/hermes-agent::skills",
+    "https://github.com/NousResearch/hermes-agent::optional-skills",
     "https://github.com/openai/skills::skills",
     "https://github.com/anthropics/skills::skills",
     "https://github.com/VoltAgent/awesome-agent-skills::skills",
@@ -187,6 +189,7 @@ const DEFAULT_SKILL_TAPS: &[&str] = &[
 ];
 
 const GITHUB_API_BASE: &str = "https://api.github.com";
+const OFFICIAL_SKILLS_REPO: &str = "nousresearch/hermes-agent";
 const HERMES_SKILLS_INDEX_URL: &str =
     "https://hermes-agent.nousresearch.com/docs/api/skills-index.json";
 const SKILLS_SH_SEARCH_URL: &str = "https://skills.sh/api/search";
@@ -675,9 +678,9 @@ fn resolved_source_from_index(entry: &HermesSkillsIndexEntry) -> Option<Registry
             return None;
         }
         return Some(RegistryInstallSource::GitHub(ResolvedSkillSource {
-            repo: "nousresearch/hermes-agent".to_string(),
+            repo: OFFICIAL_SKILLS_REPO.to_string(),
             branch: "main".to_string(),
-            skill_dir: format!("optional-skills/{}", path),
+            skill_dir: path.to_string(),
         }));
     }
 
@@ -1367,36 +1370,61 @@ async fn fetch_skill_files_from_github(
         }
         let rel_path = entry.path[prefix.len()..].to_string();
         ensure_safe_relative_path(&rel_path)?;
-        let encoded_path = entry
+        let raw_path = entry
             .path
             .split('/')
-            .map(urlencoding::encode)
+            .map(|segment| urlencoding::encode(segment).to_string())
             .collect::<Vec<_>>()
             .join("/");
-        let url = format!(
-            "{}/repos/{}/contents/{}?ref={}",
-            GITHUB_API_BASE,
-            source.repo,
-            encoded_path,
-            urlencoding::encode(&source.branch)
+        let raw_url = format!(
+            "https://raw.githubusercontent.com/{}/{}/{}",
+            source.repo, source.branch, raw_path
         );
-        let resp = github_request(client, &url, "application/vnd.github.v3.raw")
+        let bytes = match client
+            .get(&raw_url)
+            .header("User-Agent", "hermes-agent-ultra")
             .timeout(std::time::Duration::from_secs(25))
             .send()
             .await
-            .map_err(|e| AgentError::Config(format!("GitHub file download failed: {}", e)))?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            return Err(AgentError::Config(format!(
-                "Failed to download {} from {} ({}): {}",
-                rel_path, source.repo, status, body
-            )));
-        }
-        let bytes = resp
-            .bytes()
-            .await
-            .map_err(|e| AgentError::Config(format!("Invalid file payload: {}", e)))?;
+        {
+            Ok(resp) if resp.status().is_success() => resp
+                .bytes()
+                .await
+                .map_err(|e| AgentError::Config(format!("Invalid file payload: {}", e)))?,
+            _ => {
+                let encoded_path = entry
+                    .path
+                    .split('/')
+                    .map(urlencoding::encode)
+                    .collect::<Vec<_>>()
+                    .join("/");
+                let api_url = format!(
+                    "{}/repos/{}/contents/{}?ref={}",
+                    GITHUB_API_BASE,
+                    source.repo,
+                    encoded_path,
+                    urlencoding::encode(&source.branch)
+                );
+                let resp = github_request(client, &api_url, "application/vnd.github.v3.raw")
+                    .timeout(std::time::Duration::from_secs(25))
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        AgentError::Config(format!("GitHub file download failed: {}", e))
+                    })?;
+                if !resp.status().is_success() {
+                    let status = resp.status();
+                    let body = resp.text().await.unwrap_or_default();
+                    return Err(AgentError::Config(format!(
+                        "Failed to download {} from {} ({}): {}",
+                        rel_path, source.repo, status, body
+                    )));
+                }
+                resp.bytes()
+                    .await
+                    .map_err(|e| AgentError::Config(format!("Invalid file payload: {}", e)))?
+            }
+        };
         files.push((rel_path, bytes));
     }
 
@@ -1718,21 +1746,93 @@ async fn resolve_official_skill_source(
             "Missing official skill identifier (e.g., official/security/1password).".to_string(),
         ));
     }
-    if req.contains('/') {
-        return Ok(ResolvedSkillSource {
-            repo: "nousresearch/hermes-agent".to_string(),
-            branch: "main".to_string(),
-            skill_dir: format!("optional-skills/{}", req),
-        });
+
+    let normalized = canonicalize_official_skill_dir(req.trim_start_matches("official/"));
+    if normalized.is_empty() {
+        return Err(AgentError::Config(
+            "Missing official skill identifier (e.g., official/security/1password).".to_string(),
+        ));
     }
-    let resolved = resolve_skill_via_registry_index(client, req, Some("official")).await?;
-    match resolved.install_source {
-        RegistryInstallSource::GitHub(source) => Ok(source),
-        _ => Err(AgentError::Config(format!(
-            "Official skill '{}' does not resolve to a GitHub-backed source.",
-            requested
-        ))),
+
+    let branch = github_default_branch(client, OFFICIAL_SKILLS_REPO).await?;
+    let tree = github_repo_tree(client, OFFICIAL_SKILLS_REPO, &branch).await?;
+    let has_skill_dir = |dir: &str| -> bool {
+        let target = format!("{}/SKILL.md", dir.trim_matches('/'));
+        tree.iter()
+            .any(|entry| entry.kind == "blob" && entry.path == target)
+    };
+
+    let mut candidate_queries = vec![
+        req.to_string(),
+        normalized.clone(),
+        format!("official/{}", normalized),
+    ];
+    let basename = normalized
+        .split('/')
+        .next_back()
+        .unwrap_or(normalized.as_str())
+        .to_string();
+    if !basename.is_empty() {
+        candidate_queries.push(basename);
     }
+    candidate_queries.sort();
+    candidate_queries.dedup();
+
+    for query in candidate_queries {
+        if let Ok(record) = resolve_skill_via_registry_index(client, &query, Some("official")).await
+        {
+            if let RegistryInstallSource::GitHub(source) = record.install_source {
+                let mut candidates = official_skill_path_candidates(&source.skill_dir);
+                for c in official_skill_path_candidates(&normalized) {
+                    if !candidates.iter().any(|existing| existing == &c) {
+                        candidates.push(c);
+                    }
+                }
+                for candidate in candidates {
+                    if has_skill_dir(&candidate) {
+                        return Ok(ResolvedSkillSource {
+                            repo: OFFICIAL_SKILLS_REPO.to_string(),
+                            branch: branch.clone(),
+                            skill_dir: candidate,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    for candidate in official_skill_path_candidates(&normalized) {
+        if has_skill_dir(&candidate) {
+            return Ok(ResolvedSkillSource {
+                repo: OFFICIAL_SKILLS_REPO.to_string(),
+                branch: branch.clone(),
+                skill_dir: candidate,
+            });
+        }
+    }
+
+    Err(AgentError::Config(format!(
+        "Official skill '{}' not found in upstream skills or optional-skills catalogs.",
+        requested
+    )))
+}
+
+fn canonicalize_official_skill_dir(path: &str) -> String {
+    path.trim().trim_matches('/').to_string()
+}
+
+fn official_skill_path_candidates(path_like: &str) -> Vec<String> {
+    let normalized = canonicalize_official_skill_dir(path_like);
+    if normalized.is_empty() {
+        return Vec::new();
+    }
+    if normalized.starts_with("skills/") || normalized.starts_with("optional-skills/") {
+        return vec![normalized];
+    }
+    vec![
+        format!("skills/{}", normalized),
+        format!("optional-skills/{}", normalized),
+    ]
 }
 
 async fn resolve_skills_sh_source(
@@ -5332,42 +5432,14 @@ pub async fn handle_cli_skills(
             println!("Installing skill: {}", skill_name);
 
             let client = reqwest::Client::new();
-            let explicit = parse_explicit_github_skill(&skill_name);
             let registry_prefixed = parse_registry_prefixed_skill(&skill_name);
+            let explicit = if registry_prefixed.is_some() {
+                None
+            } else {
+                parse_explicit_github_skill(&skill_name)
+            };
 
-            let (files, install_seed, provenance) = if let Some((repo, maybe_branch, skill_dir)) =
-                explicit
-            {
-                let branch = if let Some(branch) = maybe_branch {
-                    branch
-                } else {
-                    github_default_branch(&client, &repo).await?
-                };
-                let resolved = ResolvedSkillSource {
-                    repo,
-                    branch,
-                    skill_dir,
-                };
-                let identifier = format!("{}/{}", resolved.repo, resolved.skill_dir);
-                println!(
-                    "Resolved source: {}/{} @ {}",
-                    resolved.repo, resolved.skill_dir, resolved.branch
-                );
-                (
-                    fetch_skill_files_from_github(&client, &resolved).await?,
-                    skill_name.clone(),
-                    SkillInstallProvenance {
-                        source: "github".to_string(),
-                        identifier,
-                        trust_level: default_trust_level_for_source("github").to_string(),
-                        metadata: serde_json::json!({
-                            "repo": resolved.repo,
-                            "branch": resolved.branch,
-                            "skill_dir": resolved.skill_dir,
-                        }),
-                    },
-                )
-            } else if let Some((source, key)) = registry_prefixed {
+            let (files, install_seed, provenance) = if let Some((source, key)) = registry_prefixed {
                 match source.as_str() {
                     "official" => {
                         let install_key = key.clone();
@@ -5509,6 +5581,36 @@ pub async fn handle_cli_skills(
                         )))
                     }
                 }
+            } else if let Some((repo, maybe_branch, skill_dir)) = explicit {
+                let branch = if let Some(branch) = maybe_branch {
+                    branch
+                } else {
+                    github_default_branch(&client, &repo).await?
+                };
+                let resolved = ResolvedSkillSource {
+                    repo,
+                    branch,
+                    skill_dir,
+                };
+                let identifier = format!("{}/{}", resolved.repo, resolved.skill_dir);
+                println!(
+                    "Resolved source: {}/{} @ {}",
+                    resolved.repo, resolved.skill_dir, resolved.branch
+                );
+                (
+                    fetch_skill_files_from_github(&client, &resolved).await?,
+                    skill_name.clone(),
+                    SkillInstallProvenance {
+                        source: "github".to_string(),
+                        identifier,
+                        trust_level: default_trust_level_for_source("github").to_string(),
+                        metadata: serde_json::json!({
+                            "repo": resolved.repo,
+                            "branch": resolved.branch,
+                            "skill_dir": resolved.skill_dir,
+                        }),
+                    },
+                )
             } else if let Some(skill_hint) = _requested_version
                 .as_deref()
                 .filter(|_| looks_like_github_repo_slug(&skill_name))
@@ -5536,58 +5638,84 @@ pub async fn handle_cli_skills(
             } else {
                 let from_index = resolve_skill_via_registry_index(&client, &skill_name, None).await;
                 if let Ok(hit) = from_index {
-                    match hit.install_source {
-                        RegistryInstallSource::GitHub(resolved) => {
-                            let branch = github_default_branch(&client, &resolved.repo).await?;
-                            let resolved = ResolvedSkillSource { branch, ..resolved };
-                            println!(
-                                "Resolved source [{}]: {}/{} @ {}",
-                                hit.source, resolved.repo, resolved.skill_dir, resolved.branch
-                            );
-                            (
-                                fetch_skill_files_from_github(&client, &resolved).await?,
-                                hit.identifier,
-                                SkillInstallProvenance {
-                                    source: hit.source,
-                                    identifier: format!("{}/{}", resolved.repo, resolved.skill_dir),
-                                    trust_level: default_trust_level_for_source("github")
-                                        .to_string(),
-                                    metadata: serde_json::json!({
-                                        "repo": resolved.repo,
-                                        "branch": resolved.branch,
-                                        "skill_dir": resolved.skill_dir,
-                                    }),
-                                },
-                            )
-                        }
-                        RegistryInstallSource::LobeHub { slug } => {
-                            println!("Resolved source [lobehub]: {}", slug);
-                            (
-                                fetch_lobehub_skill_files(&client, &slug).await?,
-                                slug.clone(),
-                                SkillInstallProvenance {
-                                    source: "lobehub".to_string(),
-                                    identifier: slug,
-                                    trust_level: default_trust_level_for_source("lobehub")
-                                        .to_string(),
-                                    metadata: serde_json::json!({}),
-                                },
-                            )
-                        }
-                        RegistryInstallSource::ClawHub { slug, version } => {
-                            println!("Resolved source [clawhub]: {}", slug);
-                            (
-                                fetch_clawhub_skill_files(&client, &slug, version.as_deref())
-                                    .await?,
-                                slug.clone(),
-                                SkillInstallProvenance {
-                                    source: "clawhub".to_string(),
-                                    identifier: slug,
-                                    trust_level: default_trust_level_for_source("clawhub")
-                                        .to_string(),
-                                    metadata: serde_json::json!({ "version_hint": version }),
-                                },
-                            )
+                    if hit.source.eq_ignore_ascii_case("official") {
+                        let resolved =
+                            resolve_official_skill_source(&client, &hit.identifier).await?;
+                        println!(
+                            "Resolved source [official]: {}/{} @ {}",
+                            resolved.repo, resolved.skill_dir, resolved.branch
+                        );
+                        (
+                            fetch_skill_files_from_github(&client, &resolved).await?,
+                            hit.identifier,
+                            SkillInstallProvenance {
+                                source: "official".to_string(),
+                                identifier: format!("{}/{}", resolved.repo, resolved.skill_dir),
+                                trust_level: default_trust_level_for_source("official").to_string(),
+                                metadata: serde_json::json!({
+                                    "repo": resolved.repo,
+                                    "branch": resolved.branch,
+                                    "skill_dir": resolved.skill_dir,
+                                }),
+                            },
+                        )
+                    } else {
+                        match hit.install_source {
+                            RegistryInstallSource::GitHub(resolved) => {
+                                let branch = github_default_branch(&client, &resolved.repo).await?;
+                                let resolved = ResolvedSkillSource { branch, ..resolved };
+                                println!(
+                                    "Resolved source [{}]: {}/{} @ {}",
+                                    hit.source, resolved.repo, resolved.skill_dir, resolved.branch
+                                );
+                                (
+                                    fetch_skill_files_from_github(&client, &resolved).await?,
+                                    hit.identifier,
+                                    SkillInstallProvenance {
+                                        source: hit.source,
+                                        identifier: format!(
+                                            "{}/{}",
+                                            resolved.repo, resolved.skill_dir
+                                        ),
+                                        trust_level: default_trust_level_for_source("github")
+                                            .to_string(),
+                                        metadata: serde_json::json!({
+                                            "repo": resolved.repo,
+                                            "branch": resolved.branch,
+                                            "skill_dir": resolved.skill_dir,
+                                        }),
+                                    },
+                                )
+                            }
+                            RegistryInstallSource::LobeHub { slug } => {
+                                println!("Resolved source [lobehub]: {}", slug);
+                                (
+                                    fetch_lobehub_skill_files(&client, &slug).await?,
+                                    slug.clone(),
+                                    SkillInstallProvenance {
+                                        source: "lobehub".to_string(),
+                                        identifier: slug,
+                                        trust_level: default_trust_level_for_source("lobehub")
+                                            .to_string(),
+                                        metadata: serde_json::json!({}),
+                                    },
+                                )
+                            }
+                            RegistryInstallSource::ClawHub { slug, version } => {
+                                println!("Resolved source [clawhub]: {}", slug);
+                                (
+                                    fetch_clawhub_skill_files(&client, &slug, version.as_deref())
+                                        .await?,
+                                    slug.clone(),
+                                    SkillInstallProvenance {
+                                        source: "clawhub".to_string(),
+                                        identifier: slug,
+                                        trust_level: default_trust_level_for_source("clawhub")
+                                            .to_string(),
+                                        metadata: serde_json::json!({ "version_hint": version }),
+                                    },
+                                )
+                            }
                         }
                     }
                 } else {
@@ -9313,6 +9441,35 @@ mod tests {
     }
 
     #[test]
+    fn test_nous_official_default_skill_taps_present_in_merged_list() {
+        let merged = merged_skill_taps(&[]);
+        assert!(merged
+            .iter()
+            .any(|tap| tap == "https://github.com/NousResearch/hermes-agent::skills"));
+        assert!(merged
+            .iter()
+            .any(|tap| tap == "https://github.com/NousResearch/hermes-agent::optional-skills"));
+    }
+
+    #[test]
+    fn test_official_skill_path_candidates_cover_skills_and_optional() {
+        let candidates = official_skill_path_candidates("creative/comfyui");
+        assert_eq!(
+            candidates,
+            vec![
+                "skills/creative/comfyui".to_string(),
+                "optional-skills/creative/comfyui".to_string(),
+            ]
+        );
+
+        let rooted = official_skill_path_candidates("optional-skills/security/1password");
+        assert_eq!(
+            rooted,
+            vec!["optional-skills/security/1password".to_string()]
+        );
+    }
+
+    #[test]
     fn test_mattpocock_default_skill_tap_present_in_merged_list() {
         let merged = merged_skill_taps(&[]);
         assert!(merged
@@ -9533,6 +9690,21 @@ mod tests {
         assert_eq!(parsed.0, "openai/skills");
         assert_eq!(parsed.1, None);
         assert_eq!(parsed.2, "skills/.system/skill-creator");
+    }
+
+    #[test]
+    fn registry_prefixed_install_identifiers_override_github_slug_parse() {
+        let registry_prefixed = parse_registry_prefixed_skill("official/creative/comfyui");
+        assert_eq!(
+            registry_prefixed,
+            Some(("official".to_string(), "creative/comfyui".to_string()))
+        );
+        let explicit = if registry_prefixed.is_some() {
+            None
+        } else {
+            parse_explicit_github_skill("official/creative/comfyui")
+        };
+        assert!(explicit.is_none());
     }
 
     #[test]

@@ -43,7 +43,7 @@ static DANGEROUS_PATTERNS: &[DangerousPattern] = &[
     },
     DangerousPattern {
         reason: "Credential exposure: hardcoded secrets",
-        regex: r#"(?i)(password\s*=\s*['"][^'"]+['"]|api[_-]?key\s*=\s*['"][^'"]+['"])"#,
+        regex: r#"(?i)((?:\bpassword\b|\bapi[_-]?key\b)\s*=\s*['"][^'"]+['"])"#,
     },
     DangerousPattern {
         reason: "Self-replication: fork bomb pattern",
@@ -265,8 +265,27 @@ impl SkillGuard {
     fn validate_urls_in_content(&self, content: &str) -> Result<(), SkillError> {
         // Simple URL extraction: find http(s):// URLs.
         let url_re = Regex::new(r"https?://[^\s\)>]+").unwrap();
+        let local_re = Regex::new(
+            r"(?i)^https?://(127\.0\.0\.1|localhost|0\.0\.0\.0|\[::1\]|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+)(:\d+)?(/|$)",
+        )
+        .unwrap();
         for cap in url_re.captures_iter(content) {
-            let url = &cap[0];
+            let raw = &cap[0];
+            let url = raw.trim_end_matches(|ch: char| {
+                matches!(
+                    ch,
+                    '`' | '"' | '\'' | '.' | ',' | ';' | ':' | ')' | '>' | ']'
+                )
+            });
+            if url.is_empty() {
+                continue;
+            }
+            // Localhost/RFC1918 examples are common in legitimate local workflow
+            // skills (ComfyUI, local APIs). Keep SSRF protection for externally
+            // supplied URLs while allowing in-skill local endpoint instructions.
+            if local_re.is_match(url) {
+                continue;
+            }
             self.validate_skill_url(url)?;
         }
         Ok(())
@@ -353,6 +372,24 @@ mod tests {
     }
 
     #[test]
+    fn test_api_key_assignment_rejected() {
+        let skill = make_skill(
+            "bad",
+            "# Skill\n1. Set api_key=\"sk_live_12345\" and continue",
+        );
+        assert!(validate_skill(&skill).is_err());
+    }
+
+    #[test]
+    fn test_env_var_named_api_key_not_treated_as_direct_secret_assignment() {
+        let skill = make_skill(
+            "ok",
+            "# Skill\n1. Export COMFY_CLOUD_API_KEY=\"comfyui-xxxxxxxxxxxx\" before running.",
+        );
+        assert!(validate_skill(&skill).is_ok());
+    }
+
+    #[test]
     fn test_valid_url_accepted() {
         assert!(validate_skill_url("https://example.com/skill.md").is_ok());
     }
@@ -385,9 +422,17 @@ mod tests {
     }
 
     #[test]
-    fn test_url_in_content_validated() {
+    fn test_localhost_url_in_content_allowed_for_local_workflows() {
         let skill = make_skill("test", "# Skill\n1. Fetch from http://localhost:3000/data");
-        // The localhost URL in the content should be caught.
+        assert!(validate_skill(&skill).is_ok());
+    }
+
+    #[test]
+    fn test_malicious_domain_url_in_content_rejected() {
+        let skill = make_skill(
+            "test",
+            "# Skill\n1. Fetch from https://malware.example.com/payload",
+        );
         assert!(validate_skill(&skill).is_err());
     }
 
