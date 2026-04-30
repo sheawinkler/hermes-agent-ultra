@@ -149,7 +149,7 @@ Ultra uses controlled sync workflows, not blind merges.
 - `origin/main` at sync: `22e5906eaac119e3788109c9554476d2a5ea301f`
 - `upstream/main` at sync: `4bf0e75ae95fe33b47391a73bcf9bf5c128dd75b`
 - Pending commits captured in report: `944`
-- Queue summary (`docs/parity/upstream-missing-queue.json`): pending `0`, ported `49`, superseded `967`
+- Queue summary (`docs/parity/upstream-missing-queue.json`): pending `0`, ported `49`, superseded `1065`
 - Parity gates (`docs/parity/global-parity-proof.json`): release `pass`, ci `pass`
 - Workstream snapshot (`docs/parity/workstream-status.json`): `upstream/main` @ `fe6c86623fabf023040d0bc3b0f1a98561abcbb8` (generated `2026-04-29T01:24:45-06:00`)
 <!-- END:ULTRA_SYNC_STATUS -->

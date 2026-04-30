@@ -1,14 +1,14 @@
 # Parity Dashboard
 
-_Generated from source artifacts: `2026-04-29T12:59:42.891969+00:00`_
+_Generated from source artifacts: `2026-04-30T04:16:47.739152+00:00`_
 
 ## Snapshot
 
 - Upstream target: `upstream/main` @ `fe6c86623fabf023040d0bc3b0f1a98561abcbb8`
 - Workstream snapshot generated: `2026-04-29T01:24:45-06:00`
 - Parity matrix generated: `2026-04-24T21:19:39.155201+00:00`
-- Queue snapshot generated: `2026-04-29T12:59:37.587942+00:00`
-- Proof snapshot generated: `2026-04-29T12:59:42.891969+00:00`
+- Queue snapshot generated: `2026-04-30T04:16:47.612500+00:00`
+- Proof snapshot generated: `2026-04-30T04:16:47.739152+00:00`
 
 ## Gate Status
 
@@ -21,10 +21,10 @@ _Generated from source artifacts: `2026-04-29T12:59:42.891969+00:00`_
 
 | Metric | Value |
 | --- | ---: |
-| Total commits in queue | 1016 |
+| Total commits in queue | 1114 |
 | Pending | 0 |
 | Ported | 49 |
-| Superseded | 967 |
+| Superseded | 1065 |
 
 ## Tree/Patch Drift
 

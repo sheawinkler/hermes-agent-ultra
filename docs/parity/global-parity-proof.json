@@ -53,7 +53,7 @@
     "mode": "tree-drift",
     "pass": true
   },
-  "generated_at_utc": "2026-04-29T12:59:42.891969+00:00",
+  "generated_at_utc": "2026-04-30T04:16:57.144749+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -84,18 +84,18 @@
   "queue_summary": {
     "by_disposition": {
       "ported": 49,
-      "superseded": 967
+      "superseded": 1065
     },
     "by_target_ticket": {
-      "20": 382,
-      "21": 30,
-      "22": 260,
-      "23": 78,
+      "20": 418,
+      "21": 42,
+      "22": 288,
+      "23": 81,
       "24": 2,
       "25": 11,
-      "26": 253
+      "26": 272
     },
-    "total_commits": 1016
+    "total_commits": 1114
   },
   "release_gate": {
     "checks": [
