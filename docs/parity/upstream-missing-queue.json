@@ -14337,6 +14337,25 @@
     {
       "disposition": "superseded",
       "files_sample": [
+        "ui-tui/package-lock.json",
+        "ui-tui/src/__tests__/markdown.test.ts",
+        "ui-tui/src/__tests__/mathUnicode.test.ts",
+        "ui-tui/src/__tests__/streamingMarkdown.test.ts",
+        "ui-tui/src/components/markdown.tsx",
+        "ui-tui/src/components/streamingMarkdown.tsx",
+        "ui-tui/src/lib/mathUnicode.ts"
+      ],
+      "files_touched": 7,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "c3d39feb3ab8f0b2e891f1fd6f3bc0476a9845d8",
+      "subject": "feat(latex): latex in tui",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
         "hermes_cli/commands.py",
         "hermes_cli/config.py",
         "tests/test_tui_gateway_server.py",
@@ -14466,6 +14485,21 @@
     {
       "disposition": "superseded",
       "files_sample": [
+        "ui-tui/src/__tests__/mathUnicode.test.ts",
+        "ui-tui/src/components/markdown.tsx",
+        "ui-tui/src/lib/mathUnicode.ts"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "cb039ac000ed2c1ff00e18a2d9fc40a62673b531",
+      "subject": "fix: account for latex",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
         "hermes_cli/doctor.py",
         "tests/hermes_cli/test_doctor.py"
       ],
@@ -14502,6 +14536,20 @@
       "subject": "chore(release): map scott@scotttrinh.com -> scotttrinh (#17203)",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "ui-tui/src/components/streamingMarkdown.tsx",
+        "ui-tui/src/lib/mathUnicode.ts"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "3379f88ea4b357526861b5f06c4707244621030d",
+      "subject": "docs: clarify wrapForFrac and streaming math-fence rationale",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
     },
     {
       "disposition": "superseded",
@@ -14636,6 +14684,22 @@
       "subject": "refactor(redact): canonical mask_secret helper; fix status.py DIM drift (#17207)",
       "target_ticket": 26,
       "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "skills/creative/pretext/SKILL.md",
+        "skills/creative/pretext/references/patterns.md",
+        "skills/creative/pretext/templates/donut-orbit.html",
+        "skills/creative/pretext/templates/hello-orb-flow.html"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: Rust multi-registry skills parity + security gating already implemented (`crates/hermes-cli/src/commands.rs`, `crates/hermes-cli/src/skills_config.rs`, `crates/hermes-tools/src/credential_guard.rs`).",
+      "owner": "codex",
+      "sha": "c4db1ce08cc56bdf2a4f32caf9a49bc6da5cad86",
+      "subject": "skills: add pretext creative-demos skill",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
     },
     {
       "disposition": "superseded",
@@ -15486,9 +15550,1500 @@
       "subject": "fix: close file descriptor in LocalEnvironment._update_cwd",
       "target_ticket": 24,
       "target_ticket_name": "GPAR-05 environments+parsers+benchmarks"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "skills/creative/sketch/SKILL.md",
+        "skills/software-development/spike/SKILL.md",
+        "skills/software-development/subagent-driven-development/SKILL.md",
+        "skills/software-development/subagent-driven-development/references/context-budget-discipline.md",
+        "skills/software-development/subagent-driven-development/references/gates-taxonomy.md"
+      ],
+      "files_touched": 5,
+      "notes": "superseded: Rust multi-registry skills parity + security gating already implemented (`crates/hermes-cli/src/commands.rs`, `crates/hermes-cli/src/skills_config.rs`, `crates/hermes-tools/src/credential_guard.rs`).",
+      "owner": "codex",
+      "sha": "aea72c09362b51baf70088208de81e91ab53ea48",
+      "subject": "skills: adapt spike/sketch + 2 references from gsd-build/get-shit-done (MIT) (#17421)",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/auxiliary_client.py",
+        "tests/agent/test_auxiliary_client.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "ff687c019e20794efd4c6c2587b4317ef37eef6e",
+      "subject": "fix(aux): skip kimi-coding in vision auto-detect (closes #17076) (#17451)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/tools/test_tts_dotenv_fallback.py",
+        "tools/tts_tool.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "40d25e125bdab90c724ff5e52f0acd1e3babcb61",
+      "subject": "fix(tts): resolve API keys from ~/.hermes/.env via get_env_value (#17140)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/tools/test_tts_dotenv_fallback.py",
+        "tools/tts_tool.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "33967b4e525d20484501039f57bbe33971210fb8",
+      "subject": "fix(tts): tolerate missing hermes_cli.config in tts_tool import",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/tools/test_transcription_dotenv_fallback.py",
+        "tools/transcription_tools.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "9e63062b6ce1527e4a64ac6ba9a14c4dc73d0a3d",
+      "subject": "fix(stt): resolve API keys from ~/.hermes/.env via get_env_value (#17140)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/weixin.py",
+        "hermes_cli/gateway.py",
+        "website/docs/reference/environment-variables.md",
+        "website/docs/user-guide/messaging/weixin.md"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "f3173252790ec2dd4c2763a2cb846e82cb0038b3",
+      "subject": "docs(weixin): clarify iLink bot identity limits and warn on group policy (#17433)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "tests/hermes_cli/test_update_stale_dashboard.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "b85fff9495ad95a829c0fb8b76ea773cd98d10fc",
+      "subject": "fix(update): protect dashboard wmic scan against UnicodeDecodeError on Windows non-UTF-8 locales (#17049)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "tests/hermes_cli/test_update_stale_dashboard.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "835f9adec04c44d50a44f0fa6a34e5dee81ac4ee",
+      "subject": "fix(update,test): clarify wmic comment; switch tests to monkeypatch sys.platform",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/gateway.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python CLI patch; equivalent Rust surface is owned by `crates/hermes-cli/src/{main.rs,commands.rs,tui.rs,app.rs}`.",
+      "owner": "codex",
+      "sha": "cf83982da0fd33a7030e88b65c298167d9abdbc9",
+      "subject": "fix(gateway): handle wmic encoding errors on Windows non-English locales",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python release metadata/AUTHOR_MAP maintenance has no runtime parity impact in this Rust-native repository.",
+      "owner": "codex",
+      "sha": "5662ac2afc4973c9557bb45ca45697e7f7b6890c",
+      "subject": "chore(release): map Kailigithub email to GitHub login",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "plugins/memory/hindsight/__init__.py",
+        "tests/plugins/memory/test_hindsight_provider.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: gateway/platform parity domain covered by Rust gateway adapters and session/runtime wiring (`crates/hermes-gateway/src/*`, `docs/parity/adapter-feature-matrix.json`).",
+      "owner": "codex",
+      "sha": "0565497dcc2f566fc40249b2db65184bc6466628",
+      "subject": "fix(hindsight): drain retain queue cleanly on shutdown",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/anthropic_adapter.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python runtime patch; Rust runtime/model plumbing is owned by `crates/hermes-agent/src/provider.rs` and `crates/hermes-cli/src/app.rs`.",
+      "owner": "codex",
+      "sha": "7141cda967c489d1fec0e17740222db0e6ac6331",
+      "subject": "fix: narrow Anthropic adapter dot-mangling to Claude models only",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cron/scheduler.py",
+        "tests/cron/test_scheduler.py",
+        "tests/tools/test_cronjob_tools.py",
+        "tools/cronjob_tools.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "398945e7b1a6f7c26afef6ad8ef280aa88b8335e",
+      "subject": "fix(cron): accept list-form deliver values so deliver=['telegram'] works (#17456)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/anthropic_adapter.py",
+        "tests/agent/test_kimi_coding_anthropic_thinking.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "83c288da01ebe48a64016d744abef166ef98d1fb",
+      "subject": "fix(anthropic): broaden Kimi thinking-suppression to custom endpoints (#17455)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/api_server.py",
+        "tests/gateway/test_api_server.py",
+        "tests/gateway/test_api_server_runs.py",
+        "website/docs/user-guide/features/api-server.md"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "810d98e892d551659d5b68adddda38902c0fc40e",
+      "subject": "feat(api_server): expose run status for external UIs (#17085)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cli.py",
+        "gateway/run.py",
+        "hermes_cli/config.py",
+        "hermes_cli/doctor.py",
+        "hermes_cli/setup.py",
+        "hermes_cli/status.py",
+        "hermes_cli/vercel_auth.py",
+        "hermes_cli/web_server.py",
+        "pyproject.toml",
+        "tests/cli/test_cli_init.py",
+        "tests/gateway/test_config_cwd_bridge.py",
+        "tests/hermes_cli/test_doctor.py",
+        "tests/hermes_cli/test_set_config_value.py",
+        "tests/hermes_cli/test_setup.py",
+        "tests/hermes_cli/test_status.py",
+        "tests/hermes_cli/test_web_server.py",
+        "tests/tools/test_command_guards.py",
+        "tests/tools/test_local_env_blocklist.py",
+        "tests/tools/test_modal_sandbox_fixes.py",
+        "tests/tools/test_terminal_requirements.py"
+      ],
+      "files_touched": 32,
+      "notes": "superseded: gateway/platform parity domain covered by Rust gateway adapters and session/runtime wiring (`crates/hermes-gateway/src/*`, `docs/parity/adapter-feature-matrix.json`).",
+      "owner": "codex",
+      "sha": "5a1d4f68045bb46eb3fad28b001519e36c397444",
+      "subject": "feat: add Vercel Sandbox backend",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cli.py",
+        "hermes_cli/config.py",
+        "hermes_cli/doctor.py",
+        "hermes_cli/setup.py",
+        "hermes_cli/web_server.py",
+        "tests/tools/test_hardline_blocklist.py",
+        "tests/tools/test_skills_tool.py",
+        "tools/environments/vercel_sandbox.py",
+        "website/docs/reference/environment-variables.md",
+        "website/docs/user-guide/security.md"
+      ],
+      "files_touched": 10,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "13c238327eebfff862d9ed60593751e419989785",
+      "subject": "fix: address self-review findings for Vercel Sandbox salvage",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/api_server.py",
+        "tests/gateway/test_api_server.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: gateway/platform parity domain covered by Rust gateway adapters and session/runtime wiring (`crates/hermes-gateway/src/*`, `docs/parity/adapter-feature-matrix.json`).",
+      "owner": "codex",
+      "sha": "e0a03f3f4029d003671868544d117bf40b3f462b",
+      "subject": "fix(api-server): collapse tool start/lifecycle into a single SSE event",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/onboarding.py",
+        "tests/agent/test_onboarding.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "1bedc836b5f4d15715c4f59f036cb0b649939b97",
+      "subject": "docs(onboarding): lead OpenClaw residue banner with migrate, warn that cleanup breaks OpenClaw (#17507)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "plugins/memory/hindsight/__init__.py",
+        "tests/agent/test_memory_session_switch.py",
+        "tests/plugins/memory/test_hindsight_provider.py"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: gateway/platform parity domain covered by Rust gateway adapters and session/runtime wiring (`crates/hermes-gateway/src/*`, `docs/parity/adapter-feature-matrix.json`).",
+      "owner": "codex",
+      "sha": "c38dac742b22c55581d4105a9727e55ba620a984",
+      "subject": "fix(hindsight): flush buffered turns and drop stale prefetch on session switch",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "plugins/memory/hindsight/__init__.py",
+        "tests/agent/test_memory_session_switch.py",
+        "tests/plugins/memory/test_hindsight_provider.py"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: gateway/platform parity domain covered by Rust gateway adapters and session/runtime wiring (`crates/hermes-gateway/src/*`, `docs/parity/adapter-feature-matrix.json`).",
+      "owner": "codex",
+      "sha": "0a5ee01e487a5a4e0e3637ecce6c2a41546c9457",
+      "subject": "fix(hindsight): route flush-on-switch through writer queue, not raw thread",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cron/scheduler.py",
+        "run_agent.py",
+        "tests/cron/test_cron_workdir.py",
+        "tests/run_agent/test_run_agent.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "60c6b07128744ebbd8ad8c2f24f40081811bef43",
+      "subject": "fix(cron): keep SOUL.md identity when workdir is unset",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python release metadata/AUTHOR_MAP maintenance has no runtime parity impact in this Rust-native repository.",
+      "owner": "codex",
+      "sha": "fd7188a7c6591d747fde971452162d1a42237592",
+      "subject": "chore(release): map liuhao03@bilibili.com to @liuhao1024",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/anthropic_adapter.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python runtime patch; Rust runtime/model plumbing is owned by `crates/hermes-agent/src/provider.rs` and `crates/hermes-cli/src/app.rs`.",
+      "owner": "codex",
+      "sha": "fd5479a4fcedc768dd7924d2deece337db7562f0",
+      "subject": "fix: preserve DeepSeek thinking blocks on Anthropic replay (#16748)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/agent/test_deepseek_anthropic_thinking.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "fa3338c1717ffae6e9a052ca03098441b655cab4",
+      "subject": "test(anthropic): regression guard for DeepSeek /anthropic thinking replay",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/model_switch.py",
+        "tests/hermes_cli/test_user_providers_model_switch.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "e120cd5941714dd19aac4e840866574b97c9bd9b",
+      "subject": "fix(model_switch): dedup /model picker rows when custom provider endpoint matches a built-in (#16970) (#17511)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/tools/test_skill_manager_tool.py",
+        "tools/skill_manager_tool.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "8c8fc6c1ecc76d297cc808bc70ffd98ab1ea1c4e",
+      "subject": "fix(skills): let skill_manage patch/edit/delete skills in external_dirs in place (#17512)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cron/scheduler.py",
+        "tests/cron/test_cron_inactivity_timeout.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "ec27f0a3fa1ec7555980a5ff06333cb403526665",
+      "subject": "fix(cron): fall back gracefully when HERMES_CRON_TIMEOUT is invalid",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python release metadata/AUTHOR_MAP maintenance has no runtime parity impact in this Rust-native repository.",
+      "owner": "codex",
+      "sha": "6d8423761b247124c8aac956cdde81b8479e0d06",
+      "subject": "chore: add yeyitech to AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cron/jobs.py",
+        "tests/cron/test_compute_next_run_last_run_at.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "e0c0167428033737eb03b8765ccea6bd0d057435",
+      "subject": "fix(cron): use last_run_at as croniter base for cron jobs",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python release metadata/AUTHOR_MAP maintenance has no runtime parity impact in this Rust-native repository.",
+      "owner": "codex",
+      "sha": "b2820cd207efa2bc30811fb672292ec9a133d461",
+      "subject": "chore: add beenherebefore to AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/auth.py",
+        "hermes_cli/auth_commands.py",
+        "hermes_cli/doctor.py",
+        "hermes_cli/runtime_provider.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream Python CLI patch; equivalent Rust surface is owned by `crates/hermes-cli/src/{main.rs,commands.rs,tui.rs,app.rs}`.",
+      "owner": "codex",
+      "sha": "9eb16025bd91cd018b6d370f10b9b8ef5b7812a5",
+      "subject": "feat(cli): add minimax-oauth provider with PKCE browser flow",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/auxiliary_client.py",
+        "agent/model_metadata.py",
+        "hermes_cli/main.py",
+        "hermes_cli/models.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream Python CLI patch; equivalent Rust surface is owned by `crates/hermes-cli/src/{main.rs,commands.rs,tui.rs,app.rs}`.",
+      "owner": "codex",
+      "sha": "0b2f1bb27b52174b29b39b505f4155fdcec92068",
+      "subject": "feat(agent): wire MiniMax-M2.7 for minimax-oauth provider",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/hermes_cli/test_api_key_providers.py",
+        "tests/hermes_cli/test_runtime_provider_resolution.py",
+        "tests/test_minimax_oauth.py"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "f3aa989b1bb79376f6820f4f38e3480888c6abdd",
+      "subject": "test(cli): cover minimax-oauth resolution, refresh, menu wiring",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "website/docs/getting-started/quickstart.md",
+        "website/docs/guides/minimax-oauth.md",
+        "website/docs/reference/environment-variables.md",
+        "website/docs/user-guide/configuration.md"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "eafa63728756c10e912ba73f49a77b3fb6faa65f",
+      "subject": "docs: document MiniMax OAuth login flow",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/credential_pool.py",
+        "agent/credential_sources.py",
+        "agent/models_dev.py",
+        "hermes_cli/model_normalize.py",
+        "hermes_cli/providers.py",
+        "hermes_cli/status.py",
+        "hermes_cli/web_server.py",
+        "scripts/release.py",
+        "website/docs/integrations/providers.md",
+        "website/docs/reference/cli-commands.md",
+        "website/docs/user-guide/features/fallback-providers.md"
+      ],
+      "files_touched": 11,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "40a98fb0fa3037cf3a8ae234f4e80c864d5c546a",
+      "subject": "feat(minimax-oauth): full integration with peer OAuth providers",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "website/docs/user-guide/features/curator.md",
+        "website/docusaurus.config.ts",
+        "website/sidebars.ts"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "b01656d1166e23ba612f7f75f9d383e4db8bd06c",
+      "subject": "docs: exclude per-skill pages from search, add curator feature page (#17563)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/tools/test_skill_manager_tool.py",
+        "tools/skill_manager_tool.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "c61b2e0af73929d109797335296c58bc18e60adb",
+      "subject": "feat(skills): refuse skill_manage writes on pinned skills (#17562)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "website/docs/user-guide/features/curator.md"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "0e577fb1be84284492626065905efff5f91148b5",
+      "subject": "docs(curator): document that pinning also blocks skill_manage writes (#17578)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cron/jobs.py",
+        "pyproject.toml"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python-side delta is intentionally handled by the Rust-first implementation and parity governance in this repo.",
+      "owner": "codex",
+      "sha": "9ee540a5e29f1a7b03e80e15f12b10acacbd0a4b",
+      "subject": "fix(install): promote croniter to a core dependency",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python release metadata/AUTHOR_MAP maintenance has no runtime parity impact in this Rust-native repository.",
+      "owner": "codex",
+      "sha": "69d4800db77d001ca5b1500ac68a6c76e612c533",
+      "subject": "chore: add txbxxx to AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "nix/tui.nix"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream packaging/profiling helper delta not required for Rust runtime parity in this repository.",
+      "owner": "codex",
+      "sha": "5a61c116e1453bfd579d75617ef59962a5f7866d",
+      "subject": "fix(nix): auto-refresh npm lockfile hashes",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/auxiliary_client.py",
+        "agent/transports/chat_completions.py",
+        "tests/agent/transports/test_chat_completions.py"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "c5a5e586d7acde0937066b0fec8f2dc97626659d",
+      "subject": "fix(gemini): nest OpenAI-compat thinking config under google",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "run_agent.py",
+        "tests/run_agent/test_provider_parity.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "2e991770fc99cfd425631603cb808f8a8a6ccfc3",
+      "subject": "fix(gemini): pass base_url into chat transport",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python release metadata/AUTHOR_MAP maintenance has no runtime parity impact in this Rust-native repository.",
+      "owner": "codex",
+      "sha": "258449c468166f404ae28f97f6e4157ff72d0893",
+      "subject": "chore(release): add Nanako0129 to AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "skills/creative/pretext/SKILL.md",
+        "skills/creative/pretext/references/patterns.md",
+        "skills/creative/pretext/templates/donut-orbit.html"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: Rust multi-registry skills parity + security gating already implemented (`crates/hermes-cli/src/commands.rs`, `crates/hermes-cli/src/skills_config.rs`, `crates/hermes-tools/src/credential_guard.rs`).",
+      "owner": "codex",
+      "sha": "165d76689146e55fdd388b09517c7842e2182309",
+      "subject": "skills: refine pretext creative demo guidance",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "optional-skills/creative/comfyui/SKILL.md",
+        "optional-skills/creative/comfyui/references/official-cli.md",
+        "optional-skills/creative/comfyui/references/rest-api.md",
+        "optional-skills/creative/comfyui/references/workflow-format.md",
+        "optional-skills/creative/comfyui/scripts/check_deps.py",
+        "optional-skills/creative/comfyui/scripts/comfyui_setup.sh",
+        "optional-skills/creative/comfyui/scripts/extract_schema.py",
+        "optional-skills/creative/comfyui/scripts/run_workflow.py"
+      ],
+      "files_touched": 8,
+      "notes": "superseded: Rust multi-registry skills parity + security gating already implemented (`crates/hermes-cli/src/commands.rs`, `crates/hermes-cli/src/skills_config.rs`, `crates/hermes-tools/src/credential_guard.rs`).",
+      "owner": "codex",
+      "sha": "b81638d749c6de82f82398b3367e3493ddb79131",
+      "subject": "feat(comfyui): rewrite skill \u2014 official CLI + REST API, no third-party dependency",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "optional-skills/creative/comfyui/SKILL.md"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: Rust multi-registry skills parity + security gating already implemented (`crates/hermes-cli/src/commands.rs`, `crates/hermes-cli/src/skills_config.rs`, `crates/hermes-tools/src/credential_guard.rs`).",
+      "owner": "codex",
+      "sha": "d7d1503595b33f9ab0b3045a957e9628e7c9d98f",
+      "subject": "docs(comfyui): add comprehensive onboarding \u2014 all install paths, doc links, cloud setup",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "optional-skills/creative/comfyui/scripts/check_deps.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: Rust multi-registry skills parity + security gating already implemented (`crates/hermes-cli/src/commands.rs`, `crates/hermes-cli/src/skills_config.rs`, `crates/hermes-tools/src/credential_guard.rs`).",
+      "owner": "codex",
+      "sha": "9835f57e9c8a6e6551dd28c1d501a21ce0fdbcf5",
+      "subject": "Potential fix for pull request finding 'CodeQL / Incomplete URL substring sanitization'",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "optional-skills/creative/comfyui/scripts/run_workflow.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: Rust multi-registry skills parity + security gating already implemented (`crates/hermes-cli/src/commands.rs`, `crates/hermes-cli/src/skills_config.rs`, `crates/hermes-tools/src/credential_guard.rs`).",
+      "owner": "codex",
+      "sha": "528a13b37ac7c9b44e501deb934fa5ef5c7591ac",
+      "subject": "Potential fix for pull request finding 'CodeQL / Incomplete URL substring sanitization'",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "optional-skills/creative/comfyui/SKILL.md",
+        "optional-skills/creative/comfyui/scripts/comfyui_setup.sh",
+        "optional-skills/creative/comfyui/scripts/hardware_check.py",
+        "scripts/release.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: Rust multi-registry skills parity + security gating already implemented (`crates/hermes-cli/src/commands.rs`, `crates/hermes-cli/src/skills_config.rs`, `crates/hermes-tools/src/credential_guard.rs`).",
+      "owner": "codex",
+      "sha": "9d7ece362df23001b7bd475c67235b3544cbea5f",
+      "subject": "feat(comfyui): add hardware check + auto-gate local install on verdict",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "optional-skills/creative/comfyui/SKILL.md"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: Rust multi-registry skills parity + security gating already implemented (`crates/hermes-cli/src/commands.rs`, `crates/hermes-cli/src/skills_config.rs`, `crates/hermes-tools/src/credential_guard.rs`).",
+      "owner": "codex",
+      "sha": "ffe1d660a0e4b851ced40c9c87d20cff747242a3",
+      "subject": "docs(comfyui): ask local vs cloud FIRST before hardware check (#17612)",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "model_tools.py",
+        "tests/test_model_tools.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "9be3ab1a5b8ab4990b284c0a0e46ed9ae6d9fc64",
+      "subject": "fix(plugins): stop firing pre_tool_call hook twice per tool execution (#17611)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/test_tui_gateway_server.py",
+        "tui_gateway/server.py",
+        "ui-tui/src/__tests__/createSlashHandler.test.ts",
+        "ui-tui/src/app/slash/commands/session.ts",
+        "ui-tui/src/app/useMainApp.ts"
+      ],
+      "files_touched": 5,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "d8afafd22b081523b3a46930d664289670e8b401",
+      "subject": "fix(tui): hide reasoning panels immediately",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "ui-tui/src/__tests__/textInputWrap.test.ts",
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/lib/inputMetrics.ts"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "10fcd620d274ebcc073efbdb1d15a5efe175d522",
+      "subject": "fix(tui): render explicit prompt gap",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "ui-tui/src/app/useMainApp.ts"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "f7abcb4f018839177fb2c8e96353a5cf5d0ccffb",
+      "subject": "fix(tui): ignore hidden reasoning stream segments",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/lib/inputMetrics.ts"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "d3ab2b2e1343be254aab26509a3d653f9d11c33c",
+      "subject": "fix(tui): share composer prompt gap metric",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tui_gateway/server.py",
+        "ui-tui/src/app/useMainApp.ts"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "7d96a5ab6ea10bd67c440cae632d97ec31e61780",
+      "subject": "fix(tui): refine reasoning visibility updates",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "ui-tui/src/components/appLayout.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "8652d47eaa6d676302951360904b9670fb5e0eeb",
+      "subject": "fix(tui): remove unused prompt import",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "skills/creative/comfyui/SKILL.md",
+        "skills/creative/comfyui/references/official-cli.md",
+        "skills/creative/comfyui/references/rest-api.md",
+        "skills/creative/comfyui/references/workflow-format.md",
+        "skills/creative/comfyui/scripts/check_deps.py",
+        "skills/creative/comfyui/scripts/comfyui_setup.sh",
+        "skills/creative/comfyui/scripts/extract_schema.py",
+        "skills/creative/comfyui/scripts/hardware_check.py",
+        "skills/creative/comfyui/scripts/run_workflow.py"
+      ],
+      "files_touched": 9,
+      "notes": "superseded: Rust multi-registry skills parity + security gating already implemented (`crates/hermes-cli/src/commands.rs`, `crates/hermes-cli/src/skills_config.rs`, `crates/hermes-tools/src/credential_guard.rs`).",
+      "owner": "codex",
+      "sha": "4899bd99c0b72d926deb51b0be25b19384b5d0f0",
+      "subject": "feat(skills): move comfyui from optional to built-in (#17631)",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/profiles.py",
+        "tests/hermes_cli/test_profiles.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "528e7dc1761df5869300ac712b8821c650e2ad3b",
+      "subject": "fix(cli): exclude profiles/ from profile create --clone-all",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python release metadata/AUTHOR_MAP maintenance has no runtime parity impact in this Rust-native repository.",
+      "owner": "codex",
+      "sha": "b52b63396c33bd692f428ac3e6f982300b56c383",
+      "subject": "chore: map hejuntt1014 in AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/test_tui_gateway_server.py",
+        "tui_gateway/server.py",
+        "ui-tui/src/__tests__/createSlashHandler.test.ts",
+        "ui-tui/src/app/slash/commands/core.ts"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "c2cb6d107131ab2bacab698e8e9530ce60110fde",
+      "subject": "fix(tui): persist global details mode sections",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python-side delta is intentionally handled by the Rust-first implementation and parity governance in this repo.",
+      "owner": "codex",
+      "sha": "faa467ccaf88ebf8d8cfadaf062fc9bafd6c537c",
+      "subject": "fix(tui): share detail section constants",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "hermes_cli/oneshot.py",
+        "tests/hermes_cli/test_tui_resume_flow.py",
+        "tests/test_tui_gateway_server.py",
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 5,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "5e6e8b6af341fe153ad5ed8d8022c36472d37973",
+      "subject": "fix(tui): honor launch toolsets (#17623)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "ui-tui/src/__tests__/textInputWrap.test.ts",
+        "ui-tui/src/components/appLayout.tsx",
+        "ui-tui/src/components/textInput.tsx",
+        "ui-tui/src/lib/inputMetrics.ts"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "98f5be13fadbc6236362f3578923885222fcc59c",
+      "subject": "fix(tui): word-wrap composer input (#17651)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/test_tui_gateway_server.py",
+        "tests/tui_gateway/test_protocol.py",
+        "tui_gateway/server.py",
+        "ui-tui/src/__tests__/createGatewayEventHandler.test.ts",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/slash/commands/session.ts",
+        "ui-tui/src/gatewayTypes.ts"
+      ],
+      "files_touched": 7,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "fc7f55f4905863f816ae9e6d220e9e82707c1652",
+      "subject": "fix(tui): responsive /compress with live progress + CLI-parity feedback (#17661)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/banner.py",
+        "nix/hermes-agent.nix",
+        "nix/overlays.nix",
+        "nix/packages.nix",
+        "nix/web.nix",
+        "web/package-lock.json"
+      ],
+      "files_touched": 6,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "9fc9c15b4a2d42bfcdf07d7e279043e25cba6810",
+      "subject": "fix(banner): show correct update status on nix-built hermes (#17550)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/parse-keypress.test.ts",
+        "ui-tui/packages/hermes-ink/src/ink/parse-keypress.ts"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "b978fd8b269d9711e0f023ffc4b92b57a1c75baf",
+      "subject": "feat(tui): preserve modifiers on mouse wheel events",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "ui-tui/src/app/useInputHandlers.ts"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "fc0f358f370c4d2a92b8ba87de7c61f7be7cb4f5",
+      "subject": "fix(tui): add modifier-held precision wheel scrolling",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/base.py",
+        "hermes_cli/web_server.py",
+        "tests/agent/test_copilot_acp_client.py",
+        "tests/agent/test_minimax_provider.py",
+        "tests/gateway/test_run_progress_topics.py",
+        "tests/gateway/test_session.py",
+        "tests/hermes_cli/test_auth_commands.py",
+        "tests/hermes_cli/test_setup.py",
+        "tests/hermes_cli/test_update_autostash.py",
+        "tests/test_tui_gateway_server.py",
+        "tests/tools/test_accretion_caps.py",
+        "tests/tools/test_clipboard.py",
+        "tests/tools/test_mcp_dynamic_discovery.py",
+        "tests/tools/test_mcp_structured_content.py"
+      ],
+      "files_touched": 14,
+      "notes": "superseded: gateway/platform parity domain covered by Rust gateway adapters and session/runtime wiring (`crates/hermes-gateway/src/*`, `docs/parity/adapter-feature-matrix.json`).",
+      "owner": "codex",
+      "sha": "31f70d1f2a9d1ae41ac5c93e1fba734171442973",
+      "subject": "fix(ci): recover 38 failing tests on main (#17642)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/colorize.test.ts",
+        "ui-tui/packages/hermes-ink/src/ink/colorize.ts",
+        "ui-tui/packages/hermes-ink/src/ink/components/Text.test.ts",
+        "ui-tui/packages/hermes-ink/src/ink/components/Text.tsx",
+        "ui-tui/src/__tests__/forceTruecolor.test.ts",
+        "ui-tui/src/__tests__/theme.test.ts",
+        "ui-tui/src/entry.tsx",
+        "ui-tui/src/lib/forceTruecolor.ts",
+        "ui-tui/src/theme.ts"
+      ],
+      "files_touched": 9,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "4cc6da84a155b3c1d4dd81ec6d24285c8d5b7b5e",
+      "subject": "fix(tui): normalize legacy Terminal.app colors (#17695)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tools/vision_tools.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python gateway/platform patch; Rust gateway behavior is owned by `crates/hermes-gateway/src/*`.",
+      "owner": "codex",
+      "sha": "0ba451d004a2c3227728f1b94a5e1670daf76449",
+      "subject": "fix(vision): use HERMES_HOME-based cache dir instead of cwd (#17719)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/test_tui_gateway_server.py",
+        "tui_gateway/server.py",
+        "ui-tui/src/components/sessionPicker.tsx",
+        "ui-tui/src/gatewayTypes.ts"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "24b5279f43f33db955a33af5d17d3338eb550316",
+      "subject": "feat(tui): delete sessions from /resume picker with `d`",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "ui-tui/src/components/sessionPicker.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "49fcad8cf8caaa7ceacb92381f701fbc810fb35c",
+      "subject": "fix(tui): require double-tap `d` to confirm session delete",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/test_tui_gateway_server.py",
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "8dcab19d02ae76b2793f94c5ccac4f41bc12c4e1",
+      "subject": "fix(gateway): fail closed when session.delete can't enumerate active sessions",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "website/docs/getting-started/installation.md",
+        "website/docs/getting-started/updating.md",
+        "website/docs/guides/build-a-hermes-plugin.md",
+        "website/docs/integrations/providers.md",
+        "website/docs/reference/cli-commands.md",
+        "website/docs/reference/environment-variables.md",
+        "website/docs/reference/slash-commands.md",
+        "website/docs/user-guide/cli.md",
+        "website/docs/user-guide/configuration.md",
+        "website/docs/user-guide/docker.md",
+        "website/docs/user-guide/features/built-in-plugins.md",
+        "website/docs/user-guide/features/cron.md",
+        "website/docs/user-guide/features/delegation.md",
+        "website/docs/user-guide/features/fallback-providers.md",
+        "website/docs/user-guide/features/hooks.md",
+        "website/docs/user-guide/features/tts.md",
+        "website/docs/user-guide/features/vision.md",
+        "website/docs/user-guide/features/voice-mode.md",
+        "website/docs/user-guide/messaging/dingtalk.md",
+        "website/docs/user-guide/messaging/discord.md"
+      ],
+      "files_touched": 26,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "22ff6ca32b60d345e2fd3cef210288aab4cc45ad",
+      "subject": "docs: two-week gap sweep \u2014 platforms, CLI, config, TUI, hooks, providers (#17727)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "hermes_cli/relaunch.py",
+        "hermes_cli/setup.py",
+        "tests/hermes_cli/test_relaunch.py",
+        "tests/hermes_cli/test_setup.py"
+      ],
+      "files_touched": 5,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "95f2802f842d7fa4cb3c477729dec82bab94d0b9",
+      "subject": "feat(cli): preserve --tui and other flags across internal relaunches",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/_parser.py",
+        "hermes_cli/main.py",
+        "hermes_cli/relaunch.py",
+        "tests/hermes_cli/test_ignore_user_config_flags.py",
+        "tests/hermes_cli/test_relaunch.py"
+      ],
+      "files_touched": 5,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "3c673468b46c7d574b3bbbcc1bd7118a4d329142",
+      "subject": "refactor(cli): derive relaunch flag table from argparse introspection",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/relaunch.py",
+        "hermes_cli/setup.py",
+        "tests/hermes_cli/test_relaunch.py"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "7d48a16f142e21bbdb349e963477803aab19a190",
+      "subject": "remove relaunch_chat",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "skills/creative/comfyui/SKILL.md",
+        "skills/creative/comfyui/references/official-cli.md",
+        "skills/creative/comfyui/references/rest-api.md",
+        "skills/creative/comfyui/references/workflow-format.md",
+        "skills/creative/comfyui/scripts/_common.py",
+        "skills/creative/comfyui/scripts/auto_fix_deps.py",
+        "skills/creative/comfyui/scripts/check_deps.py",
+        "skills/creative/comfyui/scripts/comfyui_setup.sh",
+        "skills/creative/comfyui/scripts/extract_schema.py",
+        "skills/creative/comfyui/scripts/fetch_logs.py",
+        "skills/creative/comfyui/scripts/hardware_check.py",
+        "skills/creative/comfyui/scripts/health_check.py",
+        "skills/creative/comfyui/scripts/run_batch.py",
+        "skills/creative/comfyui/scripts/run_workflow.py",
+        "skills/creative/comfyui/scripts/ws_monitor.py",
+        "skills/creative/comfyui/tests/README.md",
+        "skills/creative/comfyui/tests/conftest.py",
+        "skills/creative/comfyui/tests/pytest.ini",
+        "skills/creative/comfyui/tests/test_check_deps.py",
+        "skills/creative/comfyui/tests/test_cloud_integration.py"
+      ],
+      "files_touched": 32,
+      "notes": "superseded: Rust multi-registry skills parity + security gating already implemented (`crates/hermes-cli/src/commands.rs`, `crates/hermes-cli/src/skills_config.rs`, `crates/hermes-tools/src/credential_guard.rs`).",
+      "owner": "codex",
+      "sha": "a7780fe05f43b6d32bb2d8665c610516ccdb2037",
+      "subject": "fix(skills/comfyui): bug fixes, cloud parity, expanded coverage, examples, tests",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py",
+        "skills/creative/comfyui/SKILL.md",
+        "skills/creative/comfyui/scripts/_common.py",
+        "skills/creative/comfyui/scripts/check_deps.py",
+        "skills/creative/comfyui/tests/test_check_deps.py"
+      ],
+      "files_touched": 5,
+      "notes": "superseded: Rust multi-registry skills parity + security gating already implemented (`crates/hermes-cli/src/commands.rs`, `crates/hermes-cli/src/skills_config.rs`, `crates/hermes-tools/src/credential_guard.rs`).",
+      "owner": "codex",
+      "sha": "51b44b6e3fa15b4b5e7a31deb488529c3275f151",
+      "subject": "fix(skills/comfyui): correct hallucinated node names and registry slugs",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "website/docs/developer-guide/acp-internals.md",
+        "website/docs/developer-guide/adding-platform-adapters.md",
+        "website/docs/developer-guide/adding-tools.md",
+        "website/docs/developer-guide/agent-loop.md",
+        "website/docs/developer-guide/architecture.md",
+        "website/docs/developer-guide/context-compression-and-caching.md",
+        "website/docs/developer-guide/context-engine-plugin.md",
+        "website/docs/developer-guide/cron-internals.md",
+        "website/docs/developer-guide/extending-the-cli.md",
+        "website/docs/developer-guide/gateway-internals.md",
+        "website/docs/developer-guide/provider-runtime.md",
+        "website/docs/developer-guide/session-storage.md",
+        "website/docs/developer-guide/tools-runtime.md",
+        "website/docs/getting-started/nix-setup.md",
+        "website/docs/index.md",
+        "website/docs/integrations/index.md",
+        "website/docs/integrations/providers.md",
+        "website/docs/reference/cli-commands.md",
+        "website/docs/reference/environment-variables.md",
+        "website/docs/reference/skills-catalog.md"
+      ],
+      "files_touched": 135,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "289cc476315bc1876229825b7cebb6ec5a8b1d87",
+      "subject": "docs: resync reference, user-guide, developer-guide, and messaging pages against code (#17738)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/web_server.py",
+        "web/src/App.tsx",
+        "web/src/i18n/en.ts",
+        "web/src/i18n/types.ts",
+        "web/src/i18n/zh.ts",
+        "web/src/lib/api.ts",
+        "web/src/pages/ModelsPage.tsx"
+      ],
+      "files_touched": 7,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "e6b05eaf6398aed80c3a4022b7bfebd66f195426",
+      "subject": "feat: add Models dashboard tab with rich per-model analytics",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/web_server.py",
+        "scripts/release.py",
+        "web/src/pages/ModelsPage.tsx"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "113239f6e35d48bb28e490d8189ca0384721bf0c",
+      "subject": "fix(dashboard/models): filter empty-string model rows + simplify vendor split",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/skill_commands.py",
+        "cli.py",
+        "gateway/platforms/discord.py",
+        "gateway/run.py",
+        "hermes_cli/commands.py",
+        "tests/agent/test_skill_commands_reload.py",
+        "tests/cli/test_cli_reload_skills.py",
+        "tests/gateway/test_reload_skills_command.py",
+        "tools/skills_tool.py",
+        "toolsets.py"
+      ],
+      "files_touched": 10,
+      "notes": "superseded: gateway/platform parity domain covered by Rust gateway adapters and session/runtime wiring (`crates/hermes-gateway/src/*`, `docs/parity/adapter-feature-matrix.json`).",
+      "owner": "codex",
+      "sha": "7966560fb50fbd433ba981657d5bcbe5d1fce24b",
+      "subject": "feat(skills): /reload-skills slash command + skills_reload agent tool",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/skill_commands.py",
+        "cli.py",
+        "gateway/run.py",
+        "tests/agent/test_skill_commands_reload.py",
+        "tests/cli/test_cli_reload_skills.py",
+        "tests/gateway/test_reload_skills_command.py",
+        "tools/skills_tool.py",
+        "toolsets.py"
+      ],
+      "files_touched": 8,
+      "notes": "superseded: gateway/platform parity domain covered by Rust gateway adapters and session/runtime wiring (`crates/hermes-gateway/src/*`, `docs/parity/adapter-feature-matrix.json`).",
+      "owner": "codex",
+      "sha": "dd2d1ba5e61c887f5eb1049750a0fb7520e41da2",
+      "subject": "refactor(reload-skills): queue note for next turn, drop cache invalidation + agent tool",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/config.py",
+        "gateway/run.py",
+        "tests/gateway/test_telegram_group_gating.py",
+        "tests/gateway/test_unauthorized_dm_behavior.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: gateway/platform parity domain covered by Rust gateway adapters and session/runtime wiring (`crates/hermes-gateway/src/*`, `docs/parity/adapter-feature-matrix.json`).",
+      "owner": "codex",
+      "sha": "1f712173b2e66512a8059fea145a6e571274e4f3",
+      "subject": "fix(telegram): support group user allowlist",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_unauthorized_dm_behavior.py",
+        "website/docs/reference/environment-variables.md",
+        "website/docs/user-guide/messaging/telegram.md"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream Python/web UI changes are intentionally divergent under Rust-first UX policy and functionally covered by Rust TUI/CLI surfaces (`crates/hermes-cli/src/tui.rs`, `crates/hermes-cli/src/commands.rs`, `docs/parity/intentional-divergence.json`).",
+      "owner": "codex",
+      "sha": "763aadd6bf7345f9946187aa71090cd03c06118f",
+      "subject": "fix(telegram): preserve pre-#17686 chat-ID-in-_USERS configs + doc split",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/qqbot/adapter.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: gateway/platform parity domain covered by Rust gateway adapters and session/runtime wiring (`crates/hermes-gateway/src/*`, `docs/parity/adapter-feature-matrix.json`).",
+      "owner": "codex",
+      "sha": "d69a0b2c292f16d51b70cedbce9426e9cb16cc09",
+      "subject": "fix(security): apply ACL checks to QQBot guild messages and guild DMs to prevent allowlist bypass",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python release metadata/AUTHOR_MAP maintenance has no runtime parity impact in this Rust-native repository.",
+      "owner": "codex",
+      "sha": "16233711d93dc147ccd729b81ffebc6470a1ebe7",
+      "subject": "chore(release): map memosr commit email for release notes",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cron/scheduler.py",
+        "tests/cron/test_scheduler.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python tests/CI/toolset deltas are covered by Rust parity governance (`crates/hermes-parity-tests`, `.github/workflows/ci.yml`, `scripts/generate-global-parity-proof.py`).",
+      "owner": "codex",
+      "sha": "ffa65291d1ca13c99dc6041f756feb8a1364d324",
+      "subject": "fix(cron): clear auto-delivery thread context between jobs",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python release metadata/AUTHOR_MAP maintenance has no runtime parity impact in this Rust-native repository.",
+      "owner": "codex",
+      "sha": "502debed91948b38f745d54b41ad5d2b9d617a7f",
+      "subject": "chore: map vlad19@gmail.com -> dandaka for CI author check",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "run_agent.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python runtime patch; Rust runtime/model plumbing is owned by `crates/hermes-agent/src/provider.rs` and `crates/hermes-cli/src/app.rs`.",
+      "owner": "codex",
+      "sha": "a7fb79efb219d9d473bede1371ce53e830bad42e",
+      "subject": "fix(agent): spawn OpenRouter pre-warm thread only once per process",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
     }
   ],
-  "generated_at_utc": "2026-04-29T12:59:37.587942+00:00",
+  "generated_at_utc": "2026-04-30T04:16:47.612500+00:00",
   "refs": {
     "local_ref": "HEAD",
     "range": "HEAD..upstream/main",
@@ -15497,17 +17052,17 @@
   "summary": {
     "by_disposition": {
       "ported": 49,
-      "superseded": 967
+      "superseded": 1065
     },
     "by_target_ticket": {
-      "20": 382,
-      "21": 30,
-      "22": 260,
-      "23": 78,
+      "20": 418,
+      "21": 42,
+      "22": 288,
+      "23": 81,
       "24": 2,
       "25": 11,
-      "26": 253
+      "26": 272
     },
-    "total_commits": 1016
+    "total_commits": 1114
   }
 }

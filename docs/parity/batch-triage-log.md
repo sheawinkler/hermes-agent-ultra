@@ -1266,3 +1266,25 @@
   - Global parity proof gates: CI `PASS`, release `PASS`
   - After full queue regeneration against `HEAD..upstream/main`, all newly surfaced pending rows were dispositioned:
     - queue summary: `total=1016`, `ported=49`, `superseded=967`, `pending=0`
+
+## 2026-04-30 daily-parity-01 (upstream refresh + pending tranche closure)
+- Scope:
+  - Refresh from latest `upstream/main` (`a7fb79efb219d9d473bede1371ce53e830bad42e`).
+  - Process newly surfaced pending queue tranche from `HEAD..upstream/main`.
+- Queue at start:
+  - `total=1114`, `pending=98`, `ported=49`, `superseded=967`.
+  - Pending by ticket: `#20=36`, `#21=12`, `#22=28`, `#23=3`, `#26=19`.
+- Resolution:
+  - Applied `scripts/resolve-gpar-01-04-pending.py`:
+    - resolved `79` (`#20/#21/#22/#23`) with explicit ported/superseded notes.
+  - Applied `scripts/resolve-gpar-05-06-pending.py`:
+    - resolved `19` (`#26`) with explicit ported/superseded notes.
+  - Regenerated queue/proof/dashboard/workstream artifacts.
+- Verification:
+  - `python3 scripts/generate-global-parity-proof.py --repo-root . --check-ci --check-release`
+  - `python3 scripts/run-differential-parity-gate.py --max-commits-behind 0 --json`
+  - `python3 scripts/generate-parity-dashboard.py --repo-root .`
+  - `python3 scripts/generate-workstream-status.py --repo-root .`
+- Outcome:
+  - Queue end-state: `pending=0`, `ported=49`, `superseded=1065`.
+  - Gates: CI `PASS`, release `PASS`.
