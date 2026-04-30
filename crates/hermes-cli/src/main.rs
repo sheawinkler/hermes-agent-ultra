@@ -96,6 +96,9 @@ use tokio::sync::{broadcast, mpsc};
 #[tokio::main]
 async fn main() {
     let cli = Cli::parse();
+    if let Some(config_dir) = cli.config_dir.as_deref() {
+        std::env::set_var("HERMES_HOME", config_dir);
+    }
     let effective_command = cli.effective_command();
     let global_model_override = cli.model.clone();
     let global_provider_override = cli.provider.clone();
