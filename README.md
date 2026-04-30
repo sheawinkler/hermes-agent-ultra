@@ -97,6 +97,13 @@ Deep diagnostics bundle:
 hermes-ultra doctor --deep --snapshot --bundle
 ```
 
+Optional Sentrux MCP profile:
+
+```bash
+hermes-ultra mcp sentrux
+hermes-ultra mcp sentrux-status
+```
+
 ## Built-In Context + Memory Behavior
 
 Ultra auto-loads high-value project and persona context:

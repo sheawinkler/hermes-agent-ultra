@@ -198,6 +198,9 @@ const SKILLS_HUB_STATE_DIR: &str = ".hub";
 const SKILLS_HUB_LOCK_FILE: &str = "lock.json";
 const SKILLS_HUB_AUDIT_FILE: &str = "audit.log";
 const SKILLS_HUB_LOCK_VERSION: u32 = 1;
+const SENTRUX_MCP_SERVER_NAME: &str = "sentrux";
+const SENTRUX_MCP_COMMAND: &str = "sentrux";
+const SENTRUX_MCP_ARG: &str = "--mcp";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct SkillTapSpec {
@@ -7544,6 +7547,51 @@ pub async fn handle_cli_mcp(
     let selected = name.clone().or(server.clone());
 
     match action.as_deref().unwrap_or("list") {
+        "sentrux" | "setup-sentrux" | "sentrux-setup" => {
+            let sentrux_present = upsert_sentrux_mcp_profile(&config_dir)?;
+            if sentrux_present {
+                println!(
+                    "Detected '{}' on PATH. Configuring {} MCP profile...",
+                    SENTRUX_MCP_COMMAND, SENTRUX_MCP_SERVER_NAME
+                );
+            } else {
+                println!(
+                    "Warning: '{}' is not currently on PATH. Adding MCP config anyway.",
+                    SENTRUX_MCP_COMMAND
+                );
+                println!(
+                    "Install sentrux, then run `hermes mcp test {}` to verify transport reachability.",
+                    SENTRUX_MCP_SERVER_NAME
+                );
+            }
+
+            println!(
+                "Configured MCP server '{}' in:\n  - {}\n  - {}",
+                SENTRUX_MCP_SERVER_NAME,
+                mcp_config_path.display(),
+                config_dir.join("config.yaml").display()
+            );
+            println!(
+                "Runtime hint: use `/mcp` in-session to confirm, and `hermes mcp test {}` for transport checks.",
+                SENTRUX_MCP_SERVER_NAME
+            );
+        }
+        "sentrux-status" => {
+            let (binary_on_path, from_json, from_yaml) = sentrux_mcp_status(&config_dir);
+            println!(
+                "Sentrux MCP status:\n  - binary_on_path: {}\n  - in_mcp_servers.json: {}\n  - in_config.yaml: {}",
+                if binary_on_path { "yes" } else { "no" },
+                yes_no(from_json),
+                yes_no(from_yaml)
+            );
+        }
+        "sentrux-remove" => {
+            remove_sentrux_mcp_profile(&config_dir)?;
+            println!(
+                "Removed '{}' MCP profile from JSON + YAML config surfaces.",
+                SENTRUX_MCP_SERVER_NAME
+            );
+        }
         "list" => {
             if !mcp_config_path.exists() {
                 println!("No MCP servers configured ({})", mcp_config_path.display());
@@ -7567,7 +7615,7 @@ pub async fn handle_cli_mcp(
             }
         }
         "add" => {
-            let (entry_name, entry) = if let Some(name) =
+            let (entry_name, entry, yaml_command, yaml_url) = if let Some(name) =
                 name.as_deref().map(str::trim).filter(|s| !s.is_empty())
             {
                 let entry = if let Some(url) = url.clone().filter(|v| !v.trim().is_empty()) {
@@ -7579,7 +7627,12 @@ pub async fn handle_cli_mcp(
                         "mcp add with positional name requires --url or --command".into(),
                     ));
                 };
-                (name.to_string(), entry)
+                (
+                    name.to_string(),
+                    entry,
+                    command.clone().filter(|v| !v.trim().is_empty()),
+                    url.clone().filter(|v| !v.trim().is_empty()),
+                )
             } else {
                 let srv = server
                     .as_deref()
@@ -7590,14 +7643,19 @@ pub async fn handle_cli_mcp(
                             "Missing server. Usage: hermes mcp add <name> --url <url> | --command <cmd> (legacy: --server <name-or-url>)".into(),
                         )
                     })?;
-                (
-                    srv.to_string(),
-                    if srv.starts_with("http://") || srv.starts_with("https://") {
-                        serde_json::json!({"url": srv, "enabled": true})
-                    } else {
-                        serde_json::json!({"url": srv, "enabled": true})
-                    },
-                )
+                let (entry, yaml_url) = if srv.starts_with("http://") || srv.starts_with("https://")
+                {
+                    (
+                        serde_json::json!({"url": srv, "enabled": true}),
+                        Some(srv.to_string()),
+                    )
+                } else {
+                    (
+                        serde_json::json!({"url": srv, "enabled": true}),
+                        Some(srv.to_string()),
+                    )
+                };
+                (srv.to_string(), entry, None, yaml_url)
             };
             println!("Adding MCP server: {}", entry_name);
             let mut servers: serde_json::Value = if mcp_config_path.exists() {
@@ -7614,10 +7672,16 @@ pub async fn handle_cli_mcp(
                 .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
             std::fs::write(&mcp_config_path, json)
                 .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+            update_yaml_mcp_server(&config_dir, &entry_name, yaml_command, yaml_url, false)?;
             println!(
                 "MCP server '{}' added to {}",
                 entry_name,
                 mcp_config_path.display()
+            );
+            println!(
+                "Synced MCP server '{}' into {}",
+                entry_name,
+                config_dir.join("config.yaml").display()
             );
         }
         "remove" => {
@@ -7640,6 +7704,7 @@ pub async fn handle_cli_mcp(
                         .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
                     std::fs::write(&mcp_config_path, json)
                         .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+                    update_yaml_mcp_server(&config_dir, &srv, None, None, true)?;
                     println!("MCP server '{}' removed.", srv);
                     if mcp_auth_path.exists() {
                         let raw = std::fs::read_to_string(&mcp_auth_path).unwrap_or_default();
@@ -7816,10 +7881,120 @@ pub async fn handle_cli_mcp(
         }
         other => {
             println!("MCP action '{}' is not recognized.", other);
-            println!("Available actions: list, add, remove, serve, test, configure, login");
+            println!(
+                "Available actions: list, add, remove, serve, test, configure, login, sentrux, sentrux-status, sentrux-remove"
+            );
         }
     }
     Ok(())
+}
+
+fn command_on_path(command: &str) -> bool {
+    if command.trim().is_empty() {
+        return false;
+    }
+    let candidate = Path::new(command);
+    if candidate.components().count() > 1 {
+        return candidate.exists();
+    }
+    std::env::var_os("PATH").is_some_and(|path_var| {
+        std::env::split_paths(&path_var)
+            .map(|p| p.join(command))
+            .any(|p| p.exists())
+    })
+}
+
+fn sentrux_entry() -> serde_json::Value {
+    serde_json::json!({
+        "command": SENTRUX_MCP_COMMAND,
+        "args": [SENTRUX_MCP_ARG],
+        "enabled": true
+    })
+}
+
+fn update_yaml_mcp_server(
+    config_dir: &Path,
+    name: &str,
+    command: Option<String>,
+    url: Option<String>,
+    remove: bool,
+) -> Result<(), hermes_core::AgentError> {
+    let cfg_path = config_dir.join("config.yaml");
+    let mut cfg = hermes_config::load_user_config_file(&cfg_path)
+        .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
+    cfg.mcp_servers.retain(|entry| entry.name != name);
+    if !remove {
+        cfg.mcp_servers.push(hermes_config::McpServerEntry {
+            name: name.to_string(),
+            command,
+            url,
+        });
+        cfg.mcp_servers.sort_by(|a, b| a.name.cmp(&b.name));
+    }
+    hermes_config::save_config_yaml(&cfg_path, &cfg)
+        .map_err(|e| hermes_core::AgentError::Config(e.to_string()))
+}
+
+fn upsert_sentrux_mcp_profile(config_dir: &Path) -> Result<bool, hermes_core::AgentError> {
+    let mcp_config_path = config_dir.join("mcp_servers.json");
+    let mut servers: serde_json::Value = if mcp_config_path.exists() {
+        let content = std::fs::read_to_string(&mcp_config_path)
+            .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+        serde_json::from_str(&content).unwrap_or(serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+    if let Some(obj) = servers.as_object_mut() {
+        obj.insert(SENTRUX_MCP_SERVER_NAME.to_string(), sentrux_entry());
+    }
+    let json = serde_json::to_string_pretty(&servers)
+        .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
+    std::fs::write(&mcp_config_path, json)
+        .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+    update_yaml_mcp_server(
+        config_dir,
+        SENTRUX_MCP_SERVER_NAME,
+        Some(format!("{SENTRUX_MCP_COMMAND} {SENTRUX_MCP_ARG}")),
+        None,
+        false,
+    )?;
+    Ok(command_on_path(SENTRUX_MCP_COMMAND))
+}
+
+fn remove_sentrux_mcp_profile(config_dir: &Path) -> Result<(), hermes_core::AgentError> {
+    let mcp_config_path = config_dir.join("mcp_servers.json");
+    if mcp_config_path.exists() {
+        let content = std::fs::read_to_string(&mcp_config_path)
+            .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+        let mut servers: serde_json::Value =
+            serde_json::from_str(&content).unwrap_or(serde_json::json!({}));
+        if let Some(obj) = servers.as_object_mut() {
+            obj.remove(SENTRUX_MCP_SERVER_NAME);
+        }
+        let json = serde_json::to_string_pretty(&servers)
+            .map_err(|e| hermes_core::AgentError::Config(e.to_string()))?;
+        std::fs::write(&mcp_config_path, json)
+            .map_err(|e| hermes_core::AgentError::Io(e.to_string()))?;
+    }
+    update_yaml_mcp_server(config_dir, SENTRUX_MCP_SERVER_NAME, None, None, true)
+}
+
+fn sentrux_mcp_status(config_dir: &Path) -> (bool, bool, bool) {
+    let mcp_config_path = config_dir.join("mcp_servers.json");
+    let from_json = std::fs::read_to_string(&mcp_config_path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|v| v.get(SENTRUX_MCP_SERVER_NAME).cloned())
+        .is_some();
+    let from_yaml = hermes_config::load_user_config_file(&config_dir.join("config.yaml"))
+        .ok()
+        .map(|cfg| {
+            cfg.mcp_servers
+                .iter()
+                .any(|entry| entry.name == SENTRUX_MCP_SERVER_NAME)
+        })
+        .unwrap_or(false);
+    (command_on_path(SENTRUX_MCP_COMMAND), from_json, from_yaml)
 }
 
 /// Handle `hermes sessions [action] [--id ...] [--name ...]`.
@@ -9427,6 +9602,75 @@ mod tests {
     fn test_command_result_equality() {
         assert_eq!(CommandResult::Handled, CommandResult::Handled);
         assert_ne!(CommandResult::Handled, CommandResult::Quit);
+    }
+
+    #[tokio::test]
+    async fn test_mcp_sentrux_setup_syncs_json_and_yaml() {
+        let tmp = tempdir().expect("tempdir");
+        let config_dir = tmp.path().join("hermes-home");
+        std::fs::create_dir_all(&config_dir).expect("create config dir");
+
+        upsert_sentrux_mcp_profile(&config_dir).expect("sentrux setup helper");
+
+        let mcp_json = config_dir.join("mcp_servers.json");
+        assert!(mcp_json.exists(), "mcp_servers.json should be created");
+        let json: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(&mcp_json).expect("read mcp_servers.json"),
+        )
+        .expect("parse mcp json");
+        let sentrux = json
+            .get(SENTRUX_MCP_SERVER_NAME)
+            .expect("sentrux entry should exist");
+        assert_eq!(
+            sentrux.get("command").and_then(|v| v.as_str()),
+            Some(SENTRUX_MCP_COMMAND)
+        );
+        assert_eq!(
+            sentrux
+                .get("args")
+                .and_then(|v| v.as_array())
+                .and_then(|arr| arr.first())
+                .and_then(|v| v.as_str()),
+            Some(SENTRUX_MCP_ARG)
+        );
+
+        let cfg = hermes_config::load_user_config_file(&config_dir.join("config.yaml"))
+            .expect("load config.yaml");
+        assert!(
+            cfg.mcp_servers
+                .iter()
+                .any(|entry| entry.name == SENTRUX_MCP_SERVER_NAME
+                    && entry.command.as_deref() == Some("sentrux --mcp")),
+            "config.yaml mcp_servers should include sentrux command"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_sentrux_remove_syncs_json_and_yaml() {
+        let tmp = tempdir().expect("tempdir");
+        let config_dir = tmp.path().join("hermes-home");
+        std::fs::create_dir_all(&config_dir).expect("create config dir");
+
+        upsert_sentrux_mcp_profile(&config_dir).expect("sentrux setup helper");
+        remove_sentrux_mcp_profile(&config_dir).expect("sentrux remove helper");
+
+        let json: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(config_dir.join("mcp_servers.json")).expect("read mcp json"),
+        )
+        .expect("parse mcp json");
+        assert!(
+            json.get(SENTRUX_MCP_SERVER_NAME).is_none(),
+            "mcp_servers.json should remove sentrux"
+        );
+
+        let cfg = hermes_config::load_user_config_file(&config_dir.join("config.yaml"))
+            .expect("load config.yaml");
+        assert!(
+            cfg.mcp_servers
+                .iter()
+                .all(|entry| entry.name != SENTRUX_MCP_SERVER_NAME),
+            "config.yaml mcp_servers should remove sentrux"
+        );
     }
 
     #[test]

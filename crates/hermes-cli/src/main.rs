@@ -789,6 +789,7 @@ async fn run_optional_setup_sections(
         "Messaging platforms (gateway setup wizard)".to_string(),
         "Tools (interactive enable/disable checklist)".to_string(),
         "Memory backend setup (initialize MEMORY.md/USER.md)".to_string(),
+        "Sentrux MCP setup (quality workflow backend)".to_string(),
     ];
     let mut pre_selected: HashSet<usize> = HashSet::new();
     if current_config.platforms.values().any(|p| p.enabled) {
@@ -806,6 +807,13 @@ async fn run_optional_setup_sections(
         && memory_root.join("memories").join("USER.md").exists();
     if memory_ready {
         pre_selected.insert(2);
+    }
+    if current_config
+        .mcp_servers
+        .iter()
+        .any(|entry| entry.name.eq_ignore_ascii_case("sentrux"))
+    {
+        pre_selected.insert(3);
     }
 
     let selected = hermes_cli::curses_checklist(
@@ -840,6 +848,17 @@ async fn run_optional_setup_sections(
                 println!("\nOpening memory setup...");
                 hermes_cli::commands::handle_cli_memory(Some("setup".to_string()), None, false)
                     .await?;
+            }
+            3 => {
+                println!("\nOpening sentrux MCP setup...");
+                hermes_cli::commands::handle_cli_mcp(
+                    Some("sentrux-setup".to_string()),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+                .await?;
             }
             _ => {}
         }
