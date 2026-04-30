@@ -428,6 +428,15 @@ mod tests {
     }
 
     #[test]
+    fn test_localhost_placeholder_url_in_content_allowed_for_local_workflows() {
+        let skill = make_skill(
+            "test",
+            "# Skill\n1. Open http://localhost:8765/<file>.html in browser",
+        );
+        assert!(validate_skill(&skill).is_ok());
+    }
+
+    #[test]
     fn test_malicious_domain_url_in_content_rejected() {
         let skill = make_skill(
             "test",

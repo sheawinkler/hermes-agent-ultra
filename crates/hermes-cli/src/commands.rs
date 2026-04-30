@@ -458,6 +458,11 @@ fn parse_explicit_github_skill(spec: &str) -> Option<(String, Option<String>, St
     if trimmed.is_empty() {
         return None;
     }
+    // Registry-prefixed identifiers (official/..., skills.sh/..., etc.)
+    // must not be treated as direct GitHub owner/repo/path slugs.
+    if parse_registry_prefixed_skill(trimmed).is_some() {
+        return None;
+    }
 
     if let Some(rest) = trimmed
         .strip_prefix("https://github.com/")
@@ -9705,6 +9710,16 @@ mod tests {
             parse_explicit_github_skill("official/creative/comfyui")
         };
         assert!(explicit.is_none());
+    }
+
+    #[test]
+    fn registry_prefixed_install_identifiers_override_github_slug_parse_pretext() {
+        let registry_prefixed = parse_registry_prefixed_skill("official/creative/pretext");
+        assert_eq!(
+            registry_prefixed,
+            Some(("official".to_string(), "creative/pretext".to_string()))
+        );
+        assert!(parse_explicit_github_skill("official/creative/pretext").is_none());
     }
 
     #[test]
