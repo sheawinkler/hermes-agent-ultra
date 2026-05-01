@@ -492,6 +492,9 @@ pub enum CliCommand {
         /// New name (for rename).
         #[arg(long)]
         name: Option<String>,
+        /// Maximum rows for `sessions list` (upstream parity).
+        #[arg(long)]
+        limit: Option<usize>,
     },
 
     /// Usage analytics and insights.
@@ -950,6 +953,25 @@ mod tests {
                 assert_eq!(name.as_deref(), Some("work"));
             }
             _ => panic!("Expected Profile command"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_sessions_limit_flag() {
+        let cli = Cli::try_parse_from(vec!["hermes", "sessions", "list", "--limit", "3"]).unwrap();
+        match cli.command {
+            Some(CliCommand::Sessions {
+                action,
+                id,
+                name,
+                limit,
+            }) => {
+                assert_eq!(action.as_deref(), Some("list"));
+                assert!(id.is_none());
+                assert!(name.is_none());
+                assert_eq!(limit, Some(3));
+            }
+            _ => panic!("Expected Sessions command"),
         }
     }
 

@@ -317,9 +317,12 @@ async fn main() {
             url,
             command,
         } => hermes_cli::commands::handle_cli_mcp(action, name, server, url, command).await,
-        CliCommand::Sessions { action, id, name } => {
-            hermes_cli::commands::handle_cli_sessions(action, id, name).await
-        }
+        CliCommand::Sessions {
+            action,
+            id,
+            name,
+            limit,
+        } => hermes_cli::commands::handle_cli_sessions(action, id, name, limit).await,
         CliCommand::Insights { days, source } => {
             hermes_cli::commands::handle_cli_insights(days, source).await
         }
@@ -881,8 +884,7 @@ async fn run_config(
     match action.as_deref() {
         None => {
             // Show full config as JSON
-            let json = serde_json::to_string_pretty(&config)
-                .map_err(|e| AgentError::Config(e.to_string()))?;
+            let json = hermes_cli::commands::redacted_config_json(&config)?;
             println!("{}", json);
         }
         Some("get") => {
@@ -917,8 +919,7 @@ async fn run_config(
             println!("Saved {} = {} -> {}", key, value, cfg_path.display());
         }
         Some("show") => {
-            let json = serde_json::to_string_pretty(&config)
-                .map_err(|e| AgentError::Config(e.to_string()))?;
+            let json = hermes_cli::commands::redacted_config_json(&config)?;
             println!("{}", json);
         }
         Some("path") => {

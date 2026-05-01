@@ -60,6 +60,65 @@ fn mask_secret_value(secret: &str) -> String {
     )
 }
 
+const SECRET_KEY_HINTS: &[&str] = &[
+    "token",
+    "secret",
+    "api_key",
+    "apikey",
+    "password",
+    "passphrase",
+    "private_key",
+    "client_secret",
+    "refresh_token",
+    "access_token",
+    "authorization",
+    "bearer",
+    "webhook",
+];
+
+fn key_looks_secret(key: &str) -> bool {
+    let normalized = key.trim().to_ascii_lowercase();
+    if normalized == "url"
+        || normalized.ends_with("_url")
+        || normalized.contains("base_url")
+        || normalized.contains("callback_url")
+    {
+        return false;
+    }
+    SECRET_KEY_HINTS
+        .iter()
+        .any(|hint| normalized.contains(hint))
+}
+
+fn redact_json_value(key_hint: Option<&str>, value: &mut serde_json::Value) {
+    match value {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                redact_json_value(Some(k), v);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                redact_json_value(key_hint, item);
+            }
+        }
+        serde_json::Value::String(raw) => {
+            if key_hint.is_some_and(key_looks_secret) {
+                *raw = mask_secret_value(raw);
+            }
+        }
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => {}
+    }
+}
+
+pub fn redacted_config_json(config: &hermes_config::GatewayConfig) -> Result<String, AgentError> {
+    let mut value = serde_json::to_value(config)
+        .map_err(|e| AgentError::Config(format!("Failed to serialize config: {}", e)))?;
+    redact_json_value(None, &mut value);
+    serde_json::to_string_pretty(&value)
+        .map_err(|e| AgentError::Config(format!("Failed to render config: {}", e)))
+}
+
 // ---------------------------------------------------------------------------
 // Slash commands
 // ---------------------------------------------------------------------------
@@ -3472,7 +3531,7 @@ fn handle_tools_command(app: &mut App) -> Result<CommandResult, AgentError> {
 fn handle_config_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     if args.is_empty() {
         // Show full config
-        let config_json = serde_json::to_string_pretty(&*app.config)
+        let config_json = redacted_config_json(&app.config)
             .unwrap_or_else(|e| format!("<serialization error: {}>", e));
         emit_command_output(app, config_json);
     } else {
@@ -5404,12 +5463,16 @@ fn handle_mouse_command(app: &mut App, args: &[&str]) -> Result<CommandResult, A
 }
 
 fn print_help(app: &mut App) {
+    emit_command_output(app, render_help_text());
+}
+
+fn render_help_text() -> String {
     let mut out = String::from("Hermes Agent — Available Commands:\n\n");
     for (cmd, desc) in SLASH_COMMANDS {
         out.push_str(&format!("`{:<16}` {}\n", cmd, desc));
     }
     out.push_str("\nYou can also type any text to send it as a message to the agent.");
-    emit_command_output(app, out);
+    out
 }
 
 // ---------------------------------------------------------------------------
@@ -5483,6 +5546,78 @@ fn query_mode_tools_enabled(query_mode: bool, allow_tools_flag: bool) -> bool {
     allow_tools_flag || hermes_config::env_var_enabled(QUERY_ALLOW_TOOLS_ENV_KEY)
 }
 
+fn parse_query_slash_invocation(query: &str) -> Option<(String, Vec<String>)> {
+    let trimmed = query.trim();
+    if !trimmed.starts_with('/') {
+        return None;
+    }
+    let mut parts = trimmed.split_whitespace();
+    let cmd = parts.next()?.to_string();
+    let args = parts.map(|segment| segment.to_string()).collect();
+    Some((cmd, args))
+}
+
+fn format_query_mode_status(config: &hermes_config::GatewayConfig, current_model: &str) -> String {
+    let personality = config.personality.as_deref().unwrap_or("default");
+    format!(
+        "Hermes Agent Ultra — Query Status\nmodel: {current_model}\npersonality: {personality}\nmax_turns: {}",
+        config.max_turns
+    )
+}
+
+async fn maybe_handle_cli_query_slash(
+    query: &str,
+    config: &hermes_config::GatewayConfig,
+    current_model: &str,
+) -> Result<bool, AgentError> {
+    let Some((raw_cmd, args)) = parse_query_slash_invocation(query) else {
+        return Ok(false);
+    };
+    let cmd = canonical_command(&raw_cmd);
+    match cmd {
+        "/help" | "/commands" => println!("{}", render_help_text()),
+        "/status" | "/agent" => println!("{}", format_query_mode_status(config, current_model)),
+        "/config" => println!("{}", redacted_config_json(config)?),
+        "/model" => {
+            if args.is_empty() {
+                println!(
+                    "Current model: {current_model}\n\nQuery mode is non-interactive.\nUse `hermes-ultra chat --query \"...\" --model <provider:model>` to override,\nor run interactive `hermes-ultra` then `/model` for picker UX."
+                );
+            } else {
+                let requested = args.join(" ");
+                let resolved = normalize_model_target(current_model, &requested)?;
+                println!(
+                    "Query-mode model candidate: {resolved}\nRun with: hermes-ultra chat --query \"...\" --model {resolved}"
+                );
+            }
+        }
+        "/personality" => {
+            if args.is_empty() || args[0].eq_ignore_ascii_case("list") {
+                println!(
+                    "{}",
+                    format_personality_catalog(
+                        config.personality.as_deref(),
+                        hermes_agent::builtin_personality_descriptions(),
+                    )
+                );
+            } else {
+                let requested = args.join(" ");
+                println!(
+                    "Query mode does not persist personality switches.\nCurrent personality: {}\nTo run one-shot with a personality, use `--personality \"{}\"`.",
+                    config.personality.as_deref().unwrap_or("default"),
+                    requested
+                );
+            }
+        }
+        "/quit" | "/exit" => println!("Goodbye!"),
+        _ => println!(
+            "Query mode does not execute slash command `{}`.\nUse interactive `hermes-ultra` for full slash command support.",
+            raw_cmd
+        ),
+    }
+    Ok(true)
+}
+
 /// Handle `hermes chat [--query ...] [--preload-skill ...] [--yolo]`.
 pub async fn handle_cli_chat(
     query: Option<String>,
@@ -5530,6 +5665,11 @@ pub async fn handle_cli_chat(
         provider_override.as_deref(),
     )?;
     apply_cli_chat_runtime_env(&current_model);
+    if let Some(q) = query.as_deref() {
+        if maybe_handle_cli_query_slash(q, &config, &current_model).await? {
+            return Ok(());
+        }
+    }
 
     let tool_registry = Arc::new(ToolRegistry::new());
     let tool_schemas = if tools_enabled {
@@ -8405,6 +8545,7 @@ pub async fn handle_cli_sessions(
     action: Option<String>,
     id: Option<String>,
     name: Option<String>,
+    limit: Option<usize>,
 ) -> Result<(), hermes_core::AgentError> {
     let sessions_dir = hermes_config::hermes_home().join("sessions");
 
@@ -8414,7 +8555,8 @@ pub async fn handle_cli_sessions(
                 println!("No sessions directory found.");
                 return Ok(());
             }
-            let mut entries: Vec<(String, u64)> = Vec::new();
+            let max_rows = limit.unwrap_or(20).max(1);
+            let mut entries: Vec<(String, u64, std::time::SystemTime, String)> = Vec::new();
             if let Ok(rd) = std::fs::read_dir(&sessions_dir) {
                 for entry in rd.filter_map(|e| e.ok()) {
                     let path = entry.path();
@@ -8425,16 +8567,71 @@ pub async fn handle_cli_sessions(
                             .to_string_lossy()
                             .into_owned();
                         let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
-                        entries.push((stem, size));
+                        let modified = std::fs::metadata(&path)
+                            .ok()
+                            .and_then(|m| m.modified().ok())
+                            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                        let preview = std::fs::read_to_string(&path)
+                            .ok()
+                            .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                            .and_then(|json| {
+                                json.get("messages").and_then(|m| m.as_array()).and_then(
+                                    |messages| {
+                                        messages.iter().rev().find_map(|message| {
+                                            let role =
+                                                message.get("role").and_then(|v| v.as_str())?;
+                                            if role != "user" {
+                                                return None;
+                                            }
+                                            message
+                                                .get("content")
+                                                .and_then(|v| v.as_str())
+                                                .map(str::trim)
+                                                .filter(|content| !content.is_empty())
+                                                .map(|content| {
+                                                    content
+                                                        .split_whitespace()
+                                                        .collect::<Vec<_>>()
+                                                        .join(" ")
+                                                })
+                                        })
+                                    },
+                                )
+                            })
+                            .unwrap_or_else(|| "(no preview)".to_string());
+                        entries.push((stem, size, modified, preview));
                     }
                 }
             }
             if entries.is_empty() {
                 println!("No saved sessions.");
             } else {
-                println!("Saved sessions ({}):", entries.len());
-                for (name, size) in &entries {
-                    println!("  • {} ({} bytes)", name, size);
+                entries.sort_by(|a, b| b.2.cmp(&a.2));
+                let shown = entries.len().min(max_rows);
+                println!("Preview                                        Last Active   Src    ID");
+                println!("───────────────────────────────────────────────────────────────────────────────────────────────");
+                for (name, _size, modified, preview) in entries.iter().take(max_rows) {
+                    let age = modified.elapsed().unwrap_or_default();
+                    let age_str = if age.as_secs() < 60 {
+                        "just now".to_string()
+                    } else if age.as_secs() < 3600 {
+                        format!("{}m ago", age.as_secs() / 60)
+                    } else if age.as_secs() < 86400 {
+                        format!("{}h ago", age.as_secs() / 3600)
+                    } else {
+                        format!("{}d ago", age.as_secs() / 86400)
+                    };
+                    let preview_trimmed: String = preview.chars().take(46).collect();
+                    println!(
+                        "{:<46} {:<12} {:<6} {}",
+                        preview_trimmed, age_str, "cli", name
+                    );
+                }
+                if entries.len() > shown {
+                    println!(
+                        "… {} more session(s). Use `--limit` to change row count.",
+                        entries.len() - shown
+                    );
                 }
             }
         }
@@ -10645,6 +10842,39 @@ install_command: "uv pip install -r requirements.txt"
         let masked = mask_secret_value(raw);
         assert!(!masked.contains(raw));
         assert!(masked.contains("***"));
+    }
+
+    #[test]
+    fn redacted_config_json_masks_secret_keys() {
+        let mut cfg = hermes_config::GatewayConfig::default();
+        cfg.platforms.insert(
+            "telegram".to_string(),
+            hermes_config::PlatformConfig {
+                enabled: true,
+                token: Some("123456:telegram-token-secret".to_string()),
+                ..Default::default()
+            },
+        );
+        cfg.llm_providers.insert(
+            "nous".to_string(),
+            hermes_config::LlmProviderConfig {
+                oauth_token_url: Some("https://inference-api.nousresearch.com/v1/token".to_string()),
+                ..Default::default()
+            },
+        );
+        let rendered = redacted_config_json(&cfg).expect("render");
+        assert!(!rendered.contains("telegram-token-secret"));
+        assert!(rendered.contains("***"));
+        assert!(rendered.contains("https://inference-api.nousresearch.com/v1/token"));
+    }
+
+    #[test]
+    fn parse_query_slash_invocation_detects_commands() {
+        let parsed = parse_query_slash_invocation(" /model nous ");
+        let (cmd, args) = parsed.expect("slash parse");
+        assert_eq!(cmd, "/model");
+        assert_eq!(args, vec!["nous".to_string()]);
+        assert!(parse_query_slash_invocation("hello world").is_none());
     }
 
     #[test]
