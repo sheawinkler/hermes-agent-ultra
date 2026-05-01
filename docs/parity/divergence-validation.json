@@ -1,6 +1,6 @@
 {
   "divergence_file": "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/parity/intentional-divergence.json",
-  "generated_at_utc": "2026-04-24T21:19:40.454981+00:00",
+  "generated_at_utc": "2026-05-01T04:50:39.652940+00:00",
   "items": [
     {
       "errors": [],
@@ -58,7 +58,7 @@
       "errors": [],
       "id": "rust-skills-catalog-governance",
       "last_reviewed": "2026-04-21",
-      "matched_files": 670,
+      "matched_files": 743,
       "matched_sample": [
         "optional-skills/DESCRIPTION.md",
         "optional-skills/autonomous-ai-agents/DESCRIPTION.md",
@@ -92,11 +92,12 @@
       "errors": [],
       "id": "rust-cli-tui-primary-ux-surface",
       "last_reviewed": "2026-04-21",
-      "matched_files": 637,
+      "matched_files": 715,
       "matched_sample": [
         "ui-tui/.gitignore",
         "ui-tui/.prettierrc",
         "ui-tui/README.md",
+        "ui-tui/babel.compiler.config.cjs",
         "ui-tui/eslint.config.mjs",
         "ui-tui/package-lock.json",
         "ui-tui/package.json",
@@ -111,9 +112,8 @@
         "ui-tui/packages/hermes-ink/src/hooks/use-stdout.ts",
         "ui-tui/packages/hermes-ink/src/ink/Ansi.tsx",
         "ui-tui/packages/hermes-ink/src/ink/bidi.ts",
-        "ui-tui/packages/hermes-ink/src/ink/clearTerminal.ts",
-        "ui-tui/packages/hermes-ink/src/ink/colorize.ts",
-        "ui-tui/packages/hermes-ink/src/ink/components/AlternateScreen.tsx"
+        "ui-tui/packages/hermes-ink/src/ink/cache-eviction.ts",
+        "ui-tui/packages/hermes-ink/src/ink/clearTerminal.ts"
       ],
       "overdue": false,
       "owner": "sheawinkler",
@@ -126,10 +126,10 @@
   "summary": {
     "errors": 0,
     "items": 5,
-    "local_paths": 424,
+    "local_paths": 506,
     "review_overdue": 0,
     "unowned": 0,
-    "upstream_paths": 2523,
+    "upstream_paths": 2899,
     "warnings": 0
   }
 }

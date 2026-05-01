@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-04-24T21:19:39.230152+00:00",
+  "generated_at_utc": "2026-05-01T04:50:38.487565+00:00",
   "intent_unit": "domain_intent",
   "intents": [
     {
@@ -37,7 +37,7 @@
       ]
     },
     {
-      "evidence_count": 69,
+      "evidence_count": 71,
       "evidence_sample": [
         "crates/hermes-tools/src/approval.rs",
         "crates/hermes-tools/src/backends/browser.rs",
@@ -61,9 +61,9 @@
         "crates/hermes-tools/src/lib.rs",
         "crates/hermes-tools/src/register_builtins.rs",
         "crates/hermes-tools/src/registry.rs",
+        "crates/hermes-tools/src/rtk_filter.rs",
         "crates/hermes-tools/src/tool_policy.rs",
-        "crates/hermes-tools/src/tools/browser.rs",
-        "crates/hermes-tools/src/tools/clarify.rs"
+        "crates/hermes-tools/src/tools/browser.rs"
       ],
       "id": "tool-runtime-behavior",
       "mapped": true,
@@ -109,12 +109,13 @@
       ]
     },
     {
-      "evidence_count": 41,
+      "evidence_count": 43,
       "evidence_sample": [
         "crates/hermes-agent/src/agent_loop.rs",
         "crates/hermes-agent/src/api_bridge.rs",
         "crates/hermes-agent/src/auxiliary_builder.rs",
         "crates/hermes-agent/src/budget.rs",
+        "crates/hermes-agent/src/code_index.rs",
         "crates/hermes-agent/src/compression.rs",
         "crates/hermes-agent/src/context.rs",
         "crates/hermes-agent/src/context_files.rs",
@@ -124,6 +125,7 @@
         "crates/hermes-agent/src/honcho_provider.rs",
         "crates/hermes-agent/src/interrupt.rs",
         "crates/hermes-agent/src/lib.rs",
+        "crates/hermes-agent/src/lsp_context.rs",
         "crates/hermes-agent/src/memory_manager.rs",
         "crates/hermes-agent/src/memory_plugins/byterover.rs",
         "crates/hermes-agent/src/memory_plugins/contextlattice.rs",
@@ -133,9 +135,7 @@
         "crates/hermes-agent/src/memory_plugins/mem0.rs",
         "crates/hermes-agent/src/memory_plugins/mod.rs",
         "crates/hermes-agent/src/memory_plugins/openviking.rs",
-        "crates/hermes-agent/src/memory_plugins/retaindb.rs",
-        "crates/hermes-agent/src/memory_plugins/supermemory.rs",
-        "crates/hermes-agent/src/oauth.rs"
+        "crates/hermes-agent/src/memory_plugins/retaindb.rs"
       ],
       "id": "agent-loop-and-runtime",
       "mapped": true,
