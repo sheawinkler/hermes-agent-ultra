@@ -404,7 +404,19 @@ pub fn provider_curated_models(provider: &str) -> &'static [&'static str] {
     &[]
 }
 
-fn resolve_nous_catalog_endpoint_and_token() -> Option<(String, String)> {
+async fn resolve_nous_catalog_endpoint_and_token() -> Option<(String, String)> {
+    if let Ok(creds) = crate::auth::resolve_nous_runtime_credentials(
+        false,
+        true,
+        crate::auth::NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+        crate::auth::DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
+    )
+    .await
+    {
+        if !creds.api_key.trim().is_empty() {
+            return Some((creds.base_url, creds.api_key));
+        }
+    }
     let auth_state = crate::auth::read_provider_auth_state("nous").ok().flatten();
     let token = std::env::var("NOUS_API_KEY")
         .ok()
@@ -451,7 +463,7 @@ async fn fetch_nous_live_models() -> Vec<String> {
     if cfg!(test) {
         return Vec::new();
     }
-    let Some((base_url, token)) = resolve_nous_catalog_endpoint_and_token() else {
+    let Some((base_url, token)) = resolve_nous_catalog_endpoint_and_token().await else {
         return Vec::new();
     };
     let url = format!("{}/models", base_url.trim_end_matches('/'));

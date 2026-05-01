@@ -22,12 +22,14 @@ use hermes_cli::auth::{
     get_anthropic_oauth_status, get_gemini_oauth_auth_status, get_qwen_auth_status,
     login_anthropic_oauth, login_google_gemini_cli_oauth, login_nous_device_code,
     login_openai_codex_device_code, login_openai_device_code, read_provider_auth_state,
-    resolve_qwen_runtime_credentials, save_codex_auth_state, save_nous_auth_state,
-    save_openai_auth_state, save_provider_auth_state, AnthropicOAuthLoginOptions,
-    CodexDeviceCodeOptions, GeminiOAuthLoginOptions, NousDeviceCodeOptions,
-    ANTHROPIC_OAUTH_CLIENT_ID, ANTHROPIC_OAUTH_TOKEN_URL, CODEX_OAUTH_CLIENT_ID,
-    CODEX_OAUTH_TOKEN_URL, DEFAULT_CODEX_BASE_URL, DEFAULT_OPENAI_BASE_URL,
-    QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS, QWEN_OAUTH_CLIENT_ID, QWEN_OAUTH_TOKEN_URL,
+    resolve_nous_runtime_credentials, resolve_qwen_runtime_credentials, save_codex_auth_state,
+    save_nous_auth_state, save_openai_auth_state, save_provider_auth_state,
+    AnthropicOAuthLoginOptions, CodexDeviceCodeOptions, GeminiOAuthLoginOptions,
+    NousDeviceCodeOptions, ANTHROPIC_OAUTH_CLIENT_ID, ANTHROPIC_OAUTH_TOKEN_URL,
+    CODEX_OAUTH_CLIENT_ID, CODEX_OAUTH_TOKEN_URL, DEFAULT_CODEX_BASE_URL,
+    DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS, DEFAULT_OPENAI_BASE_URL,
+    NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS, QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+    QWEN_OAUTH_CLIENT_ID, QWEN_OAUTH_TOKEN_URL,
 };
 use hermes_cli::cli::{Cli, CliCommand};
 use hermes_cli::config_env::hydrate_env_from_config;
@@ -3952,6 +3954,38 @@ async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentE
         return Ok(());
     }
     let store = FileTokenStore::new(path).await?;
+    let manager = AuthManager::new(store.clone());
+
+    match resolve_nous_runtime_credentials(
+        false,
+        true,
+        NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+        DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
+    )
+    .await
+    {
+        Ok(creds) => {
+            std::env::set_var("NOUS_API_KEY", creds.api_key.clone());
+            if !creds.base_url.trim().is_empty() {
+                std::env::set_var("NOUS_INFERENCE_BASE_URL", creds.base_url.clone());
+            }
+            let expires_at = parse_rfc3339_utc(creds.expires_at.as_deref());
+            let _ = manager
+                .save_credential(OAuthCredential {
+                    provider: "nous".to_string(),
+                    access_token: creds.api_key,
+                    refresh_token: creds.refresh_token,
+                    token_type: creds.token_type,
+                    scope: creds.scope,
+                    expires_at,
+                })
+                .await;
+        }
+        Err(err) => {
+            tracing::debug!("Nous runtime credential refresh skipped: {}", err);
+        }
+    }
+
     let env_bindings = [
         ("HERMES_OPENAI_API_KEY", "openai"),
         ("OPENAI_API_KEY", "openai"),
@@ -4900,30 +4934,34 @@ async fn run_auth(
                 match provider.as_str() {
                     "nous" => {
                         let imported = discover_existing_nous_oauth()?;
-                        let state = if let Some(imported) = imported {
+                        let (state, imported_existing) = if let Some(imported) = imported {
                             println!(
                                 "Detected existing Nous OAuth session at {}.",
                                 imported.source_path.display()
                             );
-                            imported.state
+                            (imported.state, true)
                         } else {
-                            login_nous_device_code(NousDeviceCodeOptions::default()).await?
+                            (
+                                login_nous_device_code(NousDeviceCodeOptions::default()).await?,
+                                false,
+                            )
                         };
                         let auth_path = save_nous_auth_state(&state)?;
-                        let runtime_key = state.runtime_api_key().ok_or_else(|| {
-                            AgentError::AuthFailed(
-                                "Nous login succeeded but no runtime API key was returned".into(),
-                            )
-                        })?;
-                        let expires_at = parse_rfc3339_utc(state.agent_key_expires_at.as_deref())
-                            .or_else(|| parse_rfc3339_utc(state.expires_at.as_deref()));
+                        let resolved = resolve_nous_runtime_credentials(
+                            imported_existing,
+                            true,
+                            NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+                            DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
+                        )
+                        .await?;
+                        let expires_at = parse_rfc3339_utc(resolved.expires_at.as_deref());
                         manager
                             .save_credential(OAuthCredential {
                                 provider: "nous".to_string(),
-                                access_token: runtime_key.clone(),
-                                refresh_token: state.refresh_token.clone(),
-                                token_type: state.token_type.clone(),
-                                scope: state.scope.clone(),
+                                access_token: resolved.api_key.clone(),
+                                refresh_token: resolved.refresh_token.clone(),
+                                token_type: resolved.token_type.clone(),
+                                scope: resolved.scope.clone(),
                                 expires_at,
                             })
                             .await?;
@@ -4938,7 +4976,7 @@ async fn run_auth(
                                 .as_deref()
                                 .map(|_| "device_code".to_string())
                                 .unwrap_or_else(|| "discovered_session".to_string()),
-                            access_token: runtime_key,
+                            access_token: resolved.api_key,
                             last_status: None,
                             last_status_at: None,
                             last_error_code: None,
@@ -5538,30 +5576,34 @@ async fn run_auth(
             }
             if provider == "nous" {
                 let imported = discover_existing_nous_oauth()?;
-                let state = if let Some(imported) = imported {
+                let (state, imported_existing) = if let Some(imported) = imported {
                     println!(
                         "Detected existing Nous OAuth session at {}.",
                         imported.source_path.display()
                     );
-                    imported.state
+                    (imported.state, true)
                 } else {
-                    login_nous_device_code(NousDeviceCodeOptions::default()).await?
+                    (
+                        login_nous_device_code(NousDeviceCodeOptions::default()).await?,
+                        false,
+                    )
                 };
                 let auth_path = save_nous_auth_state(&state)?;
-                let runtime_key = state.runtime_api_key().ok_or_else(|| {
-                    AgentError::AuthFailed(
-                        "Nous login succeeded but no runtime API key was returned".into(),
-                    )
-                })?;
-                let expires_at = parse_rfc3339_utc(state.agent_key_expires_at.as_deref())
-                    .or_else(|| parse_rfc3339_utc(state.expires_at.as_deref()));
+                let resolved = resolve_nous_runtime_credentials(
+                    imported_existing,
+                    true,
+                    NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+                    DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
+                )
+                .await?;
+                let expires_at = parse_rfc3339_utc(resolved.expires_at.as_deref());
                 manager
                     .save_credential(OAuthCredential {
                         provider: "nous".to_string(),
-                        access_token: runtime_key,
-                        refresh_token: state.refresh_token.clone(),
-                        token_type: state.token_type.clone(),
-                        scope: state.scope.clone(),
+                        access_token: resolved.api_key,
+                        refresh_token: resolved.refresh_token,
+                        token_type: resolved.token_type,
+                        scope: resolved.scope,
                         expires_at,
                     })
                     .await?;
@@ -7566,34 +7608,38 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
             match selected_provider.as_str() {
                 "nous" => {
                     let imported = discover_existing_nous_oauth()?;
-                    let state = if let Some(imported) = imported {
+                    let (state, imported_existing) = if let Some(imported) = imported {
                         println!(
                             "  ✓ Detected existing Nous OAuth session: {}",
                             imported.source_path.display()
                         );
-                        imported.state
+                        (imported.state, true)
                     } else {
-                        login_nous_device_code(NousDeviceCodeOptions::default()).await?
+                        (
+                            login_nous_device_code(NousDeviceCodeOptions::default()).await?,
+                            false,
+                        )
                     };
                     let auth_path = save_nous_auth_state(&state)?;
                     println!("  ✓ Saved Nous OAuth state: {}", auth_path.display());
-                    let runtime_key = state.runtime_api_key().ok_or_else(|| {
-                        AgentError::AuthFailed(
-                            "Nous login succeeded but no runtime API key was returned".into(),
-                        )
-                    })?;
+                    let resolved = resolve_nous_runtime_credentials(
+                        imported_existing,
+                        true,
+                        NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+                        DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
+                    )
+                    .await?;
                     manager
                         .save_credential(OAuthCredential {
                             provider: "nous".to_string(),
-                            access_token: runtime_key,
-                            refresh_token: state.refresh_token.clone(),
-                            token_type: state.token_type.clone(),
-                            scope: state.scope.clone(),
-                            expires_at: parse_rfc3339_utc(state.agent_key_expires_at.as_deref())
-                                .or_else(|| parse_rfc3339_utc(state.expires_at.as_deref())),
+                            access_token: resolved.api_key,
+                            refresh_token: resolved.refresh_token,
+                            token_type: resolved.token_type,
+                            scope: resolved.scope,
+                            expires_at: parse_rfc3339_utc(resolved.expires_at.as_deref()),
                         })
                         .await?;
-                    selected_base_url_override = Some(state.inference_base_url.clone());
+                    selected_base_url_override = Some(resolved.base_url);
                     selected_oauth_token_url = Some(format!(
                         "{}/api/oauth/token",
                         state.portal_base_url.trim_end_matches('/')

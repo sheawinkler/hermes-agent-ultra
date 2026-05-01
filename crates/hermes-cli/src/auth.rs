@@ -18,6 +18,7 @@ pub const DEFAULT_NOUS_INFERENCE_URL: &str = "https://inference-api.nousresearch
 pub const DEFAULT_NOUS_CLIENT_ID: &str = "hermes-cli";
 pub const DEFAULT_NOUS_SCOPE: &str = "inference:mint_agent_key";
 pub const DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS: u32 = 30 * 60;
+pub const NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS: i64 = 120;
 
 pub const DEFAULT_CODEX_ISSUER: &str = "https://auth.openai.com";
 pub const DEFAULT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
@@ -174,6 +175,20 @@ pub struct AnthropicOAuthImport {
 pub struct NousOAuthImport {
     pub state: NousAuthState,
     pub source_path: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct NousRuntimeCredentials {
+    pub provider: String,
+    pub base_url: String,
+    pub api_key: String,
+    pub key_id: Option<String>,
+    pub expires_at: Option<String>,
+    pub expires_in: Option<i64>,
+    pub source: String,
+    pub refresh_token: Option<String>,
+    pub token_type: String,
+    pub scope: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -877,6 +892,321 @@ pub fn discover_existing_nous_oauth() -> Result<Option<NousOAuthImport>, AgentEr
         }
     }
     Ok(None)
+}
+
+fn parse_iso_timestamp_utc(raw: &str) -> Option<chrono::DateTime<Utc>> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let normalized = if trimmed.ends_with('Z') {
+        format!("{}+00:00", &trimmed[..trimmed.len() - 1])
+    } else {
+        trimmed.to_string()
+    };
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&normalized) {
+        return Some(dt.with_timezone(&Utc));
+    }
+    if let Ok(naive) = chrono::NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%dT%H:%M:%S") {
+        return Some(chrono::DateTime::<Utc>::from_naive_utc_and_offset(
+            naive, Utc,
+        ));
+    }
+    None
+}
+
+fn timestamp_is_expiring(expires_at: Option<&str>, skew_seconds: i64) -> bool {
+    let Some(raw) = expires_at else {
+        return true;
+    };
+    let Some(parsed) = parse_iso_timestamp_utc(raw) else {
+        return true;
+    };
+    let remaining = (parsed - Utc::now()).num_seconds();
+    remaining <= skew_seconds.max(0)
+}
+
+fn nous_agent_key_is_usable(state: &NousAuthState, min_ttl_seconds: u32) -> bool {
+    if state
+        .agent_key
+        .as_deref()
+        .map(str::trim)
+        .is_none_or(|v| v.is_empty())
+    {
+        return false;
+    }
+    !timestamp_is_expiring(
+        state.agent_key_expires_at.as_deref(),
+        i64::from(min_ttl_seconds.max(60)),
+    )
+}
+
+async fn refresh_nous_access_token(
+    state: &mut NousAuthState,
+    client: &reqwest::Client,
+) -> Result<(), AgentError> {
+    let refresh_token = state
+        .refresh_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            AgentError::AuthFailed(
+                "Session expired and no refresh token is available for Nous OAuth.".into(),
+            )
+        })?
+        .to_string();
+    let client_id = if state.client_id.trim().is_empty() {
+        DEFAULT_NOUS_CLIENT_ID.to_string()
+    } else {
+        state.client_id.trim().to_string()
+    };
+    let portal_base_url = state.portal_base_url.trim_end_matches('/').to_string();
+
+    let response = client
+        .post(format!("{portal_base_url}/api/oauth/token"))
+        .header(reqwest::header::ACCEPT, "application/json")
+        .form(&[
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token.as_str()),
+            ("client_id", client_id.as_str()),
+        ])
+        .send()
+        .await
+        .map_err(|e| AgentError::AuthFailed(format!("Nous OAuth refresh failed: {}", e)))?;
+    let status = response.status();
+    let body = response
+        .text()
+        .await
+        .map_err(|e| AgentError::AuthFailed(format!("Nous OAuth refresh read failed: {}", e)))?;
+    if !status.is_success() {
+        let detail = extract_error_message(&body).unwrap_or(body);
+        return Err(AgentError::AuthFailed(format!(
+            "Nous OAuth refresh failed ({}): {}",
+            status, detail
+        )));
+    }
+    let payload: NousTokenResponse = serde_json::from_str(&body)
+        .map_err(|e| AgentError::AuthFailed(format!("invalid Nous refresh response: {}", e)))?;
+
+    let access_token = payload
+        .access_token
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            AgentError::AuthFailed("Nous OAuth refresh response missing access_token".into())
+        })?
+        .to_string();
+
+    let now = Utc::now();
+    let access_expires_in = payload.expires_in.filter(|v| *v > 0);
+    let access_expires_at = access_expires_in.map(|secs| {
+        (now + chrono::Duration::seconds(secs)).to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    });
+
+    state.access_token = access_token;
+    state.refresh_token = payload.refresh_token.or_else(|| Some(refresh_token));
+    state.token_type = payload.token_type.unwrap_or_else(|| "Bearer".to_string());
+    state.scope = payload.scope.or_else(|| state.scope.clone());
+    state.obtained_at = now.to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+    state.expires_in = access_expires_in;
+    state.expires_at = access_expires_at;
+    if let Some(inference_url) = payload
+        .inference_base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        state.inference_base_url = inference_url.trim_end_matches('/').to_string();
+    }
+    state.portal_base_url = portal_base_url;
+    state.client_id = client_id;
+    Ok(())
+}
+
+async fn mint_nous_agent_key(
+    state: &mut NousAuthState,
+    client: &reqwest::Client,
+    min_key_ttl_seconds: u32,
+) -> Result<(), AgentError> {
+    let access_token = state.access_token.trim().to_string();
+    if access_token.is_empty() {
+        return Err(AgentError::AuthFailed(
+            "No Nous OAuth access token available to mint runtime agent key.".into(),
+        ));
+    }
+    let portal_base_url = state.portal_base_url.trim_end_matches('/').to_string();
+    let response = client
+        .post(format!("{portal_base_url}/api/oauth/agent-key"))
+        .bearer_auth(access_token)
+        .json(&serde_json::json!({
+            "min_ttl_seconds": min_key_ttl_seconds.max(60),
+        }))
+        .send()
+        .await
+        .map_err(|e| AgentError::AuthFailed(format!("Nous agent key mint failed: {}", e)))?;
+    let status = response.status();
+    let body = response.text().await.map_err(|e| {
+        AgentError::AuthFailed(format!("Nous agent key mint response read failed: {}", e))
+    })?;
+    if !status.is_success() {
+        let parsed = serde_json::from_str::<NousAgentKeyResponse>(&body).ok();
+        let detail = parsed
+            .and_then(|payload| payload.error_description.or(payload.error))
+            .or_else(|| extract_error_message(&body))
+            .unwrap_or(body);
+        return Err(AgentError::AuthFailed(format!(
+            "Nous agent key mint failed ({}): {}",
+            status, detail
+        )));
+    }
+    let payload: NousAgentKeyResponse = serde_json::from_str(&body)
+        .map_err(|e| AgentError::AuthFailed(format!("invalid Nous agent key response: {}", e)))?;
+    let agent_key = payload
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| AgentError::AuthFailed("Nous agent key response missing api_key".into()))?
+        .to_string();
+
+    state.agent_key = Some(agent_key);
+    state.agent_key_id = payload.key_id;
+    state.agent_key_expires_at = payload.expires_at;
+    state.agent_key_expires_in = payload.expires_in;
+    state.agent_key_reused = payload.reused;
+    state.agent_key_obtained_at =
+        Some(Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+    if let Some(inference_url) = payload
+        .inference_base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        state.inference_base_url = inference_url.trim_end_matches('/').to_string();
+    }
+    Ok(())
+}
+
+pub async fn resolve_nous_runtime_credentials(
+    force_refresh: bool,
+    refresh_if_expiring: bool,
+    refresh_skew_seconds: i64,
+    min_key_ttl_seconds: u32,
+) -> Result<NousRuntimeCredentials, AgentError> {
+    let mut state = if let Some(raw_state) = read_provider_auth_state("nous")? {
+        parse_nous_oauth_state(raw_state).ok_or_else(|| {
+            AgentError::AuthFailed(
+                "Stored Nous auth state is invalid; re-run `hermes auth nous`.".into(),
+            )
+        })?
+    } else if let Some(imported) = discover_existing_nous_oauth()? {
+        imported.state
+    } else {
+        return Err(AgentError::AuthFailed(
+            "Hermes is not logged into Nous Portal. Run `hermes auth nous`.".into(),
+        ));
+    };
+
+    if state.portal_base_url.trim().is_empty() {
+        state.portal_base_url = env_or_default("NOUS_PORTAL_BASE_URL", DEFAULT_NOUS_PORTAL_URL)
+            .trim_end_matches('/')
+            .to_string();
+    }
+    if state.inference_base_url.trim().is_empty() {
+        state.inference_base_url =
+            env_or_default("NOUS_INFERENCE_BASE_URL", DEFAULT_NOUS_INFERENCE_URL)
+                .trim_end_matches('/')
+                .to_string();
+    }
+    if state.client_id.trim().is_empty() {
+        state.client_id = DEFAULT_NOUS_CLIENT_ID.to_string();
+    }
+    if state
+        .scope
+        .as_deref()
+        .map(str::trim)
+        .is_none_or(|v| v.is_empty())
+    {
+        state.scope = Some(DEFAULT_NOUS_SCOPE.to_string());
+    }
+
+    let timeout = default_http_timeout_seconds(15.0, 15.0);
+    let client = reqwest::Client::builder()
+        .user_agent(format!("hermes-agent-ultra/{}", env!("CARGO_PKG_VERSION")))
+        .timeout(Duration::from_secs_f64(timeout))
+        .build()
+        .map_err(|e| AgentError::Io(format!("build Nous OAuth client: {}", e)))?;
+
+    let min_key_ttl_seconds = min_key_ttl_seconds.max(60);
+    let mut used_cached_key = true;
+
+    let should_refresh_access = force_refresh
+        || (refresh_if_expiring
+            && timestamp_is_expiring(state.expires_at.as_deref(), refresh_skew_seconds));
+    if should_refresh_access {
+        refresh_nous_access_token(&mut state, &client).await?;
+        used_cached_key = false;
+    }
+
+    let should_mint = force_refresh || !nous_agent_key_is_usable(&state, min_key_ttl_seconds);
+    if should_mint {
+        if let Err(err) = mint_nous_agent_key(&mut state, &client, min_key_ttl_seconds).await {
+            let err_text = err.to_string().to_ascii_lowercase();
+            let can_retry_refresh = state
+                .refresh_token
+                .as_deref()
+                .map(str::trim)
+                .is_some_and(|v| !v.is_empty())
+                && (err_text.contains("invalid_token")
+                    || err_text.contains("invalid grant")
+                    || err_text.contains("401"));
+            if can_retry_refresh {
+                refresh_nous_access_token(&mut state, &client).await?;
+                mint_nous_agent_key(&mut state, &client, min_key_ttl_seconds).await?;
+            } else {
+                return Err(err);
+            }
+        }
+        used_cached_key = false;
+    }
+
+    state.inference_base_url = state.inference_base_url.trim_end_matches('/').to_string();
+    let _ = save_nous_auth_state(&state)?;
+
+    let api_key = state.runtime_api_key().ok_or_else(|| {
+        AgentError::AuthFailed(
+            "Failed to resolve a Nous runtime API key. Re-run `hermes auth nous`.".into(),
+        )
+    })?;
+    let expires_at = state
+        .agent_key_expires_at
+        .clone()
+        .or_else(|| state.expires_at.clone());
+    let expires_in = expires_at
+        .as_deref()
+        .and_then(parse_iso_timestamp_utc)
+        .map(|dt| (dt - Utc::now()).num_seconds().max(0))
+        .or(state.agent_key_expires_in)
+        .or(state.expires_in);
+
+    Ok(NousRuntimeCredentials {
+        provider: "nous".to_string(),
+        base_url: state.inference_base_url,
+        api_key,
+        key_id: state.agent_key_id,
+        expires_at,
+        expires_in,
+        source: if used_cached_key {
+            "cache".to_string()
+        } else {
+            "portal".to_string()
+        },
+        refresh_token: state.refresh_token,
+        token_type: state.token_type,
+        scope: state.scope,
+    })
 }
 
 fn qwen_cli_auth_path() -> PathBuf {
@@ -2718,6 +3048,51 @@ mod tests {
             agent_key_obtained_at: None,
         };
         assert_eq!(state.runtime_api_key().as_deref(), Some("agent-key"));
+    }
+
+    #[test]
+    fn nous_timestamp_is_expiring_treats_missing_as_expiring() {
+        assert!(timestamp_is_expiring(None, 120));
+        assert!(timestamp_is_expiring(Some(""), 120));
+        assert!(timestamp_is_expiring(Some("not-a-date"), 120));
+    }
+
+    #[test]
+    fn nous_agent_key_usable_requires_future_expiry() {
+        let mut state = NousAuthState {
+            portal_base_url: DEFAULT_NOUS_PORTAL_URL.to_string(),
+            inference_base_url: DEFAULT_NOUS_INFERENCE_URL.to_string(),
+            client_id: DEFAULT_NOUS_CLIENT_ID.to_string(),
+            scope: Some(DEFAULT_NOUS_SCOPE.to_string()),
+            token_type: "Bearer".to_string(),
+            access_token: "portal-access".to_string(),
+            refresh_token: Some("refresh".to_string()),
+            obtained_at: Utc::now().to_rfc3339(),
+            expires_at: None,
+            expires_in: None,
+            agent_key: Some("agent-key".to_string()),
+            agent_key_id: None,
+            agent_key_expires_at: Some(
+                (Utc::now() + chrono::Duration::minutes(20))
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+            ),
+            agent_key_expires_in: None,
+            agent_key_reused: None,
+            agent_key_obtained_at: None,
+        };
+        assert!(nous_agent_key_is_usable(&state, 300));
+
+        state.agent_key_expires_at = Some(
+            (Utc::now() + chrono::Duration::seconds(30))
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+        );
+        assert!(
+            !nous_agent_key_is_usable(&state, 120),
+            "expiring key should be treated as unusable"
+        );
+
+        state.agent_key = None;
+        assert!(!nous_agent_key_is_usable(&state, 120));
     }
 
     #[test]
