@@ -8,6 +8,8 @@
 use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::json;
+use tokio::io::AsyncWriteExt;
+use tokio::process::Command;
 
 use crate::tools::tts::TtsBackend;
 use crate::tts_streaming::minimax::MiniMaxTtsBackend;
@@ -166,6 +168,130 @@ impl MultiTtsBackend {
         .to_string())
     }
 
+    async fn piper_tts(&self, text: &str, voice: Option<&str>) -> Result<String, ToolError> {
+        let binary = std::env::var("PIPER_BINARY")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| "piper".to_string());
+
+        let model = voice
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(|v| v.to_string())
+            .or_else(|| {
+                std::env::var("PIPER_MODEL")
+                    .ok()
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty())
+            })
+            .ok_or_else(|| {
+                ToolError::ExecutionFailed(
+                    "Piper requires a model. Set provider='piper' with voice='<model-path-or-name>' \
+                     or set PIPER_MODEL."
+                        .into(),
+                )
+            })?;
+
+        let output_path =
+            std::env::temp_dir().join(format!("hermes_tts_{}.wav", uuid::Uuid::new_v4()));
+        let mut cmd = Command::new(&binary);
+        cmd.arg("--model")
+            .arg(&model)
+            .arg("--output_file")
+            .arg(&output_path)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped());
+
+        if let Ok(config) = std::env::var("PIPER_CONFIG") {
+            let config = config.trim();
+            if !config.is_empty() {
+                cmd.arg("--config").arg(config);
+            }
+        }
+        if let Ok(v) = std::env::var("PIPER_SPEAKER") {
+            let v = v.trim();
+            if !v.is_empty() {
+                cmd.arg("--speaker").arg(v);
+            }
+        }
+        if let Ok(v) = std::env::var("PIPER_LENGTH_SCALE") {
+            let v = v.trim();
+            if !v.is_empty() {
+                cmd.arg("--length_scale").arg(v);
+            }
+        }
+        if let Ok(v) = std::env::var("PIPER_NOISE_SCALE") {
+            let v = v.trim();
+            if !v.is_empty() {
+                cmd.arg("--noise_scale").arg(v);
+            }
+        }
+        if let Ok(v) = std::env::var("PIPER_NOISE_W") {
+            let v = v.trim();
+            if !v.is_empty() {
+                cmd.arg("--noise_w").arg(v);
+            }
+        }
+
+        let mut child = cmd.spawn().map_err(|e| {
+            ToolError::ExecutionFailed(format!(
+                "Failed to start piper binary '{}': {}",
+                binary, e
+            ))
+        })?;
+
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(text.as_bytes())
+                .await
+                .map_err(|e| ToolError::ExecutionFailed(format!("Failed writing to piper stdin: {}", e)))?;
+            stdin
+                .write_all(b"\n")
+                .await
+                .map_err(|e| ToolError::ExecutionFailed(format!("Failed finalizing piper stdin: {}", e)))?;
+            stdin
+                .shutdown()
+                .await
+                .map_err(|e| ToolError::ExecutionFailed(format!("Failed closing piper stdin: {}", e)))?;
+        }
+
+        let output = child
+            .wait_with_output()
+            .await
+            .map_err(|e| ToolError::ExecutionFailed(format!("piper process failed: {}", e)))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(ToolError::ExecutionFailed(format!(
+                "piper exited with status {}{}",
+                output.status,
+                if stderr.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", stderr)
+                }
+            )));
+        }
+
+        let bytes = tokio::fs::read(&output_path).await.map_err(|e| {
+            ToolError::ExecutionFailed(format!(
+                "piper completed but failed reading output {}: {}",
+                output_path.display(),
+                e
+            ))
+        })?;
+
+        Ok(json!({
+            "provider": "piper",
+            "transport": "local",
+            "file": output_path.display().to_string(),
+            "voice": model,
+            "bytes": bytes.len(),
+        })
+        .to_string())
+    }
+
     /// Compose the OpenAI-audio gateway endpoint + bearer for a resolved
     /// managed config. Public visibility kept tight (`pub(crate)`) so the
     /// `tts_premium` handler can reuse it later if needed.
@@ -233,13 +359,15 @@ impl TtsBackend for MultiTtsBackend {
                 }
                 self.minimax.synthesize(text, voice, provider).await
             }
+            "piper" => self.piper_tts(text, voice).await,
             "edge_tts" | "edge-tts" | "neutts" => Err(ToolError::InvalidParams(format!(
                 "{resolved_provider} is not supported in hermes-agent-rust (zero-Python). \
                  Use provider='openai' (HERMES_OPENAI_API_KEY or OPENAI_API_KEY), \
-                 'elevenlabs' (ELEVENLABS_API_KEY), or 'minimax' (MINIMAX_API_KEY)."
+                 'elevenlabs' (ELEVENLABS_API_KEY), 'minimax' (MINIMAX_API_KEY), \
+                 or 'piper' (local piper binary + PIPER_MODEL)."
             ))),
             other => Err(ToolError::InvalidParams(format!(
-                "Unknown TTS provider: '{other}'. Use 'openai', 'elevenlabs', or 'minimax'.",
+                "Unknown TTS provider: '{other}'. Use 'openai', 'elevenlabs', 'minimax', or 'piper'.",
             ))),
         }
     }
@@ -297,5 +425,41 @@ mod tests {
             .await
             .unwrap_err();
         assert!(err.to_string().contains("Unknown"));
+    }
+
+    #[tokio::test]
+    async fn test_piper_requires_model_hint() {
+        let backend = MultiTtsBackend::new();
+        let _guard = EnvVarGuard::new("PIPER_MODEL");
+        std::env::remove_var("PIPER_MODEL");
+        let err = backend
+            .synthesize("hello", None, Some("piper"))
+            .await
+            .unwrap_err();
+        assert!(err.to_string().contains("PIPER_MODEL"));
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn new(key: &'static str) -> Self {
+            Self {
+                key,
+                old: std::env::var(key).ok(),
+            }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(v) = &self.old {
+                std::env::set_var(self.key, v);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
     }
 }
