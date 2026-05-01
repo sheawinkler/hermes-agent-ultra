@@ -38,6 +38,20 @@
       "ticket": 25
     },
     {
+      "path": "docker-compose.yml",
+      "classification": "functional",
+      "rationale": "Container orchestration defaults affect gateway/runtime launch semantics and service wiring.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "docker/entrypoint.sh",
+      "classification": "functional",
+      "rationale": "Container bootstrap and runtime environment export behavior affect parity at startup.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "flake.nix",
       "classification": "functional",
       "rationale": "Nix packaging/install behavior affects reproducible environment parity.",

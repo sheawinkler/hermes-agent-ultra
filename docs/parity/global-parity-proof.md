@@ -1,12 +1,12 @@
 # Global Parity Proof
 
-Generated: `2026-05-01T04:51:25.366822+00:00`
+Generated: `2026-05-01T05:12:16.126921+00:00`
 
 ## Gate Status
 
 - CI gate: **FAIL**
 - CI gate mode: `tree-drift`
-- Release gate: **FAIL**
+- Release gate: **PASS**
 - Release gate mode: `functional`
 
 ## Metrics
@@ -20,7 +20,7 @@ Generated: `2026-05-01T04:51:25.366822+00:00`
 | `max_unowned_divergences` | 0.0 |
 | `max_divergence_review_overdue` | 0.0 |
 | `min_test_intent_mapping_ratio` | 1.0 |
-| `max_queue_pending_commits` | 195.0 |
+| `max_queue_pending_commits` | 0.0 |
 
 ## GPAR Ticket Completion
 
@@ -31,7 +31,7 @@ Generated: `2026-05-01T04:51:25.366822+00:00`
 | `GPAR-03` | yes |
 | `GPAR-04` | yes |
 | `GPAR-05` | yes |
-| `GPAR-06` | no |
+| `GPAR-06` | yes |
 | `GPAR-07` | yes |
 | `GPAR-08` | yes |
 | `GPAR-09` | yes |
