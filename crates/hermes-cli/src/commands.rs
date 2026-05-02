@@ -13,6 +13,8 @@ use std::{
 
 use bytes::Bytes;
 use hermes_core::AgentError;
+use hermes_intelligence::model_metadata::{get_model_context_length, get_model_info};
+use hermes_intelligence::models_dev::default_client;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -86,7 +88,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/rollback", "List rollback checkpoints"),
     (
         "/model",
-        "Show current model, set directly, or pick provider/model interactively",
+        "Show current model, set directly, or pick provider/model interactively (supports capability filters)",
     ),
     ("/provider", "List configured providers and availability"),
     (
@@ -166,7 +168,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/sb", "Alias for /statusbar"),
     ("/yolo", "Toggle auto-approve mode"),
     ("/reasoning", "Toggle reasoning display"),
-    ("/raw", "RTK raw-mode controls (status/on/off/toggle/once)"),
+    (
+        "/raw",
+        "RTK raw-mode controls + deterministic trace controls (status/on/off/toggle/once/trace)",
+    ),
     (
         "/policy",
         "Policy lifecycle (needs HERMES_POLICY_ADMIN_TOKEN, same as HTTP X-Hermes-Policy-Admin)",
@@ -2986,6 +2991,232 @@ enum ModelSwitchRequest {
     SetDirect(String),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+struct ModelCapabilityRequirements {
+    require_tools: bool,
+    require_vision: bool,
+    require_reasoning: bool,
+    require_long_context: bool,
+    min_context_window: Option<u64>,
+}
+
+impl ModelCapabilityRequirements {
+    const LONG_CONTEXT_DEFAULT: u64 = 128_000;
+
+    fn is_empty(self) -> bool {
+        !self.require_tools
+            && !self.require_vision
+            && !self.require_reasoning
+            && !self.require_long_context
+            && self.min_context_window.is_none()
+    }
+
+    fn effective_min_context(self) -> Option<u64> {
+        match (self.require_long_context, self.min_context_window) {
+            (true, Some(value)) => Some(value.max(Self::LONG_CONTEXT_DEFAULT)),
+            (true, None) => Some(Self::LONG_CONTEXT_DEFAULT),
+            (false, value) => value,
+        }
+    }
+
+    fn summary(self) -> String {
+        let mut parts = Vec::new();
+        if self.require_tools {
+            parts.push("tools".to_string());
+        }
+        if self.require_vision {
+            parts.push("vision".to_string());
+        }
+        if self.require_reasoning {
+            parts.push("reasoning".to_string());
+        }
+        if let Some(min_ctx) = self.effective_min_context() {
+            parts.push(format!("context>={min_ctx}"));
+        }
+        if parts.is_empty() {
+            "none".to_string()
+        } else {
+            parts.join(", ")
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct ResolvedModelCapabilities {
+    supports_tools: bool,
+    supports_vision: bool,
+    supports_reasoning: bool,
+    context_window: u64,
+}
+
+fn normalize_model_capability_name(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "tools" | "tool" | "function-calling" | "function_calling" => Some("tools"),
+        "vision" | "image" | "images" => Some("vision"),
+        "reasoning" | "reason" => Some("reasoning"),
+        "long-context" | "long_context" | "longcontext" | "context" => Some("long-context"),
+        _ => None,
+    }
+}
+
+fn apply_model_capability_token(
+    requirements: &mut ModelCapabilityRequirements,
+    token: &str,
+) -> Result<(), AgentError> {
+    let Some(normalized) = normalize_model_capability_name(token) else {
+        return Err(AgentError::Config(format!(
+            "Unknown model capability '{}' (expected one of: tools, vision, reasoning, long-context).",
+            token
+        )));
+    };
+    match normalized {
+        "tools" => requirements.require_tools = true,
+        "vision" => requirements.require_vision = true,
+        "reasoning" => requirements.require_reasoning = true,
+        "long-context" => requirements.require_long_context = true,
+        _ => {}
+    }
+    Ok(())
+}
+
+fn parse_model_command_args(
+    args: &[&str],
+) -> Result<(Vec<String>, ModelCapabilityRequirements, Option<String>), AgentError> {
+    let mut requirements = ModelCapabilityRequirements::default();
+    let mut positional = Vec::new();
+    let mut provider_override: Option<String> = None;
+    let mut idx = 0usize;
+
+    while idx < args.len() {
+        let token = args[idx].trim();
+        if token.is_empty() {
+            idx += 1;
+            continue;
+        }
+
+        if matches!(
+            token.to_ascii_lowercase().as_str(),
+            "--vision" | "--tools" | "--reasoning" | "--long-context" | "--long_context"
+        ) {
+            apply_model_capability_token(&mut requirements, token.trim_start_matches('-'))?;
+            idx += 1;
+            continue;
+        }
+
+        if matches!(
+            token.to_ascii_lowercase().as_str(),
+            "--cap" | "--caps" | "--require" | "--requires"
+        ) {
+            let value = args
+                .get(idx + 1)
+                .ok_or_else(|| AgentError::Config(format!("{} requires a value.", token)))?;
+            for raw in value.split(',') {
+                let candidate = raw.trim();
+                if candidate.is_empty() {
+                    continue;
+                }
+                apply_model_capability_token(&mut requirements, candidate)?;
+            }
+            idx += 2;
+            continue;
+        }
+
+        if token.eq_ignore_ascii_case("--provider") || token.eq_ignore_ascii_case("-p") {
+            let provider = args
+                .get(idx + 1)
+                .ok_or_else(|| AgentError::Config(format!("{} requires a provider slug.", token)))?
+                .trim();
+            if provider.is_empty() {
+                return Err(AgentError::Config(
+                    "provider override cannot be empty.".to_string(),
+                ));
+            }
+            provider_override = Some(provider.to_ascii_lowercase());
+            idx += 2;
+            continue;
+        }
+
+        if token.eq_ignore_ascii_case("--min-context")
+            || token.eq_ignore_ascii_case("--min_context")
+        {
+            let value = args
+                .get(idx + 1)
+                .ok_or_else(|| {
+                    AgentError::Config("--min-context requires a numeric value.".into())
+                })?
+                .trim();
+            let parsed = value.parse::<u64>().map_err(|_| {
+                AgentError::Config(format!(
+                    "Invalid --min-context value '{}'; expected integer token count.",
+                    value
+                ))
+            })?;
+            requirements.min_context_window = Some(parsed);
+            idx += 2;
+            continue;
+        }
+
+        positional.push(token.to_string());
+        idx += 1;
+    }
+
+    Ok((positional, requirements, provider_override))
+}
+
+fn resolve_model_capabilities(
+    provider: &str,
+    model_id: &str,
+    client: &hermes_intelligence::models_dev::ModelsDevClient,
+) -> ResolvedModelCapabilities {
+    if let Some(caps) = client.capabilities(provider, model_id) {
+        return ResolvedModelCapabilities {
+            supports_tools: caps.supports_tools,
+            supports_vision: caps.supports_vision,
+            supports_reasoning: caps.supports_reasoning,
+            context_window: caps.context_window.max(1),
+        };
+    }
+
+    let provider_model = format!("{}:{}", provider.trim(), model_id.trim());
+    let info = get_model_info(&provider_model).or_else(|| get_model_info(model_id));
+    ResolvedModelCapabilities {
+        supports_tools: info
+            .as_ref()
+            .map(|entry| entry.supports_tools)
+            .unwrap_or(true),
+        supports_vision: info
+            .as_ref()
+            .map(|entry| entry.supports_vision)
+            .unwrap_or(false),
+        supports_reasoning: info
+            .as_ref()
+            .map(|entry| entry.supports_reasoning)
+            .unwrap_or(false),
+        context_window: get_model_context_length(&provider_model),
+    }
+}
+
+fn model_meets_requirements(
+    capabilities: ResolvedModelCapabilities,
+    requirements: ModelCapabilityRequirements,
+) -> bool {
+    if requirements.require_tools && !capabilities.supports_tools {
+        return false;
+    }
+    if requirements.require_vision && !capabilities.supports_vision {
+        return false;
+    }
+    if requirements.require_reasoning && !capabilities.supports_reasoning {
+        return false;
+    }
+    if let Some(min_context) = requirements.effective_min_context() {
+        if capabilities.context_window < min_context {
+            return false;
+        }
+    }
+    true
+}
+
 fn parse_model_switch_request(args: &[&str], known_providers: &[&str]) -> ModelSwitchRequest {
     if args.is_empty() {
         return ModelSwitchRequest::PickProviderThenModel;
@@ -3045,7 +3276,7 @@ fn resolve_catalog_model_candidate(requested_model: &str, catalog: &[String]) ->
     }) {
         return Some(hit.clone());
     }
-    catalog.first().cloned()
+    None
 }
 
 async fn guard_provider_model_selection(
@@ -3072,7 +3303,12 @@ async fn guard_provider_model_selection(
         return Ok((provider_model.to_string(), None));
     }
     let Some(candidate) = resolve_catalog_model_candidate(model_id, &catalog) else {
-        return Ok((provider_model.to_string(), None));
+        return Err(AgentError::Config(format!(
+            "Model '{}' is not available for provider '{}'. Use `/model {}` to pick a valid catalog entry.",
+            model_id.trim(),
+            provider,
+            provider,
+        )));
     };
     let guarded = format!("{}:{}", provider, candidate);
     if guarded.eq_ignore_ascii_case(provider_model) {
@@ -3116,6 +3352,7 @@ async fn pick_model_for_provider(
     app: &mut App,
     provider: &str,
     current_model: &str,
+    requirements: ModelCapabilityRequirements,
 ) -> Result<bool, AgentError> {
     let models = provider_model_ids(provider).await;
     if models.is_empty() {
@@ -3126,19 +3363,48 @@ async fn pick_model_for_provider(
         return Ok(false);
     }
 
+    let normalized_provider = provider.trim().to_ascii_lowercase();
+    let mut filtered_models = models.clone();
+    if !requirements.is_empty() {
+        let client = default_client();
+        client.fetch(false).await;
+        filtered_models = models
+            .iter()
+            .filter(|model_id| {
+                model_meets_requirements(
+                    resolve_model_capabilities(&normalized_provider, model_id, client),
+                    requirements,
+                )
+            })
+            .cloned()
+            .collect();
+    }
+
+    if filtered_models.is_empty() {
+        emit_command_output(
+            app,
+            format!(
+                "No models for provider '{}' satisfy required capabilities: {}.",
+                provider,
+                requirements.summary()
+            ),
+        );
+        return Ok(false);
+    }
+
     let (_, current_model_id) = split_provider_model(current_model);
-    let default_index = models
+    let default_index = filtered_models
         .iter()
         .position(|m| m.eq_ignore_ascii_case(current_model_id))
         .unwrap_or(0);
-    let labels: Vec<String> = models.clone();
+    let labels: Vec<String> = filtered_models.clone();
     let title = format!("Select {} model ({} available)", provider, labels.len());
     let pick = run_model_picker_select(app, &title, &labels, default_index);
-    if !pick.confirmed || pick.index >= models.len() {
+    if !pick.confirmed || pick.index >= filtered_models.len() {
         emit_command_output(app, "Model switch cancelled.");
         return Ok(false);
     }
-    let provider_model = format!("{}:{}", provider, models[pick.index].trim());
+    let provider_model = format!("{}:{}", provider, filtered_models[pick.index].trim());
     let (guarded, note) = guard_provider_model_selection(&provider_model).await?;
     app.switch_model(&guarded);
     let mut msg = format!("Model switched to: {}", guarded);
@@ -3151,22 +3417,55 @@ async fn pick_model_for_provider(
 }
 
 async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let (mut positional, requirements, provider_override) = parse_model_command_args(args)?;
+    if let Some(provider) = provider_override {
+        if positional.is_empty() {
+            positional.push(provider);
+        } else if let Some(first) = positional.first().cloned() {
+            let model_id = first
+                .split_once(':')
+                .map(|(_, rhs)| rhs.to_string())
+                .unwrap_or(first);
+            positional[0] = format!("{}:{}", provider, model_id.trim());
+        }
+    }
+    let positional_refs: Vec<&str> = positional.iter().map(String::as_str).collect();
     let known_providers = curated_provider_slugs();
-    match parse_model_switch_request(args, &known_providers) {
+    match parse_model_switch_request(&positional_refs, &known_providers) {
         ModelSwitchRequest::SetDirect(raw) => {
             let provider_model = normalize_model_target(&app.current_model, &raw)?;
             let (guarded, note) = guard_provider_model_selection(&provider_model).await?;
+            if !requirements.is_empty() {
+                let (provider, model_id) = split_provider_model(&guarded);
+                let client = default_client();
+                client.fetch(false).await;
+                let caps = resolve_model_capabilities(provider, model_id, client);
+                if !model_meets_requirements(caps, requirements) {
+                    return Err(AgentError::Config(format!(
+                        "Requested model '{}' does not satisfy required capabilities: {}.",
+                        guarded,
+                        requirements.summary()
+                    )));
+                }
+            }
             app.switch_model(&guarded);
             let mut msg = format!("Model switched to: {}", guarded);
             if let Some(n) = note {
                 msg.push_str("\n");
                 msg.push_str(&n);
             }
+            if !requirements.is_empty() {
+                msg.push_str("\n");
+                msg.push_str(&format!(
+                    "Capability constraints satisfied: {}.",
+                    requirements.summary()
+                ));
+            }
             emit_command_output(app, msg);
         }
         ModelSwitchRequest::PickModelFromProvider(provider) => {
             let current_model = app.current_model.clone();
-            pick_model_for_provider(app, &provider, &current_model).await?;
+            pick_model_for_provider(app, &provider, &current_model, requirements).await?;
         }
         ModelSwitchRequest::PickProviderThenModel => {
             emit_command_output(app, format!("Current model: {}", app.current_model));
@@ -3188,7 +3487,7 @@ async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandRes
             }
             let provider = providers[provider_pick.index].as_str();
             let current_model = app.current_model.clone();
-            pick_model_for_provider(app, provider, &current_model).await?;
+            pick_model_for_provider(app, provider, &current_model, requirements).await?;
         }
     }
     Ok(CommandResult::Handled)
@@ -4387,7 +4686,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                /ops mouse [on|off|toggle]\n\
                /ops yolo\n\
                /ops reasoning\n\
-               /ops raw [on|off|toggle|once]\n\
+               /ops raw [on|off|toggle|once|trace ...]\n\
                /ops verbose\n\
                /ops dashboard [status|on|off|url] [host] [port]\n\
                /ops skills-tier [status|trusted|balanced|open]\n\
@@ -4429,7 +4728,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                  - /ops mouse [on|off|toggle]\n\
                  - /ops yolo\n\
                  - /ops reasoning\n\
-                 - /ops raw [on|off|toggle|once]\n\
+                 - /ops raw [on|off|toggle|once|trace ...]\n\
                  - /ops verbose\n\
                  - /ops statusbar\n\
                  - /ops dashboard [status|on|off|url] [host] [port]\n\
@@ -4606,6 +4905,7 @@ fn handle_background_command(app: &mut App, args: &[&str]) -> Result<CommandResu
         "id": job_id,
         "task": task,
         "status": "queued",
+        "attempts": 0,
         "created_at": chrono::Utc::now().to_rfc3339(),
         "started_at": serde_json::Value::Null,
         "finished_at": serde_json::Value::Null,
@@ -4618,21 +4918,66 @@ fn handle_background_command(app: &mut App, args: &[&str]) -> Result<CommandResu
     )
     .map_err(|e| AgentError::Io(format!("Failed to write background status: {}", e)))?;
 
-    let task_for_run = task.clone();
-    let status_path_for_run = status_path.clone();
-    let log_path_for_run = log_path.clone();
+    schedule_background_job_execution(status_path.clone(), log_path.clone(), task.clone());
+
+    emit_command_output(
+        app,
+        format!(
+            "[Background task queued: \"{}\"]\nJob ID: {}\nStatus: {}\nLogs:   {}\nThis task runs in a detached `hermes chat --query ...` process.",
+            task,
+            status["id"].as_str().unwrap_or("unknown"),
+            status_path.display(),
+            log_path.display()
+        ),
+    );
+
+    Ok(CommandResult::Handled)
+}
+
+fn claim_queued_background_job(
+    status_path: &Path,
+) -> Result<Option<serde_json::Map<String, serde_json::Value>>, AgentError> {
+    let mut queued = read_json_map(status_path);
+    if queued.is_empty() {
+        return Ok(None);
+    }
+    let status = queued
+        .get("status")
+        .and_then(|v| v.as_str())
+        .unwrap_or("queued")
+        .to_ascii_lowercase();
+    if status != "queued" {
+        return Ok(None);
+    }
+    let started = chrono::Utc::now().to_rfc3339();
+    let attempts = queued
+        .get("attempts")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0)
+        .saturating_add(1);
+    queued.insert(
+        "status".to_string(),
+        serde_json::Value::String("running".into()),
+    );
+    queued.insert("started_at".to_string(), serde_json::Value::String(started));
+    queued.insert("attempts".to_string(), serde_json::json!(attempts));
+    write_json_map(status_path, &queued)
+        .map_err(|e| AgentError::Io(format!("Failed to claim background job: {}", e)))?;
+    Ok(Some(queued))
+}
+
+fn schedule_background_job_execution(status_path: PathBuf, log_path: PathBuf, task: String) {
     tokio::spawn(async move {
-        let started = chrono::Utc::now().to_rfc3339();
-        let mut queued = read_json_map(&status_path_for_run);
-        queued.insert(
-            "status".to_string(),
-            serde_json::Value::String("running".into()),
-        );
-        queued.insert(
-            "started_at".to_string(),
-            serde_json::Value::String(started.clone()),
-        );
-        let _ = write_json_map(&status_path_for_run, &queued);
+        let queued = match claim_queued_background_job(&status_path) {
+            Ok(Some(claimed)) => claimed,
+            Ok(None) => return,
+            Err(_) => return,
+        };
+        let started = queued
+            .get("started_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
 
         let exe = match std::env::current_exe() {
             Ok(p) => p,
@@ -4647,7 +4992,7 @@ fn handle_background_command(app: &mut App, args: &[&str]) -> Result<CommandResu
                     "error".into(),
                     serde_json::Value::String(format!("current_exe: {}", e)),
                 );
-                let _ = write_json_map(&status_path_for_run, &failed);
+                let _ = write_json_map(&status_path, &failed);
                 return;
             }
         };
@@ -4655,7 +5000,7 @@ fn handle_background_command(app: &mut App, args: &[&str]) -> Result<CommandResu
         let mut cmd = tokio::process::Command::new(exe);
         cmd.arg("chat")
             .arg("--query")
-            .arg(task_for_run)
+            .arg(task)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -4682,7 +5027,7 @@ fn handle_background_command(app: &mut App, args: &[&str]) -> Result<CommandResu
                     stdout,
                     stderr
                 );
-                let _ = std::fs::write(&log_path_for_run, log);
+                let _ = std::fs::write(&log_path, log);
 
                 let mut done = queued.clone();
                 done.insert(
@@ -4698,7 +5043,7 @@ fn handle_background_command(app: &mut App, args: &[&str]) -> Result<CommandResu
                     serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
                 );
                 done.insert("exit_code".into(), serde_json::json!(exit));
-                let _ = write_json_map(&status_path_for_run, &done);
+                let _ = write_json_map(&status_path, &done);
             }
             Err(e) => {
                 let mut failed = queued.clone();
@@ -4711,23 +5056,57 @@ fn handle_background_command(app: &mut App, args: &[&str]) -> Result<CommandResu
                     "error".into(),
                     serde_json::Value::String(format!("spawn/output failed: {}", e)),
                 );
-                let _ = write_json_map(&status_path_for_run, &failed);
+                let _ = write_json_map(&status_path, &failed);
             }
         }
     });
+}
 
-    emit_command_output(
-        app,
-        format!(
-            "[Background task queued: \"{}\"]\nJob ID: {}\nStatus: {}\nLogs:   {}\nThis task runs in a detached `hermes chat --query ...` process.",
-            task,
-            status["id"].as_str().unwrap_or("unknown"),
-            status_path.display(),
-            log_path.display()
-        ),
-    );
-
-    Ok(CommandResult::Handled)
+pub fn recover_queued_background_jobs(max_jobs: usize) -> usize {
+    let jobs_dir = hermes_config::hermes_home().join("background_jobs");
+    let Ok(entries) = std::fs::read_dir(&jobs_dir) else {
+        return 0;
+    };
+    let mut recovered = 0usize;
+    for entry in entries.filter_map(Result::ok) {
+        if recovered >= max_jobs.max(1) {
+            break;
+        }
+        let status_path = entry.path();
+        if status_path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("")
+            != "json"
+        {
+            continue;
+        }
+        let map = read_json_map(&status_path);
+        let status = map
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if status != "queued" {
+            continue;
+        }
+        let task = map
+            .get("task")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string);
+        let log_path = map
+            .get("log_path")
+            .and_then(|v| v.as_str())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| status_path.with_extension("log"));
+        if let Some(task) = task {
+            schedule_background_job_execution(status_path.clone(), log_path, task);
+            recovered = recovered.saturating_add(1);
+        }
+    }
+    recovered
 }
 
 fn read_json_map(path: &std::path::Path) -> serde_json::Map<String, serde_json::Value> {
@@ -4810,21 +5189,186 @@ fn handle_reasoning_command(app: &mut App) -> Result<CommandResult, AgentError> 
     Ok(CommandResult::Handled)
 }
 
+fn replay_enabled_runtime() -> bool {
+    std::env::var("HERMES_REPLAY_ENABLED")
+        .ok()
+        .is_some_and(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+}
+
+fn replay_log_path_for_session(session_id: &str) -> PathBuf {
+    let sid = if session_id.trim().is_empty() {
+        "session".to_string()
+    } else {
+        session_id
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>()
+    };
+    hermes_config::hermes_home()
+        .join("logs")
+        .join("replay")
+        .join(format!("{sid}.jsonl"))
+}
+
+fn render_replay_trace_tail(path: &Path, limit: usize) -> Result<String, AgentError> {
+    let raw = std::fs::read_to_string(path).map_err(|e| {
+        AgentError::Io(format!(
+            "Failed to read replay log {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+    let lines: Vec<&str> = raw
+        .lines()
+        .rev()
+        .take(limit.max(1))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    if lines.is_empty() {
+        return Ok("Replay log is empty.".to_string());
+    }
+    let mut out = String::new();
+    for line in lines {
+        let value: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => {
+                let _ = writeln!(out, "{}", line);
+                continue;
+            }
+        };
+        let seq = value
+            .get("seq")
+            .and_then(|v| v.as_u64())
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "?".to_string());
+        let event = value
+            .get("event")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let trace_id = value
+            .get("trace_id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("missing");
+        let prev_hash = value
+            .get("prev_hash")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+        let event_hash = value
+            .get("event_hash")
+            .and_then(|v| v.as_str())
+            .unwrap_or("?");
+        let turn = value
+            .get("payload")
+            .and_then(|payload| payload.get("turn"))
+            .and_then(|turn| turn.as_u64())
+            .map(|n| n.to_string())
+            .unwrap_or_else(|| "-".to_string());
+        let _ = writeln!(
+            out,
+            "#{seq:<4} turn={turn:<3} event={event:<24} trace={trace_id} prev={prev_hash} hash={event_hash}"
+        );
+    }
+    Ok(out.trim_end().to_string())
+}
+
 fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    if args
+        .first()
+        .is_some_and(|sub| sub.eq_ignore_ascii_case("trace"))
+    {
+        let replay_path = replay_log_path_for_session(&app.session_id);
+        let sub = args.get(1).map(|s| s.trim().to_ascii_lowercase());
+        match sub.as_deref() {
+            None | Some("status") => {
+                emit_command_output(
+                    app,
+                    format!(
+                        "Replay trace: {}{}\nSession: {}\nPath: {}\nUsage: /raw trace [on|off|toggle|status|tail [N]|path]",
+                        if replay_enabled_runtime() { "ON" } else { "OFF" },
+                        if replay_path.exists() { "" } else { " (no log yet)" },
+                        app.session_id,
+                        replay_path.display()
+                    ),
+                );
+            }
+            Some("path") => {
+                emit_command_output(app, format!("Replay path: {}", replay_path.display()));
+            }
+            Some("tail") => {
+                let limit = args
+                    .get(2)
+                    .and_then(|raw| raw.trim().parse::<usize>().ok())
+                    .unwrap_or(20)
+                    .clamp(1, 200);
+                if !replay_path.exists() {
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Replay log not found for current session yet: {}",
+                            replay_path.display()
+                        ),
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+                let rendered = render_replay_trace_tail(&replay_path, limit)?;
+                emit_command_output(app, rendered);
+            }
+            Some("on") | Some("off") | Some("toggle") => {
+                let next = match sub.as_deref().unwrap_or("status") {
+                    "on" => true,
+                    "off" => false,
+                    "toggle" => !replay_enabled_runtime(),
+                    _ => replay_enabled_runtime(),
+                };
+                std::env::set_var("HERMES_REPLAY_ENABLED", if next { "1" } else { "0" });
+                emit_command_output(
+                    app,
+                    format!(
+                        "Replay trace mode: {}.\nThis applies to new turns in the current process.",
+                        if next { "ON" } else { "OFF" }
+                    ),
+                );
+            }
+            Some("help") | Some("--help") | Some("-h") => emit_command_output(
+                app,
+                "Replay trace controls:\n  /raw trace status    Show enabled state + current log path\n  /raw trace on|off    Enable or disable deterministic replay trace logs\n  /raw trace toggle    Toggle replay trace logs\n  /raw trace tail [N]  Show latest trace events with lineage hashes\n  /raw trace path      Show trace log file for current session",
+            ),
+            _ => emit_command_output(
+                app,
+                "Usage: /raw trace [on|off|toggle|status|tail [N]|path]",
+            ),
+        }
+        return Ok(CommandResult::Handled);
+    }
+
     let state = app.tool_registry.raw_mode_state();
     let log_dir = app.tool_registry.rtk_log_dir();
     if args.is_empty() || args[0].eq_ignore_ascii_case("status") {
         emit_command_output(
             app,
             format!(
-                "RTK raw mode: {}{}\nDual logs: {}\nUsage: /raw [on|off|toggle|once|status]",
+                "RTK raw mode: {}{}\nDual logs: {}\nReplay trace: {}\nUsage: /raw [on|off|toggle|once|status|trace]",
                 if state.enabled { "ON" } else { "OFF" },
                 if state.once_pending {
                     " (one-shot pending)"
                 } else {
                     ""
                 },
-                log_dir.display()
+                log_dir.display(),
+                if replay_enabled_runtime() { "ON" } else { "OFF" }
             ),
         );
         return Ok(CommandResult::Handled);
@@ -4833,7 +5377,7 @@ fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Age
     match args[0].trim().to_ascii_lowercase().as_str() {
         "help" => emit_command_output(
             app,
-            "RTK raw controls:\n  /raw status   Show current mode + log path\n  /raw on       Disable output filtering for all tool calls\n  /raw off      Re-enable RTK output filtering\n  /raw toggle   Toggle global raw mode\n  /raw once     Raw pass-through for next tool call only",
+            "RTK raw controls:\n  /raw status        Show current mode + log path\n  /raw on            Disable output filtering for all tool calls\n  /raw off           Re-enable RTK output filtering\n  /raw toggle        Toggle global raw mode\n  /raw once          Raw pass-through for next tool call only\n  /raw trace ...     Deterministic replay trace controls",
         ),
         "once" => {
             app.tool_registry.set_raw_mode_once();
@@ -4860,7 +5404,7 @@ fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Age
                 ),
             );
         }
-        _ => emit_command_output(app, "Usage: /raw [on|off|toggle|once|status]"),
+        _ => emit_command_output(app, "Usage: /raw [on|off|toggle|once|status|trace]"),
     }
     Ok(CommandResult::Handled)
 }
@@ -10453,6 +10997,79 @@ install_command: "uv pip install -r requirements.txt"
         let providers = vec!["openai", "nous", "anthropic"];
         let req = parse_model_switch_request(&[], &providers);
         assert_eq!(req, ModelSwitchRequest::PickProviderThenModel);
+    }
+
+    #[test]
+    fn parse_model_command_args_extracts_capability_flags() {
+        let (positional, requirements, provider_override) = parse_model_command_args(&[
+            "nous",
+            "--cap",
+            "vision,reasoning",
+            "--min-context",
+            "200000",
+        ])
+        .expect("parse");
+        assert_eq!(positional, vec!["nous".to_string()]);
+        assert!(requirements.require_vision);
+        assert!(requirements.require_reasoning);
+        assert!(!requirements.require_tools);
+        assert_eq!(requirements.min_context_window, Some(200_000));
+        assert!(provider_override.is_none());
+    }
+
+    #[test]
+    fn parse_model_command_args_supports_boolean_capability_switches() {
+        let (positional, requirements, provider_override) =
+            parse_model_command_args(&["openai:gpt-4o", "--tools", "--long-context"])
+                .expect("parse");
+        assert_eq!(positional, vec!["openai:gpt-4o".to_string()]);
+        assert!(requirements.require_tools);
+        assert!(requirements.require_long_context);
+        assert_eq!(
+            requirements.effective_min_context(),
+            Some(ModelCapabilityRequirements::LONG_CONTEXT_DEFAULT)
+        );
+        assert!(provider_override.is_none());
+    }
+
+    #[test]
+    fn parse_model_command_args_extracts_provider_override() {
+        let (positional, _requirements, provider_override) =
+            parse_model_command_args(&["gpt-4o", "--provider", "openai"]).expect("parse");
+        assert_eq!(positional, vec!["gpt-4o".to_string()]);
+        assert_eq!(provider_override.as_deref(), Some("openai"));
+    }
+
+    #[test]
+    fn model_meets_requirements_checks_tools_vision_reasoning_and_context() {
+        let requirements = ModelCapabilityRequirements {
+            require_tools: true,
+            require_vision: true,
+            require_reasoning: true,
+            require_long_context: false,
+            min_context_window: Some(128_000),
+        };
+        let caps = ResolvedModelCapabilities {
+            supports_tools: true,
+            supports_vision: true,
+            supports_reasoning: true,
+            context_window: 200_000,
+        };
+        assert!(model_meets_requirements(caps, requirements));
+        let weak_caps = ResolvedModelCapabilities {
+            supports_tools: true,
+            supports_vision: false,
+            supports_reasoning: true,
+            context_window: 200_000,
+        };
+        assert!(!model_meets_requirements(weak_caps, requirements));
+    }
+
+    #[test]
+    fn parse_model_command_args_rejects_unknown_capability() {
+        let err = parse_model_command_args(&["--cap", "telepathy"]).expect_err("expected error");
+        let message = err.to_string().to_ascii_lowercase();
+        assert!(message.contains("unknown model capability"));
     }
 
     #[test]

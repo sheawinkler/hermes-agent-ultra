@@ -44,6 +44,11 @@ def parse_args() -> argparse.Namespace:
         help="Eval trend gate command",
     )
     parser.add_argument(
+        "--release-security-cmd",
+        default="python3 scripts/release_secret_scan.py --repo-root . --report .sync-reports/release-secret-scan.json",
+        help="Release secret-scan gate command",
+    )
+    parser.add_argument(
         "--chaos-baseline",
         default="",
         help="Optional baseline adapter chaos report for regression comparison",
@@ -132,18 +137,21 @@ def main() -> int:
     hotpath_raw = run_shell(args.hotpath_cmd, repo_root)
     parity_raw = run_shell(args.parity_diff_cmd, repo_root)
     eval_raw = run_shell(args.eval_trend_cmd, repo_root)
+    release_security_raw = run_shell(args.release_security_cmd, repo_root)
 
     redteam = slim(redteam_raw)
     chaos = slim(chaos_raw)
     hotpath = slim(hotpath_raw)
     parity = slim(parity_raw)
     eval_trend = slim(eval_raw)
+    release_security = slim(release_security_raw)
     sections: dict[str, Any] = {
         "redteam": redteam,
         "chaos": chaos,
         "hotpath": hotpath,
         "parity_differential": parity,
         "eval_trend": eval_trend,
+        "release_security": release_security,
     }
 
     compare: dict[str, Any] | None = None

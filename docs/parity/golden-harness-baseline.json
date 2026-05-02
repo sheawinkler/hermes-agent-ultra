@@ -1,0 +1,6 @@
+{
+  "source": "local-upstream-snapshot",
+  "captured_at": "2026-05-02T05:20:00Z",
+  "max_missing_commands": 4,
+  "notes": "Allow current intentional command-surface divergence; fail when missing command count regresses above this threshold."
+}

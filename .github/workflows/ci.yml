@@ -39,7 +39,10 @@ jobs:
       - name: Global parity governance contract
         run: cargo test -p hermes-parity-tests --test global_parity_governance
       - name: Upstream webhook sync script lint
-        run: python3 -m py_compile scripts/upstream_webhook_sync.py
+        run: |
+          python3 -m py_compile scripts/upstream_webhook_sync.py
+          python3 -m py_compile scripts/run-golden-parity-harness.py
+          python3 -m py_compile scripts/release_secret_scan.py
 
   cross-build:
     runs-on: ubuntu-latest

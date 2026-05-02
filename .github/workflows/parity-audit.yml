@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Checkout upstream hermes-agent snapshot
+        run: git clone --depth 1 https://github.com/NousResearch/hermes-agent.git ../hermes-agent
       - name: Generate global parity artifacts
         run: |
           python3 scripts/generate-parity-matrix.py
@@ -24,6 +26,14 @@ jobs:
           python3 scripts/validate-intentional-divergence.py --check --allow-warnings
           python3 scripts/generate-upstream-patch-queue.py --max-commits 0
           python3 scripts/generate-global-parity-proof.py --check-ci
+      - name: Golden parity harness
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 scripts/run-golden-parity-harness.py \
+            --repo-root . \
+            --upstream-root ../hermes-agent \
+            --auto-issue
       - name: Upload parity artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -43,6 +53,7 @@ jobs:
             docs/parity/global-parity-proof.md
             docs/parity/upstream-missing-queue.md
             docs/parity/upstream-missing-queue.json
+            .sync-reports/golden-parity-harness-*.json
       - name: Comment parity epic on failure
         if: failure()
         env:
