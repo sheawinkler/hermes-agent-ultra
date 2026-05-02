@@ -109,6 +109,18 @@ cat > "${PLIST_PATH}" <<EOF
   <dict>
     <key>PATH</key>
     <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>AUTOMATION_SUMMARY_SINK_ORDER</key>
+    <string>contextlattice,github,local</string>
+    <key>AUTOMATION_SUMMARY_CONTEXT_PROJECT</key>
+    <string>${REPO_ROOT##*/}</string>
+    <key>AUTOMATION_SUMMARY_CONTEXT_TOPIC_PATH</key>
+    <string>ops/nightly-elite-gate</string>
+    <key>AUTOMATION_SUMMARY_CONTEXT_FILE_NAME</key>
+    <string>ops/nightly-elite-gate.md</string>
+    <key>AUTOMATION_SUMMARY_GITHUB_ISSUE</key>
+    <string>0</string>
+    <key>AUTOMATION_SUMMARY_LOCAL_PATH</key>
+    <string>${LOG_DIR}/elite-gate/nightly-elite-gate-fallback.log</string>
   </dict>
   <key>StartCalendarInterval</key>
   <dict>
@@ -138,4 +150,3 @@ if [[ "${LOAD_SERVICE}" == "1" ]]; then
 else
   echo "Service not loaded (--no-load)."
 fi
-
