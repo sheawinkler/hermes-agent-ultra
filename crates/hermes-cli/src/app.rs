@@ -89,6 +89,8 @@ pub struct App {
     stream_handle_shared: Arc<StdMutex<Option<StreamHandle>>>,
     /// Whether TUI mouse events are enabled.
     pub mouse_enabled: bool,
+    /// Optional durable objective for the current interactive session.
+    pub session_objective: Option<String>,
 }
 
 impl std::fmt::Debug for App {
@@ -100,6 +102,7 @@ impl std::fmt::Debug for App {
             .field("current_personality", &self.current_personality)
             .field("history_index", &self.history_index)
             .field("mouse_enabled", &self.mouse_enabled)
+            .field("session_objective", &self.session_objective)
             .finish_non_exhaustive()
     }
 }
@@ -132,6 +135,8 @@ pub struct UiTranscriptMessage {
 // ---------------------------------------------------------------------------
 
 impl App {
+    const SESSION_OBJECTIVE_PREFIX: &'static str = "[SESSION_OBJECTIVE] ";
+
     fn push_stream_extra_event(
         shared: &Arc<StdMutex<Option<StreamHandle>>>,
         payload: serde_json::Value,
@@ -342,6 +347,7 @@ impl App {
             stream_handle: None,
             stream_handle_shared,
             mouse_enabled: default_mouse_enabled(),
+            session_objective: None,
         })
     }
 
@@ -458,6 +464,7 @@ impl App {
         self.session_id = Uuid::new_v4().to_string();
         self.messages.clear();
         self.ui_messages.clear();
+        self.session_objective = None;
         self.input_history.clear();
         self.history_index = 0;
     }
@@ -466,8 +473,37 @@ impl App {
     pub fn reset_session(&mut self) {
         self.messages.clear();
         self.ui_messages.clear();
+        self.session_objective = None;
         self.input_history.clear();
         self.history_index = 0;
+    }
+
+    /// Set or clear a durable session objective.
+    ///
+    /// The objective is represented as a synthetic system message so it is
+    /// applied consistently on every turn without requiring user re-entry.
+    pub fn set_session_objective(&mut self, objective: Option<String>) {
+        self.messages.retain(|m| {
+            if m.role != hermes_core::MessageRole::System {
+                return true;
+            }
+            !m.content
+                .as_deref()
+                .unwrap_or_default()
+                .starts_with(Self::SESSION_OBJECTIVE_PREFIX)
+        });
+
+        self.session_objective = objective
+            .as_ref()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        if let Some(obj) = &self.session_objective {
+            let system =
+                hermes_core::Message::system(format!("{}{}", Self::SESSION_OBJECTIVE_PREFIX, obj));
+            self.messages.insert(0, system);
+        }
+        self.prune_ui_after_current_messages();
     }
 
     /// Retry the last user message by re-sending it to the agent.
@@ -834,6 +870,43 @@ mod tests {
     use super::*;
     use hermes_config::LlmProviderConfig;
     use std::collections::HashMap;
+
+    fn build_minimal_test_app() -> App {
+        let config = Arc::new(GatewayConfig::default());
+        let tool_registry = Arc::new(ToolRegistry::new());
+        let agent_tool_registry = Arc::new(bridge_tool_registry(&tool_registry));
+        let agent_config = build_agent_config(config.as_ref(), "openai:gpt-4o");
+        let provider: Arc<dyn LlmProvider> = Arc::new(NoBackendProvider {
+            model: "openai:gpt-4o".to_string(),
+        });
+        let agent_inner = AgentLoop::new(agent_config, agent_tool_registry, provider)
+            .with_callbacks(App::stream_callbacks(Arc::new(StdMutex::new(None))));
+        let orchestrator = Arc::new(SubAgentOrchestrator::from_parent(
+            &agent_inner,
+            hermes_home_dir(),
+        ));
+        let agent = Arc::new(agent_inner.with_sub_agent_orchestrator(orchestrator));
+
+        App {
+            config,
+            agent,
+            tool_registry,
+            tool_schemas: Vec::new(),
+            messages: Vec::new(),
+            ui_messages: Vec::new(),
+            session_id: "test-session".to_string(),
+            running: true,
+            current_model: "openai:gpt-4o".to_string(),
+            current_personality: None,
+            input_history: Vec::new(),
+            history_index: 0,
+            interrupt_controller: InterruptController::new(),
+            stream_handle: None,
+            stream_handle_shared: Arc::new(StdMutex::new(None)),
+            mouse_enabled: true,
+            session_objective: None,
+        }
+    }
 
     #[test]
     fn test_session_info_serialization() {
@@ -1211,6 +1284,53 @@ mod tests {
     fn test_is_model_not_found_error_ignores_non_catalog_errors() {
         let err = AgentError::LlmApi("Rate limit exceeded".to_string());
         assert!(!App::is_model_not_found_error(&err));
+    }
+
+    #[test]
+    fn test_set_session_objective_injects_replaces_and_clears_system_message() {
+        let mut app = build_minimal_test_app();
+        app.messages
+            .push(hermes_core::Message::user("hello before objective"));
+
+        app.set_session_objective(Some(
+            "Ship parity with upstream plus stronger UX".to_string(),
+        ));
+        assert_eq!(
+            app.session_objective.as_deref(),
+            Some("Ship parity with upstream plus stronger UX")
+        );
+        assert_eq!(app.messages.len(), 2);
+        assert_eq!(app.messages[0].role, hermes_core::MessageRole::System);
+        let system = app.messages[0].content.clone().unwrap_or_default();
+        assert!(system.starts_with("[SESSION_OBJECTIVE] "));
+        assert!(system.contains("Ship parity with upstream plus stronger UX"));
+
+        app.set_session_objective(Some("Minimize latency regressions".to_string()));
+        let system_count = app
+            .messages
+            .iter()
+            .filter(|m| {
+                m.role == hermes_core::MessageRole::System
+                    && m.content
+                        .as_deref()
+                        .unwrap_or_default()
+                        .starts_with("[SESSION_OBJECTIVE] ")
+            })
+            .count();
+        assert_eq!(system_count, 1);
+        assert_eq!(
+            app.session_objective.as_deref(),
+            Some("Minimize latency regressions")
+        );
+
+        app.set_session_objective(None);
+        assert!(app.session_objective.is_none());
+        assert!(app.messages.iter().all(|m| {
+            !m.content
+                .as_deref()
+                .unwrap_or_default()
+                .starts_with("[SESSION_OBJECTIVE] ")
+        }));
     }
 }
 

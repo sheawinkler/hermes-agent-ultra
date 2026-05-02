@@ -118,6 +118,11 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/tasks", "Alias for /agents"),
     ("/queue", "Queue a follow-up prompt"),
     ("/q", "Alias for /queue"),
+    (
+        "/objective",
+        "Set/show/clear a durable session objective injected as system context",
+    ),
+    ("/goal", "Alias for /objective"),
     ("/steer", "Inject non-interrupt steering instruction"),
     ("/btw", "Run an ephemeral side-question"),
     ("/plan", "Show planning helper status"),
@@ -2856,6 +2861,7 @@ fn canonical_command(cmd: &str) -> &str {
         "/snap" => "/snapshot",
         "/set-home" => "/sethome",
         "/q" => "/queue",
+        "/goal" => "/objective",
         "/sb" => "/statusbar",
         "/exit" => "/quit",
         other => other,
@@ -2898,6 +2904,7 @@ pub async fn handle_slash_command(
         "/history" => handle_history_command(app),
         "/title" | "/branch" | "/snapshot" | "/rollback" | "/queue" | "/steer" | "/btw"
         | "/sethome" => handle_session_compat_command(app, canonical_command(cmd), args),
+        "/objective" => handle_objective_command(app, args),
         "/model" => handle_model_command(app, args).await,
         "/provider" => handle_provider_command(app).await,
         "/personality" => handle_personality_command(app, args),
@@ -5695,6 +5702,49 @@ fn handle_capability_surface_command(
         _ => "Command surface available.",
     };
     emit_command_output(app, msg);
+    Ok(CommandResult::Handled)
+}
+
+fn handle_objective_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    if args.is_empty() {
+        let msg = match app.session_objective.as_deref() {
+            Some(v) => format!(
+                "Current objective:\n{}\n\nUse `/objective clear` to remove, or `/objective <text>` to replace.",
+                v
+            ),
+            None => {
+                "No objective set.\nUsage: `/objective <text>` or `/objective clear`."
+                    .to_string()
+            }
+        };
+        emit_command_output(app, msg);
+        return Ok(CommandResult::Handled);
+    }
+
+    let first = args[0].trim();
+    if first.eq_ignore_ascii_case("clear")
+        || first.eq_ignore_ascii_case("off")
+        || first.eq_ignore_ascii_case("none")
+        || first.eq_ignore_ascii_case("reset")
+    {
+        app.set_session_objective(None);
+        emit_command_output(app, "Session objective cleared.");
+        return Ok(CommandResult::Handled);
+    }
+
+    let objective = args.join(" ").trim().to_string();
+    if objective.is_empty() {
+        emit_command_output(app, "Usage: `/objective <text>` or `/objective clear`.");
+        return Ok(CommandResult::Handled);
+    }
+    app.set_session_objective(Some(objective.clone()));
+    emit_command_output(
+        app,
+        format!(
+            "Session objective set:\n{}\n\nThis objective is now injected as system context for future turns.",
+            objective
+        ),
+    );
     Ok(CommandResult::Handled)
 }
 
@@ -10494,6 +10544,18 @@ mod tests {
     fn test_autocomplete_partial() {
         let results = autocomplete("/m");
         assert!(results.contains(&"/model"));
+    }
+
+    #[test]
+    fn test_objective_command_is_registered_and_completable() {
+        assert!(SLASH_COMMANDS.iter().any(|(name, _)| *name == "/objective"));
+        let results = autocomplete("/obj");
+        assert!(results.contains(&"/objective"));
+    }
+
+    #[test]
+    fn test_goal_alias_maps_to_objective() {
+        assert_eq!(canonical_command("/goal"), "/objective");
     }
 
     #[test]
