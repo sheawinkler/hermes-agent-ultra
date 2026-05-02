@@ -25,6 +25,9 @@ fork-specific history.
   - Reads optional env knobs: `SYNC_STRATEGY`, `REPORT_DIR`, `CONFLICT_LABEL`, `CREATE_CONFLICT_ISSUE`, `STRICT_RISK_GATE`, `ALLOW_RISK_PATHS`, `RISK_PATHS_FILE`
 - `scripts/install-upstream-sync-cron.sh`
   - Installs/updates a crontab entry with a stable marker
+- `scripts/upstream_webhook_sync.py`
+  - Webhook listener/worker path with SQLite/SQS/Kafka queue backends
+  - Includes per-upstream-commit upkeep issue queue automation (default parent issue: `#43`)
 - `scripts/run-adapter-chaos-harness.py`
   - Runs deterministic adapter chaos scenarios (timeout/5xx/rate-limit)
   - Emits JSON diagnostics under `.sync-reports/adapter-chaos-<timestamp>.json`

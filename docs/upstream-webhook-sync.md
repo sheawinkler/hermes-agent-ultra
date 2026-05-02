@@ -35,6 +35,9 @@ that needs manual coding.
   - Comments parent upkeep issue (`#13` by default) when drift is detected
   - Comments global parity epic issue (`#19` by default) when global parity gate drifts
   - Auto-opens tagged parity drift issues for new drift fingerprints
+  - Auto-creates per-upstream-commit upkeep issues with SHA-level dedupe/state
+    - default parent tracker issue: `#43`
+    - default state file: `.sync-reports/upkeep-commit-queue-state.json`
   - Classifies result:
     - `done`: merged/cherry-picked and branch/PR flow completed
     - `risk_blocked`: strict gate matched high-risk paths
@@ -144,6 +147,15 @@ python3 scripts/upstream_webhook_sync.py worker \
   --parity-labels parity,parity-upkeep
 ```
 
+Upkeep commit queue flags:
+
+```bash
+python3 scripts/upstream_webhook_sync.py worker \
+  --upkeep-commit-parent-issue 43 \
+  --upkeep-commit-labels parity,parity-upkeep,upstream-sync \
+  --upkeep-commit-max-per-event 40
+```
+
 Disable drift checks or issue auto-open:
 
 ```bash
@@ -158,6 +170,13 @@ Disable global parity checks or issue auto-open:
 python3 scripts/upstream_webhook_sync.py worker \
   --disable-global-parity-check \
   --no-global-parity-open-issues
+```
+
+Disable upkeep commit queue issueing:
+
+```bash
+python3 scripts/upstream_webhook_sync.py worker \
+  --disable-upkeep-commit-queue
 ```
 
 ## launchd Deployment (Recommended on macOS)
@@ -240,6 +259,7 @@ Relevant env keys in `~/.hermes-agent-ultra/upstream-webhook-sync.env`:
 - `UPSTREAM_SYNC_GLOBAL_PARITY_LABELS=parity,parity-upkeep`
 - `UPSTREAM_SYNC_GLOBAL_PARITY_OPEN_ISSUES=1|0`
 - `UPSTREAM_SYNC_GLOBAL_PARITY_MAX_QUEUE_COMMITS=0` (0 = full upstream missing range)
+- `UPSTREAM_SYNC_UPKEEP_COMMIT_STATE_PATH=.sync-reports/upkeep-commit-queue-state.json`
 
 ## Reliability Notes
 
