@@ -96,16 +96,16 @@ run_gate() {
 
   if [[ "${DO_PULL}" == "1" ]]; then
     FAILED_STEP="git_pull"
-    git pull --ff-only origin main
+    git pull --ff-only origin main || return $?
   fi
 
   FAILED_STEP="cargo_test"
   echo "[elite-gate] running cargo test -p hermes-cli"
-  cargo test -p hermes-cli
+  cargo test -p hermes-cli || return $?
 
   FAILED_STEP="deterministic_replay"
   echo "[elite-gate] running deterministic replay suite"
-  "${REPO_ROOT}/scripts/run-deterministic-replay-suite.sh"
+  "${REPO_ROOT}/scripts/run-deterministic-replay-suite.sh" || return $?
 
   FAILED_STEP="write_summary"
   local head_sha
@@ -127,10 +127,11 @@ EOF
   echo "[elite-gate] summary=${SUMMARY_PATH}"
 }
 
-set +e
-run_gate > >(tee "${LOG_PATH}") 2>&1
-RUN_RC=$?
-set -e
+if run_gate > >(tee "${LOG_PATH}") 2>&1; then
+  RUN_RC=0
+else
+  RUN_RC=$?
+fi
 
 cd "${REPO_ROOT}"
 HEAD_SHA="$(git rev-parse HEAD 2>/dev/null || true)"
