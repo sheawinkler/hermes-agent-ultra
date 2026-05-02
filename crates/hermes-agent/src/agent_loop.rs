@@ -939,6 +939,7 @@ struct ReplayRecorder {
 struct ReplayState {
     seq: u64,
     prev_hash: String,
+    trace_root: String,
 }
 
 impl ReplayRecorder {
@@ -990,11 +991,13 @@ impl ReplayRecorder {
                 .collect::<String>()
         };
         let initial_prev_hash = short_sha256_hex(&format!("session:{sid}:v1"));
+        let trace_root = short_sha256_hex(&format!("trace:{sid}:v1"));
         Self {
             path: Some(dir.join(format!("{sid}.jsonl"))),
             state: Some(Arc::new(Mutex::new(ReplayState {
                 seq: 0,
                 prev_hash: initial_prev_hash,
+                trace_root,
             }))),
         }
     }
@@ -1010,19 +1013,21 @@ impl ReplayRecorder {
         redact_json_value(&mut redacted);
         let canonical_payload =
             serde_json::to_string(&redacted).unwrap_or_else(|_| "{}".to_string());
-        let (seq, prev_hash, event_hash) = {
+        let (seq, prev_hash, event_hash, trace_id) = {
             let mut guard = state.lock().unwrap();
             guard.seq = guard.seq.saturating_add(1);
             let seq = guard.seq;
             let prev_hash = guard.prev_hash.clone();
             let event_hash =
                 short_sha256_hex(&format!("{seq}|{event}|{prev_hash}|{canonical_payload}"));
+            let trace_id = format!("{}-{:08x}", guard.trace_root, seq);
             guard.prev_hash = event_hash.clone();
-            (seq, prev_hash, event_hash)
+            (seq, prev_hash, event_hash, trace_id)
         };
         let line = serde_json::json!({
             "ts": chrono::Utc::now().to_rfc3339(),
             "seq": seq,
+            "trace_id": trace_id,
             "event": event,
             "prev_hash": prev_hash,
             "event_hash": event_hash,
@@ -9660,6 +9665,7 @@ mod tests {
             state: Some(Arc::new(Mutex::new(ReplayState {
                 seq: 0,
                 prev_hash: short_sha256_hex("seed"),
+                trace_root: short_sha256_hex("trace-seed"),
             }))),
         };
 
@@ -9675,6 +9681,8 @@ mod tests {
 
         assert_eq!(first["seq"], 1);
         assert_eq!(second["seq"], 2);
+        assert!(first.get("trace_id").is_some());
+        assert!(second.get("trace_id").is_some());
         assert_eq!(first["payload"]["token"], "[redacted]");
         assert_eq!(second["prev_hash"], first["event_hash"]);
         assert_ne!(first["event_hash"], second["event_hash"]);

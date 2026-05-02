@@ -31,6 +31,7 @@ use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_tools::ToolRegistry;
 
 use crate::cli::Cli;
+use crate::commands::recover_queued_background_jobs;
 use crate::model_switch::provider_model_ids;
 use crate::runtime_tool_wiring::{wire_cron_scheduler_backend, wire_stdio_clarify_backend};
 use crate::terminal_backend::build_terminal_backend;
@@ -315,6 +316,14 @@ impl App {
         let hermes_home = hermes_home_dir();
         let orchestrator = Arc::new(SubAgentOrchestrator::from_parent(&agent_inner, hermes_home));
         let agent = Arc::new(agent_inner.with_sub_agent_orchestrator(orchestrator));
+
+        let recovered_background_jobs = recover_queued_background_jobs(8);
+        if recovered_background_jobs > 0 {
+            tracing::info!(
+                "Recovered {} queued background job(s) from durable status queue",
+                recovered_background_jobs
+            );
+        }
 
         Ok(Self {
             config: Arc::new(config),
