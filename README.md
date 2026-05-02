@@ -18,6 +18,7 @@ Rust-first autonomous agent runtime with functional parity goals against `NousRe
 
 - Fully Rust-native core runtime (agent loop, tools, gateway, skills, CLI/TUI)
 - Multi-provider inference routing and OAuth-capable provider flows
+- First-class local/self-host backends: Ollama, llama.cpp, vLLM, MLX, Apple ANE endpoint, SGLang, TGI
 - Tool runtime with policy enforcement, MCP integration, cron, and memory backends
 - Parity upkeep system for upstream drift triage and controlled roll-forward
 - Production operations surface (`doctor`, replay traces, sync gates, parity artifacts)
@@ -103,6 +104,30 @@ Optional Sentrux MCP profile:
 hermes-ultra mcp sentrux
 hermes-ultra mcp sentrux-status
 ```
+
+## Local Backends
+
+`hermes-ultra setup` now includes local/self-host provider options with no mandatory API key:
+
+- `ollama-local` (default `http://127.0.0.1:11434/v1`)
+- `llama-cpp` (default `http://127.0.0.1:8080/v1`)
+- `vllm` (default `http://127.0.0.1:8000/v1`)
+- `mlx` (default `http://127.0.0.1:8080/v1`)
+- `apple-ane` (default `http://127.0.0.1:8081/v1`)
+- `sglang` (default `http://127.0.0.1:30000/v1`)
+- `tgi` (default `http://127.0.0.1:8082/v1`)
+
+Override endpoint URLs via env vars:
+
+- `OLLAMA_BASE_URL`
+- `LLAMA_CPP_BASE_URL`
+- `VLLM_BASE_URL`
+- `MLX_BASE_URL`
+- `APPLE_ANE_BASE_URL`
+- `SGLANG_BASE_URL`
+- `TGI_BASE_URL`
+
+Detailed guide: [docs/local-backends.md](./docs/local-backends.md)
 
 ## Built-In Context + Memory Behavior
 
