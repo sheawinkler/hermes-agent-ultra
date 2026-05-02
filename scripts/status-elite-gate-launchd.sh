@@ -72,7 +72,8 @@ rm -f "${TMP}" >/dev/null 2>&1 || true
 for f in \
   "${LOG_DIR}/elite-gate-launchd.out.log" \
   "${LOG_DIR}/elite-gate-launchd.err.log" \
-  "${LOG_DIR}/elite-gate/nightly-elite-gate-latest.json"; do
+  "${LOG_DIR}/elite-gate/nightly-elite-gate-latest.json" \
+  "${LOG_DIR}/elite-gate/nightly-elite-gate-fallback.log"; do
   echo
   echo "=== ${f} ==="
   if [[ -f "${f}" ]]; then
@@ -85,4 +86,3 @@ for f in \
     echo "(missing)"
   fi
 done
-

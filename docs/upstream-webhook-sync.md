@@ -179,6 +179,13 @@ python3 scripts/upstream_webhook_sync.py worker \
   --disable-upkeep-commit-queue
 ```
 
+Disable automatic per-event summary publishing:
+
+```bash
+python3 scripts/upstream_webhook_sync.py worker \
+  --disable-summary-publish
+```
+
 ## launchd Deployment (Recommended on macOS)
 
 Single-command guided setup (recommended):
@@ -260,6 +267,19 @@ Relevant env keys in `~/.hermes-agent-ultra/upstream-webhook-sync.env`:
 - `UPSTREAM_SYNC_GLOBAL_PARITY_OPEN_ISSUES=1|0`
 - `UPSTREAM_SYNC_GLOBAL_PARITY_MAX_QUEUE_COMMITS=0` (0 = full upstream missing range)
 - `UPSTREAM_SYNC_UPKEEP_COMMIT_STATE_PATH=.sync-reports/upkeep-commit-queue-state.json`
+- `UPSTREAM_SYNC_SUMMARY_SINK_ORDER=contextlattice,github,local`
+- `UPSTREAM_SYNC_SUMMARY_CONTEXT_PROJECT=<repo-name>`
+- `UPSTREAM_SYNC_SUMMARY_CONTEXT_TOPIC_PATH=ops/upstream-sync`
+- `UPSTREAM_SYNC_SUMMARY_CONTEXT_FILE_NAME=ops/upstream-sync.md`
+- `UPSTREAM_SYNC_SUMMARY_CONTEXT_TIMEOUT_SECS=8`
+- `UPSTREAM_SYNC_SUMMARY_GITHUB_ISSUE=13`
+- `UPSTREAM_SYNC_SUMMARY_LOCAL_PATH=<repo>/.sync-reports/upstream-sync-summary-fallback.log`
+
+Summary publishing behavior:
+
+- Default sink chain is ContextLattice-first.
+- If ContextLattice is unavailable, worker falls back to GitHub issue comment (if configured).
+- If GitHub fallback is unavailable, worker appends summary to local fallback log path.
 
 ## Reliability Notes
 

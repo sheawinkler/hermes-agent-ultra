@@ -46,6 +46,15 @@ fork-specific history.
 - `scripts/run-self-evolution-loop.py`
   - Runs a unified intelligence loop across golden parity + eval trend + elite sync gates
   - Emits recommendations and intelligence index under `.sync-reports/self-evolution-loop-<timestamp>.json`
+- `scripts/run-nightly-elite-gate.sh`
+  - Nightly local validation gate (`cargo test -p hermes-cli` + deterministic replay suite)
+  - Auto-publishes run summary via `contextlattice -> github -> local` sink chain
+- `scripts/publish_automation_summary.py`
+  - Publishes automation summaries with sink priority:
+    - `contextlattice` (default)
+    - `github` issue comment fallback
+    - `local` file fallback
+  - Used by nightly and webhook automation paths for resilient summary reporting
 - `scripts/compare-adapter-chaos-reports.py`
   - Compares chaos reports and fails on attempts/fallback/outcome regressions
 - `scripts/generate-readme-sync-status.py`
