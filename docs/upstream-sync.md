@@ -43,6 +43,9 @@ fork-specific history.
 - `scripts/run-eval-trend-gate.py`
   - Compares eval run baselines and enforces regression thresholds
   - Emits gate artifact under `.sync-reports/eval-trend-gate-<timestamp>.json`
+- `scripts/run-self-evolution-loop.py`
+  - Runs a unified intelligence loop across golden parity + eval trend + elite sync gates
+  - Emits recommendations and intelligence index under `.sync-reports/self-evolution-loop-<timestamp>.json`
 - `scripts/compare-adapter-chaos-reports.py`
   - Compares chaos reports and fails on attempts/fallback/outcome regressions
 - `scripts/generate-readme-sync-status.py`
@@ -61,6 +64,7 @@ bash scripts/sync-upstream.sh --redteam-cmd "python3 scripts/run-redteam-gate.py
 python3 scripts/run-adapter-chaos-harness.py --repo-root .
 python3 scripts/run-zero-copy-hotpath-bench.py --repo-root .
 python3 scripts/run-elite-sync-gate.py --repo-root .
+python3 scripts/run-self-evolution-loop.py --repo-root . --json
 python3 scripts/generate-parity-dashboard.py --repo-root .
 python3 scripts/generate-readme-sync-status.py --repo-root .
 bash scripts/sync-upstream.sh --elite-gate

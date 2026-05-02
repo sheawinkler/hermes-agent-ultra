@@ -119,6 +119,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/queue", "Queue a follow-up prompt"),
     ("/q", "Alias for /queue"),
     (
+        "/evolve",
+        "Run or inspect the self-evolution intelligence loop",
+    ),
+    (
         "/objective",
         "Set/show/clear a durable session objective injected as system context",
     ),
@@ -2904,6 +2908,7 @@ pub async fn handle_slash_command(
         "/history" => handle_history_command(app),
         "/title" | "/branch" | "/snapshot" | "/rollback" | "/queue" | "/steer" | "/btw"
         | "/sethome" => handle_session_compat_command(app, canonical_command(cmd), args),
+        "/evolve" => handle_ops_evolve_command(app, args).await,
         "/objective" => handle_objective_command(app, args),
         "/model" => handle_model_command(app, args).await,
         "/provider" => handle_provider_command(app).await,
@@ -4389,6 +4394,61 @@ fn summarize_gate_report(path: &Path, key: &str) -> Option<String> {
     ))
 }
 
+fn summarize_self_evolution_report(path: &Path, key: &str) -> Option<String> {
+    let report = read_json_file(path)?;
+    let ok = report
+        .get("ok")
+        .and_then(|v| v.as_bool())
+        .map(|v| if v { "pass" } else { "fail" })
+        .unwrap_or("unknown");
+    let generated = report
+        .get("generated_at")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let idx = report
+        .get("summary")
+        .and_then(|s| s.get("intelligence_index"))
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let recs = report
+        .get("recommendations")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.len())
+        .unwrap_or(0);
+    Some(format!(
+        "{}={} idx={:.2} recs={} @ {} ({})",
+        key,
+        ok,
+        idx,
+        recs,
+        generated,
+        path.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.display().to_string())
+    ))
+}
+
+fn self_evolution_recommendations(path: &Path) -> Vec<String> {
+    let report = match read_json_file(path) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let Some(items) = report.get("recommendations").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let obj = item.as_object()?;
+            let id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("UNKNOWN");
+            let sev = obj.get("severity").and_then(|v| v.as_str()).unwrap_or("PX");
+            let title = obj.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            let cmd = obj.get("command").and_then(|v| v.as_str()).unwrap_or("");
+            Some(format!("[{sev}] {id}: {title}\n  cmd: {cmd}"))
+        })
+        .collect()
+}
+
 fn dashboard_status_line_from_payload(payload: &serde_json::Value) -> String {
     let enabled = payload
         .get("enabled")
@@ -4624,6 +4684,91 @@ async fn handle_ops_gate_command(
     }
 }
 
+async fn handle_ops_evolve_command(
+    app: &mut App,
+    args: &[&str],
+) -> Result<CommandResult, AgentError> {
+    let sub = args
+        .first()
+        .copied()
+        .unwrap_or("status")
+        .to_ascii_lowercase();
+    let Some(repo_root) = discover_repo_root_for_about() else {
+        emit_command_output(
+            app,
+            "Self-evolution controls are unavailable outside source checkout.",
+        );
+        return Ok(CommandResult::Handled);
+    };
+    let report_dir = repo_root.join(".sync-reports");
+    match sub.as_str() {
+        "status" => {
+            let summary = latest_json_report(&report_dir, "self-evolution-loop-")
+                .and_then(|p| summarize_self_evolution_report(&p, "self_evolution"))
+                .unwrap_or_else(|| "self_evolution=unknown (no reports yet)".to_string());
+            emit_command_output(
+                app,
+                format!(
+                    "{}\nRun `/ops evolve run` to execute the loop now.",
+                    summary
+                ),
+            );
+            Ok(CommandResult::Handled)
+        }
+        "run" => {
+            let cmd = if let Some(obj) = app.session_objective.as_deref() {
+                format!(
+                    "python3 scripts/run-self-evolution-loop.py --json --objective {}",
+                    shell_escape(obj)
+                )
+            } else {
+                "python3 scripts/run-self-evolution-loop.py --json".to_string()
+            };
+            let out = run_ops_shell_command(&cmd).await?;
+            emit_command_output(app, out);
+            Ok(CommandResult::Handled)
+        }
+        "recommend" | "recs" => {
+            let Some(path) = latest_json_report(&report_dir, "self-evolution-loop-") else {
+                emit_command_output(
+                    app,
+                    "No self-evolution reports found. Run `/ops evolve run` first.",
+                );
+                return Ok(CommandResult::Handled);
+            };
+            let recs = self_evolution_recommendations(&path);
+            if recs.is_empty() {
+                emit_command_output(
+                    app,
+                    format!(
+                        "No recommendations found in {}.",
+                        path.file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| path.display().to_string())
+                    ),
+                );
+            } else {
+                let file_label = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.display().to_string());
+                emit_command_output(
+                    app,
+                    format!(
+                        "Self-evolution recommendations ({file_label}):\n{}",
+                        recs.join("\n")
+                    ),
+                );
+            }
+            Ok(CommandResult::Handled)
+        }
+        _ => {
+            emit_command_output(app, "Usage: /ops evolve [status|run|recommend]");
+            Ok(CommandResult::Handled)
+        }
+    }
+}
+
 fn shell_escape(input: &str) -> String {
     let escaped = input.replace('\'', "'\"'\"'");
     format!("'{}'", escaped)
@@ -4659,7 +4804,10 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
             let slo = latest_json_report(&report_dir, "slo-auto-rollback-")
                 .and_then(|p| summarize_gate_report(&p, "slo"))
                 .unwrap_or_else(|| "slo=unknown".to_string());
-            format!("{eval}; {slo}")
+            let evolve = latest_json_report(&report_dir, "self-evolution-loop-")
+                .and_then(|p| summarize_self_evolution_report(&p, "evolve"))
+                .unwrap_or_else(|| "evolve=unknown".to_string());
+            format!("{eval}; {slo}; {evolve}")
         } else {
             "unavailable (non-source checkout)".to_string()
         };
@@ -4697,6 +4845,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                /ops verbose\n\
                /ops dashboard [status|on|off|url] [host] [port]\n\
                /ops skills-tier [status|trusted|balanced|open]\n\
+               /ops evolve [status|run|recommend]\n\
                /ops gate [status|eval|elite|slo]\n\
                /ops help",
             app.session_id,
@@ -4740,6 +4889,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                  - /ops statusbar\n\
                  - /ops dashboard [status|on|off|url] [host] [port]\n\
                  - /ops skills-tier [status|trusted|balanced|open]\n\
+                 - /ops evolve [status|run|recommend]\n\
                  - /ops gate [status|eval|elite|slo]",
             );
             Ok(CommandResult::Handled)
@@ -4754,6 +4904,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
         "statusbar" => handle_statusbar_command(app),
         "dashboard" => handle_dashboard_command(app, &args[1..]).await,
         "skills-tier" => handle_ops_skills_tier_command(app, &args[1..]),
+        "evolve" => handle_ops_evolve_command(app, &args[1..]).await,
         "gate" => handle_ops_gate_command(app, &args[1..]).await,
         other => {
             emit_command_output(
@@ -10556,6 +10707,56 @@ mod tests {
     #[test]
     fn test_goal_alias_maps_to_objective() {
         assert_eq!(canonical_command("/goal"), "/objective");
+    }
+
+    #[test]
+    fn test_autocomplete_includes_evolve() {
+        let results = autocomplete("/evo");
+        assert!(results.contains(&"/evolve"));
+    }
+
+    #[test]
+    fn summarize_self_evolution_report_formats_fields() {
+        let tmp = tempdir().expect("tempdir");
+        let path = tmp.path().join("self-evolution-loop-test.json");
+        std::fs::write(
+            &path,
+            r#"{
+  "ok": false,
+  "generated_at": "2026-05-02T00:00:00Z",
+  "summary": { "intelligence_index": 66.67 },
+  "recommendations": [{"id":"PARITY_DRIFT"}]
+}"#,
+        )
+        .expect("write report");
+        let line = summarize_self_evolution_report(&path, "self_evolution").expect("summary");
+        assert!(line.contains("self_evolution=fail"));
+        assert!(line.contains("idx=66.67"));
+        assert!(line.contains("recs=1"));
+    }
+
+    #[test]
+    fn self_evolution_recommendations_extracts_lines() {
+        let tmp = tempdir().expect("tempdir");
+        let path = tmp.path().join("self-evolution-loop-test.json");
+        std::fs::write(
+            &path,
+            r#"{
+  "recommendations": [
+    {
+      "id": "EVAL_REGRESSION",
+      "severity": "P0",
+      "title": "Recover eval trend before promotion",
+      "command": "python3 scripts/run-eval-trend-gate.py --json"
+    }
+  ]
+}"#,
+        )
+        .expect("write report");
+        let lines = self_evolution_recommendations(&path);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("EVAL_REGRESSION"));
+        assert!(lines[0].contains("python3 scripts/run-eval-trend-gate.py --json"));
     }
 
     #[test]
