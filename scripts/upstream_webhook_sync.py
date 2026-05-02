@@ -559,6 +559,223 @@ def save_seen_drift_fingerprints(path: str, payload: dict[str, Any]) -> None:
         json.dump(payload, fh, indent=2, sort_keys=True)
 
 
+def load_upkeep_commit_state(path: str) -> dict[str, Any]:
+    if not os.path.exists(path):
+        return {"seen_commits": {}, "updated_at": utc_now_iso()}
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            payload = json.load(fh)
+        if isinstance(payload, dict) and isinstance(payload.get("seen_commits"), dict):
+            return payload
+    except Exception:
+        pass
+    return {"seen_commits": {}, "updated_at": utc_now_iso()}
+
+
+def save_upkeep_commit_state(path: str, payload: dict[str, Any]) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    payload["updated_at"] = utc_now_iso()
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2, sort_keys=True)
+
+
+def classify_commit_workstream(paths: list[str]) -> str:
+    checks = [
+        ("crates/hermes-agent/", "WS2 core runtime parity"),
+        ("crates/hermes-gateway/", "WS3 tools/adapters parity"),
+        ("crates/hermes-tools/", "WS3 tools/adapters parity"),
+        ("crates/hermes-cron/", "WS3 tools/adapters parity"),
+        ("crates/hermes-cli/src/tui.rs", "WS5 UX parity"),
+        ("crates/hermes-cli/", "WS5 UX parity"),
+        ("skills/", "WS4 skills parity"),
+        ("optional-skills/", "WS4 skills parity"),
+        (".github/workflows/", "WS6 tests/CI parity"),
+        ("scripts/", "WS7 security/store/upkeep parity"),
+    ]
+    for prefix, ws in checks:
+        if any(path.startswith(prefix) for path in paths):
+            return ws
+    return "WS8 compatibility/divergence policy"
+
+
+def commit_paths(repo_root: str, sha: str) -> list[str]:
+    rc, out, _ = run_git(
+        repo_root,
+        ["show", "--pretty=format:", "--name-only", sha],
+        check=False,
+    )
+    if rc != 0:
+        return []
+    return [line.strip() for line in out.splitlines() if line.strip()]
+
+
+def discover_event_commits(
+    repo_root: str, event: SyncEvent, max_commits: int
+) -> list[str]:
+    before = str(event.before_sha or "").strip()
+    after = str(event.after_sha or "").strip()
+    if not after:
+        return []
+
+    zero_sha = "0" * 40
+    if before and before != zero_sha and git_ref_exists(repo_root, before) and git_ref_exists(repo_root, after):
+        rc, out, _ = run_git(
+            repo_root,
+            ["rev-list", "--reverse", f"{before}..{after}"],
+            check=False,
+        )
+        if rc == 0:
+            commits = [line.strip() for line in out.splitlines() if line.strip()]
+            if max_commits > 0:
+                commits = commits[-max_commits:]
+            return commits
+
+    if git_ref_exists(repo_root, after):
+        rc, out, _ = run_git(
+            repo_root,
+            ["rev-list", "--reverse", "--max-count", str(max(1, max_commits)), after],
+            check=False,
+        )
+        if rc == 0:
+            return [line.strip() for line in out.splitlines() if line.strip()]
+    return []
+
+
+def maybe_create_upkeep_commit_issues(
+    *,
+    repo_root: str,
+    report_dir: str,
+    event: SyncEvent,
+    enabled: bool,
+    labels: list[str],
+    parent_issue: int,
+    state_path: str,
+    max_commits_per_event: int,
+) -> dict[str, Any]:
+    if not enabled:
+        return {"enabled": False, "created": 0, "skipped_seen": 0, "total_candidates": 0}
+    if shutil.which("gh") is None:
+        return {
+            "enabled": True,
+            "created": 0,
+            "skipped_seen": 0,
+            "total_candidates": 0,
+            "reason": "gh_cli_missing",
+        }
+
+    commits = discover_event_commits(repo_root, event, max_commits_per_event)
+    state = load_upkeep_commit_state(state_path)
+    seen: dict[str, Any] = state.setdefault("seen_commits", {})
+    created: list[dict[str, Any]] = []
+    skipped_seen = 0
+
+    for sha in commits:
+        if sha in seen:
+            skipped_seen += 1
+            continue
+        rc, out, _ = run_git(
+            repo_root,
+            ["show", "-s", "--format=%H%x1f%an%x1f%aI%x1f%s", sha],
+            check=False,
+        )
+        if rc != 0 or not out.strip():
+            continue
+        raw = out.strip().split("\x1f")
+        if len(raw) != 4:
+            continue
+        commit_sha, author, authored_at, subject = raw
+        paths = commit_paths(repo_root, commit_sha)
+        workstream = classify_commit_workstream(paths)
+        short_sha = commit_sha[:12]
+        title = f"[UPKEEP][{short_sha}] parity task: {subject}".strip()
+        if len(title) > 255:
+            title = title[:252] + "..."
+
+        compare_url = event.compare_url
+        body_lines = [
+            "Automated upstream commit parity task.",
+            "",
+            f"- upstream_sha: `{commit_sha}`",
+            f"- subject: {subject}",
+            f"- author: `{author}`",
+            f"- authored_at: `{authored_at}`",
+            f"- repository: `{event.repository}`",
+            f"- ref: `{event.ref}`",
+            f"- compare_url: {compare_url or '<none>'}",
+            f"- suggested_workstream: `{workstream}`",
+            "",
+            "Touched paths (first 40):",
+        ]
+        for path in paths[:40]:
+            body_lines.append(f"- `{path}`")
+        body_lines.extend(
+            [
+                "",
+                "Implementation checklist:",
+                "- [ ] assess if this is `ported` or `superseded` for Rust-first parity",
+                "- [ ] update `docs/parity/upstream-missing-queue.json` with explicit evidence note",
+                "- [ ] link resulting PR/commit",
+            ]
+        )
+        issue_url = gh_issue_create(repo_root, title, "\n".join(body_lines), labels)
+        if not issue_url:
+            continue
+        seen[commit_sha] = {
+            "issue_url": issue_url,
+            "created_at": utc_now_iso(),
+            "subject": subject,
+            "workstream": workstream,
+        }
+        created.append(
+            {
+                "sha": commit_sha,
+                "issue_url": issue_url,
+                "subject": subject,
+                "workstream": workstream,
+            }
+        )
+
+    save_upkeep_commit_state(state_path, state)
+
+    artifact = {
+        "generated_at": utc_now_iso(),
+        "delivery_id": event.delivery_id,
+        "repository": event.repository,
+        "ref": event.ref,
+        "before_sha": event.before_sha,
+        "after_sha": event.after_sha,
+        "created": created,
+        "created_count": len(created),
+        "skipped_seen_count": skipped_seen,
+        "total_candidates": len(commits),
+        "state_path": state_path,
+    }
+    os.makedirs(report_dir, exist_ok=True)
+    artifact_path = os.path.join(report_dir, f"upkeep-commit-queue-{event.delivery_id}.json")
+    with open(artifact_path, "w", encoding="utf-8") as fh:
+        json.dump(artifact, fh, indent=2, sort_keys=True)
+
+    if parent_issue > 0 and created:
+        summary = [
+            "Automated upstream upkeep commit queue update:",
+            f"- delivery_id: `{event.delivery_id}`",
+            f"- created: `{len(created)}`",
+            f"- skipped_seen: `{skipped_seen}`",
+            f"- artifact: `{artifact_path}`",
+        ]
+        for row in created[:20]:
+            summary.append(f"- `{row['sha'][:12]}` → {row['issue_url']}")
+        gh_issue_comment(repo_root, parent_issue, "\n".join(summary))
+
+    return {
+        "enabled": True,
+        "created": len(created),
+        "skipped_seen": skipped_seen,
+        "total_candidates": len(commits),
+        "artifact_path": artifact_path,
+    }
+
+
 def gh_issue_comment(repo_root: str, issue: int, body: str) -> bool:
     if shutil.which("gh") is None:
         return False
@@ -1081,6 +1298,17 @@ def worker_loop(args: argparse.Namespace) -> int:
     ]
     parity_drift_enabled = not bool(args.disable_parity_drift_check)
     open_parity_issue = not bool(args.no_parity_open_issues)
+    upkeep_labels = [
+        v.strip() for v in str(args.upkeep_commit_labels).split(",") if v.strip()
+    ]
+    upkeep_enabled = not bool(args.disable_upkeep_commit_queue)
+    upkeep_state_path = args.upkeep_commit_state_path
+    if upkeep_state_path and not os.path.isabs(upkeep_state_path):
+        upkeep_state_path = os.path.join(repo_root, upkeep_state_path)
+    if not upkeep_state_path:
+        upkeep_state_path = os.path.join(
+            report_dir, "upkeep-commit-queue-state.json"
+        )
 
     assist_cmd = args.assist_cmd or os.environ.get("UPSTREAM_SYNC_ASSIST_CMD", "")
     assist_cmd = assist_cmd.strip() or None
@@ -1112,6 +1340,16 @@ def worker_loop(args: argparse.Namespace) -> int:
                 timeout_sec=args.sync_timeout_sec,
             )
             outcome = parse_report_status(report_path)
+            upkeep_result = maybe_create_upkeep_commit_issues(
+                repo_root=repo_root,
+                report_dir=report_dir,
+                event=item.event,
+                enabled=upkeep_enabled,
+                labels=upkeep_labels,
+                parent_issue=args.upkeep_commit_parent_issue,
+                state_path=upkeep_state_path,
+                max_commits_per_event=args.upkeep_commit_max_per_event,
+            )
             if rc == 0:
                 upstream_ref = (
                     item.event.after_sha
@@ -1142,7 +1380,8 @@ def worker_loop(args: argparse.Namespace) -> int:
                 )
                 note = (
                     f"{outcome}; cli_drift={'detected' if drift_result.get('has_drift') else 'none'}; "
-                    f"global_drift={'detected' if global_drift_result.get('has_drift') else 'none'}"
+                    f"global_drift={'detected' if global_drift_result.get('has_drift') else 'none'}; "
+                    f"upkeep_created={upkeep_result.get('created', 0)}"
                 )
                 if drift_result.get("created_issue_url"):
                     note += f"; issue={drift_result['created_issue_url']}"
@@ -1152,7 +1391,11 @@ def worker_loop(args: argparse.Namespace) -> int:
                 continue
 
             if outcome in {"risk_blocked", "conflict"}:
-                queue.mark_done(item.id, status=outcome, note=outcome)
+                queue.mark_done(
+                    item.id,
+                    status=outcome,
+                    note=f"{outcome}; upkeep_created={upkeep_result.get('created', 0)}",
+                )
                 maybe_run_assist_hook(assist_cmd, item.event, report_path, outcome, repo_root)
                 continue
 
@@ -1192,6 +1435,16 @@ def worker_loop(args: argparse.Namespace) -> int:
                 timeout_sec=args.sync_timeout_sec,
             )
             outcome = parse_report_status(report_path)
+            upkeep_result = maybe_create_upkeep_commit_issues(
+                repo_root=repo_root,
+                report_dir=report_dir,
+                event=event,
+                enabled=upkeep_enabled,
+                labels=upkeep_labels,
+                parent_issue=args.upkeep_commit_parent_issue,
+                state_path=upkeep_state_path,
+                max_commits_per_event=args.upkeep_commit_max_per_event,
+            )
             if rc == 0:
                 upstream_ref = (
                     event.after_sha
@@ -1235,6 +1488,12 @@ def worker_loop(args: argparse.Namespace) -> int:
             # In SQS mode: acknowledge terminal states. Let visibility timeout retry transient failures.
             if rc == 0 or outcome in {"risk_blocked", "conflict"}:
                 consumer.ack(receipt_handle)
+            if upkeep_result.get("created"):
+                LOG.info(
+                    "upkeep commit issues created=%s delivery=%s",
+                    upkeep_result.get("created"),
+                    event.delivery_id,
+                )
             if outcome in {"risk_blocked", "conflict"}:
                 maybe_run_assist_hook(assist_cmd, event, report_path, outcome, repo_root)
             elif rc != 0:
@@ -1272,6 +1531,16 @@ def worker_loop(args: argparse.Namespace) -> int:
             timeout_sec=args.sync_timeout_sec,
         )
         outcome = parse_report_status(report_path)
+        upkeep_result = maybe_create_upkeep_commit_issues(
+            repo_root=repo_root,
+            report_dir=report_dir,
+            event=event,
+            enabled=upkeep_enabled,
+            labels=upkeep_labels,
+            parent_issue=args.upkeep_commit_parent_issue,
+            state_path=upkeep_state_path,
+            max_commits_per_event=args.upkeep_commit_max_per_event,
+        )
         if rc == 0:
             upstream_ref = (
                 event.after_sha
@@ -1316,6 +1585,12 @@ def worker_loop(args: argparse.Namespace) -> int:
         # uncommitted so another worker run can retry.
         if rc == 0 or outcome in {"risk_blocked", "conflict"}:
             consumer.ack()
+        if upkeep_result.get("created"):
+            LOG.info(
+                "upkeep commit issues created=%s delivery=%s",
+                upkeep_result.get("created"),
+                event.delivery_id,
+            )
         if outcome in {"risk_blocked", "conflict"}:
             maybe_run_assist_hook(assist_cmd, event, report_path, outcome, repo_root)
     return 0
@@ -1457,6 +1732,37 @@ def build_parser() -> argparse.ArgumentParser:
         "--assist-cmd",
         default="",
         help="Optional command to run on risk_blocked/conflict/dead outcomes (Nous/Codex helper hook)",
+    )
+    worker.add_argument(
+        "--disable-upkeep-commit-queue",
+        action="store_true",
+        default=False,
+        help="Disable per-upstream-commit upkeep issue queue creation.",
+    )
+    worker.add_argument(
+        "--upkeep-commit-parent-issue",
+        type=int,
+        default=43,
+        help="Issue number to receive commit-queue summary comments (default: 43).",
+    )
+    worker.add_argument(
+        "--upkeep-commit-labels",
+        default="parity,parity-upkeep,upstream-sync",
+        help="Comma-separated labels for per-commit upkeep issues.",
+    )
+    worker.add_argument(
+        "--upkeep-commit-state-path",
+        default=os.environ.get(
+            "UPSTREAM_SYNC_UPKEEP_COMMIT_STATE_PATH",
+            ".sync-reports/upkeep-commit-queue-state.json",
+        ),
+        help="State file path for deduping per-commit upkeep issue creation.",
+    )
+    worker.add_argument(
+        "--upkeep-commit-max-per-event",
+        type=int,
+        default=40,
+        help="Maximum upstream commits to enqueue as issues per event.",
     )
 
     return parser
