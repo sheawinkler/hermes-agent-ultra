@@ -27,6 +27,13 @@ pub const KNOWN_PROVIDERS: &[&str] = &[
     "kilocode",
     "nvidia",
     "ollama-cloud",
+    "ollama-local",
+    "llama-cpp",
+    "vllm",
+    "mlx",
+    "apple-ane",
+    "sglang",
+    "tgi",
     "opencode-go",
     "opencode-zen",
     "xai",
@@ -203,5 +210,28 @@ mod tests {
             "models.dev merged providers missing capability bit: {:?}",
             missing
         );
+    }
+
+    #[test]
+    fn local_backends_are_known_and_not_oauth() {
+        for provider in [
+            "ollama-local",
+            "llama-cpp",
+            "vllm",
+            "mlx",
+            "apple-ane",
+            "sglang",
+            "tgi",
+        ] {
+            let cap = provider_capability_for(provider).expect("capability");
+            assert!(
+                !cap.oauth_supported,
+                "{provider} should not advertise oauth"
+            );
+            assert!(
+                !cap.models_dev_merged,
+                "{provider} should not require models.dev merge"
+            );
+        }
     }
 }

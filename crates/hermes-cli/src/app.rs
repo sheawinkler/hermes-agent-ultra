@@ -1092,6 +1092,13 @@ mod tests {
             ("HF_TOKEN", "huggingface"),
             ("KILOCODE_API_KEY", "kilocode"),
             ("NVIDIA_API_KEY", "nvidia"),
+            ("OLLAMA_LOCAL_API_KEY", "ollama-local"),
+            ("LLAMA_CPP_API_KEY", "llama-cpp"),
+            ("VLLM_API_KEY", "vllm"),
+            ("MLX_API_KEY", "mlx"),
+            ("APPLE_ANE_API_KEY", "apple-ane"),
+            ("SGLANG_API_KEY", "sglang"),
+            ("TGI_API_KEY", "tgi"),
             ("OPENCODE_GO_API_KEY", "opencode-go"),
             ("OPENCODE_ZEN_API_KEY", "opencode-zen"),
             ("XAI_API_KEY", "xai"),
@@ -1122,6 +1129,37 @@ mod tests {
             "qwen"
         );
         assert_eq!(normalize_runtime_provider_name("opencode"), "opencode-zen");
+        assert_eq!(normalize_runtime_provider_name("ollama"), "ollama-local");
+        assert_eq!(normalize_runtime_provider_name("llama.cpp"), "llama-cpp");
+        assert_eq!(normalize_runtime_provider_name("ollvm"), "vllm");
+        assert_eq!(normalize_runtime_provider_name("llvm"), "vllm");
+        assert_eq!(normalize_runtime_provider_name("mlx-lm"), "mlx");
+        assert_eq!(normalize_runtime_provider_name("ane"), "apple-ane");
+    }
+
+    #[test]
+    fn test_allow_no_api_key_for_local_backends_and_private_base_urls() {
+        assert!(allow_no_api_key("ollama-local", "ollama-local", None));
+        assert!(allow_no_api_key(
+            "openai",
+            "openai",
+            Some("http://127.0.0.1:11434/v1")
+        ));
+        assert!(allow_no_api_key(
+            "custom",
+            "custom",
+            Some("http://192.168.1.20:8000/v1")
+        ));
+        assert!(allow_no_api_key(
+            "custom",
+            "custom",
+            Some("http://[::1]:11434/v1")
+        ));
+        assert!(!allow_no_api_key(
+            "openai",
+            "openai",
+            Some("https://api.openai.com/v1")
+        ));
     }
 
     #[test]
@@ -1294,6 +1332,13 @@ const ZAI_BASE_URL: &str = "https://api.z.ai/api/paas/v4";
 const ARCEE_BASE_URL: &str = "https://api.arcee.ai/api/v1";
 const OLLAMA_CLOUD_BASE_URL: &str = "https://ollama.com/v1";
 const DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com/v1";
+const OLLAMA_LOCAL_BASE_URL: &str = "http://127.0.0.1:11434/v1";
+const LLAMA_CPP_BASE_URL: &str = "http://127.0.0.1:8080/v1";
+const VLLM_BASE_URL: &str = "http://127.0.0.1:8000/v1";
+const MLX_BASE_URL: &str = "http://127.0.0.1:8080/v1";
+const APPLE_ANE_BASE_URL: &str = "http://127.0.0.1:8081/v1";
+const SGLANG_BASE_URL: &str = "http://127.0.0.1:30000/v1";
+const TGI_BASE_URL: &str = "http://127.0.0.1:8082/v1";
 
 fn normalize_runtime_provider_name(provider: &str) -> String {
     let normalized = provider.trim().to_ascii_lowercase();
@@ -1309,6 +1354,12 @@ fn normalize_runtime_provider_name(provider: &str) -> String {
         "kilo" | "kilo-code" | "kilo-gateway" => "kilocode".to_string(),
         "opencode" | "opencode-zen" | "zen" => "opencode-zen".to_string(),
         "go" => "opencode-go".to_string(),
+        "ollama" => "ollama-local".to_string(),
+        "llama.cpp" | "llamacpp" => "llama-cpp".to_string(),
+        "ollvm" | "llvm" => "vllm".to_string(),
+        "mlx-lm" | "apple-mlx" => "mlx".to_string(),
+        "ane" | "apple-neural-engine" | "neural-engine" => "apple-ane".to_string(),
+        "text-generation-inference" => "tgi".to_string(),
         _ => normalized,
     }
 }
@@ -1335,6 +1386,13 @@ fn provider_default_base_url(provider: &str) -> Option<&'static str> {
         "zai" => Some(ZAI_BASE_URL),
         "arcee" => Some(ARCEE_BASE_URL),
         "ollama-cloud" => Some(OLLAMA_CLOUD_BASE_URL),
+        "ollama-local" | "ollama" => Some(OLLAMA_LOCAL_BASE_URL),
+        "llama-cpp" | "llama.cpp" | "llamacpp" => Some(LLAMA_CPP_BASE_URL),
+        "vllm" | "ollvm" | "llvm" => Some(VLLM_BASE_URL),
+        "mlx" | "mlx-lm" | "apple-mlx" => Some(MLX_BASE_URL),
+        "apple-ane" | "ane" | "apple-neural-engine" => Some(APPLE_ANE_BASE_URL),
+        "sglang" => Some(SGLANG_BASE_URL),
+        "tgi" | "text-generation-inference" => Some(TGI_BASE_URL),
         "deepseek" => Some(DEEPSEEK_BASE_URL),
         _ => None,
     }
@@ -1443,6 +1501,71 @@ fn default_rtk_raw_mode() -> bool {
     }
 }
 
+fn provider_base_url_from_env(provider: &str) -> Option<String> {
+    let env_var = match provider.trim().to_ascii_lowercase().as_str() {
+        "ollama-local" | "ollama" => "OLLAMA_BASE_URL",
+        "llama-cpp" | "llama.cpp" | "llamacpp" => "LLAMA_CPP_BASE_URL",
+        "vllm" | "ollvm" | "llvm" => "VLLM_BASE_URL",
+        "mlx" | "mlx-lm" | "apple-mlx" => "MLX_BASE_URL",
+        "apple-ane" | "ane" | "apple-neural-engine" => "APPLE_ANE_BASE_URL",
+        "sglang" => "SGLANG_BASE_URL",
+        "tgi" | "text-generation-inference" => "TGI_BASE_URL",
+        _ => return None,
+    };
+    std::env::var(env_var)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn provider_is_local_backend(provider: &str) -> bool {
+    matches!(
+        provider.trim().to_ascii_lowercase().as_str(),
+        "ollama-local" | "llama-cpp" | "vllm" | "mlx" | "apple-ane" | "sglang" | "tgi"
+    )
+}
+
+fn allow_no_api_key(provider_name: &str, runtime_provider: &str, base_url: Option<&str>) -> bool {
+    provider_is_local_backend(runtime_provider)
+        || provider_is_local_backend(provider_name)
+        || base_url.is_some_and(url_is_local_or_private)
+}
+
+fn url_is_local_or_private(base_url: &str) -> bool {
+    let trimmed = base_url.trim();
+    let no_scheme = trimmed
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(trimmed);
+    let authority = no_scheme.split('/').next().unwrap_or(no_scheme).trim();
+    let host = if authority.starts_with('[') {
+        authority
+            .find(']')
+            .map(|idx| authority[1..idx].to_string())
+            .unwrap_or_else(|| authority.trim_matches(&['[', ']'][..]).to_string())
+    } else {
+        authority
+            .split(':')
+            .next()
+            .unwrap_or(authority)
+            .trim()
+            .to_string()
+    }
+    .to_ascii_lowercase();
+
+    if host == "localhost" {
+        return true;
+    }
+
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return match ip {
+            std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
+            std::net::IpAddr::V6(v6) => v6.is_loopback() || v6.is_unique_local(),
+        };
+    }
+    false
+}
+
 /// Resolve API key / token for a named LLM provider from well-known environment variables.
 pub fn provider_api_key_from_env(provider: &str) -> Option<String> {
     let provider = normalize_runtime_provider_name(provider);
@@ -1530,6 +1653,31 @@ pub fn provider_api_key_from_env(provider: &str) -> Option<String> {
         "ollama-cloud" => std::env::var("OLLAMA_API_KEY")
             .ok()
             .filter(|s| !s.trim().is_empty()),
+        "ollama-local" => std::env::var("OLLAMA_LOCAL_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| std::env::var("OLLAMA_API_KEY").ok())
+            .filter(|s| !s.trim().is_empty()),
+        "llama-cpp" => std::env::var("LLAMA_CPP_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
+        "vllm" => std::env::var("VLLM_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
+        "mlx" => std::env::var("MLX_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
+        "apple-ane" => std::env::var("APPLE_ANE_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
+        "sglang" => std::env::var("SGLANG_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty()),
+        "tgi" => std::env::var("TGI_API_KEY")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| std::env::var("HUGGINGFACE_API_KEY").ok())
+            .filter(|s| !s.trim().is_empty()),
         "opencode-go" => std::env::var("OPENCODE_GO_API_KEY")
             .ok()
             .filter(|s| !s.trim().is_empty()),
@@ -1575,6 +1723,11 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
 
     let default_base_url = provider_default_base_url(provider_name.as_str())
         .or_else(|| provider_default_base_url(runtime_provider.as_str()));
+    let base_url = provider_config
+        .and_then(|c| c.base_url.clone())
+        .or_else(|| provider_base_url_from_env(provider_name.as_str()))
+        .or_else(|| provider_base_url_from_env(runtime_provider.as_str()))
+        .or_else(|| default_base_url.map(ToString::to_string));
 
     let api_key = provider_config
         .and_then(|c| c.api_key.as_deref())
@@ -1590,8 +1743,15 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
         .or_else(|| provider_api_key_from_env(provider_name.as_str()))
         .or_else(|| provider_api_key_from_env(runtime_provider.as_str()));
 
+    let local_no_key_ok = allow_no_api_key(
+        provider_name.as_str(),
+        runtime_provider.as_str(),
+        base_url.as_deref(),
+    );
+
     let api_key = match api_key {
         Some(k) => k,
+        None if local_no_key_ok => "local-no-key".to_string(),
         None => {
             tracing::warn!(
                 "No API key for provider '{}'(runtime '{}'); using NoBackendProvider",
@@ -1603,10 +1763,6 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
             });
         }
     };
-
-    let base_url = provider_config
-        .and_then(|c| c.base_url.clone())
-        .or_else(|| default_base_url.map(ToString::to_string));
 
     match runtime_provider.as_str() {
         "openai" => {
@@ -1671,6 +1827,10 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
             )
             .with_model(model_name.as_str());
             Arc::new(p)
+        }
+        "ollama-local" | "llama-cpp" | "vllm" | "mlx" | "apple-ane" | "sglang" | "tgi" => {
+            let url = base_url.unwrap_or_else(|| "http://127.0.0.1:11434/v1".to_string());
+            Arc::new(GenericProvider::new(url, &api_key, model_name.as_str()))
         }
         _ => {
             let url = base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string());

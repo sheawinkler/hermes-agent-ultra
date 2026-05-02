@@ -14,6 +14,13 @@ use sha2::{Digest, Sha256};
 use crate::providers::provider_capability_for;
 const NOUS_DEFAULT_INFERENCE_BASE_URL: &str = "https://inference-api.nousresearch.com/v1";
 const PROVIDER_CATALOG_CACHE_VERSION: u32 = 1;
+const OLLAMA_LOCAL_DEFAULT_BASE_URL: &str = "http://127.0.0.1:11434/v1";
+const LLAMA_CPP_DEFAULT_BASE_URL: &str = "http://127.0.0.1:8080/v1";
+const VLLM_DEFAULT_BASE_URL: &str = "http://127.0.0.1:8000/v1";
+const MLX_DEFAULT_BASE_URL: &str = "http://127.0.0.1:8080/v1";
+const APPLE_ANE_DEFAULT_BASE_URL: &str = "http://127.0.0.1:8081/v1";
+const SGLANG_DEFAULT_BASE_URL: &str = "http://127.0.0.1:30000/v1";
+const TGI_DEFAULT_BASE_URL: &str = "http://127.0.0.1:8082/v1";
 
 const CURATED_PROVIDER_MODELS: &[(&str, &[&str])] = &[
     (
@@ -115,6 +122,58 @@ const CURATED_PROVIDER_MODELS: &[(&str, &[&str])] = &[
         &[
             "nvidia/llama-3.3-nemotron-super-49b-v1.5",
             "nvidia/nemotron-3-super-120b-a12b",
+        ],
+    ),
+    (
+        "ollama-local",
+        &["qwen3:14b", "llama3.1:8b", "deepseek-r1:14b", "mistral:7b"],
+    ),
+    (
+        "llama-cpp",
+        &[
+            "local-gguf",
+            "qwen3-14b-instruct-q4_k_m.gguf",
+            "llama-3.1-8b-instruct-q4_k_m.gguf",
+        ],
+    ),
+    (
+        "vllm",
+        &[
+            "NousResearch/Meta-Llama-3-8B-Instruct",
+            "Qwen/Qwen3-14B-Instruct",
+            "deepseek-ai/DeepSeek-V3.2",
+        ],
+    ),
+    (
+        "mlx",
+        &[
+            "mlx-community/Qwen3-8B-4bit",
+            "mlx-community/Llama-3.1-8B-Instruct-4bit",
+            "mlx-community/Mistral-7B-Instruct-v0.3-4bit",
+        ],
+    ),
+    (
+        "apple-ane",
+        &[
+            "ane-default",
+            "foundation-model",
+            "apple-on-device-openai-compatible",
+        ],
+    ),
+    (
+        "sglang",
+        &[
+            "default",
+            "Qwen/Qwen3-14B-Instruct",
+            "meta-llama/Llama-3.1-8B-Instruct",
+        ],
+    ),
+    (
+        "tgi",
+        &[
+            "default",
+            "meta-llama/Llama-3.1-8B-Instruct",
+            "Qwen/Qwen3-14B-Instruct",
         ],
     ),
     (
@@ -404,6 +463,117 @@ pub fn provider_curated_models(provider: &str) -> &'static [&'static str] {
     &[]
 }
 
+fn is_local_openai_compatible_provider(provider: &str) -> bool {
+    matches!(
+        provider.trim().to_ascii_lowercase().as_str(),
+        "ollama-local" | "llama-cpp" | "vllm" | "mlx" | "apple-ane" | "sglang" | "tgi"
+    )
+}
+
+fn local_provider_default_base_url(provider: &str) -> Option<&'static str> {
+    match provider.trim().to_ascii_lowercase().as_str() {
+        "ollama-local" => Some(OLLAMA_LOCAL_DEFAULT_BASE_URL),
+        "llama-cpp" => Some(LLAMA_CPP_DEFAULT_BASE_URL),
+        "vllm" => Some(VLLM_DEFAULT_BASE_URL),
+        "mlx" => Some(MLX_DEFAULT_BASE_URL),
+        "apple-ane" => Some(APPLE_ANE_DEFAULT_BASE_URL),
+        "sglang" => Some(SGLANG_DEFAULT_BASE_URL),
+        "tgi" => Some(TGI_DEFAULT_BASE_URL),
+        _ => None,
+    }
+}
+
+fn local_provider_base_url_env_var(provider: &str) -> Option<&'static str> {
+    match provider.trim().to_ascii_lowercase().as_str() {
+        "ollama-local" => Some("OLLAMA_BASE_URL"),
+        "llama-cpp" => Some("LLAMA_CPP_BASE_URL"),
+        "vllm" => Some("VLLM_BASE_URL"),
+        "mlx" => Some("MLX_BASE_URL"),
+        "apple-ane" => Some("APPLE_ANE_BASE_URL"),
+        "sglang" => Some("SGLANG_BASE_URL"),
+        "tgi" => Some("TGI_BASE_URL"),
+        _ => None,
+    }
+}
+
+fn local_provider_api_key(provider: &str) -> Option<String> {
+    match provider.trim().to_ascii_lowercase().as_str() {
+        "ollama-local" => std::env::var("OLLAMA_LOCAL_API_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .or_else(|| std::env::var("OLLAMA_API_KEY").ok())
+            .filter(|v| !v.trim().is_empty()),
+        "llama-cpp" => std::env::var("LLAMA_CPP_API_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty()),
+        "vllm" => std::env::var("VLLM_API_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty()),
+        "mlx" => std::env::var("MLX_API_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty()),
+        "apple-ane" => std::env::var("APPLE_ANE_API_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty()),
+        "sglang" => std::env::var("SGLANG_API_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty()),
+        "tgi" => std::env::var("TGI_API_KEY")
+            .ok()
+            .filter(|v| !v.trim().is_empty()),
+        _ => None,
+    }
+}
+
+fn local_provider_resolved_base_url(provider: &str) -> Option<String> {
+    local_provider_base_url_env_var(provider)
+        .and_then(|name| std::env::var(name).ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| local_provider_default_base_url(provider).map(ToString::to_string))
+}
+
+async fn fetch_openai_compatible_live_models(base_url: &str, api_key: Option<&str>) -> Vec<String> {
+    if cfg!(test) {
+        return Vec::new();
+    }
+    let url = format!("{}/models", base_url.trim_end_matches('/'));
+    let client = reqwest::Client::new();
+    let mut request = client.get(url);
+    if let Some(key) = api_key.map(str::trim).filter(|v| !v.is_empty()) {
+        request = request.bearer_auth(key);
+    }
+    let response = match request.send().await {
+        Ok(resp) => resp,
+        Err(_) => return Vec::new(),
+    };
+    if !response.status().is_success() {
+        return Vec::new();
+    }
+    let payload: Value = match response.json().await {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    let mut models = payload
+        .get("data")
+        .and_then(Value::as_array)
+        .map(|rows| {
+            rows.iter()
+                .filter_map(|row| row.get("id").and_then(Value::as_str))
+                .map(str::trim)
+                .filter(|id| !id.is_empty())
+                .map(ToString::to_string)
+                .collect::<Vec<String>>()
+        })
+        .unwrap_or_default();
+    if models.is_empty() {
+        return models;
+    }
+    let mut seen = HashSet::new();
+    models.retain(|model| seen.insert(model.to_ascii_lowercase()));
+    models
+}
+
 async fn resolve_nous_catalog_endpoint_and_token() -> Option<(String, String)> {
     if let Ok(creds) = crate::auth::resolve_nous_runtime_credentials(
         false,
@@ -560,6 +730,29 @@ pub async fn provider_model_ids_with_client(
         } else {
             merged
         }
+    } else if is_local_openai_compatible_provider(&normalized) {
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut merged: Vec<String> = Vec::new();
+        if let Some(base_url) = local_provider_resolved_base_url(&normalized) {
+            let live = fetch_openai_compatible_live_models(
+                base_url.as_str(),
+                local_provider_api_key(&normalized).as_deref(),
+            )
+            .await;
+            for model in live {
+                let key = model.to_ascii_lowercase();
+                if seen.insert(key) {
+                    merged.push(model);
+                }
+            }
+        }
+        for model in curated {
+            let key = model.to_ascii_lowercase();
+            if seen.insert(key) {
+                merged.push((*model).to_string());
+            }
+        }
+        merged
     } else if !is_models_dev_preferred_provider(&normalized) {
         curated.iter().map(|model| model.to_string()).collect()
     } else {
@@ -683,6 +876,15 @@ mod tests {
     }
 
     #[test]
+    fn local_backend_curated_models_include_ollama_llamacpp_and_vllm() {
+        assert!(provider_curated_models("ollama-local").contains(&"qwen3:14b"));
+        assert!(provider_curated_models("llama-cpp").contains(&"local-gguf"));
+        assert!(provider_curated_models("vllm").contains(&"NousResearch/Meta-Llama-3-8B-Instruct"));
+        assert!(provider_curated_models("mlx").contains(&"mlx-community/Qwen3-8B-4bit"));
+        assert!(provider_curated_models("apple-ane").contains(&"ane-default"));
+    }
+
+    #[test]
     fn openrouter_curated_models_include_gpt55_variants() {
         let models = provider_curated_models("openrouter");
         assert!(models.contains(&"openai/gpt-5.5"));
@@ -754,6 +956,23 @@ mod tests {
             .map(|m| (*m).to_string())
             .collect();
         assert_eq!(out, expected);
+    }
+
+    #[tokio::test]
+    async fn local_provider_catalog_returns_curated_without_network_dependency() {
+        let client = seeded_client(json!({}));
+        let out = provider_model_ids_with_client("ollama-local", &client).await;
+        let expected: Vec<String> = provider_curated_models("ollama-local")
+            .iter()
+            .map(|m| (*m).to_string())
+            .collect();
+        assert!(out.len() >= expected.len());
+        for model in expected {
+            assert!(
+                out.iter().any(|item| item == &model),
+                "missing model {model}"
+            );
+        }
     }
 
     #[tokio::test]
