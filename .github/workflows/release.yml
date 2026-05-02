@@ -6,10 +6,48 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
+  security-release-gate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Secret scan (tracked files)
+        run: |
+          python3 scripts/release_secret_scan.py \
+            --repo-root . \
+            --report .sync-reports/release-secret-scan.json
+      - name: Config redaction tests (CLI)
+        run: |
+          cargo test -p hermes-cli secret_stdout_gate_defaults_false -- --nocapture
+          cargo test -p hermes-cli secret_stdout_gate_accepts_truthy_values -- --nocapture
+          cargo test -p hermes-cli mask_secret_value_hides_payload -- --nocapture
+      - name: Config redaction tests (agent replay)
+        run: |
+          cargo test -p hermes-agent test_redact_json_value_masks_sensitive_fields -- --nocapture
+          cargo test -p hermes-agent test_replay_recorder_adds_hash_chain_metadata -- --nocapture
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          cargo install cargo-cyclonedx --locked
+          cargo cyclonedx --workspace --format json --output-file release-sbom.cdx.json
+      - name: Upload security gate artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-security-artifacts
+          path: |
+            .sync-reports/release-secret-scan.json
+            release-sbom.cdx.json
+
   cross-build:
+    needs: security-release-gate
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -49,12 +87,14 @@ jobs:
           mkdir -p dist
           cp target/${{ matrix.target }}/release/${{ matrix.binary }} dist/
           cd dist && zip ../${{ matrix.artifact }} ${{ matrix.binary }}
-      - name: Upload release asset
-        uses: softprops/action-gh-release@v2
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
         with:
-          files: ${{ matrix.artifact }}
+          name: release-${{ matrix.target }}
+          path: ${{ matrix.artifact }}
 
   macos-build:
+    needs: security-release-gate
     strategy:
       matrix:
         include:
@@ -81,22 +121,56 @@ jobs:
           mkdir -p dist
           cp target/${{ matrix.target }}/release/hermes dist/
           tar -C dist -czf ${{ matrix.artifact }} hermes
-      - name: Upload release asset
-        uses: softprops/action-gh-release@v2
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
         with:
-          files: ${{ matrix.artifact }}
+          name: release-${{ matrix.target }}
+          path: ${{ matrix.artifact }}
 
-  publish-installers:
+  sign-and-publish:
+    needs: [security-release-gate, cross-build, macos-build]
     runs-on: ubuntu-latest
-    needs: [cross-build, macos-build]
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Download release build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Download security artifacts (SBOM)
+        uses: actions/download-artifact@v4
+        with:
+          name: release-security-artifacts
+          path: dist/security
       - name: Generate Homebrew formula
         run: bash scripts/generate-homebrew-formula.sh "${GITHUB_REF_NAME}"
-      - name: Upload helper scripts
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+      - name: Sign release artifacts (keyless)
+        run: |
+          shopt -s nullglob
+          for artifact in dist/*.tar.gz dist/*.zip; do
+            cosign sign-blob \
+              --yes \
+              --output-signature "${artifact}.sig" \
+              --output-certificate "${artifact}.pem" \
+              "${artifact}"
+          done
+      - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.tar.gz.sig
+            dist/*.zip.sig
+            dist/*.tar.gz.pem
+            dist/*.zip.pem
+            dist/security/release-sbom.cdx.json
             scripts/install.sh
             Formula/hermes.rb
