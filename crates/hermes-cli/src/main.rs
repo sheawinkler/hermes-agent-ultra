@@ -3705,6 +3705,12 @@ fn normalize_auth_provider(provider: &str) -> String {
         }
         "kilo" | "kilo-code" | "kilo-gateway" => "kilocode".to_string(),
         "opencode" | "zen" => "opencode-zen".to_string(),
+        "ollama" => "ollama-local".to_string(),
+        "llama.cpp" | "llamacpp" => "llama-cpp".to_string(),
+        "ollvm" | "llvm" => "vllm".to_string(),
+        "mlx-lm" | "apple-mlx" => "mlx".to_string(),
+        "ane" | "apple-neural-engine" | "neural-engine" => "apple-ane".to_string(),
+        "text-generation-inference" => "tgi".to_string(),
         "aigateway" | "vercel" | "vercel-ai-gateway" => "ai-gateway".to_string(),
         "x-ai" | "x.ai" | "grok" => "xai".to_string(),
         "glm" | "z-ai" | "z.ai" | "zhipu" => "zai".to_string(),
@@ -3753,6 +3759,12 @@ fn normalize_secret_provider(provider: &str) -> String {
         "moonshot" | "kimi" => "kimi-coding".to_string(),
         "aigateway" | "vercel" | "vercel-ai-gateway" => "ai-gateway".to_string(),
         "opencode" | "zen" => "opencode-zen".to_string(),
+        "ollama" => "ollama-local".to_string(),
+        "llama.cpp" | "llamacpp" => "llama-cpp".to_string(),
+        "ollvm" | "llvm" => "vllm".to_string(),
+        "mlx-lm" | "apple-mlx" => "mlx".to_string(),
+        "ane" | "apple-neural-engine" | "neural-engine" => "apple-ane".to_string(),
+        "text-generation-inference" => "tgi".to_string(),
         "kilo" | "kilo-code" | "kilo-gateway" => "kilocode".to_string(),
         "x-ai" | "x.ai" | "grok" => "xai".to_string(),
         "glm" | "z-ai" | "z.ai" | "zhipu" => "zai".to_string(),
@@ -3808,6 +3820,21 @@ fn secret_provider_aliases(provider: &str) -> Vec<String> {
         "ai-gateway" => vec!["ai-gateway".to_string(), "aigateway".to_string()],
         "opencode-zen" => vec!["opencode-zen".to_string(), "opencode".to_string()],
         "kilocode" => vec!["kilocode".to_string(), "kilo".to_string()],
+        "ollama-local" => vec!["ollama-local".to_string(), "ollama".to_string()],
+        "llama-cpp" => vec![
+            "llama-cpp".to_string(),
+            "llama.cpp".to_string(),
+            "llamacpp".to_string(),
+        ],
+        "vllm" => vec!["vllm".to_string(), "ollvm".to_string(), "llvm".to_string()],
+        "mlx" => vec!["mlx".to_string(), "mlx-lm".to_string()],
+        "apple-ane" => vec![
+            "apple-ane".to_string(),
+            "ane".to_string(),
+            "apple-neural-engine".to_string(),
+        ],
+        "sglang" => vec!["sglang".to_string()],
+        "tgi" => vec!["tgi".to_string(), "text-generation-inference".to_string()],
         p => vec![p.to_string()],
     }
 }
@@ -3837,6 +3864,13 @@ fn provider_env_var(provider: &str) -> Option<&'static str> {
         "kilocode" => Some("KILOCODE_API_KEY"),
         "nvidia" => Some("NVIDIA_API_KEY"),
         "ollama-cloud" => Some("OLLAMA_API_KEY"),
+        "ollama-local" => Some("OLLAMA_LOCAL_API_KEY"),
+        "llama-cpp" => Some("LLAMA_CPP_API_KEY"),
+        "vllm" => Some("VLLM_API_KEY"),
+        "mlx" => Some("MLX_API_KEY"),
+        "apple-ane" => Some("APPLE_ANE_API_KEY"),
+        "sglang" => Some("SGLANG_API_KEY"),
+        "tgi" => Some("TGI_API_KEY"),
         "opencode-go" => Some("OPENCODE_GO_API_KEY"),
         "opencode-zen" => Some("OPENCODE_ZEN_API_KEY"),
         "xai" => Some("XAI_API_KEY"),
@@ -3955,34 +3989,42 @@ async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentE
     }
     let store = FileTokenStore::new(path).await?;
     let manager = AuthManager::new(store.clone());
+    let mut hydrated_nous_from_vault = false;
 
-    match resolve_nous_runtime_credentials(
-        false,
-        true,
-        NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
-        DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
-    )
-    .await
-    {
-        Ok(creds) => {
-            std::env::set_var("NOUS_API_KEY", creds.api_key.clone());
-            if !creds.base_url.trim().is_empty() {
-                std::env::set_var("NOUS_INFERENCE_BASE_URL", creds.base_url.clone());
+    if let Some((_provider, token)) = lookup_secret_from_vault(&store, "nous").await {
+        std::env::set_var("NOUS_API_KEY", token);
+        hydrated_nous_from_vault = true;
+    }
+
+    if !hydrated_nous_from_vault {
+        match resolve_nous_runtime_credentials(
+            false,
+            true,
+            NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+            DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
+        )
+        .await
+        {
+            Ok(creds) => {
+                std::env::set_var("NOUS_API_KEY", creds.api_key.clone());
+                if !creds.base_url.trim().is_empty() {
+                    std::env::set_var("NOUS_INFERENCE_BASE_URL", creds.base_url.clone());
+                }
+                let expires_at = parse_rfc3339_utc(creds.expires_at.as_deref());
+                let _ = manager
+                    .save_credential(OAuthCredential {
+                        provider: "nous".to_string(),
+                        access_token: creds.api_key,
+                        refresh_token: creds.refresh_token,
+                        token_type: creds.token_type,
+                        scope: creds.scope,
+                        expires_at,
+                    })
+                    .await;
             }
-            let expires_at = parse_rfc3339_utc(creds.expires_at.as_deref());
-            let _ = manager
-                .save_credential(OAuthCredential {
-                    provider: "nous".to_string(),
-                    access_token: creds.api_key,
-                    refresh_token: creds.refresh_token,
-                    token_type: creds.token_type,
-                    scope: creds.scope,
-                    expires_at,
-                })
-                .await;
-        }
-        Err(err) => {
-            tracing::debug!("Nous runtime credential refresh skipped: {}", err);
+            Err(err) => {
+                tracing::debug!("Nous runtime credential refresh skipped: {}", err);
+            }
         }
     }
 
@@ -4017,6 +4059,13 @@ async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentE
         ("KILOCODE_API_KEY", "kilocode"),
         ("NVIDIA_API_KEY", "nvidia"),
         ("OLLAMA_API_KEY", "ollama-cloud"),
+        ("OLLAMA_LOCAL_API_KEY", "ollama-local"),
+        ("LLAMA_CPP_API_KEY", "llama-cpp"),
+        ("VLLM_API_KEY", "vllm"),
+        ("MLX_API_KEY", "mlx"),
+        ("APPLE_ANE_API_KEY", "apple-ane"),
+        ("SGLANG_API_KEY", "sglang"),
+        ("TGI_API_KEY", "tgi"),
         ("OPENCODE_GO_API_KEY", "opencode-go"),
         ("OPENCODE_ZEN_API_KEY", "opencode-zen"),
         ("XAI_API_KEY", "xai"),
@@ -7044,6 +7093,13 @@ const SETUP_HUGGINGFACE_ENV_KEYS: &[&str] = &["HF_TOKEN"];
 const SETUP_KILOCODE_ENV_KEYS: &[&str] = &["KILOCODE_API_KEY"];
 const SETUP_NVIDIA_ENV_KEYS: &[&str] = &["NVIDIA_API_KEY"];
 const SETUP_OLLAMA_CLOUD_ENV_KEYS: &[&str] = &["OLLAMA_API_KEY"];
+const SETUP_OLLAMA_LOCAL_ENV_KEYS: &[&str] = &["OLLAMA_LOCAL_API_KEY", "OLLAMA_API_KEY"];
+const SETUP_LLAMA_CPP_ENV_KEYS: &[&str] = &["LLAMA_CPP_API_KEY"];
+const SETUP_VLLM_ENV_KEYS: &[&str] = &["VLLM_API_KEY"];
+const SETUP_MLX_ENV_KEYS: &[&str] = &["MLX_API_KEY"];
+const SETUP_APPLE_ANE_ENV_KEYS: &[&str] = &["APPLE_ANE_API_KEY"];
+const SETUP_SGLANG_ENV_KEYS: &[&str] = &["SGLANG_API_KEY"];
+const SETUP_TGI_ENV_KEYS: &[&str] = &["TGI_API_KEY"];
 const SETUP_OPENCODE_GO_ENV_KEYS: &[&str] = &["OPENCODE_GO_API_KEY"];
 const SETUP_OPENCODE_ZEN_ENV_KEYS: &[&str] = &["OPENCODE_ZEN_API_KEY"];
 const SETUP_XAI_ENV_KEYS: &[&str] = &["XAI_API_KEY"];
@@ -7210,6 +7266,41 @@ const SETUP_MODEL_OPTIONS: &[SetupModelOption] = &[
         label: "Ollama Cloud",
     },
     SetupModelOption {
+        provider: "ollama-local",
+        model: "ollama-local:qwen3:14b",
+        label: "Ollama Local (OpenAI-compatible)",
+    },
+    SetupModelOption {
+        provider: "llama-cpp",
+        model: "llama-cpp:local-gguf",
+        label: "llama.cpp server (local)",
+    },
+    SetupModelOption {
+        provider: "vllm",
+        model: "vllm:NousResearch/Meta-Llama-3-8B-Instruct",
+        label: "vLLM server (local/self-host)",
+    },
+    SetupModelOption {
+        provider: "mlx",
+        model: "mlx:mlx-community/Qwen3-8B-4bit",
+        label: "MLX server (Apple Silicon)",
+    },
+    SetupModelOption {
+        provider: "apple-ane",
+        model: "apple-ane:ane-default",
+        label: "Apple ANE private endpoint",
+    },
+    SetupModelOption {
+        provider: "sglang",
+        model: "sglang:default",
+        label: "SGLang OpenAI-compatible",
+    },
+    SetupModelOption {
+        provider: "tgi",
+        model: "tgi:default",
+        label: "Text Generation Inference",
+    },
+    SetupModelOption {
         provider: "copilot",
         model: "copilot:gpt-5.4",
         label: "GitHub Copilot",
@@ -7304,6 +7395,13 @@ fn setup_provider_display(provider: &str) -> &'static str {
         "kilocode" => "KiloCode",
         "nvidia" => "NVIDIA NIM",
         "ollama-cloud" => "Ollama Cloud",
+        "ollama-local" => "Ollama Local",
+        "llama-cpp" => "llama.cpp Server",
+        "vllm" => "vLLM Server",
+        "mlx" => "MLX Server",
+        "apple-ane" => "Apple ANE Endpoint",
+        "sglang" => "SGLang Server",
+        "tgi" => "Text Gen Inference",
         "opencode-go" => "OpenCode Go",
         "opencode-zen" => "OpenCode Zen",
         "xai" => "xAI",
@@ -7339,6 +7437,13 @@ fn setup_provider_env_keys(provider: &str) -> &'static [&'static str] {
         "kilocode" => SETUP_KILOCODE_ENV_KEYS,
         "nvidia" => SETUP_NVIDIA_ENV_KEYS,
         "ollama-cloud" => SETUP_OLLAMA_CLOUD_ENV_KEYS,
+        "ollama-local" => SETUP_OLLAMA_LOCAL_ENV_KEYS,
+        "llama-cpp" => SETUP_LLAMA_CPP_ENV_KEYS,
+        "vllm" => SETUP_VLLM_ENV_KEYS,
+        "mlx" => SETUP_MLX_ENV_KEYS,
+        "apple-ane" => SETUP_APPLE_ANE_ENV_KEYS,
+        "sglang" => SETUP_SGLANG_ENV_KEYS,
+        "tgi" => SETUP_TGI_ENV_KEYS,
         "opencode-go" => SETUP_OPENCODE_GO_ENV_KEYS,
         "opencode-zen" => SETUP_OPENCODE_ZEN_ENV_KEYS,
         "xai" => SETUP_XAI_ENV_KEYS,
@@ -7366,11 +7471,38 @@ fn setup_provider_default_base_url(provider: &str) -> Option<&'static str> {
         "kilocode" => Some("https://api.kilo.ai/api/gateway"),
         "nvidia" => Some("https://integrate.api.nvidia.com/v1"),
         "ollama-cloud" => Some("https://ollama.com/v1"),
+        "ollama-local" => Some("http://127.0.0.1:11434/v1"),
+        "llama-cpp" => Some("http://127.0.0.1:8080/v1"),
+        "vllm" => Some("http://127.0.0.1:8000/v1"),
+        "mlx" => Some("http://127.0.0.1:8080/v1"),
+        "apple-ane" => Some("http://127.0.0.1:8081/v1"),
+        "sglang" => Some("http://127.0.0.1:30000/v1"),
+        "tgi" => Some("http://127.0.0.1:8082/v1"),
         "opencode-go" => Some("https://opencode.ai/zen/go/v1"),
         "opencode-zen" => Some("https://opencode.ai/zen/v1"),
         "xai" => Some("https://api.x.ai/v1"),
         "xiaomi" => Some("https://api.xiaomimimo.com/v1"),
         "zai" => Some("https://api.z.ai/api/paas/v4"),
+        _ => None,
+    }
+}
+
+fn setup_provider_requires_api_key(provider: &str) -> bool {
+    !matches!(
+        provider,
+        "ollama-local" | "llama-cpp" | "vllm" | "mlx" | "apple-ane" | "sglang" | "tgi"
+    )
+}
+
+fn local_backend_base_url_env_var(provider: &str) -> Option<&'static str> {
+    match provider {
+        "ollama-local" => Some("OLLAMA_BASE_URL"),
+        "llama-cpp" => Some("LLAMA_CPP_BASE_URL"),
+        "vllm" => Some("VLLM_BASE_URL"),
+        "mlx" => Some("MLX_BASE_URL"),
+        "apple-ane" => Some("APPLE_ANE_BASE_URL"),
+        "sglang" => Some("SGLANG_BASE_URL"),
+        "tgi" => Some("TGI_BASE_URL"),
         _ => None,
     }
 }
@@ -7552,6 +7684,8 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
         .map(|option| {
             let auth_label = if provider_supports_oauth(option.provider) {
                 "OAuth/API key"
+            } else if !setup_provider_requires_api_key(option.provider) {
+                "Local / optional key"
             } else if option.provider == "bedrock" {
                 "AWS credentials"
             } else {
@@ -7834,6 +7968,22 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
         println!(
             "\nAWS Bedrock uses AWS credential chain (env/profile/role). Skipping API key prompt."
         );
+    } else if !setup_provider_requires_api_key(&selected_provider) {
+        println!(
+            "\n{} is a local/self-host OpenAI-compatible backend. API key is optional.",
+            selected_provider_label
+        );
+        if has_selected_provider_env_key {
+            print!(
+                "{} API key (optional, leave blank to keep {} from environment/{}): ",
+                selected_provider_label,
+                env_keys_display,
+                env_path.display()
+            );
+            io::stdout().flush().ok();
+            reader.read_line(&mut api_key).ok();
+            api_key = api_key.trim().to_string();
+        }
     } else if !stored_provider_secret_in_vault {
         if has_selected_provider_env_key {
             print!(
@@ -8362,6 +8512,7 @@ async fn run_doctor(
     let mut config_summary = serde_json::json!({
         "loaded": false
     });
+    let mut loaded_config: Option<GatewayConfig> = None;
     println!("\nConfiguration:");
     print!("  Loading config... ");
     match load_config(cli.config_dir.as_deref()) {
@@ -8374,6 +8525,7 @@ async fn run_doctor(
             println!("  Max turns: {}", config.max_turns);
             let platform_count = config.platforms.iter().filter(|(_, p)| p.enabled).count();
             println!("  Enabled platforms: {}", platform_count);
+            loaded_config = Some(config.clone());
             config_summary = serde_json::json!({
                 "loaded": true,
                 "model": config.model,
@@ -8393,6 +8545,63 @@ async fn run_doctor(
                 "error": e.to_string()
             }));
         }
+    }
+
+    println!("\nLocal backend endpoints:");
+    for provider in [
+        "ollama-local",
+        "llama-cpp",
+        "vllm",
+        "mlx",
+        "apple-ane",
+        "sglang",
+        "tgi",
+    ] {
+        let configured = loaded_config
+            .as_ref()
+            .and_then(|cfg| cfg.llm_providers.get(provider))
+            .and_then(|entry| entry.base_url.clone())
+            .filter(|value| !value.trim().is_empty());
+        let env_override = local_backend_base_url_env_var(provider)
+            .and_then(|name| std::env::var(name).ok())
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let base_url = configured
+            .or(env_override)
+            .or_else(|| setup_provider_default_base_url(provider).map(ToString::to_string));
+
+        let (reachable, probed_url) = if let Some(url) = base_url.clone() {
+            let models_url = format!("{}/models", url.trim_end_matches('/'));
+            let ok = reqwest::Client::new()
+                .get(models_url.as_str())
+                .timeout(std::time::Duration::from_millis(900))
+                .send()
+                .await
+                .map(|resp| resp.status().is_success())
+                .unwrap_or(false);
+            (ok, Some(models_url))
+        } else {
+            (false, None)
+        };
+
+        println!(
+            "  {:<12} ... {}",
+            provider,
+            if reachable {
+                "✓ reachable"
+            } else {
+                "(optional, endpoint not reachable)"
+            }
+        );
+        checks.push(serde_json::json!({
+            "name": format!("local_backend_{provider}"),
+            "ok": true,
+            "provider": provider,
+            "base_url": base_url,
+            "probe_url": probed_url,
+            "reachable": reachable,
+            "optional": true
+        }));
     }
 
     if deep {
@@ -11551,6 +11760,13 @@ mod tests {
         assert_eq!(normalize_auth_provider("z-ai"), "zai");
         assert_eq!(normalize_auth_provider("grok"), "xai");
         assert_eq!(normalize_auth_provider("hf"), "huggingface");
+        assert_eq!(normalize_auth_provider("ollama"), "ollama-local");
+        assert_eq!(normalize_auth_provider("llama.cpp"), "llama-cpp");
+        assert_eq!(normalize_auth_provider("ollvm"), "vllm");
+        assert_eq!(normalize_auth_provider("llvm"), "vllm");
+        assert_eq!(normalize_auth_provider("mlx-lm"), "mlx");
+        assert_eq!(normalize_auth_provider("ane"), "apple-ane");
+        assert_eq!(normalize_auth_provider("text-generation-inference"), "tgi");
         assert_eq!(normalize_auth_provider("api-server"), "api_server");
         assert_eq!(normalize_auth_provider("mm"), "mattermost");
     }
@@ -11599,6 +11815,15 @@ mod tests {
         assert_eq!(
             secret_provider_aliases("claude"),
             vec!["anthropic", "claude", "claude-code"]
+        );
+        assert_eq!(provider_env_var("ollama"), Some("OLLAMA_LOCAL_API_KEY"));
+        assert_eq!(provider_env_var("llama.cpp"), Some("LLAMA_CPP_API_KEY"));
+        assert_eq!(provider_env_var("ollvm"), Some("VLLM_API_KEY"));
+        assert_eq!(provider_env_var("mlx-lm"), Some("MLX_API_KEY"));
+        assert_eq!(provider_env_var("ane"), Some("APPLE_ANE_API_KEY"));
+        assert_eq!(
+            provider_env_var("text-generation-inference"),
+            Some("TGI_API_KEY")
         );
     }
 
@@ -11661,6 +11886,17 @@ mod tests {
     fn setup_provider_env_keys_include_nous() {
         assert_eq!(setup_provider_display("nous"), "Nous");
         assert_eq!(setup_provider_env_keys("nous"), &["NOUS_API_KEY"]);
+        assert_eq!(
+            setup_provider_env_keys("ollama-local"),
+            &["OLLAMA_LOCAL_API_KEY", "OLLAMA_API_KEY"]
+        );
+        assert_eq!(
+            setup_provider_default_base_url("vllm"),
+            Some("http://127.0.0.1:8000/v1")
+        );
+        assert!(!setup_provider_requires_api_key("ollama-local"));
+        assert!(!setup_provider_requires_api_key("apple-ane"));
+        assert!(setup_provider_requires_api_key("openai"));
         assert_eq!(setup_provider_display("alibaba"), "Alibaba Cloud DashScope");
         assert_eq!(
             setup_provider_env_keys("google-gemini-cli"),
