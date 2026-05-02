@@ -34,6 +34,19 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+try:
+    from publish_automation_summary import (
+        build_summary_markdown,
+        parse_sink_order,
+        publish_summary as publish_automation_summary,
+    )
+except ModuleNotFoundError:  # pragma: no cover
+    from scripts.publish_automation_summary import (  # type: ignore[no-redef]
+        build_summary_markdown,
+        parse_sink_order,
+        publish_summary as publish_automation_summary,
+    )
+
 
 LOG = logging.getLogger("upstream-webhook-sync")
 
@@ -1190,6 +1203,109 @@ def maybe_run_assist_hook(
         LOG.warning("assist hook failed: %s", exc)
 
 
+def maybe_publish_worker_summary(
+    *,
+    args: argparse.Namespace,
+    repo_root: str,
+    report_dir: str,
+    event: SyncEvent,
+    outcome: str,
+    sync_rc: int,
+    report_path: str,
+    drift_result: dict[str, Any] | None = None,
+    global_drift_result: dict[str, Any] | None = None,
+    upkeep_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if args.disable_summary_publish:
+        return {"enabled": False, "ok": False, "reason": "disabled"}
+
+    repo_path = pathlib.Path(repo_root).resolve()
+    report_dir_path = pathlib.Path(report_dir).resolve()
+    sink_order = parse_sink_order(str(args.summary_sink_order))
+    context_project = str(args.summary_context_project or "").strip() or repo_path.name
+    local_path = str(args.summary_local_path or "").strip()
+    if not local_path:
+        local_path = str(report_dir_path / "upstream-sync-summary-fallback.log")
+    elif not os.path.isabs(local_path):
+        local_path = str((repo_path / local_path).resolve())
+
+    local_ref = "HEAD"
+    try:
+        _, local_ref_out, _ = run_git(repo_root, ["rev-parse", "--short", "HEAD"], check=False)
+        if local_ref_out:
+            local_ref = local_ref_out
+    except Exception:
+        local_ref = "HEAD"
+
+    metadata = {
+        "timestamp_utc": dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "status": outcome or "unknown",
+        "summary_kind": "upstream_webhook_sync",
+        "repo": str(repo_path),
+        "head_sha": local_ref,
+        "delivery_id": event.delivery_id,
+        "upstream_after_sha": event.after_sha,
+        "upstream_ref": event.ref,
+        "sync_exit_code": sync_rc,
+        "report_path": report_path,
+        "cli_drift": (drift_result or {}).get("has_drift"),
+        "global_drift": (global_drift_result or {}).get("has_drift"),
+        "upkeep_created": (upkeep_result or {}).get("created"),
+    }
+
+    lines = [
+        "Webhook sync worker processed an upstream event.",
+        "",
+        f"- delivery_id: `{event.delivery_id}`",
+        f"- repository: `{event.repository}`",
+        f"- ref: `{event.ref}`",
+        f"- upstream_after_sha: `{event.after_sha}`",
+        f"- outcome: `{outcome}`",
+        f"- sync_exit_code: `{sync_rc}`",
+    ]
+    if report_path:
+        lines.append(f"- report_path: `{report_path}`")
+    if event.compare_url:
+        lines.append(f"- compare_url: {event.compare_url}")
+    if drift_result is not None:
+        lines.append(f"- cli_drift: `{bool(drift_result.get('has_drift'))}`")
+    if global_drift_result is not None:
+        lines.append(f"- global_drift: `{bool(global_drift_result.get('has_drift'))}`")
+    if upkeep_result is not None:
+        lines.append(f"- upkeep_issues_created: `{int(upkeep_result.get('created', 0) or 0)}`")
+    body = "\n".join(lines)
+
+    markdown = build_summary_markdown(
+        title="Upstream Webhook Sync Summary",
+        summary_kind="upstream_webhook_sync",
+        status=outcome or "unknown",
+        metadata=metadata,
+        body=body,
+    )
+    result = publish_automation_summary(
+        sink_order=sink_order,
+        summary_markdown=markdown,
+        repo_root=repo_path,
+        contextlattice_url=args.summary_contextlattice_url,
+        context_timeout_secs=float(args.summary_context_timeout_secs),
+        context_api_key=str(args.summary_context_api_key or ""),
+        context_project=context_project,
+        context_file_name=args.summary_context_file_name,
+        context_topic_path=args.summary_context_topic_path,
+        github_issue=int(args.summary_github_issue),
+        local_path=pathlib.Path(local_path),
+    )
+    if result.get("ok"):
+        LOG.info(
+            "summary published: sink=%s delivery=%s",
+            result.get("primary_sink", ""),
+            event.delivery_id,
+        )
+    else:
+        LOG.warning("summary publish failed for delivery=%s", event.delivery_id)
+    return {"enabled": True, **result}
+
+
 def serve_webhook(args: argparse.Namespace) -> int:
     expected_repo = args.expected_repo
     expected_ref = args.expected_ref
@@ -1383,18 +1499,45 @@ def worker_loop(args: argparse.Namespace) -> int:
                     f"global_drift={'detected' if global_drift_result.get('has_drift') else 'none'}; "
                     f"upkeep_created={upkeep_result.get('created', 0)}"
                 )
+                summary_result = maybe_publish_worker_summary(
+                    args=args,
+                    repo_root=repo_root,
+                    report_dir=report_dir,
+                    event=item.event,
+                    outcome=outcome,
+                    sync_rc=rc,
+                    report_path=report_path,
+                    drift_result=drift_result,
+                    global_drift_result=global_drift_result,
+                    upkeep_result=upkeep_result,
+                )
                 if drift_result.get("created_issue_url"):
                     note += f"; issue={drift_result['created_issue_url']}"
                 if global_drift_result.get("created_issue_url"):
                     note += f"; global_issue={global_drift_result['created_issue_url']}"
+                if summary_result.get("ok"):
+                    note += f"; summary_sink={summary_result.get('primary_sink', '')}"
                 queue.mark_done(item.id, status="done", note=note)
                 continue
 
             if outcome in {"risk_blocked", "conflict"}:
+                summary_result = maybe_publish_worker_summary(
+                    args=args,
+                    repo_root=repo_root,
+                    report_dir=report_dir,
+                    event=item.event,
+                    outcome=outcome,
+                    sync_rc=rc,
+                    report_path=report_path,
+                    upkeep_result=upkeep_result,
+                )
+                note = f"{outcome}; upkeep_created={upkeep_result.get('created', 0)}"
+                if summary_result.get("ok"):
+                    note += f"; summary_sink={summary_result.get('primary_sink', '')}"
                 queue.mark_done(
                     item.id,
                     status=outcome,
-                    note=f"{outcome}; upkeep_created={upkeep_result.get('created', 0)}",
+                    note=note,
                 )
                 maybe_run_assist_hook(assist_cmd, item.event, report_path, outcome, repo_root)
                 continue
@@ -1403,6 +1546,16 @@ def worker_loop(args: argparse.Namespace) -> int:
                 item.id, attempts=item.attempts, max_attempts=args.max_attempts, error=output[-1000:]
             )
             if item.attempts >= args.max_attempts:
+                maybe_publish_worker_summary(
+                    args=args,
+                    repo_root=repo_root,
+                    report_dir=report_dir,
+                    event=item.event,
+                    outcome="dead",
+                    sync_rc=rc,
+                    report_path=report_path,
+                    upkeep_result=upkeep_result,
+                )
                 maybe_run_assist_hook(
                     assist_cmd, item.event, report_path, "dead", repo_root
                 )
@@ -1445,6 +1598,9 @@ def worker_loop(args: argparse.Namespace) -> int:
                 state_path=upkeep_state_path,
                 max_commits_per_event=args.upkeep_commit_max_per_event,
             )
+            drift_result: dict[str, Any] | None = None
+            global_drift_result: dict[str, Any] | None = None
+            summary_result: dict[str, Any] | None = None
             if rc == 0:
                 upstream_ref = (
                     event.after_sha
@@ -1485,6 +1641,29 @@ def worker_loop(args: argparse.Namespace) -> int:
                         event.delivery_id,
                         global_drift_result.get("artifact_path", ""),
                     )
+                summary_result = maybe_publish_worker_summary(
+                    args=args,
+                    repo_root=repo_root,
+                    report_dir=report_dir,
+                    event=event,
+                    outcome=outcome,
+                    sync_rc=rc,
+                    report_path=report_path,
+                    drift_result=drift_result,
+                    global_drift_result=global_drift_result,
+                    upkeep_result=upkeep_result,
+                )
+            elif outcome in {"risk_blocked", "conflict"}:
+                summary_result = maybe_publish_worker_summary(
+                    args=args,
+                    repo_root=repo_root,
+                    report_dir=report_dir,
+                    event=event,
+                    outcome=outcome,
+                    sync_rc=rc,
+                    report_path=report_path,
+                    upkeep_result=upkeep_result,
+                )
             # In SQS mode: acknowledge terminal states. Let visibility timeout retry transient failures.
             if rc == 0 or outcome in {"risk_blocked", "conflict"}:
                 consumer.ack(receipt_handle)
@@ -1492,6 +1671,12 @@ def worker_loop(args: argparse.Namespace) -> int:
                 LOG.info(
                     "upkeep commit issues created=%s delivery=%s",
                     upkeep_result.get("created"),
+                    event.delivery_id,
+                )
+            if summary_result and summary_result.get("ok"):
+                LOG.info(
+                    "summary sink=%s delivery=%s",
+                    summary_result.get("primary_sink", ""),
                     event.delivery_id,
                 )
             if outcome in {"risk_blocked", "conflict"}:
@@ -1541,6 +1726,9 @@ def worker_loop(args: argparse.Namespace) -> int:
             state_path=upkeep_state_path,
             max_commits_per_event=args.upkeep_commit_max_per_event,
         )
+        drift_result: dict[str, Any] | None = None
+        global_drift_result: dict[str, Any] | None = None
+        summary_result: dict[str, Any] | None = None
         if rc == 0:
             upstream_ref = (
                 event.after_sha
@@ -1581,6 +1769,29 @@ def worker_loop(args: argparse.Namespace) -> int:
                     event.delivery_id,
                     global_drift_result.get("artifact_path", ""),
                 )
+            summary_result = maybe_publish_worker_summary(
+                args=args,
+                repo_root=repo_root,
+                report_dir=report_dir,
+                event=event,
+                outcome=outcome,
+                sync_rc=rc,
+                report_path=report_path,
+                drift_result=drift_result,
+                global_drift_result=global_drift_result,
+                upkeep_result=upkeep_result,
+            )
+        elif outcome in {"risk_blocked", "conflict"}:
+            summary_result = maybe_publish_worker_summary(
+                args=args,
+                repo_root=repo_root,
+                report_dir=report_dir,
+                event=event,
+                outcome=outcome,
+                sync_rc=rc,
+                report_path=report_path,
+                upkeep_result=upkeep_result,
+            )
         # Commit offsets for terminal states; for transient failures we keep offset
         # uncommitted so another worker run can retry.
         if rc == 0 or outcome in {"risk_blocked", "conflict"}:
@@ -1589,6 +1800,12 @@ def worker_loop(args: argparse.Namespace) -> int:
             LOG.info(
                 "upkeep commit issues created=%s delivery=%s",
                 upkeep_result.get("created"),
+                event.delivery_id,
+            )
+        if summary_result and summary_result.get("ok"):
+            LOG.info(
+                "summary sink=%s delivery=%s",
+                summary_result.get("primary_sink", ""),
                 event.delivery_id,
             )
         if outcome in {"risk_blocked", "conflict"}:
@@ -1732,6 +1949,74 @@ def build_parser() -> argparse.ArgumentParser:
         "--assist-cmd",
         default="",
         help="Optional command to run on risk_blocked/conflict/dead outcomes (Nous/Codex helper hook)",
+    )
+    worker.add_argument(
+        "--disable-summary-publish",
+        action="store_true",
+        default=False,
+        help="Disable automatic automation-summary publishing for each processed event.",
+    )
+    worker.add_argument(
+        "--summary-sink-order",
+        default=os.environ.get(
+            "UPSTREAM_SYNC_SUMMARY_SINK_ORDER",
+            os.environ.get("AUTOMATION_SUMMARY_SINK_ORDER", "contextlattice,github,local"),
+        ),
+        help="Comma-separated summary sink order (contextlattice,github,local,stdout).",
+    )
+    worker.add_argument(
+        "--summary-contextlattice-url",
+        default=os.environ.get("CONTEXTLATTICE_ORCHESTRATOR_URL")
+        or os.environ.get("MEMMCP_ORCHESTRATOR_URL")
+        or "http://127.0.0.1:8075",
+        help="ContextLattice orchestrator URL for automation summary writes.",
+    )
+    worker.add_argument(
+        "--summary-context-project",
+        default=os.environ.get("UPSTREAM_SYNC_SUMMARY_CONTEXT_PROJECT", ""),
+        help="ContextLattice project for summary writes (defaults to repo dir name).",
+    )
+    worker.add_argument(
+        "--summary-context-topic-path",
+        default=os.environ.get(
+            "UPSTREAM_SYNC_SUMMARY_CONTEXT_TOPIC_PATH",
+            "ops/upstream-sync",
+        ),
+        help="ContextLattice topic path for summary writes.",
+    )
+    worker.add_argument(
+        "--summary-context-file-name",
+        default=os.environ.get(
+            "UPSTREAM_SYNC_SUMMARY_CONTEXT_FILE_NAME",
+            "ops/upstream-sync.md",
+        ),
+        help="ContextLattice file key for summary writes.",
+    )
+    worker.add_argument(
+        "--summary-context-timeout-secs",
+        type=float,
+        default=float(
+            os.environ.get("UPSTREAM_SYNC_SUMMARY_CONTEXT_TIMEOUT_SECS", "8")
+        ),
+        help="ContextLattice write timeout seconds for summary publishing.",
+    )
+    worker.add_argument(
+        "--summary-context-api-key",
+        default=os.environ.get("UPSTREAM_SYNC_SUMMARY_CONTEXT_API_KEY")
+        or os.environ.get("CONTEXTLATTICE_API_KEY")
+        or "",
+        help="Optional ContextLattice API key for summary writes.",
+    )
+    worker.add_argument(
+        "--summary-github-issue",
+        type=int,
+        default=int(os.environ.get("UPSTREAM_SYNC_SUMMARY_GITHUB_ISSUE", "0") or "0"),
+        help="Fallback GitHub issue number for summary comments.",
+    )
+    worker.add_argument(
+        "--summary-local-path",
+        default=os.environ.get("UPSTREAM_SYNC_SUMMARY_LOCAL_PATH", ""),
+        help="Fallback local file path for summary logs.",
     )
     worker.add_argument(
         "--disable-upkeep-commit-queue",

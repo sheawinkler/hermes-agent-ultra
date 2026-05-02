@@ -166,6 +166,15 @@ UPSTREAM_SYNC_GLOBAL_PARITY_LABELS=parity,parity-upkeep
 UPSTREAM_SYNC_GLOBAL_PARITY_OPEN_ISSUES=1
 UPSTREAM_SYNC_GLOBAL_PARITY_MAX_QUEUE_COMMITS=0
 
+# Automation summary sink chain (ContextLattice first; fallback to github/local).
+UPSTREAM_SYNC_SUMMARY_SINK_ORDER=contextlattice,github,local
+UPSTREAM_SYNC_SUMMARY_CONTEXT_PROJECT=${REPO_ROOT##*/}
+UPSTREAM_SYNC_SUMMARY_CONTEXT_TOPIC_PATH=ops/upstream-sync
+UPSTREAM_SYNC_SUMMARY_CONTEXT_FILE_NAME=ops/upstream-sync.md
+UPSTREAM_SYNC_SUMMARY_CONTEXT_TIMEOUT_SECS=8
+UPSTREAM_SYNC_SUMMARY_GITHUB_ISSUE=13
+UPSTREAM_SYNC_SUMMARY_LOCAL_PATH=${REPO_ROOT}/.sync-reports/upstream-sync-summary-fallback.log
+
 # Optional Nous/Codex assist command invoked for risk_blocked/conflict/dead.
 UPSTREAM_SYNC_ASSIST_CMD=
 
@@ -191,6 +200,13 @@ ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_GLOBAL_PARITY_PARENT_ISSUE" "19"
 ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_GLOBAL_PARITY_LABELS" "parity,parity-upkeep"
 ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_GLOBAL_PARITY_OPEN_ISSUES" "1"
 ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_GLOBAL_PARITY_MAX_QUEUE_COMMITS" "0"
+ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_SUMMARY_SINK_ORDER" "contextlattice,github,local"
+ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_SUMMARY_CONTEXT_PROJECT" "${REPO_ROOT##*/}"
+ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_SUMMARY_CONTEXT_TOPIC_PATH" "ops/upstream-sync"
+ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_SUMMARY_CONTEXT_FILE_NAME" "ops/upstream-sync.md"
+ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_SUMMARY_CONTEXT_TIMEOUT_SECS" "8"
+ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_SUMMARY_GITHUB_ISSUE" "13"
+ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_SUMMARY_LOCAL_PATH" "${REPO_ROOT}/.sync-reports/upstream-sync-summary-fallback.log"
 ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_ELITE_GATE" "0"
 ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_ELITE_CMD" "python3 scripts/run-elite-sync-gate.py"
 ensure_env_key "${ENV_FILE}" "UPSTREAM_SYNC_ELITE_ROLLBACK_CMD" ""
