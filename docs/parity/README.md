@@ -35,6 +35,7 @@ By default this command fetches upstream directly from GitHub
 - `divergence-validation.json`: ownership/review freshness and coverage checks for intentional divergences
 - `global-parity-thresholds.json`: machine-readable CI/release parity thresholds
   - `ci_thresholds`: tree-drift observability gate
+  - `ci_thresholds.special_rules`: scoped exemptions for non-actionable upstream-only drift
   - `release_thresholds`: functional parity gate (GPAR/workstream + divergence/test integrity)
 - `global-parity-proof.json`: consolidated parity proof with gate results for tickets #19-#28
 - `global-parity-proof.md`: human-readable parity proof summary

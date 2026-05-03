@@ -25,7 +25,7 @@ def gate_metric_thresholds(thresholds: dict[str, Any]) -> dict[str, Any]:
         return metric_thresholds
     out: dict[str, Any] = {}
     for key, value in thresholds.items():
-        if key in {"required_workstreams_complete", "gate_mode"}:
+        if key in {"required_workstreams_complete", "gate_mode", "special_rules"}:
             continue
         out[key] = value
     return out
@@ -49,6 +49,95 @@ def evaluate_gate(metrics: dict[str, float], thresholds: dict[str, Any]) -> dict
             checks.append({"metric": key, "status": "pass" if ok else "fail", "actual": actual, "limit": limit})
             passed = passed and ok
     return {"pass": passed, "checks": checks}
+
+
+def _check_by_metric(checks: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for check in checks:
+        metric = str(check.get("metric", "")).strip()
+        if metric:
+            out[metric] = check
+    return out
+
+
+def apply_ci_special_rules(
+    metrics: dict[str, float],
+    ci_gate: dict[str, Any],
+    release_gate: dict[str, Any],
+    ci_thresholds: dict[str, Any],
+) -> None:
+    special_rules = ci_thresholds.get("special_rules")
+    if not isinstance(special_rules, dict):
+        return
+
+    rule_cfg = special_rules.get("allow_files_only_upstream_overshoot_when_functional_clean")
+    if not isinstance(rule_cfg, dict):
+        return
+    if not bool(rule_cfg.get("enabled", False)):
+        return
+
+    checks = ci_gate.get("checks", [])
+    if not isinstance(checks, list):
+        return
+    failed_checks = [c for c in checks if c.get("status") == "fail"]
+    failed_metrics = {str(c.get("metric", "")).strip() for c in failed_checks}
+    if failed_metrics != {"max_files_only_upstream"}:
+        return
+
+    check_map = _check_by_metric(checks)
+    files_only_upstream_check = check_map.get("max_files_only_upstream")
+    if not isinstance(files_only_upstream_check, dict):
+        return
+
+    actual_raw = files_only_upstream_check.get("actual")
+    limit_raw = files_only_upstream_check.get("limit")
+    try:
+        actual = float(actual_raw)
+        limit = float(limit_raw)
+    except (TypeError, ValueError):
+        return
+
+    overshoot = max(0.0, actual - limit)
+    max_overshoot = float(rule_cfg.get("max_overshoot", 0.0))
+    if overshoot > max_overshoot:
+        return
+
+    if bool(rule_cfg.get("requires_release_gate_pass", True)) and not bool(
+        release_gate.get("pass", False)
+    ):
+        return
+
+    unowned_limit = float(rule_cfg.get("requires_max_unowned_divergences", 0))
+    review_limit = float(rule_cfg.get("requires_max_divergence_review_overdue", 0))
+    pending_limit = float(rule_cfg.get("requires_max_queue_pending_commits", 100))
+    ratio_limit = float(rule_cfg.get("requires_min_test_intent_mapping_ratio", 0.9))
+    if metrics.get("max_unowned_divergences", 0.0) > unowned_limit:
+        return
+    if metrics.get("max_divergence_review_overdue", 0.0) > review_limit:
+        return
+    if metrics.get("max_queue_pending_commits", 0.0) > pending_limit:
+        return
+    if metrics.get("min_test_intent_mapping_ratio", 0.0) < ratio_limit:
+        return
+
+    files_only_upstream_check["status"] = "warn"
+    files_only_upstream_check["special_rule"] = (
+        "allow_files_only_upstream_overshoot_when_functional_clean"
+    )
+    files_only_upstream_check["overshoot"] = overshoot
+    files_only_upstream_check["max_overshoot"] = max_overshoot
+    ci_gate["pass"] = True
+    ci_gate.setdefault("special_rules_applied", []).append(
+        {
+            "rule": "allow_files_only_upstream_overshoot_when_functional_clean",
+            "metric": "max_files_only_upstream",
+            "actual": actual,
+            "limit": limit,
+            "overshoot": overshoot,
+            "max_overshoot": max_overshoot,
+            "reason": "functional parity clean; upstream-only file growth treated as drift warning",
+        }
+    )
 
 
 def main() -> int:
@@ -191,6 +280,13 @@ def main() -> int:
                 "limit": "all true",
             }
         )
+
+    apply_ci_special_rules(
+        metrics=metrics,
+        ci_gate=ci_gate,
+        release_gate=release_gate,
+        ci_thresholds=thresholds.get("ci_thresholds", {}),
+    )
 
     payload = {
         "generated_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),

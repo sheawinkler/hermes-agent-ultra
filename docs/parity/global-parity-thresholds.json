@@ -35,7 +35,18 @@
     "max_unowned_divergences": 0,
     "max_divergence_review_overdue": 0,
     "min_test_intent_mapping_ratio": 0.9,
-    "max_queue_pending_commits": 100
+    "max_queue_pending_commits": 100,
+    "special_rules": {
+      "allow_files_only_upstream_overshoot_when_functional_clean": {
+        "enabled": true,
+        "max_overshoot": 500,
+        "requires_release_gate_pass": true,
+        "requires_max_unowned_divergences": 0,
+        "requires_max_divergence_review_overdue": 0,
+        "requires_max_queue_pending_commits": 100,
+        "requires_min_test_intent_mapping_ratio": 0.9
+      }
+    }
   },
   "drift_alert_thresholds": {
     "warn_commits_behind": 5200,

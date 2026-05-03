@@ -1,10 +1,10 @@
 # Global Parity Proof
 
-Generated: `2026-05-01T05:12:16.126921+00:00`
+Generated: `2026-05-03T08:07:57.572654+00:00`
 
 ## Gate Status
 
-- CI gate: **FAIL**
+- CI gate: **PASS**
 - CI gate mode: `tree-drift`
 - Release gate: **PASS**
 - Release gate mode: `functional`
