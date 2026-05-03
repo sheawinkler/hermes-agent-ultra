@@ -418,6 +418,8 @@ pub struct TuiState {
     expanded_tool_cards: HashSet<String>,
     /// Stable timestamp labels keyed by message fingerprint.
     message_time_labels: HashMap<u64, String>,
+    /// Animation frame index for companion pet rendering.
+    pet_frame: usize,
 }
 
 /// A section of tool output that can be folded/expanded.
@@ -495,6 +497,7 @@ impl Default for TuiState {
             transcript_cache: TranscriptCache::default(),
             expanded_tool_cards: HashSet::new(),
             message_time_labels: HashMap::new(),
+            pet_frame: 0,
         }
     }
 }
@@ -1068,6 +1071,10 @@ impl TuiState {
     /// Advance the spinner frame.
     pub fn tick_spinner(&mut self) {
         self.spinner_frame = self.spinner_frame.wrapping_add(1);
+    }
+
+    pub fn tick_pet(&mut self) {
+        self.pet_frame = self.pet_frame.wrapping_add(1);
     }
 }
 
@@ -2652,6 +2659,15 @@ fn render_status(
         status_text.push_str(&state.status_message);
         status_text.push_str(&scroll_hint);
     }
+    if let Some(frame_token) =
+        pet_frame_token(app.pet_settings(), state.pet_frame, state.processing)
+    {
+        if matches!(app.pet_settings().dock, crate::app::PetDock::Left) {
+            status_text = format!("{frame_token} | {status_text}");
+        } else {
+            status_text.push_str(&format!(" | {frame_token}"));
+        }
+    }
     let clipped = truncate_chars(&status_text, area.width.saturating_sub(1) as usize);
     let line_style = if state.status_message.is_empty() {
         base
@@ -2712,6 +2728,55 @@ fn fuzzy_subsequence_score(needle: &str, haystack: &str) -> i32 {
         }
     }
     score
+}
+
+fn pet_frame_token(
+    settings: &crate::app::PetSettings,
+    frame: usize,
+    processing: bool,
+) -> Option<String> {
+    if !settings.enabled {
+        return None;
+    }
+    let effective_mood = if processing && settings.mood != "sleepy" {
+        "working"
+    } else {
+        settings.mood.as_str()
+    };
+    let frames: [&str; 2] = match (settings.species.as_str(), effective_mood) {
+        ("boba", "sleepy") => ["(-_- )z", "(-_- )Z"],
+        ("boba", "working") => ["(>_< )", "(<_< )"],
+        ("boba", "hyped") => ["(o_o)!", "(!o_o)"],
+        ("boba", "chill") => ["(u_u )", "(u_U )"],
+        ("bytecat", "sleepy") => ["= -.-=z", "= -.-=Z"],
+        ("bytecat", "working") => ["=^x^=", "=^_^="],
+        ("bytecat", "hyped") => ["=^o^=!", "=^O^=!"],
+        ("bytecat", "chill") => ["=^.^=~", "=^.-=~"],
+        ("otter", "sleepy") => ["(>< )z", "(>< )Z"],
+        ("otter", "working") => ["(>> )~", "(<< )~"],
+        ("otter", "hyped") => ["(OO )~", "(oo )~"],
+        ("otter", "chill") => ["(~~ )~", "(~_ )~"],
+        ("fox", "sleepy") => ["{-- }z", "{-- }Z"],
+        ("fox", "working") => ["{^x }", "{x^ }"],
+        ("fox", "hyped") => ["{^^ }!", "{oo }!"],
+        ("fox", "chill") => ["{.. }", "{._ }"],
+        ("owl", "sleepy") => ["(v_v)z", "(v_v)Z"],
+        ("owl", "working") => ["(O_O)", "(0_0)"],
+        ("owl", "hyped") => ["(O0O)!", "(0O0)!"],
+        ("owl", "chill") => ["(o_o)", "(o_O)"],
+        ("capy", "sleepy") => ["(._.)z", "(._.)Z"],
+        ("capy", "working") => ["(>_.)", "(._<)"],
+        ("capy", "hyped") => ["(o_.)!", "(._o)!"],
+        ("capy", "chill") => ["(._.)~", "(.._)~"],
+        ("boba", _) => ["(o_o )", "(O_O )"],
+        ("bytecat", _) => ["=^.^=", "=^o^="],
+        ("otter", _) => ["(>< )~", "(~>< )"],
+        ("fox", _) => ["{^.^}", "{^o^}"],
+        ("owl", _) => ["(OvO)", "(oVo)"],
+        ("capy", _) => ["(._.)", "(o_.)"],
+        _ => ["(o_o )", "(O_O )"],
+    };
+    Some(frames[frame % frames.len()].to_string())
 }
 
 fn is_ctrl_c(key: &KeyEvent) -> bool {
@@ -2875,6 +2940,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
     let mut last_jobs_refresh = Instant::now()
         .checked_sub(Duration::from_secs(2))
         .unwrap_or_else(Instant::now);
+    let mut last_pet_tick = Instant::now();
     app.set_stream_handle(Some(StreamHandle::from(tui.event_sender())));
 
     // Spawn crossterm event reader
@@ -2927,6 +2993,14 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                 }
                 if state.processing {
                     state.tick_spinner();
+                    needs_redraw = true;
+                }
+                if app.pet_settings().enabled
+                    && last_pet_tick.elapsed()
+                        >= Duration::from_millis(app.pet_settings().tick_ms.clamp(120, 2000))
+                {
+                    state.tick_pet();
+                    last_pet_tick = Instant::now();
                     needs_redraw = true;
                 }
                 if previous_jobs != state.background_jobs_running {
@@ -3408,6 +3482,30 @@ mod tests {
         let style = status_message_style("Warning: retrying", &colors);
         assert_eq!(style.fg, Some(colors.status_bar_warn));
         assert_eq!(style.bg, Some(colors.status_bar_bg));
+    }
+
+    #[test]
+    fn test_pet_frame_token_hidden_when_disabled() {
+        let settings = crate::app::PetSettings {
+            enabled: false,
+            ..crate::app::PetSettings::default()
+        };
+        assert!(pet_frame_token(&settings, 0, false).is_none());
+    }
+
+    #[test]
+    fn test_pet_frame_token_returns_species_specific_frame() {
+        let settings = crate::app::PetSettings {
+            enabled: true,
+            species: "fox".to_string(),
+            mood: "ready".to_string(),
+            dock: crate::app::PetDock::Right,
+            tick_ms: 400,
+        };
+        let frame0 = pet_frame_token(&settings, 0, false).expect("frame");
+        let frame1 = pet_frame_token(&settings, 1, false).expect("frame");
+        assert_ne!(frame0, frame1);
+        assert!(frame0.contains('{'));
     }
 
     #[test]

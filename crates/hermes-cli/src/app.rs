@@ -37,6 +37,78 @@ use crate::runtime_tool_wiring::{wire_cron_scheduler_backend, wire_stdio_clarify
 use crate::terminal_backend::build_terminal_backend;
 use crate::tui::StreamHandle;
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum PetDock {
+    Left,
+    #[default]
+    Right,
+}
+
+impl PetDock {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Left => "left",
+            Self::Right => "right",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PetSettings {
+    pub enabled: bool,
+    pub species: String,
+    pub mood: String,
+    pub dock: PetDock,
+    pub tick_ms: u64,
+}
+
+impl Default for PetSettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            species: "boba".to_string(),
+            mood: "ready".to_string(),
+            dock: PetDock::Right,
+            tick_ms: 420,
+        }
+    }
+}
+
+impl PetSettings {
+    const SPECIES: [&'static str; 6] = ["boba", "bytecat", "otter", "fox", "owl", "capy"];
+    const MOODS: [&'static str; 5] = ["ready", "working", "sleepy", "hyped", "chill"];
+    const MIN_TICK_MS: u64 = 120;
+    const MAX_TICK_MS: u64 = 2000;
+
+    pub fn normalized(mut self) -> Self {
+        let species = self.species.trim().to_ascii_lowercase();
+        if Self::SPECIES.iter().any(|candidate| *candidate == species) {
+            self.species = species;
+        } else {
+            self.species = Self::default().species;
+        }
+
+        let mood = self.mood.trim().to_ascii_lowercase();
+        if Self::MOODS.iter().any(|candidate| *candidate == mood) {
+            self.mood = mood;
+        } else {
+            self.mood = Self::default().mood;
+        }
+
+        self.tick_ms = self.tick_ms.clamp(Self::MIN_TICK_MS, Self::MAX_TICK_MS);
+        self
+    }
+
+    pub fn species_catalog() -> &'static [&'static str] {
+        &Self::SPECIES
+    }
+
+    pub fn mood_catalog() -> &'static [&'static str] {
+        &Self::MOODS
+    }
+}
+
 // ---------------------------------------------------------------------------
 // App
 // ---------------------------------------------------------------------------
@@ -91,6 +163,8 @@ pub struct App {
     pub mouse_enabled: bool,
     /// Optional durable objective for the current interactive session.
     pub session_objective: Option<String>,
+    /// Animated companion pet settings.
+    pub pet_settings: PetSettings,
 }
 
 impl std::fmt::Debug for App {
@@ -103,6 +177,7 @@ impl std::fmt::Debug for App {
             .field("history_index", &self.history_index)
             .field("mouse_enabled", &self.mouse_enabled)
             .field("session_objective", &self.session_objective)
+            .field("pet_settings", &self.pet_settings)
             .finish_non_exhaustive()
     }
 }
@@ -348,6 +423,7 @@ impl App {
             stream_handle_shared,
             mouse_enabled: default_mouse_enabled(),
             session_objective: None,
+            pet_settings: load_pet_settings(),
         })
     }
 
@@ -367,6 +443,19 @@ impl App {
     /// Current TUI mouse handling state.
     pub fn mouse_enabled(&self) -> bool {
         self.mouse_enabled
+    }
+
+    /// Retrieve current companion pet settings.
+    pub fn pet_settings(&self) -> &PetSettings {
+        &self.pet_settings
+    }
+
+    /// Update and persist companion pet settings.
+    pub fn set_pet_settings(&mut self, settings: PetSettings) -> Result<(), AgentError> {
+        let normalized = settings.normalized();
+        persist_pet_settings(&normalized)?;
+        self.pet_settings = normalized;
+        Ok(())
     }
 
     /// Run the interactive REPL loop.
@@ -870,6 +959,14 @@ mod tests {
     use super::*;
     use hermes_config::LlmProviderConfig;
     use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env test lock")
+    }
 
     fn build_minimal_test_app() -> App {
         let config = Arc::new(GatewayConfig::default());
@@ -905,6 +1002,7 @@ mod tests {
             stream_handle_shared: Arc::new(StdMutex::new(None)),
             mouse_enabled: true,
             session_objective: None,
+            pet_settings: PetSettings::default(),
         }
     }
 
@@ -1256,6 +1354,42 @@ mod tests {
         assert!(default_mouse_enabled());
 
         std::env::remove_var("HERMES_TUI_MOUSE");
+    }
+
+    #[test]
+    fn test_pet_settings_normalization_clamps_and_rewrites_invalid_values() {
+        let input = PetSettings {
+            enabled: true,
+            species: "unknown".to_string(),
+            mood: "invalid".to_string(),
+            dock: PetDock::Left,
+            tick_ms: 10,
+        };
+        let normalized = input.normalized();
+        assert!(normalized.enabled);
+        assert_eq!(normalized.species, "boba");
+        assert_eq!(normalized.mood, "ready");
+        assert_eq!(normalized.dock, PetDock::Left);
+        assert_eq!(normalized.tick_ms, 120);
+    }
+
+    #[test]
+    fn test_load_pet_settings_uses_persisted_file_if_present() {
+        let _lock = env_test_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::env::set_var("HERMES_HOME", tmp.path());
+        std::fs::write(
+            tmp.path().join("pet.json"),
+            r#"{"enabled":true,"species":"fox","mood":"hyped","dock":"left","tick_ms":180}"#,
+        )
+        .expect("write pet settings");
+        let loaded = load_pet_settings();
+        assert!(loaded.enabled);
+        assert_eq!(loaded.species, "fox");
+        assert_eq!(loaded.mood, "hyped");
+        assert_eq!(loaded.dock, PetDock::Left);
+        assert_eq!(loaded.tick_ms, 180);
+        std::env::remove_var("HERMES_HOME");
     }
 
     #[test]
@@ -1618,6 +1752,77 @@ fn default_mouse_enabled() -> bool {
         ),
         Err(_) => true,
     }
+}
+
+fn pet_settings_path() -> PathBuf {
+    hermes_home_dir().join("pet.json")
+}
+
+fn parse_bool_env(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+fn default_pet_settings() -> PetSettings {
+    let mut settings = PetSettings::default();
+    if let Ok(raw) = std::env::var("HERMES_PET") {
+        if let Some(enabled) = parse_bool_env(&raw) {
+            settings.enabled = enabled;
+        }
+    }
+    if let Ok(raw) = std::env::var("HERMES_PET_SPECIES") {
+        settings.species = raw;
+    }
+    if let Ok(raw) = std::env::var("HERMES_PET_MOOD") {
+        settings.mood = raw;
+    }
+    if let Ok(raw) = std::env::var("HERMES_PET_DOCK") {
+        settings.dock = if raw.trim().eq_ignore_ascii_case("left") {
+            PetDock::Left
+        } else {
+            PetDock::Right
+        };
+    }
+    if let Ok(raw) = std::env::var("HERMES_PET_TICK_MS") {
+        if let Ok(value) = raw.trim().parse::<u64>() {
+            settings.tick_ms = value;
+        }
+    }
+    settings.normalized()
+}
+
+fn load_pet_settings() -> PetSettings {
+    let path = pet_settings_path();
+    let from_file = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<PetSettings>(&raw).ok())
+        .map(PetSettings::normalized);
+    from_file.unwrap_or_else(default_pet_settings)
+}
+
+fn persist_pet_settings(settings: &PetSettings) -> Result<(), AgentError> {
+    let path = pet_settings_path();
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            AgentError::Io(format!(
+                "Failed to create pet settings directory '{}': {}",
+                parent.display(),
+                e
+            ))
+        })?;
+    }
+    let body = serde_json::to_string_pretty(settings)
+        .map_err(|e| AgentError::Config(format!("pet settings serialization failed: {e}")))?;
+    std::fs::write(&path, format!("{body}\n")).map_err(|e| {
+        AgentError::Io(format!(
+            "Failed to persist pet settings '{}': {}",
+            path.display(),
+            e
+        ))
+    })
 }
 
 fn default_rtk_raw_mode() -> bool {

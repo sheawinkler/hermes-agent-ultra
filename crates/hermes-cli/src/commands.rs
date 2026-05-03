@@ -20,7 +20,7 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::app::App;
+use crate::app::{App, PetDock, PetSettings};
 use crate::model_switch::{curated_provider_slugs, normalize_provider_model, provider_model_ids};
 
 // ---------------------------------------------------------------------------
@@ -100,6 +100,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/fast", "Toggle fast-mode hints"),
     ("/skin", "Show available skin/theme options"),
     ("/voice", "Show voice mode status"),
+    (
+        "/pet",
+        "Animated companion controls (`status|on|off|toggle|list|set|mood|dock|speed`)",
+    ),
     ("/skills", "List available skills"),
     ("/skill", "Alias for /skills"),
     ("/tools", "List registered tools"),
@@ -2918,6 +2922,7 @@ pub async fn handle_slash_command(
         "/fast" | "/skin" | "/voice" => {
             handle_runtime_ui_mode_command(app, canonical_command(cmd), args)
         }
+        "/pet" => handle_pet_command(app, args),
         "/skills" => handle_skills_command(app, args).await,
         "/tools" => handle_tools_command(app),
         "/toolcards" => handle_toolcards_command(app, args),
@@ -6060,6 +6065,174 @@ fn handle_runtime_ui_mode_command(
         _ => "Unsupported runtime UI mode command.".to_string(),
     };
     emit_command_output(app, msg);
+    Ok(CommandResult::Handled)
+}
+
+fn render_pet_status(settings: &PetSettings) -> String {
+    format!(
+        "Pet status:\n  - enabled: {}\n  - species: {}\n  - mood: {}\n  - dock: {}\n  - speed_ms: {}\n\nUse `/pet on`, `/pet off`, `/pet toggle`, `/pet set <species>`, `/pet mood <mood>`, `/pet dock <left|right>`, `/pet speed <ms>`, `/pet list`.",
+        if settings.enabled { "ON" } else { "OFF" },
+        settings.species,
+        settings.mood,
+        settings.dock.as_str(),
+        settings.tick_ms
+    )
+}
+
+fn parse_pet_species(value: &str) -> Option<String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    PetSettings::species_catalog()
+        .iter()
+        .find(|candidate| **candidate == normalized)
+        .map(|candidate| (*candidate).to_string())
+}
+
+fn parse_pet_mood(value: &str) -> Option<String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    PetSettings::mood_catalog()
+        .iter()
+        .find(|candidate| **candidate == normalized)
+        .map(|candidate| (*candidate).to_string())
+}
+
+fn parse_pet_dock(value: &str) -> Option<PetDock> {
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "left" => Some(PetDock::Left),
+        "right" => Some(PetDock::Right),
+        _ => None,
+    }
+}
+
+fn handle_pet_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let action = args.first().copied().unwrap_or("status");
+    let mut settings = app.pet_settings().clone();
+
+    match action.to_ascii_lowercase().as_str() {
+        "status" => {
+            emit_command_output(app, render_pet_status(&settings));
+        }
+        "list" => {
+            emit_command_output(
+                app,
+                format!(
+                    "Available pets:\n  - species: {}\n  - moods: {}\n  - dock: left, right",
+                    PetSettings::species_catalog().join(", "),
+                    PetSettings::mood_catalog().join(", ")
+                ),
+            );
+        }
+        "on" | "off" | "toggle" | "wake" | "sleep" | "tuck" => {
+            let action_lc = action.to_ascii_lowercase();
+            let normalized_toggle = match action_lc.as_str() {
+                "wake" => Some("on"),
+                "sleep" | "tuck" => Some("off"),
+                other => Some(other),
+            };
+            match parse_toggle_arg(normalized_toggle, settings.enabled) {
+                Ok(enabled) => {
+                    settings.enabled = enabled;
+                    app.set_pet_settings(settings.clone())?;
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Pet {}.\n{}",
+                            if settings.enabled { "enabled" } else { "hidden" },
+                            render_pet_status(&settings)
+                        ),
+                    );
+                }
+                Err(_) => emit_command_output(
+                    app,
+                    "Usage: /pet [status|on|off|toggle|wake|tuck|list|set <species>|mood <mood>|dock <left|right>|speed <ms>]",
+                ),
+            }
+        }
+        "set" | "species" => {
+            let Some(raw) = args.get(1).copied() else {
+                emit_command_output(
+                    app,
+                    format!(
+                        "Usage: /pet set <species>\nAvailable species: {}",
+                        PetSettings::species_catalog().join(", ")
+                    ),
+                );
+                return Ok(CommandResult::Handled);
+            };
+            if let Some(species) = parse_pet_species(raw) {
+                settings.species = species;
+                app.set_pet_settings(settings.clone())?;
+                emit_command_output(app, render_pet_status(&settings));
+            } else {
+                emit_command_output(
+                    app,
+                    format!(
+                        "Unknown species '{}'. Available: {}",
+                        raw,
+                        PetSettings::species_catalog().join(", ")
+                    ),
+                );
+            }
+        }
+        "mood" => {
+            let Some(raw) = args.get(1).copied() else {
+                emit_command_output(
+                    app,
+                    format!(
+                        "Usage: /pet mood <mood>\nAvailable moods: {}",
+                        PetSettings::mood_catalog().join(", ")
+                    ),
+                );
+                return Ok(CommandResult::Handled);
+            };
+            if let Some(mood) = parse_pet_mood(raw) {
+                settings.mood = mood;
+                app.set_pet_settings(settings.clone())?;
+                emit_command_output(app, render_pet_status(&settings));
+            } else {
+                emit_command_output(
+                    app,
+                    format!(
+                        "Unknown mood '{}'. Available: {}",
+                        raw,
+                        PetSettings::mood_catalog().join(", ")
+                    ),
+                );
+            }
+        }
+        "dock" => {
+            let Some(raw) = args.get(1).copied() else {
+                emit_command_output(app, "Usage: /pet dock <left|right>");
+                return Ok(CommandResult::Handled);
+            };
+            if let Some(dock) = parse_pet_dock(raw) {
+                settings.dock = dock;
+                app.set_pet_settings(settings.clone())?;
+                emit_command_output(app, render_pet_status(&settings));
+            } else {
+                emit_command_output(app, "Usage: /pet dock <left|right>");
+            }
+        }
+        "speed" => {
+            let Some(raw) = args.get(1).copied() else {
+                emit_command_output(app, "Usage: /pet speed <ms>");
+                return Ok(CommandResult::Handled);
+            };
+            match raw.trim().parse::<u64>() {
+                Ok(ms) => {
+                    settings.tick_ms = ms;
+                    app.set_pet_settings(settings.clone())?;
+                    emit_command_output(app, render_pet_status(&settings));
+                }
+                Err(_) => emit_command_output(app, "Usage: /pet speed <ms>"),
+            }
+        }
+        _ => emit_command_output(
+            app,
+            "Usage: /pet [status|on|off|toggle|wake|tuck|list|set <species>|mood <mood>|dock <left|right>|speed <ms>]",
+        ),
+    }
+
     Ok(CommandResult::Handled)
 }
 
@@ -11098,6 +11271,13 @@ mod tests {
     }
 
     #[test]
+    fn test_pet_command_is_registered_and_completable() {
+        assert!(SLASH_COMMANDS.iter().any(|(name, _)| *name == "/pet"));
+        let results = autocomplete("/pe");
+        assert!(results.contains(&"/pet"));
+    }
+
+    #[test]
     fn test_objective_command_is_registered_and_completable() {
         assert!(SLASH_COMMANDS.iter().any(|(name, _)| *name == "/objective"));
         let results = autocomplete("/obj");
@@ -11845,6 +12025,21 @@ install_command: "uv pip install -r requirements.txt"
         assert_eq!(parse_toggle_arg(Some("on"), false).expect("on"), true);
         assert_eq!(parse_toggle_arg(Some("off"), true).expect("off"), false);
         assert!(parse_toggle_arg(Some("bad-value"), true).is_err());
+    }
+
+    #[test]
+    fn parse_pet_species_and_mood_validate_catalog_entries() {
+        assert_eq!(parse_pet_species("fox").as_deref(), Some("fox"));
+        assert!(parse_pet_species("dragon").is_none());
+        assert_eq!(parse_pet_mood("ready").as_deref(), Some("ready"));
+        assert!(parse_pet_mood("sleeping-beauty").is_none());
+    }
+
+    #[test]
+    fn parse_pet_dock_accepts_left_or_right() {
+        assert_eq!(parse_pet_dock("left"), Some(PetDock::Left));
+        assert_eq!(parse_pet_dock("right"), Some(PetDock::Right));
+        assert_eq!(parse_pet_dock("center"), None);
     }
 
     #[test]
