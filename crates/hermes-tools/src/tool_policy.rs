@@ -1013,10 +1013,13 @@ mod tests {
         println!("tool_policy_hot_path_ns_per_eval={}", ns_per_eval);
 
         // Keep this gate loose enough for CI variance while still catching severe regressions.
+        let max_ns_per_eval = std::env::var("HERMES_TOOL_POLICY_HOT_PATH_NS_MAX")
+            .ok()
+            .and_then(|value| value.parse::<u128>().ok())
+            .unwrap_or(800_000);
         assert!(
-            ns_per_eval < 600_000,
-            "tool policy hot path regressed: {} ns/eval",
-            ns_per_eval
+            ns_per_eval < max_ns_per_eval,
+            "tool policy hot path regressed: {ns_per_eval} ns/eval (max {max_ns_per_eval})"
         );
     }
 

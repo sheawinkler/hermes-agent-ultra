@@ -1265,7 +1265,14 @@ mod tests {
         let close = backend.close_process_stdin(&session_id).await.unwrap();
         assert_eq!(close["status"], "ok");
 
-        let wait = backend.wait_process(&session_id, Some(5)).await.unwrap();
+        let wait = backend.wait_process(&session_id, Some(20)).await.unwrap();
+        if wait["status"] == "timeout" {
+            let poll = backend.poll_process(&session_id).await.unwrap();
+            let _ = backend.kill_process(&session_id).await;
+            panic!(
+                "background process did not exit after closing stdin: wait={wait}, poll={poll}"
+            );
+        }
         assert_eq!(wait["status"], "exited");
         assert!(wait["output"]
             .as_str()

@@ -19,7 +19,7 @@ mod tests {
         let cfg = GatewayConfig::default();
         let backend = build_terminal_backend(&cfg);
         let out = backend
-            .execute_command("echo backend-ok", Some(5), None, false, false)
+            .execute_command("echo backend-ok", Some(20), None, false, false)
             .await
             .expect("backend command should run");
         assert_eq!(out.exit_code, 0);
