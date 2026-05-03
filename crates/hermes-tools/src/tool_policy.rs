@@ -4,7 +4,6 @@
 //! audit or block tool calls before handler execution.
 
 use std::collections::HashSet;
-use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 
@@ -113,22 +112,6 @@ struct ToolPolicyFileConfig {
     denylist: Option<Vec<String>>,
     deny_param_patterns: Option<Vec<String>>,
     max_param_bytes: Option<usize>,
-}
-
-#[derive(Default)]
-struct ByteCounter {
-    len: usize,
-}
-
-impl io::Write for ByteCounter {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.len += buf.len();
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
-    }
 }
 
 impl ToolPolicyEngine {
@@ -324,50 +307,43 @@ impl ToolPolicyEngine {
                 deny_reason = Some(reason);
                 deny_code = Some(code);
             } else if self.deny_param_patterns.is_empty() {
-                let mut counter = ByteCounter::default();
-                match serde_json::to_writer(&mut counter, params) {
-                    Ok(()) if counter.len > self.max_param_bytes => {
-                        deny_reason = Some(format!(
-                            "tool params exceed max bytes: {} > {}",
-                            counter.len, self.max_param_bytes
-                        ));
-                        deny_code = Some("params_too_large".to_string());
-                    }
-                    Ok(()) => {}
-                    Err(_) => {
-                        deny_reason = Some(
-                            "tool params could not be serialized for policy check".to_string(),
-                        );
-                        deny_code = Some("params_not_serializable".to_string());
-                    }
+                let serialized_len = estimate_json_len_capped(params, self.max_param_bytes);
+                if serialized_len > self.max_param_bytes {
+                    deny_reason = Some(format!(
+                        "tool params exceed max bytes: {} > {}",
+                        serialized_len, self.max_param_bytes
+                    ));
+                    deny_code = Some("params_too_large".to_string());
                 }
             } else {
-                match serde_json::to_string(params) {
-                    Ok(params_str) => {
-                        if params_str.len() > self.max_param_bytes {
-                            deny_reason = Some(format!(
-                                "tool params exceed max bytes: {} > {}",
-                                params_str.len(),
-                                self.max_param_bytes
-                            ));
-                            deny_code = Some("params_too_large".to_string());
-                        } else if let Some(pattern) = self
-                            .deny_param_patterns
-                            .iter()
-                            .find(|p| p.is_match(&params_str))
-                        {
-                            deny_reason = Some(format!(
-                                "tool params matched deny pattern '{}'",
-                                pattern.as_str()
-                            ));
-                            deny_code = Some("params_pattern_denied".to_string());
+                let serialized_len = estimate_json_len_capped(params, self.max_param_bytes);
+                if serialized_len > self.max_param_bytes {
+                    deny_reason = Some(format!(
+                        "tool params exceed max bytes: {} > {}",
+                        serialized_len, self.max_param_bytes
+                    ));
+                    deny_code = Some("params_too_large".to_string());
+                } else {
+                    match serde_json::to_string(params) {
+                        Ok(params_str) => {
+                            if let Some(pattern) = self
+                                .deny_param_patterns
+                                .iter()
+                                .find(|p| p.is_match(&params_str))
+                            {
+                                deny_reason = Some(format!(
+                                    "tool params matched deny pattern '{}'",
+                                    pattern.as_str()
+                                ));
+                                deny_code = Some("params_pattern_denied".to_string());
+                            }
                         }
-                    }
-                    Err(_) => {
-                        deny_reason = Some(
-                            "tool params could not be serialized for policy check".to_string(),
-                        );
-                        deny_code = Some("params_not_serializable".to_string());
+                        Err(_) => {
+                            deny_reason = Some(
+                                "tool params could not be serialized for policy check".to_string(),
+                            );
+                            deny_code = Some("params_not_serializable".to_string());
+                        }
                     }
                 }
             }
@@ -431,6 +407,89 @@ impl ToolPolicyEngine {
                 }
             }
         }
+    }
+}
+
+#[inline]
+fn add_capped_len(total: &mut usize, add: usize, max: usize) -> bool {
+    *total = total.saturating_add(add);
+    *total > max
+}
+
+#[inline]
+fn escaped_json_string_len(s: &str, max: usize, total: &mut usize) -> bool {
+    // Opening quote.
+    if add_capped_len(total, 1, max) {
+        return true;
+    }
+    for &b in s.as_bytes() {
+        let add = match b {
+            b'"' | b'\\' => 2,
+            0x00..=0x1F => 6,
+            _ => 1,
+        };
+        if add_capped_len(total, add, max) {
+            return true;
+        }
+    }
+    // Closing quote.
+    add_capped_len(total, 1, max)
+}
+
+fn estimate_json_len_capped(value: &Value, max: usize) -> usize {
+    fn walk(value: &Value, total: &mut usize, max: usize) -> bool {
+        match value {
+            Value::Null => add_capped_len(total, 4, max),
+            Value::Bool(true) => add_capped_len(total, 4, max),
+            Value::Bool(false) => add_capped_len(total, 5, max),
+            Value::Number(n) => add_capped_len(total, n.to_string().len(), max),
+            Value::String(s) => escaped_json_string_len(s, max, total),
+            Value::Array(items) => {
+                if add_capped_len(total, 1, max) {
+                    return true;
+                }
+                let mut first = true;
+                for item in items {
+                    if !first && add_capped_len(total, 1, max) {
+                        return true;
+                    }
+                    first = false;
+                    if walk(item, total, max) {
+                        return true;
+                    }
+                }
+                add_capped_len(total, 1, max)
+            }
+            Value::Object(map) => {
+                if add_capped_len(total, 1, max) {
+                    return true;
+                }
+                let mut first = true;
+                for (key, item) in map {
+                    if !first && add_capped_len(total, 1, max) {
+                        return true;
+                    }
+                    first = false;
+                    if escaped_json_string_len(key, max, total) {
+                        return true;
+                    }
+                    if add_capped_len(total, 1, max) {
+                        return true;
+                    }
+                    if walk(item, total, max) {
+                        return true;
+                    }
+                }
+                add_capped_len(total, 1, max)
+            }
+        }
+    }
+
+    let mut total = 0usize;
+    if walk(value, &mut total, max) {
+        max.saturating_add(1)
+    } else {
+        total
     }
 }
 
@@ -771,6 +830,21 @@ mod tests {
         assert!(!decision.allow);
         assert_eq!(decision.code.as_deref(), Some("params_too_large"));
         assert!(decision.reason.as_deref().unwrap_or("").contains("exceed"));
+    }
+
+    #[test]
+    fn estimate_json_len_capped_tracks_compact_json_size_for_ascii_payloads() {
+        let payload = serde_json::json!({
+            "cmd": "echo benchmark",
+            "args": ["--long", "value\"with\\escapes"],
+            "metadata": {
+                "blob": "x".repeat(1024),
+                "session": "bench"
+            }
+        });
+        let expected = serde_json::to_string(&payload).expect("serialize").len();
+        let estimated = estimate_json_len_capped(&payload, usize::MAX / 2);
+        assert_eq!(estimated, expected);
     }
 
     #[test]
