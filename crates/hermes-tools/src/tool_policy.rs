@@ -425,6 +425,7 @@ fn escaped_json_string_len(s: &str, max: usize, total: &mut usize) -> bool {
     for &b in s.as_bytes() {
         let add = match b {
             b'"' | b'\\' => 2,
+            b'\x08' | b'\x09' | b'\x0A' | b'\x0C' | b'\x0D' => 2,
             0x00..=0x1F => 6,
             _ => 1,
         };
@@ -711,6 +712,94 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
+    #[derive(Clone, Copy)]
+    struct XorShift64(u64);
+
+    impl XorShift64 {
+        fn new(seed: u64) -> Self {
+            Self(seed.max(1))
+        }
+
+        fn next_u64(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+
+        fn next_usize(&mut self, upper: usize) -> usize {
+            if upper <= 1 {
+                return 0;
+            }
+            (self.next_u64() as usize) % upper
+        }
+    }
+
+    fn gen_string(rng: &mut XorShift64, max_len: usize) -> String {
+        let len = rng.next_usize(max_len.saturating_add(1));
+        let mut out = String::with_capacity(len.saturating_add(8));
+        for _ in 0..len {
+            let ch = match rng.next_usize(16) {
+                0 => '"',
+                1 => '\\',
+                2 => '\n',
+                3 => '\r',
+                4 => '\t',
+                5 => '\u{0001}',
+                6 => '\u{001f}',
+                7 => '\u{2028}',
+                8 => '\u{2029}',
+                9 => 'é',
+                10 => '中',
+                11 => '🦀',
+                _ => {
+                    let byte = b'a'.saturating_add(rng.next_usize(26) as u8);
+                    char::from(byte)
+                }
+            };
+            out.push(ch);
+        }
+        out
+    }
+
+    fn gen_value(rng: &mut XorShift64, depth: usize) -> Value {
+        if depth == 0 {
+            return match rng.next_usize(6) {
+                0 => Value::Null,
+                1 => Value::Bool(rng.next_usize(2) == 0),
+                2 => serde_json::json!(rng.next_u64() as i64),
+                3 => serde_json::json!((rng.next_u64() % 1_000_000) as f64 / 113.0f64),
+                4 => Value::String(gen_string(rng, 24)),
+                _ => serde_json::json!([rng.next_usize(10), gen_string(rng, 8)]),
+            };
+        }
+        match rng.next_usize(8) {
+            0 => Value::Null,
+            1 => Value::Bool(rng.next_usize(2) == 0),
+            2 => serde_json::json!(rng.next_u64() as i64),
+            3 => serde_json::json!((rng.next_u64() % 1_000_000) as f64 / 113.0f64),
+            4 => Value::String(gen_string(rng, 48)),
+            5 => {
+                let len = rng.next_usize(5);
+                let mut arr = Vec::with_capacity(len);
+                for _ in 0..len {
+                    arr.push(gen_value(rng, depth - 1));
+                }
+                Value::Array(arr)
+            }
+            _ => {
+                let len = rng.next_usize(5);
+                let mut map = serde_json::Map::with_capacity(len);
+                for _ in 0..len {
+                    map.insert(gen_string(rng, 18), gen_value(rng, depth - 1));
+                }
+                Value::Object(map)
+            }
+        }
+    }
+
     #[test]
     fn policy_denies_denylisted_tool() {
         let policy = ToolPolicyEngine::new(ToolPolicyMode::Enforce)
@@ -845,6 +934,52 @@ mod tests {
         let expected = serde_json::to_string(&payload).expect("serialize").len();
         let estimated = estimate_json_len_capped(&payload, usize::MAX / 2);
         assert_eq!(estimated, expected);
+    }
+
+    #[test]
+    fn estimate_json_len_capped_matches_serde_json_for_edge_cases() {
+        let values = vec![
+            serde_json::json!({"s":"\u{2028}\u{2029}"}),
+            serde_json::json!({"s":"\n\r\t\\\""}),
+            serde_json::json!({"s":"é中🦀"}),
+            serde_json::json!({"k\"\\\\":"v\u{0001}\u{001f}"}),
+            serde_json::json!([{"a":[1,2,3]}, {"b":{"c":"x"}}]),
+        ];
+        for value in values {
+            let expected = serde_json::to_string(&value).expect("serialize").len();
+            let estimated = estimate_json_len_capped(&value, usize::MAX / 2);
+            assert_eq!(estimated, expected, "mismatch for value={}", value);
+        }
+    }
+
+    #[test]
+    fn estimate_json_len_capped_matches_serde_json_for_randomized_values() {
+        let mut rng = XorShift64::new(0xC0DE_5EED_BAAD_F00D);
+        for idx in 0..500usize {
+            let value = gen_value(&mut rng, 3);
+            let expected = serde_json::to_string(&value).expect("serialize").len();
+            let estimated = estimate_json_len_capped(&value, usize::MAX / 2);
+            assert_eq!(
+                estimated, expected,
+                "randomized mismatch at iteration {} for value={}",
+                idx, value
+            );
+        }
+    }
+
+    #[test]
+    fn estimate_json_len_capped_signals_overflow_by_returning_max_plus_one() {
+        let value = serde_json::json!({
+            "blob": "x".repeat(4096),
+            "nested": [{"k":"v"},{"k":"w"}],
+        });
+        let exact = serde_json::to_string(&value).expect("serialize").len();
+        let cap_below = exact.saturating_sub(1);
+        let over = estimate_json_len_capped(&value, cap_below);
+        assert_eq!(over, cap_below.saturating_add(1));
+
+        let at = estimate_json_len_capped(&value, exact);
+        assert_eq!(at, exact);
     }
 
     #[test]
