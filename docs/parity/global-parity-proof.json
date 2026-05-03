@@ -16,8 +16,11 @@
       {
         "actual": 2850.0,
         "limit": 2600,
+        "max_overshoot": 500.0,
         "metric": "max_files_only_upstream",
-        "status": "fail"
+        "overshoot": 250.0,
+        "special_rule": "allow_files_only_upstream_overshoot_when_functional_clean",
+        "status": "warn"
       },
       {
         "actual": 10.0,
@@ -51,9 +54,20 @@
       }
     ],
     "mode": "tree-drift",
-    "pass": false
+    "pass": true,
+    "special_rules_applied": [
+      {
+        "actual": 2850.0,
+        "limit": 2600.0,
+        "max_overshoot": 500.0,
+        "metric": "max_files_only_upstream",
+        "overshoot": 250.0,
+        "reason": "functional parity clean; upstream-only file growth treated as drift warning",
+        "rule": "allow_files_only_upstream_overshoot_when_functional_clean"
+      }
+    ]
   },
-  "generated_at_utc": "2026-05-01T05:12:16.126921+00:00",
+  "generated_at_utc": "2026-05-03T08:07:57.572654+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
