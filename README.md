@@ -105,6 +105,25 @@ hermes-ultra mcp sentrux
 hermes-ultra mcp sentrux-status
 ```
 
+Key operator commands:
+
+```bash
+# Capability diagnostics for current or target model
+/model explain
+/model why-not --cap tools,reasoning --min-context 200000
+
+# Deterministic trace controls
+/raw trace status
+/raw trace verify
+/raw trace export 200
+
+# Runtime policy packs
+/policy list
+/policy strict
+/policy standard
+/policy dev
+```
+
 ## Local Backends
 
 `hermes-ultra setup` now includes local/self-host provider options with no mandatory API key:

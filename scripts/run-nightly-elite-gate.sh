@@ -107,6 +107,18 @@ run_gate() {
   echo "[elite-gate] running deterministic replay suite"
   "${REPO_ROOT}/scripts/run-deterministic-replay-suite.sh" || return $?
 
+  FAILED_STEP="security_release_gate_v2"
+  echo "[elite-gate] running security release gate v2"
+  python3 "${REPO_ROOT}/scripts/run-security-release-gate-v2.py" --repo-root "${REPO_ROOT}" || return $?
+
+  FAILED_STEP="performance_autopilot"
+  echo "[elite-gate] running performance autopilot"
+  python3 "${REPO_ROOT}/scripts/run-performance-autopilot.py" --repo-root "${REPO_ROOT}" || return $?
+
+  FAILED_STEP="background_queue_audit"
+  echo "[elite-gate] auditing background queue health"
+  python3 "${REPO_ROOT}/scripts/audit_background_queue.py" || return $?
+
   FAILED_STEP="write_summary"
   local head_sha
   head_sha="$(git rev-parse HEAD)"
@@ -119,7 +131,10 @@ run_gate() {
   "log_path": "${LOG_PATH}",
   "checks": [
     "cargo test -p hermes-cli",
-    "scripts/run-deterministic-replay-suite.sh"
+    "scripts/run-deterministic-replay-suite.sh",
+    "scripts/run-security-release-gate-v2.py",
+    "scripts/run-performance-autopilot.py",
+    "scripts/audit_background_queue.py"
   ]
 }
 EOF
@@ -148,7 +163,10 @@ if [[ "${RUN_RC}" -ne 0 ]]; then
   "exit_code": ${RUN_RC},
   "checks": [
     "cargo test -p hermes-cli",
-    "scripts/run-deterministic-replay-suite.sh"
+    "scripts/run-deterministic-replay-suite.sh",
+    "scripts/run-security-release-gate-v2.py",
+    "scripts/run-performance-autopilot.py",
+    "scripts/audit_background_queue.py"
   ]
 }
 EOF
@@ -164,6 +182,9 @@ Nightly elite gate completed.
 - checks:
   - \`cargo test -p hermes-cli\`
   - \`scripts/run-deterministic-replay-suite.sh\`
+  - \`scripts/run-security-release-gate-v2.py\`
+  - \`scripts/run-performance-autopilot.py\`
+  - \`scripts/audit_background_queue.py\`
 EOF
 
 cat > "${SUMMARY_META_PATH}" <<EOF
@@ -175,7 +196,10 @@ cat > "${SUMMARY_META_PATH}" <<EOF
   "failed_step": "${FAILED_STEP}",
   "checks": [
     "cargo test -p hermes-cli",
-    "scripts/run-deterministic-replay-suite.sh"
+    "scripts/run-deterministic-replay-suite.sh",
+    "scripts/run-security-release-gate-v2.py",
+    "scripts/run-performance-autopilot.py",
+    "scripts/audit_background_queue.py"
   ]
 }
 EOF

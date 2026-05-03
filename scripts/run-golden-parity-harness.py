@@ -19,10 +19,17 @@ TITLE_PREFIX = "[Parity] Golden Harness Drift"
 
 REQUIRED_TUI_TESTS = [
     "test_completion_popup_hidden_when_slash_deleted",
+    "test_completion_popup_hidden_when_modal_or_processing_active",
     "test_transcript_hides_system_messages",
     "test_stream_handle",
     "test_is_ctrl_c_detection",
 ]
+
+REQUIRED_COMMAND_CONTRACTS = {
+    "/model": ["capability", "explain"],
+    "/raw": ["trace", "deterministic"],
+    "/policy": ["profile"],
+}
 
 
 @dataclass
@@ -33,6 +40,7 @@ class HarnessReport:
     missing_commands: list[str]
     extra_commands: list[str]
     missing_tui_tests: list[str]
+    command_contract_failures: list[str]
     allow_missing_commands: int
     ok: bool
 
@@ -44,6 +52,7 @@ class HarnessReport:
             "missing_commands": self.missing_commands,
             "extra_commands": self.extra_commands,
             "missing_tui_tests": self.missing_tui_tests,
+            "command_contract_failures": self.command_contract_failures,
             "allow_missing_commands": self.allow_missing_commands,
             "ok": self.ok,
         }
@@ -87,6 +96,12 @@ def parse_local_slash_commands(commands_rs: pathlib.Path) -> set[str]:
     return {m.strip() for m in matches if m.strip().startswith("/")}
 
 
+def parse_local_command_descriptions(commands_rs: pathlib.Path) -> dict[str, str]:
+    raw = commands_rs.read_text(encoding="utf-8")
+    pairs = re.findall(r'\(\s*"(/[^"]+)"\s*,\s*"([^"]*)"\s*,?\s*\)', raw)
+    return {cmd.strip(): desc.strip() for cmd, desc in pairs if cmd.strip().startswith("/")}
+
+
 def parse_upstream_slash_commands(upstream_root: pathlib.Path) -> set[str]:
     sys.path.insert(0, str(upstream_root))
     try:
@@ -121,14 +136,29 @@ def load_allow_missing(args: argparse.Namespace, repo_root: pathlib.Path) -> int
 
 
 def build_report(repo_root: pathlib.Path, upstream_root: pathlib.Path, allow_missing: int) -> HarnessReport:
-    local = parse_local_slash_commands(repo_root / "crates/hermes-cli/src/commands.rs")
+    commands_rs = repo_root / "crates/hermes-cli/src/commands.rs"
+    local = parse_local_slash_commands(commands_rs)
+    local_desc = parse_local_command_descriptions(commands_rs)
     upstream = parse_upstream_slash_commands(upstream_root)
     missing = sorted(upstream - local)
     extra = sorted(local - upstream)
+    contract_failures: list[str] = []
+    for command, required_terms in REQUIRED_COMMAND_CONTRACTS.items():
+        desc = local_desc.get(command, "")
+        desc_lc = desc.lower()
+        missing_terms = [term for term in required_terms if term.lower() not in desc_lc]
+        if missing_terms:
+            contract_failures.append(
+                f"{command}: description missing required terms {missing_terms!r}"
+            )
 
     tui_tests = parse_tui_tests(repo_root / "crates/hermes-cli/src/tui.rs")
     missing_tui_tests = [name for name in REQUIRED_TUI_TESTS if name not in tui_tests]
-    ok = len(missing) <= allow_missing and not missing_tui_tests
+    ok = (
+        len(missing) <= allow_missing
+        and not missing_tui_tests
+        and not contract_failures
+    )
     return HarnessReport(
         generated_at=dt.datetime.now(dt.timezone.utc).isoformat(),
         repo_root=str(repo_root),
@@ -136,6 +166,7 @@ def build_report(repo_root: pathlib.Path, upstream_root: pathlib.Path, allow_mis
         missing_commands=missing,
         extra_commands=extra,
         missing_tui_tests=missing_tui_tests,
+        command_contract_failures=contract_failures,
         allow_missing_commands=allow_missing,
         ok=ok,
     )
@@ -179,6 +210,7 @@ def maybe_open_issue(repo_root: pathlib.Path, report: HarnessReport) -> None:
         "",
         f"- Missing upstream commands: `{len(report.missing_commands)}`",
         f"- Missing required TUI tests: `{len(report.missing_tui_tests)}`",
+        f"- Command contract failures: `{len(report.command_contract_failures)}`",
         "",
     ]
     if report.missing_commands:
@@ -188,6 +220,10 @@ def maybe_open_issue(repo_root: pathlib.Path, report: HarnessReport) -> None:
     if report.missing_tui_tests:
         summary_lines.append("Missing TUI tests:")
         summary_lines.extend([f"- `{name}`" for name in report.missing_tui_tests])
+        summary_lines.append("")
+    if report.command_contract_failures:
+        summary_lines.append("Command contract failures:")
+        summary_lines.extend([f"- {line}" for line in report.command_contract_failures[:50]])
         summary_lines.append("")
     body = "\n".join(summary_lines).strip()
 
@@ -248,7 +284,9 @@ def main() -> int:
         "[golden-parity] "
         f"{'PASSED' if report.ok else 'FAILED'} "
         f"(missing={len(report.missing_commands)} extra={len(report.extra_commands)} "
-        f"missing_tui_tests={len(report.missing_tui_tests)} allow_missing={allow_missing})"
+        f"missing_tui_tests={len(report.missing_tui_tests)} "
+        f"contract_failures={len(report.command_contract_failures)} "
+        f"allow_missing={allow_missing})"
     )
     print(f"[golden-parity] Report: {report_path}")
 

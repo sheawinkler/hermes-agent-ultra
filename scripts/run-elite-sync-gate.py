@@ -45,8 +45,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--release-security-cmd",
-        default="python3 scripts/release_secret_scan.py --repo-root . --report .sync-reports/release-secret-scan.json",
+        default="python3 scripts/run-security-release-gate-v2.py --repo-root . --report .sync-reports/security-release-gate-v2.json",
         help="Release secret-scan gate command",
+    )
+    parser.add_argument(
+        "--performance-autopilot-cmd",
+        default="python3 scripts/run-performance-autopilot.py --repo-root . --strict",
+        help="Performance autopilot command",
     )
     parser.add_argument(
         "--chaos-baseline",
@@ -138,6 +143,7 @@ def main() -> int:
     parity_raw = run_shell(args.parity_diff_cmd, repo_root)
     eval_raw = run_shell(args.eval_trend_cmd, repo_root)
     release_security_raw = run_shell(args.release_security_cmd, repo_root)
+    perf_autopilot_raw = run_shell(args.performance_autopilot_cmd, repo_root)
 
     redteam = slim(redteam_raw)
     chaos = slim(chaos_raw)
@@ -145,6 +151,7 @@ def main() -> int:
     parity = slim(parity_raw)
     eval_trend = slim(eval_raw)
     release_security = slim(release_security_raw)
+    perf_autopilot = slim(perf_autopilot_raw)
     sections: dict[str, Any] = {
         "redteam": redteam,
         "chaos": chaos,
@@ -152,6 +159,7 @@ def main() -> int:
         "parity_differential": parity,
         "eval_trend": eval_trend,
         "release_security": release_security,
+        "performance_autopilot": perf_autopilot,
     }
 
     compare: dict[str, Any] | None = None

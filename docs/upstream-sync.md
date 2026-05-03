@@ -35,8 +35,16 @@ fork-specific history.
   - Runs zero-copy policy hot-path benchmark test and captures ns/eval evidence
   - Emits JSON diagnostics under `.sync-reports/zero-copy-hotpath-<timestamp>.json`
 - `scripts/run-elite-sync-gate.py`
-  - Runs red-team + adapter chaos + zero-copy hot-path + differential parity + eval trend as one gate
+  - Runs red-team + adapter chaos + zero-copy hot-path + differential parity + eval trend + security gate v2 + performance autopilot as one gate
   - Emits JSON diagnostics under `.sync-reports/elite-sync-gate-<timestamp>.json`
+- `scripts/run-security-release-gate-v2.py`
+  - Runs release-time secret scan, SBOM generation (`cargo metadata`), provenance signature tests, and redaction regression tests
+  - Emits JSON diagnostics under `.sync-reports/security-release-gate-v2-<timestamp>.json`
+- `scripts/run-performance-autopilot.py`
+  - Runs hot-path + eval trend checks and emits deterministic tuning recommendations (`json` + `markdown`)
+- `scripts/audit_background_queue.py`
+  - Audits background job manifests for malformed JSON, stale running jobs, and duplicate active tasks
+  - Optional repair mode: `--repair`
 - `scripts/run-differential-parity-gate.py`
   - Compares local CLI command/action surface with `upstream/main`
   - Emits gate artifact under `.sync-reports/differential-parity-gate-<timestamp>.json`
@@ -47,7 +55,7 @@ fork-specific history.
   - Runs a unified intelligence loop across golden parity + eval trend + elite sync gates
   - Emits recommendations and intelligence index under `.sync-reports/self-evolution-loop-<timestamp>.json`
 - `scripts/run-nightly-elite-gate.sh`
-  - Nightly local validation gate (`cargo test -p hermes-cli` + deterministic replay suite)
+  - Nightly local validation gate (`cargo test -p hermes-cli` + deterministic replay + security gate v2 + performance autopilot + queue audit)
   - Auto-publishes run summary via `contextlattice -> github -> local` sink chain
 - `scripts/publish_automation_summary.py`
   - Publishes automation summaries with sink priority:
