@@ -236,25 +236,19 @@ impl MultiTtsBackend {
         }
 
         let mut child = cmd.spawn().map_err(|e| {
-            ToolError::ExecutionFailed(format!(
-                "Failed to start piper binary '{}': {}",
-                binary, e
-            ))
+            ToolError::ExecutionFailed(format!("Failed to start piper binary '{}': {}", binary, e))
         })?;
 
         if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(text.as_bytes())
-                .await
-                .map_err(|e| ToolError::ExecutionFailed(format!("Failed writing to piper stdin: {}", e)))?;
-            stdin
-                .write_all(b"\n")
-                .await
-                .map_err(|e| ToolError::ExecutionFailed(format!("Failed finalizing piper stdin: {}", e)))?;
-            stdin
-                .shutdown()
-                .await
-                .map_err(|e| ToolError::ExecutionFailed(format!("Failed closing piper stdin: {}", e)))?;
+            stdin.write_all(text.as_bytes()).await.map_err(|e| {
+                ToolError::ExecutionFailed(format!("Failed writing to piper stdin: {}", e))
+            })?;
+            stdin.write_all(b"\n").await.map_err(|e| {
+                ToolError::ExecutionFailed(format!("Failed finalizing piper stdin: {}", e))
+            })?;
+            stdin.shutdown().await.map_err(|e| {
+                ToolError::ExecutionFailed(format!("Failed closing piper stdin: {}", e))
+            })?;
         }
 
         let output = child
