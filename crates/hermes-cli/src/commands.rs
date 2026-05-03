@@ -15,6 +15,7 @@ use bytes::Bytes;
 use hermes_core::AgentError;
 use hermes_intelligence::model_metadata::{get_model_context_length, get_model_info};
 use hermes_intelligence::models_dev::default_client;
+use hermes_tools::ToolPolicyEngine;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -88,7 +89,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/rollback", "List rollback checkpoints"),
     (
         "/model",
-        "Show current model, set directly, or pick provider/model interactively (supports capability filters)",
+        "Show/switch models, or run capability diagnostics (`/model explain`, `why-not`, `--cap`)",
     ),
     ("/provider", "List configured providers and availability"),
     (
@@ -183,7 +184,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "/policy",
-        "Policy lifecycle (needs HERMES_POLICY_ADMIN_TOKEN, same as HTTP X-Hermes-Policy-Admin)",
+        "Runtime policy profiles (`status|list|strict|standard|dev`) + live counters",
     ),
     ("/help", "Show help for available commands"),
     ("/quit", "Quit the application"),
@@ -3229,6 +3230,118 @@ fn model_meets_requirements(
     true
 }
 
+fn unmet_model_requirements(
+    capabilities: ResolvedModelCapabilities,
+    requirements: ModelCapabilityRequirements,
+) -> Vec<String> {
+    let mut missing = Vec::new();
+    if requirements.require_tools && !capabilities.supports_tools {
+        missing.push("tools".to_string());
+    }
+    if requirements.require_vision && !capabilities.supports_vision {
+        missing.push("vision".to_string());
+    }
+    if requirements.require_reasoning && !capabilities.supports_reasoning {
+        missing.push("reasoning".to_string());
+    }
+    if let Some(min_context) = requirements.effective_min_context() {
+        if capabilities.context_window < min_context {
+            missing.push(format!(
+                "context>={} (actual={})",
+                min_context, capabilities.context_window
+            ));
+        }
+    }
+    missing
+}
+
+async fn handle_model_explain_command(
+    app: &mut App,
+    args: &[&str],
+    strict_why_not: bool,
+) -> Result<CommandResult, AgentError> {
+    let (mut positional, requirements, provider_override) = parse_model_command_args(args)?;
+    if let Some(provider) = provider_override {
+        if positional.is_empty() {
+            positional.push(provider);
+        } else if let Some(first) = positional.first().cloned() {
+            let model_id = first
+                .split_once(':')
+                .map(|(_, rhs)| rhs.to_string())
+                .unwrap_or(first);
+            positional[0] = format!("{}:{}", provider, model_id.trim());
+        }
+    }
+    let target = if positional.is_empty() {
+        app.current_model.clone()
+    } else {
+        normalize_model_target(&app.current_model, &positional[0])?
+    };
+    let (guarded, remap_note) = guard_provider_model_selection(&target).await?;
+    let (provider, model_id) = split_provider_model(&guarded);
+    let client = default_client();
+    client.fetch(false).await;
+    let capabilities = resolve_model_capabilities(provider, model_id, client);
+
+    let mut out = String::new();
+    let _ = writeln!(out, "Model capability report");
+    let _ = writeln!(out, "-----------------------");
+    let _ = writeln!(out, "target: {}", guarded);
+    let _ = writeln!(out, "provider: {}", provider.trim());
+    let _ = writeln!(out, "tools: {}", capabilities.supports_tools);
+    let _ = writeln!(out, "vision: {}", capabilities.supports_vision);
+    let _ = writeln!(out, "reasoning: {}", capabilities.supports_reasoning);
+    let _ = writeln!(out, "context_window: {}", capabilities.context_window);
+    if let Some(note) = remap_note.as_deref() {
+        let _ = writeln!(out, "catalog_guard: {}", note);
+    }
+
+    if !requirements.is_empty() {
+        let unmet = unmet_model_requirements(capabilities, requirements);
+        if unmet.is_empty() {
+            let _ = writeln!(out, "requirements: satisfied ({})", requirements.summary());
+        } else {
+            let _ = writeln!(out, "requirements: FAILED ({})", requirements.summary());
+            let _ = writeln!(out, "missing: {}", unmet.join(", "));
+            let catalog = provider_model_ids(provider).await;
+            let alternatives: Vec<String> = catalog
+                .into_iter()
+                .filter(|candidate| {
+                    model_meets_requirements(
+                        resolve_model_capabilities(provider, candidate, client),
+                        requirements,
+                    )
+                })
+                .take(8)
+                .collect();
+            if alternatives.is_empty() {
+                let _ = writeln!(out, "alternatives: none in provider catalog");
+            } else {
+                let _ = writeln!(
+                    out,
+                    "alternatives: {}",
+                    alternatives
+                        .iter()
+                        .map(|m| format!("{}:{}", provider, m))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                );
+            }
+            if strict_why_not {
+                return Err(AgentError::Config(out.trim_end().to_string()));
+            }
+        }
+    } else if strict_why_not {
+        let _ = writeln!(
+            out,
+            "why-not mode requires constraints. Example: `/model why-not --cap tools,reasoning --min-context 200000`"
+        );
+    }
+
+    emit_command_output(app, out.trim_end());
+    Ok(CommandResult::Handled)
+}
+
 fn parse_model_switch_request(args: &[&str], known_providers: &[&str]) -> ModelSwitchRequest {
     if args.is_empty() {
         return ModelSwitchRequest::PickProviderThenModel;
@@ -3429,6 +3542,18 @@ async fn pick_model_for_provider(
 }
 
 async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    if let Some(sub) = args.first().map(|v| v.trim()) {
+        if sub.eq_ignore_ascii_case("explain") {
+            return handle_model_explain_command(app, &args[1..], false).await;
+        }
+        if sub.eq_ignore_ascii_case("why-not")
+            || sub.eq_ignore_ascii_case("whynot")
+            || sub.eq_ignore_ascii_case("diagnose")
+        {
+            return handle_model_explain_command(app, &args[1..], true).await;
+        }
+    }
+
     let (mut positional, requirements, provider_override) = parse_model_command_args(args)?;
     if let Some(provider) = provider_override {
         if positional.is_empty() {
@@ -5442,6 +5567,97 @@ fn render_replay_trace_tail(path: &Path, limit: usize) -> Result<String, AgentEr
     Ok(out.trim_end().to_string())
 }
 
+fn replay_trace_integrity(path: &Path) -> Result<(usize, usize, usize), AgentError> {
+    let raw = std::fs::read_to_string(path).map_err(|e| {
+        AgentError::Io(format!(
+            "Failed to read replay log {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+    let mut entries = 0usize;
+    let mut parse_errors = 0usize;
+    let mut chain_breaks = 0usize;
+    let mut last_event_hash: Option<String> = None;
+    for line in raw.lines() {
+        let parsed: serde_json::Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => {
+                parse_errors = parse_errors.saturating_add(1);
+                continue;
+            }
+        };
+        entries = entries.saturating_add(1);
+        let prev_hash = parsed
+            .get("prev_hash")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        let event_hash = parsed
+            .get("event_hash")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        if let (Some(last), Some(prev)) = (last_event_hash.as_ref(), prev_hash.as_ref()) {
+            if last != prev {
+                chain_breaks = chain_breaks.saturating_add(1);
+            }
+        }
+        if let Some(curr) = event_hash {
+            last_event_hash = Some(curr);
+        }
+    }
+    Ok((entries, parse_errors, chain_breaks))
+}
+
+fn export_replay_trace_json(
+    replay_path: &Path,
+    limit: usize,
+    output_path: &Path,
+) -> Result<usize, AgentError> {
+    let raw = std::fs::read_to_string(replay_path).map_err(|e| {
+        AgentError::Io(format!(
+            "Failed to read replay log {}: {}",
+            replay_path.display(),
+            e
+        ))
+    })?;
+    let rows: Vec<serde_json::Value> = raw
+        .lines()
+        .rev()
+        .take(limit.max(1))
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+
+    let payload = serde_json::json!({
+        "generated_at": chrono::Utc::now().to_rfc3339(),
+        "source_replay": replay_path.display().to_string(),
+        "rows": rows,
+    });
+    if let Some(parent) = output_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            AgentError::Io(format!(
+                "Failed to create replay export directory {}: {}",
+                parent.display(),
+                e
+            ))
+        })?;
+    }
+    std::fs::write(
+        output_path,
+        serde_json::to_string_pretty(&payload).unwrap_or_else(|_| "{}".to_string()),
+    )
+    .map_err(|e| {
+        AgentError::Io(format!(
+            "Failed to write replay export {}: {}",
+            output_path.display(),
+            e
+        ))
+    })?;
+    Ok(payload["rows"].as_array().map(|arr| arr.len()).unwrap_or(0))
+}
+
 fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     if args
         .first()
@@ -5454,7 +5670,7 @@ fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Age
                 emit_command_output(
                     app,
                     format!(
-                        "Replay trace: {}{}\nSession: {}\nPath: {}\nUsage: /raw trace [on|off|toggle|status|tail [N]|path]",
+                        "Replay trace: {}{}\nSession: {}\nPath: {}\nUsage: /raw trace [on|off|toggle|status|tail [N]|verify|export [N] [PATH]|path]",
                         if replay_enabled_runtime() { "ON" } else { "OFF" },
                         if replay_path.exists() { "" } else { " (no log yet)" },
                         app.session_id,
@@ -5484,6 +5700,65 @@ fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Age
                 let rendered = render_replay_trace_tail(&replay_path, limit)?;
                 emit_command_output(app, rendered);
             }
+            Some("verify") => {
+                if !replay_path.exists() {
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Replay log not found for current session yet: {}",
+                            replay_path.display()
+                        ),
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+                let (entries, parse_errors, chain_breaks) = replay_trace_integrity(&replay_path)?;
+                let ok = parse_errors == 0 && chain_breaks == 0;
+                emit_command_output(
+                    app,
+                    format!(
+                        "Replay integrity: {}\nentries: {}\nparse_errors: {}\nchain_breaks: {}\npath: {}",
+                        if ok { "PASS" } else { "FAIL" },
+                        entries,
+                        parse_errors,
+                        chain_breaks,
+                        replay_path.display()
+                    ),
+                );
+            }
+            Some("export") => {
+                let limit = args
+                    .get(2)
+                    .and_then(|raw| raw.trim().parse::<usize>().ok())
+                    .unwrap_or(100)
+                    .clamp(1, 1000);
+                let output_path = args.get(3).map(PathBuf::from).unwrap_or_else(|| {
+                    hermes_config::hermes_home()
+                        .join("logs")
+                        .join("replay")
+                        .join("exports")
+                        .join(format!("{}-tail.json", app.session_id))
+                });
+                if !replay_path.exists() {
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Replay log not found for current session yet: {}",
+                            replay_path.display()
+                        ),
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+                let written = export_replay_trace_json(&replay_path, limit, &output_path)?;
+                emit_command_output(
+                    app,
+                    format!(
+                        "Replay export written.\nrows: {}\nsource: {}\noutput: {}",
+                        written,
+                        replay_path.display(),
+                        output_path.display()
+                    ),
+                );
+            }
             Some("on") | Some("off") | Some("toggle") => {
                 let next = match sub.as_deref().unwrap_or("status") {
                     "on" => true,
@@ -5502,11 +5777,11 @@ fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Age
             }
             Some("help") | Some("--help") | Some("-h") => emit_command_output(
                 app,
-                "Replay trace controls:\n  /raw trace status    Show enabled state + current log path\n  /raw trace on|off    Enable or disable deterministic replay trace logs\n  /raw trace toggle    Toggle replay trace logs\n  /raw trace tail [N]  Show latest trace events with lineage hashes\n  /raw trace path      Show trace log file for current session",
+                "Replay trace controls:\n  /raw trace status              Show enabled state + current log path\n  /raw trace on|off              Enable or disable deterministic replay trace logs\n  /raw trace toggle              Toggle replay trace logs\n  /raw trace tail [N]            Show latest trace events with lineage hashes\n  /raw trace verify              Validate replay hash-chain integrity\n  /raw trace export [N] [PATH]   Export tail events to JSON\n  /raw trace path                Show trace log file for current session",
             ),
             _ => emit_command_output(
                 app,
-                "Usage: /raw trace [on|off|toggle|status|tail [N]|path]",
+                "Usage: /raw trace [on|off|toggle|status|tail [N]|verify|export [N] [PATH]|path]",
             ),
         }
         return Ok(CommandResult::Handled);
@@ -5567,11 +5842,127 @@ fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Age
     Ok(CommandResult::Handled)
 }
 
-fn handle_policy_command(app: &mut App, _args: &[&str]) -> Result<CommandResult, AgentError> {
-    emit_command_output(
-        app,
-        "The adaptive `/policy` CLI was removed — Hermes Python has no equivalent policy store.",
-    );
+#[derive(Debug, Clone, Copy)]
+struct PolicyProfile {
+    name: &'static str,
+    preset: &'static str,
+    mode: &'static str,
+    sandbox: &'static str,
+    description: &'static str,
+}
+
+const POLICY_PROFILES: &[PolicyProfile] = &[
+    PolicyProfile {
+        name: "strict",
+        preset: "strict",
+        mode: "enforce",
+        sandbox: "strict",
+        description: "maximum guardrails; strongest deny + sandbox posture",
+    },
+    PolicyProfile {
+        name: "standard",
+        preset: "balanced",
+        mode: "enforce",
+        sandbox: "balanced",
+        description: "default production posture with balanced safety and throughput",
+    },
+    PolicyProfile {
+        name: "dev",
+        preset: "dev",
+        mode: "audit",
+        sandbox: "dev",
+        description: "development posture with audit/simulate-friendly behavior",
+    },
+];
+
+fn resolve_policy_profile(input: &str) -> Option<PolicyProfile> {
+    let token = input.trim().to_ascii_lowercase();
+    POLICY_PROFILES.iter().copied().find(|profile| {
+        profile.name == token
+            || (token == "balanced" && profile.name == "standard")
+            || (token == "prod" && profile.name == "standard")
+    })
+}
+
+fn current_policy_profile_name() -> &'static str {
+    let preset = std::env::var("HERMES_TOOL_POLICY_PRESET")
+        .ok()
+        .unwrap_or_else(|| "balanced".to_string())
+        .trim()
+        .to_ascii_lowercase();
+    match preset.as_str() {
+        "strict" => "strict",
+        "dev" => "dev",
+        _ => "standard",
+    }
+}
+
+fn apply_policy_profile(app: &mut App, profile: PolicyProfile) {
+    std::env::set_var("HERMES_TOOL_POLICY_PRESET", profile.preset);
+    std::env::set_var("HERMES_TOOL_POLICY_MODE", profile.mode);
+    std::env::set_var("HERMES_EXECUTION_SANDBOX_PROFILE", profile.sandbox);
+    app.tool_registry.set_policy(ToolPolicyEngine::from_env());
+}
+
+fn handle_policy_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    if args.is_empty() || args[0].eq_ignore_ascii_case("status") {
+        let counters = app.tool_registry.policy_counters();
+        emit_command_output(
+            app,
+            format!(
+                "Policy profile: {}\nPreset: {}\nMode: {}\nSandbox: {}\nCounters: allow={} deny={} audit_only={} simulate={} would_block={}\n\nUse `/policy list` or `/policy strict|standard|dev`.",
+                current_policy_profile_name(),
+                std::env::var("HERMES_TOOL_POLICY_PRESET").unwrap_or_else(|_| "balanced".into()),
+                std::env::var("HERMES_TOOL_POLICY_MODE").unwrap_or_else(|_| "enforce".into()),
+                std::env::var("HERMES_EXECUTION_SANDBOX_PROFILE")
+                    .unwrap_or_else(|_| "balanced".into()),
+                counters.allow,
+                counters.deny,
+                counters.audit_only,
+                counters.simulate,
+                counters.would_block
+            ),
+        );
+        return Ok(CommandResult::Handled);
+    }
+
+    if args[0].eq_ignore_ascii_case("list") {
+        let mut out = String::from("Policy profiles:\n");
+        for profile in POLICY_PROFILES {
+            let marker = if current_policy_profile_name() == profile.name {
+                "*"
+            } else {
+                " "
+            };
+            let _ = writeln!(
+                out,
+                "{} {:<9} preset={} mode={} sandbox={} — {}",
+                marker,
+                profile.name,
+                profile.preset,
+                profile.mode,
+                profile.sandbox,
+                profile.description
+            );
+        }
+        out.push_str("\nSelect with `/policy strict`, `/policy standard`, or `/policy dev`.");
+        emit_command_output(app, out.trim_end());
+        return Ok(CommandResult::Handled);
+    }
+
+    if let Some(profile) = resolve_policy_profile(args[0]) {
+        apply_policy_profile(app, profile);
+        emit_command_output(
+            app,
+            format!(
+                "Policy profile switched to `{}`.\nPreset={} Mode={} Sandbox={}",
+                profile.name, profile.preset, profile.mode, profile.sandbox
+            ),
+        );
+        return Ok(CommandResult::Handled);
+    }
+
+    emit_command_output(app, "Usage: /policy [status|list|strict|standard|dev]");
     Ok(CommandResult::Handled)
 }
 
@@ -5818,10 +6209,19 @@ fn background_status_rows() -> Vec<String> {
 fn handle_agents_command(app: &mut App) -> Result<CommandResult, AgentError> {
     let rows = background_status_rows();
     if rows.is_empty() {
-        emit_command_output(app, "No background jobs found.");
+        emit_command_output(
+            app,
+            "No background jobs found.\nAudit/repair queue manifests with `python3 scripts/audit_background_queue.py [--repair]`.",
+        );
     } else {
         let joined = rows.into_iter().take(20).collect::<Vec<_>>().join("\n");
-        emit_command_output(app, format!("Background jobs:\n{}", joined));
+        emit_command_output(
+            app,
+            format!(
+                "Background jobs:\n{}\n\nQueue audit: `python3 scripts/audit_background_queue.py`",
+                joined
+            ),
+        );
     }
     Ok(CommandResult::Handled)
 }
@@ -11329,10 +11729,69 @@ install_command: "uv pip install -r requirements.txt"
     }
 
     #[test]
+    fn unmet_model_requirements_lists_missing_constraints() {
+        let requirements = ModelCapabilityRequirements {
+            require_tools: true,
+            require_vision: true,
+            require_reasoning: true,
+            require_long_context: false,
+            min_context_window: Some(256_000),
+        };
+        let caps = ResolvedModelCapabilities {
+            supports_tools: true,
+            supports_vision: false,
+            supports_reasoning: false,
+            context_window: 128_000,
+        };
+        let missing = unmet_model_requirements(caps, requirements);
+        assert!(missing.iter().any(|m| m == "vision"));
+        assert!(missing.iter().any(|m| m == "reasoning"));
+        assert!(missing
+            .iter()
+            .any(|m| m.contains("context>=256000 (actual=128000)")));
+    }
+
+    #[test]
     fn parse_model_command_args_rejects_unknown_capability() {
         let err = parse_model_command_args(&["--cap", "telepathy"]).expect_err("expected error");
         let message = err.to_string().to_ascii_lowercase();
         assert!(message.contains("unknown model capability"));
+    }
+
+    #[test]
+    fn policy_profile_resolution_accepts_primary_aliases() {
+        assert_eq!(
+            resolve_policy_profile("strict").map(|p| p.name),
+            Some("strict")
+        );
+        assert_eq!(
+            resolve_policy_profile("standard").map(|p| p.name),
+            Some("standard")
+        );
+        assert_eq!(
+            resolve_policy_profile("balanced").map(|p| p.name),
+            Some("standard")
+        );
+        assert_eq!(resolve_policy_profile("dev").map(|p| p.name), Some("dev"));
+        assert!(resolve_policy_profile("unknown").is_none());
+    }
+
+    #[test]
+    fn replay_trace_integrity_detects_hash_break() {
+        let tmp = tempdir().expect("tempdir");
+        let path = tmp.path().join("session.jsonl");
+        std::fs::write(
+            &path,
+            r#"{"seq":1,"event":"user","prev_hash":"seed","event_hash":"h1","payload":{"turn":1}}
+{"seq":2,"event":"assistant","prev_hash":"BROKEN","event_hash":"h2","payload":{"turn":1}}
+"#,
+        )
+        .expect("write replay");
+        let (entries, parse_errors, chain_breaks) =
+            replay_trace_integrity(&path).expect("integrity");
+        assert_eq!(entries, 2);
+        assert_eq!(parse_errors, 0);
+        assert_eq!(chain_breaks, 1);
     }
 
     #[test]

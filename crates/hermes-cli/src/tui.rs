@@ -1165,6 +1165,8 @@ pub fn render(frame: &mut Frame, app: &App, state: &mut TuiState, theme: &Theme)
 
 fn should_render_completions_popup(state: &TuiState) -> bool {
     state.mode != InputMode::Normal
+        && !state.processing
+        && state.modal.is_none()
         && state.input.starts_with('/')
         && !state.input.contains('\n')
         && !state.history_search_active
@@ -3317,6 +3319,29 @@ mod tests {
         state.refresh_completions();
         assert!(!should_render_completions_popup(&state));
         assert!(state.completions.is_empty());
+    }
+
+    #[test]
+    fn test_completion_popup_hidden_when_modal_or_processing_active() {
+        let mut state = TuiState::default();
+        state.input = "/model".to_string();
+        state.update_completions();
+        assert!(should_render_completions_popup(&state));
+
+        state.processing = true;
+        assert!(!should_render_completions_popup(&state));
+        state.processing = false;
+
+        state.modal = Some(PickerModal::new(
+            PickerKind::Personality,
+            "personality",
+            vec![PickerItem {
+                label: "default".to_string(),
+                detail: String::new(),
+                value: "default".to_string(),
+            }],
+        ));
+        assert!(!should_render_completions_popup(&state));
     }
 
     #[test]
