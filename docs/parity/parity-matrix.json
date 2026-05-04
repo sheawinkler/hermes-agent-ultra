@@ -1,25 +1,25 @@
 {
-  "generated_at_utc": "2026-05-03T23:35:47.613455+00:00",
+  "generated_at_utc": "2026-05-04T05:34:34.417292+00:00",
   "refs": {
     "local_ref": "main",
-    "local_sha": "8795e9403ccbbeced30ac029f3ddc3f053ecd67d",
+    "local_sha": "1861c5dcfb8cad8dcddb5f15c1a5a8c34c7f1ce2",
     "upstream_ref": "upstream/main",
-    "upstream_sha": "86e64c1d3bc0324452202cf8e26703dbef7839b3",
+    "upstream_sha": "95f395027f72c69f06bddcecb08da53cfd10c440",
     "merge_base": null
   },
   "summary": {
-    "commits_behind": 1498,
-    "commits_ahead": 506,
-    "upstream_patch_missing": 1433,
+    "commits_behind": 1512,
+    "commits_ahead": 507,
+    "upstream_patch_missing": 1446,
     "upstream_patch_represented": 1,
-    "local_patch_unique": 453,
-    "files_only_upstream": 2898,
+    "local_patch_unique": 454,
+    "files_only_upstream": 2899,
     "files_only_local": 470,
     "files_shared_identical": 38,
     "files_shared_different": 10,
-    "tree_files_changed": 3379,
-    "tree_insertions": 1126634,
-    "tree_deletions": 213057
+    "tree_files_changed": 3380,
+    "tree_insertions": 1127344,
+    "tree_deletions": 213071
   },
   "top_upstream_only": [
     {
@@ -32,7 +32,7 @@
     },
     {
       "path": "tests/gateway",
-      "count": 223
+      "count": 224
     },
     {
       "path": "tests/tools",
@@ -398,7 +398,7 @@
     },
     {
       "path": "tests/gateway",
-      "count": 223
+      "count": 224
     },
     {
       "path": "tests/tools",
@@ -716,7 +716,7 @@
       "workstream": "WS6",
       "issue": 10,
       "name": "Tests and CI parity",
-      "upstream_only": 940,
+      "upstream_only": 941,
       "shared_different": 0,
       "local_only": 3,
       "risk": "high",
@@ -784,9 +784,9 @@
     }
   ],
   "commit_mapping": {
-    "upstream_patch_missing": 1433,
+    "upstream_patch_missing": 1446,
     "upstream_patch_represented": 1,
-    "local_patch_unique": 453,
+    "local_patch_unique": 454,
     "local_patch_equivalent_to_upstream": 1,
     "upstream_patch_missing_sample": [
       "d8cc85dcdccf86f7cf07fe012b00646282a12b90",

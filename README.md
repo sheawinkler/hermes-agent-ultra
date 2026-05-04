@@ -194,15 +194,15 @@ Ultra uses controlled sync workflows, not blind merges.
 <!-- BEGIN:ULTRA_SYNC_STATUS -->
 ### Live Upstream Sync Status (auto-generated)
 
-- Generated at: `20260501-044932`
-- Source report: [`upstream-sync-20260501-044932.txt`](./.sync-reports/upstream-sync-20260501-044932.txt)
-- Sync timestamp (`timestamp_utc`): `20260501-044932`
-- `origin/main` at sync: `f9c3b022de0e5188ecb275014fd074d9d6760a46`
-- `upstream/main` at sync: `ec1443b9f106bf0c4e83669d9abea8ecf934fb3d`
-- Pending commits captured in report: `1368`
-- Queue summary (`docs/parity/upstream-missing-queue.json`): pending `0`, ported `51`, superseded `1258`
-- Parity gates (`docs/parity/global-parity-proof.json`): release `pass`, ci `fail`
-- Workstream snapshot (`docs/parity/workstream-status.json`): `upstream/main` @ `ec1443b9f106bf0c4e83669d9abea8ecf934fb3d` (generated `2026-04-30T22:51:48-06:00`)
+- Generated at: `20260504-053352`
+- Source report: [`upstream-sync-20260504-053352.txt`](./.sync-reports/upstream-sync-20260504-053352.txt)
+- Sync timestamp (`timestamp_utc`): `20260504-053352`
+- `origin/main` at sync: `1861c5dcfb8cad8dcddb5f15c1a5a8c34c7f1ce2`
+- `upstream/main` at sync: `95f395027f72c69f06bddcecb08da53cfd10c440`
+- Pending commits captured in report: `1512`
+- Queue summary (`docs/parity/upstream-missing-queue.json`): pending `138`, ported `51`, superseded `1258`
+- Parity gates (`docs/parity/global-parity-proof.json`): release `fail`, ci `fail`
+- Workstream snapshot (`docs/parity/workstream-status.json`): `upstream/main` @ `95f395027f72c69f06bddcecb08da53cfd10c440` (generated `2026-05-03T17:47:41-06:00`)
 <!-- END:ULTRA_SYNC_STATUS -->
 
 Note: this repository intentionally tracks parity via queue/gate workflows because upstream and ultra history can diverge materially.

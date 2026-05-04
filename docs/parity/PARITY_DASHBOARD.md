@@ -1,28 +1,28 @@
 # Parity Dashboard
 
-_Generated from source artifacts: `2026-05-01T05:12:16.126921+00:00`_
+_Generated from source artifacts: `2026-05-04T05:34:38.857152+00:00`_
 
 ## Snapshot
 
-- Upstream target: `upstream/main` @ `ec1443b9f106bf0c4e83669d9abea8ecf934fb3d`
-- Workstream snapshot generated: `2026-04-30T22:51:48-06:00`
-- Parity matrix generated: `2026-05-01T05:10:49.963289+00:00`
-- Queue snapshot generated: `2026-05-01T05:10:20.526324+00:00`
-- Proof snapshot generated: `2026-05-01T05:12:16.126921+00:00`
+- Upstream target: `upstream/main` @ `95f395027f72c69f06bddcecb08da53cfd10c440`
+- Workstream snapshot generated: `2026-05-03T17:47:41-06:00`
+- Parity matrix generated: `2026-05-04T05:34:34.417292+00:00`
+- Queue snapshot generated: `2026-05-04T05:34:36.981959+00:00`
+- Proof snapshot generated: `2026-05-04T05:34:38.857152+00:00`
 
 ## Gate Status
 
-- Release gate: **PASS**
+- Release gate: **FAIL**
 - CI/tree-drift gate: **FAIL**
-- Release gate failures: none
-- CI gate failures: max_files_only_upstream (actual=2850.0, limit=2600)
+- Release gate failures: max_queue_pending_commits (actual=138.0, limit=0)
+- CI gate failures: max_files_only_upstream (actual=2899.0, limit=2600); max_queue_pending_commits (actual=138.0, limit=100)
 
 ## Queue Summary
 
 | Metric | Value |
 | --- | ---: |
-| Total commits in queue | 1309 |
-| Pending | 0 |
+| Total commits in queue | 1447 |
+| Pending | 138 |
 | Ported | 51 |
 | Superseded | 1258 |
 
@@ -30,13 +30,13 @@ _Generated from source artifacts: `2026-05-01T05:12:16.126921+00:00`_
 
 | Metric | Value |
 | --- | ---: |
-| commits_behind | 1368 |
-| commits_ahead | 470 |
-| upstream_patch_missing | 1309 |
-| upstream_patch_represented | 0 |
-| local_patch_unique | 429 |
-| files_only_upstream | 2850 |
-| files_only_local | 458 |
+| commits_behind | 1512 |
+| commits_ahead | 507 |
+| upstream_patch_missing | 1446 |
+| upstream_patch_represented | 1 |
+| local_patch_unique | 454 |
+| files_only_upstream | 2899 |
+| files_only_local | 470 |
 | files_shared_identical | 38 |
 | files_shared_different | 10 |
 
