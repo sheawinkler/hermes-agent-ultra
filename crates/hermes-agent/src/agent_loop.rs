@@ -248,7 +248,7 @@ Only act if there's something genuinely worth saving. \
 If nothing stands out, just say 'Nothing to save.' and stop.";
 
 const TOOL_USE_ENFORCEMENT_GUIDANCE: &str = "# Tool-use enforcement\nYou MUST use your tools to take action. Do not describe what you would do without actually doing it. When you say you will perform an action, make the corresponding tool call in the same response. Every response should either (a) contain tool calls that make progress, or (b) deliver a final result.";
-const CONTEXTLATTICE_OPERATIONAL_GUIDANCE: &str = "# ContextLattice operational guidance\nWhen a user asks to confirm, connect, verify, or harden ContextLattice integration, do not answer from assumptions. You MUST attempt ContextLattice tool calls first: use `contextlattice_search` for a direct probe and `contextlattice_context_pack` when broader grounding is needed. If a call fails, report the concrete error and provide the exact remediation steps. Do not claim lack of access before attempting at least one ContextLattice tool call in the current turn.";
+const CONTEXTLATTICE_OPERATIONAL_GUIDANCE: &str = "# ContextLattice operational guidance\nWhen a user asks to confirm, connect, verify, or harden ContextLattice integration, do not answer from assumptions. First check local integration instructions when present (env `HERMES_CONTEXTLATTICE_INSTRUCTIONS_PATH`, or local `scripts/agent_orchestration.py` in the workspace). Then attempt ContextLattice tool calls: use `contextlattice_search` for a direct probe and `contextlattice_context_pack` when broader grounding is needed. If a call fails, report the concrete error and provide the exact remediation steps. Never run shell command `contextlattice` for this workflow; use the ContextLattice tools directly. Do not claim lack of access before attempting at least one ContextLattice tool call in the current turn.";
 
 const OPENAI_MODEL_EXECUTION_GUIDANCE: &str = "# Execution discipline (OpenAI)\nUse tools whenever they improve correctness, completeness, or grounding. Do not stop early when another tool call would materially improve the result. Verify outcomes before declaring completion.";
 
@@ -3638,6 +3638,9 @@ impl AgentLoop {
             ctx.add_message(msg);
         }
         self.hydrate_todo_store(&ctx);
+        if let Some(hint) = contextlattice_connect_system_hint(ctx.get_messages()) {
+            ctx.add_message(Message::system(hint));
+        }
 
         let persist_user_idx = if self.config.persist_user_message.is_some() {
             ctx.get_messages()
@@ -4221,6 +4224,8 @@ impl AgentLoop {
 
             // Cap concurrent delegate_task calls
             self.cap_delegates(&mut tool_calls);
+            let contextlattice_connect_intent =
+                detect_contextlattice_connect_intent(ctx.get_messages());
 
             // --- Pre-tool hook ---
             for tc in &tool_calls {
@@ -4261,6 +4266,7 @@ impl AgentLoop {
                     &tool_calls,
                     total_turns,
                     tool_governor.tool_concurrency,
+                    contextlattice_connect_intent,
                     self.config
                         .max_cost_usd
                         .map(|limit| (limit - session_cost_usd).max(0.0)),
@@ -4551,6 +4557,9 @@ impl AgentLoop {
             ctx.add_message(msg);
         }
         self.hydrate_todo_store(&ctx);
+        if let Some(hint) = contextlattice_connect_system_hint(ctx.get_messages()) {
+            ctx.add_message(Message::system(hint));
+        }
 
         let persist_user_idx = if self.config.persist_user_message.is_some() {
             ctx.get_messages()
@@ -5235,6 +5244,8 @@ impl AgentLoop {
                 }
             }
             self.cap_delegates(&mut tool_calls);
+            let contextlattice_connect_intent =
+                detect_contextlattice_connect_intent(ctx.get_messages());
 
             // Pre-tool hooks + callbacks
             for tc in &tool_calls {
@@ -5270,6 +5281,7 @@ impl AgentLoop {
                         Some(&turn_governor_runtime),
                     )
                     .tool_concurrency,
+                    contextlattice_connect_intent,
                     self.config
                         .max_cost_usd
                         .map(|limit| (limit - session_cost_usd).max(0.0)),
@@ -5986,6 +5998,7 @@ impl AgentLoop {
         tool_calls: &[ToolCall],
         turn: u32,
         tool_concurrency: usize,
+        contextlattice_connect_intent: bool,
         parent_budget_remaining_usd: Option<f64>,
         tool_errors: &mut Vec<hermes_core::ToolErrorRecord>,
     ) -> Vec<ToolResult> {
@@ -6071,6 +6084,19 @@ impl AgentLoop {
         for tc in tool_calls {
             // Skip `delegate_task` when an orchestrator already handled it.
             if orchestrator.is_some() && tc.function.name == "delegate_task" {
+                continue;
+            }
+            if contextlattice_connect_intent
+                && tc.function.name == "terminal"
+                && is_contextlattice_shell_invocation(&tc.function.arguments)
+            {
+                let msg = "ContextLattice integration requests must use `contextlattice_search` / `contextlattice_context_pack`, not shell command `contextlattice`. Retry by calling `contextlattice_search` first with a scoped query.".to_string();
+                tool_errors.push(hermes_core::ToolErrorRecord {
+                    tool_name: tc.function.name.clone(),
+                    error: msg.clone(),
+                    turn,
+                });
+                results.push(ToolResult::err(&tc.id, msg));
                 continue;
             }
             let tool_call_id = tc.id.clone();
@@ -6355,6 +6381,64 @@ fn extract_last_user_assistant(messages: &[Message]) -> (String, String) {
         .and_then(|m| m.content.clone())
         .unwrap_or_default();
     (user, assistant)
+}
+
+fn detect_contextlattice_connect_intent(messages: &[Message]) -> bool {
+    let Some(last_user) = messages
+        .iter()
+        .rev()
+        .find(|m| matches!(m.role, hermes_core::MessageRole::User))
+        .and_then(|m| m.content.as_deref())
+    else {
+        return false;
+    };
+    let lower = last_user.to_ascii_lowercase();
+    if !lower.contains("contextlattice") {
+        return false;
+    }
+    [
+        "connect",
+        "connection",
+        "configure",
+        "setup",
+        "set up",
+        "verify",
+        "harden",
+        "probe",
+        "integrat",
+        "health",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+fn contextlattice_connect_system_hint(messages: &[Message]) -> Option<String> {
+    if !detect_contextlattice_connect_intent(messages) {
+        return None;
+    }
+    Some(
+        "[SYSTEM] ContextLattice integration intent detected. Execute this order: \
+         (1) If available, inspect local instructions file from `HERMES_CONTEXTLATTICE_INSTRUCTIONS_PATH` \
+         or workspace `scripts/agent_orchestration.py`; \
+         (2) call `contextlattice_search` for a direct connectivity probe; \
+         (3) if needed call `contextlattice_context_pack` for broader grounding; \
+         (4) call `contextlattice_write` to checkpoint what was verified. \
+         Never use terminal command `contextlattice` for this workflow."
+            .to_string(),
+    )
+}
+
+fn is_contextlattice_shell_invocation(raw_args: &str) -> bool {
+    let Ok(args) = serde_json::from_str::<Value>(raw_args) else {
+        return false;
+    };
+    let command = args
+        .get("command")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .unwrap_or_default();
+    let lower = command.to_ascii_lowercase();
+    lower == "contextlattice" || lower.starts_with("contextlattice ")
 }
 
 fn summarize_background_review_result(messages: &[Message]) -> Option<String> {
@@ -9912,5 +9996,39 @@ mod tests {
         assert_eq!(first["payload"]["token"], "[redacted]");
         assert_eq!(second["prev_hash"], first["event_hash"]);
         assert_ne!(first["event_hash"], second["event_hash"]);
+    }
+
+    #[test]
+    fn test_detect_contextlattice_connect_intent() {
+        let msgs = vec![Message::user(
+            "please confirm and connect to contextlattice, then harden it",
+        )];
+        assert!(detect_contextlattice_connect_intent(&msgs));
+
+        let msgs = vec![Message::user("explain contextlattice architecture only")];
+        assert!(!detect_contextlattice_connect_intent(&msgs));
+    }
+
+    #[test]
+    fn test_contextlattice_connect_system_hint_emitted() {
+        let msgs = vec![Message::user("connect to contextlattice and verify health")];
+        let hint = contextlattice_connect_system_hint(&msgs).expect("expected hint");
+        assert!(hint.contains("contextlattice_search"));
+        assert!(hint.contains("scripts/agent_orchestration.py"));
+        assert!(hint.contains("Never use terminal command `contextlattice`"));
+    }
+
+    #[test]
+    fn test_contextlattice_shell_invocation_detector() {
+        assert!(is_contextlattice_shell_invocation(
+            r#"{"command":"contextlattice"}"#
+        ));
+        assert!(is_contextlattice_shell_invocation(
+            r#"{"command":"contextlattice status"}"#
+        ));
+        assert!(!is_contextlattice_shell_invocation(
+            r#"{"command":"which contextlattice"}"#
+        ));
+        assert!(!is_contextlattice_shell_invocation(r#"{"command":"ls"}"#));
     }
 }

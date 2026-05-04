@@ -14,7 +14,9 @@ use std::time::{Duration, Instant};
 
 use chrono::Local;
 use crossterm::cursor::Show;
-use crossterm::event::{Event as CrosstermEvent, KeyEvent, MouseEvent};
+use crossterm::event::{
+    DisableMouseCapture, EnableMouseCapture, Event as CrosstermEvent, KeyEvent, MouseEvent,
+};
 use crossterm::terminal::{
     disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
 };
@@ -300,6 +302,7 @@ impl Tui {
         enable_raw_mode()?;
         let mut stdout = std::io::stdout();
         stdout.execute(EnterAlternateScreen)?;
+        stdout.execute(EnableMouseCapture)?;
         let backend = CrosstermBackend::new(stdout);
         let terminal = ratatui::Terminal::new(backend)?;
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
@@ -320,6 +323,7 @@ impl Tui {
             return Ok(());
         }
         disable_raw_mode()?;
+        self.terminal.backend_mut().execute(DisableMouseCapture)?;
         self.terminal.backend_mut().execute(LeaveAlternateScreen)?;
         self.terminal.show_cursor()?;
         self.restored = true;
@@ -349,6 +353,7 @@ impl Drop for Tui {
         }
         let _ = disable_raw_mode();
         let mut stdout = std::io::stdout();
+        let _ = stdout.execute(DisableMouseCapture);
         let _ = stdout.execute(LeaveAlternateScreen);
         let _ = stdout.execute(Show);
         self.restored = true;
@@ -618,6 +623,29 @@ impl TuiState {
         self.last_progress_pulse_at = Some(now);
     }
 
+    fn processing_elapsed(&self) -> Duration {
+        self.processing_started_at
+            .map(|started| started.elapsed())
+            .unwrap_or_default()
+    }
+
+    fn processing_stage_label(&self) -> &'static str {
+        if !self.processing {
+            return "idle";
+        }
+        if !self.saw_first_token {
+            if self.active_tools.is_empty() {
+                "awaiting first token"
+            } else {
+                "running tools (pre-token)"
+            }
+        } else if self.active_tools.is_empty() {
+            "streaming response"
+        } else {
+            "running tools + streaming"
+        }
+    }
+
     fn refresh_sticky_prompt(&mut self, app: &App) {
         if self.scroll_offset == 0 {
             self.sticky_prompt.clear();
@@ -880,6 +908,19 @@ impl TuiState {
                 self.scroll_offset = self.scroll_offset.saturating_sub(1);
                 false
             }
+            // Fallback fine-grained scroll chords when terminals reserve Ctrl+Up/Down.
+            KeyCode::Up
+                if mods.contains(KeyModifiers::ALT) || mods.contains(KeyModifiers::SHIFT) =>
+            {
+                self.scroll_offset = self.scroll_offset.saturating_add(1);
+                false
+            }
+            KeyCode::Down
+                if mods.contains(KeyModifiers::ALT) || mods.contains(KeyModifiers::SHIFT) =>
+            {
+                self.scroll_offset = self.scroll_offset.saturating_sub(1);
+                false
+            }
             // Jump back to newest transcript content.
             KeyCode::End if mods.contains(KeyModifiers::CONTROL) => {
                 self.scroll_offset = 0;
@@ -959,7 +1000,18 @@ impl TuiState {
                     self.history_search_query.clear();
                     return false;
                 }
-                self.mode = InputMode::Normal;
+                if !self.input.is_empty() {
+                    self.input.clear();
+                    self.cursor_position = 0;
+                    self.selection_anchor = None;
+                }
+                self.completions.clear();
+                self.completion_index = None;
+                if self.scroll_offset > 0 {
+                    self.scroll_offset = 0;
+                }
+                // Keep insert mode so Esc never appears to "freeze" typing.
+                self.mode = InputMode::Insert;
                 false
             }
             _ => {
@@ -1328,6 +1380,41 @@ fn render_live_details(
         .style(Style::default().bg(colors.background))
         .border_style(Style::default().fg(colors.status_bar_dim));
     let mut rows: Vec<Line<'static>> = Vec::new();
+
+    if state.processing {
+        let elapsed = state.processing_elapsed().as_secs_f64();
+        rows.push(Line::from(vec![
+            Span::styled(
+                " ⟳ processing ",
+                Style::default()
+                    .fg(colors.status_bar_strong)
+                    .bg(colors.background)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("{elapsed:.1}s"),
+                Style::default()
+                    .fg(colors.accent)
+                    .bg(colors.background)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" • {}", state.processing_stage_label()),
+                Style::default()
+                    .fg(colors.status_bar_text)
+                    .bg(colors.background),
+            ),
+        ]));
+        rows.push(Line::from(vec![Span::styled(
+            format!(
+                " [{}] chunks:{} chars:{}",
+                animated_processing_bar(state.spinner_frame, 18),
+                state.stream_chunk_count,
+                state.stream_char_count
+            ),
+            Style::default().fg(colors.accent).bg(colors.background),
+        )]));
+    }
 
     if !state.active_tools.is_empty() {
         rows.push(Line::from(vec![
@@ -2822,7 +2909,7 @@ fn render_status(
     colors: &crate::theme::RatatuiColors,
 ) {
     let processing_indicator = if state.processing {
-        format!("{}", state.spinner_char())
+        format!("⟳{}", state.spinner_char())
     } else {
         "✓".to_string()
     };
@@ -2842,10 +2929,24 @@ fn render_status(
         .fg(colors.status_bar_text)
         .bg(colors.status_bar_bg);
 
-    let mut status_text = format!(
-        "{} {} | {} | {} msgs | {}",
-        processing_indicator, state.mode, model, msg_count, session
-    );
+    let mut status_text = if state.processing {
+        let elapsed = state.processing_elapsed().as_secs_f64();
+        format!(
+            "{} PROCESSING {:.1}s [{}] {} | {} | {} msgs | {}",
+            processing_indicator,
+            elapsed,
+            animated_processing_bar(state.spinner_frame, 12),
+            state.processing_stage_label(),
+            state.mode,
+            msg_count,
+            session
+        )
+    } else {
+        format!(
+            "{} {} | {} | {} msgs | {}",
+            processing_indicator, state.mode, model, msg_count, session
+        )
+    };
     status_text.push_str(match state.view_density {
         ViewDensity::Compact => " | compact",
         ViewDensity::Detailed => " | detailed",
@@ -2895,6 +2996,22 @@ fn render_status(
     let status_bar = Paragraph::new(Line::from(Span::styled(clipped, line_style)))
         .block(Block::default().style(Style::default().bg(colors.status_bar_bg)));
     frame.render_widget(status_bar, area);
+}
+
+fn animated_processing_bar(frame: usize, width: usize) -> String {
+    let width = width.max(6);
+    let head = frame % width;
+    let trail = 3usize;
+    let mut out = String::with_capacity(width);
+    for i in 0..width {
+        let lit = if head >= trail {
+            i >= head - trail && i <= head
+        } else {
+            i <= head || i + width >= head + width - trail
+        };
+        out.push(if lit { '█' } else { '·' });
+    }
+    out
 }
 
 fn transcript_divider(content_width: u16) -> String {
@@ -3962,6 +4079,29 @@ mod tests {
             .recent_activity
             .last()
             .is_some_and(|line| line.contains("working")));
+    }
+
+    #[test]
+    fn test_processing_stage_labels() {
+        let mut state = TuiState::default();
+        assert_eq!(state.processing_stage_label(), "idle");
+        state.begin_processing_cycle("nous:test-model");
+        assert_eq!(state.processing_stage_label(), "awaiting first token");
+        state.active_tools.push("terminal".to_string());
+        assert_eq!(state.processing_stage_label(), "running tools (pre-token)");
+        state.saw_first_token = true;
+        assert_eq!(state.processing_stage_label(), "running tools + streaming");
+        state.active_tools.clear();
+        assert_eq!(state.processing_stage_label(), "streaming response");
+    }
+
+    #[test]
+    fn test_animated_processing_bar_width_and_motion() {
+        let bar_a = animated_processing_bar(0, 12);
+        let bar_b = animated_processing_bar(4, 12);
+        assert_eq!(bar_a.chars().count(), 12);
+        assert_eq!(bar_b.chars().count(), 12);
+        assert_ne!(bar_a, bar_b);
     }
 
     #[test]
