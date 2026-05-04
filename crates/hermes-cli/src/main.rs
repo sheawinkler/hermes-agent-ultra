@@ -7063,8 +7063,13 @@ fn normalize_env_value(value: &str) -> String {
         .to_string()
 }
 
+fn read_env_text(path: &Path) -> std::io::Result<String> {
+    let bytes = std::fs::read(path)?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
 fn read_env_key(path: &Path, key: &str) -> Option<String> {
-    let raw = std::fs::read_to_string(path).ok()?;
+    let raw = read_env_text(path).ok()?;
     for line in raw.lines() {
         if let Some((k, v)) = parse_env_assignment(line) {
             if k == key {
@@ -7521,9 +7526,9 @@ fn local_backend_base_url_env_var(provider: &str) -> Option<&'static str> {
 }
 
 fn merge_missing_env_keys(src: &Path, dst: &Path, label: &str) -> Result<usize, AgentError> {
-    let src_content = std::fs::read_to_string(src)
-        .map_err(|e| AgentError::Io(format!("read {}: {}", src.display(), e)))?;
-    let existing = std::fs::read_to_string(dst).unwrap_or_default();
+    let src_content =
+        read_env_text(src).map_err(|e| AgentError::Io(format!("read {}: {}", src.display(), e)))?;
+    let existing = read_env_text(dst).unwrap_or_default();
 
     let existing_keys: std::collections::HashSet<String> = existing
         .lines()
@@ -12072,6 +12077,20 @@ mod tests {
         assert!(contents.contains("OPENAI_API_KEY=real-key"));
         assert!(!contents.contains("OPENROUTER_API_KEY="));
         assert!(!contents.contains("MINIMAX_API_KEY="));
+    }
+
+    #[test]
+    fn read_env_key_handles_non_utf8_bytes_without_crashing() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let env_file = tmp.path().join(".env");
+        let mut bytes = b"OPENAI_API_KEY=real-key\nBROKEN=".to_vec();
+        bytes.extend_from_slice(&[0xFF, 0xFE, 0x81, b'\n']);
+        std::fs::write(&env_file, bytes).expect("write non-utf8 env");
+
+        assert_eq!(
+            read_env_key(&env_file, "OPENAI_API_KEY").as_deref(),
+            Some("real-key")
+        );
     }
 
     #[test]

@@ -80,20 +80,20 @@ pub enum DeliveryTarget {
 /// - `"telegram:12345"` -> `DeliveryTarget::Platform { name: "telegram", chat_id: "12345" }`
 /// - `"discord:channel_id"` -> `DeliveryTarget::Platform { name: "discord", chat_id: "channel_id" }`
 pub fn parse_target(target_str: &str) -> DeliveryTarget {
-    let trimmed = target_str.trim().to_lowercase();
-    match trimmed.as_str() {
-        "origin" => DeliveryTarget::Origin,
-        "local" => DeliveryTarget::Local,
-        other => {
-            if let Some((name, chat_id)) = other.split_once(':') {
-                DeliveryTarget::Platform {
-                    name: name.trim().to_string(),
-                    chat_id: chat_id.trim().to_string(),
-                }
-            } else {
-                DeliveryTarget::Origin
-            }
+    let trimmed = target_str.trim();
+    if trimmed.eq_ignore_ascii_case("origin") {
+        return DeliveryTarget::Origin;
+    }
+    if trimmed.eq_ignore_ascii_case("local") {
+        return DeliveryTarget::Local;
+    }
+    if let Some((name_raw, chat_id_raw)) = trimmed.split_once(':') {
+        DeliveryTarget::Platform {
+            name: name_raw.trim().to_ascii_lowercase(),
+            chat_id: chat_id_raw.trim().to_string(),
         }
+    } else {
+        DeliveryTarget::Origin
     }
 }
 
@@ -296,6 +296,17 @@ mod tests {
             DeliveryTarget::Platform {
                 name: "discord".into(),
                 chat_id: "channel_abc".into()
+            }
+        );
+    }
+
+    #[test]
+    fn test_parse_target_platform_preserves_chat_id_case() {
+        assert_eq!(
+            parse_target("SLACK:ChanID-AbC123"),
+            DeliveryTarget::Platform {
+                name: "slack".into(),
+                chat_id: "ChanID-AbC123".into()
             }
         );
     }
