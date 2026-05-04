@@ -291,10 +291,14 @@ enum ModalAction {
 pub struct Tui {
     /// The ratatui terminal backend.
     pub terminal: ratatui::Terminal<CrosstermBackend<Stdout>>,
-    /// Channel receiver for async events.
+    /// Channel receiver for control/UI events (keys, mouse, resize, app control).
     pub events: mpsc::UnboundedReceiver<Event>,
-    /// Channel sender for async events.
+    /// Channel receiver for high-volume stream events (tokens/chunks).
+    pub stream_events: mpsc::UnboundedReceiver<Event>,
+    /// Channel sender for control/UI events.
     event_sender: mpsc::UnboundedSender<Event>,
+    /// Channel sender for stream events.
+    stream_sender: mpsc::UnboundedSender<Event>,
     /// The active color theme.
     theme: Theme,
     /// Whether terminal cleanup has already run.
@@ -311,12 +315,15 @@ impl Tui {
         let backend = CrosstermBackend::new(stdout);
         let terminal = ratatui::Terminal::new(backend)?;
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
+        let (stream_sender, stream_receiver) = mpsc::unbounded_channel();
         let requested_theme =
             std::env::var("HERMES_THEME").unwrap_or_else(|_| "ultra-neon".to_string());
         Ok(Self {
             terminal,
             events: event_receiver,
+            stream_events: stream_receiver,
             event_sender,
+            stream_sender,
             theme: crate::skin_engine::resolve_theme(requested_theme.as_str()),
             restored: false,
         })
@@ -338,6 +345,11 @@ impl Tui {
     /// Get a sender for injecting events (used by async tasks).
     pub fn event_sender(&self) -> mpsc::UnboundedSender<Event> {
         self.event_sender.clone()
+    }
+
+    /// Get a sender for injecting high-volume stream events.
+    pub fn stream_sender(&self) -> mpsc::UnboundedSender<Event> {
+        self.stream_sender.clone()
     }
 
     /// Set the active theme.
@@ -3472,7 +3484,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
         .checked_sub(Duration::from_secs(2))
         .unwrap_or_else(Instant::now);
     let mut last_pet_tick = Instant::now();
-    app.set_stream_handle(Some(StreamHandle::from(tui.event_sender())));
+    app.set_stream_handle(Some(StreamHandle::from(tui.stream_sender())));
 
     // Spawn crossterm event reader
     let event_sender = tui.event_sender();
@@ -3522,29 +3534,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
         }
 
         tokio::select! {
-            _ = frame_tick.tick() => {
-                let previous_jobs = state.background_jobs_running;
-                if last_jobs_refresh.elapsed() >= Duration::from_secs(1) {
-                    state.background_jobs_running = app.running_background_job_count();
-                    last_jobs_refresh = Instant::now();
-                }
-                if state.processing {
-                    state.tick_spinner();
-                    state.maybe_emit_progress_pulse();
-                    needs_redraw = true;
-                }
-                if app.pet_settings().enabled
-                    && last_pet_tick.elapsed()
-                        >= Duration::from_millis(app.pet_settings().tick_ms.clamp(120, 2000))
-                {
-                    state.tick_pet();
-                    last_pet_tick = Instant::now();
-                    needs_redraw = true;
-                }
-                if previous_jobs != state.background_jobs_running {
-                    needs_redraw = true;
-                }
-            }
+            biased;
             event = tui.events.recv() => {
                 match event {
                     Some(Event::Key(key)) => {
@@ -3751,6 +3741,62 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         state.status_message = msg;
                         needs_redraw = true;
                     }
+                    Some(Event::AgentRunComplete {
+                        result,
+                        elapsed_secs,
+                    }) => {
+                        match result {
+                            Ok(agent_result) => {
+                                let total_turns = agent_result.total_turns;
+                                let interrupted = agent_result.interrupted;
+                                let finished_naturally = agent_result.finished_naturally;
+                                app.apply_agent_result(agent_result);
+                                state.finish_processing_cycle("✔ completed in");
+                                state.status_message.clear();
+                                state.push_activity(format!(
+                                    "run finished in {:.2}s (total_turns={})",
+                                    elapsed_secs, total_turns
+                                ));
+                                if interrupted {
+                                    app.push_ui_assistant("[Agent execution interrupted]");
+                                } else if !finished_naturally {
+                                    state.push_activity(
+                                        "run stopped before natural finish".to_string(),
+                                    );
+                                }
+                            }
+                            Err(err) => {
+                                state.finish_processing_cycle("✖ failed after");
+                                state.status_message = format!("Error: {}", err);
+                                state.push_activity(format!("✖ {}", err));
+                                app.push_ui_assistant(format!("Error: {}", err));
+                            }
+                        }
+                        state.stream_buffer.clear();
+                        state.stream_muted = false;
+                        state.stream_needs_break = false;
+                        state.active_tools.clear();
+                        needs_redraw = true;
+                    }
+                    Some(Event::Interrupt) => {
+                        state.finish_processing_cycle("⏹ interrupted after");
+                        state.stream_buffer.clear();
+                        state.stream_muted = false;
+                        state.stream_needs_break = false;
+                        state.active_tools.clear();
+                        needs_redraw = true;
+                    }
+                    Some(Event::StreamDelta(_)) | Some(Event::StreamChunk(_)) | Some(Event::AgentDone) => {
+                        // Stream events are consumed on the dedicated stream lane.
+                    }
+                    None => {
+                        // Channel closed
+                        break;
+                    }
+                }
+            }
+            stream_event = tui.stream_events.recv() => {
+                match stream_event {
                     Some(Event::StreamDelta(delta)) => {
                         state.stream_buffer.push_str(&delta);
                         needs_redraw = true;
@@ -3910,55 +3956,31 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         state.status_message.clear();
                         needs_redraw = true;
                     }
-                    Some(Event::AgentRunComplete {
-                        result,
-                        elapsed_secs,
-                    }) => {
-                        match result {
-                            Ok(agent_result) => {
-                                let total_turns = agent_result.total_turns;
-                                let interrupted = agent_result.interrupted;
-                                let finished_naturally = agent_result.finished_naturally;
-                                app.apply_agent_result(agent_result);
-                                state.finish_processing_cycle("✔ completed in");
-                                state.status_message.clear();
-                                state.push_activity(format!(
-                                    "run finished in {:.2}s (total_turns={})",
-                                    elapsed_secs, total_turns
-                                ));
-                                if interrupted {
-                                    app.push_ui_assistant("[Agent execution interrupted]");
-                                } else if !finished_naturally {
-                                    state.push_activity(
-                                        "run stopped before natural finish".to_string(),
-                                    );
-                                }
-                            }
-                            Err(err) => {
-                                state.finish_processing_cycle("✖ failed after");
-                                state.status_message = format!("Error: {}", err);
-                                state.push_activity(format!("✖ {}", err));
-                                app.push_ui_assistant(format!("Error: {}", err));
-                            }
-                        }
-                        state.stream_buffer.clear();
-                        state.stream_muted = false;
-                        state.stream_needs_break = false;
-                        state.active_tools.clear();
-                        needs_redraw = true;
-                    }
-                    Some(Event::Interrupt) => {
-                        state.finish_processing_cycle("⏹ interrupted after");
-                        state.stream_buffer.clear();
-                        state.stream_muted = false;
-                        state.stream_needs_break = false;
-                        state.active_tools.clear();
-                        needs_redraw = true;
-                    }
-                    None => {
-                        // Channel closed
-                        break;
-                    }
+                    Some(_) => {}
+                    None => {}
+                }
+            }
+            _ = frame_tick.tick() => {
+                let previous_jobs = state.background_jobs_running;
+                if last_jobs_refresh.elapsed() >= Duration::from_secs(1) {
+                    state.background_jobs_running = app.running_background_job_count();
+                    last_jobs_refresh = Instant::now();
+                }
+                if state.processing {
+                    state.tick_spinner();
+                    state.maybe_emit_progress_pulse();
+                    needs_redraw = true;
+                }
+                if app.pet_settings().enabled
+                    && last_pet_tick.elapsed()
+                        >= Duration::from_millis(app.pet_settings().tick_ms.clamp(120, 2000))
+                {
+                    state.tick_pet();
+                    last_pet_tick = Instant::now();
+                    needs_redraw = true;
+                }
+                if previous_jobs != state.background_jobs_running {
+                    needs_redraw = true;
                 }
             }
         }
