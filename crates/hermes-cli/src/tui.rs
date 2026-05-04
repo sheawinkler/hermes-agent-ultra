@@ -422,6 +422,16 @@ pub struct TuiState {
     message_time_labels: HashMap<u64, String>,
     /// Animation frame index for companion pet rendering.
     pet_frame: usize,
+    /// When the current processing cycle started.
+    processing_started_at: Option<Instant>,
+    /// Last time we emitted a progress heartbeat row.
+    last_progress_pulse_at: Option<Instant>,
+    /// Count of streaming chunks seen in current cycle.
+    stream_chunk_count: usize,
+    /// Count of visible streaming chars seen in current cycle.
+    stream_char_count: usize,
+    /// Whether first response token has been observed in this cycle.
+    saw_first_token: bool,
 }
 
 /// A section of tool output that can be folded/expanded.
@@ -500,6 +510,11 @@ impl Default for TuiState {
             expanded_tool_cards: HashSet::new(),
             message_time_labels: HashMap::new(),
             pet_frame: 0,
+            processing_started_at: None,
+            last_progress_pulse_at: None,
+            stream_chunk_count: 0,
+            stream_char_count: 0,
+            saw_first_token: false,
         }
     }
 }
@@ -540,6 +555,63 @@ impl TuiState {
                 .collect();
             self.live_thinking = format!("…{}", tail);
         }
+    }
+
+    fn begin_processing_cycle(&mut self, model: &str) {
+        self.processing = true;
+        self.processing_started_at = Some(Instant::now());
+        self.last_progress_pulse_at = None;
+        self.stream_chunk_count = 0;
+        self.stream_char_count = 0;
+        self.saw_first_token = false;
+        self.active_tools.clear();
+        self.live_thinking.clear();
+        self.push_activity(format!("⟳ dispatching request to {model}"));
+    }
+
+    fn finish_processing_cycle(&mut self, label: &str) {
+        let elapsed = self
+            .processing_started_at
+            .map(|t| t.elapsed().as_secs_f64())
+            .unwrap_or_default();
+        self.push_activity(format!(
+            "{} {:.2}s • {} chunks • {} chars",
+            label, elapsed, self.stream_chunk_count, self.stream_char_count
+        ));
+        self.processing = false;
+        self.processing_started_at = None;
+        self.last_progress_pulse_at = None;
+        self.stream_chunk_count = 0;
+        self.stream_char_count = 0;
+        self.saw_first_token = false;
+    }
+
+    fn maybe_emit_progress_pulse(&mut self) {
+        if !self.processing {
+            return;
+        }
+        let now = Instant::now();
+        let should_emit = self
+            .last_progress_pulse_at
+            .map(|t| now.duration_since(t) >= Duration::from_millis(1250))
+            .unwrap_or(true);
+        if !should_emit {
+            return;
+        }
+        let elapsed = self
+            .processing_started_at
+            .map(|t| t.elapsed().as_secs_f64())
+            .unwrap_or_default();
+        let tool_state = if self.active_tools.is_empty() {
+            "no active tools".to_string()
+        } else {
+            format!("{} active tool(s)", self.active_tools.len())
+        };
+        self.push_activity(format!(
+            "… working {:.1}s • {} chunks • {} chars • {}",
+            elapsed, self.stream_chunk_count, self.stream_char_count, tool_state
+        ));
+        self.last_progress_pulse_at = Some(now);
     }
 
     fn refresh_sticky_prompt(&mut self, app: &App) {
@@ -3160,6 +3232,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                 }
                 if state.processing {
                     state.tick_spinner();
+                    state.maybe_emit_progress_pulse();
                     needs_redraw = true;
                 }
                 if app.pet_settings().enabled
@@ -3273,16 +3346,15 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                 }
 
                                 if !handled_by_tui {
-                                    state.processing = true;
+                                    state.begin_processing_cycle(&app.current_model);
                                     state.status_message = "Processing...".to_string();
                                     match app.handle_input(&input).await {
                                         Ok(_) => {
-                                            state.processing = false;
                                             state.status_message.clear();
                                         }
                                         Err(e) => {
-                                            state.processing = false;
                                             state.status_message = format!("Error: {}", e);
+                                            state.push_activity(format!("✖ {}", e));
                                             app.push_ui_assistant(format!("Error: {}", e));
                                         }
                                     }
@@ -3320,6 +3392,17 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                     }
                     Some(Event::StreamChunk(chunk)) => {
                         if let Some(delta) = chunk.delta {
+                            let has_stream_payload = delta
+                                .content
+                                .as_ref()
+                                .is_some_and(|text| !text.is_empty())
+                                || delta
+                                    .tool_calls
+                                    .as_ref()
+                                    .is_some_and(|calls| !calls.is_empty());
+                            if has_stream_payload {
+                                state.stream_chunk_count = state.stream_chunk_count.saturating_add(1);
+                            }
                             if let Some(extra) = delta.extra.as_ref() {
                                 if let Some(control) = extra.get("control").and_then(|v| v.as_str()) {
                                     if control == "mute_post_response" {
@@ -3400,6 +3483,16 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                                 ));
                                             }
                                         }
+                                        "lifecycle" => {
+                                            let message = extra
+                                                .get("message")
+                                                .and_then(|v| v.as_str())
+                                                .unwrap_or("")
+                                                .trim();
+                                            if !message.is_empty() {
+                                                state.push_activity(format!("⟡ {}", message));
+                                            }
+                                        }
                                         "thinking" => {
                                             if let Some(text) =
                                                 extra.get("text").and_then(|v| v.as_str())
@@ -3421,6 +3514,19 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                         state.stream_needs_break = false;
                                     }
                                     state.stream_buffer.push_str(&content);
+                                    state.stream_char_count =
+                                        state.stream_char_count.saturating_add(content.chars().count());
+                                    if !state.saw_first_token {
+                                        state.saw_first_token = true;
+                                        let first_token_ms = state
+                                            .processing_started_at
+                                            .map(|t| t.elapsed().as_millis())
+                                            .unwrap_or_default();
+                                        state.push_activity(format!(
+                                            "↧ first token in {}ms",
+                                            first_token_ms
+                                        ));
+                                    }
                                 }
                             }
                         }
@@ -3431,7 +3537,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         needs_redraw = true;
                     }
                     Some(Event::AgentDone) => {
-                        state.processing = false;
+                        state.finish_processing_cycle("✔ completed in");
                         state.stream_buffer.clear();
                         state.stream_muted = false;
                         state.stream_needs_break = false;
@@ -3440,7 +3546,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         needs_redraw = true;
                     }
                     Some(Event::Interrupt) => {
-                        state.processing = false;
+                        state.finish_processing_cycle("⏹ interrupted after");
                         state.stream_buffer.clear();
                         state.stream_muted = false;
                         state.stream_needs_break = false;
@@ -3619,6 +3725,48 @@ mod tests {
         state.append_live_thinking(&long);
         assert!(state.live_thinking.chars().count() <= 260);
         assert!(state.live_thinking.starts_with('…'));
+    }
+
+    #[test]
+    fn test_processing_cycle_tracks_and_resets_stats() {
+        let mut state = TuiState::default();
+        state.begin_processing_cycle("nous:test-model");
+        assert!(state.processing);
+        assert_eq!(state.stream_chunk_count, 0);
+        assert_eq!(state.stream_char_count, 0);
+        assert!(state.processing_started_at.is_some());
+        assert!(state
+            .recent_activity
+            .last()
+            .is_some_and(|line| line.contains("dispatching request")));
+
+        state.stream_chunk_count = 7;
+        state.stream_char_count = 1234;
+        state.finish_processing_cycle("✔ completed in");
+
+        assert!(!state.processing);
+        assert_eq!(state.stream_chunk_count, 0);
+        assert_eq!(state.stream_char_count, 0);
+        assert!(state.processing_started_at.is_none());
+        assert!(state
+            .recent_activity
+            .last()
+            .is_some_and(|line| line.contains("✔ completed in")));
+    }
+
+    #[test]
+    fn test_progress_pulse_emits_activity_row() {
+        let mut state = TuiState::default();
+        state.begin_processing_cycle("nous:test-model");
+        state.processing_started_at = Some(Instant::now() - Duration::from_secs(2));
+        state.last_progress_pulse_at = None;
+        let before = state.recent_activity.len();
+        state.maybe_emit_progress_pulse();
+        assert!(state.recent_activity.len() > before);
+        assert!(state
+            .recent_activity
+            .last()
+            .is_some_and(|line| line.contains("working")));
     }
 
     #[test]
