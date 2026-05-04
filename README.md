@@ -200,9 +200,9 @@ Ultra uses controlled sync workflows, not blind merges.
 - `origin/main` at sync: `1861c5dcfb8cad8dcddb5f15c1a5a8c34c7f1ce2`
 - `upstream/main` at sync: `95f395027f72c69f06bddcecb08da53cfd10c440`
 - Pending commits captured in report: `1512`
-- Queue summary (`docs/parity/upstream-missing-queue.json`): pending `0`, ported `63`, superseded `1386`
+- Queue summary (`docs/parity/upstream-missing-queue.json`): pending `0`, ported `63`, superseded `1387`
 - Parity gates (`docs/parity/global-parity-proof.json`): release `pass`, ci `pass`
-- Workstream snapshot (`docs/parity/workstream-status.json`): `upstream/main` @ `a11aed1accc735ae0d7af80d626b33870d4b696c` (generated `2026-05-04T00:57:58-06:00`)
+- Workstream snapshot (`docs/parity/workstream-status.json`): `upstream/main` @ `8163d371922768c32f43eb6036d7d36e56775605` (generated `2026-05-04T01:23:44-06:00`)
 <!-- END:ULTRA_SYNC_STATUS -->
 
 Note: this repository intentionally tracks parity via queue/gate workflows because upstream and ultra history can diverge materially.
