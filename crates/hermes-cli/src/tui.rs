@@ -884,14 +884,21 @@ impl TuiState {
                 self.scroll_offset = 0;
                 false
             }
-            // Submit is handled by the caller checking for these combos.
-            KeyCode::Enter
-                if mods.contains(KeyModifiers::CONTROL) || mods.contains(KeyModifiers::ALT) =>
-            {
+            // Explicit multiline shortcuts.
+            KeyCode::Enter if mods.contains(KeyModifiers::SHIFT) => {
+                self.insert_newline_at_cursor();
+                self.selection_anchor = None;
+                self.refresh_completions();
                 false
             }
-            // Slash commands submit on plain Enter in the run-loop.
-            KeyCode::Enter if self.input.starts_with('/') && !self.input.contains('\n') => false,
+            KeyCode::Char('j') if mods.contains(KeyModifiers::CONTROL) => {
+                self.insert_newline_at_cursor();
+                self.selection_anchor = None;
+                self.refresh_completions();
+                false
+            }
+            // Submit shortcuts are handled in the run-loop after key handling.
+            _ if is_submit_shortcut(&key, &self.input) => false,
             KeyCode::Tab => {
                 // Accept completion
                 self.accept_completion();
@@ -1090,6 +1097,12 @@ impl TuiState {
         self.sync_from_textarea(&textarea);
     }
 
+    fn insert_newline_at_cursor(&mut self) {
+        let at = self.cursor_position.min(self.input.len());
+        self.input.insert(at, '\n');
+        self.cursor_position = at.saturating_add(1);
+    }
+
     fn move_cursor_word_left(&mut self) {
         if self.cursor_position == 0 || self.input.is_empty() {
             self.cursor_position = 0;
@@ -1200,7 +1213,7 @@ pub fn render(frame: &mut Frame, app: &App, state: &mut TuiState, theme: &Theme)
     // Layout: header, body, input, status bar
     let header_height = 1;
     let composer_lines = state.input.matches('\n').count() as u16 + 1;
-    let input_height = (composer_lines + 2).clamp(3, 6);
+    let input_height = (composer_lines + 2).clamp(3, 12);
     let status_height = 1;
 
     let vertical = Layout::default()
@@ -1284,7 +1297,7 @@ fn should_render_completions_popup(state: &TuiState) -> bool {
 fn render_header(frame: &mut Frame, app: &App, area: Rect, colors: &crate::theme::RatatuiColors) {
     let session_short = &app.session_id[..8.min(app.session_id.len())];
     let title = format!(
-        " HERMES AGENT ULTRA  •  session {}  •  Ctrl+Enter send  •  / commands  •  Ctrl+L lane  •  Ctrl+D density  •  Ctrl+T timestamps",
+        " HERMES AGENT ULTRA  •  session {}  •  Enter send  •  Shift+Enter/Ctrl+J newline  •  / commands  •  Ctrl+L lane  •  Ctrl+D density  •  Ctrl+T timestamps",
         session_short
     );
     let text = Text::from(vec![Line::from(vec![Span::styled(
@@ -2750,7 +2763,9 @@ fn render_input(
     );
     textarea.set_cursor_line_style(Style::default().bg(colors.background));
     if state.input.is_empty() && state.mode == InputMode::Insert && !state.history_search_active {
-        textarea.set_placeholder_text("Type a message and press Ctrl+Enter to send");
+        textarea.set_placeholder_text(
+            "Type a message (Enter sends, Shift+Enter/Ctrl+J inserts newline)",
+        );
         textarea.set_placeholder_style(
             Style::default()
                 .fg(colors.status_bar_dim)
@@ -2985,6 +3000,30 @@ fn is_ctrl_c(key: &KeyEvent) -> bool {
     key.modifiers
         .contains(crossterm::event::KeyModifiers::CONTROL)
         && key.code == crossterm::event::KeyCode::Char('c')
+}
+
+fn is_submit_shortcut(key: &KeyEvent, input: &str) -> bool {
+    use crossterm::event::{KeyCode, KeyModifiers};
+    let mods = key.modifiers;
+
+    if key.code == KeyCode::Enter {
+        if mods.contains(KeyModifiers::SHIFT) {
+            return false;
+        }
+        if mods.is_empty()
+            || mods.contains(KeyModifiers::CONTROL)
+            || mods.contains(KeyModifiers::ALT)
+        {
+            // Slash commands stay single-line and are submitted with Enter.
+            if input.starts_with('/') {
+                return !input.contains('\n');
+            }
+            return true;
+        }
+    }
+
+    // Fallback for terminals that encode Ctrl+Enter as Ctrl+M.
+    key.code == KeyCode::Char('m') && mods.contains(KeyModifiers::CONTROL)
 }
 
 fn parse_slash_parts(input: &str) -> Option<(String, Vec<String>)> {
@@ -3382,15 +3421,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                             break;
                         }
 
-                        // Ctrl+Enter / Alt+Enter submits. For slash commands, Enter submits too.
-                        let is_submit_combo = (key.modifiers.contains(crossterm::event::KeyModifiers::CONTROL)
-                            || key.modifiers.contains(crossterm::event::KeyModifiers::ALT))
-                            && key.code == crossterm::event::KeyCode::Enter;
-                        let is_slash_enter = key.code == crossterm::event::KeyCode::Enter
-                            && key.modifiers.is_empty()
-                            && state.input.starts_with('/')
-                            && !state.input.contains('\n');
-                        let is_submit = is_submit_combo || is_slash_enter;
+                        let is_submit = is_submit_shortcut(&key, &state.input);
 
                         if is_submit {
                             let input = state.input.clone();
@@ -3884,6 +3915,47 @@ mod tests {
         let plain_c = KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE);
         assert!(is_ctrl_c(&ctrl_c));
         assert!(!is_ctrl_c(&plain_c));
+    }
+
+    #[test]
+    fn test_submit_shortcuts_are_detected() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let plain_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        let ctrl_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::CONTROL);
+        let alt_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::ALT);
+        let ctrl_m = KeyEvent::new(KeyCode::Char('m'), KeyModifiers::CONTROL);
+
+        assert!(is_submit_shortcut(&plain_enter, "hello"));
+        assert!(is_submit_shortcut(&ctrl_enter, "hello"));
+        assert!(is_submit_shortcut(&alt_enter, "hello"));
+        assert!(is_submit_shortcut(&ctrl_m, "hello"));
+    }
+
+    #[test]
+    fn test_submit_shortcuts_exclude_newline_shortcuts() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let shift_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::SHIFT);
+        let ctrl_j = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::CONTROL);
+
+        assert!(!is_submit_shortcut(&shift_enter, "hello"));
+        assert!(!is_submit_shortcut(&ctrl_j, "hello"));
+    }
+
+    #[test]
+    fn test_submit_shortcut_rejects_multiline_slash_commands() {
+        use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+        let plain_enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        assert!(!is_submit_shortcut(&plain_enter, "/model\nlist"));
+    }
+
+    #[test]
+    fn test_insert_newline_at_cursor_updates_input_and_cursor() {
+        let mut state = TuiState::default();
+        state.input = "hello".to_string();
+        state.cursor_position = 5;
+        state.insert_newline_at_cursor();
+        assert_eq!(state.input, "hello\n");
+        assert_eq!(state.cursor_position, 6);
     }
 
     #[test]
