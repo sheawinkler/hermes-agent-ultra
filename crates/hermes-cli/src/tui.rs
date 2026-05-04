@@ -570,6 +570,9 @@ impl TuiState {
     }
 
     fn finish_processing_cycle(&mut self, label: &str) {
+        if !self.processing {
+            return;
+        }
         let elapsed = self
             .processing_started_at
             .map(|t| t.elapsed().as_secs_f64())
@@ -3350,9 +3353,11 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                     state.status_message = "Processing...".to_string();
                                     match app.handle_input(&input).await {
                                         Ok(_) => {
+                                            state.finish_processing_cycle("✔ completed in");
                                             state.status_message.clear();
                                         }
                                         Err(e) => {
+                                            state.finish_processing_cycle("✖ failed after");
                                             state.status_message = format!("Error: {}", e);
                                             state.push_activity(format!("✖ {}", e));
                                             app.push_ui_assistant(format!("Error: {}", e));

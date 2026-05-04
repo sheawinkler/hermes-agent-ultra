@@ -31,6 +31,11 @@ use hermes_cron::cron_scheduler_for_data_dir;
 use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_tools::ToolRegistry;
 
+use crate::auth::{
+    resolve_gemini_oauth_runtime_credentials, resolve_nous_runtime_credentials,
+    resolve_qwen_runtime_credentials, DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
+    NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS, QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+};
 use crate::cli::Cli;
 use crate::commands::recover_queued_background_jobs;
 use crate::model_switch::provider_model_ids;
@@ -247,6 +252,107 @@ impl App {
                 .collect();
             out.push('…');
             out
+        }
+    }
+
+    fn set_env_if_changed(key: &str, value: &str) -> bool {
+        let next = value.trim();
+        if next.is_empty() {
+            return false;
+        }
+        let current = std::env::var(key).ok().unwrap_or_default();
+        if current == next {
+            return false;
+        }
+        std::env::set_var(key, next);
+        true
+    }
+
+    async fn refresh_runtime_provider_credentials_if_needed(&mut self) {
+        let (provider_name, _) = resolve_provider_and_model(&self.config, &self.current_model);
+        let provider = normalize_runtime_provider_name(provider_name.as_str());
+        let mut rotated = false;
+        let mut note: Option<String> = None;
+
+        match provider.as_str() {
+            "nous" => match resolve_nous_runtime_credentials(
+                false,
+                true,
+                NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+                DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
+            )
+            .await
+            {
+                Ok(creds) => {
+                    rotated |= Self::set_env_if_changed("NOUS_API_KEY", &creds.api_key);
+                    if !creds.base_url.trim().is_empty() {
+                        rotated |=
+                            Self::set_env_if_changed("NOUS_INFERENCE_BASE_URL", &creds.base_url);
+                    }
+                    if rotated {
+                        note = Some("refreshed Nous runtime credential".to_string());
+                    }
+                }
+                Err(e) => {
+                    Self::emit_lifecycle_event(
+                        &self.stream_handle_shared,
+                        format!("warning: Nous credential refresh skipped ({e})"),
+                    );
+                }
+            },
+            "qwen-oauth" => match resolve_qwen_runtime_credentials(
+                false,
+                true,
+                QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+            )
+            .await
+            {
+                Ok(creds) => {
+                    rotated |=
+                        Self::set_env_if_changed("HERMES_QWEN_OAUTH_API_KEY", &creds.api_key);
+                    rotated |= Self::set_env_if_changed("DASHSCOPE_API_KEY", &creds.api_key);
+                    if !creds.base_url.trim().is_empty() {
+                        rotated |=
+                            Self::set_env_if_changed("HERMES_QWEN_BASE_URL", &creds.base_url);
+                    }
+                    if rotated {
+                        note = Some("refreshed Qwen OAuth runtime credential".to_string());
+                    }
+                }
+                Err(e) => {
+                    Self::emit_lifecycle_event(
+                        &self.stream_handle_shared,
+                        format!("warning: Qwen OAuth refresh skipped ({e})"),
+                    );
+                }
+            },
+            "google-gemini-cli" | "gemini-cli" | "gemini-oauth" => {
+                match resolve_gemini_oauth_runtime_credentials(false).await {
+                    Ok(creds) => {
+                        rotated |=
+                            Self::set_env_if_changed("HERMES_GEMINI_OAUTH_API_KEY", &creds.api_key);
+                        rotated |= Self::set_env_if_changed("GOOGLE_API_KEY", &creds.api_key);
+                        rotated |= Self::set_env_if_changed("GEMINI_API_KEY", &creds.api_key);
+                        if rotated {
+                            note = Some("refreshed Gemini OAuth runtime credential".to_string());
+                        }
+                    }
+                    Err(e) => {
+                        Self::emit_lifecycle_event(
+                            &self.stream_handle_shared,
+                            format!("warning: Gemini OAuth refresh skipped ({e})"),
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        if rotated {
+            self.switch_model(&self.current_model.clone());
+        }
+        if let Some(msg) = note {
+            Self::emit_lifecycle_event(&self.stream_handle_shared, msg);
         }
     }
 
@@ -682,6 +788,7 @@ impl App {
     /// Checks the interrupt controller before running and clears it after.
     async fn run_agent(&mut self) -> Result<(), AgentError> {
         let run_started_at = Instant::now();
+        self.refresh_runtime_provider_credentials_if_needed().await;
         self.interrupt_controller.clear_interrupt();
         let mut remediation_attempted = false;
         loop {
