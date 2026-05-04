@@ -30,6 +30,7 @@ use ratatui::Frame;
 use tokio::sync::mpsc;
 use tui_textarea::{CursorMove, TextArea};
 
+use hermes_auth::FileTokenStore;
 use hermes_core::{AgentError, StreamChunk};
 
 use crate::app::App;
@@ -268,6 +269,7 @@ enum ModalAction {
     None,
     Close,
     Confirm,
+    DisconnectProvider,
 }
 
 // ---------------------------------------------------------------------------
@@ -620,6 +622,30 @@ impl TuiState {
                 modal.query.clear();
                 modal.refresh_filter();
                 ModalAction::None
+            }
+            KeyCode::Char('d')
+                if key.modifiers.is_empty()
+                    && modal.query.trim().is_empty()
+                    && matches!(modal.kind, PickerKind::ModelProvider) =>
+            {
+                ModalAction::DisconnectProvider
+            }
+            KeyCode::Char(ch)
+                if key.modifiers.is_empty()
+                    && modal.query.trim().is_empty()
+                    && ch.is_ascii_digit() =>
+            {
+                let nth = if ch == '0' {
+                    10usize
+                } else {
+                    ch.to_digit(10).unwrap_or(0) as usize
+                };
+                if nth >= 1 && nth <= modal.filtered_indices.len() {
+                    modal.selected_filtered = nth - 1;
+                    ModalAction::Confirm
+                } else {
+                    ModalAction::None
+                }
             }
             KeyCode::Char(ch)
                 if key.modifiers.is_empty() || key.modifiers == KeyModifiers::SHIFT =>
@@ -2401,6 +2427,7 @@ fn render_picker_modal(
                 let item = &modal.items[*item_idx];
                 let selected = filtered_idx == modal.selected_filtered;
                 let selected_marker = if selected { "▶" } else { " " };
+                let absolute_number = filtered_idx + 1;
                 let multi_marker = if modal.allow_multi {
                     if modal.selected_values.contains(&item.value) {
                         "■ "
@@ -2429,7 +2456,10 @@ fn render_picker_modal(
                         .fg(colors.status_bar_dim)
                         .bg(colors.status_bar_bg)
                 };
-                let text = format!("{selected_marker} {multi_marker}{}", item.label);
+                let text = format!(
+                    "{selected_marker} {:>3}. {multi_marker}{}",
+                    absolute_number, item.label
+                );
                 let available = rows_area.width.saturating_sub(2) as usize;
                 let primary = truncate_chars(&text, available);
                 if item.detail.is_empty() {
@@ -2476,8 +2506,10 @@ fn render_picker_modal(
 
     let footer = if modal.allow_multi {
         "↑↓ move • PgUp/PgDn page • Space toggle • Enter confirm • Esc close"
+    } else if matches!(modal.kind, PickerKind::ModelProvider) {
+        "↑↓ move • 1-9/0 quick-pick • d disconnect • Enter select • Esc close"
     } else {
-        "↑↓ move • PgUp/PgDn page • Enter select • Esc close"
+        "↑↓ move • PgUp/PgDn page • 1-9/0 quick-pick • Enter select • Esc close"
     };
     frame.render_widget(
         Paragraph::new(Line::from(vec![Span::styled(
@@ -2796,26 +2828,124 @@ fn parse_slash_parts(input: &str) -> Option<(String, Vec<String>)> {
     Some((cmd, args))
 }
 
+fn provider_env_key_hints(provider: &str) -> &'static [&'static str] {
+    match provider.trim().to_ascii_lowercase().as_str() {
+        "openai" => &["HERMES_OPENAI_API_KEY", "OPENAI_API_KEY"],
+        "openai-codex" | "codex" => &["HERMES_OPENAI_CODEX_API_KEY"],
+        "anthropic" => &["ANTHROPIC_API_KEY"],
+        "nous" => &["NOUS_API_KEY"],
+        "openrouter" => &["OPENROUTER_API_KEY"],
+        "gemini" | "google" => &["GOOGLE_API_KEY", "GEMINI_API_KEY"],
+        "google-gemini-cli" => &["HERMES_GEMINI_OAUTH_API_KEY"],
+        "qwen" => &["DASHSCOPE_API_KEY", "QWEN_API_KEY"],
+        "qwen-oauth" => &["HERMES_QWEN_OAUTH_API_KEY", "DASHSCOPE_API_KEY"],
+        "deepseek" => &["DEEPSEEK_API_KEY"],
+        "kimi" | "moonshot" | "kimi-coding" | "kimi-coding-cn" => &["KIMI_API_KEY"],
+        "ollama-local" => &["OLLAMA_LOCAL_API_KEY", "OLLAMA_API_KEY"],
+        "llama-cpp" => &["LLAMA_CPP_API_KEY"],
+        "vllm" => &["VLLM_API_KEY"],
+        "mlx" => &["MLX_API_KEY"],
+        "apple-ane" => &["APPLE_ANE_API_KEY"],
+        "sglang" => &["SGLANG_API_KEY"],
+        "tgi" => &["TGI_API_KEY"],
+        "zai" => &["ZAI_API_KEY"],
+        "minimax" | "minimax-cn" => &["MINIMAX_API_KEY"],
+        "stepfun" => &["HERMES_STEPFUN_API_KEY", "STEPFUN_API_KEY"],
+        _ => &[],
+    }
+}
+
+async fn load_token_store_providers() -> HashSet<String> {
+    let path = hermes_config::paths::hermes_home()
+        .join("auth")
+        .join("tokens.json");
+    let Ok(store) = FileTokenStore::new(path).await else {
+        return HashSet::new();
+    };
+    store
+        .list_providers()
+        .await
+        .into_iter()
+        .map(|provider| provider.to_ascii_lowercase())
+        .collect()
+}
+
+fn provider_auth_detail(provider: &str, token_store_providers: &HashSet<String>) -> String {
+    let normalized = provider.trim().to_ascii_lowercase();
+    let mut sources: Vec<String> = Vec::new();
+    for key in provider_env_key_hints(&normalized) {
+        if std::env::var(key)
+            .ok()
+            .map(|v| !v.trim().is_empty())
+            .unwrap_or(false)
+        {
+            sources.push(format!("env:{key}"));
+            break;
+        }
+    }
+    if token_store_providers.contains(&normalized) {
+        sources.push("vault".to_string());
+    }
+    if crate::auth::read_provider_auth_state(&normalized)
+        .ok()
+        .flatten()
+        .is_some()
+    {
+        sources.push("oauth".to_string());
+    }
+
+    if sources.is_empty() {
+        let setup_hint = provider_env_key_hints(&normalized)
+            .first()
+            .copied()
+            .unwrap_or("API_KEY");
+        format!("auth:missing (setup: /auth {normalized} or {setup_hint})")
+    } else {
+        format!("auth:{}", sources.join("+"))
+    }
+}
+
+async fn disconnect_provider_credentials(provider: &str) -> Result<(bool, bool), AgentError> {
+    let normalized = provider.trim().to_ascii_lowercase();
+    let path = hermes_config::paths::hermes_home()
+        .join("auth")
+        .join("tokens.json");
+    let mut removed_vault = false;
+    if let Ok(store) = FileTokenStore::new(path).await {
+        removed_vault = store
+            .list_providers()
+            .await
+            .into_iter()
+            .any(|p| p.eq_ignore_ascii_case(&normalized));
+        let _ = store.remove(&normalized).await;
+    }
+    let removed_oauth = crate::auth::clear_provider_auth_state(&normalized).unwrap_or(false);
+    Ok((removed_vault, removed_oauth))
+}
+
 async fn open_model_provider_modal(state: &mut TuiState, app: &App) {
     let providers = crate::model_switch::curated_provider_slugs();
     let entries = crate::model_switch::provider_catalog_entries(&providers, 4).await;
+    let token_store_providers = load_token_store_providers().await;
     let mut items: Vec<PickerItem> = Vec::new();
     for provider in providers {
         let entry = entries
             .iter()
             .find(|entry| entry.provider.eq_ignore_ascii_case(provider));
+        let auth_detail = provider_auth_detail(provider, &token_store_providers);
         let detail = if let Some(entry) = entry {
             if entry.models.is_empty() {
-                format!("{} models", entry.total_models)
+                format!("{} models • {}", entry.total_models, auth_detail)
             } else {
                 format!(
-                    "{} models • {}",
+                    "{} models • {} • {}",
                     entry.total_models,
-                    entry.models.join(", ")
+                    entry.models.join(", "),
+                    auth_detail
                 )
             }
         } else {
-            "catalog unavailable".to_string()
+            format!("catalog unavailable • {}", auth_detail)
         };
         items.push(PickerItem {
             label: provider.to_string(),
@@ -2894,6 +3024,43 @@ fn open_personality_modal(state: &mut TuiState, app: &App) {
         }
     }
     state.open_modal(modal);
+}
+
+async fn process_modal_disconnect(state: &mut TuiState, app: &mut App) -> Result<(), AgentError> {
+    let Some(modal) = state.modal.clone() else {
+        return Ok(());
+    };
+    let Some(item) = modal.selected_item().cloned() else {
+        state.status_message = "No provider selected".to_string();
+        return Ok(());
+    };
+    if !matches!(modal.kind, PickerKind::ModelProvider) {
+        state.status_message = "Disconnect is only supported in provider picker".to_string();
+        return Ok(());
+    }
+    let provider = item.value.trim().to_ascii_lowercase();
+    match disconnect_provider_credentials(&provider).await {
+        Ok((removed_vault, removed_oauth)) => {
+            if removed_vault || removed_oauth {
+                state.status_message = format!(
+                    "Disconnected `{provider}` (vault={}, oauth={})",
+                    removed_vault, removed_oauth
+                );
+                app.push_ui_assistant(format!(
+                    "Disconnected provider `{}` (vault={}, oauth={}).",
+                    provider, removed_vault, removed_oauth
+                ));
+            } else {
+                state.status_message =
+                    format!("No stored credential found for `{provider}` to disconnect");
+            }
+            open_model_provider_modal(state, app).await;
+        }
+        Err(err) => {
+            state.status_message = format!("Disconnect failed for `{provider}`: {err}");
+        }
+    }
+    Ok(())
 }
 
 async fn process_modal_confirm(state: &mut TuiState, app: &mut App) -> Result<(), AgentError> {
@@ -3028,6 +3195,9 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                 }
                                 ModalAction::Confirm => {
                                     process_modal_confirm(&mut state, &mut app).await?;
+                                }
+                                ModalAction::DisconnectProvider => {
+                                    process_modal_disconnect(&mut state, &mut app).await?;
                                 }
                                 ModalAction::None => {}
                             }

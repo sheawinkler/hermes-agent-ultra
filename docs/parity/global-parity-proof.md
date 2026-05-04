@@ -1,6 +1,6 @@
 # Global Parity Proof
 
-Generated: `2026-05-04T05:35:08.910614+00:00`
+Generated: `2026-05-04T06:57:43.585000+00:00`
 
 ## Gate Status
 
@@ -20,7 +20,7 @@ Generated: `2026-05-04T05:35:08.910614+00:00`
 | `max_unowned_divergences` | 0.0 |
 | `max_divergence_review_overdue` | 0.0 |
 | `min_test_intent_mapping_ratio` | 1.0 |
-| `max_queue_pending_commits` | 138.0 |
+| `max_queue_pending_commits` | 113.0 |
 
 ## GPAR Ticket Completion
 

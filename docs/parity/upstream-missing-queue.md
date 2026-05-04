@@ -1,6 +1,6 @@
 # Upstream Missing Patch Queue
 
-Generated: `2026-05-04T05:34:36.981959+00:00`
+Generated: `2026-05-04T06:55:37.880712+00:00`
 
 - Range: `main..upstream/main`; total commits tracked: `1447`.
 
@@ -16,39 +16,14 @@ Generated: `2026-05-04T05:34:36.981959+00:00`
 
 | Disposition | Commit Count |
 | --- | ---: |
-| pending | 138 |
-| ported | 51 |
-| superseded | 1258 |
+| pending | 113 |
+| ported | 60 |
+| superseded | 1274 |
 
 ## First 100 Pending Commits
 
 | SHA | Ticket | Subject |
 | --- | ---: | --- |
-| `e2a490560610` | #22 | feat(dashboard): add Plugins page with enable/disable, auth status, install/remove |
-| `6549b0f2b7fe` | #26 | fix(security): address CodeQL path-traversal and info-exposure findings |
-| `7dc85495e05d` | #22 | style(plugins): make page full width |
-| `9550d0fd46d1` | #22 | fix(plugins): show 'Plugins' in page header instead of 'Web UI' |
-| `a52363231faa` | #22 | refactor(plugins): move rescan button to page header, remove redundant title |
-| `c73b799de70d` | #22 | feat(dashboard): add hide/show toggle for dashboard plugins in sidebar |
-| `443950e82736` | #26 | fix(tui): pass user_providers as dict to match CLI model-switch pipeline |
-| `36fa8a4d28cf` | #22 | fix(tui): show absolute position numbers in model picker |
-| `26f7f6850757` | #22 | feat(tui): show all providers in /model picker with inline API key setup |
-| `f4c761c6a095` | #22 | feat(tui): add inline provider disconnect via 'd' keybind in /model picker |
-| `c8e506c383f4` | #22 | fix(tui): address code review feedback on model picker |
-| `c23c7c994bf8` | #22 | fix(tui): address remaining review feedback — ordering and digit shortcuts |
-| `fc78e708ed0c` | #26 | fix(update): don't crash hermes update if skill config scan fails (#18257) |
-| `41fa1f1b5cf5` | #20 | fix(acp): run /steer as a regular prompt on idle sessions (#18258) |
-| `f0dc919f92c5` | #20 | fix(compression): include system prompt + tool schemas in token estimates (#18265) |
-| `bfb704684ec6` | #20 | fix(deepseek): use non-empty reasoning_content placeholder for V4 Pro thinking mode |
-| `e2eb561e8e1a` | #20 | fix(curator): rewrite cron job skill refs after consolidation (#18253) |
-| `4caad285a602` | #23 | feat(gateway): auto-delete slash-command system notices after TTL (#18266) |
-| `50c046331dc7` | #20 | feat(update): add --yes/-y flag to skip interactive prompts (#18261) |
-| `7c6c5619a7b8` | #22 | docs(sidebar): collapse exploding skills tree to a single Skills node (#18259) |
-| `265bd59c1d9f` | #20 | feat: /goal — persistent cross-turn goals (Ralph loop) (#18262) |
-| `1be3b74cfb45` | #20 | fix(gateway): honor MATRIX_HOME_ROOM in onboarding |
-| `77dd6d54699f` | #26 | chore(release): add mikeyobrien to AUTHOR_MAP |
-| `9ca72a69a730` | #20 | fix(moonshot): fill missing type before enum cleanup to handle anyOf branches without explicit type |
-| `9cb5baeacfc7` | #26 | chore(release): map hendrixfreire for moonshot salvage |
 | `2af8b8ff3712` | #20 | fix(moonshot): also strip nullable/enum after anyOf collapse |
 | `cf2b2d31ce77` | #22 | docs: add Persistent Goals (/goal) feature page (#18275) |
 | `c6eebfc25a57` | #22 | docs: publish llms.txt and llms-full.txt for agent-friendly ingestion (#18276) |
@@ -124,4 +99,29 @@ Generated: `2026-05-04T05:34:36.981959+00:00`
 | `934103476f31` | #23 | fix(gateway): send /new response before cancel_session_processing to avoid race (#18912) |
 | `7a22c639dc84` | #26 | chore: add shellybotmoyer to AUTHOR_MAP |
 | `1148c4624173` | #23 | fix(gateway): correct ws scheme conversion for https urls |
+| `6f2dab248a6c` | #20 | fix: update tests for resume_pending semantics + add AUTHOR_MAP entries |
+| `55647a581349` | #26 | fix(whatsapp): pin protobufjs >=7.5.5 via npm overrides to clear 3 critical vulns (#19204) |
+| `d87fd9f03958` | #22 | fix(goals): make /goal work in TUI and fix gateway verdict delivery (#19209) |
+| `b59bb4e351c4` | #20 | fix(gateway): preserve home-channel thread targets across restart notifications |
+| `3c59566cc512` | #26 | chore(release): map leprincep35700 email for PR #18440 salvage |
+| `69dd0f7cf1f4` | #26 | fix(approval): extend sensitive write target to cover shell RC and credential files |
+| `6b4fb9f87897` | #20 | fix(cron): treat non-dict origin as missing instead of crashing tick |
+| `e527240b2700` | #20 | fix(tools): write_file handler now rejects missing 'content'/'path' args instead of silently writing zero-byte files (#19096) |
+| `279b656adc3c` | #22 | fix(tui): clear Apple Terminal resize artifacts |
+| `511add724987` | #21 | feat(skill): add video-orchestrator optional creative skill |
+| `0dd8e3f8d876` | #21 | rename: video-orchestrator → kanban-video-orchestrator |
+| `c9a3f36f5656` | #20 | feat: add video_analyze tool for native video understanding (#19301) |
+| `b8ae8cc801df` | #20 | fix(debug): redact log content at upload time in hermes debug share |
+| `9eaddfafa300` | #22 | fix(cli): CLI/TUI on local backend always uses launch directory, ignores terminal.cwd (#19242) |
+| `167b5648ea60` | #22 | Revert "fix(cli): CLI/TUI on local backend always uses launch directory, ignores terminal.cwd (#19242)" (#19329) |
+| `f5bd77b3e16d` | #20 | fix(kanban): anchor board, workspaces, and worker logs at the shared Hermes root |
+| `2658494e815b` | #20 | fix(kanban): add per-path env overrides + dispatcher env injection |
+| `4a2f822137bf` | #20 | fix(mcp): reconnect on terminated sessions |
+| `dfdd7b6e6fc3` | #20 | fix(codex-transport): preserve request override headers for xai responses |
+| `65bebb9b8026` | #26 | fix(cli): follow 307 redirects in MiniMax OAuth httpx clients |
+| `a5cae1649675` | #23 | fix(api_server): fall back to default port on malformed API_SERVER_PORT |
+| `6c4aca7adca4` | #26 | fix(vision): guard user_prompt type before debug_call_data construction |
+| `5bd937533c9c` | #26 | fix(vision): guard user_prompt type in video_analyze_tool before debug_call_data construction |
+| `408dd8aa28cb` | #26 | fix(compressor): skip non-string tool content in dedup pass to prevent AttributeError |
+| `86e64c1d3bc0` | #20 | fix(gateway): hide required-arg commands from Telegram menu |
 
