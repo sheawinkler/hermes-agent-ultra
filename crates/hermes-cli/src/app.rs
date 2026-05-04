@@ -167,6 +167,8 @@ pub struct App {
     stream_handle_shared: Arc<StdMutex<Option<StreamHandle>>>,
     /// Whether TUI mouse events are enabled.
     pub mouse_enabled: bool,
+    /// Pending skin/theme slug to apply in the TUI loop.
+    pub pending_theme: Option<String>,
     /// Optional durable objective for the current interactive session.
     pub session_objective: Option<String>,
     /// Animated companion pet settings.
@@ -182,6 +184,7 @@ impl std::fmt::Debug for App {
             .field("current_personality", &self.current_personality)
             .field("history_index", &self.history_index)
             .field("mouse_enabled", &self.mouse_enabled)
+            .field("pending_theme", &self.pending_theme)
             .field("session_objective", &self.session_objective)
             .field("pet_settings", &self.pet_settings)
             .finish_non_exhaustive()
@@ -546,6 +549,7 @@ impl App {
             stream_handle: None,
             stream_handle_shared,
             mouse_enabled: default_mouse_enabled(),
+            pending_theme: None,
             session_objective: None,
             pet_settings: load_pet_settings(),
         })
@@ -567,6 +571,20 @@ impl App {
     /// Current TUI mouse handling state.
     pub fn mouse_enabled(&self) -> bool {
         self.mouse_enabled
+    }
+
+    /// Queue a TUI skin/theme change request to be applied in the UI loop.
+    pub fn request_theme_change(&mut self, skin: &str) {
+        let value = skin.trim();
+        if value.is_empty() {
+            return;
+        }
+        self.pending_theme = Some(value.to_string());
+    }
+
+    /// Drain any queued skin/theme change request.
+    pub fn take_pending_theme_change(&mut self) -> Option<String> {
+        self.pending_theme.take()
     }
 
     /// Retrieve current companion pet settings.
@@ -1162,6 +1180,7 @@ mod tests {
             stream_handle: None,
             stream_handle_shared: Arc::new(StdMutex::new(None)),
             mouse_enabled: true,
+            pending_theme: None,
             session_objective: None,
             pet_settings: PetSettings::default(),
         }

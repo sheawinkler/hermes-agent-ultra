@@ -22,6 +22,7 @@ use sha2::{Digest, Sha256};
 
 use crate::app::{App, PetDock, PetSettings};
 use crate::model_switch::{curated_provider_slugs, normalize_provider_model, provider_model_ids};
+use crate::skin_engine::{canonical_skin_name, BUILTIN_SKINS};
 use hermes_config::{GatewayConfig, LlmProviderConfig};
 
 // ---------------------------------------------------------------------------
@@ -100,6 +101,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/profile", "Show active profile and Hermes home path"),
     ("/fast", "Toggle fast-mode hints"),
     ("/skin", "Show available skin/theme options"),
+    ("/skins", "Alias for /skin"),
     ("/voice", "Show voice mode status"),
     (
         "/pet",
@@ -2875,6 +2877,7 @@ fn canonical_command(cmd: &str) -> &str {
         "/set-home" => "/sethome",
         "/q" => "/queue",
         "/goal" => "/objective",
+        "/skins" => "/skin",
         "/sb" => "/statusbar",
         "/exit" => "/quit",
         other => other,
@@ -6306,13 +6309,58 @@ fn handle_runtime_ui_mode_command(
     cmd: &str,
     args: &[&str],
 ) -> Result<CommandResult, AgentError> {
-    let arg = args.first().copied().unwrap_or("status");
     let msg = match cmd {
+        "/skin" => {
+            let first = args.first().copied().unwrap_or("status");
+            if first.eq_ignore_ascii_case("list") {
+                let active = std::env::var("HERMES_THEME").unwrap_or_else(|_| "ultra-neon".to_string());
+                let active_canonical = canonical_skin_name(&active).unwrap_or("ultra-neon");
+                let mut out = String::new();
+                let _ = writeln!(out, "Built-in skins (active: {}):", active_canonical);
+                for (name, detail) in BUILTIN_SKINS {
+                    let marker = if *name == active_canonical { "✓" } else { " " };
+                    let _ = writeln!(out, "  {} {:<30} {}", marker, name, detail);
+                }
+                let _ = writeln!(
+                    out,
+                    "\nUse `/skin <name>` or `/skin set <name>` to switch immediately."
+                );
+                out.trim_end().to_string()
+            } else if first.eq_ignore_ascii_case("status") || first.eq_ignore_ascii_case("show") {
+                let active = std::env::var("HERMES_THEME").unwrap_or_else(|_| "ultra-neon".to_string());
+                let active_canonical = canonical_skin_name(&active).unwrap_or("ultra-neon");
+                format!(
+                    "Current skin: {}\nUse `/skin list` to browse options.\nUse `/skin <name>` to switch now.",
+                    active_canonical
+                )
+            } else {
+                let requested = if first.eq_ignore_ascii_case("set") {
+                    args.get(1).copied().unwrap_or("")
+                } else {
+                    first
+                };
+                if requested.trim().is_empty() {
+                    "Usage: `/skin list` or `/skin <name>`".to_string()
+                } else if let Some(canonical) = canonical_skin_name(requested) {
+                    std::env::set_var("HERMES_THEME", canonical);
+                    app.request_theme_change(canonical);
+                    format!(
+                        "Skin switched to `{}`.\nApplied in this TUI session and exported as HERMES_THEME for child processes.",
+                        canonical
+                    )
+                } else {
+                    format!(
+                        "Unknown skin `{}`. Use `/skin list` for built-ins.",
+                        requested
+                    )
+                }
+            }
+        }
         "/fast" => format!(
             "Fast mode compatibility command received (`{}`).\nCurrent model: {}\nTip: switch to a lower-latency model via `/model`.",
-            arg, app.current_model
+            args.first().copied().unwrap_or("status"),
+            app.current_model
         ),
-        "/skin" => "Skin/themes are selected with `HERMES_THEME`.\nAvailable built-ins: ultra-neon, ultra-amber, ultra-ice, ultra-hc, dark, light.".to_string(),
         "/voice" => "Voice mode uses provider/platform capabilities; no separate TUI voice engine is active in this session.".to_string(),
         _ => "Unsupported runtime UI mode command.".to_string(),
     };
@@ -11539,6 +11587,12 @@ mod tests {
     #[test]
     fn test_goal_alias_maps_to_objective() {
         assert_eq!(canonical_command("/goal"), "/objective");
+    }
+
+    #[test]
+    fn test_skins_alias_maps_to_skin() {
+        assert_eq!(canonical_command("/skins"), "/skin");
+        assert!(SLASH_COMMANDS.iter().any(|(name, _)| *name == "/skins"));
     }
 
     #[test]

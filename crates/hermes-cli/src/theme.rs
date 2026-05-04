@@ -449,6 +449,94 @@ pub fn ultra_hc_theme() -> Theme {
     theme
 }
 
+/// Built-in neon glow variant (extra bloom contrast for low-light terminals).
+pub fn neon_glow_theme() -> Theme {
+    let mut theme = ultra_neon_theme();
+    theme.name = "neon-glow".to_string();
+    theme.colors.accent = "#ff6dff".to_string();
+    theme.colors.primary = "#22064b".to_string();
+    theme.colors.secondary = "#9d8bd7".to_string();
+    theme.colors.background = "#05010f".to_string();
+    theme.colors.status_bar_bg = Some("#1a0434".to_string());
+    theme.colors.status_bar_strong = Some("#ff6dff".to_string());
+    theme.styles.user_input.fg = Some("#a5d7ff".to_string());
+    theme.styles.tool_call.fg = Some("#ffd275".to_string());
+    theme.styles.tool_result.fg = Some("#3dffcb".to_string());
+    theme
+}
+
+/// Built-in ultra-saturated magenta/cyan blast profile.
+pub fn hyper_ultra_hyper_saturated_theme() -> Theme {
+    let mut theme = ultra_neon_theme();
+    theme.name = "hyper-ultra-hyper-saturated".to_string();
+    theme.colors.accent = "#ff00ff".to_string();
+    theme.colors.primary = "#2a005f".to_string();
+    theme.colors.secondary = "#b28dff".to_string();
+    theme.colors.background = "#03000a".to_string();
+    theme.colors.foreground = "#f4f0ff".to_string();
+    theme.colors.status_bar_bg = Some("#250050".to_string());
+    theme.colors.status_bar_strong = Some("#ff00ff".to_string());
+    theme.colors.status_bar_dim = Some("#a680ff".to_string());
+    theme.styles.user_input.fg = Some("#00f5ff".to_string());
+    theme.styles.assistant_response.fg = Some("#f4f0ff".to_string());
+    theme.styles.tool_call.fg = Some("#ff8a00".to_string());
+    theme.styles.tool_result.fg = Some("#00ff9d".to_string());
+    theme
+}
+
+/// Built-in bleeding-edge profile (acid lime + hot magenta + midnight slate).
+pub fn bleeding_edges_theme() -> Theme {
+    let mut theme = default_theme();
+    theme.name = "bleeding-edges".to_string();
+    theme.colors.accent = "#ff2f92".to_string();
+    theme.colors.primary = "#162414".to_string();
+    theme.colors.secondary = "#8ec18a".to_string();
+    theme.colors.background = "#040807".to_string();
+    theme.colors.foreground = "#e8ffe8".to_string();
+    theme.colors.warning = "#f6ff4d".to_string();
+    theme.colors.success = "#3dff7a".to_string();
+    theme.colors.status_bar_bg = Some("#101f0f".to_string());
+    theme.colors.status_bar_strong = Some("#f8ff5a".to_string());
+    theme.colors.status_bar_dim = Some("#86a88a".to_string());
+    theme.styles.user_input.fg = Some("#7dffda".to_string());
+    theme.styles.assistant_response.fg = Some("#e8ffe8".to_string());
+    theme.styles.tool_call.fg = Some("#ff6ab0".to_string());
+    theme.styles.tool_result.fg = Some("#73ff8a".to_string());
+    theme
+}
+
+/// Built-in laserwave profile (synthwave pink + electric blue).
+pub fn ultra_laserwave_theme() -> Theme {
+    let mut theme = ultra_neon_theme();
+    theme.name = "ultra-laserwave".to_string();
+    theme.colors.accent = "#ff3fe4".to_string();
+    theme.colors.primary = "#1f0d4d".to_string();
+    theme.colors.secondary = "#9a8ef0".to_string();
+    theme.colors.background = "#06041a".to_string();
+    theme.colors.status_bar_bg = Some("#190b40".to_string());
+    theme.colors.status_bar_strong = Some("#46c8ff".to_string());
+    theme.styles.user_input.fg = Some("#8fe5ff".to_string());
+    theme.styles.tool_call.fg = Some("#ffb269".to_string());
+    theme.styles.tool_result.fg = Some("#58ffcf".to_string());
+    theme
+}
+
+/// Built-in voltage profile (electric cyan with amber highlights).
+pub fn ultra_voltage_theme() -> Theme {
+    let mut theme = ultra_ice_theme();
+    theme.name = "ultra-voltage".to_string();
+    theme.colors.accent = "#00f0ff".to_string();
+    theme.colors.primary = "#03253a".to_string();
+    theme.colors.secondary = "#8dc8dc".to_string();
+    theme.colors.background = "#020a10".to_string();
+    theme.colors.status_bar_bg = Some("#05334c".to_string());
+    theme.colors.status_bar_strong = Some("#00f0ff".to_string());
+    theme.styles.user_input.fg = Some("#a6f4ff".to_string());
+    theme.styles.tool_call.fg = Some("#ffc166".to_string());
+    theme.styles.tool_result.fg = Some("#4effbc".to_string());
+    theme
+}
+
 /// Built-in light theme.
 pub fn light_theme() -> Theme {
     Theme {
@@ -582,6 +670,14 @@ mod tests {
         assert_eq!(ultra_amber_theme().name, "ultra-amber");
         assert_eq!(ultra_ice_theme().name, "ultra-ice");
         assert_eq!(ultra_hc_theme().name, "ultra-hc");
+        assert_eq!(neon_glow_theme().name, "neon-glow");
+        assert_eq!(
+            hyper_ultra_hyper_saturated_theme().name,
+            "hyper-ultra-hyper-saturated"
+        );
+        assert_eq!(bleeding_edges_theme().name, "bleeding-edges");
+        assert_eq!(ultra_laserwave_theme().name, "ultra-laserwave");
+        assert_eq!(ultra_voltage_theme().name, "ultra-voltage");
     }
 
     #[test]

@@ -3349,6 +3349,12 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
 
     // Main event loop
     while app.running {
+        if let Some(theme_name) = app.take_pending_theme_change() {
+            let applied = crate::skin_engine::resolve_theme(&theme_name);
+            tui.set_theme(applied);
+            needs_redraw = true;
+        }
+
         if needs_redraw {
             state.refresh_sticky_prompt(&app);
             let active_theme = tui.theme().clone();
