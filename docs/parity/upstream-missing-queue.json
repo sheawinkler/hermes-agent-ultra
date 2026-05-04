@@ -22113,9 +22113,23 @@
       "subject": "fix(cli): local backend CLI always uses launch directory, stops .env sync of TERMINAL_CWD (#19334)",
       "target_ticket": 22,
       "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "optional-skills/creative/kanban-video-orchestrator/references/role-archetypes.md",
+        "optional-skills/creative/kanban-video-orchestrator/references/tool-matrix.md"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream optional-skills content doc references are outside Hermes Ultra runtime path; skill/tool parity is owned by Rust command + registry surfaces.",
+      "owner": "codex",
+      "sha": "8163d371922768c32f43eb6036d7d36e56775605",
+      "subject": "fix(skill): reference built-in video_analyze/vision_analyze tools in kanban-video-orchestrator (#19562)",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
     }
   ],
-  "generated_at_utc": "2026-05-04T07:11:26.307978+00:00",
+  "generated_at_utc": "2026-05-04T07:38:03.627513+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -22124,17 +22138,17 @@
   "summary": {
     "by_disposition": {
       "ported": 63,
-      "superseded": 1386
+      "superseded": 1387
     },
     "by_target_ticket": {
       "20": 575,
-      "21": 49,
+      "21": 50,
       "22": 335,
       "23": 115,
       "24": 4,
       "25": 16,
       "26": 355
     },
-    "total_commits": 1449
+    "total_commits": 1450
   }
 }
