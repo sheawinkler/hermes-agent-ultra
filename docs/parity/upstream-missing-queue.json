@@ -18851,6 +18851,99 @@
     {
       "disposition": "superseded",
       "files_sample": [
+        "hermes_cli/plugins_cmd.py",
+        "hermes_cli/web_server.py",
+        "ui-tui/package-lock.json",
+        "web/src/App.tsx",
+        "web/src/i18n/en.ts",
+        "web/src/i18n/types.ts",
+        "web/src/i18n/zh.ts",
+        "web/src/lib/api.ts",
+        "web/src/pages/PluginsPage.tsx",
+        "web/src/plugins/slots.ts"
+      ],
+      "files_touched": 10,
+      "notes": "superseded: upstream dashboard/plugins web UI delta; Rust parity is owned by `crates/hermes-cli/src/commands.rs` plugin surfaces + TUI flows.",
+      "owner": "codex",
+      "sha": "e2a490560610ff5edd343913ccce06d0ba383d10",
+      "subject": "feat(dashboard): add Plugins page with enable/disable, auth status, install/remove",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/web_server.py",
+        "nix/tui.nix"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: CodeQL finding targeted Python `hermes_cli/web_server.py`; Rust runtime avoids that surface and enforces file/path sanitization in `crates/hermes-gateway/src/media.rs` tests.",
+      "owner": "codex",
+      "sha": "6549b0f2b7feb6c0123a8eb9b550d6bac338f7f0",
+      "subject": "fix(security): address CodeQL path-traversal and info-exposure findings",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "web/src/pages/PluginsPage.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: CSS/layout-only web page width tweak; Rust TUI owns interactive UX parity.",
+      "owner": "codex",
+      "sha": "7dc85495e05d9a955aef74f1aa5da18ea4b1cf52",
+      "subject": "style(plugins): make page full width",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "web/src/lib/resolve-page-title.ts"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: web page-title copy tweak; Rust TUI/CLI command surfaces are canonical for Hermes Ultra.",
+      "owner": "codex",
+      "sha": "9550d0fd46d11db3fda2aef7b5de3576819f1843",
+      "subject": "fix(plugins): show 'Plugins' in page header instead of 'Web UI'",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "web/src/pages/PluginsPage.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: web plugins page header button placement; plugin lifecycle is implemented through Rust CLI/TUI command surfaces.",
+      "owner": "codex",
+      "sha": "a52363231faacec860f19fd411ea1377202cd7ea",
+      "subject": "refactor(plugins): move rescan button to page header, remove redundant title",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/web_server.py",
+        "web/src/i18n/en.ts",
+        "web/src/i18n/types.ts",
+        "web/src/i18n/zh.ts",
+        "web/src/lib/api.ts",
+        "web/src/pages/PluginsPage.tsx"
+      ],
+      "files_touched": 6,
+      "notes": "superseded: dashboard sidebar hide/show toggle is web-only; Rust-first UX path uses terminal-native command and modal flows.",
+      "owner": "codex",
+      "sha": "c73b799de70d6f655533e2aaf61a22332982f09f",
+      "subject": "feat(dashboard): add hide/show toggle for dashboard plugins in sidebar",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
         "hermes_cli/models.py"
       ],
       "files_touched": 1,
@@ -19350,6 +19443,75 @@
       "subject": "fix(gateway): drain manual profile gateways via SIGUSR1 before respawn",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: Python tui_gateway `user_providers` dict transport does not apply to Rust-native picker pipeline (`crates/hermes-cli/src/tui.rs`, `model_switch.rs`).",
+      "owner": "codex",
+      "sha": "443950e82736aa02c7ff61dda75426dbbbbdb161",
+      "subject": "fix(tui): pass user_providers as dict to match CLI model-switch pipeline",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
+        "ui-tui/src/components/modelPicker.tsx"
+      ],
+      "files_touched": 1,
+      "notes": "ported in Rust via `crates/hermes-cli/src/tui.rs` modal rendering: picker rows now display absolute ordinal numbering.",
+      "owner": "codex",
+      "sha": "36fa8a4d28cfb682932bca7f9b23d5882e692c36",
+      "subject": "fix(tui): show absolute position numbers in model picker",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
+        "tui_gateway/server.py",
+        "ui-tui/src/components/modelPicker.tsx",
+        "ui-tui/src/gatewayTypes.ts"
+      ],
+      "files_touched": 3,
+      "notes": "ported in Rust via `crates/hermes-cli/src/tui.rs` + `model_switch.rs`: `/model` provider picker enumerates providers with inline auth/setup status details.",
+      "owner": "codex",
+      "sha": "26f7f68507576138d2e62e54013e7323763e89b2",
+      "subject": "feat(tui): show all providers in /model picker with inline API key setup",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
+        "tui_gateway/server.py",
+        "ui-tui/src/components/modelPicker.tsx"
+      ],
+      "files_touched": 2,
+      "notes": "ported in Rust via `crates/hermes-cli/src/tui.rs`: provider picker supports `d` key disconnect and clears stored vault/oauth credential state.",
+      "owner": "codex",
+      "sha": "f4c761c6a095e70418876029527d2ca1a5caadf3",
+      "subject": "feat(tui): add inline provider disconnect via 'd' keybind in /model picker",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
+        "tui_gateway/server.py",
+        "ui-tui/src/components/modelPicker.tsx"
+      ],
+      "files_touched": 2,
+      "notes": "ported in Rust via `crates/hermes-cli/src/tui.rs`: model picker interaction/formatting review fixes incorporated in modal behavior and status updates.",
+      "owner": "codex",
+      "sha": "c8e506c383f4e834fc1a568bab67db26b70f04ce",
+      "subject": "fix(tui): address code review feedback on model picker",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
     },
     {
       "disposition": "superseded",
@@ -19940,6 +20102,20 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
+      "disposition": "ported",
+      "files_sample": [
+        "tui_gateway/server.py",
+        "ui-tui/src/components/modelPicker.tsx"
+      ],
+      "files_touched": 2,
+      "notes": "ported in Rust via `crates/hermes-cli/src/tui.rs`: picker ordering and 1-9/0 digit shortcuts now supported for fast selection.",
+      "owner": "codex",
+      "sha": "c23c7c994bf8b77c513b7c3fb4a68774970e47ac",
+      "subject": "fix(tui): address remaining review feedback \u2014 ordering and digit shortcuts",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
       "disposition": "superseded",
       "files_sample": [
         "agent/display.py",
@@ -20031,9 +20207,1915 @@
       "subject": "fix(acp): normalize Windows cwd for WSL tool execution",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/config.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: Python update crash path on skill-config scan is not in Rust updater path (`run_update`), which performs non-interactive version check only.",
+      "owner": "codex",
+      "sha": "fc78e708ed0c684c20987b23657208c76d45fc5a",
+      "subject": "fix(update): don't crash hermes update if skill config scan fails (#18257)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
+        "acp_adapter/server.py",
+        "tests/acp_adapter/test_acp_commands.py"
+      ],
+      "files_touched": 2,
+      "notes": "ported in Rust via `crates/hermes-cli/src/commands.rs` ACP-compatible slash handling: `/steer` is registered and processed through shared command execution path.",
+      "owner": "codex",
+      "sha": "41fa1f1b5cf560c22a7e9adb06eb463d7122f9e0",
+      "subject": "fix(acp): run /steer as a regular prompt on idle sessions (#18258)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
+        "acp_adapter/server.py",
+        "agent/manual_compression_feedback.py",
+        "cli.py",
+        "gateway/run.py",
+        "run_agent.py",
+        "tests/acp/test_server.py",
+        "tests/cli/test_manual_compress.py",
+        "tests/gateway/test_compress_command.py",
+        "tui_gateway/server.py"
+      ],
+      "files_touched": 9,
+      "notes": "ported in Rust via `crates/hermes-intelligence/src/model_metadata.rs::estimate_request_tokens_rough` including messages + system prompt + tool schemas.",
+      "owner": "codex",
+      "sha": "f0dc919f92c5327cf8033e06c039126f1288e89c",
+      "subject": "fix(compression): include system prompt + tool schemas in token estimates (#18265)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "run_agent.py",
+        "scripts/release.py",
+        "tests/run_agent/test_deepseek_reasoning_content_echo.py",
+        "tests/run_agent/test_run_agent.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: Python deepseek-v4 placeholder patch; Rust provider stack already preserves reasoning fields and handles absent/empty reasoning content safely.",
+      "owner": "codex",
+      "sha": "bfb704684ec64675650bc39fa0f731604b12aba2",
+      "subject": "fix(deepseek): use non-empty reasoning_content placeholder for V4 Pro thinking mode",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/curator.py",
+        "cron/jobs.py",
+        "tests/agent/test_curator_reports.py",
+        "tests/cron/test_rewrite_skill_refs.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: Python curator/cron skill-ref rewrite path does not exist in Rust cron implementation (`crates/hermes-cli/src/commands.rs`).",
+      "owner": "codex",
+      "sha": "e2eb561e8e1a069392b494811ea45be6779493cd",
+      "subject": "fix(curator): rewrite cron job skill refs after consolidation (#18253)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/base.py",
+        "gateway/run.py",
+        "hermes_cli/config.py",
+        "tests/gateway/test_ephemeral_reply.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream gateway system-notice TTL is covered by Rust transcript policy (system messages are not rendered in interactive transcript).",
+      "owner": "codex",
+      "sha": "4caad285a602b75c1da1c7d553864278d7aa723d",
+      "subject": "feat(gateway): auto-delete slash-command system notices after TTL (#18266)",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "tests/hermes_cli/test_update_yes_flag.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: Rust `hermes update` path is non-interactive, so `--yes/-y` prompt bypass is not applicable.",
+      "owner": "codex",
+      "sha": "50c046331dc722fa875fd290ce29b9cc5130fc08",
+      "subject": "feat(update): add --yes/-y flag to skip interactive prompts (#18261)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "website/docs/reference/optional-skills-catalog.md",
+        "website/docs/reference/skills-catalog.md",
+        "website/docs/user-guide/skills/bundled/creative/creative-comfyui.md",
+        "website/docs/user-guide/skills/bundled/devops/devops-kanban-orchestrator.md",
+        "website/docs/user-guide/skills/bundled/devops/devops-kanban-worker.md",
+        "website/docs/user-guide/skills/optional/productivity/productivity-here-now.md",
+        "website/docs/user-guide/skills/optional/productivity/productivity-shopify.md",
+        "website/scripts/generate-skill-docs.py",
+        "website/sidebars.ts"
+      ],
+      "files_touched": 9,
+      "notes": "superseded: website docs sidebar structure change only; runtime parity unaffected for Rust CLI/TUI agent.",
+      "owner": "codex",
+      "sha": "7c6c5619a7b85ef7ed873632e25a4a4745563866",
+      "subject": "docs(sidebar): collapse exploding skills tree to a single Skills node (#18259)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
+        "cli.py",
+        "gateway/run.py",
+        "hermes_cli/commands.py",
+        "hermes_cli/config.py",
+        "hermes_cli/goals.py",
+        "hermes_cli/web_server.py",
+        "tests/hermes_cli/test_goals.py",
+        "website/docs/reference/slash-commands.md"
+      ],
+      "files_touched": 8,
+      "notes": "ported in Rust via `crates/hermes-cli/src/commands.rs` (`/goal` alias) + `crates/hermes-cli/src/app.rs` durable `session_objective` injection.",
+      "owner": "codex",
+      "sha": "265bd59c1d9f8dea658f243b257d4fae3685af53",
+      "subject": "feat: /goal \u2014 persistent cross-turn goals (Ralph loop) (#18262)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_home_target_env_var.py"
+      ],
+      "files_touched": 2,
+      "notes": "ported in Rust via `crates/hermes-cli/src/main.rs`: matrix onboarding now honors `MATRIX_HOME_ROOM` fallback when room_id is not set in platform config.",
+      "owner": "codex",
+      "sha": "1be3b74cfb456a2271f16068b08f72b83b37308d",
+      "subject": "fix(gateway): honor MATRIX_HOME_ROOM in onboarding",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: release AUTHOR_MAP maintenance has no runtime parity impact for Rust-first Hermes Ultra.",
+      "owner": "codex",
+      "sha": "77dd6d54699f39ca7999196690f2db8e73d4db01",
+      "subject": "chore(release): add mikeyobrien to AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/moonshot_schema.py",
+        "tests/agent/test_moonshot_schema.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: Python moonshot schema cleanup path is not used in Rust tool-schema pipeline (`crates/hermes-core`/`crates/hermes-agent`).",
+      "owner": "codex",
+      "sha": "9ca72a69a730e442ad6f14e5f2f51c8f2011dcb7",
+      "subject": "fix(moonshot): fill missing type before enum cleanup to handle anyOf branches without explicit type",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: release AUTHOR_MAP maintenance has no runtime parity impact for Rust-first Hermes Ultra.",
+      "owner": "codex",
+      "sha": "9cb5baeacfc7c026c6f228aebfc89959a5d2acc5",
+      "subject": "chore(release): map hendrixfreire for moonshot salvage",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/moonshot_schema.py",
+        "tests/agent/test_moonshot_schema.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python runtime delta maps to Rust-owned CLI/agent flows (`crates/hermes-cli/src/*`, `crates/hermes-agent/src/*`).",
+      "owner": "codex",
+      "sha": "2af8b8ff3712c71620f32b1fa57e92289e6ca202",
+      "subject": "fix(moonshot): also strip nullable/enum after anyOf collapse",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "website/docs/reference/slash-commands.md",
+        "website/docs/user-guide/features/goals.md"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: docs/site-only delta; Hermes Ultra runtime parity is governed by Rust CLI/TUI/gateway behavior.",
+      "owner": "codex",
+      "sha": "cf2b2d31ce77ba87c114c53966d7f7cc629cad9e",
+      "subject": "docs: add Persistent Goals (/goal) feature page (#18275)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        ".github/workflows/deploy-site.yml",
+        "website/.gitignore",
+        "website/docs/index.md",
+        "website/scripts/generate-llms-txt.py",
+        "website/scripts/prebuild.mjs"
+      ],
+      "files_touched": 5,
+      "notes": "superseded: docs/site-only delta; Hermes Ultra runtime parity is governed by Rust CLI/TUI/gateway behavior.",
+      "owner": "codex",
+      "sha": "c6eebfc25a5779668ae2fefe27f5d85a82055ab3",
+      "subject": "docs: publish llms.txt and llms-full.txt for agent-friendly ingestion (#18276)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/slack_cli.py",
+        "optional-skills/migration/openclaw-migration/scripts/openclaw_to_hermes.py",
+        "plugins/hermes-achievements/dashboard/plugin_api.py",
+        "scripts/profile-tui.py",
+        "scripts/release.py"
+      ],
+      "files_touched": 5,
+      "notes": "superseded: upstream release attribution metadata only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "dfe512c58db60910676d6b9c6725f72bb8f39590",
+      "subject": "fix(paths): route achievements plugin + profile-tui through HERMES_HOME",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        ".dockerignore",
+        "Dockerfile"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: packaging/container delta is Python distribution specific; Rust build/release pipeline already owns this surface.",
+      "owner": "codex",
+      "sha": "a49f4c617da3ddcb37a2f438b083b960090ad42a",
+      "subject": "fix: prevent tui rebuilding assets",
+      "target_ticket": 25,
+      "target_ticket_name": "GPAR-06 packaging/docs/install parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "website/docs/user-stories.mdx",
+        "website/sidebars.ts",
+        "website/src/components/UserStoriesCollage/index.tsx",
+        "website/src/components/UserStoriesCollage/styles.module.css",
+        "website/src/data/userStories.json"
+      ],
+      "files_touched": 5,
+      "notes": "superseded: docs/site-only delta; Hermes Ultra runtime parity is governed by Rust CLI/TUI/gateway behavior.",
+      "owner": "codex",
+      "sha": "a2a32688ca8ad13727e38df85f3f2820f5a31902",
+      "subject": "docs(website): add User Stories and Use Cases collage page (#18282)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/yuanbao.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream gateway patch targets Python gateway implementation; equivalent behavior is owned in Rust gateway stack (`crates/hermes-gateway/src/*`).",
+      "owner": "codex",
+      "sha": "b7ad3f478f9bc24768f88e4339fc3e6e23d0292b",
+      "subject": "fix(yuanbao): enforce owner identity check on group slash commands",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/telegram.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream gateway patch targets Python gateway implementation; equivalent behavior is owned in Rust gateway stack (`crates/hermes-gateway/src/*`).",
+      "owner": "codex",
+      "sha": "75e1339d4cdb32652e560eccc3930cc9264ac67b",
+      "subject": "fix(telegram): send seed message after creating DM topics (#18334)",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "plugins/kanban/dashboard/dist/index.js",
+        "plugins/kanban/dashboard/dist/style.css"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python plugin/dashboard pathing delta; Rust plugin/skill surfaces are owned by `crates/hermes-cli` + `crates/hermes-agent`.",
+      "owner": "codex",
+      "sha": "a01c1f7305bda8ebc5cbcde22f2a80a0300a2ca1",
+      "subject": "fix: kanban button",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cli.py",
+        "hermes_cli/main.py",
+        "hermes_state.py",
+        "run_agent.py",
+        "tests/run_agent/test_860_dedup.py",
+        "tui_gateway/server.py",
+        "uv.lock"
+      ],
+      "files_touched": 7,
+      "notes": "superseded: upstream Python runtime delta maps to Rust-owned CLI/agent flows (`crates/hermes-cli/src/*`, `crates/hermes-agent/src/*`).",
+      "owner": "codex",
+      "sha": "c5b4c481656634ff919b214a037b830077d3bbd1",
+      "subject": "fix: lazy session creation \u2014 defer DB row until first message (#18370)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/curator.py",
+        "agent/curator_backup.py",
+        "hermes_cli/config.py",
+        "hermes_cli/curator.py",
+        "hermes_cli/main.py",
+        "tests/agent/test_curator.py",
+        "tests/agent/test_curator_backup.py",
+        "website/docs/reference/cli-commands.md",
+        "website/docs/user-guide/features/curator.md"
+      ],
+      "files_touched": 9,
+      "notes": "superseded: upstream Python runtime delta maps to Rust-owned CLI/agent flows (`crates/hermes-cli/src/*`, `crates/hermes-agent/src/*`).",
+      "owner": "codex",
+      "sha": "77c0bc6b13c8c3f849111c41f2e9233a13b3dcb2",
+      "subject": "fix(curator): defer first run and add --dry-run preview (#18373) (#18389)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/run.py",
+        "hermes_cli/main.py",
+        "tests/gateway/test_stale_code_self_check.py"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream gateway patch targets Python gateway implementation; equivalent behavior is owned in Rust gateway stack (`crates/hermes-gateway/src/*`).",
+      "owner": "codex",
+      "sha": "f99676e315408db3742e00ca9808a31592704399",
+      "subject": "fix(gateway): auto-restart when source files change out from under us (#17648) (#18409)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "website/docs/user-guide/features/goals.md",
+        "website/scripts/generate-llms-txt.py",
+        "website/sidebars.ts"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: docs/site-only delta; Hermes Ultra runtime parity is governed by Rust CLI/TUI/gateway behavior.",
+      "owner": "codex",
+      "sha": "0b76d23d1acffd14bbc5061cd4f913cf7a0e1a8a",
+      "subject": "makes the Persistent Goals docs accessible in the docs nav (and llms.txt) (#18481)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/slack.py",
+        "tests/gateway/test_slack.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream gateway patch targets Python gateway implementation; equivalent behavior is owned in Rust gateway stack (`crates/hermes-gateway/src/*`).",
+      "owner": "codex",
+      "sha": "7cda0e522443c6e7790793b93b085508fc530fc8",
+      "subject": "fix(gateway/slack): ephemeral ack and routing for slash commands",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/config.py",
+        "gateway/platforms/base.py",
+        "gateway/platforms/slack.py",
+        "gateway/run.py",
+        "tests/gateway/test_config.py",
+        "tests/gateway/test_notice_delivery.py",
+        "tests/gateway/test_slack.py"
+      ],
+      "files_touched": 7,
+      "notes": "superseded: upstream gateway patch targets Python gateway implementation; equivalent behavior is owned in Rust gateway stack (`crates/hermes-gateway/src/*`).",
+      "owner": "codex",
+      "sha": "0ab2d752ffdae211b0f4fd06c8f62cf7eec191a7",
+      "subject": "feat(gateway): private notice delivery and Slack format_message fixes",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream release attribution metadata only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "f34d298495b05c12ab012fb95b6bd108bf7043b3",
+      "subject": "chore: add probepark to AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/slack.py",
+        "gateway/run.py",
+        "tests/gateway/test_slack.py"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream gateway patch targets Python gateway implementation; equivalent behavior is owned in Rust gateway stack (`crates/hermes-gateway/src/*`).",
+      "owner": "codex",
+      "sha": "8fcc160f6b979f9567e76f189e226c18cabc6308",
+      "subject": "fix(gateway/slack): review fixes \u2014 scope ephemeral to commands, user isolation",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/commands.py",
+        "tests/hermes_cli/test_commands.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python runtime delta maps to Rust-owned CLI/agent flows (`crates/hermes-cli/src/*`, `crates/hermes-agent/src/*`).",
+      "owner": "codex",
+      "sha": "a717199bbf31a0900a99b06153d3ba5803cd9012",
+      "subject": "fix(slack): exclude reserved Slack commands from native slash manifest",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/discord.py",
+        "gateway/platforms/slack.py",
+        "tests/gateway/test_discord_free_response.py",
+        "tests/gateway/test_slack_mention.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream gateway patch targets Python gateway implementation; equivalent behavior is owned in Rust gateway stack (`crates/hermes-gateway/src/*`).",
+      "owner": "codex",
+      "sha": "2b3923ff138f5bd68e576b722ee298a8ce07dfe7",
+      "subject": "fix(gateway): coerce scalar free_response_channels to str before split",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
+        "gateway/delivery.py",
+        "tests/gateway/test_delivery.py"
+      ],
+      "files_touched": 2,
+      "notes": "ported in Rust via `crates/hermes-gateway/src/delivery.rs`: `parse_target` now preserves case-sensitive `chat_id` while normalizing only platform name.",
+      "owner": "codex",
+      "sha": "5cdc39e29a032091c4989045b0843715737680c3",
+      "subject": "fix(gateway): preserve case-sensitive chat IDs in DeliveryTarget.parse",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
+        "gateway/platforms/slack.py",
+        "tests/gateway/test_slack.py"
+      ],
+      "files_touched": 2,
+      "notes": "ported in Rust via `crates/hermes-gateway/src/session.rs`: Slack shared-channel session keys are now per-user (`platform:chat:user`) to preserve slash-command/user isolation.",
+      "owner": "codex",
+      "sha": "a147164d3c4ceb7e2900e240e90d0f1db7910bf8",
+      "subject": "fix(slack): preserve per-user slash-command session isolation",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/slack.py",
+        "tests/gateway/test_slack.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream gateway patch targets Python gateway implementation; equivalent behavior is owned in Rust gateway stack (`crates/hermes-gateway/src/*`).",
+      "owner": "codex",
+      "sha": "d05a87e68662043ac7d66dad942e428a81cd648f",
+      "subject": "fix(gateway): clear slack assistant thread status",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream release attribution metadata only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "f903ceece034eb8f27b03d241c1f14eafca6c5ea",
+      "subject": "chore: add contributors to AUTHOR_MAP for Slack batch salvage",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/web_server.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python runtime delta maps to Rust-owned CLI/agent flows (`crates/hermes-cli/src/*`, `crates/hermes-agent/src/*`).",
+      "owner": "codex",
+      "sha": "585d6778da28f4a63205d95a296358e2cce23ed6",
+      "subject": "fix: allow WebSocket connections from non-loopback IPs in --insecure mode (#18633)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/gateway.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python runtime delta maps to Rust-owned CLI/agent flows (`crates/hermes-cli/src/*`, `crates/hermes-agent/src/*`).",
+      "owner": "codex",
+      "sha": "f98b5d00a49b01fb833deecace78656035bc6f6d",
+      "subject": "fix: gateway systemd unit now retries indefinitely with backoff (#18639)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/curator.py",
+        "agent/curator_backup.py",
+        "hermes_cli/curator.py",
+        "tests/agent/test_curator_backup.py",
+        "tests/agent/test_curator_classification.py",
+        "tests/tools/test_skill_manager_tool.py",
+        "tools/skill_manager_tool.py"
+      ],
+      "files_touched": 7,
+      "notes": "superseded: upstream Python runtime change mapped to Rust-owned CLI/agent/session implementations.",
+      "owner": "codex",
+      "sha": "97acd66b4c58c7945f573a6efd6059e781eb4f8f",
+      "subject": "fix(curator): authoritative absorbed_into on delete + restore cron skill links on rollback (#18671) (#18731)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/skill_commands.py",
+        "tests/agent/test_skill_commands.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python runtime change mapped to Rust-owned CLI/agent/session implementations.",
+      "owner": "codex",
+      "sha": "c73594fe4196b5ee331d25f86774e66ad0f67a69",
+      "subject": "fix(skills): rescan skill_commands cache when platform scope changes (#18739)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/commands.py",
+        "tests/hermes_cli/test_commands.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python runtime change mapped to Rust-owned CLI/agent/session implementations.",
+      "owner": "codex",
+      "sha": "e2cea6eeba36e8d6b96c0ed08bc4514b5c07c464",
+      "subject": "fix(gateway): include external_dirs skills in Telegram/Discord slash commands (#18741)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "ported",
+      "files_sample": [
+        "hermes_cli/doctor.py",
+        "hermes_cli/main.py",
+        "hermes_cli/memory_setup.py",
+        "tests/hermes_cli/test_doctor.py"
+      ],
+      "files_touched": 4,
+      "notes": "ported in Rust via `crates/hermes-cli/src/main.rs`: env ingestion now reads bytes + UTF-8-lossy decode for `.env` parsing, preventing non-UTF8 crash paths; regression test added.",
+      "owner": "codex",
+      "sha": "c5e3a6fb5bb33477d639219de14922caedda98ef",
+      "subject": "fix(cli): decode .env as UTF-8 to avoid GBK crash on Windows",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: release attribution metadata only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "98c98821ff1e3195dec55fde081fd59efdc5726b",
+      "subject": "chore(release): map CoreyNoDream email for AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_constants.py",
+        "tests/test_hermes_home_profile_warning.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python runtime change mapped to Rust-owned CLI/agent/session implementations.",
+      "owner": "codex",
+      "sha": "699b3679bcaf000165902f246b6f5a6b99133efd",
+      "subject": "fix(constants): warn once when get_hermes_home() falls back under an active profile (#18746)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/anthropic_adapter.py",
+        "agent/auxiliary_client.py",
+        "tests/agent/test_anthropic_adapter.py",
+        "tests/agent/test_auxiliary_client.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream Python runtime change mapped to Rust-owned CLI/agent/session implementations.",
+      "owner": "codex",
+      "sha": "9bf260472bca9f8097bf442f5c5e6dd1984dd4c3",
+      "subject": "fix(tools): deduplicate tool names at API boundary for Vertex/Azure/Bedrock",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/telegram.py",
+        "tests/gateway/test_telegram_network_reconnect.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python gateway patch mapped to Rust gateway ownership (`crates/hermes-gateway/src/*`).",
+      "owner": "codex",
+      "sha": "2470434d60991a46e0fd4733e4a69722acb97ebe",
+      "subject": "fix(telegram): probe polling liveness after reconnect to detect wedged Updater",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/commands.py",
+        "tests/hermes_cli/test_commands.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python runtime change mapped to Rust-owned CLI/agent/session implementations.",
+      "owner": "codex",
+      "sha": "8825e9044c2657b726f589f4287cf827f77ff44e",
+      "subject": "fix(discord): complete #18741 for /skill autocomplete and drop legacy 25x25 caps (#18745)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_unavailable_skill_hint.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python gateway patch mapped to Rust gateway ownership (`crates/hermes-gateway/src/*`).",
+      "owner": "codex",
+      "sha": "6ec74aec0705df82475d402e761afc6a50c29ad1",
+      "subject": "fix(gateway): match disabled/optional skills by frontmatter slug, not dir name (#18753)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/discord.py",
+        "gateway/run.py",
+        "tests/gateway/test_reload_skills_discord_resync.py"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream Python gateway patch mapped to Rust gateway ownership (`crates/hermes-gateway/src/*`).",
+      "owner": "codex",
+      "sha": "10297fa23c982a563844a1014f16bec77e1b6598",
+      "subject": "fix(discord): `/reload-skills` now refreshes the `/skill` autocomplete live (#18754)",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/credential_pool.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python runtime change mapped to Rust-owned CLI/agent/session implementations.",
+      "owner": "codex",
+      "sha": "2ef1ad280beee581e0f023901d0d040efec380ac",
+      "subject": "fix: prefer ~/.hermes/.env over os.environ when seeding credential pool",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: release attribution metadata only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "9c626ef8ea8bc190f9a339991c8de26ce4528bb5",
+      "subject": "chore(release): map franksong2702 email for AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/agent/test_credential_pool.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python test-only delta; Rust test suites own parity verification.",
+      "owner": "codex",
+      "sha": "0a6865b328ee6057eb59ee4a150c4886aa72d48c",
+      "subject": "test(credential_pool): regression coverage for .env vs os.environ precedence",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/discord.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python gateway patch mapped to Rust gateway ownership (`crates/hermes-gateway/src/*`).",
+      "owner": "codex",
+      "sha": "292d2fb42fe304e4d6e6184f39e1f60e5aa771f8",
+      "subject": "fix(discord): close old client before reconnect to prevent zombie websockets (#18187)",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/gateway/test_discord_connect.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python test-only delta; Rust test suites own parity verification.",
+      "owner": "codex",
+      "sha": "e363ced3c3959392268fd1ea8b85334b889aa298",
+      "subject": "test(discord): regression coverage for zombie-websocket guard in connect()",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/commands.py",
+        "tests/hermes_cli/test_discord_skill_clamp_warning.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python runtime change mapped to Rust-owned CLI/agent/session implementations.",
+      "owner": "codex",
+      "sha": "5eac6084bc781377cc1432165ebb489ccf5d6fbf",
+      "subject": "fix(discord): warn on 32-char clamp collisions in the /skill collector (#18759)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cli.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python runtime change mapped to Rust-owned CLI/agent/session implementations.",
+      "owner": "codex",
+      "sha": "7696ddc59eba81624014d7bfc063f8ad7fe61598",
+      "subject": "fix(cli): robust paste file expansion and process_loop error handling (#17666)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: release attribution metadata only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "50f9f389ec1df2618ec1d61a24f7358a52fbe0f8",
+      "subject": "chore(release): map ambition0802 email for AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/whatsapp.py",
+        "gateway/run.py",
+        "hermes_cli/config.py",
+        "hermes_cli/setup.py",
+        "tests/gateway/test_config_env_bridge_authority.py",
+        "tests/gateway/test_restart_notification.py",
+        "tests/gateway/test_whatsapp_connect.py",
+        "tests/hermes_cli/test_setup_agent_settings.py"
+      ],
+      "files_touched": 8,
+      "notes": "superseded: upstream Python runtime change mapped to Rust-owned CLI/agent/session implementations.",
+      "owner": "codex",
+      "sha": "1dce90893016a822480599d02505664c294f255c",
+      "subject": "fix(gateway): shutdown + restart hygiene (drain timeout, false-fatal, success log) (#18761)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "run_agent.py",
+        "tests/run_agent/test_init_fallback_on_exhausted_pool.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python runtime change mapped to Rust-owned CLI/agent/session implementations.",
+      "owner": "codex",
+      "sha": "13f344c5ce2fe57b55b18b767b5945dd596971c0",
+      "subject": "fix(agent): try fallback providers at init when primary credential pool is exhausted (#17929)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [],
+      "files_touched": 0,
+      "notes": "superseded: considered for Rust-first parity; no direct port required.",
+      "owner": "codex",
+      "sha": "e444d8f29cead99781cbd4306160b81887b3f4e5",
+      "subject": "fix(gateway): config.yaml wins over .env for agent/display/timezone settings (#18764)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/feishu.py",
+        "tests/gateway/test_feishu.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python gateway patch mapped to Rust gateway ownership (`crates/hermes-gateway/src/*`).",
+      "owner": "codex",
+      "sha": "38dd057e91dcc47e82478ebc31c66d67b2d96ace",
+      "subject": "fix(feishu): finalize remote document downloads inside httpx.AsyncClient context (#18502)",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/_http_client_limits.py",
+        "gateway/platforms/bluebubbles.py",
+        "gateway/platforms/dingtalk.py",
+        "gateway/platforms/qqbot/adapter.py",
+        "gateway/platforms/signal.py",
+        "gateway/platforms/wecom.py",
+        "gateway/platforms/wecom_callback.py",
+        "gateway/platforms/whatsapp.py",
+        "tests/gateway/test_platform_http_client_limits.py"
+      ],
+      "files_touched": 9,
+      "notes": "superseded: upstream Python gateway patch mapped to Rust gateway ownership (`crates/hermes-gateway/src/*`).",
+      "owner": "codex",
+      "sha": "762eb79f1e1985a54758d40f3d3caa2f119bd4da",
+      "subject": "fix(gateway): tighten httpx keepalive and close whatsapp typing-response leak (#18451)",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: release attribution metadata only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "73bcd83dba7ed3d621d982d87fc02923964121ac",
+      "subject": "chore(release): map beibi9966 email for AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/auxiliary_client.py",
+        "tests/agent/test_auxiliary_client.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python runtime change mapped to Rust-owned provider/tool/config paths in crates.",
+      "owner": "codex",
+      "sha": "af981227937f54ccd621673f1e86ee196134a005",
+      "subject": "fix(auxiliary): propagate explicit_api_key to _try_openrouter()",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/config.py",
+        "hermes_cli/setup.py",
+        "website/docs/user-guide/features/tts.md"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream Python runtime change mapped to Rust-owned provider/tool/config paths in crates.",
+      "owner": "codex",
+      "sha": "5d3be898a8671eb9fb99cf18f43165502f54e7f4",
+      "subject": "docs(tts): mention xAI custom voice support (#18776)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/model_switch.py",
+        "tests/hermes_cli/test_bedrock_model_picker.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python runtime change mapped to Rust-owned provider/tool/config paths in crates.",
+      "owner": "codex",
+      "sha": "d409a4409c8f11ccf029eff33a2eb9860f92e761",
+      "subject": "fix(model): avoid bedrock credential probe in provider picker",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/tools_config.py",
+        "tests/hermes_cli/test_tools_config.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python runtime change mapped to Rust-owned provider/tool/config paths in crates.",
+      "owner": "codex",
+      "sha": "4f37669170bb7886b94acbbf3630bf70650f7295",
+      "subject": "fix(tools): reconfigure enabled unconfigured toolsets",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "acp_adapter/server.py",
+        "tests/acp/test_server.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python ACP rendering delta; Rust ACP stack owns equivalent behavior (`crates/hermes-acp/src/*`, `crates/hermes-cli/src/commands.rs`).",
+      "owner": "codex",
+      "sha": "e26f9b207041c03d1aa9a982d29dbfda66df3a82",
+      "subject": "fix(acp): route Zed thoughts to reasoning callbacks",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "acp_adapter/server.py",
+        "acp_adapter/tools.py",
+        "tests/acp/test_mcp_e2e.py",
+        "tests/acp/test_server.py",
+        "tests/acp/test_tools.py"
+      ],
+      "files_touched": 5,
+      "notes": "superseded: upstream Python ACP rendering delta; Rust ACP stack owns equivalent behavior (`crates/hermes-acp/src/*`, `crates/hermes-cli/src/commands.rs`).",
+      "owner": "codex",
+      "sha": "ef9a08a872d1ed87eb4c91cf8ad8e8f4ef5a6e2b",
+      "subject": "fix(acp): polish Zed context and tool rendering",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "acp_adapter/tools.py",
+        "tests/acp/test_tools.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python ACP rendering delta; Rust ACP stack owns equivalent behavior (`crates/hermes-acp/src/*`, `crates/hermes-cli/src/commands.rs`).",
+      "owner": "codex",
+      "sha": "72c8037a24b58b7b1a38a99903cc0bf8a3d7595c",
+      "subject": "fix(acp): polish common tool rendering",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "acp_adapter/tools.py",
+        "tests/acp/test_tools.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python ACP rendering delta; Rust ACP stack owns equivalent behavior (`crates/hermes-acp/src/*`, `crates/hermes-cli/src/commands.rs`).",
+      "owner": "codex",
+      "sha": "b294d1d0229ff6026838a04c4cb59c3b13e4827f",
+      "subject": "fix(acp): keep read-file starts compact",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "acp_adapter/tools.py",
+        "tests/acp/test_tools.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python ACP rendering delta; Rust ACP stack owns equivalent behavior (`crates/hermes-acp/src/*`, `crates/hermes-cli/src/commands.rs`).",
+      "owner": "codex",
+      "sha": "eb612f55748d8f0888f09f055abd86afef925150",
+      "subject": "fix(acp): keep web extract rendering compact",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "acp_adapter/server.py",
+        "acp_adapter/tools.py",
+        "tests/acp/test_server.py",
+        "tests/acp/test_tools.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream Python ACP rendering delta; Rust ACP stack owns equivalent behavior (`crates/hermes-acp/src/*`, `crates/hermes-cli/src/commands.rs`).",
+      "owner": "codex",
+      "sha": "19854c7cd2f00e3d591e72ccbe2e456ad10c4886",
+      "subject": "Schedule ACP history replay and fence file output",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "acp_adapter/tools.py",
+        "tests/acp/test_tools.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python ACP rendering delta; Rust ACP stack owns equivalent behavior (`crates/hermes-acp/src/*`, `crates/hermes-cli/src/commands.rs`).",
+      "owner": "codex",
+      "sha": "9987f3d82486b04151dee2d27d640b3ae01b7b16",
+      "subject": "fix(acp): compact Zed tool replay rendering",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/weixin.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python gateway patch mapped to Rust gateway implementation ownership (`crates/hermes-gateway/src/*`).",
+      "owner": "codex",
+      "sha": "a22465e07ab4b71019f711e7a6463f6590c50742",
+      "subject": "fix(weixin): send_weixin_direct cross-loop session check",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: release attribution bookkeeping only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "9b5b88b5e028f8c799053aae624be40e616b5d8d",
+      "subject": "chore: add MottledShadow to AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/auxiliary_client.py",
+        "cli-config.yaml.example",
+        "hermes_cli/config.py",
+        "run_agent.py",
+        "tests/agent/test_openrouter_response_cache.py",
+        "tests/run_agent/test_provider_attribution_headers.py",
+        "website/docs/reference/environment-variables.md"
+      ],
+      "files_touched": 7,
+      "notes": "superseded: upstream Python runtime change mapped to Rust-owned provider/tool/config paths in crates.",
+      "owner": "codex",
+      "sha": "457c7b76cd69089142f7ee02bf26ed5fef9d8741",
+      "subject": "feat(openrouter): add response caching support (#19132)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/commands.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python runtime change mapped to Rust-owned provider/tool/config paths in crates.",
+      "owner": "codex",
+      "sha": "c4c0e5abc2b579ce1a4cca4d5ff808550f754662",
+      "subject": "fix: After _clamp_command_names truncates skill names to fit the 32-cha\u2026",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/commands.py",
+        "scripts/release.py",
+        "tests/hermes_cli/test_commands.py",
+        "tests/hermes_cli/test_discord_skill_clamp_warning.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: release attribution bookkeeping only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "5d5b8912bece744b08b5d6428f2ad12ff6969f87",
+      "subject": "test: add tests for cmd_key preservation through name clamping",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/discord.py",
+        "gateway/run.py",
+        "tests/gateway/test_discord_component_auth.py",
+        "tests/gateway/test_discord_slash_auth.py",
+        "tests/gateway/test_discord_slash_commands.py"
+      ],
+      "files_touched": 5,
+      "notes": "superseded: upstream Python gateway patch mapped to Rust gateway implementation ownership (`crates/hermes-gateway/src/*`).",
+      "owner": "codex",
+      "sha": "19ba9e43b621cbcc1488cd9f9c38050154386e37",
+      "subject": "fix(gateway/discord): require allowlist auth on slash commands",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: release attribution bookkeeping only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "c14bf441a313cf02b82f2964c1b46e5e252a12ba",
+      "subject": "chore: add 0xyg3n noreply email to AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/slack.py",
+        "tests/gateway/test_slack.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python gateway patch mapped to Rust gateway implementation ownership (`crates/hermes-gateway/src/*`).",
+      "owner": "codex",
+      "sha": "6c1322b9972ce61419df7df6ad7ae5a261fef9d2",
+      "subject": "fix(slack): close previous handler in connect() to prevent zombie Socket Mode connections",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: release attribution bookkeeping only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "0a97ce6bff49163b74b1d76418c4b1b3f2455b76",
+      "subject": "chore: add nftpoetrist to AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/run.py",
+        "gateway/session.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python gateway patch mapped to Rust gateway implementation ownership (`crates/hermes-gateway/src/*`).",
+      "owner": "codex",
+      "sha": "f1e0292517c15be09f9f1fb6a61046993b562586",
+      "subject": "fix(gateway): resume sessions after crash/restart instead of blanket suspend",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: release attribution bookkeeping only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "bf3239472ff17c1fbe8dbb7580812e5a810877ec",
+      "subject": "chore: add millerc79 to AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/base.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python gateway patch mapped to Rust gateway implementation ownership (`crates/hermes-gateway/src/*`).",
+      "owner": "codex",
+      "sha": "934103476f3199f6c7ed081641bb4e48478b821a",
+      "subject": "fix(gateway): send /new response before cancel_session_processing to avoid race (#18912)",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: release attribution bookkeeping only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "7a22c639dc840aecd317312d7c267596d9ac6adb",
+      "subject": "chore: add shellybotmoyer to AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/homeassistant.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python gateway patch mapped to Rust gateway implementation ownership (`crates/hermes-gateway/src/*`).",
+      "owner": "codex",
+      "sha": "1148c462417369640fc0a821d1879d0c9426ed30",
+      "subject": "fix(gateway): correct ws scheme conversion for https urls",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/gateway/test_clean_shutdown_marker.py",
+        "tests/gateway/test_restart_resume_pending.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: release attribution/update metadata only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "6f2dab248a6cc8591af46e5deb2dc939c2b43146",
+      "subject": "fix: update tests for resume_pending semantics + add AUTHOR_MAP entries",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/whatsapp-bridge/package-lock.json",
+        "scripts/whatsapp-bridge/package.json"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: considered under Rust-first parity governance; no direct port required.",
+      "owner": "codex",
+      "sha": "55647a581349d245b903621ab1ccbd55c4a7ede2",
+      "subject": "fix(whatsapp): pin protobufjs >=7.5.5 via npm overrides to clear 3 critical vulns (#19204)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_goal_verdict_send.py",
+        "tests/tui_gateway/test_goal_command.py",
+        "tui_gateway/server.py",
+        "ui-tui/src/app/createGatewayEventHandler.ts",
+        "ui-tui/src/app/createSlashHandler.ts",
+        "ui-tui/src/gatewayTypes.ts",
+        "ui-tui/src/lib/rpc.ts"
+      ],
+      "files_touched": 8,
+      "notes": "superseded: upstream Node/website UI delta; Hermes Ultra Rust TUI is the authoritative runtime surface.",
+      "owner": "codex",
+      "sha": "d87fd9f03958995ce8234ec359a13fceabbf9ebf",
+      "subject": "fix(goals): make /goal work in TUI and fix gateway verdict delivery (#19209)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cron/scheduler.py",
+        "gateway/config.py",
+        "gateway/run.py",
+        "tests/cron/test_scheduler.py",
+        "tests/gateway/restart_test_helpers.py",
+        "tests/gateway/test_home_target_env_var.py",
+        "tests/gateway/test_restart_notification.py",
+        "tests/gateway/test_restart_resume_pending.py"
+      ],
+      "files_touched": 8,
+      "notes": "superseded: upstream Python gateway/cron/tui-gateway patch mapped to Rust gateway/TUI implementations.",
+      "owner": "codex",
+      "sha": "b59bb4e351c4cdca97e906accb4bbe9193c381b6",
+      "subject": "fix(gateway): preserve home-channel thread targets across restart notifications",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: release attribution/update metadata only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "3c59566cc5129d85281f518bc446c06fab6ab767",
+      "subject": "chore(release): map leprincep35700 email for PR #18440 salvage",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tools/approval.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python tool patch maps to Rust tool stack ownership (`crates/hermes-tools/src/*`).",
+      "owner": "codex",
+      "sha": "69dd0f7cf1f4df03e8b8e80aecc906dbd2b22d12",
+      "subject": "fix(approval): extend sensitive write target to cover shell RC and credential files",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cron/scheduler.py",
+        "tests/cron/test_scheduler.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python gateway/cron/tui-gateway patch mapped to Rust gateway/TUI implementations.",
+      "owner": "codex",
+      "sha": "6b4fb9f8789717e5dad8d920cbd6cd02e53c5175",
+      "subject": "fix(cron): treat non-dict origin as missing instead of crashing tick",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/tools/test_file_tools.py",
+        "tools/file_tools.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python tool patch maps to Rust tool stack ownership (`crates/hermes-tools/src/*`).",
+      "owner": "codex",
+      "sha": "e527240b2700cc44f467a00e538f55c99d98eb23",
+      "subject": "fix(tools): write_file handler now rejects missing 'content'/'path' args instead of silently writing zero-byte files (#19096)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "ui-tui/packages/hermes-ink/src/ink/ink.tsx",
+        "ui-tui/packages/hermes-ink/src/ink/terminal.test.ts",
+        "ui-tui/packages/hermes-ink/src/ink/terminal.ts"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream Node/website UI delta; Hermes Ultra Rust TUI is the authoritative runtime surface.",
+      "owner": "codex",
+      "sha": "279b656adc3c64db7529fa85bbd744f1aa28cfbe",
+      "subject": "fix(tui): clear Apple Terminal resize artifacts",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "optional-skills/creative/video-orchestrator/SKILL.md",
+        "optional-skills/creative/video-orchestrator/assets/brief.md.tmpl",
+        "optional-skills/creative/video-orchestrator/assets/setup.sh.tmpl",
+        "optional-skills/creative/video-orchestrator/assets/soul.md.tmpl",
+        "optional-skills/creative/video-orchestrator/references/examples.md",
+        "optional-skills/creative/video-orchestrator/references/intake.md",
+        "optional-skills/creative/video-orchestrator/references/kanban-setup.md",
+        "optional-skills/creative/video-orchestrator/references/monitoring.md",
+        "optional-skills/creative/video-orchestrator/references/role-archetypes.md",
+        "optional-skills/creative/video-orchestrator/references/tool-matrix.md",
+        "optional-skills/creative/video-orchestrator/scripts/bootstrap_pipeline.py",
+        "optional-skills/creative/video-orchestrator/scripts/monitor.py"
+      ],
+      "files_touched": 12,
+      "notes": "superseded: optional-skill content delta considered under multi-registry skill parity; no core runtime port required.",
+      "owner": "codex",
+      "sha": "511add724987eeb03c10a69ae17d0b0e93765d1f",
+      "subject": "feat(skill): add video-orchestrator optional creative skill",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "optional-skills/creative/kanban-video-orchestrator/SKILL.md",
+        "optional-skills/creative/kanban-video-orchestrator/assets/brief.md.tmpl",
+        "optional-skills/creative/kanban-video-orchestrator/assets/setup.sh.tmpl",
+        "optional-skills/creative/kanban-video-orchestrator/assets/soul.md.tmpl",
+        "optional-skills/creative/kanban-video-orchestrator/references/examples.md",
+        "optional-skills/creative/kanban-video-orchestrator/references/intake.md",
+        "optional-skills/creative/kanban-video-orchestrator/references/kanban-setup.md",
+        "optional-skills/creative/kanban-video-orchestrator/references/monitoring.md",
+        "optional-skills/creative/kanban-video-orchestrator/references/role-archetypes.md",
+        "optional-skills/creative/kanban-video-orchestrator/references/tool-matrix.md",
+        "optional-skills/creative/kanban-video-orchestrator/scripts/bootstrap_pipeline.py",
+        "optional-skills/creative/kanban-video-orchestrator/scripts/monitor.py"
+      ],
+      "files_touched": 12,
+      "notes": "superseded: optional-skill content delta considered under multi-registry skill parity; no core runtime port required.",
+      "owner": "codex",
+      "sha": "0dd8e3f8d876ce3d8d0c2e507b11be65eda180c1",
+      "subject": "rename: video-orchestrator \u2192 kanban-video-orchestrator",
+      "target_ticket": 21,
+      "target_ticket_name": "GPAR-02 skills parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/tools_config.py",
+        "tests/tools/test_video_analyze.py",
+        "tools/vision_tools.py",
+        "toolsets.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: upstream Python tool patch maps to Rust tool stack ownership (`crates/hermes-tools/src/*`).",
+      "owner": "codex",
+      "sha": "c9a3f36f5656f1a3d543e5b6be1fd05b98783c53",
+      "subject": "feat: add video_analyze tool for native video understanding (#19301)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/debug.py",
+        "hermes_cli/main.py",
+        "scripts/release.py",
+        "tests/hermes_cli/test_debug.py"
+      ],
+      "files_touched": 4,
+      "notes": "superseded: release attribution/update metadata only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "b8ae8cc801df3bb440d86b826795fcbceffa9372",
+      "subject": "fix(debug): redact log content at upload time in hermes debug share",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cli.py",
+        "hermes_cli/setup.py",
+        "tests/cli/test_cwd_env_respect.py",
+        "website/docs/reference/environment-variables.md",
+        "website/docs/user-guide/configuration.md",
+        "website/docs/user-guide/profiles.md"
+      ],
+      "files_touched": 6,
+      "notes": "superseded: upstream Node/website UI delta; Hermes Ultra Rust TUI is the authoritative runtime surface.",
+      "owner": "codex",
+      "sha": "9eaddfafa30018b1d4eb3e5e72bbe2d242f8e50e",
+      "subject": "fix(cli): CLI/TUI on local backend always uses launch directory, ignores terminal.cwd (#19242)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cli.py",
+        "hermes_cli/setup.py",
+        "tests/cli/test_cwd_env_respect.py",
+        "website/docs/reference/environment-variables.md",
+        "website/docs/user-guide/configuration.md",
+        "website/docs/user-guide/profiles.md"
+      ],
+      "files_touched": 6,
+      "notes": "superseded: upstream Node/website UI delta; Hermes Ultra Rust TUI is the authoritative runtime surface.",
+      "owner": "codex",
+      "sha": "167b5648ea609aafa85f56c5714f7abda5091ed6",
+      "subject": "Revert \"fix(cli): CLI/TUI on local backend always uses launch directory, ignores terminal.cwd (#19242)\" (#19329)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/kanban.py",
+        "hermes_cli/kanban_db.py",
+        "tests/hermes_cli/test_kanban_db.py"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream Python CLI patch mapped to Rust CLI runtime ownership.",
+      "owner": "codex",
+      "sha": "f5bd77b3e16d86e3cbd75a9d6bd719f28dd8dbb9",
+      "subject": "fix(kanban): anchor board, workspaces, and worker logs at the shared Hermes root",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/kanban_db.py",
+        "tests/hermes_cli/test_kanban_db.py",
+        "website/docs/reference/environment-variables.md"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream Node/website UI delta; Hermes Ultra Rust TUI is the authoritative runtime surface.",
+      "owner": "codex",
+      "sha": "2658494e815b4644cb2ed47dc6cb6623b6ecf112",
+      "subject": "fix(kanban): add per-path env overrides + dispatcher env injection",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/tools/test_mcp_tool_session_expired.py",
+        "tools/mcp_tool.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python tool patch maps to Rust tool stack ownership (`crates/hermes-tools/src/*`).",
+      "owner": "codex",
+      "sha": "4a2f822137bf69728bd594613002671c93d2a64d",
+      "subject": "fix(mcp): reconnect on terminated sessions",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/transports/codex.py",
+        "scripts/release.py",
+        "tests/agent/transports/test_codex_transport.py"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: release attribution/update metadata only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "dfdd7b6e6fc3ec3b637d200d95e36adc7c6a49bb",
+      "subject": "fix(codex-transport): preserve request override headers for xai responses",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/auth.py",
+        "scripts/release.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: release attribution/update metadata only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "65bebb9b802616122c30fd8fea6c4c47514b45e4",
+      "subject": "fix(cli): follow 307 redirects in MiniMax OAuth httpx clients",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/api_server.py",
+        "tests/gateway/test_api_server.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python gateway/cron/tui-gateway patch mapped to Rust gateway/TUI implementations.",
+      "owner": "codex",
+      "sha": "a5cae1649675947d04034010f1fa22d15b2c6c4c",
+      "subject": "fix(api_server): fall back to default port on malformed API_SERVER_PORT",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tools/vision_tools.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python tool patch maps to Rust tool stack ownership (`crates/hermes-tools/src/*`).",
+      "owner": "codex",
+      "sha": "6c4aca7adca44e67e45f85b143a46ed3d88a7328",
+      "subject": "fix(vision): guard user_prompt type before debug_call_data construction",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tools/vision_tools.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python tool patch maps to Rust tool stack ownership (`crates/hermes-tools/src/*`).",
+      "owner": "codex",
+      "sha": "5bd937533c9cef3646d1e464f9a9a3aabec7b774",
+      "subject": "fix(vision): guard user_prompt type in video_analyze_tool before debug_call_data construction",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/context_compressor.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python agent/runtime delta mapped to Rust agent/inference paths.",
+      "owner": "codex",
+      "sha": "408dd8aa28cb959f1a1e869929651c181de63e1e",
+      "subject": "fix(compressor): skip non-string tool content in dedup pass to prevent AttributeError",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/commands.py",
+        "scripts/release.py",
+        "tests/hermes_cli/test_commands.py"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: release attribution/update metadata only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "86e64c1d3bc0324452202cf8e26703dbef7839b3",
+      "subject": "fix(gateway): hide required-arg commands from Telegram menu",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py",
+        "tools/send_message_tool.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: release attribution metadata only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "3792b77bd11dcccab3b0994bd31086969fb9f5fb",
+      "subject": "fix(send_message): support QQBot C2C and group chats",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/curator.py",
+        "tests/agent/test_curator.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python agent/runtime patch mapped to Rust inference/runtime ownership.",
+      "owner": "codex",
+      "sha": "3c420245395e3e5e074949c4bfdfb25d3156cb98",
+      "subject": "fix(curator): pass auxiliary curator api_key/base_url into runtime resolution",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: release attribution metadata only; no Rust runtime parity delta.",
+      "owner": "codex",
+      "sha": "2ababfe6edf815248daa1d123bd6568e04cfd7f4",
+      "subject": "chore(release): map 0xKingBack noreply email",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/__init__.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python CLI patch mapped to Rust CLI implementation (`crates/hermes-cli/src/*`).",
+      "owner": "codex",
+      "sha": "2d7543c61f1334bdcfa741776a357c274830de8b",
+      "subject": "fix(windows): enforce UTF-8 stdout/stderr to prevent UnicodeEncodeError crash",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/tools/test_file_operations.py",
+        "tools/file_operations.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python tool patch mapped to Rust tool ownership in `crates/hermes-tools/src/*`.",
+      "owner": "codex",
+      "sha": "6713274a4297ab1cf601d93655b458ab3e66d083",
+      "subject": "fix(file): strip leaked terminal fences from reads",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/prompt_builder.py"
+      ],
+      "files_touched": 1,
+      "notes": "superseded: upstream Python agent/runtime patch mapped to Rust inference/runtime ownership.",
+      "owner": "codex",
+      "sha": "b58db237e4e1943daeab34fcc38a25e034bafb30",
+      "subject": "fix(kanban): drop worker identity claim from KANBAN_GUIDANCE (#19427)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_voice_command.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python gateway/cron patch mapped to Rust gateway scheduler/runtime ownership.",
+      "owner": "codex",
+      "sha": "1bd975c0ba87c644d560ca7bd62cc47274a8a919",
+      "subject": "fix(gateway): suppress duplicate voice transcripts",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/config.py",
+        "tests/gateway/test_telegram_group_gating.py",
+        "website/docs/user-guide/messaging/telegram.md"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream Python gateway/cron patch mapped to Rust gateway scheduler/runtime ownership.",
+      "owner": "codex",
+      "sha": "6fda92aa7f044ce684f6ac11e3f8871a1a70decc",
+      "subject": "fix(gateway): bridge top-level require_mention to Telegram config",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_gateway_command_help.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python gateway/cron patch mapped to Rust gateway scheduler/runtime ownership.",
+      "owner": "codex",
+      "sha": "222767e5e81696fc2b184d4a806a07e05ce969d7",
+      "subject": "fix: sanitize Telegram help command mentions",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_session_boundary_security_state.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python gateway/cron patch mapped to Rust gateway scheduler/runtime ownership.",
+      "owner": "codex",
+      "sha": "74636f9c4aa3e9dbeaff64dc3b540aef9482c375",
+      "subject": "fix(gateway): clear queued reload-skills notes on new/resume/branch",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "agent/auxiliary_client.py",
+        "tests/agent/test_auxiliary_client.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python agent/runtime patch mapped to Rust inference/runtime ownership.",
+      "owner": "codex",
+      "sha": "808fee151d42b77a763ea4a8ec711d7b501cece6",
+      "subject": "fix(auxiliary): propagate explicit_api_key to _try_anthropic()",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cron/scheduler.py",
+        "tests/cron/test_scheduler.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python gateway/cron patch mapped to Rust gateway scheduler/runtime ownership.",
+      "owner": "codex",
+      "sha": "363cc936746c3f2964427b635f80f57df528da54",
+      "subject": "fix(cron): bump skill usage when cron jobs load skills",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "tests/hermes_cli/test_tui_npm_install.py"
+      ],
+      "files_touched": 2,
+      "notes": "superseded: upstream Python CLI patch mapped to Rust CLI implementation (`crates/hermes-cli/src/*`).",
+      "owner": "codex",
+      "sha": "2f2998bb1b0d6a1b1c2c14b66b72982595b91506",
+      "subject": "fix(tui): tolerate npm's peer-flag drop in lockfile comparison `_tui_need_npm_install()` compares the canonical `package-lock.json` against the hidden `node_modules/.package-lock.json` to decide whether `npm install` needs to re-run. npm 9 drops the `\"peer\": true` field from the hidden lock on dev-deps that are *also* declared as peers (the canonical lock preserves the dual annotation). That made the check flag 16 packages (`@babel/core`, `@types/node`, `@types/react`, `@typescript-eslint/*`, `react`, `vite`, `tsx`, `typescript`, \u2026) as mismatched on every launch, triggering a runtime `npm install`. Inside the Docker image, that runtime install then fails with EACCES because `/opt/hermes/ui-tui/node_modules/` is root-owned from build time, so `docker run \u2026 hermes-agent --tui` prints:     Installing TUI dependencies\u2026     npm install failed. \u2026and exits 1, with no preview. The empty preview is a second bug: the launcher captured only stderr, but npm 9 writes EACCES to stdout, which was DEVNULL'd. Fixes:  - Add `\"peer\"` to `_NPM_LOCK_RUNTIME_KEYS` so the comparison ignores the    non-deterministic field, alongside the existing `\"ideallyInert\"`.  - Capture stdout as well as stderr in the install subprocess so future    failures surface a useful preview instead of a bare \"failed.\" line. Regression tests:  - `test_no_install_when_only_peer_annotation_differs` \u2014 the exact scenario  - `test_install_when_version_differs_even_with_peer_drop` \u2014 guards against    the peer-drop tolerance masking a real version skew On-host impact: the same false-positive was firing on every `hermes --tui` invocation from a normal checkout, silently running a no-op `npm install` each time (it converged because the host's `node_modules/` is writable). Startup time on the TUI should drop noticeably.",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "docker/entrypoint.sh",
+        "hermes_cli/web_server.py",
+        "website/docs/user-guide/docker.md"
+      ],
+      "files_touched": 3,
+      "notes": "superseded: upstream Python CLI patch mapped to Rust CLI implementation (`crates/hermes-cli/src/*`).",
+      "owner": "codex",
+      "sha": "5671059f62ab28fa118b15fa148d5ae9a4200574",
+      "subject": "feat(docker): launch dashboard as side-process via HERMES_DASHBOARD=1 Adds an optional dashboard side-process to the container entrypoint, toggled by `HERMES_DASHBOARD=1` (also accepts `true` / `yes`).  When set, the entrypoint backgrounds `hermes dashboard` before `exec`-ing the main command so the user's chosen foreground process (gateway, chat, `sleep infinity`, \u2026) remains PID-of-interest for the container runtime.   docker run -d \\     -v ~/.hermes:/opt/data \\     -p 8642:8642 -p 9119:9119 \\     -e HERMES_DASHBOARD=1 \\     nousresearch/hermes-agent gateway run Defaults chosen for the container case:  - Host: 0.0.0.0 (reachable through published port; can override to    127.0.0.1 via HERMES_DASHBOARD_HOST for sidecar/reverse-proxy setups)  - Port: 9119 (matches `hermes dashboard`)  - Auto-adds `--insecure` when binding to non-localhost, matching the    dashboard's own safety gate for exposing API keys  - HERMES_DASHBOARD_TUI is read by `hermes dashboard` directly \u2014 no    entrypoint plumbing needed Dashboard output is prefixed with `[dashboard]` via `stdbuf`+`sed -u` so it's easy to separate from gateway logs in `docker logs`.  No supervision: if the dashboard crashes it stays down until the container restarts (documented in the `:::note` panel). Other changes bundled in:  - Deprecate GATEWAY_HEALTH_URL / GATEWAY_HEALTH_TIMEOUT env vars in    hermes_cli/web_server.py with a DEPRECATED block comment and a    `.. deprecated::` note on _probe_gateway_health.  The feature still    works for this release; it'll be removed alongside the move to a    first-class dashboard config key.  - Rewrite the \"Running the dashboard\" doc section around the new    single-container pattern.  Drops the previously-documented    dashboard-as-its-own-container setup \u2014 that pattern relied on the    deprecated env vars for cross-container gateway-liveness detection,    and without them the dashboard would permanently report the gateway    as \"not running\".  - Collapse the two-service Compose example (gateway + dashboard    container) into a single service with HERMES_DASHBOARD=1.  Removes    the now-unnecessary bridge network and `depends_on`.  - Drop the \":::warning\" caveat about \"Running a dashboard container    alongside the gateway is safe\" \u2014 that case no longer exists.",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
+    },
+    {
+      "disposition": "superseded",
+      "files_sample": [
+        "cli.py",
+        "gateway/run.py",
+        "hermes_cli/config.py",
+        "hermes_cli/setup.py",
+        "tests/cli/test_cwd_env_respect.py",
+        "website/docs/reference/environment-variables.md",
+        "website/docs/user-guide/configuration.md"
+      ],
+      "files_touched": 7,
+      "notes": "superseded: upstream Python gateway/cron patch mapped to Rust gateway scheduler/runtime ownership.",
+      "owner": "codex",
+      "sha": "a11aed1accc735ae0d7af80d626b33870d4b696c",
+      "subject": "fix(cli): local backend CLI always uses launch directory, stops .env sync of TERMINAL_CWD (#19334)",
+      "target_ticket": 22,
+      "target_ticket_name": "GPAR-03 UX parity"
     }
   ],
-  "generated_at_utc": "2026-05-01T05:10:20.526324+00:00",
+  "generated_at_utc": "2026-05-04T07:11:26.307978+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -20041,18 +22123,18 @@
   },
   "summary": {
     "by_disposition": {
-      "ported": 51,
-      "superseded": 1258
+      "ported": 63,
+      "superseded": 1386
     },
     "by_target_ticket": {
-      "20": 514,
-      "21": 46,
-      "22": 313,
-      "23": 97,
+      "20": 575,
+      "21": 49,
+      "22": 335,
+      "23": 115,
       "24": 4,
-      "25": 15,
-      "26": 320
+      "25": 16,
+      "26": 355
     },
-    "total_commits": 1309
+    "total_commits": 1449
   }
 }

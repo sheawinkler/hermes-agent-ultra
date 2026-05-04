@@ -306,6 +306,11 @@ impl SessionManager {
 
     /// Compose the canonical session key for platform/chat/user.
     pub fn compose_session_key(&self, platform: &str, chat_id: &str, user_id: &str) -> String {
+        // Keep Slack shared channels per-user isolated to avoid command/runtime
+        // state bleed between users in the same channel.
+        if is_slack_shared_channel(platform, chat_id) && !user_id.trim().is_empty() {
+            return format!("{}:{}:{}", platform, chat_id, user_id);
+        }
         let session_type = Self::infer_session_type(chat_id);
         if self.group_sessions_per_user && session_type == SessionType::Group {
             format!("{}:{}:{}", platform, chat_id, user_id)
@@ -534,6 +539,20 @@ impl SessionManager {
     }
 }
 
+fn is_slack_shared_channel(platform: &str, chat_id: &str) -> bool {
+    if !platform.eq_ignore_ascii_case("slack") {
+        return false;
+    }
+    let id = chat_id.trim();
+    if id.is_empty() {
+        return false;
+    }
+    let Some(first) = id.chars().next() else {
+        return false;
+    };
+    matches!(first, 'C' | 'c' | 'G' | 'g')
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -685,5 +704,22 @@ mod tests {
 
         manager.reset_session(&sid).await;
         assert!(manager.get_messages(&sid).await.is_empty());
+    }
+
+    #[test]
+    fn compose_session_key_slack_shared_channels_are_per_user() {
+        let manager = SessionManager::new(SessionConfig::default());
+        assert_eq!(
+            manager.compose_session_key("slack", "C123ABC", "U999"),
+            "slack:C123ABC:U999"
+        );
+        assert_eq!(
+            manager.compose_session_key("slack", "G123ABC", "U999"),
+            "slack:G123ABC:U999"
+        );
+        assert_eq!(
+            manager.compose_session_key("slack", "D123ABC", "U999"),
+            "slack:D123ABC"
+        );
     }
 }

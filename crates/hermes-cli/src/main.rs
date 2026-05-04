@@ -2914,6 +2914,19 @@ fn extra_string(platform_cfg: &PlatformConfig, key: &str) -> Option<String> {
         .map(String::from)
 }
 
+fn env_string(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn matrix_home_room_for_platform(platform_cfg: &PlatformConfig) -> Option<String> {
+    extra_string(platform_cfg, "room_id")
+        .or_else(|| extra_string(platform_cfg, "home_room"))
+        .or_else(|| env_string("MATRIX_HOME_ROOM"))
+}
+
 fn extra_bool(platform_cfg: &PlatformConfig, key: &str, default: bool) -> bool {
     platform_cfg
         .extra
@@ -3193,7 +3206,7 @@ async fn register_gateway_adapters(
                     homeserver_url,
                     user_id,
                     access_token,
-                    room_id: extra_string(platform_cfg, "room_id"),
+                    room_id: matrix_home_room_for_platform(platform_cfg),
                     proxy: Default::default(),
                 };
                 match MatrixAdapter::new(matrix_cfg) {
@@ -7050,8 +7063,13 @@ fn normalize_env_value(value: &str) -> String {
         .to_string()
 }
 
+fn read_env_text(path: &Path) -> std::io::Result<String> {
+    let bytes = std::fs::read(path)?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
 fn read_env_key(path: &Path, key: &str) -> Option<String> {
-    let raw = std::fs::read_to_string(path).ok()?;
+    let raw = read_env_text(path).ok()?;
     for line in raw.lines() {
         if let Some((k, v)) = parse_env_assignment(line) {
             if k == key {
@@ -7508,9 +7526,9 @@ fn local_backend_base_url_env_var(provider: &str) -> Option<&'static str> {
 }
 
 fn merge_missing_env_keys(src: &Path, dst: &Path, label: &str) -> Result<usize, AgentError> {
-    let src_content = std::fs::read_to_string(src)
-        .map_err(|e| AgentError::Io(format!("read {}: {}", src.display(), e)))?;
-    let existing = std::fs::read_to_string(dst).unwrap_or_default();
+    let src_content =
+        read_env_text(src).map_err(|e| AgentError::Io(format!("read {}: {}", src.display(), e)))?;
+    let existing = read_env_text(dst).unwrap_or_default();
 
     let existing_keys: std::collections::HashSet<String> = existing
         .lines()
@@ -11679,6 +11697,14 @@ mod tests {
     use hermes_config::PlatformConfig;
     use hermes_gateway::dm::DmManager;
     use hermes_gateway::{Gateway, SessionManager};
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+            .lock()
+            .expect("env lock poisoned")
+    }
 
     fn make_platform(enabled: bool, token: Option<&str>) -> PlatformConfig {
         let mut cfg = PlatformConfig {
@@ -11825,6 +11851,33 @@ mod tests {
             provider_env_var("text-generation-inference"),
             Some("TGI_API_KEY")
         );
+    }
+
+    #[test]
+    fn matrix_home_room_prefers_platform_config_then_env_fallback() {
+        let _guard = env_lock();
+        let previous = std::env::var("MATRIX_HOME_ROOM").ok();
+
+        let mut platform = PlatformConfig::default();
+        platform
+            .extra
+            .insert("room_id".to_string(), serde_json::json!("!cfg:matrix.org"));
+        std::env::set_var("MATRIX_HOME_ROOM", "!env:matrix.org");
+        assert_eq!(
+            matrix_home_room_for_platform(&platform).as_deref(),
+            Some("!cfg:matrix.org")
+        );
+
+        platform.extra.remove("room_id");
+        assert_eq!(
+            matrix_home_room_for_platform(&platform).as_deref(),
+            Some("!env:matrix.org")
+        );
+
+        match previous {
+            Some(value) => std::env::set_var("MATRIX_HOME_ROOM", value),
+            None => std::env::remove_var("MATRIX_HOME_ROOM"),
+        }
     }
 
     #[test]
@@ -12024,6 +12077,20 @@ mod tests {
         assert!(contents.contains("OPENAI_API_KEY=real-key"));
         assert!(!contents.contains("OPENROUTER_API_KEY="));
         assert!(!contents.contains("MINIMAX_API_KEY="));
+    }
+
+    #[test]
+    fn read_env_key_handles_non_utf8_bytes_without_crashing() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let env_file = tmp.path().join(".env");
+        let mut bytes = b"OPENAI_API_KEY=real-key\nBROKEN=".to_vec();
+        bytes.extend_from_slice(&[0xFF, 0xFE, 0x81, b'\n']);
+        std::fs::write(&env_file, bytes).expect("write non-utf8 env");
+
+        assert_eq!(
+            read_env_key(&env_file, "OPENAI_API_KEY").as_deref(),
+            Some("real-key")
+        );
     }
 
     #[test]

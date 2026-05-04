@@ -2,23 +2,23 @@
   "ci_gate": {
     "checks": [
       {
-        "actual": 1498.0,
+        "actual": 1512.0,
         "limit": 5500,
         "metric": "max_commits_behind",
         "status": "pass"
       },
       {
-        "actual": 1433.0,
+        "actual": 1446.0,
         "limit": 5000,
         "metric": "max_upstream_patch_missing",
         "status": "pass"
       },
       {
-        "actual": 2898.0,
+        "actual": 2899.0,
         "limit": 2600,
         "max_overshoot": 500.0,
         "metric": "max_files_only_upstream",
-        "overshoot": 298.0,
+        "overshoot": 299.0,
         "special_rule": "allow_files_only_upstream_overshoot_when_functional_clean",
         "status": "warn"
       },
@@ -57,17 +57,17 @@
     "pass": true,
     "special_rules_applied": [
       {
-        "actual": 2898.0,
+        "actual": 2899.0,
         "limit": 2600.0,
         "max_overshoot": 500.0,
         "metric": "max_files_only_upstream",
-        "overshoot": 298.0,
+        "overshoot": 299.0,
         "reason": "functional parity clean; upstream-only file growth treated as drift warning",
         "rule": "allow_files_only_upstream_overshoot_when_functional_clean"
       }
     ]
   },
-  "generated_at_utc": "2026-05-03T23:41:03.833603+00:00",
+  "generated_at_utc": "2026-05-04T07:19:17.288838+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -80,13 +80,13 @@
     "GPAR-09": true
   },
   "metrics": {
-    "max_commits_behind": 1498.0,
+    "max_commits_behind": 1512.0,
     "max_divergence_review_overdue": 0.0,
-    "max_files_only_upstream": 2898.0,
+    "max_files_only_upstream": 2899.0,
     "max_queue_pending_commits": 0.0,
     "max_shared_different": 10.0,
     "max_unowned_divergences": 0.0,
-    "max_upstream_patch_missing": 1433.0,
+    "max_upstream_patch_missing": 1446.0,
     "min_test_intent_mapping_ratio": 1.0
   },
   "program": {
@@ -97,19 +97,19 @@
   },
   "queue_summary": {
     "by_disposition": {
-      "ported": 51,
-      "superseded": 1258
+      "ported": 63,
+      "superseded": 1386
     },
     "by_target_ticket": {
-      "20": 514,
-      "21": 46,
-      "22": 313,
-      "23": 97,
+      "20": 575,
+      "21": 49,
+      "22": 335,
+      "23": 115,
       "24": 4,
-      "25": 15,
-      "26": 320
+      "25": 16,
+      "26": 355
     },
-    "total_commits": 1309
+    "total_commits": 1449
   },
   "release_gate": {
     "checks": [
