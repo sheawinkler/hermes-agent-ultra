@@ -446,16 +446,16 @@ publish_conflict_issue() {
   {
     echo "Automated upstream sync hit a conflict."
     echo
-    echo "- mode: \\`${MODE}\\`"
-    echo "- strategy: \\`${SYNC_STRATEGY}\\`"
-    echo "- reason: \\`${reason}\\`"
+    echo "- mode: \`${MODE}\`"
+    echo "- strategy: \`${SYNC_STRATEGY}\`"
+    echo "- reason: \`${reason}\`"
     if [[ -n "${failed_commit}" ]]; then
-      echo "- failed commit: \\`${failed_commit}\\`"
+      echo "- failed commit: \`${failed_commit}\`"
     fi
     if [[ "${SYNC_STRATEGY}" == "cherry-pick" ]]; then
-      echo "- rollback tag: \\`${ROLLBACK_TAG}\\`"
+      echo "- rollback tag: \`${ROLLBACK_TAG}\`"
     fi
-    echo "- report: \\`${conflict_report}\\`"
+    echo "- report: \`${conflict_report}\`"
     echo
     echo "See local report for conflicted files and recovery commands."
   } > "${body_file}"
