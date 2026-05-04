@@ -22,6 +22,7 @@ use sha2::{Digest, Sha256};
 
 use crate::app::{App, PetDock, PetSettings};
 use crate::model_switch::{curated_provider_slugs, normalize_provider_model, provider_model_ids};
+use hermes_config::{GatewayConfig, LlmProviderConfig};
 
 // ---------------------------------------------------------------------------
 // CommandResult
@@ -181,7 +182,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/statusbar", "Toggle status bar visibility"),
     ("/sb", "Alias for /statusbar"),
     ("/yolo", "Toggle auto-approve mode"),
-    ("/reasoning", "Toggle reasoning display"),
+    (
+        "/reasoning",
+        "Reasoning controls (display + effort: status/on/off/set <low|medium|high|xhigh>)",
+    ),
     (
         "/raw",
         "RTK raw-mode controls + deterministic trace controls (status/on/off/toggle/once/trace)",
@@ -2962,7 +2966,7 @@ pub async fn handle_slash_command(
         "/verbose" => handle_verbose_command(app),
         "/statusbar" => handle_statusbar_command(app),
         "/yolo" => handle_yolo_command(app),
-        "/reasoning" => handle_reasoning_command(app),
+        "/reasoning" => handle_reasoning_command(app, args),
         "/raw" => handle_raw_command(app, args),
         "/policy" => handle_policy_command(app, args),
         "/help" => {
@@ -4954,7 +4958,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                yolo:         {}\n\
                mouse:        {}\n\
                statusbar:    ON\n\
-               reasoning:    toggle via `/ops reasoning`\n\
+               reasoning:    `/ops reasoning status` + `/ops reasoning set ...`\n\
                raw:          toggle via `/ops raw`\n\
                verbose:      toggle via `/ops verbose`\n\
              \n\
@@ -4970,7 +4974,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                /ops personality [list|name]\n\
                /ops mouse [on|off|toggle]\n\
                /ops yolo\n\
-               /ops reasoning\n\
+               /ops reasoning [status|on|off|toggle|set <level>]\n\
                /ops raw [on|off|toggle|once|trace ...]\n\
                /ops verbose\n\
                /ops dashboard [status|on|off|url] [host] [port]\n\
@@ -5013,7 +5017,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                  - /ops personality [list|name]\n\
                  - /ops mouse [on|off|toggle]\n\
                  - /ops yolo\n\
-                 - /ops reasoning\n\
+                 - /ops reasoning [status|on|off|toggle|set <level>]\n\
                  - /ops raw [on|off|toggle|once|trace ...]\n\
                  - /ops verbose\n\
                  - /ops statusbar\n\
@@ -5028,7 +5032,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
         "personality" => handle_personality_command(app, &args[1..]),
         "mouse" => handle_mouse_command(app, &args[1..]),
         "yolo" => handle_yolo_command(app),
-        "reasoning" => handle_reasoning_command(app),
+        "reasoning" => handle_reasoning_command(app, &args[1..]),
         "raw" => handle_raw_command(app, &args[1..]),
         "verbose" => handle_verbose_command(app),
         "statusbar" => handle_statusbar_command(app),
@@ -5454,25 +5458,273 @@ fn handle_yolo_command(app: &mut App) -> Result<CommandResult, AgentError> {
     Ok(CommandResult::Handled)
 }
 
-fn handle_reasoning_command(app: &mut App) -> Result<CommandResult, AgentError> {
-    // Reasoning display is a runtime-only toggle; stored as thread-local state
-    // since StreamingConfig doesn't have a show_reasoning field.
-    use std::sync::atomic::{AtomicBool, Ordering};
-    static SHOW_REASONING: AtomicBool = AtomicBool::new(false);
+fn reasoning_display_flag() -> &'static std::sync::atomic::AtomicBool {
+    static SHOW_REASONING: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+    &SHOW_REASONING
+}
 
-    let prev = SHOW_REASONING.fetch_xor(true, Ordering::Relaxed);
-    let new_val = !prev;
+fn set_reasoning_display(enabled: bool) {
+    reasoning_display_flag().store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
 
-    if new_val {
-        emit_command_output(
-            app,
-            "Reasoning display: ON — model reasoning will be shown.",
-        );
+fn toggle_reasoning_display() -> bool {
+    let prev = reasoning_display_flag().fetch_xor(true, std::sync::atomic::Ordering::Relaxed);
+    !prev
+}
+
+fn reasoning_display_enabled() -> bool {
+    reasoning_display_flag().load(std::sync::atomic::Ordering::Relaxed)
+}
+
+fn parse_reasoning_effort(raw: &str) -> Result<Option<&'static str>, AgentError> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "minimal" | "min" => Ok(Some("minimal")),
+        "low" => Ok(Some("low")),
+        "medium" | "med" => Ok(Some("medium")),
+        "high" => Ok(Some("high")),
+        "xhigh" | "max" => Ok(Some("xhigh")),
+        "auto" | "default" | "clear" | "reset" | "none" => Ok(None),
+        other => Err(AgentError::Config(format!(
+            "Unknown reasoning effort '{}'. Use one of: minimal, low, medium, high, xhigh, auto.",
+            other
+        ))),
+    }
+}
+
+fn resolve_provider_key<'a>(cfg: &'a GatewayConfig, provider: &str) -> String {
+    cfg.llm_providers
+        .keys()
+        .find(|key| key.eq_ignore_ascii_case(provider))
+        .cloned()
+        .unwrap_or_else(|| provider.trim().to_ascii_lowercase())
+}
+
+fn gemini_thinking_level_for_effort(effort: &str) -> &'static str {
+    match effort {
+        "minimal" | "low" => "low",
+        "medium" => "medium",
+        "high" | "xhigh" => "high",
+        _ => "medium",
+    }
+}
+
+fn set_provider_reasoning_effort(cfg: &mut GatewayConfig, provider: &str, effort: Option<&str>) {
+    let provider_key = resolve_provider_key(cfg, provider);
+    let provider_cfg = cfg
+        .llm_providers
+        .entry(provider_key.clone())
+        .or_insert_with(LlmProviderConfig::default);
+
+    let mut body_map = provider_cfg
+        .extra_body
+        .take()
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+
+    match effort {
+        Some(level) => {
+            body_map.insert(
+                "reasoning_effort".to_string(),
+                serde_json::Value::String(level.to_string()),
+            );
+            let mut reasoning_obj = body_map
+                .get("reasoning")
+                .and_then(|v| v.as_object().cloned())
+                .unwrap_or_default();
+            reasoning_obj.insert(
+                "effort".to_string(),
+                serde_json::Value::String(level.to_string()),
+            );
+            body_map.insert(
+                "reasoning".to_string(),
+                serde_json::Value::Object(reasoning_obj),
+            );
+
+            if provider_key.contains("gemini") || provider_key == "google" {
+                let level_mapped = gemini_thinking_level_for_effort(level);
+                let mut google_obj = body_map
+                    .get("google")
+                    .and_then(|v| v.as_object().cloned())
+                    .unwrap_or_default();
+                let mut thinking_cfg = google_obj
+                    .get("thinking_config")
+                    .and_then(|v| v.as_object().cloned())
+                    .unwrap_or_default();
+                thinking_cfg.insert(
+                    "thinking_level".to_string(),
+                    serde_json::Value::String(level_mapped.to_string()),
+                );
+                google_obj.insert(
+                    "thinking_config".to_string(),
+                    serde_json::Value::Object(thinking_cfg.clone()),
+                );
+                body_map.insert("google".to_string(), serde_json::Value::Object(google_obj));
+                body_map.insert(
+                    "thinking_config".to_string(),
+                    serde_json::Value::Object(thinking_cfg),
+                );
+            }
+        }
+        None => {
+            body_map.remove("reasoning_effort");
+            if let Some(reasoning_obj) = body_map
+                .get_mut("reasoning")
+                .and_then(|value| value.as_object_mut())
+            {
+                reasoning_obj.remove("effort");
+                if reasoning_obj.is_empty() {
+                    body_map.remove("reasoning");
+                }
+            }
+            body_map.remove("thinking_config");
+            if let Some(google_obj) = body_map
+                .get_mut("google")
+                .and_then(|value| value.as_object_mut())
+            {
+                google_obj.remove("thinking_config");
+                if google_obj.is_empty() {
+                    body_map.remove("google");
+                }
+            }
+        }
+    }
+
+    provider_cfg.extra_body = if body_map.is_empty() {
+        None
     } else {
-        emit_command_output(
-            app,
-            "Reasoning display: OFF — model reasoning will be hidden.",
-        );
+        Some(serde_json::Value::Object(body_map))
+    };
+}
+
+fn provider_reasoning_effort(cfg: &GatewayConfig, provider: &str) -> Option<String> {
+    let provider_key = resolve_provider_key(cfg, provider);
+    cfg.llm_providers
+        .get(&provider_key)
+        .and_then(|entry| entry.extra_body.as_ref())
+        .and_then(|body| body.get("reasoning_effort"))
+        .and_then(|value| value.as_str())
+        .map(ToString::to_string)
+}
+
+fn handle_reasoning_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    if args.is_empty() {
+        let enabled = toggle_reasoning_display();
+        if enabled {
+            emit_command_output(
+                app,
+                "Reasoning display: ON — model reasoning will be shown.",
+            );
+        } else {
+            emit_command_output(
+                app,
+                "Reasoning display: OFF — model reasoning will be hidden.",
+            );
+        }
+        return Ok(CommandResult::Handled);
+    }
+
+    match args[0].trim().to_ascii_lowercase().as_str() {
+        "status" => {
+            let (provider, _) = split_provider_model(&app.current_model);
+            let effort = provider_reasoning_effort(&app.config, provider)
+                .unwrap_or_else(|| "auto".to_string());
+            emit_command_output(
+                app,
+                format!(
+                    "Reasoning status\n- display: {}\n- effort: {}\n- provider: {}",
+                    if reasoning_display_enabled() {
+                        "ON"
+                    } else {
+                        "OFF"
+                    },
+                    effort,
+                    provider
+                ),
+            );
+        }
+        "toggle" => {
+            let enabled = toggle_reasoning_display();
+            emit_command_output(
+                app,
+                format!(
+                    "Reasoning display: {} — model reasoning will be {}.",
+                    if enabled { "ON" } else { "OFF" },
+                    if enabled { "shown" } else { "hidden" }
+                ),
+            );
+        }
+        "on" | "show" => {
+            set_reasoning_display(true);
+            emit_command_output(
+                app,
+                "Reasoning display: ON — model reasoning will be shown.",
+            );
+        }
+        "off" | "hide" => {
+            set_reasoning_display(false);
+            emit_command_output(
+                app,
+                "Reasoning display: OFF — model reasoning will be hidden.",
+            );
+        }
+        "set" | "level" | "effort" => {
+            if args.len() < 2 {
+                emit_command_output(
+                    app,
+                    "Usage: /reasoning set <minimal|low|medium|high|xhigh|auto>",
+                );
+                return Ok(CommandResult::Handled);
+            }
+            let effort = parse_reasoning_effort(args[1])?;
+            let provider = split_provider_model(&app.current_model).0.to_string();
+            let current_model = app.current_model.clone();
+            app.config = Arc::new({
+                let mut cfg = (*app.config).clone();
+                set_provider_reasoning_effort(&mut cfg, &provider, effort);
+                cfg
+            });
+            app.switch_model(&current_model);
+            let effort_label = effort.unwrap_or("auto");
+            emit_command_output(
+                app,
+                format!(
+                    "Reasoning effort set to `{}` for provider `{}` (model `{}`).",
+                    effort_label, provider, current_model
+                ),
+            );
+        }
+        "help" => {
+            emit_command_output(
+                app,
+                "Reasoning controls:\n\
+                 - /reasoning                 Toggle reasoning display\n\
+                 - /reasoning status          Show display + effort state\n\
+                 - /reasoning on|off          Explicitly show/hide reasoning\n\
+                 - /reasoning set <level>     Set provider reasoning effort\n\
+                 Levels: minimal, low, medium, high, xhigh, auto",
+            );
+        }
+        shorthand => {
+            let effort = parse_reasoning_effort(shorthand)?;
+            let provider = split_provider_model(&app.current_model).0.to_string();
+            let current_model = app.current_model.clone();
+            app.config = Arc::new({
+                let mut cfg = (*app.config).clone();
+                set_provider_reasoning_effort(&mut cfg, &provider, effort);
+                cfg
+            });
+            app.switch_model(&current_model);
+            emit_command_output(
+                app,
+                format!(
+                    "Reasoning effort set to `{}` for provider `{}` (model `{}`).",
+                    effort.unwrap_or("auto"),
+                    provider,
+                    current_model
+                ),
+            );
+        }
     }
     Ok(CommandResult::Handled)
 }
@@ -12025,6 +12277,85 @@ install_command: "uv pip install -r requirements.txt"
         assert_eq!(parse_toggle_arg(Some("on"), false).expect("on"), true);
         assert_eq!(parse_toggle_arg(Some("off"), true).expect("off"), false);
         assert!(parse_toggle_arg(Some("bad-value"), true).is_err());
+    }
+
+    #[test]
+    fn parse_reasoning_effort_accepts_levels_and_auto_clear() {
+        assert_eq!(
+            parse_reasoning_effort("minimal").expect("minimal"),
+            Some("minimal")
+        );
+        assert_eq!(parse_reasoning_effort("low").expect("low"), Some("low"));
+        assert_eq!(
+            parse_reasoning_effort("medium").expect("medium"),
+            Some("medium")
+        );
+        assert_eq!(parse_reasoning_effort("high").expect("high"), Some("high"));
+        assert_eq!(
+            parse_reasoning_effort("xhigh").expect("xhigh"),
+            Some("xhigh")
+        );
+        assert_eq!(parse_reasoning_effort("auto").expect("auto"), None);
+        assert!(parse_reasoning_effort("turbo").is_err());
+    }
+
+    #[test]
+    fn set_provider_reasoning_effort_updates_and_clears_extra_body() {
+        let mut cfg = GatewayConfig::default();
+        set_provider_reasoning_effort(&mut cfg, "nous", Some("high"));
+        let extra = cfg
+            .llm_providers
+            .get("nous")
+            .and_then(|entry| entry.extra_body.as_ref())
+            .expect("extra body");
+        assert_eq!(
+            extra
+                .get("reasoning_effort")
+                .and_then(|value| value.as_str())
+                .expect("reasoning effort"),
+            "high"
+        );
+        assert_eq!(
+            extra
+                .get("reasoning")
+                .and_then(|value| value.get("effort"))
+                .and_then(|value| value.as_str())
+                .expect("reasoning.effort"),
+            "high"
+        );
+
+        set_provider_reasoning_effort(&mut cfg, "nous", None);
+        let extra_after_clear = cfg
+            .llm_providers
+            .get("nous")
+            .and_then(|entry| entry.extra_body.as_ref());
+        assert!(extra_after_clear.is_none());
+    }
+
+    #[test]
+    fn set_provider_reasoning_effort_sets_gemini_thinking_level() {
+        let mut cfg = GatewayConfig::default();
+        set_provider_reasoning_effort(&mut cfg, "gemini", Some("xhigh"));
+        let extra = cfg
+            .llm_providers
+            .get("gemini")
+            .and_then(|entry| entry.extra_body.as_ref())
+            .expect("extra body");
+        assert_eq!(
+            extra
+                .get("google")
+                .and_then(|value| value.get("thinking_config"))
+                .and_then(|value| value.get("thinking_level"))
+                .and_then(|value| value.as_str()),
+            Some("high")
+        );
+        assert_eq!(
+            extra
+                .get("thinking_config")
+                .and_then(|value| value.get("thinking_level"))
+                .and_then(|value| value.as_str()),
+            Some("high")
+        );
     }
 
     #[test]

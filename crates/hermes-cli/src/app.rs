@@ -1082,6 +1082,30 @@ mod tests {
     }
 
     #[test]
+    fn test_build_agent_config_forwards_provider_extra_body() {
+        let mut cfg = GatewayConfig::default();
+        cfg.llm_providers.insert(
+            "nous".to_string(),
+            LlmProviderConfig {
+                extra_body: Some(serde_json::json!({
+                    "reasoning_effort": "high",
+                    "reasoning": { "effort": "high" }
+                })),
+                ..LlmProviderConfig::default()
+            },
+        );
+        let agent_cfg = build_agent_config(&cfg, "nous:moonshotai/kimi-k2.6");
+        assert_eq!(
+            agent_cfg
+                .extra_body
+                .as_ref()
+                .and_then(|body| body.get("reasoning_effort"))
+                .and_then(|value| value.as_str()),
+            Some("high")
+        );
+    }
+
+    #[test]
     fn test_build_agent_config_infers_provider_for_bare_model() {
         let mut cfg = GatewayConfig::default();
         cfg.model = Some("claude-opus-4-6".to_string());
@@ -1474,6 +1498,23 @@ mod tests {
 
 pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
     let (resolved_provider, _) = resolve_provider_and_model(config, model);
+    let runtime_provider = normalize_runtime_provider_name(resolved_provider.as_str());
+    let provider_extra_body = config
+        .llm_providers
+        .get(resolved_provider.as_str())
+        .or_else(|| config.llm_providers.get(runtime_provider.as_str()))
+        .or_else(|| {
+            config.llm_providers.iter().find_map(|(name, cfg)| {
+                if name.eq_ignore_ascii_case(resolved_provider.as_str())
+                    || name.eq_ignore_ascii_case(runtime_provider.as_str())
+                {
+                    Some(cfg)
+                } else {
+                    None
+                }
+            })
+        })
+        .and_then(|cfg| cfg.extra_body.clone());
     let skip_memory_env = std::env::var("HERMES_SKIP_MEMORY")
         .ok()
         .map(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
@@ -1496,6 +1537,7 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
         model: model.to_string(),
         system_prompt: config.system_prompt.clone(),
         personality: config.personality.clone(),
+        extra_body: provider_extra_body,
         hermes_home: config.home_dir.clone(),
         provider: Some(resolved_provider),
         stream: config.streaming.enabled,
