@@ -1175,6 +1175,53 @@ fn governor_error_critical_rate() -> f64 {
         .unwrap_or(0.50)
 }
 
+fn governor_tool_loop_guard_enabled() -> bool {
+    std::env::var("HERMES_TOOL_LOOP_GUARD_ENABLED")
+        .map(|v| {
+            !matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "0" | "false" | "off"
+            )
+        })
+        .unwrap_or(true)
+}
+
+fn governor_tool_loop_guard_max_consecutive_error_turns() -> u32 {
+    std::env::var("HERMES_TOOL_LOOP_GUARD_MAX_CONSEC_ERROR_TURNS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(4)
+}
+
+fn governor_tool_loop_guard_min_failed_calls() -> u32 {
+    std::env::var("HERMES_TOOL_LOOP_GUARD_MIN_FAILED_CALLS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(1)
+}
+
+fn should_trip_tool_loop_guard(
+    consecutive_error_turns: u32,
+    turn_tool_count: usize,
+    turn_tool_error_count: u32,
+) -> bool {
+    if !governor_tool_loop_guard_enabled() {
+        return false;
+    }
+    if turn_tool_count == 0 {
+        return false;
+    }
+    if turn_tool_error_count < governor_tool_loop_guard_min_failed_calls() {
+        return false;
+    }
+    if turn_tool_error_count != turn_tool_count as u32 {
+        return false;
+    }
+    consecutive_error_turns >= governor_tool_loop_guard_max_consecutive_error_turns()
+}
+
 fn smart_routing_learning_enabled() -> bool {
     std::env::var("HERMES_SMART_ROUTING_LEARNING_ENABLED")
         .ok()
@@ -4303,6 +4350,50 @@ impl AgentLoop {
             if let Some(note) = lsp_note {
                 ctx.add_message(Message::system(note));
             }
+            if should_trip_tool_loop_guard(
+                governor_consecutive_error_turns,
+                tool_calls.len(),
+                turn_tool_error_count,
+            ) {
+                let guard_message = format!(
+                    "Tool-loop guard tripped after {} consecutive error turn(s); latest turn failed {}/{} tool call(s).",
+                    governor_consecutive_error_turns,
+                    turn_tool_error_count,
+                    tool_calls.len()
+                );
+                self.emit_status("lifecycle", &guard_message);
+                replay.record(
+                    "tool_loop_guard",
+                    serde_json::json!({
+                        "turn": total_turns,
+                        "consecutive_error_turns": governor_consecutive_error_turns,
+                        "failed_calls": turn_tool_error_count,
+                        "total_calls": tool_calls.len(),
+                    }),
+                );
+                if let Some(summary) = self
+                    .handle_tool_loop_guard_summary(
+                        &mut ctx,
+                        governor_consecutive_error_turns,
+                        turn_tool_error_count,
+                        tool_calls.len(),
+                    )
+                    .await?
+                {
+                    ctx.add_message(summary);
+                }
+                self.memory_on_session_end(ctx.get_messages());
+                return Ok(AgentResult {
+                    messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
+                    finished_naturally: false,
+                    total_turns,
+                    tool_errors,
+                    usage: accumulated_usage,
+                    interrupted: false,
+                    session_cost_usd: Some(session_cost_usd),
+                    session_started_hooks_fired,
+                });
+            }
             if !tool_calls.is_empty()
                 && tool_calls
                     .iter()
@@ -5264,6 +5355,64 @@ impl AgentLoop {
             if let Some(note) = lsp_note {
                 ctx.add_message(Message::system(note));
             }
+            if should_trip_tool_loop_guard(
+                governor_consecutive_error_turns,
+                tool_calls.len(),
+                turn_tool_error_count,
+            ) {
+                let guard_message = format!(
+                    "Tool-loop guard tripped after {} consecutive error turn(s); latest turn failed {}/{} tool call(s).",
+                    governor_consecutive_error_turns,
+                    turn_tool_error_count,
+                    tool_calls.len()
+                );
+                self.emit_status("lifecycle", &guard_message);
+                replay.record(
+                    "tool_loop_guard",
+                    serde_json::json!({
+                        "turn": total_turns,
+                        "consecutive_error_turns": governor_consecutive_error_turns,
+                        "failed_calls": turn_tool_error_count,
+                        "total_calls": tool_calls.len(),
+                    }),
+                );
+                if let Some(summary) = self
+                    .handle_tool_loop_guard_summary(
+                        &mut ctx,
+                        governor_consecutive_error_turns,
+                        turn_tool_error_count,
+                        tool_calls.len(),
+                    )
+                    .await?
+                {
+                    ctx.add_message(summary);
+                }
+                if stream_mute.swap(false, Ordering::AcqRel) {
+                    on_chunk(StreamChunk {
+                        delta: Some(hermes_core::StreamDelta {
+                            content: None,
+                            tool_calls: None,
+                            extra: Some(serde_json::json!({
+                                "control": "mute_post_response",
+                                "enabled": false
+                            })),
+                        }),
+                        finish_reason: None,
+                        usage: None,
+                    });
+                }
+                self.memory_on_session_end(ctx.get_messages());
+                return Ok(AgentResult {
+                    messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
+                    finished_naturally: false,
+                    total_turns,
+                    tool_errors,
+                    usage: accumulated_usage,
+                    interrupted: false,
+                    session_cost_usd: Some(session_cost_usd),
+                    session_started_hooks_fired,
+                });
+            }
             if !tool_calls.is_empty()
                 && tool_calls
                     .iter()
@@ -5774,6 +5923,33 @@ impl AgentLoop {
             "[SYSTEM] Maximum conversation turns reached. Please provide a brief summary of \
              what was accomplished and any remaining tasks.",
         ));
+        let (_, model_name) = self.extract_provider_and_model(self.config.model.as_str());
+        let response = self
+            .llm_provider
+            .chat_completion(
+                ctx.get_messages(),
+                &[],
+                self.config.max_tokens,
+                self.config.temperature,
+                Some(model_name),
+                self.extra_body_for_api_mode(&self.config.api_mode).as_ref(),
+            )
+            .await
+            .map_err(|e| AgentError::LlmApi(e.to_string()))?;
+        Ok(Some(response.message))
+    }
+
+    async fn handle_tool_loop_guard_summary(
+        &self,
+        ctx: &mut ContextManager,
+        consecutive_error_turns: u32,
+        failed_calls: u32,
+        total_calls: usize,
+    ) -> Result<Option<Message>, AgentError> {
+        ctx.add_message(Message::system(format!(
+            "[SYSTEM] Tool-loop guard triggered after {} consecutive error turn(s). Latest turn failed {}/{} tool call(s). Stop calling tools and provide a concise final response with what succeeded, what failed, and precise next manual step(s).",
+            consecutive_error_turns, failed_calls, total_calls
+        )));
         let (_, model_name) = self.extract_provider_and_model(self.config.model.as_str());
         let response = self
             .llm_provider
@@ -9638,6 +9814,29 @@ mod tests {
         assert!(gov.error_degraded);
         assert!(gov.max_tokens.unwrap_or(1200) < 1200);
         assert!(gov.tool_concurrency <= 2);
+    }
+
+    #[test]
+    fn test_tool_loop_guard_trips_on_consecutive_full_failure_turns() {
+        std::env::set_var("HERMES_TOOL_LOOP_GUARD_ENABLED", "1");
+        std::env::set_var("HERMES_TOOL_LOOP_GUARD_MAX_CONSEC_ERROR_TURNS", "3");
+        std::env::set_var("HERMES_TOOL_LOOP_GUARD_MIN_FAILED_CALLS", "1");
+        assert!(!should_trip_tool_loop_guard(2, 2, 2));
+        assert!(should_trip_tool_loop_guard(3, 2, 2));
+        std::env::remove_var("HERMES_TOOL_LOOP_GUARD_ENABLED");
+        std::env::remove_var("HERMES_TOOL_LOOP_GUARD_MAX_CONSEC_ERROR_TURNS");
+        std::env::remove_var("HERMES_TOOL_LOOP_GUARD_MIN_FAILED_CALLS");
+    }
+
+    #[test]
+    fn test_tool_loop_guard_ignores_partial_success_turns() {
+        std::env::set_var("HERMES_TOOL_LOOP_GUARD_ENABLED", "1");
+        std::env::set_var("HERMES_TOOL_LOOP_GUARD_MAX_CONSEC_ERROR_TURNS", "2");
+        std::env::set_var("HERMES_TOOL_LOOP_GUARD_MIN_FAILED_CALLS", "1");
+        assert!(!should_trip_tool_loop_guard(4, 3, 2));
+        std::env::remove_var("HERMES_TOOL_LOOP_GUARD_ENABLED");
+        std::env::remove_var("HERMES_TOOL_LOOP_GUARD_MAX_CONSEC_ERROR_TURNS");
+        std::env::remove_var("HERMES_TOOL_LOOP_GUARD_MIN_FAILED_CALLS");
     }
 
     #[test]

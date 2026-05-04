@@ -1877,6 +1877,93 @@ fn render_assistant_markdown_lines(
     rendered
 }
 
+fn value_to_display_text(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(raw) => {
+            let trimmed = raw.trim();
+            if trimmed.starts_with('{') || trimmed.starts_with('[') {
+                if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(trimmed) {
+                    return serde_json::to_string_pretty(&parsed)
+                        .unwrap_or_else(|_| raw.to_string());
+                }
+            }
+            raw.to_string()
+        }
+        _ => serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string()),
+    }
+}
+
+fn push_block(lines: &mut Vec<String>, header: &str, value: &serde_json::Value) {
+    let rendered = value_to_display_text(value);
+    if rendered.trim().is_empty() {
+        return;
+    }
+    lines.push(format!("[{header}]"));
+    for line in rendered.lines() {
+        lines.push(line.to_string());
+    }
+}
+
+fn format_tool_message_lines(content: &str) -> Vec<String> {
+    let trimmed = content.trim();
+    if trimmed.is_empty() {
+        return vec![String::new()];
+    }
+
+    let parsed = match serde_json::from_str::<serde_json::Value>(trimmed) {
+        Ok(v) => v,
+        Err(_) => {
+            return content
+                .lines()
+                .map(std::string::ToString::to_string)
+                .collect();
+        }
+    };
+
+    if let Some(obj) = parsed.as_object() {
+        let mut lines: Vec<String> = Vec::new();
+
+        if let Some(w) = obj.get("_budget_warning").and_then(|v| v.as_str()) {
+            lines.push(format!("⚠ {}", w.trim()));
+        }
+
+        for key in ["result", "error", "stdout", "stderr", "message"] {
+            if let Some(value) = obj.get(key) {
+                push_block(&mut lines, key, value);
+            }
+        }
+
+        let mut extras = serde_json::Map::new();
+        for (k, v) in obj.iter() {
+            if k == "_budget_warning"
+                || k == "result"
+                || k == "error"
+                || k == "stdout"
+                || k == "stderr"
+                || k == "message"
+            {
+                continue;
+            }
+            extras.insert(k.clone(), v.clone());
+        }
+        if !extras.is_empty() {
+            push_block(&mut lines, "meta", &serde_json::Value::Object(extras));
+        }
+        if !lines.is_empty() {
+            return lines;
+        }
+    }
+
+    serde_json::to_string_pretty(&parsed)
+        .map(|s| s.lines().map(std::string::ToString::to_string).collect())
+        .unwrap_or_else(|_| {
+            content
+                .lines()
+                .map(std::string::ToString::to_string)
+                .collect()
+        })
+}
+
 fn append_transcript_message_lines(
     lines: &mut Vec<Line<'static>>,
     msg: &hermes_core::Message,
@@ -1929,7 +2016,7 @@ fn append_transcript_message_lines(
                 let expanded = state.expanded_tool_cards.contains(&card_key)
                     || state.expanded_tool_cards.contains("__all__")
                     || matches!(state.view_density, ViewDensity::Detailed);
-                let all_lines: Vec<&str> = content.lines().collect();
+                let all_lines = format_tool_message_lines(content);
                 let shown = if expanded { 32 } else { 5 };
                 lines.push(Line::from(vec![Span::styled(
                     format!(
@@ -2255,30 +2342,26 @@ fn render_messages(
         }
     }
     let lines = &state.transcript_cache.lines;
-
-    let max_hidden_from_bottom = lines.len().saturating_sub(viewport_rows);
+    let text = Text::from(lines.clone());
+    let total_visual_rows = approximate_visual_rows(lines, inner.width);
+    let max_hidden_from_bottom = total_visual_rows.saturating_sub(viewport_rows);
     let hidden_from_bottom = usize::from(state.scroll_offset).min(max_hidden_from_bottom);
-    let end = lines.len().saturating_sub(hidden_from_bottom);
-    let start = end.saturating_sub(viewport_rows);
-    let mut visible_lines: Vec<Line<'static>> = lines[start..end].to_vec();
-    if visible_lines.len() < viewport_rows {
-        let pad = viewport_rows - visible_lines.len();
-        let mut padded = Vec::with_capacity(viewport_rows);
-        padded.extend((0..pad).map(|_| Line::from(String::new())));
-        padded.extend(visible_lines);
-        visible_lines = padded;
+    if usize::from(state.scroll_offset) != hidden_from_bottom {
+        state.scroll_offset = hidden_from_bottom.min(u16::MAX as usize) as u16;
     }
+    let top_visual_row = total_visual_rows.saturating_sub(viewport_rows + hidden_from_bottom);
 
-    let paragraph = Paragraph::new(Text::from(visible_lines))
+    let paragraph = Paragraph::new(text)
         .block(block)
-        .wrap(Wrap { trim: false });
+        .wrap(Wrap { trim: false })
+        .scroll((top_visual_row as u16, 0));
 
     frame.render_widget(Clear, area);
     frame.render_widget(paragraph, area);
 
-    if lines.len() > viewport_rows {
-        let mut scrollbar_state = ScrollbarState::new(lines.len())
-            .position(start)
+    if total_visual_rows > viewport_rows {
+        let mut scrollbar_state = ScrollbarState::new(total_visual_rows)
+            .position(top_visual_row)
             .viewport_content_length(viewport_rows);
         let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
             .track_symbol(Some("│"))
@@ -2297,6 +2380,18 @@ fn render_messages(
             );
         frame.render_stateful_widget(scrollbar, inner, &mut scrollbar_state);
     }
+}
+
+fn approximate_visual_rows(lines: &[Line<'static>], wrap_width: u16) -> usize {
+    let width = usize::from(wrap_width.max(1));
+    lines
+        .iter()
+        .map(|line| {
+            let chars = line.to_string().chars().count().max(1);
+            ((chars - 1) / width) + 1
+        })
+        .sum::<usize>()
+        .max(1)
 }
 
 /// Render slash-command completions as a popup over the conversation panel.
@@ -3879,6 +3974,25 @@ mod tests {
             Message::assistant("a"),
         ];
         assert_eq!(count_renderable_messages(&messages), 2);
+    }
+
+    #[test]
+    fn test_format_tool_message_lines_parses_json_payload() {
+        let payload = r#"{"result":"line1\nline2","_budget_warning":"[BUDGET WARNING: Iteration 40/50.]","error":"boom"}"#;
+        let lines = format_tool_message_lines(payload);
+        let joined = lines.join("\n");
+        assert!(joined.contains("⚠ [BUDGET WARNING"));
+        assert!(joined.contains("[result]"));
+        assert!(joined.contains("line1"));
+        assert!(joined.contains("[error]"));
+        assert!(joined.contains("boom"));
+    }
+
+    #[test]
+    fn test_approximate_visual_rows_wraps_long_lines() {
+        let lines = vec![Line::from("x".repeat(120))];
+        assert_eq!(approximate_visual_rows(&lines, 40), 3);
+        assert_eq!(approximate_visual_rows(&lines, 80), 2);
     }
 
     #[test]
