@@ -333,8 +333,20 @@ fn scrub_subprocess_env(cmd: &mut TokioCommand) {
 fn with_login_profile_sources(command: &str) -> String {
     #[cfg(unix)]
     {
-        format!(
+        fn shell_single_quote(value: &str) -> String {
+            format!("'{}'", value.replace('\'', "'\\''"))
+        }
+
+        let bash_command = shell_single_quote(&format!(
             "[ -f \"$HOME/.profile\" ] && . \"$HOME/.profile\"; [ -f \"$HOME/.bash_profile\" ] && . \"$HOME/.bash_profile\"; {command}"
+        ));
+        let zsh_command = shell_single_quote(&format!(
+            "[ -f \"$HOME/.zshenv\" ] && . \"$HOME/.zshenv\"; [ -f \"$HOME/.zprofile\" ] && . \"$HOME/.zprofile\"; [ -f \"$HOME/.zshrc\" ] && . \"$HOME/.zshrc\"; [ -f \"$HOME/.profile\" ] && . \"$HOME/.profile\"; {command}"
+        ));
+        format!(
+            "if command -v bash >/dev/null 2>&1; then exec bash -lc {bash_command}; \
+elif command -v zsh >/dev/null 2>&1; then exec zsh -lc {zsh_command}; \
+else printf '%s\n' \"Hermes could not find bash or zsh in PATH. Run 'exec zsh -l' or set your default shell where env vars are available.\" >&2; exit 127; fi"
         )
     }
     #[cfg(not(unix))]
@@ -1069,9 +1081,13 @@ mod tests {
     #[test]
     fn test_with_login_profile_sources_prepends_profile_loads() {
         let wrapped = with_login_profile_sources("echo hi");
-        assert!(wrapped.contains(". \"$HOME/.profile\""));
+        assert!(wrapped.contains("command -v bash"));
+        assert!(wrapped.contains("exec bash -lc"));
         assert!(wrapped.contains(". \"$HOME/.bash_profile\""));
-        assert!(wrapped.ends_with("echo hi"));
+        assert!(wrapped.contains("command -v zsh"));
+        assert!(wrapped.contains("exec zsh -lc"));
+        assert!(wrapped.contains(". \"$HOME/.zshrc\""));
+        assert!(wrapped.contains("echo hi"));
     }
 
     #[cfg(not(unix))]
@@ -1269,9 +1285,7 @@ mod tests {
         if wait["status"] == "timeout" {
             let poll = backend.poll_process(&session_id).await.unwrap();
             let _ = backend.kill_process(&session_id).await;
-            panic!(
-                "background process did not exit after closing stdin: wait={wait}, poll={poll}"
-            );
+            panic!("background process did not exit after closing stdin: wait={wait}, poll={poll}");
         }
         assert_eq!(wait["status"], "exited");
         assert!(wait["output"]
