@@ -6,6 +6,7 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex as StdMutex};
+use std::time::Instant;
 
 use futures::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -306,6 +307,23 @@ impl App {
             })),
             ..AgentCallbacks::default()
         }
+    }
+
+    fn emit_lifecycle_event(
+        shared: &Arc<StdMutex<Option<StreamHandle>>>,
+        message: impl AsRef<str>,
+    ) {
+        let preview = App::preview_for_status(message.as_ref(), 220);
+        if preview.is_empty() {
+            return;
+        }
+        App::push_stream_extra_event(
+            shared,
+            serde_json::json!({
+                "ui_event": "lifecycle",
+                "message": preview,
+            }),
+        );
     }
 
     /// Create a new `App` from the parsed CLI arguments.
@@ -663,9 +681,18 @@ impl App {
     /// Sends all messages to the agent loop and appends the result.
     /// Checks the interrupt controller before running and clears it after.
     async fn run_agent(&mut self) -> Result<(), AgentError> {
+        let run_started_at = Instant::now();
         self.interrupt_controller.clear_interrupt();
         let mut remediation_attempted = false;
         loop {
+            Self::emit_lifecycle_event(
+                &self.stream_handle_shared,
+                format!(
+                    "dispatching request to {} (messages={})",
+                    self.current_model,
+                    self.messages.len()
+                ),
+            );
             let messages = self.messages.clone();
             let result = if self.config.streaming.enabled {
                 let stream_handle = self.stream_handle.clone();
@@ -689,6 +716,14 @@ impl App {
                 Ok(result) => {
                     self.messages = result.messages;
                     self.prune_ui_after_current_messages();
+                    Self::emit_lifecycle_event(
+                        &self.stream_handle_shared,
+                        format!(
+                            "run finished in {:.2}s (total_turns={})",
+                            run_started_at.elapsed().as_secs_f64(),
+                            result.total_turns
+                        ),
+                    );
                     if let Some(handle) = &self.stream_handle {
                         handle.send_done();
                     }
@@ -709,6 +744,13 @@ impl App {
                 }
                 Err(AgentError::Interrupted { message }) => {
                     self.interrupt_controller.clear_interrupt();
+                    Self::emit_lifecycle_event(
+                        &self.stream_handle_shared,
+                        format!(
+                            "run interrupted after {:.2}s",
+                            run_started_at.elapsed().as_secs_f64()
+                        ),
+                    );
                     if let Some(handle) = &self.stream_handle {
                         handle.send_done();
                     }
@@ -725,6 +767,14 @@ impl App {
                     break;
                 }
                 Err(e) => {
+                    Self::emit_lifecycle_event(
+                        &self.stream_handle_shared,
+                        format!(
+                            "run error after {:.2}s: {}",
+                            run_started_at.elapsed().as_secs_f64(),
+                            e
+                        ),
+                    );
                     if let Some(handle) = &self.stream_handle {
                         handle.send_done();
                     }
@@ -742,6 +792,10 @@ impl App {
                             } else {
                                 println!("{notice}");
                             }
+                            Self::emit_lifecycle_event(
+                                &self.stream_handle_shared,
+                                format!("auto-remediation switching model to {}", next_model),
+                            );
                             self.switch_model(&next_model);
                             remediation_attempted = true;
                             continue;
