@@ -33,7 +33,7 @@ use tokio::sync::mpsc;
 use tui_textarea::{CursorMove, TextArea};
 
 use hermes_auth::FileTokenStore;
-use hermes_core::{AgentError, StreamChunk};
+use hermes_core::{AgentError, AgentResult, Message, StreamChunk};
 
 use crate::app::App;
 use crate::commands;
@@ -59,6 +59,11 @@ pub enum Event {
     StreamChunk(StreamChunk),
     /// Agent finished processing.
     AgentDone,
+    /// Background agent run completed.
+    AgentRunComplete {
+        result: Result<AgentResult, String>,
+        elapsed_secs: f64,
+    },
     /// Interrupt signal (Ctrl+C).
     Interrupt,
     /// Mouse interaction.
@@ -3580,6 +3585,13 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         let is_submit = is_submit_shortcut(&key, &state.input);
 
                         if is_submit {
+                            if state.processing {
+                                state.status_message =
+                                    "Still processing previous request… wait for completion."
+                                        .to_string();
+                                needs_redraw = true;
+                                continue;
+                            }
                             let input = state.input.clone();
                             state.input.clear();
                             state.cursor_position = 0;
@@ -3642,19 +3654,74 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                 }
 
                                 if !handled_by_tui {
-                                    state.begin_processing_cycle(&app.current_model);
-                                    state.status_message = "Processing...".to_string();
-                                    match app.handle_input(&input).await {
-                                        Ok(_) => {
-                                            state.finish_processing_cycle("✔ completed in");
-                                            state.status_message.clear();
+                                    let trimmed = input.trim().to_string();
+                                    if trimmed.starts_with('/') {
+                                        state.begin_processing_cycle(&app.current_model);
+                                        state.status_message = "Processing...".to_string();
+                                        match app.handle_input(&input).await {
+                                            Ok(_) => {
+                                                state.finish_processing_cycle("✔ completed in");
+                                                state.status_message.clear();
+                                            }
+                                            Err(e) => {
+                                                state.finish_processing_cycle("✖ failed after");
+                                                state.status_message = format!("Error: {}", e);
+                                                state.push_activity(format!("✖ {}", e));
+                                                app.push_ui_assistant(format!("Error: {}", e));
+                                            }
                                         }
-                                        Err(e) => {
-                                            state.finish_processing_cycle("✖ failed after");
-                                            state.status_message = format!("Error: {}", e);
-                                            state.push_activity(format!("✖ {}", e));
-                                            app.push_ui_assistant(format!("Error: {}", e));
-                                        }
+                                    } else if !trimmed.is_empty() {
+                                        // Non-slash prompts run in a background task so stream events
+                                        // can be consumed/rendered live by this UI loop.
+                                        app.input_history.push(trimmed.clone());
+                                        app.history_index = app.input_history.len();
+                                        app.messages.push(Message::user(trimmed.clone()));
+
+                                        state.begin_processing_cycle(&app.current_model);
+                                        state.status_message = "Processing...".to_string();
+
+                                        let event_tx = tui.event_sender();
+                                        let agent = app.agent.clone();
+                                        let stream_enabled = app.config.streaming.enabled;
+                                        let tool_schemas = app.tool_schemas.clone();
+                                        let messages = app.messages.clone();
+                                        let stream_handle = app.stream_handle.clone();
+
+                                        tokio::spawn(async move {
+                                            let started = Instant::now();
+                                            let result = if stream_enabled {
+                                                let stream_cb: Option<
+                                                    Box<
+                                                        dyn Fn(hermes_core::StreamChunk)
+                                                            + Send
+                                                            + Sync,
+                                                    >,
+                                                > = stream_handle.map(|h| {
+                                                    Box::new(
+                                                        move |chunk: hermes_core::StreamChunk| {
+                                                            h.send_chunk(chunk);
+                                                        },
+                                                    )
+                                                        as Box<
+                                                            dyn Fn(hermes_core::StreamChunk)
+                                                                + Send
+                                                                + Sync,
+                                                        >
+                                                });
+                                                agent.run_stream(
+                                                    messages,
+                                                    Some(tool_schemas),
+                                                    stream_cb,
+                                                )
+                                                .await
+                                            } else {
+                                                agent.run(messages, Some(tool_schemas)).await
+                                            };
+                                            let _ = event_tx.send(Event::AgentRunComplete {
+                                                result: result.map_err(|e| e.to_string()),
+                                                elapsed_secs: started.elapsed().as_secs_f64(),
+                                            });
+                                        });
                                     }
                                 }
                             }
@@ -3841,6 +3908,43 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         state.stream_needs_break = false;
                         state.active_tools.clear();
                         state.status_message.clear();
+                        needs_redraw = true;
+                    }
+                    Some(Event::AgentRunComplete {
+                        result,
+                        elapsed_secs,
+                    }) => {
+                        match result {
+                            Ok(agent_result) => {
+                                let total_turns = agent_result.total_turns;
+                                let interrupted = agent_result.interrupted;
+                                let finished_naturally = agent_result.finished_naturally;
+                                app.apply_agent_result(agent_result);
+                                state.finish_processing_cycle("✔ completed in");
+                                state.status_message.clear();
+                                state.push_activity(format!(
+                                    "run finished in {:.2}s (total_turns={})",
+                                    elapsed_secs, total_turns
+                                ));
+                                if interrupted {
+                                    app.push_ui_assistant("[Agent execution interrupted]");
+                                } else if !finished_naturally {
+                                    state.push_activity(
+                                        "run stopped before natural finish".to_string(),
+                                    );
+                                }
+                            }
+                            Err(err) => {
+                                state.finish_processing_cycle("✖ failed after");
+                                state.status_message = format!("Error: {}", err);
+                                state.push_activity(format!("✖ {}", err));
+                                app.push_ui_assistant(format!("Error: {}", err));
+                            }
+                        }
+                        state.stream_buffer.clear();
+                        state.stream_muted = false;
+                        state.stream_needs_break = false;
+                        state.active_tools.clear();
                         needs_redraw = true;
                     }
                     Some(Event::Interrupt) => {

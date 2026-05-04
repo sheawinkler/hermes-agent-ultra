@@ -974,6 +974,12 @@ impl App {
         self.ui_messages.retain(|m| m.insert_at <= cap);
     }
 
+    /// Apply the finalized messages returned by an agent run.
+    pub fn apply_agent_result(&mut self, result: hermes_core::AgentResult) {
+        self.messages = result.messages;
+        self.prune_ui_after_current_messages();
+    }
+
     /// Count background jobs currently queued/running.
     pub fn running_background_job_count(&self) -> usize {
         let jobs_dir = hermes_config::hermes_home().join("background_jobs");

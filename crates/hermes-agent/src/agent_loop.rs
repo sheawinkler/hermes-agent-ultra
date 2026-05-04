@@ -248,7 +248,7 @@ Only act if there's something genuinely worth saving. \
 If nothing stands out, just say 'Nothing to save.' and stop.";
 
 const TOOL_USE_ENFORCEMENT_GUIDANCE: &str = "# Tool-use enforcement\nYou MUST use your tools to take action. Do not describe what you would do without actually doing it. When you say you will perform an action, make the corresponding tool call in the same response. Every response should either (a) contain tool calls that make progress, or (b) deliver a final result.";
-const CONTEXTLATTICE_OPERATIONAL_GUIDANCE: &str = "# ContextLattice operational guidance\nWhen a user asks to confirm, connect, verify, or harden ContextLattice integration, do not answer from assumptions. First check local integration instructions when present (env `HERMES_CONTEXTLATTICE_INSTRUCTIONS_PATH`, or local `scripts/agent_orchestration.py` in the workspace). Then attempt ContextLattice tool calls: use `contextlattice_search` for a direct probe and `contextlattice_context_pack` when broader grounding is needed. If a call fails, report the concrete error and provide the exact remediation steps. Never run shell command `contextlattice` for this workflow; use the ContextLattice tools directly. Do not claim lack of access before attempting at least one ContextLattice tool call in the current turn.";
+const CONTEXTLATTICE_OPERATIONAL_GUIDANCE: &str = "# ContextLattice operational guidance\nWhen a user asks to confirm, connect, verify, or harden ContextLattice integration, do not answer from assumptions. First check local integration instructions when present (env `HERMES_CONTEXTLATTICE_INSTRUCTIONS_PATH`, or local `scripts/agent_orchestration.py` in the workspace, typically `/Users/sheawinkler/Documents/Projects/scripts/agent_orchestration.py`). Then attempt ContextLattice tool calls: use `contextlattice_search` for a direct probe and `contextlattice_context_pack` when broader grounding is needed. If a call fails, report the concrete error and provide the exact remediation steps. Never run shell command `contextlattice` for this workflow; use the ContextLattice tools directly. Do not claim lack of access before attempting at least one ContextLattice tool call in the current turn.";
 
 const OPENAI_MODEL_EXECUTION_GUIDANCE: &str = "# Execution discipline (OpenAI)\nUse tools whenever they improve correctness, completeness, or grounding. Do not stop early when another tool call would materially improve the result. Verify outcomes before declaring completion.";
 
@@ -6419,7 +6419,7 @@ fn contextlattice_connect_system_hint(messages: &[Message]) -> Option<String> {
     Some(
         "[SYSTEM] ContextLattice integration intent detected. Execute this order: \
          (1) If available, inspect local instructions file from `HERMES_CONTEXTLATTICE_INSTRUCTIONS_PATH` \
-         or workspace `scripts/agent_orchestration.py`; \
+         or workspace `scripts/agent_orchestration.py` (preferred path: `/Users/sheawinkler/Documents/Projects/scripts/agent_orchestration.py`); \
          (2) call `contextlattice_search` for a direct connectivity probe; \
          (3) if needed call `contextlattice_context_pack` for broader grounding; \
          (4) call `contextlattice_write` to checkpoint what was verified. \
