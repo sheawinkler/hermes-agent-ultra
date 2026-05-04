@@ -99,6 +99,7 @@ enum PickerKind {
     ModelProvider,
     ModelForProvider { provider: String },
     Personality,
+    Skin,
 }
 
 #[derive(Debug, Clone)]
@@ -3235,6 +3236,28 @@ fn open_personality_modal(state: &mut TuiState, app: &App) {
     state.open_modal(modal);
 }
 
+fn open_skin_modal(state: &mut TuiState) {
+    let mut items = Vec::with_capacity(crate::skin_engine::BUILTIN_SKINS.len());
+    for (name, detail) in crate::skin_engine::BUILTIN_SKINS {
+        items.push(PickerItem {
+            label: (*name).to_string(),
+            detail: (*detail).to_string(),
+            value: (*name).to_string(),
+        });
+    }
+    let mut modal = PickerModal::new(PickerKind::Skin, "Select Skin", items);
+    let active = std::env::var("HERMES_THEME").unwrap_or_else(|_| "ultra-neon".to_string());
+    let active_canonical = crate::skin_engine::canonical_skin_name(&active).unwrap_or("ultra-neon");
+    if let Some(idx) = modal.filtered_indices.iter().position(|item_idx| {
+        modal.items[*item_idx]
+            .value
+            .eq_ignore_ascii_case(active_canonical)
+    }) {
+        modal.selected_filtered = idx;
+    }
+    state.open_modal(modal);
+}
+
 async fn process_modal_disconnect(state: &mut TuiState, app: &mut App) -> Result<(), AgentError> {
     let Some(modal) = state.modal.clone() else {
         return Ok(());
@@ -3297,6 +3320,16 @@ async fn process_modal_confirm(state: &mut TuiState, app: &mut App) -> Result<()
             app.push_ui_assistant(format!("Switched personality to `{}`.", item.value));
             state.close_modal();
             state.status_message = format!("Personality: {}", item.value);
+        }
+        PickerKind::Skin => {
+            let skin = crate::skin_engine::canonical_skin_name(item.value.as_str())
+                .unwrap_or("ultra-neon")
+                .to_string();
+            std::env::set_var("HERMES_THEME", &skin);
+            app.request_theme_change(&skin);
+            app.push_ui_assistant(format!("Switched skin to `{}`.", skin));
+            state.close_modal();
+            state.status_message = format!("Skin: {}", skin);
         }
     }
     Ok(())
@@ -3458,6 +3491,17 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                     {
                                         open_personality_modal(&mut state, &app);
                                         state.status_message = "Choose personality".to_string();
+                                        handled_by_tui = true;
+                                    } else if (cmd.eq_ignore_ascii_case("/skin")
+                                        || cmd.eq_ignore_ascii_case("/skins"))
+                                        && (args.is_empty()
+                                            || (args.len() == 1
+                                                && (args[0].eq_ignore_ascii_case("list")
+                                                    || args[0].eq_ignore_ascii_case("status")
+                                                    || args[0].eq_ignore_ascii_case("show"))))
+                                    {
+                                        open_skin_modal(&mut state);
+                                        state.status_message = "Choose skin".to_string();
                                         handled_by_tui = true;
                                     } else if cmd.eq_ignore_ascii_case("/toolcards")
                                         && args.first().is_some_and(|a| a.eq_ignore_ascii_case("export"))
@@ -3829,6 +3873,20 @@ mod tests {
             }],
         ));
         assert!(!should_render_completions_popup(&state));
+    }
+
+    #[test]
+    fn test_open_skin_modal_populates_builtin_skin_items() {
+        let mut state = TuiState::default();
+        open_skin_modal(&mut state);
+        let modal = state.modal.as_ref().expect("skin modal");
+        assert!(matches!(modal.kind, PickerKind::Skin));
+        assert!(modal.items.iter().any(|item| item.value == "ultra-neon"));
+        assert!(modal.items.iter().any(|item| item.value == "neon-glow"));
+        assert!(modal
+            .items
+            .iter()
+            .any(|item| item.value == "hyper-ultra-hyper-saturated"));
     }
 
     #[test]
