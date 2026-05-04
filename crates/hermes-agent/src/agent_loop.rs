@@ -248,10 +248,22 @@ Only act if there's something genuinely worth saving. \
 If nothing stands out, just say 'Nothing to save.' and stop.";
 
 const TOOL_USE_ENFORCEMENT_GUIDANCE: &str = "# Tool-use enforcement\nYou MUST use your tools to take action. Do not describe what you would do without actually doing it. When you say you will perform an action, make the corresponding tool call in the same response. Every response should either (a) contain tool calls that make progress, or (b) deliver a final result.";
+const CONTEXTLATTICE_OPERATIONAL_GUIDANCE: &str = "# ContextLattice operational guidance\nWhen a user asks to confirm, connect, verify, or harden ContextLattice integration, do not answer from assumptions. You MUST attempt ContextLattice tool calls first: use `contextlattice_search` for a direct probe and `contextlattice_context_pack` when broader grounding is needed. If a call fails, report the concrete error and provide the exact remediation steps. Do not claim lack of access before attempting at least one ContextLattice tool call in the current turn.";
 
 const OPENAI_MODEL_EXECUTION_GUIDANCE: &str = "# Execution discipline (OpenAI)\nUse tools whenever they improve correctness, completeness, or grounding. Do not stop early when another tool call would materially improve the result. Verify outcomes before declaring completion.";
 
 const GOOGLE_MODEL_OPERATIONAL_GUIDANCE: &str = "# Operational guidance (Google)\nBe concise and execution-first. Prefer absolute paths, parallel tool calls when safe, and verify each substantive change.";
+
+fn should_inject_tool_enforcement_for_model(_model: &str) -> bool {
+    let disabled = std::env::var("HERMES_DISABLE_TOOL_ENFORCEMENT_PROMPT")
+        .ok()
+        .map(|v| {
+            let v = v.trim().to_ascii_lowercase();
+            v == "1" || v == "true" || v == "yes" || v == "on"
+        })
+        .unwrap_or(false);
+    !disabled
+}
 
 /// Configuration for the agent loop.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2023,10 +2035,7 @@ impl AgentLoop {
     }
 
     fn should_inject_tool_enforcement(&self, model: &str) -> bool {
-        let model_lower = model.to_lowercase();
-        ["gpt", "codex", "gemini", "gemma", "grok"]
-            .iter()
-            .any(|p| model_lower.contains(p))
+        should_inject_tool_enforcement_for_model(model)
     }
 
     fn platform_hint_text(&self) -> Option<&'static str> {
@@ -2804,6 +2813,11 @@ impl AgentLoop {
             if model_lower.contains("gpt") || model_lower.contains("codex") {
                 builder = builder.with_block(OPENAI_MODEL_EXECUTION_GUIDANCE);
             }
+        }
+        if tool_names.contains("contextlattice_search")
+            || tool_names.contains("contextlattice_context_pack")
+        {
+            builder = builder.with_block(CONTEXTLATTICE_OPERATIONAL_GUIDANCE);
         }
 
         if let Some(ref personality) = self.config.personality {
@@ -6498,6 +6512,19 @@ mod tests {
         assert!(!config.smart_model_routing.enabled);
         assert!(config.background_review_metrics_enabled);
         assert_eq!(config.stream_read_max_retries, 2);
+    }
+
+    #[test]
+    fn tool_enforcement_prompt_gate_applies_to_non_openai_model_names() {
+        assert!(should_inject_tool_enforcement_for_model(
+            "nous:nousresearch/hermes-4-70b"
+        ));
+        assert!(should_inject_tool_enforcement_for_model(
+            "openrouter:moonshotai/kimi-k2.6"
+        ));
+        assert!(should_inject_tool_enforcement_for_model(
+            "anthropic:claude-3-7-sonnet"
+        ));
     }
 
     #[test]
