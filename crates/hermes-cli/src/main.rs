@@ -488,7 +488,18 @@ struct ResumeSessionPayload {
 }
 
 async fn run_resume(cli: Cli, requested_session_id: Option<String>) -> Result<(), AgentError> {
-    let payload = load_resume_payload(&cli, requested_session_id.as_deref())?;
+    let requested = requested_session_id.as_deref();
+    let payload = match load_resume_payload(&cli, requested) {
+        Ok(payload) => payload,
+        Err(err) if should_resume_fallback_to_fresh(requested, &err) => {
+            let mut app = App::new(cli).await?;
+            app.push_ui_assistant(
+                "No saved sessions found yet. Started a fresh session; future turns will autosave for `resume`.",
+            );
+            return hermes_cli::tui::run(app).await;
+        }
+        Err(err) => return Err(err),
+    };
     let mut app = App::new(cli).await?;
 
     if let Some(model) = payload.model.clone().filter(|m| !m.trim().is_empty()) {
@@ -603,6 +614,20 @@ fn load_resume_payload(
         personality,
         messages,
     })
+}
+
+fn should_resume_fallback_to_fresh(requested: Option<&str>, err: &AgentError) -> bool {
+    let requested = requested.unwrap_or("latest").trim();
+    let wants_latest = requested.is_empty() || requested.eq_ignore_ascii_case("latest");
+    if !wants_latest {
+        return false;
+    }
+    match err {
+        AgentError::Config(msg) | AgentError::Io(msg) => {
+            msg.contains("No saved sessions found") || msg.contains("No sessions directory found")
+        }
+        _ => false,
+    }
 }
 
 fn resolve_resume_session_file(
@@ -13582,6 +13607,23 @@ mod tests {
             resolve_resume_session_file(&sessions_dir, None).expect("resolve latest");
         assert_eq!(resolved, "new-session");
         assert_eq!(path, new);
+    }
+
+    #[test]
+    fn should_resume_fallback_to_fresh_only_for_latest_missing_state() {
+        let latest_missing = AgentError::Config("No saved sessions found in /tmp".to_string());
+        assert!(should_resume_fallback_to_fresh(None, &latest_missing));
+        assert!(should_resume_fallback_to_fresh(
+            Some("latest"),
+            &latest_missing
+        ));
+        assert!(!should_resume_fallback_to_fresh(
+            Some("abc123"),
+            &latest_missing
+        ));
+
+        let other_error = AgentError::Config("Session 'abc123' not found".to_string());
+        assert!(!should_resume_fallback_to_fresh(None, &other_error));
     }
 
     #[test]
