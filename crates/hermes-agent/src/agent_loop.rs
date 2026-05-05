@@ -217,6 +217,9 @@ const SKILLS_GUIDANCE: &str = "After completing a complex task (5+ tool calls), 
 
 const CONVERSATIONAL_SUPPORT_GUIDANCE: &str = "# Conversational support protocol\nWhen users share personal stress, emotions, or difficult decisions, start with a brief non-judgmental acknowledgment, ask one clarifying question if context is missing, then offer practical options with trade-offs. Keep factual or technical requests direct and do not force emotional language where it does not fit. Do not present yourself as a therapist or crisis service; when safety risk appears, urge the user to seek immediate professional or emergency help.";
 const OAUTH_REFRESH_BACKOFF_SECS: u64 = 60;
+const SESSION_OBJECTIVE_PREFIX: &str = "[SESSION_OBJECTIVE] ";
+const OBJECTIVE_PATCH_TAG: &str = "PATCH_VERIFIED:";
+const OBJECTIVE_ANALYTICS_TAG: &str = "ANALYTICS_VERIFIED:";
 
 // Python `AIAgent._MEMORY_REVIEW_PROMPT` / `_SKILL_REVIEW_PROMPT` / `_COMBINED_REVIEW_PROMPT` (v2026.4.13)
 const MEMORY_REVIEW_PROMPT: &str = "Review the conversation above and consider saving to memory if appropriate.\n\n\
@@ -939,6 +942,12 @@ struct GovernorRuntimeState {
     avg_llm_latency_ms: Option<f64>,
     avg_tool_error_rate: f64,
     consecutive_error_turns: u32,
+}
+
+#[derive(Debug, Clone, Default)]
+struct RepoReviewBudgetState {
+    last_discovery_signature: Option<String>,
+    repeat_streak: u32,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -3833,6 +3842,9 @@ impl AgentLoop {
         if let Some(hint) = contextlattice_connect_system_hint(ctx.get_messages()) {
             ctx.add_message(Message::system(hint));
         }
+        if let Some(hint) = objective_mode_system_hint(ctx.get_messages()) {
+            ctx.add_message(Message::system(hint));
+        }
 
         let persist_user_idx = if self.config.persist_user_message.is_some() {
             ctx.get_messages()
@@ -3903,6 +3915,8 @@ impl AgentLoop {
         let mut governor_llm_latency_window: VecDeque<u64> = VecDeque::new();
         let mut governor_tool_error_window: VecDeque<f64> = VecDeque::new();
         let mut governor_consecutive_error_turns: u32 = 0;
+        let mut repo_review_budget_state = RepoReviewBudgetState::default();
+        let mut objective_guard_retries: u32 = 0;
         let governor_window_limit = governor_window_size();
 
         loop {
@@ -4275,6 +4289,23 @@ impl AgentLoop {
                         }
                     }
                 }
+                let (objective_guard_active, requires_analytics) =
+                    objective_guard_policy(ctx.get_messages());
+                if objective_guard_active {
+                    let assistant_text = assistant_msg.content.as_deref().unwrap_or_default();
+                    if !objective_guard_satisfied(assistant_text, requires_analytics)
+                        && objective_guard_retries < 2
+                    {
+                        objective_guard_retries = objective_guard_retries.saturating_add(1);
+                        ctx.add_message(Message::system(objective_guard_retry_prompt(
+                            requires_analytics,
+                        )));
+                        ctx.add_message(Message::user(
+                            "Re-issue the final response with required verified sections now.",
+                        ));
+                        continue;
+                    }
+                }
                 tracing::debug!("No tool calls in response, finishing naturally");
                 // Final memory sync
                 let (u, a) = extract_last_user_assistant(ctx.get_messages());
@@ -4308,6 +4339,26 @@ impl AgentLoop {
             for tc in &mut tool_calls {
                 self.repair_tool_call(tc);
                 self.hydrate_session_search_args(tc);
+            }
+            if let Some(note) =
+                apply_repo_review_tool_profile_narrowing(&mut tool_calls, ctx.get_messages())
+            {
+                self.emit_status("lifecycle", "Applied repo-review tool profile narrowing.");
+                ctx.add_message(Message::system(note));
+            }
+            if let Some(note) = apply_repo_review_discovery_budget_policy(
+                &mut tool_calls,
+                ctx.get_messages(),
+                &mut repo_review_budget_state,
+            ) {
+                self.emit_status("lifecycle", "Applied repo-review discovery budget policy.");
+                ctx.add_message(Message::system(note));
+            }
+            if tool_calls.is_empty() {
+                ctx.add_message(Message::system(
+                    "[SYSTEM] Tool profile/budget policy filtered this turn's calls. Propose refined, scoped code-inspection calls next.",
+                ));
+                continue;
             }
             let invalid_tool_calls: Vec<String> = tool_calls
                 .iter()
@@ -4756,6 +4807,9 @@ impl AgentLoop {
         if let Some(hint) = contextlattice_connect_system_hint(ctx.get_messages()) {
             ctx.add_message(Message::system(hint));
         }
+        if let Some(hint) = objective_mode_system_hint(ctx.get_messages()) {
+            ctx.add_message(Message::system(hint));
+        }
 
         let persist_user_idx = if self.config.persist_user_message.is_some() {
             ctx.get_messages()
@@ -4825,6 +4879,8 @@ impl AgentLoop {
         let mut governor_llm_latency_window: VecDeque<u64> = VecDeque::new();
         let mut governor_tool_error_window: VecDeque<f64> = VecDeque::new();
         let mut governor_consecutive_error_turns: u32 = 0;
+        let mut repo_review_budget_state = RepoReviewBudgetState::default();
+        let mut objective_guard_retries: u32 = 0;
         let governor_window_limit = governor_window_size();
 
         loop {
@@ -5267,6 +5323,23 @@ impl AgentLoop {
                         }
                     }
                 }
+                let (objective_guard_active, requires_analytics) =
+                    objective_guard_policy(ctx.get_messages());
+                if objective_guard_active {
+                    let assistant_text = assistant_msg.content.as_deref().unwrap_or_default();
+                    if !objective_guard_satisfied(assistant_text, requires_analytics)
+                        && objective_guard_retries < 2
+                    {
+                        objective_guard_retries = objective_guard_retries.saturating_add(1);
+                        ctx.add_message(Message::system(objective_guard_retry_prompt(
+                            requires_analytics,
+                        )));
+                        ctx.add_message(Message::user(
+                            "Re-issue the final response with required verified sections now.",
+                        ));
+                        continue;
+                    }
+                }
                 let (u, a) = extract_last_user_assistant(ctx.get_messages());
                 self.memory_sync(&u, &a, session_id);
                 self.spawn_background_review(total_turns, &ctx, review_memory_at_end);
@@ -5311,6 +5384,26 @@ impl AgentLoop {
             for tc in &mut tool_calls {
                 self.repair_tool_call(tc);
                 self.hydrate_session_search_args(tc);
+            }
+            if let Some(note) =
+                apply_repo_review_tool_profile_narrowing(&mut tool_calls, ctx.get_messages())
+            {
+                self.emit_status("lifecycle", "Applied repo-review tool profile narrowing.");
+                ctx.add_message(Message::system(note));
+            }
+            if let Some(note) = apply_repo_review_discovery_budget_policy(
+                &mut tool_calls,
+                ctx.get_messages(),
+                &mut repo_review_budget_state,
+            ) {
+                self.emit_status("lifecycle", "Applied repo-review discovery budget policy.");
+                ctx.add_message(Message::system(note));
+            }
+            if tool_calls.is_empty() {
+                ctx.add_message(Message::system(
+                    "[SYSTEM] Tool profile/budget policy filtered this turn's calls. Propose refined, scoped code-inspection calls next.",
+                ));
+                continue;
             }
             let all_housekeeping = tool_calls.iter().all(|tc| {
                 matches!(
@@ -6587,6 +6680,309 @@ fn extract_last_user_assistant(messages: &[Message]) -> (String, String) {
         .and_then(|m| m.content.clone())
         .unwrap_or_default();
     (user, assistant)
+}
+
+fn latest_user_content(messages: &[Message]) -> Option<&str> {
+    messages
+        .iter()
+        .rev()
+        .find(|m| matches!(m.role, hermes_core::MessageRole::User))
+        .and_then(|m| m.content.as_deref())
+}
+
+fn extract_session_objective(messages: &[Message]) -> Option<String> {
+    messages
+        .iter()
+        .find(|m| matches!(m.role, hermes_core::MessageRole::System))
+        .and_then(|m| m.content.as_deref())
+        .and_then(|content| content.strip_prefix(SESSION_OBJECTIVE_PREFIX))
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
+
+fn detect_repo_review_intent(messages: &[Message]) -> bool {
+    let user = latest_user_content(messages)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let objective = extract_session_objective(messages)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    let combined = format!("{} {}", user, objective);
+    let review_terms = [
+        "repo",
+        "repository",
+        "codebase",
+        "review",
+        "audit",
+        "inspect",
+        "diagnose",
+        "debug",
+        "patch",
+        "implement",
+        "fix",
+    ];
+    let has_review_signal = review_terms.iter().any(|needle| combined.contains(needle));
+    let has_path_signal =
+        combined.contains('/') || combined.contains(".rs") || combined.contains(".py");
+    has_review_signal && has_path_signal
+}
+
+fn detect_communication_intent(messages: &[Message]) -> bool {
+    let text = latest_user_content(messages)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let comm_terms = [
+        "telegram",
+        "discord",
+        "slack",
+        "whatsapp",
+        "signal",
+        "notify",
+        "notification",
+        "send message",
+        "message me",
+        "dm",
+    ];
+    comm_terms.iter().any(|needle| text.contains(needle))
+}
+
+fn objective_guard_policy(messages: &[Message]) -> (bool, bool) {
+    let user = latest_user_content(messages)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let objective = extract_session_objective(messages)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let combined = format!("{} {}", user, objective);
+
+    let objective_active = !objective.is_empty()
+        || user.contains("/objective")
+        || user.contains("objective:")
+        || user.contains("goal:");
+    let repo_like = detect_repo_review_intent(messages)
+        || combined.contains("plan")
+        || combined.contains("analysis")
+        || combined.contains("review");
+    let trading_like = [
+        "solana",
+        "wallet",
+        "trade",
+        "trading",
+        "pnl",
+        "profit",
+        "exponent",
+        "objective",
+    ]
+    .iter()
+    .any(|needle| combined.contains(needle));
+
+    (objective_active && repo_like, trading_like)
+}
+
+fn objective_mode_system_hint(messages: &[Message]) -> Option<String> {
+    let (guard_active, requires_analytics) = objective_guard_policy(messages);
+    if !guard_active {
+        return None;
+    }
+    let analytics_line = if requires_analytics {
+        "2) ANALYTICS_VERIFIED: include copied metric values (or `objective_state=unproven` with blocker)."
+    } else {
+        "2) ANALYTICS_VERIFIED: include objective-state evidence relevant to this task."
+    };
+    Some(format!(
+        "[SYSTEM] Objective-mode guard active. Before finalizing, output sections exactly:\n\
+         1) {OBJECTIVE_PATCH_TAG} each proposed change must include `path=...` and `exists_now=true|false`.\n\
+         {analytics_line}\n\
+         Use only evidence verified in this run; if missing evidence, state `unproven` explicitly."
+    ))
+}
+
+fn objective_guard_satisfied(text: &str, requires_analytics: bool) -> bool {
+    let lower = text.to_ascii_lowercase();
+    let has_patch_tag = lower.contains(&OBJECTIVE_PATCH_TAG.to_ascii_lowercase());
+    let has_patch_evidence = lower.contains("exists_now=true")
+        || lower.contains("exists_now: true")
+        || lower.contains("verified_exists=true");
+    if !(has_patch_tag && has_patch_evidence) {
+        return false;
+    }
+    if !requires_analytics {
+        return true;
+    }
+    let has_analytics_tag = lower.contains(&OBJECTIVE_ANALYTICS_TAG.to_ascii_lowercase());
+    let has_objective_state = lower.contains("objective_state=")
+        || lower.contains("objective_state:")
+        || lower.contains("metric=");
+    has_analytics_tag && has_objective_state
+}
+
+fn objective_guard_retry_prompt(requires_analytics: bool) -> String {
+    let analytics_line = if requires_analytics {
+        "Also include copied analytics values and `objective_state=<advancing|flat|regressing|unproven>`."
+    } else {
+        "Include objective-state evidence even if the objective is currently unproven."
+    };
+    format!(
+        "[SYSTEM] Objective guard check failed. Re-issue your final response with required sections:\n\
+         {OBJECTIVE_PATCH_TAG}\n\
+         - path=<verified path>\n\
+         - exists_now=true|false\n\
+         {OBJECTIVE_ANALYTICS_TAG}\n\
+         - objective_state=<value>\n\
+         {analytics_line}"
+    )
+}
+
+fn is_housekeeping_tool_name(name: &str) -> bool {
+    matches!(
+        name,
+        "memory" | "todo" | "skill_manage" | "session_search" | "skills"
+    )
+}
+
+fn is_discovery_tool_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.contains("search")
+        || lower.contains("find")
+        || lower.contains("grep")
+        || lower.contains("list")
+        || lower.contains("read")
+        || lower.contains("view")
+        || lower.contains("scan")
+        || lower.contains("context_pack")
+        || lower == "terminal"
+        || lower == "execute_code"
+}
+
+fn is_messaging_tool_name(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    [
+        "telegram",
+        "discord",
+        "slack",
+        "mattermost",
+        "signal",
+        "whatsapp",
+        "wecom",
+        "weixin",
+        "qqbot",
+        "dingtalk",
+        "feishu",
+        "gmail",
+        "calendar",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+}
+
+fn compact_tool_args_for_signature(raw: &str) -> String {
+    raw.split_whitespace().collect::<String>()
+}
+
+fn discovery_signature(tool_calls: &[ToolCall]) -> Option<String> {
+    let mut fingerprints: Vec<String> = tool_calls
+        .iter()
+        .filter(|tc| is_discovery_tool_name(&tc.function.name))
+        .map(|tc| {
+            format!(
+                "{}:{}",
+                tc.function.name,
+                compact_tool_args_for_signature(&tc.function.arguments)
+            )
+        })
+        .collect();
+    if fingerprints.is_empty() {
+        return None;
+    }
+    fingerprints.sort();
+    let mut hasher = Sha256::new();
+    for fp in fingerprints {
+        hasher.update(fp.as_bytes());
+        hasher.update(b"\n");
+    }
+    Some(format!("{:x}", hasher.finalize()))
+}
+
+fn apply_repo_review_tool_profile_narrowing(
+    tool_calls: &mut Vec<ToolCall>,
+    messages: &[Message],
+) -> Option<String> {
+    if !detect_repo_review_intent(messages) {
+        return None;
+    }
+    let allow_messaging = detect_communication_intent(messages);
+    let mut filtered = 0usize;
+    tool_calls.retain(|tc| {
+        let should_filter = is_messaging_tool_name(&tc.function.name) && !allow_messaging;
+        if should_filter {
+            filtered += 1;
+            return false;
+        }
+        true
+    });
+    if filtered == 0 {
+        return None;
+    }
+    Some(format!(
+        "[SYSTEM] Repo-review tool profile narrowed this turn: skipped {} messaging adapter call(s) to keep focus on code evidence. `todo` remains enabled for task organization. If notifications are required, request telegram/discord/slack explicitly.",
+        filtered
+    ))
+}
+
+fn apply_repo_review_discovery_budget_policy(
+    tool_calls: &mut Vec<ToolCall>,
+    messages: &[Message],
+    state: &mut RepoReviewBudgetState,
+) -> Option<String> {
+    if !detect_repo_review_intent(messages) {
+        *state = RepoReviewBudgetState::default();
+        return None;
+    }
+    let Some(signature) = discovery_signature(tool_calls) else {
+        state.repeat_streak = 0;
+        state.last_discovery_signature = None;
+        return None;
+    };
+    let only_discovery_or_housekeeping = tool_calls.iter().all(|tc| {
+        is_discovery_tool_name(&tc.function.name) || is_housekeeping_tool_name(&tc.function.name)
+    });
+
+    if only_discovery_or_housekeeping
+        && state.last_discovery_signature.as_deref() == Some(signature.as_str())
+    {
+        state.repeat_streak = state.repeat_streak.saturating_add(1);
+    } else {
+        state.repeat_streak = 0;
+    }
+    state.last_discovery_signature = Some(signature);
+
+    if state.repeat_streak < 2 || !only_discovery_or_housekeeping {
+        return None;
+    }
+
+    let mut kept_per_tool: HashMap<String, usize> = HashMap::new();
+    let mut removed = 0usize;
+    tool_calls.retain(|tc| {
+        if !is_discovery_tool_name(&tc.function.name) {
+            return true;
+        }
+        let counter = kept_per_tool.entry(tc.function.name.clone()).or_insert(0);
+        if *counter < 2 {
+            *counter += 1;
+            true
+        } else {
+            removed += 1;
+            false
+        }
+    });
+
+    Some(format!(
+        "[SYSTEM] Discovery budget policy engaged after repeated near-identical repo-discovery loops (streak={}). {} duplicate low-yield discovery call(s) were trimmed. Refine search scope/paths, then move to synthesis and concrete patch planning.",
+        state.repeat_streak + 1,
+        removed
+    ))
 }
 
 fn detect_contextlattice_connect_intent(messages: &[Message]) -> bool {
@@ -10329,6 +10725,95 @@ mod tests {
             r#"{"command":"which contextlattice"}"#
         ));
         assert!(!is_contextlattice_shell_invocation(r#"{"command":"ls"}"#));
+    }
+
+    #[test]
+    fn test_repo_review_tool_profile_keeps_todo_filters_messaging() {
+        let msgs = vec![Message::user("review repo at /tmp/app and diagnose issue")];
+        let mut calls = vec![
+            ToolCall {
+                id: "a".to_string(),
+                function: hermes_core::FunctionCall {
+                    name: "todo".to_string(),
+                    arguments: "{}".to_string(),
+                },
+                extra_content: None,
+            },
+            ToolCall {
+                id: "b".to_string(),
+                function: hermes_core::FunctionCall {
+                    name: "telegram_send".to_string(),
+                    arguments: r#"{"text":"status"}"#.to_string(),
+                },
+                extra_content: None,
+            },
+        ];
+        let note = apply_repo_review_tool_profile_narrowing(&mut calls, &msgs);
+        assert!(note.is_some());
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].function.name, "todo");
+    }
+
+    #[test]
+    fn test_repo_review_discovery_policy_trims_repeated_loops() {
+        let msgs = vec![Message::user(
+            "inspect repo /tmp/app and review codebase deeply",
+        )];
+        let mut state = RepoReviewBudgetState::default();
+        let make_calls = || {
+            vec![
+                ToolCall {
+                    id: "1".to_string(),
+                    function: hermes_core::FunctionCall {
+                        name: "terminal".to_string(),
+                        arguments: r#"{"command":"rg -n TODO src"}"#.to_string(),
+                    },
+                    extra_content: None,
+                },
+                ToolCall {
+                    id: "2".to_string(),
+                    function: hermes_core::FunctionCall {
+                        name: "terminal".to_string(),
+                        arguments: r#"{"command":"rg -n TODO src"}"#.to_string(),
+                    },
+                    extra_content: None,
+                },
+                ToolCall {
+                    id: "3".to_string(),
+                    function: hermes_core::FunctionCall {
+                        name: "terminal".to_string(),
+                        arguments: r#"{"command":"rg -n TODO src"}"#.to_string(),
+                    },
+                    extra_content: None,
+                },
+            ]
+        };
+        let mut first = make_calls();
+        assert!(apply_repo_review_discovery_budget_policy(&mut first, &msgs, &mut state).is_none());
+        let mut second = make_calls();
+        assert!(
+            apply_repo_review_discovery_budget_policy(&mut second, &msgs, &mut state).is_none()
+        );
+        let mut third = make_calls();
+        let note = apply_repo_review_discovery_budget_policy(&mut third, &msgs, &mut state);
+        assert!(note.is_some());
+        assert!(third.len() < 3);
+    }
+
+    #[test]
+    fn test_objective_guard_requires_sections_for_trading_objective() {
+        let msgs = vec![
+            Message::system("[SESSION_OBJECTIVE] Exponentiate Solana wallet via trading."),
+            Message::user("review repo /tmp/algotraderv2_rust and produce patch plan"),
+        ];
+        let (active, needs_analytics) = objective_guard_policy(&msgs);
+        assert!(active);
+        assert!(needs_analytics);
+        assert!(!objective_guard_satisfied("plain response", true));
+        assert!(objective_guard_satisfied(
+            "PATCH_VERIFIED:\n- path=/tmp/a.rs exists_now=true\nANALYTICS_VERIFIED:\n- objective_state=advancing metric=+0.42 SOL",
+            true
+        ));
     }
 
     #[test]
