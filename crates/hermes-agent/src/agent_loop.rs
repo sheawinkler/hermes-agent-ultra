@@ -220,6 +220,12 @@ const OAUTH_REFRESH_BACKOFF_SECS: u64 = 60;
 const SESSION_OBJECTIVE_PREFIX: &str = "[SESSION_OBJECTIVE] ";
 const OBJECTIVE_PATCH_TAG: &str = "PATCH_VERIFIED:";
 const OBJECTIVE_ANALYTICS_TAG: &str = "ANALYTICS_VERIFIED:";
+const OBJECTIVE_DEEP_AUDIT_TAG: &str = "DEEP_AUDIT_VERIFIED:";
+const OBJECTIVE_GUARD_MAX_RETRIES: u32 = 2;
+const OBJECTIVE_DEEP_AUDIT_MAX_RETRIES: u32 = 4;
+const OBJECTIVE_DEEP_AUDIT_MIN_PATCH_ITEMS: usize = 2;
+const OBJECTIVE_DEEP_AUDIT_MIN_VERIFIED_FILES: usize = 5;
+const OBJECTIVE_DEEP_AUDIT_MIN_COMMANDS: usize = 3;
 
 // Python `AIAgent._MEMORY_REVIEW_PROMPT` / `_SKILL_REVIEW_PROMPT` / `_COMBINED_REVIEW_PROMPT` (v2026.4.13)
 const MEMORY_REVIEW_PROMPT: &str = "Review the conversation above and consider saving to memory if appropriate.\n\n\
@@ -4289,16 +4295,25 @@ impl AgentLoop {
                         }
                     }
                 }
-                let (objective_guard_active, requires_analytics) =
+                let (objective_guard_active, requires_analytics, deep_audit_required) =
                     objective_guard_policy(ctx.get_messages());
                 if objective_guard_active {
                     let assistant_text = assistant_msg.content.as_deref().unwrap_or_default();
-                    if !objective_guard_satisfied(assistant_text, requires_analytics)
-                        && objective_guard_retries < 2
+                    let max_guard_retries = if deep_audit_required {
+                        OBJECTIVE_DEEP_AUDIT_MAX_RETRIES
+                    } else {
+                        OBJECTIVE_GUARD_MAX_RETRIES
+                    };
+                    if !objective_guard_satisfied(
+                        assistant_text,
+                        requires_analytics,
+                        deep_audit_required,
+                    ) && objective_guard_retries < max_guard_retries
                     {
                         objective_guard_retries = objective_guard_retries.saturating_add(1);
                         ctx.add_message(Message::system(objective_guard_retry_prompt(
                             requires_analytics,
+                            deep_audit_required,
                         )));
                         ctx.add_message(Message::user(
                             "Re-issue the final response with required verified sections now.",
@@ -5323,16 +5338,25 @@ impl AgentLoop {
                         }
                     }
                 }
-                let (objective_guard_active, requires_analytics) =
+                let (objective_guard_active, requires_analytics, deep_audit_required) =
                     objective_guard_policy(ctx.get_messages());
                 if objective_guard_active {
                     let assistant_text = assistant_msg.content.as_deref().unwrap_or_default();
-                    if !objective_guard_satisfied(assistant_text, requires_analytics)
-                        && objective_guard_retries < 2
+                    let max_guard_retries = if deep_audit_required {
+                        OBJECTIVE_DEEP_AUDIT_MAX_RETRIES
+                    } else {
+                        OBJECTIVE_GUARD_MAX_RETRIES
+                    };
+                    if !objective_guard_satisfied(
+                        assistant_text,
+                        requires_analytics,
+                        deep_audit_required,
+                    ) && objective_guard_retries < max_guard_retries
                     {
                         objective_guard_retries = objective_guard_retries.saturating_add(1);
                         ctx.add_message(Message::system(objective_guard_retry_prompt(
                             requires_analytics,
+                            deep_audit_required,
                         )));
                         ctx.add_message(Message::user(
                             "Re-issue the final response with required verified sections now.",
@@ -6748,7 +6772,35 @@ fn detect_communication_intent(messages: &[Message]) -> bool {
     comm_terms.iter().any(|needle| text.contains(needle))
 }
 
-fn objective_guard_policy(messages: &[Message]) -> (bool, bool) {
+fn detect_deep_repo_audit_intent(messages: &[Message]) -> bool {
+    if !detect_repo_review_intent(messages) {
+        return false;
+    }
+    let user = latest_user_content(messages)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let objective = extract_session_objective(messages)
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let combined = format!("{} {}", user, objective);
+    [
+        "deep",
+        "deeply",
+        "comprehensive",
+        "full ",
+        "full-scope",
+        "end-to-end",
+        "line-by-line",
+        "thorough",
+        "complete",
+        "surgical",
+        "parity",
+    ]
+    .iter()
+    .any(|needle| combined.contains(needle))
+}
+
+fn objective_guard_policy(messages: &[Message]) -> (bool, bool, bool) {
     let user = latest_user_content(messages)
         .unwrap_or_default()
         .to_ascii_lowercase();
@@ -6777,12 +6829,14 @@ fn objective_guard_policy(messages: &[Message]) -> (bool, bool) {
     ]
     .iter()
     .any(|needle| combined.contains(needle));
+    let guard_active = objective_active && repo_like;
+    let deep_audit_required = guard_active && detect_deep_repo_audit_intent(messages);
 
-    (objective_active && repo_like, trading_like)
+    (guard_active, trading_like, deep_audit_required)
 }
 
 fn objective_mode_system_hint(messages: &[Message]) -> Option<String> {
-    let (guard_active, requires_analytics) = objective_guard_policy(messages);
+    let (guard_active, requires_analytics, deep_audit_required) = objective_guard_policy(messages);
     if !guard_active {
         return None;
     }
@@ -6791,15 +6845,93 @@ fn objective_mode_system_hint(messages: &[Message]) -> Option<String> {
     } else {
         "2) ANALYTICS_VERIFIED: include objective-state evidence relevant to this task."
     };
+    let deep_audit_line = if deep_audit_required {
+        format!(
+            "3) {OBJECTIVE_DEEP_AUDIT_TAG} include `scope_complete=true|false`, `verified_files=<n>` (>= {OBJECTIVE_DEEP_AUDIT_MIN_VERIFIED_FILES}), `commands_run=<n>` (>= {OBJECTIVE_DEEP_AUDIT_MIN_COMMANDS}), and explicit `unknowns=` + `blockers=` fields."
+        )
+    } else {
+        String::new()
+    };
     Some(format!(
         "[SYSTEM] Objective-mode guard active. Before finalizing, output sections exactly:\n\
          1) {OBJECTIVE_PATCH_TAG} each proposed change must include `path=...` and `exists_now=true|false`.\n\
          {analytics_line}\n\
+         {deep_audit_line}\n\
          Use only evidence verified in this run; if missing evidence, state `unproven` explicitly."
     ))
 }
 
-fn objective_guard_satisfied(text: &str, requires_analytics: bool) -> bool {
+fn parse_usize_after_marker(text: &str, marker: &str) -> Option<usize> {
+    let start = text.find(marker)?;
+    let mut digits = String::new();
+    for ch in text[start + marker.len()..].chars() {
+        if ch.is_ascii_digit() {
+            digits.push(ch);
+        } else if !digits.is_empty() {
+            break;
+        }
+    }
+    if digits.is_empty() {
+        None
+    } else {
+        digits.parse::<usize>().ok()
+    }
+}
+
+fn deep_audit_verified_patch_items(lower: &str) -> usize {
+    let path_hits = ["path=", "path:"]
+        .iter()
+        .map(|needle| lower.matches(needle).count())
+        .sum::<usize>();
+    let exists_hits = [
+        "exists_now=true",
+        "exists_now=false",
+        "exists_now: true",
+        "exists_now: false",
+        "verified_exists=true",
+        "verified_exists=false",
+        "verified_exists: true",
+        "verified_exists: false",
+    ]
+    .iter()
+    .map(|needle| lower.matches(needle).count())
+    .sum::<usize>();
+    path_hits.min(exists_hits)
+}
+
+fn objective_deep_audit_satisfied(lower: &str) -> bool {
+    if !lower.contains(&OBJECTIVE_DEEP_AUDIT_TAG.to_ascii_lowercase()) {
+        return false;
+    }
+    if deep_audit_verified_patch_items(lower) < OBJECTIVE_DEEP_AUDIT_MIN_PATCH_ITEMS {
+        return false;
+    }
+    let verified_files = parse_usize_after_marker(lower, "verified_files=")
+        .or_else(|| parse_usize_after_marker(lower, "verified_files:"))
+        .unwrap_or(0);
+    if verified_files < OBJECTIVE_DEEP_AUDIT_MIN_VERIFIED_FILES {
+        return false;
+    }
+    let commands_run = parse_usize_after_marker(lower, "commands_run=")
+        .or_else(|| parse_usize_after_marker(lower, "commands_run:"))
+        .unwrap_or(0);
+    if commands_run < OBJECTIVE_DEEP_AUDIT_MIN_COMMANDS {
+        return false;
+    }
+    let has_scope_field = lower.contains("scope_complete=true")
+        || lower.contains("scope_complete=false")
+        || lower.contains("scope_complete: true")
+        || lower.contains("scope_complete: false");
+    let has_unknowns_field = lower.contains("unknowns=") || lower.contains("unknowns:");
+    let has_blockers_field = lower.contains("blockers=") || lower.contains("blockers:");
+    has_scope_field && has_unknowns_field && has_blockers_field
+}
+
+fn objective_guard_satisfied(
+    text: &str,
+    requires_analytics: bool,
+    deep_audit_required: bool,
+) -> bool {
     let lower = text.to_ascii_lowercase();
     let has_patch_tag = lower.contains(&OBJECTIVE_PATCH_TAG.to_ascii_lowercase());
     let has_patch_evidence = lower.contains("exists_now=true")
@@ -6815,14 +6947,34 @@ fn objective_guard_satisfied(text: &str, requires_analytics: bool) -> bool {
     let has_objective_state = lower.contains("objective_state=")
         || lower.contains("objective_state:")
         || lower.contains("metric=");
-    has_analytics_tag && has_objective_state
+    let analytics_ok = has_analytics_tag && has_objective_state;
+    if !analytics_ok {
+        return false;
+    }
+    if deep_audit_required {
+        return objective_deep_audit_satisfied(&lower);
+    }
+    true
 }
 
-fn objective_guard_retry_prompt(requires_analytics: bool) -> String {
+fn objective_guard_retry_prompt(requires_analytics: bool, deep_audit_required: bool) -> String {
     let analytics_line = if requires_analytics {
         "Also include copied analytics values and `objective_state=<advancing|flat|regressing|unproven>`."
     } else {
         "Include objective-state evidence even if the objective is currently unproven."
+    };
+    let deep_audit_line = if deep_audit_required {
+        format!(
+            "{OBJECTIVE_DEEP_AUDIT_TAG}\n\
+             - scope_complete=true|false\n\
+             - verified_files=<n> (>= {OBJECTIVE_DEEP_AUDIT_MIN_VERIFIED_FILES})\n\
+             - commands_run=<n> (>= {OBJECTIVE_DEEP_AUDIT_MIN_COMMANDS})\n\
+             - unknowns=<count>\n\
+             - blockers=<none|list>\n\
+             - include at least {OBJECTIVE_DEEP_AUDIT_MIN_PATCH_ITEMS} verified patch items in {OBJECTIVE_PATCH_TAG}"
+        )
+    } else {
+        String::new()
     };
     format!(
         "[SYSTEM] Objective guard check failed. Re-issue your final response with required sections:\n\
@@ -6831,7 +6983,8 @@ fn objective_guard_retry_prompt(requires_analytics: bool) -> String {
          - exists_now=true|false\n\
          {OBJECTIVE_ANALYTICS_TAG}\n\
          - objective_state=<value>\n\
-         {analytics_line}"
+         {analytics_line}\n\
+         {deep_audit_line}"
     )
 }
 
@@ -10806,14 +10959,44 @@ mod tests {
             Message::system("[SESSION_OBJECTIVE] Exponentiate Solana wallet via trading."),
             Message::user("review repo /tmp/algotraderv2_rust and produce patch plan"),
         ];
-        let (active, needs_analytics) = objective_guard_policy(&msgs);
+        let (active, needs_analytics, deep_audit_required) = objective_guard_policy(&msgs);
         assert!(active);
         assert!(needs_analytics);
-        assert!(!objective_guard_satisfied("plain response", true));
+        assert!(!deep_audit_required);
+        assert!(!objective_guard_satisfied("plain response", true, false));
         assert!(objective_guard_satisfied(
             "PATCH_VERIFIED:\n- path=/tmp/a.rs exists_now=true\nANALYTICS_VERIFIED:\n- objective_state=advancing metric=+0.42 SOL",
-            true
+            true,
+            false
         ));
+    }
+
+    #[test]
+    fn test_deep_objective_guard_requires_deep_audit_section() {
+        let msgs = vec![
+            Message::system("[SESSION_OBJECTIVE] Exponentiate Solana wallet via trading."),
+            Message::user(
+                "deep end-to-end review repo /tmp/algotraderv2_rust and produce complete patch plan",
+            ),
+        ];
+        let (active, needs_analytics, deep_audit_required) = objective_guard_policy(&msgs);
+        assert!(active);
+        assert!(needs_analytics);
+        assert!(deep_audit_required);
+
+        let shallow = "PATCH_VERIFIED:\n- path=/tmp/a.rs exists_now=true\nANALYTICS_VERIFIED:\n- objective_state=advancing metric=+0.42 SOL";
+        assert!(!objective_guard_satisfied(shallow, true, true));
+
+        let deep = "PATCH_VERIFIED:\n- path=/tmp/a.rs exists_now=true\n- path=/tmp/b.rs exists_now=true\nANALYTICS_VERIFIED:\n- objective_state=flat metric=+0.00 SOL\nDEEP_AUDIT_VERIFIED:\n- scope_complete=true\n- verified_files=8\n- commands_run=5\n- unknowns=1\n- blockers=none";
+        assert!(objective_guard_satisfied(deep, true, true));
+    }
+
+    #[test]
+    fn test_deep_objective_retry_prompt_contains_audit_requirements() {
+        let prompt = objective_guard_retry_prompt(true, true);
+        assert!(prompt.contains(OBJECTIVE_DEEP_AUDIT_TAG));
+        assert!(prompt.contains("verified_files"));
+        assert!(prompt.contains("commands_run"));
     }
 
     #[test]
