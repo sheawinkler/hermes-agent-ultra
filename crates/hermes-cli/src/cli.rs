@@ -641,9 +641,10 @@ pub struct Cli {
     #[arg(short = 'z', long, global = true)]
     pub oneshot: Option<String>,
 
-    /// Allow tools in one-shot/query mode (`-z` / `chat --query`).
+    /// Force-enable tools in one-shot/query mode (`-z` / `chat --query`).
     ///
-    /// By default, one-shot/query mode disables tools for deterministic replies.
+    /// Tools are enabled by default in query mode. Use
+    /// `HERMES_QUERY_DISABLE_TOOLS=1` to force-disable.
     #[arg(long, global = true)]
     pub allow_tools: bool,
 

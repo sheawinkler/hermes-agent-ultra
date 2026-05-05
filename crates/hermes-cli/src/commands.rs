@@ -7167,12 +7167,23 @@ fn apply_cli_chat_runtime_env(provider_model: &str) {
 }
 
 const QUERY_ALLOW_TOOLS_ENV_KEY: &str = "HERMES_QUERY_ALLOW_TOOLS";
+const QUERY_DISABLE_TOOLS_ENV_KEY: &str = "HERMES_QUERY_DISABLE_TOOLS";
 
 fn query_mode_tools_enabled(query_mode: bool, allow_tools_flag: bool) -> bool {
     if !query_mode {
         return true;
     }
-    allow_tools_flag || hermes_config::env_var_enabled(QUERY_ALLOW_TOOLS_ENV_KEY)
+    if allow_tools_flag {
+        return true;
+    }
+    if hermes_config::env_var_enabled(QUERY_DISABLE_TOOLS_ENV_KEY) {
+        return false;
+    }
+    // Backward compatible explicit-enable override (now redundant with default-on).
+    if hermes_config::env_var_enabled(QUERY_ALLOW_TOOLS_ENV_KEY) {
+        return true;
+    }
+    true
 }
 
 /// Handle `hermes chat [--query ...] [--preload-skill ...] [--yolo]`.
@@ -7211,8 +7222,8 @@ pub async fn handle_cli_chat(
     let tools_enabled = query_mode_tools_enabled(query_mode, allow_tools_flag);
     if query_mode && !tools_enabled {
         println!(
-            "[Query mode: tools disabled by default. Pass --allow-tools or set {}=1 to enable.]",
-            QUERY_ALLOW_TOOLS_ENV_KEY
+            "[Query mode tools are disabled by {}=1. Unset it or pass --allow-tools to re-enable.]",
+            QUERY_DISABLE_TOOLS_ENV_KEY
         );
     }
 
@@ -12576,18 +12587,30 @@ install_command: "uv pip install -r requirements.txt"
     }
 
     #[test]
-    fn query_mode_tools_enabled_defaults_off_for_query_mode() {
+    fn query_mode_tools_enabled_defaults_on_for_query_mode() {
         let _lock = env_test_lock();
+        std::env::remove_var("HERMES_QUERY_DISABLE_TOOLS");
         std::env::remove_var("HERMES_QUERY_ALLOW_TOOLS");
-        assert!(!query_mode_tools_enabled(true, false));
+        assert!(query_mode_tools_enabled(true, false));
         assert!(query_mode_tools_enabled(false, false));
     }
 
     #[test]
-    fn query_mode_tools_enabled_respects_flag_and_env_override() {
+    fn query_mode_tools_enabled_respects_disable_env_and_flag_override() {
         let _lock = env_test_lock();
         std::env::remove_var("HERMES_QUERY_ALLOW_TOOLS");
+        std::env::set_var("HERMES_QUERY_DISABLE_TOOLS", "1");
+        assert!(!query_mode_tools_enabled(true, false));
         assert!(query_mode_tools_enabled(true, true));
+        std::env::remove_var("HERMES_QUERY_DISABLE_TOOLS");
+    }
+
+    #[test]
+    fn query_mode_tools_enabled_respects_legacy_allow_env() {
+        let _lock = env_test_lock();
+        std::env::remove_var("HERMES_QUERY_DISABLE_TOOLS");
+        std::env::remove_var("HERMES_QUERY_ALLOW_TOOLS");
+        assert!(query_mode_tools_enabled(true, false));
         std::env::set_var("HERMES_QUERY_ALLOW_TOOLS", "1");
         assert!(query_mode_tools_enabled(true, false));
         std::env::remove_var("HERMES_QUERY_ALLOW_TOOLS");
