@@ -224,8 +224,8 @@ const OBJECTIVE_DEEP_AUDIT_TAG: &str = "DEEP_AUDIT_VERIFIED:";
 const OBJECTIVE_GUARD_MAX_RETRIES: u32 = 2;
 const OBJECTIVE_DEEP_AUDIT_MAX_RETRIES: u32 = 4;
 const OBJECTIVE_DEEP_AUDIT_MIN_PATCH_ITEMS: usize = 2;
-const OBJECTIVE_DEEP_AUDIT_MIN_VERIFIED_FILES: usize = 5;
-const OBJECTIVE_DEEP_AUDIT_MIN_COMMANDS: usize = 3;
+const OBJECTIVE_DEEP_AUDIT_MIN_UNIQUE_FILES: usize = 5;
+const OBJECTIVE_DEEP_AUDIT_MIN_UNIQUE_COMMANDS: usize = 3;
 
 // Python `AIAgent._MEMORY_REVIEW_PROMPT` / `_SKILL_REVIEW_PROMPT` / `_COMBINED_REVIEW_PROMPT` (v2026.4.13)
 const MEMORY_REVIEW_PROMPT: &str = "Review the conversation above and consider saving to memory if appropriate.\n\n\
@@ -6847,7 +6847,7 @@ fn objective_mode_system_hint(messages: &[Message]) -> Option<String> {
     };
     let deep_audit_line = if deep_audit_required {
         format!(
-            "3) {OBJECTIVE_DEEP_AUDIT_TAG} include `scope_complete=true|false`, `verified_files=<n>` (>= {OBJECTIVE_DEEP_AUDIT_MIN_VERIFIED_FILES}), `commands_run=<n>` (>= {OBJECTIVE_DEEP_AUDIT_MIN_COMMANDS}), and explicit `unknowns=` + `blockers=` fields."
+            "3) {OBJECTIVE_DEEP_AUDIT_TAG} include `scope_complete=true|false`, at least {OBJECTIVE_DEEP_AUDIT_MIN_UNIQUE_FILES} unique `file=<path>` lines, at least {OBJECTIVE_DEEP_AUDIT_MIN_UNIQUE_COMMANDS} unique `cmd=<command>` lines, and explicit `unknowns=` + `blockers=` fields."
         )
     } else {
         String::new()
@@ -6861,21 +6861,40 @@ fn objective_mode_system_hint(messages: &[Message]) -> Option<String> {
     ))
 }
 
-fn parse_usize_after_marker(text: &str, marker: &str) -> Option<usize> {
-    let start = text.find(marker)?;
-    let mut digits = String::new();
-    for ch in text[start + marker.len()..].chars() {
-        if ch.is_ascii_digit() {
-            digits.push(ch);
-        } else if !digits.is_empty() {
-            break;
+fn section_after_tag<'a>(text: &'a str, tag: &str) -> Option<&'a str> {
+    let tag_lc = tag.to_ascii_lowercase();
+    let start = text.find(&tag_lc)?;
+    Some(&text[start + tag_lc.len()..])
+}
+
+fn unique_values_for_markers(section: &str, markers: &[&str]) -> HashSet<String> {
+    let mut values = HashSet::new();
+    for raw_line in section.lines() {
+        let line = raw_line.trim();
+        for marker in markers {
+            if let Some(idx) = line.find(marker) {
+                let candidate = line[idx + marker.len()..]
+                    .trim()
+                    .trim_matches('`')
+                    .trim_matches('"')
+                    .trim_matches('\'');
+                if candidate.is_empty() {
+                    continue;
+                }
+                let token = candidate
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or_default()
+                    .trim_end_matches(',')
+                    .trim_end_matches(';');
+                if !token.is_empty() {
+                    values.insert(token.to_string());
+                }
+                break;
+            }
         }
     }
-    if digits.is_empty() {
-        None
-    } else {
-        digits.parse::<usize>().ok()
-    }
+    values
 }
 
 fn deep_audit_verified_patch_items(lower: &str) -> usize {
@@ -6906,16 +6925,14 @@ fn objective_deep_audit_satisfied(lower: &str) -> bool {
     if deep_audit_verified_patch_items(lower) < OBJECTIVE_DEEP_AUDIT_MIN_PATCH_ITEMS {
         return false;
     }
-    let verified_files = parse_usize_after_marker(lower, "verified_files=")
-        .or_else(|| parse_usize_after_marker(lower, "verified_files:"))
-        .unwrap_or(0);
-    if verified_files < OBJECTIVE_DEEP_AUDIT_MIN_VERIFIED_FILES {
+    let section = section_after_tag(lower, OBJECTIVE_DEEP_AUDIT_TAG).unwrap_or_default();
+    let unique_files = unique_values_for_markers(section, &["file=", "file:", "path=", "path:"]);
+    if unique_files.len() < OBJECTIVE_DEEP_AUDIT_MIN_UNIQUE_FILES {
         return false;
     }
-    let commands_run = parse_usize_after_marker(lower, "commands_run=")
-        .or_else(|| parse_usize_after_marker(lower, "commands_run:"))
-        .unwrap_or(0);
-    if commands_run < OBJECTIVE_DEEP_AUDIT_MIN_COMMANDS {
+    let unique_commands =
+        unique_values_for_markers(section, &["cmd=", "cmd:", "command=", "command:"]);
+    if unique_commands.len() < OBJECTIVE_DEEP_AUDIT_MIN_UNIQUE_COMMANDS {
         return false;
     }
     let has_scope_field = lower.contains("scope_complete=true")
@@ -6967,8 +6984,10 @@ fn objective_guard_retry_prompt(requires_analytics: bool, deep_audit_required: b
         format!(
             "{OBJECTIVE_DEEP_AUDIT_TAG}\n\
              - scope_complete=true|false\n\
-             - verified_files=<n> (>= {OBJECTIVE_DEEP_AUDIT_MIN_VERIFIED_FILES})\n\
-             - commands_run=<n> (>= {OBJECTIVE_DEEP_AUDIT_MIN_COMMANDS})\n\
+             - file=<verified_path_1>\n\
+             - file=<verified_path_2> ... (at least {OBJECTIVE_DEEP_AUDIT_MIN_UNIQUE_FILES} unique file lines)\n\
+             - cmd=<command_1>\n\
+             - cmd=<command_2> ... (at least {OBJECTIVE_DEEP_AUDIT_MIN_UNIQUE_COMMANDS} unique command lines)\n\
              - unknowns=<count>\n\
              - blockers=<none|list>\n\
              - include at least {OBJECTIVE_DEEP_AUDIT_MIN_PATCH_ITEMS} verified patch items in {OBJECTIVE_PATCH_TAG}"
@@ -10987,7 +11006,10 @@ mod tests {
         let shallow = "PATCH_VERIFIED:\n- path=/tmp/a.rs exists_now=true\nANALYTICS_VERIFIED:\n- objective_state=advancing metric=+0.42 SOL";
         assert!(!objective_guard_satisfied(shallow, true, true));
 
-        let deep = "PATCH_VERIFIED:\n- path=/tmp/a.rs exists_now=true\n- path=/tmp/b.rs exists_now=true\nANALYTICS_VERIFIED:\n- objective_state=flat metric=+0.00 SOL\nDEEP_AUDIT_VERIFIED:\n- scope_complete=true\n- verified_files=8\n- commands_run=5\n- unknowns=1\n- blockers=none";
+        let numeric_only = "PATCH_VERIFIED:\n- path=/tmp/a.rs exists_now=true\n- path=/tmp/b.rs exists_now=true\nANALYTICS_VERIFIED:\n- objective_state=flat metric=+0.00 SOL\nDEEP_AUDIT_VERIFIED:\n- scope_complete=true\n- verified_files=8\n- commands_run=5\n- unknowns=1\n- blockers=none";
+        assert!(!objective_guard_satisfied(numeric_only, true, true));
+
+        let deep = "PATCH_VERIFIED:\n- path=/tmp/a.rs exists_now=true\n- path=/tmp/b.rs exists_now=true\nANALYTICS_VERIFIED:\n- objective_state=flat metric=+0.00 SOL\nDEEP_AUDIT_VERIFIED:\n- scope_complete=true\n- file=/tmp/a.rs\n- file=/tmp/b.rs\n- file=/tmp/c.rs\n- file=/tmp/d.rs\n- file=/tmp/e.rs\n- cmd=rg -n objective src\n- cmd=sed -n 1,220p src/main.rs\n- cmd=cargo test -p hermes-agent objective_guard\n- unknowns=1\n- blockers=none";
         assert!(objective_guard_satisfied(deep, true, true));
     }
 
@@ -10995,8 +11017,8 @@ mod tests {
     fn test_deep_objective_retry_prompt_contains_audit_requirements() {
         let prompt = objective_guard_retry_prompt(true, true);
         assert!(prompt.contains(OBJECTIVE_DEEP_AUDIT_TAG));
-        assert!(prompt.contains("verified_files"));
-        assert!(prompt.contains("commands_run"));
+        assert!(prompt.contains("file=<verified_path_1>"));
+        assert!(prompt.contains("cmd=<command_1>"));
     }
 
     #[test]
