@@ -1811,6 +1811,38 @@ fn count_renderable_messages(messages: &[hermes_core::Message]) -> usize {
         .count()
 }
 
+fn looks_like_internal_scaffold_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("to=functions.")
+        || trimmed.starts_with("to=tools.")
+        || trimmed.starts_with("to=memory.")
+        || trimmed.starts_with("->functions.")
+        || trimmed.contains(" to=functions.")
+}
+
+fn sanitize_scaffold_line_to_ascii(line: &str) -> Option<String> {
+    let leading_len = line.len().saturating_sub(line.trim_start().len());
+    let leading = &line[..leading_len];
+    let mut body = String::new();
+    let mut prev_space = false;
+    for ch in line[leading_len..].chars() {
+        if ch.is_ascii_graphic() {
+            body.push(ch);
+            prev_space = false;
+        } else if ch.is_ascii_whitespace() {
+            if !prev_space {
+                body.push(' ');
+                prev_space = true;
+            }
+        }
+    }
+    let body = body.trim();
+    if body.is_empty() {
+        return None;
+    }
+    Some(format!("{leading}{body}"))
+}
+
 fn render_assistant_markdown_lines(
     content: &str,
     styles: &crate::theme::ResolvedStyles,
@@ -1840,6 +1872,15 @@ fn render_assistant_markdown_lines(
         .add_modifier(Modifier::BOLD);
 
     for raw in content.lines() {
+        let normalized = if looks_like_internal_scaffold_line(raw) {
+            sanitize_scaffold_line_to_ascii(raw).unwrap_or_default()
+        } else {
+            raw.to_string()
+        };
+        if normalized.is_empty() {
+            continue;
+        }
+        let raw = normalized.as_str();
         let trimmed = raw.trim_start();
         let is_fence = trimmed.starts_with("```") || trimmed.starts_with("~~~");
         if is_fence {
@@ -4427,5 +4468,32 @@ mod tests {
         let as_text =
             |v: &[Line<'static>]| -> Vec<String> { v.iter().map(Line::to_string).collect() };
         assert_eq!(as_text(&full), as_text(&lines));
+    }
+
+    #[test]
+    fn test_scaffold_line_sanitizer_strips_non_ascii() {
+        let raw = "to=functions.memory 大安快些 json ... But I can in one message as seen in logs.";
+        let sanitized = sanitize_scaffold_line_to_ascii(raw).expect("sanitized");
+        assert!(!sanitized.contains('大'));
+        assert!(!sanitized.contains('安'));
+        assert!(sanitized.contains("to=functions.memory"));
+        assert!(sanitized.contains("But I can in one message as seen in logs."));
+    }
+
+    #[test]
+    fn test_render_assistant_markdown_lines_sanitizes_scaffold_only() {
+        let theme = Theme::default_theme();
+        let colors = theme.colors.to_ratatui_colors();
+        let styles = theme.resolved_styles();
+        let content = "to=functions.memory 天安中彩樣\nregular line";
+        let lines = render_assistant_markdown_lines(content, &styles, &colors);
+        let joined = lines
+            .iter()
+            .map(Line::to_string)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(joined.contains("to=functions.memory"));
+        assert!(!joined.contains('天'));
+        assert!(joined.contains("regular line"));
     }
 }
