@@ -225,6 +225,12 @@ pub struct UiTranscriptMessage {
 impl App {
     const SESSION_OBJECTIVE_PREFIX: &'static str = "[SESSION_OBJECTIVE] ";
 
+    fn ensure_session_stub_snapshot(&self) {
+        if let Err(err) = self.persist_session_snapshot(None) {
+            tracing::warn!("session startup snapshot skipped: {}", err);
+        }
+    }
+
     fn push_stream_extra_event(
         shared: &Arc<StdMutex<Option<StreamHandle>>>,
         payload: serde_json::Value,
@@ -539,7 +545,7 @@ impl App {
             );
         }
 
-        Ok(Self {
+        let app = Self {
             state_root,
             config: Arc::new(config),
             agent,
@@ -560,7 +566,9 @@ impl App {
             pending_theme: None,
             session_objective: None,
             pet_settings: load_pet_settings(),
-        })
+        };
+        app.ensure_session_stub_snapshot();
+        Ok(app)
     }
 
     /// Attach a streaming handle (used by TUI mode).
@@ -706,6 +714,7 @@ impl App {
         self.session_objective = None;
         self.input_history.clear();
         self.history_index = 0;
+        self.ensure_session_stub_snapshot();
     }
 
     /// Reset the current session (clear messages but keep session ID).
@@ -1327,6 +1336,35 @@ mod tests {
             app.state_root.join("sessions").join("state-root-test.json")
         );
         assert!(path.exists());
+    }
+
+    #[test]
+    fn test_new_session_persists_startup_stub_snapshot() {
+        let _guard = env_test_lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut app = build_minimal_test_app();
+        app.state_root = tmp.path().join("custom-state-root");
+        std::fs::create_dir_all(app.state_root.join("sessions")).expect("create sessions dir");
+        let old_session_id = app.session_id.clone();
+
+        app.new_session();
+
+        assert_ne!(app.session_id, old_session_id);
+        let snapshot_path = app
+            .state_root
+            .join("sessions")
+            .join(format!("{}.json", app.session_id));
+        assert!(snapshot_path.exists());
+
+        let content = std::fs::read_to_string(&snapshot_path).expect("read snapshot");
+        let value: serde_json::Value = serde_json::from_str(&content).expect("parse snapshot");
+        assert_eq!(
+            value
+                .get("messages")
+                .and_then(|v| v.as_array())
+                .map(|arr| arr.len()),
+            Some(0)
+        );
     }
 
     #[test]

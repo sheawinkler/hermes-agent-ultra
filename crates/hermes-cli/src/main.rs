@@ -593,12 +593,6 @@ fn load_resume_payload(
         })?;
 
     let messages = parse_resume_messages(messages_value);
-    if messages.is_empty() {
-        return Err(AgentError::Config(format!(
-            "Session `{}` has no restorable messages.",
-            resolved_id
-        )));
-    }
 
     Ok(ResumeSessionPayload {
         resolved_id,
@@ -13745,6 +13739,35 @@ mod tests {
             Some(home) => std::env::set_var("HOME", home),
             None => std::env::remove_var("HOME"),
         }
+    }
+
+    #[test]
+    fn load_resume_payload_accepts_empty_messages_for_startup_stub() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cli = cli_for_temp_state_root(tmp.path());
+        let sessions_dir = hermes_state_root(&cli).join("sessions");
+        std::fs::create_dir_all(&sessions_dir).expect("create sessions dir");
+        let session_path = sessions_dir.join("stub-empty.json");
+        std::fs::write(
+            &session_path,
+            r#"{
+  "session_info": {
+    "session_id": "stub-empty",
+    "model": "nous:nousresearch/hermes-4-70b"
+  },
+  "messages": []
+}"#,
+        )
+        .expect("write stub session");
+
+        let payload = load_resume_payload(&cli, Some("stub-empty")).expect("load payload");
+        assert_eq!(payload.resolved_id, "stub-empty");
+        assert_eq!(payload.session_id, "stub-empty");
+        assert_eq!(
+            payload.model.as_deref(),
+            Some("nous:nousresearch/hermes-4-70b")
+        );
+        assert_eq!(payload.messages.len(), 0);
     }
 
     #[test]
