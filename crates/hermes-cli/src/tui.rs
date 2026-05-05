@@ -1820,7 +1820,17 @@ fn looks_like_internal_scaffold_line(line: &str) -> bool {
         || trimmed.contains(" to=functions.")
 }
 
-fn sanitize_scaffold_line_to_ascii(line: &str) -> Option<String> {
+fn strict_default_language_output_enabled() -> bool {
+    match std::env::var("HERMES_TUI_STRICT_DEFAULT_LANGUAGE") {
+        Ok(raw) => !matches!(
+            raw.trim().to_ascii_lowercase().as_str(),
+            "0" | "false" | "no" | "off"
+        ),
+        Err(_) => true,
+    }
+}
+
+fn sanitize_line_to_default_language_ascii(line: &str, compact_ws: bool) -> Option<String> {
     let leading_len = line.len().saturating_sub(line.trim_start().len());
     let leading = &line[..leading_len];
     let mut body = String::new();
@@ -1829,15 +1839,33 @@ fn sanitize_scaffold_line_to_ascii(line: &str) -> Option<String> {
         if ch.is_ascii_graphic() {
             body.push(ch);
             prev_space = false;
-        } else if ch.is_ascii_whitespace() {
-            if !prev_space {
+            continue;
+        }
+
+        if ch.is_ascii_whitespace() {
+            if compact_ws {
+                if !prev_space {
+                    body.push(' ');
+                    prev_space = true;
+                }
+            } else {
                 body.push(' ');
                 prev_space = true;
             }
+            continue;
+        }
+
+        if !prev_space {
+            body.push(' ');
+            prev_space = true;
         }
     }
-    let body = body.trim();
-    if body.is_empty() {
+    let body = if compact_ws {
+        body.trim().to_string()
+    } else {
+        body.trim_end().to_string()
+    };
+    if body.trim().is_empty() {
         return None;
     }
     Some(format!("{leading}{body}"))
@@ -1871,9 +1899,12 @@ fn render_assistant_markdown_lines(
         .bg(colors.background)
         .add_modifier(Modifier::BOLD);
 
+    let strict_gate = strict_default_language_output_enabled();
     for raw in content.lines() {
-        let normalized = if looks_like_internal_scaffold_line(raw) {
-            sanitize_scaffold_line_to_ascii(raw).unwrap_or_default()
+        let normalized = if strict_gate {
+            sanitize_line_to_default_language_ascii(raw, false).unwrap_or_default()
+        } else if looks_like_internal_scaffold_line(raw) {
+            sanitize_line_to_default_language_ascii(raw, true).unwrap_or_default()
         } else {
             raw.to_string()
         };
@@ -4471,9 +4502,9 @@ mod tests {
     }
 
     #[test]
-    fn test_scaffold_line_sanitizer_strips_non_ascii() {
+    fn test_default_language_sanitizer_strips_non_ascii() {
         let raw = "to=functions.memory 大安快些 json ... But I can in one message as seen in logs.";
-        let sanitized = sanitize_scaffold_line_to_ascii(raw).expect("sanitized");
+        let sanitized = sanitize_line_to_default_language_ascii(raw, true).expect("sanitized");
         assert!(!sanitized.contains('大'));
         assert!(!sanitized.contains('安'));
         assert!(sanitized.contains("to=functions.memory"));
@@ -4481,11 +4512,11 @@ mod tests {
     }
 
     #[test]
-    fn test_render_assistant_markdown_lines_sanitizes_scaffold_only() {
+    fn test_render_assistant_markdown_lines_enforces_default_language_gate() {
         let theme = Theme::default_theme();
         let colors = theme.colors.to_ratatui_colors();
         let styles = theme.resolved_styles();
-        let content = "to=functions.memory 天安中彩樣\nregular line";
+        let content = "to=functions.memory 天安中彩樣\nregular line 大家好";
         let lines = render_assistant_markdown_lines(content, &styles, &colors);
         let joined = lines
             .iter()
@@ -4494,6 +4525,7 @@ mod tests {
             .join("\n");
         assert!(joined.contains("to=functions.memory"));
         assert!(!joined.contains('天'));
+        assert!(!joined.contains('大'));
         assert!(joined.contains("regular line"));
     }
 }
