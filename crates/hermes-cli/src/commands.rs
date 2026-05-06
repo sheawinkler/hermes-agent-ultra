@@ -165,6 +165,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
         "Show build/parity/upstream snapshot and enabled Ultra features",
     ),
     ("/ops", "Operator control plane (status + quick controls)"),
+    (
+        "/mission",
+        "Mission control board for continuous loops (`status|init`)",
+    ),
     ("/dashboard", "Dashboard control (status|on|off|url)"),
     (
         "/platforms",
@@ -2965,6 +2969,7 @@ pub async fn handle_slash_command(
         "/status" => handle_status_command(app),
         "/about" => handle_about_command(app),
         "/ops" => handle_ops_command(app, args).await,
+        "/mission" => handle_mission_command(app, args).await,
         "/dashboard" => handle_dashboard_command(app, args).await,
         "/platforms" => handle_platforms_command(app),
         "/commands" => {
@@ -5061,6 +5066,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                /ops skills-tier [status|trusted|balanced|open]\n\
                /ops evolve [status|run|recommend]\n\
                /ops gate [status|eval|elite|slo]\n\
+               /mission [status|init]\n\
                /ops help",
             app.session_id,
             app.current_model,
@@ -5104,7 +5110,8 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                  - /ops dashboard [status|on|off|url] [host] [port]\n\
                  - /ops skills-tier [status|trusted|balanced|open]\n\
                  - /ops evolve [status|run|recommend]\n\
-                 - /ops gate [status|eval|elite|slo]",
+                 - /ops gate [status|eval|elite|slo]\n\
+                 - /mission [status|init]",
             );
             Ok(CommandResult::Handled)
         }
@@ -5128,6 +5135,221 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                     other
                 ),
             );
+            Ok(CommandResult::Handled)
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+struct AlphaLoopDefinition {
+    id: String,
+    title: String,
+    objective: String,
+    cadence: String,
+    target: String,
+    enabled: bool,
+    trading_sensitive: bool,
+}
+
+fn alpha_state_dir() -> PathBuf {
+    hermes_config::hermes_home().join("alpha")
+}
+
+fn alpha_loops_path() -> PathBuf {
+    alpha_state_dir().join("loops.json")
+}
+
+fn default_alpha_loops() -> Vec<AlphaLoopDefinition> {
+    vec![
+        AlphaLoopDefinition {
+            id: "primary-objective-loop".to_string(),
+            title: "Primary Objective Loop".to_string(),
+            objective: "Continuously drive the operator primary objective with measurable gates"
+                .to_string(),
+            cadence: "continuous".to_string(),
+            target: "objective:primary".to_string(),
+            enabled: true,
+            trading_sensitive: false,
+        },
+        AlphaLoopDefinition {
+            id: "secondary-monitor-loop".to_string(),
+            title: "Secondary Monitor Loop".to_string(),
+            objective: "Continuously monitor a secondary production workflow for regressions"
+                .to_string(),
+            cadence: "1m".to_string(),
+            target: "repo:secondary".to_string(),
+            enabled: true,
+            trading_sensitive: false,
+        },
+        AlphaLoopDefinition {
+            id: "research-improvement-loop".to_string(),
+            title: "Research + Improvement Loop".to_string(),
+            objective: "Run continuous research and implementation recommendations".to_string(),
+            cadence: "5m".to_string(),
+            target: "workflow:research".to_string(),
+            enabled: true,
+            trading_sensitive: false,
+        },
+    ]
+}
+
+fn write_default_alpha_loops(force: bool) -> Result<PathBuf, AgentError> {
+    let dir = alpha_state_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        AgentError::Io(format!(
+            "failed to create alpha state directory {}: {}",
+            dir.display(),
+            e
+        ))
+    })?;
+    let path = alpha_loops_path();
+    if path.exists() && !force {
+        return Ok(path);
+    }
+    let content = serde_json::to_string_pretty(&default_alpha_loops())
+        .map_err(|e| AgentError::Config(format!("failed to encode alpha loops: {}", e)))?;
+    std::fs::write(&path, content).map_err(|e| {
+        AgentError::Io(format!(
+            "failed to write alpha loops file {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+    Ok(path)
+}
+
+fn load_alpha_loops() -> Result<Vec<AlphaLoopDefinition>, AgentError> {
+    let path = write_default_alpha_loops(false)?;
+    let raw = std::fs::read_to_string(&path).map_err(|e| {
+        AgentError::Io(format!(
+            "failed to read alpha loops {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+    serde_json::from_str::<Vec<AlphaLoopDefinition>>(&raw).map_err(|e| {
+        AgentError::Config(format!(
+            "failed to parse alpha loops {}: {}",
+            path.display(),
+            e
+        ))
+    })
+}
+
+fn background_job_counts() -> (usize, usize, usize, usize) {
+    let jobs_dir = hermes_config::hermes_home().join("background_jobs");
+    let mut queued = 0usize;
+    let mut running = 0usize;
+    let mut completed = 0usize;
+    let mut failed = 0usize;
+    let Ok(entries) = std::fs::read_dir(jobs_dir) else {
+        return (queued, running, completed, failed);
+    };
+    for entry in entries.filter_map(Result::ok) {
+        if entry.path().extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let status = read_json_map(&entry.path())
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_ascii_lowercase();
+        match status.as_str() {
+            "queued" => queued = queued.saturating_add(1),
+            "running" => running = running.saturating_add(1),
+            "completed" => completed = completed.saturating_add(1),
+            "failed" => failed = failed.saturating_add(1),
+            _ => {}
+        }
+    }
+    (queued, running, completed, failed)
+}
+
+async fn contextlattice_health_line() -> String {
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build();
+    let Ok(client) = client else {
+        return "contextlattice: client_error".to_string();
+    };
+    match client.get("http://127.0.0.1:8075/health").send().await {
+        Ok(resp) if resp.status().is_success() => {
+            "contextlattice: healthy (127.0.0.1:8075)".to_string()
+        }
+        Ok(resp) => format!("contextlattice: unhealthy (status {})", resp.status()),
+        Err(err) => format!("contextlattice: unreachable ({})", err),
+    }
+}
+
+async fn handle_mission_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let action = args
+        .first()
+        .copied()
+        .unwrap_or("status")
+        .to_ascii_lowercase();
+    match action.as_str() {
+        "init" => {
+            let path = write_default_alpha_loops(true)?;
+            emit_command_output(
+                app,
+                format!(
+                    "Mission loops initialized at {}\nUse `/mission status` to inspect active loops.",
+                    path.display()
+                ),
+            );
+            Ok(CommandResult::Handled)
+        }
+        "status" | "show" => {
+            let loops = load_alpha_loops()?;
+            let objective = app
+                .session_objective
+                .as_deref()
+                .unwrap_or("(none; use /objective <text>)");
+            let (queued, running, completed, failed) = background_job_counts();
+            let ctx_status = contextlattice_health_line().await;
+            let enabled = loops.iter().filter(|l| l.enabled).count();
+            let trading = loops.iter().filter(|l| l.trading_sensitive).count();
+            let public = loops.len().saturating_sub(trading);
+            let mut out = String::new();
+            out.push_str("Mission Control\n\n");
+            out.push_str(&format!("objective: {}\n", objective));
+            out.push_str(&format!("model: {}\n", app.current_model));
+            out.push_str(&format!("{}\n", ctx_status));
+            out.push_str(&format!(
+                "background_jobs: queued={} running={} completed={} failed={}\n\n",
+                queued, running, completed, failed
+            ));
+            out.push_str(&format!(
+                "loops: total={} enabled={} trading_private={} public={}\n",
+                loops.len(),
+                enabled,
+                trading,
+                public
+            ));
+            for lp in loops {
+                out.push_str(&format!(
+                    "- [{}] {} ({}) cadence={} target={}{}\n",
+                    if lp.enabled { "on" } else { "off" },
+                    lp.id,
+                    lp.title,
+                    lp.cadence,
+                    lp.target,
+                    if lp.trading_sensitive {
+                        " [private-trading]"
+                    } else {
+                        ""
+                    }
+                ));
+            }
+            out.push_str("\nActions:\n");
+            out.push_str("- /mission init\n");
+            out.push_str("- /objective <text>\n");
+            out.push_str("- /background <task>\n");
+            emit_command_output(app, out.trim_end());
+            Ok(CommandResult::Handled)
+        }
+        _ => {
+            emit_command_output(app, "Usage: /mission [status|init]");
             Ok(CommandResult::Handled)
         }
     }
@@ -11675,9 +11897,30 @@ mod tests {
     }
 
     #[test]
+    fn test_mission_command_is_registered_and_completable() {
+        assert!(SLASH_COMMANDS.iter().any(|(name, _)| *name == "/mission"));
+        let results = autocomplete("/mis");
+        assert!(results.contains(&"/mission"));
+    }
+
+    #[test]
     fn test_skins_alias_maps_to_skin() {
         assert_eq!(canonical_command("/skins"), "/skin");
         assert!(SLASH_COMMANDS.iter().any(|(name, _)| *name == "/skins"));
+    }
+
+    #[test]
+    fn alpha_loop_defaults_are_written_and_loadable() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        std::env::set_var("HERMES_HOME", tmp.path());
+        let path = write_default_alpha_loops(true).expect("write defaults");
+        assert!(path.exists());
+        let loops = load_alpha_loops().expect("load defaults");
+        assert_eq!(loops.len(), 3);
+        assert!(loops.iter().any(|l| l.id == "primary-objective-loop"));
+        assert!(loops.iter().all(|l| !l.trading_sensitive));
+        std::env::remove_var("HERMES_HOME");
     }
 
     #[test]
