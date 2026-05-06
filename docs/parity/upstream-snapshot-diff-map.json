@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-04-27T07:30:15.500479+00:00",
+  "generated_at_utc": "2026-05-06T03:50:28.045654+00:00",
   "groups": [
     {
       "classification": "needs_rust_implementation_review",
@@ -18,14 +18,14 @@
         "tests/acp/test_server.py",
         "tests/acp/test_session.py",
         "tests/acp/test_tools.py",
-        "tests/agent/__init__.py",
-        "tests/agent/test_anthropic_adapter.py",
-        "tests/agent/test_anthropic_keychain.py"
+        "tests/acp_adapter/test_acp_commands.py",
+        "tests/acp_adapter/test_acp_images.py",
+        "tests/agent/__init__.py"
       ],
       "status_counts": {
-        "A": 794
+        "A": 960
       },
-      "total": 794
+      "total": 960
     },
     {
       "classification": "needs_rust_implementation_review",
@@ -49,9 +49,9 @@
         "skills/creative/ascii-video/README.md"
       ],
       "status_counts": {
-        "A": 483
+        "A": 514
       },
-      "total": 483
+      "total": 514
     },
     {
       "classification": "intentional_divergence_rust_primary",
@@ -75,35 +75,9 @@
         "crates/hermes-agent/src/compression.rs"
       ],
       "status_counts": {
-        "D": 352
+        "D": 356
       },
-      "total": 352
-    },
-    {
-      "classification": "needs_rust_implementation_review",
-      "prefix": "ui-tui",
-      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
-      "sample_paths": [
-        "ui-tui/.gitignore",
-        "ui-tui/.prettierrc",
-        "ui-tui/README.md",
-        "ui-tui/babel.compiler.config.cjs",
-        "ui-tui/eslint.config.mjs",
-        "ui-tui/package-lock.json",
-        "ui-tui/package.json",
-        "ui-tui/packages/hermes-ink/ambient.d.ts",
-        "ui-tui/packages/hermes-ink/index.d.ts",
-        "ui-tui/packages/hermes-ink/index.js",
-        "ui-tui/packages/hermes-ink/package-lock.json",
-        "ui-tui/packages/hermes-ink/package.json",
-        "ui-tui/packages/hermes-ink/src/bootstrap/state.ts",
-        "ui-tui/packages/hermes-ink/src/entry-exports.ts",
-        "ui-tui/packages/hermes-ink/src/hooks/use-stderr.ts"
-      ],
-      "status_counts": {
-        "A": 291
-      },
-      "total": 291
+      "total": 356
     },
     {
       "classification": "needs_rust_implementation_review",
@@ -127,9 +101,35 @@
         "website/docs/developer-guide/cron-internals.md"
       ],
       "status_counts": {
-        "A": 290
+        "A": 339
       },
-      "total": 290
+      "total": 339
+    },
+    {
+      "classification": "needs_rust_implementation_review",
+      "prefix": "ui-tui",
+      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
+      "sample_paths": [
+        "ui-tui/.gitignore",
+        "ui-tui/.prettierrc",
+        "ui-tui/README.md",
+        "ui-tui/babel.compiler.config.cjs",
+        "ui-tui/eslint.config.mjs",
+        "ui-tui/package-lock.json",
+        "ui-tui/package.json",
+        "ui-tui/packages/hermes-ink/ambient.d.ts",
+        "ui-tui/packages/hermes-ink/index.d.ts",
+        "ui-tui/packages/hermes-ink/index.js",
+        "ui-tui/packages/hermes-ink/package-lock.json",
+        "ui-tui/packages/hermes-ink/package.json",
+        "ui-tui/packages/hermes-ink/src/bootstrap/state.ts",
+        "ui-tui/packages/hermes-ink/src/entry-exports.ts",
+        "ui-tui/packages/hermes-ink/src/hooks/use-stderr.ts"
+      ],
+      "status_counts": {
+        "A": 307
+      },
+      "total": 307
     },
     {
       "classification": "needs_rust_implementation_review",
@@ -153,10 +153,37 @@
         "optional-skills/creative/concept-diagrams/examples/automated-password-reset-flow.md"
       ],
       "status_counts": {
-        "A": 189,
-        "D": 3
+        "A": 203,
+        "D": 6,
+        "M": 2
       },
-      "total": 192
+      "total": 211
+    },
+    {
+      "classification": "needs_rust_implementation_review",
+      "prefix": "plugins",
+      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
+      "sample_paths": [
+        "plugins/__init__.py",
+        "plugins/context_engine/__init__.py",
+        "plugins/disk-cleanup/README.md",
+        "plugins/disk-cleanup/__init__.py",
+        "plugins/disk-cleanup/disk_cleanup.py",
+        "plugins/disk-cleanup/plugin.yaml",
+        "plugins/example-dashboard/dashboard/dist/index.js",
+        "plugins/example-dashboard/dashboard/manifest.json",
+        "plugins/example-dashboard/dashboard/plugin_api.py",
+        "plugins/google_meet/README.md",
+        "plugins/google_meet/SKILL.md",
+        "plugins/google_meet/__init__.py",
+        "plugins/google_meet/audio_bridge.py",
+        "plugins/google_meet/cli.py",
+        "plugins/google_meet/meet_bot.py"
+      ],
+      "status_counts": {
+        "A": 154
+      },
+      "total": 154
     },
     {
       "classification": "needs_rust_implementation_review",
@@ -180,9 +207,9 @@
         "web/public/fonts/RulesExpanded-Bold.woff2"
       ],
       "status_counts": {
-        "A": 92
+        "A": 90
       },
-      "total": 92
+      "total": 90
     },
     {
       "classification": "needs_rust_implementation_review",
@@ -206,9 +233,37 @@
         "tools/browser_tool.py"
       ],
       "status_counts": {
-        "A": 84
+        "A": 89
       },
-      "total": 84
+      "total": 89
+    },
+    {
+      "classification": "selective_adopt_review",
+      "prefix": "scripts",
+      "rationale": "Installer/packaging/docs/infra deltas may be partially applicable and should be reviewed.",
+      "sample_paths": [
+        "scripts/audit_background_queue.py",
+        "scripts/build_model_catalog.py",
+        "scripts/build_skills_index.py",
+        "scripts/check-runtime-placeholders.sh",
+        "scripts/clippy-warning-gate.sh",
+        "scripts/compare-adapter-chaos-reports.py",
+        "scripts/contributor_audit.py",
+        "scripts/cron-upstream-sync.sh",
+        "scripts/discord-voice-doctor.py",
+        "scripts/generate-adapter-matrix.py",
+        "scripts/generate-global-parity-proof.py",
+        "scripts/generate-gpar-01-04-proof.py",
+        "scripts/generate-homebrew-formula.sh",
+        "scripts/generate-parity-dashboard.py",
+        "scripts/generate-parity-matrix.py"
+      ],
+      "status_counts": {
+        "A": 19,
+        "D": 51,
+        "M": 1
+      },
+      "total": 71
     },
     {
       "classification": "needs_rust_implementation_review",
@@ -216,77 +271,25 @@
       "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
       "sample_paths": [
         "hermes_cli/__init__.py",
+        "hermes_cli/_parser.py",
         "hermes_cli/auth.py",
         "hermes_cli/auth_commands.py",
         "hermes_cli/azure_detect.py",
         "hermes_cli/backup.py",
         "hermes_cli/banner.py",
+        "hermes_cli/browser_connect.py",
         "hermes_cli/callbacks.py",
         "hermes_cli/claw.py",
         "hermes_cli/cli_output.py",
         "hermes_cli/clipboard.py",
         "hermes_cli/codex_models.py",
         "hermes_cli/colors.py",
-        "hermes_cli/commands.py",
-        "hermes_cli/completion.py",
-        "hermes_cli/config.py"
+        "hermes_cli/commands.py"
       ],
       "status_counts": {
-        "A": 58
+        "A": 67
       },
-      "total": 58
-    },
-    {
-      "classification": "needs_rust_implementation_review",
-      "prefix": "gateway",
-      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
-      "sample_paths": [
-        "gateway/__init__.py",
-        "gateway/builtin_hooks/__init__.py",
-        "gateway/builtin_hooks/boot_md.py",
-        "gateway/channel_directory.py",
-        "gateway/config.py",
-        "gateway/delivery.py",
-        "gateway/display_config.py",
-        "gateway/hooks.py",
-        "gateway/mirror.py",
-        "gateway/pairing.py",
-        "gateway/platforms/ADDING_A_PLATFORM.md",
-        "gateway/platforms/__init__.py",
-        "gateway/platforms/api_server.py",
-        "gateway/platforms/base.py",
-        "gateway/platforms/bluebubbles.py"
-      ],
-      "status_counts": {
-        "A": 54
-      },
-      "total": 54
-    },
-    {
-      "classification": "needs_rust_implementation_review",
-      "prefix": "plugins",
-      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
-      "sample_paths": [
-        "plugins/__init__.py",
-        "plugins/context_engine/__init__.py",
-        "plugins/disk-cleanup/README.md",
-        "plugins/disk-cleanup/__init__.py",
-        "plugins/disk-cleanup/disk_cleanup.py",
-        "plugins/disk-cleanup/plugin.yaml",
-        "plugins/example-dashboard/dashboard/dist/index.js",
-        "plugins/example-dashboard/dashboard/manifest.json",
-        "plugins/example-dashboard/dashboard/plugin_api.py",
-        "plugins/image_gen/openai-codex/__init__.py",
-        "plugins/image_gen/openai-codex/plugin.yaml",
-        "plugins/image_gen/openai/__init__.py",
-        "plugins/image_gen/openai/plugin.yaml",
-        "plugins/image_gen/xai/__init__.py",
-        "plugins/image_gen/xai/plugin.yaml"
-      ],
-      "status_counts": {
-        "A": 54
-      },
-      "total": 54
+      "total": 67
     },
     {
       "classification": "needs_rust_implementation_review",
@@ -305,14 +308,67 @@
         "agent/copilot_acp_client.py",
         "agent/credential_pool.py",
         "agent/credential_sources.py",
-        "agent/display.py",
-        "agent/error_classifier.py",
-        "agent/file_safety.py"
+        "agent/curator.py",
+        "agent/curator_backup.py",
+        "agent/display.py"
       ],
       "status_counts": {
-        "A": 51
+        "A": 58
       },
-      "total": 51
+      "total": 58
+    },
+    {
+      "classification": "needs_rust_implementation_review",
+      "prefix": "gateway",
+      "rationale": "Upstream runtime/product surface changed; evaluate and port behavior in Rust where relevant.",
+      "sample_paths": [
+        "gateway/__init__.py",
+        "gateway/assets/telegram-botfather-threads-settings.jpg",
+        "gateway/builtin_hooks/__init__.py",
+        "gateway/channel_directory.py",
+        "gateway/config.py",
+        "gateway/delivery.py",
+        "gateway/display_config.py",
+        "gateway/hooks.py",
+        "gateway/mirror.py",
+        "gateway/pairing.py",
+        "gateway/platform_registry.py",
+        "gateway/platforms/ADDING_A_PLATFORM.md",
+        "gateway/platforms/__init__.py",
+        "gateway/platforms/_http_client_limits.py",
+        "gateway/platforms/api_server.py"
+      ],
+      "status_counts": {
+        "A": 58
+      },
+      "total": 58
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "docs",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "docs/hermes-kanban-v1-spec.pdf",
+        "docs/installer-troubleshooting.md",
+        "docs/local-backends.md",
+        "docs/parity/ELITE_07_20_CLOSURE_PROOF.md",
+        "docs/parity/ELITE_21_28_CLOSURE_PROOF.md",
+        "docs/parity/PARITY_DASHBOARD.md",
+        "docs/parity/README.md",
+        "docs/parity/REMAINING_QUEUE_IMPLEMENTATION_PLAN_2026-05-01.md",
+        "docs/parity/adapter-feature-matrix.json",
+        "docs/parity/adapter-feature-matrix.md",
+        "docs/parity/batch-triage-log.md",
+        "docs/parity/compatibility-policy.md",
+        "docs/parity/divergence-validation.json",
+        "docs/parity/full-queue-triage-groups.json",
+        "docs/parity/full-queue-triage-groups.md"
+      ],
+      "status_counts": {
+        "A": 2,
+        "D": 44
+      },
+      "total": 46
     },
     {
       "classification": "needs_rust_implementation_review",
@@ -342,60 +398,6 @@
     },
     {
       "classification": "selective_adopt_review",
-      "prefix": "scripts",
-      "rationale": "Installer/packaging/docs/infra deltas may be partially applicable and should be reviewed.",
-      "sample_paths": [
-        "scripts/build_model_catalog.py",
-        "scripts/build_skills_index.py",
-        "scripts/check-runtime-placeholders.sh",
-        "scripts/clippy-warning-gate.sh",
-        "scripts/contributor_audit.py",
-        "scripts/cron-upstream-sync.sh",
-        "scripts/discord-voice-doctor.py",
-        "scripts/generate-adapter-matrix.py",
-        "scripts/generate-global-parity-proof.py",
-        "scripts/generate-homebrew-formula.sh",
-        "scripts/generate-parity-matrix.py",
-        "scripts/generate-test-intent-mapping.py",
-        "scripts/generate-upstream-patch-queue.py",
-        "scripts/generate-upstream-snapshot-diff-map.py",
-        "scripts/generate-workstream-status.py"
-      ],
-      "status_counts": {
-        "A": 18,
-        "D": 24,
-        "M": 1
-      },
-      "total": 43
-    },
-    {
-      "classification": "manual_review_required",
-      "prefix": "docs",
-      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
-      "sample_paths": [
-        "docs/installer-troubleshooting.md",
-        "docs/parity/README.md",
-        "docs/parity/adapter-feature-matrix.json",
-        "docs/parity/adapter-feature-matrix.md",
-        "docs/parity/batch-triage-log.md",
-        "docs/parity/compatibility-policy.md",
-        "docs/parity/divergence-validation.json",
-        "docs/parity/full-queue-triage-groups.json",
-        "docs/parity/full-queue-triage-groups.md",
-        "docs/parity/global-parity-program.md",
-        "docs/parity/global-parity-proof.json",
-        "docs/parity/global-parity-proof.md",
-        "docs/parity/global-parity-thresholds.json",
-        "docs/parity/intentional-divergence.json",
-        "docs/parity/parity-matrix.json"
-      ],
-      "status_counts": {
-        "D": 29
-      },
-      "total": 29
-    },
-    {
-      "classification": "selective_adopt_review",
       "prefix": ".github",
       "rationale": "Installer/packaging/docs/infra deltas may be partially applicable and should be reviewed.",
       "sample_paths": [
@@ -405,21 +407,43 @@
         ".github/ISSUE_TEMPLATE/setup_help.yml",
         ".github/PULL_REQUEST_TEMPLATE.md",
         ".github/actions/nix-setup/action.yml",
+        ".github/dependabot.yml",
         ".github/workflows/ci.yml",
         ".github/workflows/contributor-check.yml",
         ".github/workflows/deploy-site.yml",
         ".github/workflows/docker-publish.yml",
         ".github/workflows/docs-site-checks.yml",
-        ".github/workflows/nix-lockfile-check.yml",
         ".github/workflows/nix-lockfile-fix.yml",
         ".github/workflows/nix.yml",
-        ".github/workflows/parity-audit.yml"
+        ".github/workflows/osv-scanner.yml"
       ],
       "status_counts": {
-        "A": 16,
+        "A": 17,
         "D": 3
       },
-      "total": 19
+      "total": 20
+    },
+    {
+      "classification": "selective_adopt_review",
+      "prefix": "nix",
+      "rationale": "Installer/packaging/docs/infra deltas may be partially applicable and should be reviewed.",
+      "sample_paths": [
+        "nix/checks.nix",
+        "nix/configMergeScript.nix",
+        "nix/devShell.nix",
+        "nix/hermes-agent.nix",
+        "nix/lib.nix",
+        "nix/nixosModules.nix",
+        "nix/overlays.nix",
+        "nix/packages.nix",
+        "nix/python.nix",
+        "nix/tui.nix",
+        "nix/web.nix"
+      ],
+      "status_counts": {
+        "A": 11
+      },
+      "total": 11
     },
     {
       "classification": "needs_rust_implementation_review",
@@ -442,24 +466,23 @@
       "total": 9
     },
     {
-      "classification": "selective_adopt_review",
-      "prefix": "nix",
-      "rationale": "Installer/packaging/docs/infra deltas may be partially applicable and should be reviewed.",
+      "classification": "manual_review_required",
+      "prefix": "locales",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
       "sample_paths": [
-        "nix/checks.nix",
-        "nix/configMergeScript.nix",
-        "nix/devShell.nix",
-        "nix/lib.nix",
-        "nix/nixosModules.nix",
-        "nix/packages.nix",
-        "nix/python.nix",
-        "nix/tui.nix",
-        "nix/web.nix"
+        "locales/de.yaml",
+        "locales/en.yaml",
+        "locales/es.yaml",
+        "locales/fr.yaml",
+        "locales/ja.yaml",
+        "locales/tr.yaml",
+        "locales/uk.yaml",
+        "locales/zh.yaml"
       ],
       "status_counts": {
-        "A": 9
+        "A": 8
       },
-      "total": 9
+      "total": 8
     },
     {
       "classification": "needs_rust_implementation_review",
@@ -503,6 +526,20 @@
         "cron/__init__.py",
         "cron/jobs.py",
         "cron/scheduler.py"
+      ],
+      "status_counts": {
+        "A": 3
+      },
+      "total": 3
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "providers",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "providers/README.md",
+        "providers/__init__.py",
+        "providers/base.py"
       ],
       "status_counts": {
         "A": 3
@@ -781,6 +818,18 @@
     },
     {
       "classification": "manual_review_required",
+      "prefix": "README.zh-CN.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "README.zh-CN.md"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
       "prefix": "README_JA.md",
       "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
       "sample_paths": [
@@ -797,6 +846,18 @@
       "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
       "sample_paths": [
         "README_KO.md"
+      ],
+      "status_counts": {
+        "D": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "README_QUICKSTART.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "README_QUICKSTART.md"
       ],
       "status_counts": {
         "D": 1
@@ -833,6 +894,18 @@
       "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
       "sample_paths": [
         "RELEASE_v0.11.0.md"
+      ],
+      "status_counts": {
+        "A": 1
+      },
+      "total": 1
+    },
+    {
+      "classification": "manual_review_required",
+      "prefix": "RELEASE_v0.12.0.md",
+      "rationale": "Path does not match a known tranche bucket; requires explicit manual classification.",
+      "sample_paths": [
+        "RELEASE_v0.12.0.md"
       ],
       "status_counts": {
         "A": 1
@@ -1325,13 +1398,13 @@
     "upstream_ref": "upstream/main"
   },
   "summary": {
-    "group_count": 88,
+    "group_count": 93,
     "status_counts": {
-      "A": 2603,
-      "D": 420,
-      "M": 10
+      "A": 3021,
+      "D": 470,
+      "M": 12
     },
-    "total_entries": 3033
+    "total_entries": 3503
   },
   "tranche_summary": {
     "infra_surface": {
@@ -1343,11 +1416,11 @@
         "scripts"
       ],
       "status_counts": {
-        "A": 45,
-        "D": 27,
+        "A": 49,
+        "D": 54,
         "M": 3
       },
-      "total": 75
+      "total": 106
     },
     "runtime_surface": {
       "prefixes": [
@@ -1358,9 +1431,9 @@
         "tools"
       ],
       "status_counts": {
-        "A": 301
+        "A": 426
       },
-      "total": 301
+      "total": 426
     },
     "rust_divergence": {
       "prefixes": [
@@ -1369,9 +1442,9 @@
         "crates"
       ],
       "status_counts": {
-        "D": 354
+        "D": 358
       },
-      "total": 354
+      "total": 358
     },
     "ux_surface": {
       "prefixes": [
@@ -1382,10 +1455,11 @@
         "website"
       ],
       "status_counts": {
-        "A": 1345,
-        "D": 3
+        "A": 1453,
+        "D": 6,
+        "M": 2
       },
-      "total": 1348
+      "total": 1461
     },
     "validation_surface": {
       "prefixes": [
@@ -1393,9 +1467,9 @@
         "tests"
       ],
       "status_counts": {
-        "A": 837
+        "A": 1003
       },
-      "total": 837
+      "total": 1003
     }
   }
 }

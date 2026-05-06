@@ -66,6 +66,13 @@
       "ticket": 25
     },
     {
+      "path": "optional-skills/blockchain",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream optional-skills blockchain tree is Python-skill-store content; Hermes Ultra keeps Rust-first runtime parity and supports external skill registries via native loader paths.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "scripts/install.sh",
       "classification": "functional",
       "rationale": "Installer behavior directly affects setup parity and bootstrap capabilities.",
