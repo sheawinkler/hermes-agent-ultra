@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use chrono::{DateTime, Utc};
 use hermes_core::AgentError;
@@ -1175,6 +1176,86 @@ pub struct ExperimentSpec {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct CapitalAllocationRow {
+    pub project_id: String,
+    pub target_weight: f64,
+    pub target_capital_sol: f64,
+    pub max_loss_budget_sol: f64,
+    pub throttle_factor: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct PortfolioRiskGovernor {
+    pub mode: String,
+    pub halt_new_entries: bool,
+    pub max_portfolio_drawdown_pct: f64,
+    pub max_project_drawdown_pct: f64,
+    pub max_ruin_probability: f64,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct CanaryPromotionStep {
+    pub stage: String,
+    pub passed: bool,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct RepoDriftSentinel {
+    pub project_id: String,
+    pub git_head: String,
+    pub baseline_head: String,
+    pub dirty_files: usize,
+    pub changed_since_baseline: bool,
+    pub drift_state: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct RunContextAudit {
+    pub project_id: String,
+    pub files_scanned: usize,
+    pub required_metrics_present: Vec<String>,
+    pub missing_metrics: Vec<String>,
+    pub passed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct EnvProvenanceGate {
+    pub project_id: String,
+    pub inspected_files: Vec<String>,
+    pub conflicting_keys: Vec<String>,
+    pub passed: bool,
+    pub decision: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct ReplayCanaryResult {
+    pub project_id: String,
+    pub sample_size: usize,
+    pub pass_rate: f64,
+    pub decision: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct RemediationRunbookAction {
+    pub project_id: String,
+    pub priority: String,
+    pub title: String,
+    pub command: String,
+    pub rationale: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+pub struct ResearchSourceIngestion {
+    pub project_id: String,
+    pub source: String,
+    pub path: String,
+    pub found: bool,
+    pub items: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
 pub struct TradingAlphaReport {
     pub generated_at: String,
     pub projects: Vec<TradingProjectReport>,
@@ -1191,6 +1272,15 @@ pub struct TradingAlphaReport {
     pub walkforward_checks: Vec<String>,
     pub meta_ranking: Vec<String>,
     pub promotion_candidate: String,
+    pub capital_allocator: Vec<CapitalAllocationRow>,
+    pub risk_governor: PortfolioRiskGovernor,
+    pub canary_pipeline: Vec<CanaryPromotionStep>,
+    pub repo_drift: Vec<RepoDriftSentinel>,
+    pub run_context_audits: Vec<RunContextAudit>,
+    pub env_provenance: Vec<EnvProvenanceGate>,
+    pub replay_canary: Vec<ReplayCanaryResult>,
+    pub remediation_runbook: Vec<RemediationRunbookAction>,
+    pub research_sources: Vec<ResearchSourceIngestion>,
 }
 
 fn trading_state_dir() -> PathBuf {
@@ -1664,6 +1754,422 @@ fn choose_promotion_candidate(meta: &[String]) -> String {
         .to_string()
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default)]
+struct TradingDriftBaseline {
+    pub updated_at: String,
+    pub heads: HashMap<String, String>,
+}
+
+fn trading_drift_baseline_path() -> PathBuf {
+    trading_state_dir().join("drift_baseline.json")
+}
+
+fn load_trading_drift_baseline() -> TradingDriftBaseline {
+    let path = trading_drift_baseline_path();
+    if !path.exists() {
+        return TradingDriftBaseline::default();
+    }
+    read_json_file::<TradingDriftBaseline>(&path).unwrap_or_default()
+}
+
+fn write_trading_drift_baseline(baseline: &TradingDriftBaseline) {
+    let _ = write_json_file(&trading_drift_baseline_path(), baseline);
+}
+
+fn run_command_capture(cwd: &Path, bin: &str, args: &[&str]) -> Option<String> {
+    let output = Command::new(bin)
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+fn collect_repo_drift(
+    spec: &TradingProjectSpec,
+    baseline: &TradingDriftBaseline,
+) -> RepoDriftSentinel {
+    let root = PathBuf::from(expand_home(&spec.path));
+    if !root.exists() {
+        return RepoDriftSentinel {
+            project_id: spec.id.clone(),
+            drift_state: "missing-project".to_string(),
+            ..RepoDriftSentinel::default()
+        };
+    }
+
+    let git_head =
+        run_command_capture(&root, "git", &["rev-parse", "--short", "HEAD"]).unwrap_or_default();
+    let dirty_output =
+        run_command_capture(&root, "git", &["status", "--short"]).unwrap_or_default();
+    let dirty_files = dirty_output
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .count();
+    let baseline_head = baseline.heads.get(&spec.id).cloned().unwrap_or_default();
+    let changed_since_baseline =
+        !baseline_head.is_empty() && !git_head.is_empty() && git_head != baseline_head;
+    let drift_state = if git_head.is_empty() {
+        "not-a-git-repo".to_string()
+    } else if dirty_files > 0 {
+        "dirty-working-tree".to_string()
+    } else if changed_since_baseline {
+        "head-changed".to_string()
+    } else {
+        "stable".to_string()
+    };
+    RepoDriftSentinel {
+        project_id: spec.id.clone(),
+        git_head,
+        baseline_head,
+        dirty_files,
+        changed_since_baseline,
+        drift_state,
+    }
+}
+
+fn collect_run_context_audit(project: &TradingProjectReport) -> RunContextAudit {
+    let required = vec![
+        "wallet_sol".to_string(),
+        "pnl_sol".to_string(),
+        "reject_rate".to_string(),
+        "slippage_bps".to_string(),
+        "latency_p95_ms".to_string(),
+    ];
+    let mut present = Vec::new();
+    if project.latest_wallet_sol != 0.0 {
+        present.push("wallet_sol".to_string());
+    }
+    if project.latest_pnl_sol != 0.0 {
+        present.push("pnl_sol".to_string());
+    }
+    if project.reject_rate != 0.0 {
+        present.push("reject_rate".to_string());
+    }
+    if project.slippage_bps != 0.0 {
+        present.push("slippage_bps".to_string());
+    }
+    if project.latency_p95_ms != 0.0 {
+        present.push("latency_p95_ms".to_string());
+    }
+    let missing = required
+        .iter()
+        .filter(|key| !present.iter().any(|p| p == *key))
+        .cloned()
+        .collect::<Vec<_>>();
+    let passed = project.run_context_files > 0 && missing.len() <= 2;
+    RunContextAudit {
+        project_id: project.id.clone(),
+        files_scanned: project.run_context_files,
+        required_metrics_present: present,
+        missing_metrics: missing,
+        passed,
+    }
+}
+
+fn parse_env_kv(raw: &str) -> HashMap<String, String> {
+    let mut out = HashMap::new();
+    for line in raw.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if let Some((k, v)) = line.split_once('=') {
+            out.insert(k.trim().to_string(), v.trim().to_string());
+        }
+    }
+    out
+}
+
+fn collect_env_provenance(spec: &TradingProjectSpec) -> EnvProvenanceGate {
+    let root = PathBuf::from(expand_home(&spec.path));
+    if !root.exists() {
+        return EnvProvenanceGate {
+            project_id: spec.id.clone(),
+            passed: false,
+            decision: "project-missing".to_string(),
+            ..EnvProvenanceGate::default()
+        };
+    }
+    let candidates = vec![
+        root.join(".env"),
+        root.join("logs").join("knob_tuner").join("overrides.env"),
+        root.join("logs")
+            .join("nightly_tuner")
+            .join("overrides.env"),
+    ];
+    let critical = vec![
+        "RISK_CIRCUIT_MAX_CONSEC_LOSING_CLOSES",
+        "REAL_ALGOTRADER_WS_BUY_GATE_ENABLED",
+        "PRE_TRADE_MAX_SLIPPAGE_BPS",
+        "PRE_TRADE_MIN_LIQUIDITY_USD",
+        "REAL_ALGOTRADER_FAMILY_ENABLE",
+    ];
+    let mut seen: HashMap<String, String> = HashMap::new();
+    let mut conflicts = Vec::new();
+    let mut inspected = Vec::new();
+    for file in candidates {
+        if !file.exists() {
+            continue;
+        }
+        inspected.push(file.display().to_string());
+        let Ok(raw) = std::fs::read_to_string(&file) else {
+            continue;
+        };
+        let kv = parse_env_kv(&raw);
+        for key in &critical {
+            if let Some(value) = kv.get(*key) {
+                if let Some(prev) = seen.get(*key) {
+                    if prev != value {
+                        conflicts.push((*key).to_string());
+                    }
+                } else {
+                    seen.insert((*key).to_string(), value.clone());
+                }
+            }
+        }
+    }
+    conflicts.sort();
+    conflicts.dedup();
+    let passed = conflicts.is_empty();
+    EnvProvenanceGate {
+        project_id: spec.id.clone(),
+        inspected_files: inspected,
+        conflicting_keys: conflicts.clone(),
+        passed,
+        decision: if passed {
+            "provenance-clean".to_string()
+        } else {
+            format!("conflicts: {}", conflicts.join(", "))
+        },
+    }
+}
+
+fn compute_risk_governor(
+    projects: &[TradingProjectReport],
+    ruin_probability: f64,
+    worst_drawdown: f64,
+) -> PortfolioRiskGovernor {
+    let max_project_drawdown = projects
+        .iter()
+        .map(|p| p.drawdown_pct)
+        .fold(0.0f64, f64::max);
+    if ruin_probability >= 0.6 || worst_drawdown >= 0.45 {
+        return PortfolioRiskGovernor {
+            mode: "hard-stop".to_string(),
+            halt_new_entries: true,
+            max_portfolio_drawdown_pct: 0.12,
+            max_project_drawdown_pct: 0.08,
+            max_ruin_probability: 0.25,
+            reason: "ruin_probability or drawdown exceeded hard safety envelope".to_string(),
+        };
+    }
+    if ruin_probability >= 0.35 || max_project_drawdown >= 0.25 {
+        return PortfolioRiskGovernor {
+            mode: "de-risk".to_string(),
+            halt_new_entries: false,
+            max_portfolio_drawdown_pct: 0.18,
+            max_project_drawdown_pct: 0.12,
+            max_ruin_probability: 0.35,
+            reason: "risk elevated; reduce exposure and tighten gates".to_string(),
+        };
+    }
+    PortfolioRiskGovernor {
+        mode: "normal".to_string(),
+        halt_new_entries: false,
+        max_portfolio_drawdown_pct: 0.25,
+        max_project_drawdown_pct: 0.18,
+        max_ruin_probability: 0.45,
+        reason: "risk envelope healthy".to_string(),
+    }
+}
+
+fn compute_capital_allocator(
+    projects: &[TradingProjectReport],
+    strategy_weights: &HashMap<String, f64>,
+    current_wallet: f64,
+    governor: &PortfolioRiskGovernor,
+) -> Vec<CapitalAllocationRow> {
+    let mode_factor = match governor.mode.as_str() {
+        "hard-stop" => 0.10,
+        "de-risk" => 0.55,
+        _ => 1.0,
+    };
+    projects
+        .iter()
+        .map(|p| {
+            let target_weight = *strategy_weights.get(&p.id).unwrap_or(&0.0);
+            let throttle_factor = (1.0 - p.drawdown_pct).clamp(0.1, 1.0) * mode_factor;
+            let target_capital_sol = (current_wallet * target_weight * throttle_factor).max(0.0);
+            let max_loss_budget_sol =
+                (target_capital_sol * governor.max_project_drawdown_pct).max(0.0);
+            CapitalAllocationRow {
+                project_id: p.id.clone(),
+                target_weight,
+                target_capital_sol,
+                max_loss_budget_sol,
+                throttle_factor,
+            }
+        })
+        .collect()
+}
+
+fn compute_canary_pipeline(
+    report: &TradingAlphaReport,
+    governor: &PortfolioRiskGovernor,
+) -> Vec<CanaryPromotionStep> {
+    let stage1 = report
+        .run_context_audits
+        .iter()
+        .all(|audit| audit.passed && audit.files_scanned > 0);
+    let stage2 = report.ruin_probability <= governor.max_ruin_probability;
+    let stage3 = report
+        .replay_canary
+        .iter()
+        .all(|row| row.pass_rate >= 0.60 && row.sample_size > 0);
+    vec![
+        CanaryPromotionStep {
+            stage: "telemetry-audit".to_string(),
+            passed: stage1,
+            detail: "run_context invariants and coverage checks".to_string(),
+        },
+        CanaryPromotionStep {
+            stage: "risk-envelope".to_string(),
+            passed: stage2,
+            detail: format!(
+                "ruin_probability {:.4} <= max {:.4}",
+                report.ruin_probability, governor.max_ruin_probability
+            ),
+        },
+        CanaryPromotionStep {
+            stage: "replay-canary".to_string(),
+            passed: stage3,
+            detail: "fresh telemetry replay pass-rate gate".to_string(),
+        },
+    ]
+}
+
+fn compute_replay_canary(projects: &[TradingProjectReport]) -> Vec<ReplayCanaryResult> {
+    projects
+        .iter()
+        .map(|p| {
+            let sample = p.run_context_files.max(1);
+            let quality = (1.0 - p.reject_rate).clamp(0.0, 1.0)
+                * (1.0 - (p.slippage_bps / 150.0).clamp(0.0, 1.0))
+                * (1.0 - p.drawdown_pct.clamp(0.0, 1.0));
+            let decision = if quality >= 0.60 {
+                "pass".to_string()
+            } else {
+                "fail".to_string()
+            };
+            ReplayCanaryResult {
+                project_id: p.id.clone(),
+                sample_size: sample,
+                pass_rate: quality,
+                decision,
+            }
+        })
+        .collect()
+}
+
+fn build_remediation_runbook(
+    projects: &[TradingProjectReport],
+    governor: &PortfolioRiskGovernor,
+) -> Vec<RemediationRunbookAction> {
+    let mut out = Vec::new();
+    for p in projects {
+        let mut pushed = false;
+        for rec in p.patch_recommendations.iter().take(2) {
+            out.push(RemediationRunbookAction {
+                project_id: p.id.clone(),
+                priority: if p.objective_state == "regressing" {
+                    "p0".to_string()
+                } else {
+                    "p1".to_string()
+                },
+                title: rec.clone(),
+                command: format!(
+                    "cd {} && rg -n \"slippage|reject|drawdown|risk\" src scripts",
+                    p.path
+                ),
+                rationale: format!("incident={} regime={}", p.incident_class, p.regime),
+            });
+            pushed = true;
+        }
+        if !pushed {
+            out.push(RemediationRunbookAction {
+                project_id: p.id.clone(),
+                priority: "p2".to_string(),
+                title: "continue telemetry burn-in".to_string(),
+                command: format!("cd {} && ls logs/run_context | tail -n 20", p.path),
+                rationale: "no urgent remediation signals found".to_string(),
+            });
+        }
+    }
+    if governor.halt_new_entries {
+        out.push(RemediationRunbookAction {
+            project_id: "portfolio".to_string(),
+            priority: "p0".to_string(),
+            title: "halt new entries and switch to shadow-only".to_string(),
+            command: "set RISK_MODE=shadow_only and disable live entries until risk recovers"
+                .to_string(),
+            rationale: governor.reason.clone(),
+        });
+    }
+    out
+}
+
+fn count_files(dir: &Path, max_depth: usize) -> usize {
+    if max_depth == 0 || !dir.exists() {
+        return 0;
+    }
+    let mut total = 0usize;
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                total = total.saturating_add(1);
+            } else if path.is_dir() {
+                total = total.saturating_add(count_files(&path, max_depth.saturating_sub(1)));
+            }
+        }
+    }
+    total
+}
+
+fn ingest_research_sources(spec: &TradingProjectSpec) -> Vec<ResearchSourceIngestion> {
+    let root = PathBuf::from(expand_home(&spec.path));
+    let sources = vec![
+        ("run_context", root.join("logs").join("run_context"), 2usize),
+        ("docs", root.join("docs"), 2usize),
+        ("scripts", root.join("scripts"), 2usize),
+        ("notebooks", root.join("notebooks"), 2usize),
+        ("backtests", root.join("backtests"), 2usize),
+    ];
+    sources
+        .into_iter()
+        .map(|(name, path, depth)| ResearchSourceIngestion {
+            project_id: spec.id.clone(),
+            source: name.to_string(),
+            path: path.display().to_string(),
+            found: path.exists(),
+            items: if path.exists() {
+                count_files(&path, depth)
+            } else {
+                0
+            },
+        })
+        .collect()
+}
+
 fn compute_postmortem(projects: &[TradingProjectReport]) -> String {
     let mut lines = Vec::new();
     lines.push("Postmortem packet".to_string());
@@ -1691,6 +2197,12 @@ pub fn refresh_trading_alpha_report() -> Result<TradingAlphaReport, AgentError> 
         .iter()
         .filter(|p| p.enabled)
         .map(analyze_project)
+        .collect::<Vec<_>>();
+    let active_specs = cfg
+        .projects
+        .iter()
+        .filter(|p| p.enabled)
+        .cloned()
         .collect::<Vec<_>>();
 
     let current_wallet = projects
@@ -1752,8 +2264,41 @@ pub fn refresh_trading_alpha_report() -> Result<TradingAlphaReport, AgentError> 
     let meta_ranking = rank_meta_strategies(&projects);
     let promotion_candidate = choose_promotion_candidate(&meta_ranking);
     let postmortem = compute_postmortem(&projects);
+    let risk_governor = compute_risk_governor(&projects, ruin_probability, worst_drawdown);
+    let capital_allocator =
+        compute_capital_allocator(&projects, &strategy_weights, current_wallet, &risk_governor);
+    let replay_canary = compute_replay_canary(&projects);
+    let run_context_audits = projects
+        .iter()
+        .map(collect_run_context_audit)
+        .collect::<Vec<_>>();
+    let env_provenance = active_specs
+        .iter()
+        .map(collect_env_provenance)
+        .collect::<Vec<_>>();
+    let remediation_runbook = build_remediation_runbook(&projects, &risk_governor);
+    let research_sources = active_specs
+        .iter()
+        .flat_map(ingest_research_sources)
+        .collect::<Vec<_>>();
 
-    let report = TradingAlphaReport {
+    let baseline = load_trading_drift_baseline();
+    let repo_drift = active_specs
+        .iter()
+        .map(|spec| collect_repo_drift(spec, &baseline))
+        .collect::<Vec<_>>();
+
+    let mut next_baseline = baseline.clone();
+    for drift in &repo_drift {
+        if !drift.git_head.is_empty() {
+            next_baseline
+                .heads
+                .insert(drift.project_id.clone(), drift.git_head.clone());
+        }
+    }
+    next_baseline.updated_at = now_rfc3339();
+
+    let mut report = TradingAlphaReport {
         generated_at: now_rfc3339(),
         projects,
         wallet_progress_pct: progress,
@@ -1769,8 +2314,19 @@ pub fn refresh_trading_alpha_report() -> Result<TradingAlphaReport, AgentError> 
         walkforward_checks,
         meta_ranking,
         promotion_candidate,
+        capital_allocator,
+        risk_governor,
+        canary_pipeline: Vec::new(),
+        repo_drift,
+        run_context_audits,
+        env_provenance,
+        replay_canary,
+        remediation_runbook,
+        research_sources,
     };
+    report.canary_pipeline = compute_canary_pipeline(&report, &report.risk_governor);
 
+    write_trading_drift_baseline(&next_baseline);
     write_json_file(&trading_last_report_path(), &report)?;
     Ok(report)
 }
@@ -1824,6 +2380,39 @@ pub fn render_trading_alpha_board(report: &TradingAlphaReport) -> String {
     }
     out.push('\n');
 
+    out.push_str("Capital allocator\n");
+    for row in &report.capital_allocator {
+        out.push_str(&format!(
+            "- {} weight={:.4} capital_sol={:.6} max_loss_sol={:.6} throttle={:.3}\n",
+            row.project_id,
+            row.target_weight,
+            row.target_capital_sol,
+            row.max_loss_budget_sol,
+            row.throttle_factor
+        ));
+    }
+    out.push('\n');
+
+    out.push_str("Risk governor\n");
+    out.push_str(&format!(
+        "- mode={} halt_new_entries={} max_portfolio_drawdown={:.2}% max_project_drawdown={:.2}% max_ruin_probability={:.4}\n",
+        report.risk_governor.mode,
+        report.risk_governor.halt_new_entries,
+        report.risk_governor.max_portfolio_drawdown_pct * 100.0,
+        report.risk_governor.max_project_drawdown_pct * 100.0,
+        report.risk_governor.max_ruin_probability
+    ));
+    out.push_str(&format!("  reason: {}\n\n", report.risk_governor.reason));
+
+    out.push_str("Canary promotion pipeline\n");
+    for step in &report.canary_pipeline {
+        out.push_str(&format!(
+            "- {} passed={} detail={}\n",
+            step.stage, step.passed, step.detail
+        ));
+    }
+    out.push('\n');
+
     out.push_str("Autoresearch\n");
     out.push_str(&format!(
         "- hypotheses={} experiments={} matrix_rows={}\n",
@@ -1849,6 +2438,76 @@ pub fn render_trading_alpha_board(report: &TradingAlphaReport) -> String {
         out.push_str(&format!("- {}\n", line));
     }
     out.push('\n');
+
+    out.push_str("Repo drift sentinel\n");
+    for row in &report.repo_drift {
+        out.push_str(&format!(
+            "- {} state={} head={} baseline={} dirty_files={} changed_since_baseline={}\n",
+            row.project_id,
+            row.drift_state,
+            row.git_head,
+            row.baseline_head,
+            row.dirty_files,
+            row.changed_since_baseline
+        ));
+    }
+    out.push('\n');
+
+    out.push_str("Run context audits\n");
+    for audit in &report.run_context_audits {
+        out.push_str(&format!(
+            "- {} passed={} files_scanned={} missing={}\n",
+            audit.project_id,
+            audit.passed,
+            audit.files_scanned,
+            if audit.missing_metrics.is_empty() {
+                "none".to_string()
+            } else {
+                audit.missing_metrics.join(",")
+            }
+        ));
+    }
+    out.push('\n');
+
+    out.push_str("Env provenance gates\n");
+    for gate in &report.env_provenance {
+        out.push_str(&format!(
+            "- {} passed={} inspected_files={} decision={}\n",
+            gate.project_id,
+            gate.passed,
+            gate.inspected_files.len(),
+            gate.decision
+        ));
+    }
+    out.push('\n');
+
+    out.push_str("Replay canary\n");
+    for row in &report.replay_canary {
+        out.push_str(&format!(
+            "- {} sample_size={} pass_rate={:.3} decision={}\n",
+            row.project_id, row.sample_size, row.pass_rate, row.decision
+        ));
+    }
+    out.push('\n');
+
+    out.push_str("Remediation runbook\n");
+    for action in report.remediation_runbook.iter().take(12) {
+        out.push_str(&format!(
+            "- [{}] {} :: {} | {}\n",
+            action.priority, action.project_id, action.title, action.command
+        ));
+    }
+    out.push('\n');
+
+    out.push_str("Research source ingestion\n");
+    for src in report.research_sources.iter().take(24) {
+        out.push_str(&format!(
+            "- {}:{} found={} items={} path={}\n",
+            src.project_id, src.source, src.found, src.items, src.path
+        ));
+    }
+    out.push('\n');
+
     out.push_str(&report.postmortem);
     out
 }
@@ -1938,11 +2597,65 @@ mod tests {
             canary_recommendation: "hold-canary".to_string(),
             postmortem: "Postmortem packet".to_string(),
             promotion_candidate: "proj-a".to_string(),
+            risk_governor: PortfolioRiskGovernor {
+                mode: "normal".to_string(),
+                ..PortfolioRiskGovernor::default()
+            },
             ..TradingAlphaReport::default()
         };
         let rendered = render_trading_alpha_board(&report);
         assert!(rendered.contains("Trading Private Mission Board"));
         assert!(rendered.contains("Strategy weights"));
+        assert!(rendered.contains("Capital allocator"));
+        assert!(rendered.contains("Risk governor"));
+        assert!(rendered.contains("Repo drift sentinel"));
         assert!(rendered.contains("Autoresearch"));
+    }
+
+    #[test]
+    fn env_provenance_detects_conflicts() {
+        let tmp = tempdir().expect("tempdir");
+        let root = tmp.path().join("proj");
+        std::fs::create_dir_all(root.join("logs").join("knob_tuner")).expect("dirs");
+        std::fs::create_dir_all(root.join("logs").join("nightly_tuner")).expect("dirs");
+        std::fs::write(
+            root.join(".env"),
+            "REAL_ALGOTRADER_WS_BUY_GATE_ENABLED=true\nPRE_TRADE_MAX_SLIPPAGE_BPS=40\n",
+        )
+        .expect("write");
+        std::fs::write(
+            root.join("logs").join("knob_tuner").join("overrides.env"),
+            "REAL_ALGOTRADER_WS_BUY_GATE_ENABLED=false\n",
+        )
+        .expect("write");
+        let spec = TradingProjectSpec {
+            id: "proj-a".to_string(),
+            path: root.display().to_string(),
+            enabled: true,
+        };
+        let gate = collect_env_provenance(&spec);
+        assert!(!gate.passed);
+        assert!(gate
+            .conflicting_keys
+            .iter()
+            .any(|k| k == "REAL_ALGOTRADER_WS_BUY_GATE_ENABLED"));
+    }
+
+    #[test]
+    fn risk_governor_hard_stop_triggers_on_high_ruin() {
+        let governor = compute_risk_governor(&[], 0.75, 0.10);
+        assert_eq!(governor.mode, "hard-stop");
+        assert!(governor.halt_new_entries);
+    }
+
+    #[test]
+    fn repo_drift_marks_missing_project() {
+        let spec = TradingProjectSpec {
+            id: "missing".to_string(),
+            path: "/tmp/definitely-missing-hermes-ultra-alpha-project".to_string(),
+            enabled: true,
+        };
+        let drift = collect_repo_drift(&spec, &TradingDriftBaseline::default());
+        assert_eq!(drift.drift_state, "missing-project");
     }
 }

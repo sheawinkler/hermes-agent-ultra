@@ -5311,10 +5311,155 @@ async fn handle_mission_command(app: &mut App, args: &[&str]) -> Result<CommandR
                     emit_command_output(app, out.trim_end());
                     Ok(CommandResult::Handled)
                 }
+                "allocator" => {
+                    let report = load_last_trading_alpha_report()?;
+                    let mut out = String::new();
+                    out.push_str("Capital Allocator\n");
+                    out.push_str("-----------------\n");
+                    for row in &report.capital_allocator {
+                        let _ = writeln!(
+                            out,
+                            "- {} weight={:.4} capital_sol={:.6} max_loss_sol={:.6} throttle={:.3}",
+                            row.project_id,
+                            row.target_weight,
+                            row.target_capital_sol,
+                            row.max_loss_budget_sol,
+                            row.throttle_factor
+                        );
+                    }
+                    emit_command_output(app, out.trim_end());
+                    Ok(CommandResult::Handled)
+                }
+                "governor" => {
+                    let report = load_last_trading_alpha_report()?;
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Portfolio Risk Governor\n\nmode={}\nhalt_new_entries={}\nmax_portfolio_drawdown_pct={:.4}\nmax_project_drawdown_pct={:.4}\nmax_ruin_probability={:.4}\nreason={}",
+                            report.risk_governor.mode,
+                            report.risk_governor.halt_new_entries,
+                            report.risk_governor.max_portfolio_drawdown_pct,
+                            report.risk_governor.max_project_drawdown_pct,
+                            report.risk_governor.max_ruin_probability,
+                            report.risk_governor.reason
+                        ),
+                    );
+                    Ok(CommandResult::Handled)
+                }
+                "drift" => {
+                    let report = load_last_trading_alpha_report()?;
+                    let mut out = String::new();
+                    out.push_str("Repo Drift Sentinel\n");
+                    out.push_str("-------------------\n");
+                    for row in &report.repo_drift {
+                        let _ = writeln!(
+                            out,
+                            "- {} state={} head={} baseline={} dirty_files={} changed_since_baseline={}",
+                            row.project_id,
+                            row.drift_state,
+                            row.git_head,
+                            row.baseline_head,
+                            row.dirty_files,
+                            row.changed_since_baseline
+                        );
+                    }
+                    emit_command_output(app, out.trim_end());
+                    Ok(CommandResult::Handled)
+                }
+                "audit" => {
+                    let report = load_last_trading_alpha_report()?;
+                    let mut out = String::new();
+                    out.push_str("Run Context Audits\n");
+                    out.push_str("------------------\n");
+                    for row in &report.run_context_audits {
+                        let _ = writeln!(
+                            out,
+                            "- {} passed={} files_scanned={} missing={}",
+                            row.project_id,
+                            row.passed,
+                            row.files_scanned,
+                            if row.missing_metrics.is_empty() {
+                                "none".to_string()
+                            } else {
+                                row.missing_metrics.join(",")
+                            }
+                        );
+                    }
+                    emit_command_output(app, out.trim_end());
+                    Ok(CommandResult::Handled)
+                }
+                "provenance" => {
+                    let report = load_last_trading_alpha_report()?;
+                    let mut out = String::new();
+                    out.push_str("Env Provenance Gates\n");
+                    out.push_str("--------------------\n");
+                    for row in &report.env_provenance {
+                        let _ = writeln!(
+                            out,
+                            "- {} passed={} inspected_files={} conflicts={} decision={}",
+                            row.project_id,
+                            row.passed,
+                            row.inspected_files.len(),
+                            if row.conflicting_keys.is_empty() {
+                                "none".to_string()
+                            } else {
+                                row.conflicting_keys.join(",")
+                            },
+                            row.decision
+                        );
+                    }
+                    emit_command_output(app, out.trim_end());
+                    Ok(CommandResult::Handled)
+                }
+                "replay" => {
+                    let report = load_last_trading_alpha_report()?;
+                    let mut out = String::new();
+                    out.push_str("Replay Canary Harness\n");
+                    out.push_str("---------------------\n");
+                    for row in &report.replay_canary {
+                        let _ = writeln!(
+                            out,
+                            "- {} sample_size={} pass_rate={:.3} decision={}",
+                            row.project_id, row.sample_size, row.pass_rate, row.decision
+                        );
+                    }
+                    emit_command_output(app, out.trim_end());
+                    Ok(CommandResult::Handled)
+                }
+                "runbook" => {
+                    let report = load_last_trading_alpha_report()?;
+                    let mut out = String::new();
+                    out.push_str("Automated Remediation Runbook (Dry Run)\n");
+                    out.push_str("---------------------------------------\n");
+                    for row in &report.remediation_runbook {
+                        let _ = writeln!(
+                            out,
+                            "- [{}] {} :: {}\n  cmd: {}\n  why: {}",
+                            row.priority, row.project_id, row.title, row.command, row.rationale
+                        );
+                    }
+                    emit_command_output(app, out.trim_end());
+                    Ok(CommandResult::Handled)
+                }
+                "sources" => {
+                    let report = load_last_trading_alpha_report()?;
+                    let mut out = String::new();
+                    out.push_str("Research Source Ingestion\n");
+                    out.push_str("-------------------------\n");
+                    for row in &report.research_sources {
+                        let _ = writeln!(
+                            out,
+                            "- {}:{} found={} items={} path={}",
+                            row.project_id, row.source, row.found, row.items, row.path
+                        );
+                    }
+                    emit_command_output(app, out.trim_end());
+                    Ok(CommandResult::Handled)
+                }
                 _ => {
                     emit_command_output(
                         app,
-                        "Usage: /mission trading [status|refresh|postmortem|autoresearch]",
+                        "Usage: /mission trading [status|refresh|postmortem|autoresearch|allocator|governor|drift|audit|provenance|replay|runbook|sources]",
                     );
                     Ok(CommandResult::Handled)
                 }
@@ -5347,7 +5492,7 @@ async fn handle_mission_command(app: &mut App, args: &[&str]) -> Result<CommandR
             out.push_str("- /mission recover\n");
             out.push_str("- /mission replay [limit]\n");
             out.push_str("- /mission enqueue <loop-id> <event-type> <payload>\n");
-            out.push_str("- /mission trading [status|refresh|postmortem|autoresearch]\n");
+            out.push_str("- /mission trading [status|refresh|postmortem|autoresearch|allocator|governor|drift|audit|provenance|replay|runbook|sources]\n");
             out.push_str("- /objective <text>\n");
             out.push_str("- /background <task>\n");
             emit_command_output(app, out.trim_end());
