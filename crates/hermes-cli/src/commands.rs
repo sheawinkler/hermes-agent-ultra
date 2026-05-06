@@ -20,6 +20,12 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::alpha_runtime::{
+    append_counterfactual, clear_objective_contract, enqueue_loop_event,
+    ensure_alpha_runtime_bootstrap, load_alpha_loops, load_objective_contract,
+    recover_orphan_loop_events, render_mission_board, replay_loop_queue,
+    summarize_objective_contract, upsert_objective_contract, utility_terms_from_contract,
+};
 use crate::app::{App, PetDock, PetSettings};
 use crate::model_switch::{curated_provider_slugs, normalize_provider_model, provider_model_ids};
 use crate::skin_engine::{canonical_skin_name, BUILTIN_SKINS};
@@ -132,7 +138,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "/objective",
-        "Set/show/clear a durable session objective injected as system context",
+        "Set/show/clear objective contract (`status|plan|constraints|counterfactual|clear`)",
     ),
     ("/goal", "Alias for /objective"),
     (
@@ -167,7 +173,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/ops", "Operator control plane (status + quick controls)"),
     (
         "/mission",
-        "Mission control board for continuous loops (`status|init`)",
+        "Mission control board for continuous loops (`status|init|recover|replay|enqueue`)",
     ),
     ("/dashboard", "Dashboard control (status|on|off|url)"),
     (
@@ -5140,102 +5146,6 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-struct AlphaLoopDefinition {
-    id: String,
-    title: String,
-    objective: String,
-    cadence: String,
-    target: String,
-    enabled: bool,
-    trading_sensitive: bool,
-}
-
-fn alpha_state_dir() -> PathBuf {
-    hermes_config::hermes_home().join("alpha")
-}
-
-fn alpha_loops_path() -> PathBuf {
-    alpha_state_dir().join("loops.json")
-}
-
-fn default_alpha_loops() -> Vec<AlphaLoopDefinition> {
-    vec![
-        AlphaLoopDefinition {
-            id: "primary-objective-loop".to_string(),
-            title: "Primary Objective Loop".to_string(),
-            objective: "Continuously drive the operator primary objective with measurable gates"
-                .to_string(),
-            cadence: "continuous".to_string(),
-            target: "objective:primary".to_string(),
-            enabled: true,
-            trading_sensitive: false,
-        },
-        AlphaLoopDefinition {
-            id: "secondary-monitor-loop".to_string(),
-            title: "Secondary Monitor Loop".to_string(),
-            objective: "Continuously monitor a secondary production workflow for regressions"
-                .to_string(),
-            cadence: "1m".to_string(),
-            target: "repo:secondary".to_string(),
-            enabled: true,
-            trading_sensitive: false,
-        },
-        AlphaLoopDefinition {
-            id: "research-improvement-loop".to_string(),
-            title: "Research + Improvement Loop".to_string(),
-            objective: "Run continuous research and implementation recommendations".to_string(),
-            cadence: "5m".to_string(),
-            target: "workflow:research".to_string(),
-            enabled: true,
-            trading_sensitive: false,
-        },
-    ]
-}
-
-fn write_default_alpha_loops(force: bool) -> Result<PathBuf, AgentError> {
-    let dir = alpha_state_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| {
-        AgentError::Io(format!(
-            "failed to create alpha state directory {}: {}",
-            dir.display(),
-            e
-        ))
-    })?;
-    let path = alpha_loops_path();
-    if path.exists() && !force {
-        return Ok(path);
-    }
-    let content = serde_json::to_string_pretty(&default_alpha_loops())
-        .map_err(|e| AgentError::Config(format!("failed to encode alpha loops: {}", e)))?;
-    std::fs::write(&path, content).map_err(|e| {
-        AgentError::Io(format!(
-            "failed to write alpha loops file {}: {}",
-            path.display(),
-            e
-        ))
-    })?;
-    Ok(path)
-}
-
-fn load_alpha_loops() -> Result<Vec<AlphaLoopDefinition>, AgentError> {
-    let path = write_default_alpha_loops(false)?;
-    let raw = std::fs::read_to_string(&path).map_err(|e| {
-        AgentError::Io(format!(
-            "failed to read alpha loops {}: {}",
-            path.display(),
-            e
-        ))
-    })?;
-    serde_json::from_str::<Vec<AlphaLoopDefinition>>(&raw).map_err(|e| {
-        AgentError::Config(format!(
-            "failed to parse alpha loops {}: {}",
-            path.display(),
-            e
-        ))
-    })
-}
-
 fn background_job_counts() -> (usize, usize, usize, usize) {
     let jobs_dir = hermes_config::hermes_home().join("background_jobs");
     let mut queued = 0usize;
@@ -5265,22 +5175,6 @@ fn background_job_counts() -> (usize, usize, usize, usize) {
     (queued, running, completed, failed)
 }
 
-async fn contextlattice_health_line() -> String {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(2))
-        .build();
-    let Ok(client) = client else {
-        return "contextlattice: client_error".to_string();
-    };
-    match client.get("http://127.0.0.1:8075/health").send().await {
-        Ok(resp) if resp.status().is_success() => {
-            "contextlattice: healthy (127.0.0.1:8075)".to_string()
-        }
-        Ok(resp) => format!("contextlattice: unhealthy (status {})", resp.status()),
-        Err(err) => format!("contextlattice: unreachable ({})", err),
-    }
-}
-
 async fn handle_mission_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     let action = args
         .first()
@@ -5289,67 +5183,104 @@ async fn handle_mission_command(app: &mut App, args: &[&str]) -> Result<CommandR
         .to_ascii_lowercase();
     match action.as_str() {
         "init" => {
-            let path = write_default_alpha_loops(true)?;
+            let written = ensure_alpha_runtime_bootstrap(true)?;
+            let mut details = String::new();
+            for path in written {
+                let _ = writeln!(details, "- {}", path.display());
+            }
             emit_command_output(
                 app,
                 format!(
-                    "Mission loops initialized at {}\nUse `/mission status` to inspect active loops.",
-                    path.display()
+                    "Mission runtime initialized.\n{}\nUse `/mission status` to inspect active loops.",
+                    details.trim_end()
+                ),
+            );
+            Ok(CommandResult::Handled)
+        }
+        "recover" => {
+            let recovered = recover_orphan_loop_events(600)?;
+            emit_command_output(
+                app,
+                format!(
+                    "Mission queue recovery complete. Marked {} orphaned running event(s).",
+                    recovered
+                ),
+            );
+            Ok(CommandResult::Handled)
+        }
+        "replay" => {
+            let limit = args
+                .get(1)
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(32);
+            let replayed = replay_loop_queue(limit)?;
+            emit_command_output(
+                app,
+                format!(
+                    "Mission queue replay complete. Replayed {} event(s) (limit={}).",
+                    replayed, limit
+                ),
+            );
+            Ok(CommandResult::Handled)
+        }
+        "enqueue" => {
+            if args.len() < 4 {
+                emit_command_output(
+                    app,
+                    "Usage: /mission enqueue <loop-id> <event-type> <payload text>",
+                );
+                return Ok(CommandResult::Handled);
+            }
+            let loop_id = args[1];
+            let event_type = args[2];
+            let payload = args[3..].join(" ");
+            let event = enqueue_loop_event(loop_id, event_type, &payload)?;
+            emit_command_output(
+                app,
+                format!(
+                    "Queued mission event {} loop={} type={} status={}",
+                    event.id, event.loop_id, event.event_type, event.status
                 ),
             );
             Ok(CommandResult::Handled)
         }
         "status" | "show" => {
             let loops = load_alpha_loops()?;
-            let objective = app
-                .session_objective
-                .as_deref()
-                .unwrap_or("(none; use /objective <text>)");
             let (queued, running, completed, failed) = background_job_counts();
-            let ctx_status = contextlattice_health_line().await;
+            let board = render_mission_board(
+                &app.current_model,
+                app.session_objective.as_deref(),
+                (queued, running, completed, failed),
+            )
+            .await?;
             let enabled = loops.iter().filter(|l| l.enabled).count();
             let trading = loops.iter().filter(|l| l.trading_sensitive).count();
             let public = loops.len().saturating_sub(trading);
             let mut out = String::new();
-            out.push_str("Mission Control\n\n");
-            out.push_str(&format!("objective: {}\n", objective));
-            out.push_str(&format!("model: {}\n", app.current_model));
-            out.push_str(&format!("{}\n", ctx_status));
-            out.push_str(&format!(
-                "background_jobs: queued={} running={} completed={} failed={}\n\n",
-                queued, running, completed, failed
-            ));
-            out.push_str(&format!(
-                "loops: total={} enabled={} trading_private={} public={}\n",
+            out.push_str(&board);
+            let _ = writeln!(
+                out,
+                "\nLoop inventory: total={} enabled={} trading_private={} public={}",
                 loops.len(),
                 enabled,
                 trading,
                 public
-            ));
-            for lp in loops {
-                out.push_str(&format!(
-                    "- [{}] {} ({}) cadence={} target={}{}\n",
-                    if lp.enabled { "on" } else { "off" },
-                    lp.id,
-                    lp.title,
-                    lp.cadence,
-                    lp.target,
-                    if lp.trading_sensitive {
-                        " [private-trading]"
-                    } else {
-                        ""
-                    }
-                ));
-            }
+            );
             out.push_str("\nActions:\n");
             out.push_str("- /mission init\n");
+            out.push_str("- /mission recover\n");
+            out.push_str("- /mission replay [limit]\n");
+            out.push_str("- /mission enqueue <loop-id> <event-type> <payload>\n");
             out.push_str("- /objective <text>\n");
             out.push_str("- /background <task>\n");
             emit_command_output(app, out.trim_end());
             Ok(CommandResult::Handled)
         }
         _ => {
-            emit_command_output(app, "Usage: /mission [status|init]");
+            emit_command_output(
+                app,
+                "Usage: /mission [status|init|recover|replay [limit]|enqueue <loop-id> <event-type> <payload>]",
+            );
             Ok(CommandResult::Handled)
         }
     }
@@ -7003,16 +6934,118 @@ fn handle_capability_surface_command(
 }
 
 fn handle_objective_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let objective_usage = "Usage: `/objective <text>` or `/objective status|plan|constraints|counterfactual <scenario> | <expected_delta>|clear`.";
+
+    if let Some(first) = args.first() {
+        let cmd = first.trim().to_ascii_lowercase();
+        if cmd == "status" || cmd == "show" {
+            let mut out = String::new();
+            match app.session_objective.as_deref() {
+                Some(v) => {
+                    let _ = writeln!(out, "Current objective:\n{}", v);
+                }
+                None => {
+                    let _ = writeln!(out, "No session objective set.");
+                }
+            }
+            if let Some(contract) = load_objective_contract()? {
+                let _ = writeln!(out, "\nObjective contract");
+                let _ = writeln!(out, "------------------");
+                let _ = writeln!(out, "{}", summarize_objective_contract(&contract));
+            } else {
+                let _ = writeln!(out, "\nNo persisted objective contract yet.");
+            }
+            emit_command_output(app, out.trim_end());
+            return Ok(CommandResult::Handled);
+        }
+
+        if cmd == "plan" {
+            let Some(contract) = load_objective_contract()? else {
+                emit_command_output(
+                    app,
+                    "No objective contract. Set one with `/objective <text>`.",
+                );
+                return Ok(CommandResult::Handled);
+            };
+            let mut out = String::new();
+            out.push_str("Objective horizon plan\n");
+            out.push_str("----------------------\n");
+            for horizon in contract.horizons {
+                let _ = writeln!(out, "- {}:", horizon.horizon);
+                for goal in horizon.goals {
+                    let _ = writeln!(out, "  - {}", goal);
+                }
+            }
+            let terms = utility_terms_from_contract()?;
+            if !terms.is_empty() {
+                let mut rows: Vec<(String, f64)> = terms.into_iter().collect();
+                rows.sort_by(|a, b| b.1.total_cmp(&a.1));
+                out.push_str("\nUtility weights:\n");
+                for (name, weight) in rows {
+                    let _ = writeln!(out, "- {}: {:.2}", name, weight);
+                }
+            }
+            emit_command_output(app, out.trim_end());
+            return Ok(CommandResult::Handled);
+        }
+
+        if cmd == "constraints" {
+            let Some(contract) = load_objective_contract()? else {
+                emit_command_output(
+                    app,
+                    "No objective contract. Set one with `/objective <text>`.",
+                );
+                return Ok(CommandResult::Handled);
+            };
+            let mut out = String::new();
+            out.push_str("Objective hard constraints\n");
+            out.push_str("--------------------------\n");
+            for c in contract.utility.hard_constraints {
+                let _ = writeln!(out, "- {}", c.expression);
+            }
+            emit_command_output(app, out.trim_end());
+            return Ok(CommandResult::Handled);
+        }
+
+        if cmd == "counterfactual" {
+            if args.len() < 2 {
+                emit_command_output(
+                    app,
+                    "Usage: /objective counterfactual <scenario> | <expected_delta>",
+                );
+                return Ok(CommandResult::Handled);
+            }
+            let joined = args[1..].join(" ");
+            let (scenario, expected_delta) = joined
+                .split_once('|')
+                .map(|(a, b)| (a.trim(), b.trim()))
+                .unwrap_or((joined.trim(), "impact not specified"));
+            if scenario.is_empty() {
+                emit_command_output(
+                    app,
+                    "Counterfactual scenario cannot be empty. Use: /objective counterfactual <scenario> | <expected_delta>",
+                );
+                return Ok(CommandResult::Handled);
+            }
+            let updated = append_counterfactual(scenario, expected_delta)?;
+            emit_command_output(
+                app,
+                format!(
+                    "Counterfactual saved (journal entries={}).",
+                    updated.counterfactual_journal.len()
+                ),
+            );
+            return Ok(CommandResult::Handled);
+        }
+    }
+
     if args.is_empty() {
         let msg = match app.session_objective.as_deref() {
             Some(v) => format!(
-                "Current objective:\n{}\n\nUse `/objective clear` to remove, or `/objective <text>` to replace.",
+                "Current objective:\n{}\n\nUse `/objective clear` to remove, `/objective <text>` to replace, or `/objective status` for contract details.",
                 v
             ),
-            None => {
-                "No objective set.\nUsage: `/objective <text>` or `/objective clear`."
-                    .to_string()
-            }
+            None => format!("No objective set.\n{}", objective_usage),
         };
         emit_command_output(app, msg);
         return Ok(CommandResult::Handled);
@@ -7025,21 +7058,30 @@ fn handle_objective_command(app: &mut App, args: &[&str]) -> Result<CommandResul
         || first.eq_ignore_ascii_case("reset")
     {
         app.set_session_objective(None);
+        clear_objective_contract()?;
         emit_command_output(app, "Session objective cleared.");
         return Ok(CommandResult::Handled);
     }
 
     let objective = args.join(" ").trim().to_string();
     if objective.is_empty() {
-        emit_command_output(app, "Usage: `/objective <text>` or `/objective clear`.");
+        emit_command_output(app, objective_usage);
         return Ok(CommandResult::Handled);
     }
+    let objective_lc = objective.to_ascii_lowercase();
+    let trading_sensitive = [
+        "trading", "sol", "kraken", "wallet", "pnl", "strategy", "market",
+    ]
+    .iter()
+    .any(|needle| objective_lc.contains(needle));
+    let contract = upsert_objective_contract(&objective, trading_sensitive)?;
     app.set_session_objective(Some(objective.clone()));
     emit_command_output(
         app,
         format!(
-            "Session objective set:\n{}\n\nThis objective is now injected as system context for future turns.",
-            objective
+            "Session objective set:\n{}\n\nObjective contract persisted:\n{}\n\nThis objective is now injected as system context for future turns.",
+            objective,
+            summarize_objective_contract(&contract)
         ),
     );
     Ok(CommandResult::Handled)
@@ -11914,9 +11956,9 @@ mod tests {
         let _guard = env_test_lock();
         let tmp = tempdir().expect("tempdir");
         std::env::set_var("HERMES_HOME", tmp.path());
-        let path = write_default_alpha_loops(true).expect("write defaults");
+        let path = crate::alpha_runtime::write_default_alpha_loops(true).expect("write defaults");
         assert!(path.exists());
-        let loops = load_alpha_loops().expect("load defaults");
+        let loops = crate::alpha_runtime::load_alpha_loops().expect("load defaults");
         assert_eq!(loops.len(), 3);
         assert!(loops.iter().any(|l| l.id == "primary-objective-loop"));
         assert!(loops.iter().all(|l| !l.trading_sensitive));

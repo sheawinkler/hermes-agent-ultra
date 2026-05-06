@@ -10,6 +10,7 @@
 //! - CLI argument parsing via clap (9.7)
 //! - Theme/skin engine (9.8)
 
+pub mod alpha_runtime;
 pub mod app;
 pub mod auth;
 pub mod banner;
