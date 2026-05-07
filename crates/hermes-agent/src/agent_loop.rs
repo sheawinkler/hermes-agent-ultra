@@ -2610,6 +2610,73 @@ impl AgentLoop {
         hermes_home.join("auth").join("tokens.json")
     }
 
+    fn objective_runtime_ledger_path(&self) -> PathBuf {
+        let hermes_home = self
+            .config
+            .hermes_home
+            .as_deref()
+            .map(PathBuf::from)
+            .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
+            .or_else(|| dirs::home_dir().map(|h| h.join(".hermes")))
+            .unwrap_or_else(|| PathBuf::from(".hermes"));
+        hermes_home
+            .join("alpha")
+            .join("objective_runtime_ledger.jsonl")
+    }
+
+    fn append_objective_runtime_ledger(
+        &self,
+        messages: &[Message],
+        assistant_text: &str,
+        total_turns: u32,
+    ) -> Result<(), AgentError> {
+        let Some(objective) = extract_session_objective(messages) else {
+            return Ok(());
+        };
+        if objective.trim().is_empty() {
+            return Ok(());
+        }
+        let objective_id = short_sha256_hex(&format!("objective:{}", objective))
+            .chars()
+            .take(12)
+            .collect::<String>();
+        let objective_state = extract_objective_state_marker(assistant_text);
+        let evidence_files = extract_marker_values(assistant_text, "path=", 12);
+        let evidence_commands = extract_marker_values(assistant_text, "cmd=", 12);
+        let decision = if objective_state == "advancing" {
+            "promote"
+        } else if objective_state == "regressing" {
+            "investigate"
+        } else if objective_state == "unproven" {
+            "collect-more-evidence"
+        } else {
+            "monitor"
+        };
+        let entry = serde_json::json!({
+            "recorded_at": Utc::now().to_rfc3339(),
+            "objective_id": format!("obj-{}", objective_id),
+            "objective_state": objective_state,
+            "decision": decision,
+            "turns": total_turns,
+            "evidence_files": evidence_files,
+            "evidence_commands": evidence_commands,
+        });
+        let path = self.objective_runtime_ledger_path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| {
+                AgentError::Io(format!("create {} failed: {}", parent.display(), e))
+            })?;
+        }
+        let mut file = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .map_err(|e| AgentError::Io(format!("open {} failed: {}", path.display(), e)))?;
+        writeln!(file, "{}", entry)
+            .map_err(|e| AgentError::Io(format!("append {} failed: {}", path.display(), e)))?;
+        Ok(())
+    }
+
     fn resolve_runtime_command_args(
         &self,
         provider: Option<&str>,
@@ -4410,6 +4477,16 @@ impl AgentLoop {
                     }
                 }
                 tracing::debug!("No tool calls in response, finishing naturally");
+                if let Err(err) = self.append_objective_runtime_ledger(
+                    ctx.get_messages(),
+                    assistant_msg.content.as_deref().unwrap_or_default(),
+                    total_turns,
+                ) {
+                    self.emit_status(
+                        "lifecycle",
+                        &format!("Objective runtime ledger append skipped: {}", err),
+                    );
+                }
                 // Final memory sync
                 let (u, a) = extract_last_user_assistant(ctx.get_messages());
                 self.memory_sync(&u, &a, session_id);
@@ -5505,6 +5582,16 @@ impl AgentLoop {
                         ));
                         continue;
                     }
+                }
+                if let Err(err) = self.append_objective_runtime_ledger(
+                    ctx.get_messages(),
+                    assistant_msg.content.as_deref().unwrap_or_default(),
+                    total_turns,
+                ) {
+                    self.emit_status(
+                        "lifecycle",
+                        &format!("Objective runtime ledger append skipped: {}", err),
+                    );
                 }
                 let (u, a) = extract_last_user_assistant(ctx.get_messages());
                 self.memory_sync(&u, &a, session_id);
@@ -7767,6 +7854,62 @@ fn default_model_cost_per_million(model: &str) -> Option<(f64, f64)> {
         return Some((10.0, 40.0));
     }
     None
+}
+
+fn extract_objective_state_marker(text: &str) -> String {
+    for line in text.lines() {
+        let lowered = line.trim().to_ascii_lowercase();
+        if let Some(rest) = lowered.split("objective_state=").nth(1) {
+            let token = rest
+                .trim_start()
+                .split(|c: char| c.is_whitespace() || c == ',' || c == ';')
+                .next()
+                .unwrap_or("")
+                .trim_matches(|c: char| c == ')' || c == '.');
+            if !token.is_empty() {
+                return token.to_string();
+            }
+        }
+        if let Some(rest) = lowered.split("objective_state:").nth(1) {
+            let token = rest
+                .trim_start()
+                .split(|c: char| c.is_whitespace() || c == ',' || c == ';')
+                .next()
+                .unwrap_or("")
+                .trim_matches(|c: char| c == ')' || c == '.');
+            if !token.is_empty() {
+                return token.to_string();
+            }
+        }
+    }
+    "unspecified".to_string()
+}
+
+fn extract_marker_values(text: &str, marker: &str, limit: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let Some(idx) = line.find(marker) else {
+            continue;
+        };
+        let rest = &line[idx + marker.len()..];
+        let value = rest
+            .split(|c: char| c.is_whitespace() || c == ')' || c == ',' || c == ';' || c == '|')
+            .next()
+            .unwrap_or("")
+            .trim();
+        if value.is_empty() {
+            continue;
+        }
+        let normalized = value.trim_matches(|c: char| c == '"' || c == '\'' || c == '`');
+        if normalized.is_empty() || out.iter().any(|v| v == normalized) {
+            continue;
+        }
+        out.push(normalized.to_string());
+        if out.len() >= limit {
+            break;
+        }
+    }
+    out
 }
 
 fn estimate_usage_cost_usd(usage: &UsageStats, model: &str, config: &AgentConfig) -> Option<f64> {
@@ -11696,5 +11839,25 @@ mod tests {
         assert_eq!(calls.len(), 1);
         assert_eq!(coerced.tool_calls.as_ref().map(|v| v.len()), Some(1));
         assert_eq!(coerced.content.as_deref(), Some("Running tool."));
+    }
+
+    #[test]
+    fn test_extract_objective_state_marker_prefers_explicit_marker() {
+        let text = "ANALYTICS_VERIFIED:\n- objective_state=advancing metric=+0.12 SOL";
+        assert_eq!(extract_objective_state_marker(text), "advancing");
+        let colon_text = "ANALYTICS_VERIFIED:\n- objective_state: regressing metric=-0.30 SOL";
+        assert_eq!(extract_objective_state_marker(colon_text), "regressing");
+    }
+
+    #[test]
+    fn test_extract_marker_values_collects_unique_paths_and_cmds() {
+        let text = "PATCH_VERIFIED:\n- path=/tmp/a.rs exists_now=true\n- path=/tmp/a.rs exists_now=true\n- path=/tmp/b.rs exists_now=true\nDEEP_AUDIT_VERIFIED:\n- cmd=rg -n objective src\n- cmd=cargo test -p hermes-agent objective_guard";
+        let files = extract_marker_values(text, "path=", 8);
+        let cmds = extract_marker_values(text, "cmd=", 8);
+        assert_eq!(
+            files,
+            vec!["/tmp/a.rs".to_string(), "/tmp/b.rs".to_string()]
+        );
+        assert_eq!(cmds, vec!["rg".to_string(), "cargo".to_string()]);
     }
 }
