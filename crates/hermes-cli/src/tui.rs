@@ -1325,9 +1325,34 @@ impl TuiState {
 
 const TRANSCRIPT_HARD_WRAP_COLS: u16 = 80;
 const TRANSCRIPT_CONTENT_WRAP_COLS: usize = 76;
+const OFFSET_ANCHOR_SEARCH_RADIUS: usize = 1200;
 
 fn transcript_wrap_width(viewport_width: u16) -> u16 {
     viewport_width.min(TRANSCRIPT_HARD_WRAP_COLS).max(1)
+}
+
+fn find_anchor_line_index(
+    lines: &[Line<'static>],
+    anchor_text: &str,
+    expected_index: usize,
+) -> Option<usize> {
+    if lines.is_empty() {
+        return None;
+    }
+    let len = lines.len();
+    let center = expected_index.min(len.saturating_sub(1));
+    let radius = OFFSET_ANCHOR_SEARCH_RADIUS.min(len.saturating_sub(1));
+    let start = center.saturating_sub(radius);
+    let end = (center + radius).min(len.saturating_sub(1));
+
+    for (idx, line) in lines.iter().enumerate().take(end + 1).skip(start) {
+        if line.to_string() == anchor_text {
+            return Some(idx);
+        }
+    }
+    lines
+        .iter()
+        .position(|line| line.to_string() == anchor_text)
 }
 
 /// Render the full TUI frame.
@@ -2622,15 +2647,21 @@ fn render_messages(
                     .lines
                     .get(old_start)
                     .map(Line::to_string)
+                    .map(|text| (text, old_start, prev_len))
             } else {
                 None
             };
 
             let new_lines = build_transcript_lines(&transcript, state, styles, colors, wrap_width);
-            if let Some(anchor_text) = prev_anchor_line {
-                if let Some(new_idx) = new_lines
-                    .iter()
-                    .position(|line| line.to_string() == anchor_text)
+            if let Some((anchor_text, old_start, old_len)) = prev_anchor_line {
+                let new_len = new_lines.len();
+                let expected_idx = if old_len > 0 {
+                    old_start.saturating_mul(new_len) / old_len
+                } else {
+                    0
+                };
+                if let Some(new_idx) =
+                    find_anchor_line_index(&new_lines, &anchor_text, expected_idx)
                 {
                     let new_len = new_lines.len();
                     let visible = viewport_rows.min(new_len.max(1));
@@ -4321,6 +4352,11 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         needs_redraw = true;
                     }
                     Some(Event::Resize(_, _)) => {
+                        let _ = tui.terminal.autoresize();
+                        state.transcript_cache = TranscriptCache::default();
+                        if state.auto_follow_transcript {
+                            state.scroll_offset = 0;
+                        }
                         needs_redraw = true;
                     }
                     Some(Event::Mouse(mouse)) => {
@@ -4330,10 +4366,10 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         use crossterm::event::MouseEventKind;
                         match mouse.kind {
                             MouseEventKind::ScrollUp => {
-                                state.scroll_history_up(3);
+                                state.scroll_history_up(1);
                             }
                             MouseEventKind::ScrollDown => {
-                                state.scroll_history_down(3);
+                                state.scroll_history_down(1);
                             }
                             _ => {}
                         }
@@ -4657,6 +4693,25 @@ mod tests {
         assert_eq!(bar_a.chars().count(), 12);
         assert_eq!(bar_b.chars().count(), 12);
         assert_ne!(bar_a, bar_b);
+    }
+
+    #[test]
+    fn test_find_anchor_line_index_prefers_near_expected_window() {
+        let mut lines: Vec<Line<'static>> = Vec::new();
+        lines.push(Line::from("dup anchor"));
+        for idx in 1..2500 {
+            lines.push(Line::from(format!("line-{idx}")));
+        }
+        lines.push(Line::from("dup anchor"));
+        let idx = find_anchor_line_index(&lines, "dup anchor", 2499).expect("anchor index");
+        assert_eq!(idx, 2500);
+    }
+
+    #[test]
+    fn test_find_anchor_line_index_falls_back_to_global_search() {
+        let lines = vec![Line::from("alpha"), Line::from("beta"), Line::from("gamma")];
+        let idx = find_anchor_line_index(&lines, "gamma", 0).expect("anchor index");
+        assert_eq!(idx, 2);
     }
 
     #[test]
