@@ -1826,6 +1826,10 @@
           title: props.columnName === "triage"
             ? "Hermes profile that will spec this task (default: the dispatcher's configured specifier). Leave blank to let the dispatcher pick."
             : "Hermes profile to assign. Leave blank and the dispatcher will pick from available profiles when the task is Ready.",
+          style: { textTransform: "none" },
+          autoCapitalize: "none",
+          autoCorrect: "off",
+          spellCheck: false,
         }),
         h(Input, {
           type: "number",
@@ -2404,6 +2408,10 @@
         },
         placeholder: "(empty = unassign)",
         className: "h-7 text-xs flex-1",
+        style: { textTransform: "none" },
+        autoCapitalize: "none",
+        autoCorrect: "off",
+        spellCheck: false,
       }),
     );
   }
