@@ -31,6 +31,7 @@ use ratatui::widgets::{
 use ratatui::Frame;
 use tokio::sync::mpsc;
 use tui_textarea::{CursorMove, TextArea};
+use unicode_width::UnicodeWidthChar;
 
 use hermes_auth::FileTokenStore;
 use hermes_core::{AgentError, AgentResult, Message, StreamChunk};
@@ -3374,7 +3375,7 @@ fn render_status(
             status_text.push_str(&format!(" | {frame_token}"));
         }
     }
-    let clipped = truncate_chars(&status_text, area.width.saturating_sub(1) as usize);
+    let clipped = fit_status_line(&status_text, area.width.saturating_sub(1) as usize);
     let line_style = if state.status_message.is_empty() {
         base
     } else {
@@ -3421,6 +3422,30 @@ fn truncate_chars(text: &str, max_chars: usize) -> String {
     let take = max_chars.saturating_sub(1);
     let mut out: String = text.chars().take(take).collect();
     out.push('…');
+    out
+}
+
+fn fit_status_line(text: &str, width: usize) -> String {
+    if width == 0 {
+        return String::new();
+    }
+    let mut out = String::new();
+    let mut used = 0usize;
+    for ch in text.chars() {
+        let cw = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if cw == 0 {
+            continue;
+        }
+        if used + cw > width {
+            break;
+        }
+        out.push(ch);
+        used += cw;
+    }
+    while used < width {
+        out.push(' ');
+        used += 1;
+    }
     out
 }
 

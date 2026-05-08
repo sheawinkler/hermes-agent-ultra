@@ -1138,6 +1138,17 @@ fn redact_sensitive_text(value: &str) -> Option<String> {
     }
 }
 
+fn truncate_hook_preview(text: &str, max_chars: usize) -> String {
+    let total = text.chars().count();
+    if total <= max_chars.max(1) {
+        return text.to_string();
+    }
+    let keep_head = max_chars.saturating_sub(96).max(64);
+    let head: String = text.chars().take(keep_head).collect();
+    let omitted = total.saturating_sub(keep_head);
+    format!("{head}\n...[truncated {omitted} chars]...")
+}
+
 fn redact_json_value(value: &mut Value) {
     match value {
         Value::Object(map) => {
@@ -1863,8 +1874,62 @@ impl AgentLoop {
     fn inject_hook_context(&self, results: &[HookResult], ctx: &mut ContextManager) {
         for r in results {
             if let HookResult::InjectContext(text) = r {
-                ctx.add_message(Message::system(text));
+                let trimmed = text.trim();
+                if trimmed.is_empty() {
+                    continue;
+                }
+                if let Some(spill_path) = self.spill_hook_context_if_oversized(trimmed) {
+                    let preview = truncate_hook_preview(trimmed, 720);
+                    let note = format!(
+                        "Hook context was oversized and spilled to disk.\nspill_path={}\npreview:\n{}",
+                        spill_path.display(),
+                        preview
+                    );
+                    ctx.add_message(Message::system(note));
+                    continue;
+                }
+                ctx.add_message(Message::system(trimmed.to_string()));
             }
+        }
+    }
+
+    fn hook_context_spill_threshold_chars(&self) -> usize {
+        std::env::var("HERMES_HOOK_CONTEXT_SPILL_CHARS")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .filter(|v| *v >= 1024)
+            .unwrap_or(12_000)
+    }
+
+    fn hook_context_spill_dir(&self) -> PathBuf {
+        let hermes_home = self
+            .config
+            .hermes_home
+            .as_deref()
+            .map(PathBuf::from)
+            .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
+            .or_else(|| dirs::home_dir().map(|h| h.join(".hermes")))
+            .unwrap_or_else(|| PathBuf::from(".hermes"));
+        hermes_home.join("hooks").join("spills")
+    }
+
+    fn spill_hook_context_if_oversized(&self, text: &str) -> Option<PathBuf> {
+        if text.len() < self.hook_context_spill_threshold_chars() {
+            return None;
+        }
+        let dir = self.hook_context_spill_dir();
+        if std::fs::create_dir_all(&dir).is_err() {
+            return None;
+        }
+        let mut hasher = Sha256::new();
+        hasher.update(text.as_bytes());
+        let digest = hex::encode(hasher.finalize());
+        let stamp = Utc::now().format("%Y%m%dT%H%M%SZ");
+        let path = dir.join(format!("hook_context_{}_{}.txt", stamp, &digest[..16]));
+        if std::fs::write(&path, text).is_ok() {
+            Some(path)
+        } else {
+            None
         }
     }
 

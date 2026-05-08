@@ -16,13 +16,14 @@
 //! compactions: the previous summary is fed back into the prompt and the
 //! model is told to update rather than rewrite.
 
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use hermes_core::{AgentError, LlmProvider, Message, MessageRole};
 use hermes_intelligence::auxiliary::{
     AuxiliaryClient, AuxiliaryError, AuxiliaryRequest, AuxiliaryTask,
 };
+use regex::Regex;
 
 // ---------------------------------------------------------------------------
 // Constants — kept aligned with Python module-level globals.
@@ -57,6 +58,16 @@ const CONTENT_HEAD: usize = 4_000;
 const CONTENT_TAIL: usize = 1_500;
 const TOOL_ARGS_MAX: usize = 1_500;
 const TOOL_ARGS_HEAD: usize = 1_200;
+
+static SUMMARY_SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+    vec![
+        Regex::new(r"(?i)(api[_-]?key|token|secret|password)\s*[:=]\s*[A-Za-z0-9._\-]{8,}")
+            .unwrap(),
+        Regex::new(r"(?i)authorization\s*:\s*bearer\s+[A-Za-z0-9._\-]{8,}").unwrap(),
+        Regex::new(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----")
+            .unwrap(),
+    ]
+});
 
 // ---------------------------------------------------------------------------
 // Errors
@@ -341,7 +352,8 @@ impl ContextCompressor {
         let mut parts = Vec::with_capacity(turns.len());
         for msg in turns {
             let role = msg.role;
-            let raw_content = msg.content.clone().unwrap_or_default();
+            let raw_content =
+                redact_sensitive_summary_text(&msg.content.clone().unwrap_or_default());
 
             let content = truncate_middle(&raw_content, CONTENT_MAX, CONTENT_HEAD, CONTENT_TAIL);
             match role {
@@ -355,10 +367,12 @@ impl ContextCompressor {
                         if !tcs.is_empty() {
                             let mut tc_parts = Vec::with_capacity(tcs.len());
                             for tc in tcs {
-                                let args = if tc.function.arguments.len() > TOOL_ARGS_MAX {
-                                    format!("{}...", &tc.function.arguments[..TOOL_ARGS_HEAD])
+                                let safe_args =
+                                    redact_sensitive_summary_text(&tc.function.arguments);
+                                let args = if safe_args.len() > TOOL_ARGS_MAX {
+                                    format!("{}...", &safe_args[..TOOL_ARGS_HEAD])
                                 } else {
-                                    tc.function.arguments.clone()
+                                    safe_args
                                 };
                                 tc_parts.push(format!("  {}({})", tc.function.name, args));
                             }
@@ -383,6 +397,7 @@ impl ContextCompressor {
 
     fn build_summary_prompt(&self, content_block: &str, summary_budget: u64) -> String {
         if let Some(prev) = self.previous_summary.as_ref() {
+            let prev = redact_sensitive_summary_text(prev);
             format!(
                 "You are updating a context compaction summary. A previous compaction produced the summary below. \
 New conversation turns have occurred since then and need to be incorporated.\n\n\
@@ -893,6 +908,14 @@ fn role_label(role: MessageRole) -> &'static str {
         MessageRole::Assistant => "assistant",
         MessageRole::Tool => "tool",
     }
+}
+
+fn redact_sensitive_summary_text(raw: &str) -> String {
+    let mut out = raw.to_string();
+    for pattern in SUMMARY_SECRET_PATTERNS.iter() {
+        out = pattern.replace_all(&out, "[redacted]").to_string();
+    }
+    out
 }
 
 fn content_len(msg: &Message) -> usize {
