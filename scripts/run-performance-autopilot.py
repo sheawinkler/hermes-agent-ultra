@@ -160,6 +160,10 @@ def write_markdown(path: pathlib.Path, report: dict[str, Any]) -> None:
         "",
         f"- generated_at: `{report['generated_at']}`",
         f"- ok: `{report['ok']}`",
+        f"- intelligence_index: `{report.get('intelligence_index', 0):.2f}`",
+        f"- performance_index: `{report.get('performance_index', 0):.2f}`",
+        f"- adaptive_index: `{report.get('adaptive_index', 0):.2f}`",
+        f"- profile_recommendation: `{report.get('profile_recommendation', 'balanced')}`",
         "",
         "## Sections",
     ]
@@ -172,6 +176,11 @@ def write_markdown(path: pathlib.Path, report: dict[str, Any]) -> None:
         lines.append(
             f"- **{rec['id']} ({rec['severity']})**: {rec['title']} — {rec['recommendation']}"
         )
+    actions = report.get("adaptive_actions") or []
+    if actions:
+        lines.extend(["", "## Adaptive Actions"])
+        for action in actions:
+            lines.append(f"- `{action['key']}={action['value']}` ({action['reason']})")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
 
@@ -196,8 +205,104 @@ def write_env(path: pathlib.Path, report: dict[str, Any]) -> None:
         )
     if rec_ids == {"PERF_STABLE"}:
         lines.append("HERMES_PERF_AUTOPILOT_STATUS=stable")
+    lines.append(f"HERMES_PERF_AUTOPILOT_PROFILE={report.get('profile_recommendation', 'balanced')}")
+    for action in report.get("adaptive_actions", []):
+        key = action.get("key")
+        value = action.get("value")
+        if key and value is not None:
+            lines.append(f"{key}={value}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def compute_adaptive_indexes(
+    hotpath: dict[str, Any], eval_gate: dict[str, Any], mcp_gate: dict[str, Any], recommendations: list[dict[str, str]]
+) -> dict[str, Any]:
+    ns = parse_hotpath_ns((hotpath.get("stdout_tail") or "") + "\n" + (hotpath.get("stderr_tail") or ""))
+    checks = [hotpath.get("ok"), eval_gate.get("ok"), mcp_gate.get("ok")]
+    pass_count = sum(1 for ok in checks if ok)
+    fail_count = len(checks) - pass_count
+    base_performance = 100.0
+    if ns is not None and ns > 12000:
+        # 12k ns target, penalize by overflow ratio capped to 30 points.
+        overflow_ratio = min((ns - 12000) / 12000, 3.0)
+        base_performance -= min(30.0, overflow_ratio * 10.0)
+    if not hotpath.get("ok"):
+        base_performance -= 35.0
+    if not mcp_gate.get("ok"):
+        base_performance -= 20.0
+    base_performance = max(0.0, min(100.0, base_performance))
+
+    severity_weight = {"P0": 22.0, "P1": 12.0, "P2": 6.0, "P3": 2.0}
+    penalty = 0.0
+    for rec in recommendations:
+        penalty += severity_weight.get(str(rec.get("severity", "P3")).upper(), 4.0)
+    # Intelligence index rewards clean eval/recovery behavior.
+    base_intelligence = 100.0 - penalty
+    if not eval_gate.get("ok"):
+        base_intelligence -= 18.0
+    base_intelligence = max(0.0, min(100.0, base_intelligence))
+
+    adaptive_index = round(base_performance * 0.55 + base_intelligence * 0.45, 2)
+    performance_index = round(base_performance, 2)
+    intelligence_index = round(base_intelligence, 2)
+
+    if fail_count >= 2:
+        profile = "safety"
+    elif not eval_gate.get("ok"):
+        profile = "quality"
+    elif not mcp_gate.get("ok"):
+        profile = "reliability"
+    elif ns is not None and ns > 12000:
+        profile = "throughput"
+    else:
+        profile = "balanced"
+
+    adaptive_actions: list[dict[str, str]] = []
+    adaptive_actions.append(
+        {
+            "key": "HERMES_PERF_AUTOPILOT_PROFILE",
+            "value": profile,
+            "reason": "profile recommendation from adaptive index",
+        }
+    )
+    if profile == "throughput":
+        adaptive_actions.extend(
+            [
+                {"key": "HERMES_TOOL_POLICY_PRESET", "value": "standard", "reason": "reduce policy hot-path overhead"},
+                {"key": "HERMES_MODEL_CATALOG_GUARD", "value": "1", "reason": "avoid invalid model retries"},
+            ]
+        )
+    elif profile == "quality":
+        adaptive_actions.extend(
+            [
+                {"key": "HERMES_REPLAY_ENABLED", "value": "1", "reason": "capture deterministic replay for eval failures"},
+                {"key": "HERMES_MODEL_AUTO_REMEDIATE", "value": "1", "reason": "promote self-heal recommendation loop"},
+            ]
+        )
+    elif profile == "reliability":
+        adaptive_actions.append(
+            {"key": "HERMES_TOOL_POLICY_MODE", "value": "enforce", "reason": "stabilize stale transport/recovery behavior"}
+        )
+    elif profile == "safety":
+        adaptive_actions.extend(
+            [
+                {"key": "HERMES_TOOL_POLICY_MODE", "value": "enforce", "reason": "strict policy posture under multi-check failure"},
+                {"key": "HERMES_REPLAY_ENABLED", "value": "1", "reason": "preserve incident evidence during degraded state"},
+            ]
+        )
+    else:
+        adaptive_actions.append(
+            {"key": "HERMES_PERF_AUTOPILOT_STATUS", "value": "stable", "reason": "all checks stable"}
+        )
+
+    return {
+        "performance_index": performance_index,
+        "intelligence_index": intelligence_index,
+        "adaptive_index": adaptive_index,
+        "profile_recommendation": profile,
+        "adaptive_actions": adaptive_actions,
+    }
 
 
 def main() -> int:
@@ -215,6 +320,7 @@ def main() -> int:
     mcp_gate = run_shell(args.mcp_cmd, repo_root)
     recommendations = build_recommendations(hotpath, eval_gate, mcp_gate)
     ok = all(section.get("ok") for section in [hotpath, eval_gate, mcp_gate])
+    adaptive = compute_adaptive_indexes(hotpath, eval_gate, mcp_gate, recommendations)
 
     report = {
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -226,6 +332,11 @@ def main() -> int:
             "mcp_stale_recovery": mcp_gate,
         },
         "recommendations": recommendations,
+        "performance_index": adaptive["performance_index"],
+        "intelligence_index": adaptive["intelligence_index"],
+        "adaptive_index": adaptive["adaptive_index"],
+        "profile_recommendation": adaptive["profile_recommendation"],
+        "adaptive_actions": adaptive["adaptive_actions"],
         "report_json": str(output_json),
         "report_markdown": str(output_md),
     }

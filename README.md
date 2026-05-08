@@ -122,6 +122,12 @@ Key operator commands:
 /policy strict
 /policy standard
 /policy dev
+
+# Adaptive intelligence-performance autopilot
+/ops autopilot status
+/ops autopilot run
+/ops autopilot recommend
+/ops autopilot apply
 ```
 
 ## Local Backends
