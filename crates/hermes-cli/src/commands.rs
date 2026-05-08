@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::{
     collections::{HashMap, HashSet},
     fmt::Write as _,
+    io::Write as _,
     path::{Path, PathBuf},
     time::SystemTime,
 };
@@ -218,6 +219,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
         "Show build/parity/upstream snapshot and enabled Ultra features",
     ),
     ("/ops", "Operator control plane (status + quick controls)"),
+    (
+        "/autopilot",
+        "Adaptive intelligence-performance autopilot (`status|run|recommend|apply|profile|mode|clear`)",
+    ),
     (
         "/mission",
         "Mission control board (`status|init|recover|replay|enqueue|trading ...`)",
@@ -2966,6 +2971,7 @@ fn canonical_command(cmd: &str) -> &str {
         "/autocompress" => "/autocompact",
         "/skins" => "/skin",
         "/sb" => "/statusbar",
+        "/pilot" => "/autopilot",
         "/debug" => "/debug-dump",
         "/exit" => "/quit",
         other => other,
@@ -3047,6 +3053,7 @@ pub async fn handle_slash_command(
         "/status" => handle_status_command(app),
         "/about" => handle_about_command(app),
         "/ops" => handle_ops_command(app, args).await,
+        "/autopilot" => handle_ops_autopilot_command(app, args).await,
         "/mission" => handle_mission_command(app, args).await,
         "/dashboard" => handle_dashboard_command(app, args).await,
         "/platforms" => handle_platforms_command(app),
@@ -4833,6 +4840,139 @@ fn self_evolution_recommendations(path: &Path) -> Vec<String> {
         .collect()
 }
 
+const AUTOPILOT_ALLOWED_ENV_KEYS: &[&str] = &[
+    "HERMES_TOOL_POLICY_PRESET",
+    "HERMES_TOOL_POLICY_MODE",
+    "HERMES_MODEL_CATALOG_GUARD",
+    "HERMES_MODEL_AUTO_REMEDIATE",
+    "HERMES_REPLAY_ENABLED",
+    "HERMES_PERF_AUTOPILOT_STATUS",
+    "HERMES_PERF_AUTOPILOT_PROFILE",
+    "HERMES_PERF_AUTOPILOT_MODE",
+];
+
+fn summarize_performance_autopilot_report(path: &Path, key: &str) -> Option<String> {
+    let report = read_json_file(path)?;
+    let ok = report
+        .get("ok")
+        .and_then(|v| v.as_bool())
+        .map(|v| if v { "pass" } else { "fail" })
+        .unwrap_or("unknown");
+    let generated = report
+        .get("generated_at")
+        .and_then(|v| v.as_str())
+        .unwrap_or("unknown");
+    let recommendations = report
+        .get("recommendations")
+        .and_then(|v| v.as_array())
+        .map(|arr| arr.len())
+        .unwrap_or(0);
+    let severe = report
+        .get("recommendations")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter(|item| {
+                    item.get("severity")
+                        .and_then(|v| v.as_str())
+                        .is_some_and(|sev| {
+                            sev.eq_ignore_ascii_case("P0") || sev.eq_ignore_ascii_case("P1")
+                        })
+                })
+                .count()
+        })
+        .unwrap_or(0);
+    let adaptive_idx = report
+        .get("adaptive_index")
+        .and_then(|v| v.as_f64())
+        .unwrap_or(0.0);
+    let profile = report
+        .get("profile_recommendation")
+        .and_then(|v| v.as_str())
+        .unwrap_or("balanced");
+    Some(format!(
+        "{}={} idx={:.2} profile={} recs={} severe={} @ {} ({})",
+        key,
+        ok,
+        adaptive_idx,
+        profile,
+        recommendations,
+        severe,
+        generated,
+        path.file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.display().to_string())
+    ))
+}
+
+fn performance_autopilot_recommendations(path: &Path) -> Vec<String> {
+    let report = match read_json_file(path) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let Some(items) = report.get("recommendations").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            let obj = item.as_object()?;
+            let id = obj.get("id").and_then(|v| v.as_str()).unwrap_or("UNKNOWN");
+            let sev = obj.get("severity").and_then(|v| v.as_str()).unwrap_or("PX");
+            let title = obj.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            let rec = obj
+                .get("recommendation")
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            Some(format!("[{sev}] {id}: {title}\n  recommendation: {rec}"))
+        })
+        .collect()
+}
+
+fn parse_env_file_kv(path: &Path) -> Vec<(String, String)> {
+    let raw = match std::fs::read_to_string(path) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    raw.lines()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                return None;
+            }
+            let (k, v) = trimmed.split_once('=')?;
+            Some((k.trim().to_string(), v.trim().to_string()))
+        })
+        .collect()
+}
+
+fn write_autopilot_runtime_event(
+    report_dir: &Path,
+    session_id: &str,
+    mode: &str,
+    profile: &str,
+    applied: &[(String, String)],
+) {
+    let path = report_dir.join("performance-autopilot-runtime.jsonl");
+    let created_at = format!("{:?}", SystemTime::now());
+    let payload = serde_json::json!({
+        "created_at": created_at,
+        "session_id": session_id,
+        "mode": mode,
+        "profile": profile,
+        "applied": applied,
+    });
+    if let Ok(line) = serde_json::to_string(&payload) {
+        if let Ok(mut fh) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+        {
+            let _ = writeln!(&mut fh, "{line}");
+        }
+    }
+}
+
 fn dashboard_status_line_from_payload(payload: &serde_json::Value) -> String {
     let enabled = payload
         .get("enabled")
@@ -5153,6 +5293,199 @@ async fn handle_ops_evolve_command(
     }
 }
 
+async fn handle_ops_autopilot_command(
+    app: &mut App,
+    args: &[&str],
+) -> Result<CommandResult, AgentError> {
+    let sub = args
+        .first()
+        .copied()
+        .unwrap_or("status")
+        .to_ascii_lowercase();
+    let mode = std::env::var("HERMES_PERF_AUTOPILOT_MODE")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "advisory".to_string());
+    let profile = std::env::var("HERMES_PERF_AUTOPILOT_PROFILE")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "balanced".to_string());
+
+    let Some(repo_root) = discover_repo_root_for_about() else {
+        emit_command_output(
+            app,
+            "Autopilot controls are unavailable outside source checkout.",
+        );
+        return Ok(CommandResult::Handled);
+    };
+    let report_dir = repo_root.join(".sync-reports");
+    let latest = latest_json_report(&report_dir, "performance-autopilot-");
+
+    match sub.as_str() {
+        "status" => {
+            let summary = latest
+                .as_ref()
+                .and_then(|p| summarize_performance_autopilot_report(p, "autopilot"))
+                .unwrap_or_else(|| "autopilot=unknown (no reports yet)".to_string());
+            emit_command_output(
+                app,
+                format!(
+                    "{}\nmode={} profile={}\nUse `/ops autopilot run` then `/ops autopilot recommend`.",
+                    summary, mode, profile
+                ),
+            );
+            Ok(CommandResult::Handled)
+        }
+        "run" => {
+            let out = run_ops_shell_command(
+                "python3 scripts/run-performance-autopilot.py --repo-root . --json",
+            )
+            .await?;
+            emit_command_output(app, out);
+            Ok(CommandResult::Handled)
+        }
+        "recommend" | "recs" => {
+            let Some(path) = latest else {
+                emit_command_output(
+                    app,
+                    "No performance autopilot reports found. Run `/ops autopilot run` first.",
+                );
+                return Ok(CommandResult::Handled);
+            };
+            let recs = performance_autopilot_recommendations(&path);
+            if recs.is_empty() {
+                emit_command_output(
+                    app,
+                    format!(
+                        "No recommendations found in {}.",
+                        path.file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| path.display().to_string())
+                    ),
+                );
+            } else {
+                let file_label = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| path.display().to_string());
+                emit_command_output(
+                    app,
+                    format!(
+                        "Autopilot recommendations ({file_label}):\n{}",
+                        recs.join("\n")
+                    ),
+                );
+            }
+            Ok(CommandResult::Handled)
+        }
+        "apply" => {
+            let env_path =
+                report_dir.join(format!("performance-autopilot-env-{}.env", app.session_id));
+            let cmd = format!(
+                "python3 scripts/run-performance-autopilot.py --repo-root . --apply-env {} --json",
+                shell_escape(&env_path.display().to_string())
+            );
+            let out = run_ops_shell_command(&cmd).await?;
+            let kvs = parse_env_file_kv(&env_path);
+            let mut applied = Vec::new();
+            for (k, v) in kvs {
+                if AUTOPILOT_ALLOWED_ENV_KEYS
+                    .iter()
+                    .any(|allowed| *allowed == k)
+                {
+                    std::env::set_var(&k, &v);
+                    applied.push((k, v));
+                }
+            }
+            write_autopilot_runtime_event(&report_dir, &app.session_id, &mode, &profile, &applied);
+            let applied_keys = if applied.is_empty() {
+                "(none)".to_string()
+            } else {
+                applied
+                    .iter()
+                    .map(|(k, _)| k.clone())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            emit_command_output(
+                app,
+                format!(
+                    "{out}\n\nApplied safe runtime knobs: {applied_keys}\nmode={mode} profile={profile}\nlog: {}",
+                    report_dir.join("performance-autopilot-runtime.jsonl").display()
+                ),
+            );
+            Ok(CommandResult::Handled)
+        }
+        "profile" => {
+            let next = args.get(1).map(|v| v.to_ascii_lowercase());
+            match next.as_deref() {
+                None | Some("status") => emit_command_output(
+                    app,
+                    format!("autopilot profile={profile} (mode={mode})"),
+                ),
+                Some("list") => emit_command_output(
+                    app,
+                    "Autopilot profiles:\n- balanced: default stability/perf mix\n- throughput: lower latency and tighter loop cadence\n- quality: stronger verification and replay focus\n- reliability: prioritize retries/recovery and degraded-source tolerance\n- safety: strictest gate posture with conservative policy knobs",
+                ),
+                Some("balanced" | "throughput" | "quality" | "reliability" | "safety") => {
+                    let value = next.unwrap_or_else(|| "balanced".to_string());
+                    std::env::set_var("HERMES_PERF_AUTOPILOT_PROFILE", &value);
+                    emit_command_output(app, format!("autopilot profile set to '{}'", value));
+                }
+                Some(other) => {
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Unknown profile '{}'. Use `/ops autopilot profile list`.",
+                            other
+                        ),
+                    );
+                }
+            }
+            Ok(CommandResult::Handled)
+        }
+        "mode" => {
+            let next = args.get(1).map(|v| v.to_ascii_lowercase());
+            match next.as_deref() {
+                None | Some("status") => emit_command_output(app, format!("autopilot mode={mode}")),
+                Some("list") => emit_command_output(
+                    app,
+                    "Autopilot modes:\n- off: disabled\n- advisory: report + recommendations only\n- enforce: intended to pair with `/ops autopilot apply` during incidents",
+                ),
+                Some("off" | "advisory" | "enforce") => {
+                    let value = next.unwrap_or_else(|| "advisory".to_string());
+                    std::env::set_var("HERMES_PERF_AUTOPILOT_MODE", &value);
+                    emit_command_output(app, format!("autopilot mode set to '{}'", value));
+                }
+                Some(other) => {
+                    emit_command_output(
+                        app,
+                        format!("Unknown mode '{}'. Use `/ops autopilot mode list`.", other),
+                    );
+                }
+            }
+            Ok(CommandResult::Handled)
+        }
+        "clear" => {
+            std::env::remove_var("HERMES_PERF_AUTOPILOT_MODE");
+            std::env::remove_var("HERMES_PERF_AUTOPILOT_PROFILE");
+            std::env::remove_var("HERMES_PERF_AUTOPILOT_STATUS");
+            emit_command_output(
+                app,
+                "Cleared autopilot runtime overrides (mode/profile/status).",
+            );
+            Ok(CommandResult::Handled)
+        }
+        _ => {
+            emit_command_output(
+                app,
+                "Usage: /ops autopilot [status|run|recommend|apply|profile [status|list|balanced|throughput|quality|reliability|safety]|mode [status|list|off|advisory|enforce]|clear]",
+            );
+            Ok(CommandResult::Handled)
+        }
+    }
+}
+
 fn shell_escape(input: &str) -> String {
     let escaped = input.replace('\'', "'\"'\"'");
     format!("'{}'", escaped)
@@ -5191,10 +5524,21 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
             let evolve = latest_json_report(&report_dir, "self-evolution-loop-")
                 .and_then(|p| summarize_self_evolution_report(&p, "evolve"))
                 .unwrap_or_else(|| "evolve=unknown".to_string());
-            format!("{eval}; {slo}; {evolve}")
+            let autopilot = latest_json_report(&report_dir, "performance-autopilot-")
+                .and_then(|p| summarize_performance_autopilot_report(&p, "autopilot"))
+                .unwrap_or_else(|| "autopilot=unknown".to_string());
+            format!("{eval}; {slo}; {evolve}; {autopilot}")
         } else {
             "unavailable (non-source checkout)".to_string()
         };
+        let autopilot_mode = std::env::var("HERMES_PERF_AUTOPILOT_MODE")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| "advisory".to_string());
+        let autopilot_profile = std::env::var("HERMES_PERF_AUTOPILOT_PROFILE")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| "balanced".to_string());
 
         let out = format!(
             "Operator Control Plane\n\
@@ -5214,6 +5558,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
              \n\
              Policy/Gates:\n\
                tool_policy:  mode={} preset={}\n\
+               autopilot:    mode={} profile={}\n\
                policy_counts allow={} deny={} audit_only={} simulate={} would_block={}\n\
                skills_tier:  {} (bypass={})\n\
                {}\n\
@@ -5230,6 +5575,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                /ops dashboard [status|on|off|url] [host] [port]\n\
                /ops skills-tier [status|trusted|balanced|open]\n\
                /ops evolve [status|run|recommend]\n\
+               /ops autopilot [status|run|recommend|apply|profile|mode|clear]\n\
                /ops gate [status|eval|elite|slo]\n\
                /mission [status|init]\n\
                /ops help",
@@ -5240,6 +5586,8 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
             if app.mouse_enabled() { "ON" } else { "OFF" },
             policy_mode,
             policy_preset,
+            autopilot_mode,
+            autopilot_profile,
             counters.allow,
             counters.deny,
             counters.audit_only,
@@ -5275,6 +5623,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                  - /ops dashboard [status|on|off|url] [host] [port]\n\
                  - /ops skills-tier [status|trusted|balanced|open]\n\
                  - /ops evolve [status|run|recommend]\n\
+                 - /ops autopilot [status|run|recommend|apply|profile|mode|clear]\n\
                  - /ops gate [status|eval|elite|slo]\n\
                  - /mission [status|init]",
             );
@@ -5291,6 +5640,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
         "dashboard" => handle_dashboard_command(app, &args[1..]).await,
         "skills-tier" => handle_ops_skills_tier_command(app, &args[1..]),
         "evolve" => handle_ops_evolve_command(app, &args[1..]).await,
+        "autopilot" => handle_ops_autopilot_command(app, &args[1..]).await,
         "gate" => handle_ops_gate_command(app, &args[1..]).await,
         other => {
             emit_command_output(
@@ -14994,6 +15344,77 @@ mod tests {
         assert_eq!(lines.len(), 1);
         assert!(lines[0].contains("EVAL_REGRESSION"));
         assert!(lines[0].contains("python3 scripts/run-eval-trend-gate.py --json"));
+    }
+
+    #[test]
+    fn summarize_performance_autopilot_report_formats_fields() {
+        let tmp = tempdir().expect("tempdir");
+        let path = tmp.path().join("performance-autopilot-test.json");
+        std::fs::write(
+            &path,
+            r#"{
+  "ok": true,
+  "generated_at": "2026-05-08T00:00:00Z",
+  "recommendations": [
+    {"id":"PERF_STABLE", "severity":"P3", "title":"stable", "recommendation":"none"}
+  ]
+}"#,
+        )
+        .expect("write report");
+        let line = summarize_performance_autopilot_report(&path, "autopilot").expect("summary");
+        assert!(line.contains("autopilot=pass"));
+        assert!(line.contains("recs=1"));
+        assert!(line.contains("severe=0"));
+    }
+
+    #[test]
+    fn performance_autopilot_recommendations_extract_lines() {
+        let tmp = tempdir().expect("tempdir");
+        let path = tmp.path().join("performance-autopilot-test.json");
+        std::fs::write(
+            &path,
+            r#"{
+  "recommendations": [
+    {
+      "id":"HOTPATH_SLOW",
+      "severity":"P1",
+      "title":"Tool policy hot-path latency above target",
+      "recommendation":"Keep HERMES_TOOL_POLICY_PRESET=standard"
+    }
+  ]
+}"#,
+        )
+        .expect("write report");
+        let recs = performance_autopilot_recommendations(&path);
+        assert_eq!(recs.len(), 1);
+        assert!(recs[0].contains("HOTPATH_SLOW"));
+        assert!(recs[0].contains("recommendation"));
+    }
+
+    #[test]
+    fn parse_env_file_kv_ignores_comments() {
+        let tmp = tempdir().expect("tempdir");
+        let path = tmp.path().join("autopilot.env");
+        std::fs::write(
+            &path,
+            "# comment\nHERMES_TOOL_POLICY_PRESET=standard\n \nINVALID_LINE\nHERMES_REPLAY_ENABLED=1\n",
+        )
+        .expect("write env");
+        let kvs = parse_env_file_kv(&path);
+        assert_eq!(kvs.len(), 2);
+        assert_eq!(kvs[0].0, "HERMES_TOOL_POLICY_PRESET");
+        assert_eq!(kvs[1].0, "HERMES_REPLAY_ENABLED");
+    }
+
+    #[test]
+    fn test_autocomplete_includes_autopilot() {
+        let results = autocomplete("/auto");
+        assert!(results.contains(&"/autopilot"));
+    }
+
+    #[test]
+    fn canonical_command_maps_pilot_alias() {
+        assert_eq!(canonical_command("/pilot"), "/autopilot");
     }
 
     #[test]

@@ -1335,6 +1335,60 @@ fn transcript_wrap_width(viewport_width: u16) -> u16 {
     viewport_width.min(TRANSCRIPT_HARD_WRAP_COLS).max(1)
 }
 
+fn stream_lane_budget(processing: bool, chunk_count: usize) -> (usize, Duration) {
+    let profile = std::env::var("HERMES_PERF_AUTOPILOT_PROFILE")
+        .ok()
+        .map(|v| v.to_ascii_lowercase())
+        .unwrap_or_else(|| "balanced".to_string());
+    let mode = std::env::var("HERMES_PERF_AUTOPILOT_MODE")
+        .ok()
+        .map(|v| v.to_ascii_lowercase())
+        .unwrap_or_else(|| "advisory".to_string());
+
+    stream_lane_budget_from(mode.as_str(), profile.as_str(), processing, chunk_count)
+}
+
+fn stream_lane_budget_from(
+    mode: &str,
+    profile: &str,
+    processing: bool,
+    chunk_count: usize,
+) -> (usize, Duration) {
+    if mode == "off" {
+        return (96, Duration::from_millis(6));
+    }
+
+    let mut cap = 96usize;
+    let mut budget_ms = 6u64;
+
+    match profile {
+        "throughput" => {
+            cap = 320;
+            budget_ms = 16;
+        }
+        "quality" => {
+            cap = 120;
+            budget_ms = 8;
+        }
+        "reliability" => {
+            cap = 192;
+            budget_ms = 12;
+        }
+        "safety" => {
+            cap = 96;
+            budget_ms = 8;
+        }
+        _ => {}
+    }
+
+    if processing && chunk_count > 40 {
+        cap = cap.max(224);
+        budget_ms = budget_ms.max(12);
+    }
+
+    (cap, Duration::from_millis(budget_ms))
+}
+
 fn find_anchor_line_index(
     lines: &[Line<'static>],
     anchor_text: &str,
@@ -4507,12 +4561,14 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
             stream_event = tui.stream_events.recv() => {
                 if let Some(first) = stream_event {
                     let mut redraw = process_stream_lane_event(&mut app, &mut state, first);
+                    let (drain_cap, drain_budget) =
+                        stream_lane_budget(state.processing, state.stream_chunk_count);
                     let drain_started = Instant::now();
-                    for _ in 0..96 {
+                    for _ in 0..drain_cap {
                         match tui.stream_events.try_recv() {
                             Ok(next) => {
                                 redraw |= process_stream_lane_event(&mut app, &mut state, next);
-                                if drain_started.elapsed() >= Duration::from_millis(6) {
+                                if drain_started.elapsed() >= drain_budget {
                                     break;
                                 }
                             }
@@ -5017,6 +5073,27 @@ mod tests {
         assert_eq!(transcript_wrap_width(12), 12);
         assert_eq!(transcript_wrap_width(80), 80);
         assert_eq!(transcript_wrap_width(140), 80);
+    }
+
+    #[test]
+    fn test_stream_lane_budget_defaults_balanced() {
+        let (cap, budget) = stream_lane_budget_from("advisory", "balanced", false, 0);
+        assert_eq!(cap, 96);
+        assert_eq!(budget, Duration::from_millis(6));
+    }
+
+    #[test]
+    fn test_stream_lane_budget_throughput_profile_expands() {
+        let (cap, budget) = stream_lane_budget_from("advisory", "throughput", false, 0);
+        assert!(cap >= 320);
+        assert!(budget >= Duration::from_millis(16));
+    }
+
+    #[test]
+    fn test_stream_lane_budget_off_mode_uses_baseline() {
+        let (cap, budget) = stream_lane_budget_from("off", "throughput", true, 200);
+        assert_eq!(cap, 96);
+        assert_eq!(budget, Duration::from_millis(6));
     }
 
     #[test]
