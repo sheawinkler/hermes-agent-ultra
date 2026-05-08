@@ -42,6 +42,9 @@ pub mod tui;
 pub mod update;
 pub mod webhook_delivery;
 
+#[cfg(test)]
+pub(crate) mod test_env_lock;
+
 // Re-export primary types
 pub use app::App;
 pub use checklist::{

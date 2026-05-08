@@ -799,8 +799,8 @@ pub async fn provider_catalog_entries(
 
 #[cfg(test)]
 mod tests {
+    use crate::test_env_lock;
     use std::path::PathBuf;
-    use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use hermes_intelligence::models_dev::ModelsDevClient;
@@ -814,10 +814,7 @@ mod tests {
     };
 
     fn env_guard() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("env lock poisoned")
+        test_env_lock::lock()
     }
 
     fn cache_path(label: &str) -> PathBuf {

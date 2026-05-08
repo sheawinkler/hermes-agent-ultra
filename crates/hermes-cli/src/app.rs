@@ -1489,15 +1489,12 @@ fn apply_cli_runtime_overrides(config: &mut GatewayConfig, cli: &Cli) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_env_lock;
     use hermes_config::LlmProviderConfig;
     use std::collections::HashMap;
-    use std::sync::{Mutex, OnceLock};
 
     fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("env test lock")
+        test_env_lock::lock()
     }
 
     fn build_minimal_test_app() -> App {

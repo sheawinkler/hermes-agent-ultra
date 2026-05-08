@@ -14190,16 +14190,12 @@ pub fn handle_cli_version() -> Result<(), hermes_core::AgentError> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{Mutex, OnceLock};
-
     use super::*;
+    use crate::test_env_lock;
     use tempfile::tempdir;
 
     fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("env test lock")
+        test_env_lock::lock()
     }
 
     #[test]

@@ -3034,13 +3034,7 @@ pub async fn logout(provider: &str) -> Result<String, AgentError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    static OPENAI_ENV_LOCK: Mutex<()> = Mutex::new(());
-    static ANTHROPIC_ENV_LOCK: Mutex<()> = Mutex::new(());
-    static NOUS_ENV_LOCK: Mutex<()> = Mutex::new(());
-    static QWEN_ENV_LOCK: Mutex<()> = Mutex::new(());
-    static GEMINI_ENV_LOCK: Mutex<()> = Mutex::new(());
+    use crate::test_env_lock;
 
     #[test]
     fn nous_runtime_api_key_prefers_agent_key() {
@@ -3119,7 +3113,7 @@ mod tests {
 
     #[test]
     fn discover_existing_openai_oauth_reads_env_path() {
-        let _guard = OPENAI_ENV_LOCK.lock().expect("lock");
+        let _guard = test_env_lock::lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         let auth_path = tmp.path().join("codex-auth.json");
         let exp = Utc::now().timestamp() + 3600;
@@ -3166,7 +3160,7 @@ mod tests {
 
     #[test]
     fn discover_existing_openai_codex_oauth_reads_env_path() {
-        let _guard = OPENAI_ENV_LOCK.lock().expect("lock");
+        let _guard = test_env_lock::lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         let auth_path = tmp.path().join("codex-auth.json");
         let exp = Utc::now().timestamp() + 3600;
@@ -3209,7 +3203,7 @@ mod tests {
 
     #[test]
     fn discover_existing_anthropic_oauth_reads_claude_credentials_file() {
-        let _guard = ANTHROPIC_ENV_LOCK.lock().expect("lock");
+        let _guard = test_env_lock::lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         let cred_path = tmp.path().join(".credentials.json");
         let expires_at = Utc::now().timestamp_millis() + 3600_000;
@@ -3243,7 +3237,7 @@ mod tests {
 
     #[test]
     fn discover_existing_nous_oauth_reads_auth_store_provider_state() {
-        let _guard = NOUS_ENV_LOCK.lock().expect("lock");
+        let _guard = test_env_lock::lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         let auth_store = tmp.path().join("auth.json");
         let raw = serde_json::json!({
@@ -3288,7 +3282,7 @@ mod tests {
 
     #[test]
     fn read_provider_auth_state_falls_back_to_global_store_when_primary_missing_provider() {
-        let _guard = NOUS_ENV_LOCK.lock().expect("lock");
+        let _guard = test_env_lock::lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         let prev_home = std::env::var("HOME").ok();
         let prev_hermes_home = std::env::var("HERMES_HOME").ok();
@@ -3389,7 +3383,7 @@ mod tests {
 
     #[test]
     fn gemini_state_read_write_roundtrip() {
-        let _guard = GEMINI_ENV_LOCK.lock().expect("lock");
+        let _guard = test_env_lock::lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         let auth_path = tmp.path().join("google_oauth.json");
         std::env::set_var(
@@ -3420,7 +3414,7 @@ mod tests {
 
     #[tokio::test]
     async fn resolve_qwen_runtime_credentials_reads_qwen_cli_auth_file() {
-        let _guard = QWEN_ENV_LOCK.lock().expect("lock");
+        let _guard = test_env_lock::lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         let auth_path = tmp.path().join("oauth_creds.json");
         let expiry_date = Utc::now().timestamp_millis() + 5 * 60 * 1000;

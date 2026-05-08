@@ -368,6 +368,10 @@ fn ensure_alpha_dir() -> Result<(), AgentError> {
 fn write_json_file<T: Serialize>(path: &Path, value: &T) -> Result<(), AgentError> {
     let serialized = serde_json::to_string_pretty(value)
         .map_err(|e| AgentError::Config(format!("serialize {} failed: {}", path.display(), e)))?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AgentError::Io(format!("failed to create {}: {}", parent.display(), e)))?;
+    }
     std::fs::write(path, serialized)
         .map_err(|e| AgentError::Io(format!("write {} failed: {}", path.display(), e)))
 }
@@ -3082,47 +3086,80 @@ pub fn render_trading_alpha_board(report: &TradingAlphaReport) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_env_lock;
+    use std::ffi::OsString;
+    use std::path::Path;
+    use std::sync::MutexGuard;
     use tempfile::tempdir;
+
+    struct ScopedHermesHome {
+        previous: Option<OsString>,
+    }
+
+    impl ScopedHermesHome {
+        fn set(path: &Path) -> Self {
+            let previous = std::env::var_os("HERMES_HOME");
+            std::env::set_var("HERMES_HOME", path);
+            Self { previous }
+        }
+    }
+
+    impl Drop for ScopedHermesHome {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var("HERMES_HOME", value),
+                None => std::env::remove_var("HERMES_HOME"),
+            }
+        }
+    }
+
+    fn hermes_home_lock() -> MutexGuard<'static, ()> {
+        test_env_lock::lock()
+    }
+
+    fn with_test_hermes_home<T>(f: impl FnOnce() -> T) -> T {
+        let _lock = hermes_home_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home = ScopedHermesHome::set(tmp.path());
+        f()
+    }
 
     #[test]
     fn objective_contract_roundtrip_and_counterfactual() {
-        let tmp = tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", tmp.path());
-        let contract = upsert_objective_contract(
-            "maximize reliability while keeping latency low and never skipping tests",
-            false,
-        )
-        .expect("upsert");
-        assert!(!contract.utility.terms.is_empty());
-        assert!(!contract.utility.hard_constraints.is_empty());
-        assert_eq!(contract.horizons.len(), 3);
-        let updated = append_counterfactual("if we defer tests", "risk rises").expect("append");
-        assert_eq!(updated.counterfactual_journal.len(), 1);
-        std::env::remove_var("HERMES_HOME");
+        with_test_hermes_home(|| {
+            let contract = upsert_objective_contract(
+                "maximize reliability while keeping latency low and never skipping tests",
+                false,
+            )
+            .expect("upsert");
+            assert!(!contract.utility.terms.is_empty());
+            assert!(!contract.utility.hard_constraints.is_empty());
+            assert_eq!(contract.horizons.len(), 3);
+            let updated = append_counterfactual("if we defer tests", "risk rises").expect("append");
+            assert_eq!(updated.counterfactual_journal.len(), 1);
+        });
     }
 
     #[test]
     fn bootstrap_writes_runtime_files() {
-        let tmp = tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", tmp.path());
-        let written = ensure_alpha_runtime_bootstrap(true).expect("bootstrap");
-        assert!(!written.is_empty());
-        assert!(alpha_state_dir().join(LOOPS_FILE).exists());
-        assert!(alpha_state_dir().join(SUBAGENT_REGISTRY_FILE).exists());
-        assert!(alpha_state_dir().join(CONTEXTLATTICE_POLICY_FILE).exists());
-        std::env::remove_var("HERMES_HOME");
+        with_test_hermes_home(|| {
+            let written = ensure_alpha_runtime_bootstrap(true).expect("bootstrap");
+            assert!(!written.is_empty());
+            assert!(alpha_state_dir().join(LOOPS_FILE).exists());
+            assert!(alpha_state_dir().join(SUBAGENT_REGISTRY_FILE).exists());
+            assert!(alpha_state_dir().join(CONTEXTLATTICE_POLICY_FILE).exists());
+        });
     }
 
     #[test]
     fn queue_replay_is_deduplicated() {
-        let tmp = tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", tmp.path());
-        ensure_alpha_runtime_bootstrap(true).expect("bootstrap");
-        enqueue_loop_event("loop-a", "tick", "same-payload").expect("event1");
-        enqueue_loop_event("loop-a", "tick", "same-payload").expect("event2");
-        let replayed = replay_loop_queue(10).expect("replay");
-        assert_eq!(replayed, 1);
-        std::env::remove_var("HERMES_HOME");
+        with_test_hermes_home(|| {
+            ensure_alpha_runtime_bootstrap(true).expect("bootstrap");
+            enqueue_loop_event("loop-a", "tick", "same-payload").expect("event1");
+            enqueue_loop_event("loop-a", "tick", "same-payload").expect("event2");
+            let replayed = replay_loop_queue(10).expect("replay");
+            assert_eq!(replayed, 1);
+        });
     }
 
     #[test]
@@ -3134,16 +3171,15 @@ mod tests {
 
     #[test]
     fn trading_runtime_bootstrap_and_report_refresh_work() {
-        let tmp = tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", tmp.path());
-        ensure_trading_runtime_bootstrap(true).expect("bootstrap trading");
-        let cfg = load_trading_runtime_config().expect("load trading config");
-        assert!(!cfg.projects.is_empty());
-        let report = refresh_trading_alpha_report().expect("refresh report");
-        assert!(!report.generated_at.is_empty());
-        let loaded = load_last_trading_alpha_report().expect("load report");
-        assert_eq!(loaded.generated_at, report.generated_at);
-        std::env::remove_var("HERMES_HOME");
+        with_test_hermes_home(|| {
+            ensure_trading_runtime_bootstrap(true).expect("bootstrap trading");
+            let cfg = load_trading_runtime_config().expect("load trading config");
+            assert!(!cfg.projects.is_empty());
+            let report = refresh_trading_alpha_report().expect("refresh report");
+            assert!(!report.generated_at.is_empty());
+            let loaded = load_last_trading_alpha_report().expect("load report");
+            assert_eq!(loaded.generated_at, report.generated_at);
+        });
     }
 
     #[test]
@@ -3228,79 +3264,78 @@ mod tests {
 
     #[test]
     fn objective_profile_and_policy_planes_roundtrip() {
-        let tmp = tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", tmp.path());
-        ensure_alpha_runtime_bootstrap(true).expect("bootstrap");
+        with_test_hermes_home(|| {
+            ensure_alpha_runtime_bootstrap(true).expect("bootstrap");
 
-        let profile = objective_profile_specialized_for("sheawinkler");
-        let profile = set_objective_profile(profile).expect("set profile");
-        assert_eq!(profile.profile_id, "sheawinkler");
-        assert_eq!(profile.default_shell, "zsh");
-        let loaded_profile = load_objective_profile().expect("load profile");
-        assert_eq!(loaded_profile.profile_id, "sheawinkler");
+            let profile = objective_profile_specialized_for("sheawinkler");
+            let profile = set_objective_profile(profile).expect("set profile");
+            assert_eq!(profile.profile_id, "sheawinkler");
+            assert_eq!(profile.default_shell, "zsh");
+            let loaded_profile = load_objective_profile().expect("load profile");
+            assert_eq!(loaded_profile.profile_id, "sheawinkler");
 
-        let sim = set_objective_simulation_mode("strict").expect("strict sim");
-        assert_eq!(sim.mode, "strict");
-        assert!(sim.require_shadow_pass);
-        assert!(sim.require_replay_validation);
-        let ensemble = set_objective_ensemble_mode("debate").expect("debate ensemble");
-        assert_eq!(ensemble.mode, "debate");
-        assert!(ensemble.require_disagreement_explainer);
-        assert!(!ensemble.allow_fast_path_single_model);
+            let sim = set_objective_simulation_mode("strict").expect("strict sim");
+            assert_eq!(sim.mode, "strict");
+            assert!(sim.require_shadow_pass);
+            assert!(sim.require_replay_validation);
+            let ensemble = set_objective_ensemble_mode("debate").expect("debate ensemble");
+            assert_eq!(ensemble.mode, "debate");
+            assert!(ensemble.require_disagreement_explainer);
+            assert!(!ensemble.allow_fast_path_single_model);
 
-        let ledger = append_objective_learning_entry(ObjectiveLearningLedgerEntry {
-            recorded_at: String::new(),
-            objective_id: "obj-demo".to_string(),
-            objective_state: "advancing".to_string(),
-            decision: "promote".to_string(),
-            evidence_files: vec!["src/lib.rs".to_string()],
-            evidence_commands: vec!["cargo test".to_string()],
-            notes: "test-entry".to_string(),
-        })
-        .expect("append ledger");
-        assert_eq!(ledger.entries.len(), 1);
-        assert_eq!(ledger.entries[0].objective_id, "obj-demo");
+            let ledger = append_objective_learning_entry(ObjectiveLearningLedgerEntry {
+                recorded_at: String::new(),
+                objective_id: "obj-demo".to_string(),
+                objective_state: "advancing".to_string(),
+                decision: "promote".to_string(),
+                evidence_files: vec!["src/lib.rs".to_string()],
+                evidence_commands: vec!["cargo test".to_string()],
+                notes: "test-entry".to_string(),
+            })
+            .expect("append ledger");
+            assert_eq!(ledger.entries.len(), 1);
+            assert_eq!(ledger.entries[0].objective_id, "obj-demo");
 
-        let generalized = reset_objective_profile_generalized().expect("reset profile");
-        assert_eq!(generalized.profile_id, "repo-general");
-        std::env::remove_var("HERMES_HOME");
+            let generalized = reset_objective_profile_generalized().expect("reset profile");
+            assert_eq!(generalized.profile_id, "repo-general");
+        });
     }
 
     #[test]
     fn objective_dag_claim_quorum_and_eval_surfaces_roundtrip() {
-        let tmp = tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", tmp.path());
-        ensure_alpha_runtime_bootstrap(true).expect("bootstrap");
-        upsert_objective_contract("improve objective with verified rollout", false).expect("obj");
+        with_test_hermes_home(|| {
+            ensure_alpha_runtime_bootstrap(true).expect("bootstrap");
+            upsert_objective_contract("improve objective with verified rollout", false)
+                .expect("obj");
 
-        let dag = build_objective_dag_from_contract().expect("build dag");
-        assert_eq!(dag.objective_id.starts_with("obj-"), true);
-        assert!(dag.nodes.len() >= 4);
-        let loaded_dag = load_objective_dag().expect("load dag");
-        assert_eq!(loaded_dag.nodes.len(), dag.nodes.len());
+            let dag = build_objective_dag_from_contract().expect("build dag");
+            assert_eq!(dag.objective_id.starts_with("obj-"), true);
+            assert!(dag.nodes.len() >= 4);
+            let loaded_dag = load_objective_dag().expect("load dag");
+            assert_eq!(loaded_dag.nodes.len(), dag.nodes.len());
 
-        let claim = set_claim_verifier_enabled(false).expect("claim off");
-        assert!(!claim.enabled);
-        let claim = set_claim_verifier_enabled(true).expect("claim on");
-        assert!(claim.enabled);
+            let claim = set_claim_verifier_enabled(false).expect("claim off");
+            assert!(!claim.enabled);
+            let claim = set_claim_verifier_enabled(true).expect("claim on");
+            assert!(claim.enabled);
 
-        let quorum = set_quorum_policy(
-            true,
-            Some(3),
-            Some(vec!["nous:nousresearch/hermes-4-70b".to_string()]),
-        )
-        .expect("quorum");
-        assert!(quorum.enabled);
-        assert_eq!(quorum.voters, 3);
-        assert_eq!(quorum.models.len(), 1);
+            let quorum = set_quorum_policy(
+                true,
+                Some(3),
+                Some(vec!["nous:nousresearch/hermes-4-70b".to_string()]),
+            )
+            .expect("quorum");
+            assert!(quorum.enabled);
+            assert_eq!(quorum.voters, 3);
+            assert_eq!(quorum.models.len(), 1);
 
-        let trend = append_objective_eval_sample("obj-demo", "advancing", "test sample")
-            .expect("append eval");
-        assert_eq!(trend.samples.len(), 1);
-        assert!(trend.samples[0].score > 0.9);
+            let trend = append_objective_eval_sample("obj-demo", "advancing", "test sample")
+                .expect("append eval");
+            assert_eq!(trend.samples.len(), 1);
+            assert!(trend.samples[0].score > 0.9);
 
-        let cleared = clear_objective_dag().expect("clear dag");
-        assert!(cleared.nodes.is_empty());
-        std::env::remove_var("HERMES_HOME");
+            let cleared = clear_objective_dag().expect("clear dag");
+            assert!(cleared.nodes.is_empty());
+        });
     }
 }
