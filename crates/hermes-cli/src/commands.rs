@@ -45,6 +45,7 @@ use crate::kanban::{
     set_blocked, KanbanActionInput, KanbanBoard, KanbanLane, NewKanbanTaskInput,
 };
 use crate::model_switch::{curated_provider_slugs, normalize_provider_model, provider_model_ids};
+use crate::pairing_store::{PairingStatus, PairingStore};
 use crate::skin_engine::{canonical_skin_name, BUILTIN_SKINS};
 use hermes_config::{GatewayConfig, LlmProviderConfig};
 
@@ -3024,8 +3025,13 @@ pub async fn handle_slash_command(
         "/history" => handle_history_command(app),
         "/recap" => handle_recap_command(app, args),
         "/context" => handle_context_command(app, args),
-        "/title" | "/branch" | "/snapshot" | "/rollback" | "/queue" | "/steer" | "/btw"
-        | "/sethome" => handle_session_compat_command(app, canonical_command(cmd), args),
+        "/title" | "/branch" => handle_session_compat_command(app, canonical_command(cmd), args),
+        "/snapshot" => handle_snapshot_command(app, args),
+        "/rollback" => handle_rollback_command(app, args),
+        "/queue" => handle_queue_command(app, args),
+        "/steer" => handle_steer_command(app, args),
+        "/btw" => handle_btw_command(app, args),
+        "/sethome" => handle_sethome_command(app, args),
         "/evolve" => handle_ops_evolve_command(app, args).await,
         "/objective" => handle_objective_command(app, args),
         "/claims" => handle_claims_command(app, args),
@@ -3074,10 +3080,12 @@ pub async fn handle_slash_command(
             Ok(CommandResult::Handled)
         }
         "/log" => handle_log_command(app),
-        "/debug-dump" | "/dump-format" | "/experiment" | "/feedback" | "/paste" | "/gquota"
-        | "/restart" | "/approve" | "/deny" | "/update" | "/redraw" => {
-            handle_compatibility_notice_command(app, canonical_command(cmd), args)
-        }
+        "/debug-dump" | "/dump-format" | "/experiment" | "/feedback" | "/restart" | "/update"
+        | "/redraw" => handle_compatibility_notice_command(app, canonical_command(cmd), args),
+        "/paste" => handle_paste_command(app, args),
+        "/gquota" => handle_gquota_command(app, args).await,
+        "/approve" => handle_approve_command(app, args),
+        "/deny" => handle_deny_command(app, args),
         "/copy" => handle_copy_command(app),
         "/save" => handle_save_command(app, args),
         "/load" => handle_load_command(app, args),
@@ -10001,9 +10009,346 @@ fn handle_interactive_question_command(
         return Ok(CommandResult::Handled);
     }
 
+    let raw = args.join(" ");
+    let segments: Vec<String> = raw
+        .split('|')
+        .map(|part| part.trim().to_string())
+        .filter(|part| !part.is_empty())
+        .collect();
+    if segments.len() < 2 {
+        emit_command_output(
+            app,
+            "Interactive picker is available in TUI mode. For non-TUI usage provide options as `question | option1 | option2`.",
+        );
+        return Ok(CommandResult::Handled);
+    }
+
+    let question = segments[0].clone();
+    let options = &segments[1..];
+    let recommended = options
+        .iter()
+        .position(|opt| opt.to_ascii_lowercase().contains("recommended"))
+        .unwrap_or(0);
+    let selected = options
+        .get(recommended)
+        .map(|v| v.as_str())
+        .unwrap_or("(none)");
+
+    let mut out = String::new();
+    let _ = writeln!(out, "Interactive question (non-TUI fallback)");
+    let _ = writeln!(out, "Q: {}", question);
+    let _ = writeln!(out, "Options:");
+    for (idx, option) in options.iter().enumerate() {
+        let marker = if idx == recommended {
+            " (recommended)"
+        } else {
+            ""
+        };
+        let _ = writeln!(out, "  {}. {}{}", idx + 1, option, marker);
+    }
+    let _ = writeln!(out, "\nSelected: {}", selected);
+    let _ = writeln!(
+        out,
+        "Tip: In TUI mode, `/ask ...` opens a selectable picker."
+    );
+    emit_command_output(app, out.trim_end());
+    Ok(CommandResult::Handled)
+}
+
+const SESSION_STEER_PREFIX: &str = "[SESSION_STEER] ";
+const HOME_SESSION_MARKER_FILE: &str = "home-session.json";
+
+fn home_session_marker_path() -> PathBuf {
+    hermes_config::hermes_home().join(HOME_SESSION_MARKER_FILE)
+}
+
+fn load_home_session_marker() -> Option<serde_json::Value> {
+    let path = home_session_marker_path();
+    let body = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&body).ok()
+}
+
+fn set_session_steer(app: &mut App, steer: Option<String>) {
+    app.messages.retain(|m| {
+        if m.role != hermes_core::MessageRole::System {
+            return true;
+        }
+        !m.content
+            .as_deref()
+            .unwrap_or_default()
+            .starts_with(SESSION_STEER_PREFIX)
+    });
+    if let Some(steer_text) = steer
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    {
+        app.messages.push(hermes_core::Message::system(format!(
+            "{SESSION_STEER_PREFIX}{steer_text}"
+        )));
+    }
+}
+
+fn current_session_steer(app: &App) -> Option<String> {
+    app.messages
+        .iter()
+        .rev()
+        .find(|m| m.role == hermes_core::MessageRole::System)
+        .and_then(|m| m.content.as_deref())
+        .and_then(|raw| raw.strip_prefix(SESSION_STEER_PREFIX))
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn handle_snapshot_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let sessions_dir = hermes_config::hermes_home().join("sessions");
+    if args.is_empty() || args[0].eq_ignore_ascii_case("list") {
+        if !sessions_dir.exists() {
+            emit_command_output(
+                app,
+                format!(
+                    "No snapshots found in {}.\nUse `/snapshot save [name]` to create one.",
+                    sessions_dir.display()
+                ),
+            );
+            return Ok(CommandResult::Handled);
+        }
+        let entries = enumerate_saved_sessions(&sessions_dir);
+        if entries.is_empty() {
+            emit_command_output(
+                app,
+                format!(
+                    "No snapshots found in {}.\nUse `/snapshot save [name]` to create one.",
+                    sessions_dir.display()
+                ),
+            );
+            return Ok(CommandResult::Handled);
+        }
+        let mut out = String::new();
+        let _ = writeln!(out, "Session snapshots:");
+        for (idx, (name, path, _)) in entries.iter().take(20).enumerate() {
+            let marker = if idx == 0 { " (latest)" } else { "" };
+            let _ = writeln!(out, "  - {}{}  -> {}", name, marker, path.display());
+        }
+        let _ = writeln!(
+            out,
+            "\nUse `/snapshot save [name]` to create, `/rollback latest` to restore latest, or `/load <snapshot-name>` to load a specific snapshot."
+        );
+        emit_command_output(app, out.trim_end());
+        return Ok(CommandResult::Handled);
+    }
+
+    let save_name = if args[0].eq_ignore_ascii_case("save") {
+        args.get(1).copied()
+    } else {
+        args.first().copied()
+    };
+    let path = app.persist_session_snapshot(save_name)?;
+    emit_command_output(app, format!("Snapshot saved: {}", path.display()));
+    Ok(CommandResult::Handled)
+}
+
+fn handle_rollback_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    if args.is_empty() || args[0].eq_ignore_ascii_case("list") {
+        let sessions_dir = hermes_config::hermes_home().join("sessions");
+        let entries = enumerate_saved_sessions(&sessions_dir);
+        let mut out = String::from("Rollback controls:\n");
+        out.push_str("- `/rollback undo [n]`      revert the last exchange(s)\n");
+        out.push_str("- `/rollback latest`        load latest snapshot\n");
+        out.push_str("- `/rollback load <name>`   load named snapshot\n");
+        if entries.is_empty() {
+            out.push_str("- snapshots: none yet (`/snapshot save` to create one)\n");
+        } else {
+            out.push_str("- recent snapshots:\n");
+            for (name, _, _) in entries.into_iter().take(5) {
+                out.push_str(&format!("    - {}\n", name));
+            }
+        }
+        emit_command_output(app, out.trim_end());
+        return Ok(CommandResult::Handled);
+    }
+
+    let sub = args[0];
+    if sub.eq_ignore_ascii_case("undo") || sub.parse::<usize>().is_ok() {
+        let steps = if sub.eq_ignore_ascii_case("undo") {
+            args.get(1)
+                .and_then(|v| v.parse::<usize>().ok())
+                .unwrap_or(1)
+        } else {
+            sub.parse::<usize>().unwrap_or(1)
+        };
+        let bounded = steps.clamp(1, 64);
+        for _ in 0..bounded {
+            app.undo_last();
+        }
+        emit_command_output(
+            app,
+            format!("Rolled back {} exchange(s) via undo.", bounded),
+        );
+        return Ok(CommandResult::Handled);
+    }
+
+    if sub.eq_ignore_ascii_case("latest") {
+        let sessions_dir = hermes_config::hermes_home().join("sessions");
+        let entries = enumerate_saved_sessions(&sessions_dir);
+        let Some((name, path, _)) = entries.first() else {
+            emit_command_output(app, "No snapshots available to rollback.");
+            return Ok(CommandResult::Handled);
+        };
+        return load_session_from_path(app, name, path, false);
+    }
+
+    if sub.eq_ignore_ascii_case("load") {
+        let Some(name) = args.get(1).copied() else {
+            emit_command_output(app, "Usage: /rollback load <snapshot-name>");
+            return Ok(CommandResult::Handled);
+        };
+        return handle_load_command(app, &[name]);
+    }
+
+    handle_load_command(app, &[sub])
+}
+
+fn handle_queue_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    if args.is_empty() {
+        emit_command_output(
+            app,
+            "Usage: /queue <prompt>\nUse `/queue status` to inspect queued/running background jobs.",
+        );
+        return Ok(CommandResult::Handled);
+    }
+
+    if args[0].eq_ignore_ascii_case("status") || args[0].eq_ignore_ascii_case("list") {
+        let (queued, running, completed, failed) = background_job_counts();
+        emit_command_output(
+            app,
+            format!(
+                "Background queue status: queued={} running={} completed={} failed={}",
+                queued, running, completed, failed
+            ),
+        );
+        return Ok(CommandResult::Handled);
+    }
+
+    handle_background_command(app, args)
+}
+
+fn handle_steer_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    if args.is_empty() {
+        let message = current_session_steer(app).map_or_else(
+            || "No active steering instruction. Use `/steer <instruction>`.".to_string(),
+            |v| format!("Active steering instruction:\n{}", v),
+        );
+        emit_command_output(app, message);
+        return Ok(CommandResult::Handled);
+    }
+
+    if args[0].eq_ignore_ascii_case("clear") {
+        set_session_steer(app, None);
+        emit_command_output(app, "Cleared session steering instruction.");
+        return Ok(CommandResult::Handled);
+    }
+
+    let steer = args.join(" ");
+    set_session_steer(app, Some(steer.clone()));
     emit_command_output(
         app,
-        "Interactive picker is available in TUI mode. Launch `hermes-ultra` and run `/ask ...` there.",
+        format!(
+            "Steering instruction set.\nThis is injected as system context on subsequent turns.\n\n{}",
+            steer.trim()
+        ),
+    );
+    Ok(CommandResult::Handled)
+}
+
+fn handle_btw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    if args.is_empty() {
+        emit_command_output(
+            app,
+            "Usage: /btw <side-question>\nRuns an ephemeral side-question as a background task.",
+        );
+        return Ok(CommandResult::Handled);
+    }
+    let question = args.join(" ").trim().to_string();
+    if question.is_empty() {
+        emit_command_output(app, "Usage: /btw <side-question>");
+        return Ok(CommandResult::Handled);
+    }
+    let task = format!(
+        "Ephemeral side question (do not alter objective/contracts unless explicitly asked): {}",
+        question
+    );
+    let job = queue_background_job(&task)?;
+    emit_command_output(
+        app,
+        format!(
+            "[/btw queued]\nQuestion: {}\nJob ID: {}\nStatus: {}\nLogs:   {}",
+            question,
+            job.id,
+            job.status_path.display(),
+            job.log_path.display()
+        ),
+    );
+    Ok(CommandResult::Handled)
+}
+
+fn handle_sethome_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let marker_path = home_session_marker_path();
+    if args.is_empty() || args[0].eq_ignore_ascii_case("status") {
+        if let Some(marker) = load_home_session_marker() {
+            emit_command_output(
+                app,
+                format!(
+                    "Home marker file: {}\n{}",
+                    marker_path.display(),
+                    serde_json::to_string_pretty(&marker).unwrap_or_else(|_| "{}".to_string())
+                ),
+            );
+        } else {
+            emit_command_output(
+                app,
+                format!(
+                    "No home marker set. Use `/sethome <name>`.\nMarker path: {}",
+                    marker_path.display()
+                ),
+            );
+        }
+        return Ok(CommandResult::Handled);
+    }
+
+    if args[0].eq_ignore_ascii_case("clear") {
+        if marker_path.exists() {
+            std::fs::remove_file(&marker_path).map_err(|e| {
+                AgentError::Io(format!("Failed to remove {}: {}", marker_path.display(), e))
+            })?;
+            emit_command_output(app, "Cleared home marker.");
+        } else {
+            emit_command_output(app, "Home marker already clear.");
+        }
+        return Ok(CommandResult::Handled);
+    }
+
+    if let Some(parent) = marker_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AgentError::Io(format!("Failed to create {}: {}", parent.display(), e)))?;
+    }
+    let value = serde_json::json!({
+        "session_id": app.session_id,
+        "home": args.join(" ").trim(),
+        "updated_at": chrono::Utc::now().to_rfc3339(),
+    });
+    std::fs::write(
+        &marker_path,
+        serde_json::to_string_pretty(&value)
+            .map_err(|e| AgentError::Config(format!("serialize home marker: {}", e)))?,
+    )
+    .map_err(|e| AgentError::Io(format!("Failed to write {}: {}", marker_path.display(), e)))?;
+    emit_command_output(
+        app,
+        format!(
+            "Home marker updated.\nPath: {}\nHome: {}",
+            marker_path.display(),
+            args.join(" ").trim()
+        ),
     );
     Ok(CommandResult::Handled)
 }
@@ -10212,16 +10557,219 @@ fn handle_compatibility_notice_command(
             }
         ),
         "/feedback" => "Feedback channels: open a GitHub issue in this repository with repro steps + `hermes debug share --local` output.".to_string(),
-        "/paste" => "Clipboard attach helper is platform-dependent; use `/image <path>` for image workflows.".to_string(),
-        "/gquota" => "Gemini quota details come from provider account dashboards; no direct CLI quota probe is active in this build.".to_string(),
         "/restart" => "Gateway restart is a gateway-mode command. Use `hermes gateway restart`.".to_string(),
-        "/approve" => "Approve is gateway workflow only (pending approval queue).".to_string(),
-        "/deny" => "Deny is gateway workflow only (pending approval queue).".to_string(),
         "/update" => "Update compatibility command: use `hermes update` for updater workflow.".to_string(),
         "/redraw" => "Manual redraw acknowledged. Hermes Ultra uses continuous redraw scheduling; if the UI looks stale press `Ctrl+L` to toggle the activity lane and force a repaint.".to_string(),
         _ => "Compatibility command acknowledged.".to_string(),
     };
     emit_command_output(app, msg);
+    Ok(CommandResult::Handled)
+}
+
+fn handle_paste_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let text = arboard::Clipboard::new()
+        .and_then(|mut cb| cb.get_text())
+        .map_err(|e| AgentError::Config(format!("Clipboard unavailable: {}", e)))?;
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        emit_command_output(app, "Clipboard is empty.");
+        return Ok(CommandResult::Handled);
+    }
+    let pastes_dir = hermes_config::hermes_home().join("pastes");
+    std::fs::create_dir_all(&pastes_dir)
+        .map_err(|e| AgentError::Io(format!("Failed to create {}: {}", pastes_dir.display(), e)))?;
+    let file_name = format!("paste-{}.txt", chrono::Utc::now().format("%Y%m%d-%H%M%S"));
+    let path = pastes_dir.join(file_name);
+    std::fs::write(&path, trimmed)
+        .map_err(|e| AgentError::Io(format!("Failed to write {}: {}", path.display(), e)))?;
+
+    let preview = if args.first().is_some_and(|v| v.eq_ignore_ascii_case("show")) {
+        trimmed.to_string()
+    } else {
+        truncate_chars(trimmed, 280)
+    };
+
+    let mut out = String::new();
+    let _ = writeln!(out, "Clipboard captured:");
+    let _ = writeln!(out, "  - chars: {}", trimmed.chars().count());
+    let _ = writeln!(out, "  - saved: {}", path.display());
+    let _ = writeln!(out, "  - preview: {}", preview);
+    let _ = writeln!(
+        out,
+        "Use `/background review {}` to process it in isolation.",
+        path.display()
+    );
+    emit_command_output(app, out.trim_end());
+    Ok(CommandResult::Handled)
+}
+
+async fn handle_gquota_command(app: &mut App, _args: &[&str]) -> Result<CommandResult, AgentError> {
+    let provider = app
+        .current_model
+        .split_once(':')
+        .map(|(p, _)| p.trim().to_ascii_lowercase())
+        .unwrap_or_else(|| "unknown".to_string());
+    let gemini_vars = [
+        "HERMES_GEMINI_OAUTH_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_API_KEY",
+    ];
+    let mut present = Vec::new();
+    for key in gemini_vars {
+        if std::env::var(key)
+            .ok()
+            .is_some_and(|v| !v.trim().is_empty())
+        {
+            present.push(key.to_string());
+        }
+    }
+    let oauth_state = crate::auth::read_provider_auth_state("google-gemini-cli")
+        .ok()
+        .flatten();
+    let expires_at = oauth_state
+        .as_ref()
+        .and_then(|v| v.get("expires_at_ms"))
+        .and_then(|v| v.as_i64());
+    let mut out = String::new();
+    let _ = writeln!(out, "Gemini quota/auth diagnostics");
+    let _ = writeln!(out, "  - active provider: {}", provider);
+    let _ = writeln!(
+        out,
+        "  - gemini creds in env: {} ({})",
+        if present.is_empty() { "no" } else { "yes" },
+        if present.is_empty() {
+            "none".to_string()
+        } else {
+            present.join(", ")
+        }
+    );
+    let _ = writeln!(
+        out,
+        "  - oauth state file: {}",
+        if oauth_state.is_some() {
+            "present"
+        } else {
+            "missing"
+        }
+    );
+    if let Some(ms) = expires_at {
+        let ts = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(ms)
+            .map(|d| d.to_rfc3339())
+            .unwrap_or_else(|| "invalid".to_string());
+        let _ = writeln!(out, "  - token expiry: {}", ts);
+    }
+    let _ = writeln!(
+        out,
+        "  - live quota API: unavailable in local CLI; check provider dashboard for hard usage limits."
+    );
+    emit_command_output(app, out.trim_end());
+    Ok(CommandResult::Handled)
+}
+
+fn handle_approve_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let store = PairingStore::open_default();
+    if args.is_empty() || args[0].eq_ignore_ascii_case("list") {
+        let pending: Vec<_> = store
+            .list()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|d| d.status == PairingStatus::Pending)
+            .collect();
+        if pending.is_empty() {
+            emit_command_output(
+                app,
+                "No pending devices to approve. Use `hermes pairing list` for full inventory.",
+            );
+            return Ok(CommandResult::Handled);
+        }
+        let mut out = String::from("Pending pairing devices:\n");
+        for dev in pending {
+            out.push_str(&format!(
+                "  - {} ({})\n",
+                dev.device_id,
+                dev.name.unwrap_or_else(|| "unnamed".to_string())
+            ));
+        }
+        out.push_str("Approve one with `/approve <device-id>` or all with `/approve all`.");
+        emit_command_output(app, out.trim_end());
+        return Ok(CommandResult::Handled);
+    }
+
+    if args[0].eq_ignore_ascii_case("all") {
+        let mut approved = 0usize;
+        for dev in store.list().unwrap_or_default() {
+            if dev.status == PairingStatus::Pending && store.approve(&dev.device_id).is_ok() {
+                approved += 1;
+            }
+        }
+        emit_command_output(app, format!("Approved {} pending device(s).", approved));
+        return Ok(CommandResult::Handled);
+    }
+
+    match store.approve(args[0]) {
+        Ok(dev) => emit_command_output(
+            app,
+            format!(
+                "Approved device '{}' (name={}).",
+                dev.device_id,
+                dev.name.unwrap_or_else(|| "unnamed".to_string())
+            ),
+        ),
+        Err(err) => emit_command_output(
+            app,
+            format!(
+                "Approve failed: {}. Use `/approve list` or `hermes pairing list`.",
+                err
+            ),
+        ),
+    }
+    Ok(CommandResult::Handled)
+}
+
+fn handle_deny_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let store = PairingStore::open_default();
+    if args.is_empty() || args[0].eq_ignore_ascii_case("list") {
+        let entries = store.list().unwrap_or_default();
+        let mut out = String::from("Pairing devices (deny/revoke candidates):\n");
+        if entries.is_empty() {
+            out.push_str("  - none\n");
+        } else {
+            for dev in entries {
+                out.push_str(&format!("  - {} [{}]\n", dev.device_id, dev.status));
+            }
+        }
+        out.push_str("Revoke one with `/deny <device-id>` or purge pending with `/deny pending`.");
+        emit_command_output(app, out.trim_end());
+        return Ok(CommandResult::Handled);
+    }
+
+    if args[0].eq_ignore_ascii_case("pending") || args[0].eq_ignore_ascii_case("clear-pending") {
+        match store.clear_pending() {
+            Ok(count) => emit_command_output(app, format!("Removed {} pending device(s).", count)),
+            Err(err) => {
+                emit_command_output(app, format!("Failed clearing pending devices: {}", err))
+            }
+        }
+        return Ok(CommandResult::Handled);
+    }
+
+    match store.revoke(args[0]) {
+        Ok(dev) => emit_command_output(
+            app,
+            format!(
+                "Revoked device '{}' (name={}).",
+                dev.device_id,
+                dev.name.unwrap_or_else(|| "unnamed".to_string())
+            ),
+        ),
+        Err(err) => emit_command_output(
+            app,
+            format!(
+                "Deny failed: {}. Use `/deny list` or `hermes pairing list`.",
+                err
+            ),
+        ),
+    }
     Ok(CommandResult::Handled)
 }
 
