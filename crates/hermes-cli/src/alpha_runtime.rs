@@ -216,6 +216,7 @@ pub struct SubagentRegistry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
 pub struct ContextLatticePolicy {
     pub preflight_required: bool,
     pub auto_context_pack_on_mission_start: bool,
@@ -224,6 +225,60 @@ pub struct ContextLatticePolicy {
     pub readback_verification_required: bool,
     pub shared_topic_taxonomy: Vec<String>,
     pub conflict_resolution_mode: String,
+    pub include_grounding_required: bool,
+    pub include_retrieval_debug_for_execution: bool,
+    pub broaden_scope_on_zero_hits: bool,
+    pub scoped_recency_pass_before_finalize: bool,
+    pub contradiction_check_across_layers: bool,
+    pub numeric_fact_verbatim_copy: bool,
+    pub objective_analytics_writeback_required: bool,
+    pub preferred_retrieval_mode: String,
+    pub deep_retry_budget_secs: Vec<u64>,
+    pub regular_retry_budget_secs: Vec<u64>,
+    pub summary_sink_order: Vec<String>,
+    pub required_project_scoping: bool,
+    pub checkpoint_payload_requires_project_file_topic: bool,
+}
+
+impl Default for ContextLatticePolicy {
+    fn default() -> Self {
+        Self {
+            preflight_required: true,
+            auto_context_pack_on_mission_start: true,
+            degradation_aware_planning: true,
+            checkpoint_write_policy: vec![
+                "plan_started".to_string(),
+                "implementation_checkpoint".to_string(),
+                "verification_complete".to_string(),
+                "final_readback_verified".to_string(),
+            ],
+            readback_verification_required: true,
+            shared_topic_taxonomy: vec![
+                "runbooks/alpha".to_string(),
+                "runbooks/alpha/objective".to_string(),
+                "runbooks/alpha/loops".to_string(),
+                "runbooks/alpha/provider".to_string(),
+            ],
+            conflict_resolution_mode: "source_weight_then_recency".to_string(),
+            include_grounding_required: true,
+            include_retrieval_debug_for_execution: true,
+            broaden_scope_on_zero_hits: true,
+            scoped_recency_pass_before_finalize: true,
+            contradiction_check_across_layers: true,
+            numeric_fact_verbatim_copy: true,
+            objective_analytics_writeback_required: true,
+            preferred_retrieval_mode: "deep".to_string(),
+            deep_retry_budget_secs: vec![120, 180, 240],
+            regular_retry_budget_secs: vec![120, 180],
+            summary_sink_order: vec![
+                "contextlattice".to_string(),
+                "github".to_string(),
+                "local".to_string(),
+            ],
+            required_project_scoping: true,
+            checkpoint_payload_requires_project_file_topic: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -384,25 +439,7 @@ fn read_json_file<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, AgentE
 }
 
 fn default_contextlattice_policy() -> ContextLatticePolicy {
-    ContextLatticePolicy {
-        preflight_required: true,
-        auto_context_pack_on_mission_start: true,
-        degradation_aware_planning: true,
-        checkpoint_write_policy: vec![
-            "plan_started".to_string(),
-            "implementation_checkpoint".to_string(),
-            "verification_complete".to_string(),
-            "final_readback_verified".to_string(),
-        ],
-        readback_verification_required: true,
-        shared_topic_taxonomy: vec![
-            "runbooks/alpha".to_string(),
-            "runbooks/alpha/objective".to_string(),
-            "runbooks/alpha/loops".to_string(),
-            "runbooks/alpha/provider".to_string(),
-        ],
-        conflict_resolution_mode: "source_weight_then_recency".to_string(),
-    }
+    ContextLatticePolicy::default()
 }
 
 fn default_objective_profile() -> ObjectiveProfile {
@@ -1196,6 +1233,107 @@ pub fn load_contextlattice_policy() -> Result<ContextLatticePolicy, AgentError> 
     read_json_file(&contextlattice_policy_path())
 }
 
+pub fn set_contextlattice_policy(
+    policy: ContextLatticePolicy,
+) -> Result<ContextLatticePolicy, AgentError> {
+    ensure_alpha_runtime_bootstrap(false)?;
+    let mut updated = policy;
+    if updated.checkpoint_write_policy.is_empty() {
+        updated.checkpoint_write_policy = ContextLatticePolicy::default().checkpoint_write_policy;
+    }
+    if updated.shared_topic_taxonomy.is_empty() {
+        updated.shared_topic_taxonomy = ContextLatticePolicy::default().shared_topic_taxonomy;
+    }
+    if updated.deep_retry_budget_secs.is_empty() {
+        updated.deep_retry_budget_secs = ContextLatticePolicy::default().deep_retry_budget_secs;
+    }
+    if updated.regular_retry_budget_secs.is_empty() {
+        updated.regular_retry_budget_secs =
+            ContextLatticePolicy::default().regular_retry_budget_secs;
+    }
+    if updated.summary_sink_order.is_empty() {
+        updated.summary_sink_order = ContextLatticePolicy::default().summary_sink_order;
+    }
+    if updated.preferred_retrieval_mode.trim().is_empty() {
+        updated.preferred_retrieval_mode = ContextLatticePolicy::default().preferred_retrieval_mode;
+    } else {
+        let normalized = updated.preferred_retrieval_mode.trim().to_ascii_lowercase();
+        updated.preferred_retrieval_mode = match normalized.as_str() {
+            "fast" | "balanced" | "deep" => normalized,
+            _ => "deep".to_string(),
+        };
+    }
+    write_json_file(&contextlattice_policy_path(), &updated)?;
+    Ok(updated)
+}
+
+pub fn set_contextlattice_policy_mode(mode: &str) -> Result<ContextLatticePolicy, AgentError> {
+    let mut policy = load_contextlattice_policy()?;
+    match mode.trim().to_ascii_lowercase().as_str() {
+        "max" | "strict" => {
+            policy.preflight_required = true;
+            policy.auto_context_pack_on_mission_start = true;
+            policy.degradation_aware_planning = true;
+            policy.readback_verification_required = true;
+            policy.include_grounding_required = true;
+            policy.include_retrieval_debug_for_execution = true;
+            policy.broaden_scope_on_zero_hits = true;
+            policy.scoped_recency_pass_before_finalize = true;
+            policy.contradiction_check_across_layers = true;
+            policy.numeric_fact_verbatim_copy = true;
+            policy.objective_analytics_writeback_required = true;
+            policy.required_project_scoping = true;
+            policy.checkpoint_payload_requires_project_file_topic = true;
+            policy.preferred_retrieval_mode = "deep".to_string();
+            policy.deep_retry_budget_secs = vec![120, 180, 240];
+            policy.regular_retry_budget_secs = vec![120, 180];
+        }
+        "balanced" => {
+            policy.preflight_required = true;
+            policy.auto_context_pack_on_mission_start = true;
+            policy.degradation_aware_planning = true;
+            policy.readback_verification_required = true;
+            policy.include_grounding_required = true;
+            policy.include_retrieval_debug_for_execution = true;
+            policy.broaden_scope_on_zero_hits = true;
+            policy.scoped_recency_pass_before_finalize = true;
+            policy.contradiction_check_across_layers = true;
+            policy.numeric_fact_verbatim_copy = true;
+            policy.objective_analytics_writeback_required = true;
+            policy.required_project_scoping = true;
+            policy.checkpoint_payload_requires_project_file_topic = true;
+            policy.preferred_retrieval_mode = "balanced".to_string();
+            policy.deep_retry_budget_secs = vec![90, 120, 180];
+            policy.regular_retry_budget_secs = vec![90, 120];
+        }
+        "speed" | "fast" => {
+            policy.preflight_required = true;
+            policy.auto_context_pack_on_mission_start = true;
+            policy.degradation_aware_planning = true;
+            policy.readback_verification_required = true;
+            policy.include_grounding_required = true;
+            policy.include_retrieval_debug_for_execution = false;
+            policy.broaden_scope_on_zero_hits = true;
+            policy.scoped_recency_pass_before_finalize = true;
+            policy.contradiction_check_across_layers = true;
+            policy.numeric_fact_verbatim_copy = true;
+            policy.objective_analytics_writeback_required = true;
+            policy.required_project_scoping = true;
+            policy.checkpoint_payload_requires_project_file_topic = true;
+            policy.preferred_retrieval_mode = "fast".to_string();
+            policy.deep_retry_budget_secs = vec![60, 90, 120];
+            policy.regular_retry_budget_secs = vec![60, 90];
+        }
+        _ => {
+            return Err(AgentError::Config(
+                "unknown contextlattice policy mode; expected one of: max|strict|balanced|fast|speed"
+                    .to_string(),
+            ));
+        }
+    }
+    set_contextlattice_policy(policy)
+}
+
 pub fn enqueue_loop_event(
     loop_id: &str,
     event_type: &str,
@@ -1602,11 +1740,32 @@ pub async fn render_mission_board(
     out.push_str(&format!("- {}\n", ctx_status.health_line));
     out.push_str(&format!("- {}\n", ctx_status.preflight_script_line));
     out.push_str(&format!(
-        "- policy: preflight={} context_pack_on_start={} degradation_aware={} readback_required={}\n\n",
+        "- policy: preflight={} context_pack_on_start={} degradation_aware={} readback_required={}\n",
         ctx_policy.preflight_required,
         ctx_policy.auto_context_pack_on_mission_start,
         ctx_policy.degradation_aware_planning,
         ctx_policy.readback_verification_required
+    ));
+    out.push_str(&format!(
+        "- retrieval: mode={} grounding_required={} retrieval_debug={} broaden_scope={} recency_pass={}\n",
+        ctx_policy.preferred_retrieval_mode,
+        ctx_policy.include_grounding_required,
+        ctx_policy.include_retrieval_debug_for_execution,
+        ctx_policy.broaden_scope_on_zero_hits,
+        ctx_policy.scoped_recency_pass_before_finalize
+    ));
+    out.push_str(&format!(
+        "- integrity: contradiction_check={} numeric_verbatim={} project_scoping={} checkpoint_payload_contract={}\n",
+        ctx_policy.contradiction_check_across_layers,
+        ctx_policy.numeric_fact_verbatim_copy,
+        ctx_policy.required_project_scoping,
+        ctx_policy.checkpoint_payload_requires_project_file_topic
+    ));
+    out.push_str(&format!(
+        "- retries: deep={:?} regular={:?} sinks={}\n\n",
+        ctx_policy.deep_retry_budget_secs,
+        ctx_policy.regular_retry_budget_secs,
+        ctx_policy.summary_sink_order.join(",")
     ));
 
     out.push_str("Objective Contract\n");
@@ -3298,6 +3457,29 @@ mod tests {
 
             let generalized = reset_objective_profile_generalized().expect("reset profile");
             assert_eq!(generalized.profile_id, "repo-general");
+        });
+    }
+
+    #[test]
+    fn contextlattice_policy_modes_roundtrip() {
+        with_test_hermes_home(|| {
+            ensure_alpha_runtime_bootstrap(true).expect("bootstrap");
+
+            let max = set_contextlattice_policy_mode("max").expect("max mode");
+            assert_eq!(max.preferred_retrieval_mode, "deep");
+            assert!(max.include_retrieval_debug_for_execution);
+            assert!(max.preflight_required);
+            assert_eq!(max.deep_retry_budget_secs, vec![120, 180, 240]);
+
+            let fast = set_contextlattice_policy_mode("fast").expect("fast mode");
+            assert_eq!(fast.preferred_retrieval_mode, "fast");
+            assert!(!fast.include_retrieval_debug_for_execution);
+            assert_eq!(fast.regular_retry_budget_secs, vec![60, 90]);
+
+            let loaded = load_contextlattice_policy().expect("load context policy");
+            assert_eq!(loaded.preferred_retrieval_mode, "fast");
+            assert!(loaded.required_project_scoping);
+            assert!(loaded.checkpoint_payload_requires_project_file_topic);
         });
     }
 

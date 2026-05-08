@@ -31,6 +31,15 @@ def parse_args() -> argparse.Namespace:
         help="MCP stale-transport recovery regression command",
     )
     parser.add_argument(
+        "--contextlattice-cmd",
+        default=(
+            "python3 /Users/sheawinkler/Documents/Projects/scripts/agent_orchestration.py "
+            "preflight hermes-agent-ultra runbooks/alpha/objective "
+            "\"hermes-ultra contextlattice intelligence preflight\""
+        ),
+        help="ContextLattice preflight/intelligence telemetry command",
+    )
+    parser.add_argument(
         "--output-json",
         default="",
         help="Optional JSON report path",
@@ -54,7 +63,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def run_shell(command: str, cwd: pathlib.Path) -> dict[str, Any]:
+def run_shell(command: str, cwd: pathlib.Path, max_tail: int = 6000) -> dict[str, Any]:
     started = dt.datetime.now(dt.timezone.utc)
     proc = subprocess.run(
         ["bash", "-lc", command],
@@ -71,8 +80,8 @@ def run_shell(command: str, cwd: pathlib.Path) -> dict[str, Any]:
         "started_at": started.isoformat(),
         "finished_at": finished.isoformat(),
         "duration_ms": int((finished - started).total_seconds() * 1000),
-        "stdout_tail": proc.stdout[-6000:],
-        "stderr_tail": proc.stderr[-6000:],
+        "stdout_tail": proc.stdout[-max_tail:],
+        "stderr_tail": proc.stderr[-max_tail:],
     }
 
 
@@ -87,11 +96,67 @@ def parse_hotpath_ns(stdout: str) -> int | None:
     return int(value)
 
 
+def parse_contextlattice_payload(section: dict[str, Any]) -> dict[str, Any] | None:
+    raw = (section.get("stdout_tail") or "").strip()
+    if not raw:
+        return None
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start < 0 or end <= start:
+        return None
+    blob = raw[start : end + 1]
+    try:
+        parsed = json.loads(blob)
+    except Exception:
+        return None
+    if isinstance(parsed, dict):
+        return parsed
+    return None
+
+
+def contextlattice_summary(payload: dict[str, Any] | None) -> dict[str, Any]:
+    summary = {
+        "healthy": False,
+        "warnings": 0,
+        "python_fallbacks": 0,
+        "route_owner_class": "",
+        "source_counts": {},
+        "queue_pending_total": 0,
+    }
+    if not payload:
+        return summary
+    health = payload.get("health") if isinstance(payload.get("health"), dict) else {}
+    summary["healthy"] = bool(health.get("ok"))
+    warnings = payload.get("warnings")
+    if isinstance(warnings, list):
+        summary["warnings"] = len(warnings)
+    retrieval = payload.get("context_pack", {}).get("retrieval")
+    if isinstance(retrieval, dict):
+        summary["route_owner_class"] = str(retrieval.get("route_owner_class") or "")
+        source_counts = retrieval.get("source_counts")
+        if isinstance(source_counts, dict):
+            summary["source_counts"] = source_counts
+        fallbacks = retrieval.get("fallback_counts")
+        if isinstance(fallbacks, dict):
+            summary["python_fallbacks"] = int(fallbacks.get("python_hot_path_total") or 0)
+    status = payload.get("status")
+    if isinstance(status, dict):
+        queue = status.get("queue")
+        if isinstance(queue, dict):
+            summary["queue_pending_total"] = int(queue.get("pendingTotal") or 0)
+    return summary
+
+
 def build_recommendations(
-    hotpath: dict[str, Any], eval_gate: dict[str, Any], mcp_gate: dict[str, Any]
+    hotpath: dict[str, Any],
+    eval_gate: dict[str, Any],
+    mcp_gate: dict[str, Any],
+    context_gate: dict[str, Any],
 ) -> list[dict[str, str]]:
     recs: list[dict[str, str]] = []
     ns = parse_hotpath_ns((hotpath.get("stdout_tail") or "") + "\n" + (hotpath.get("stderr_tail") or ""))
+    ctx_payload = parse_contextlattice_payload(context_gate)
+    ctx_summary = contextlattice_summary(ctx_payload)
 
     if not hotpath.get("ok"):
         recs.append(
@@ -129,6 +194,56 @@ def build_recommendations(
                 "severity": "P1",
                 "title": "MCP stale transport recovery regression",
                 "recommendation": "Run `cargo test -p hermes-mcp` and restore reconnect-on-stale behavior before promotion.",
+            }
+        )
+
+    if not context_gate.get("ok"):
+        recs.append(
+            {
+                "id": "CONTEXTLATTICE_PREFLIGHT_FAIL",
+                "severity": "P0",
+                "title": "ContextLattice preflight failed",
+                "recommendation": "Run `python3 /Users/sheawinkler/Documents/Projects/scripts/agent_orchestration.py preflight hermes-agent-ultra runbooks/alpha/objective` and resolve retrieval/service health before promotion.",
+            }
+        )
+    elif not ctx_summary["healthy"]:
+        recs.append(
+            {
+                "id": "CONTEXTLATTICE_UNHEALTHY",
+                "severity": "P1",
+                "title": "ContextLattice health is degraded",
+                "recommendation": "Use `/objective context max` and confirm orchestrator health/retrieval lanes before long-running objective loops.",
+            }
+        )
+    if ctx_summary["python_fallbacks"] > 0:
+        recs.append(
+            {
+                "id": "CONTEXTLATTICE_PYTHON_FALLBACK",
+                "severity": "P1",
+                "title": "ContextLattice retrieval fallback detected",
+                "recommendation": "Investigate non-native fallback causes and keep Go/Rust lanes hot to avoid degraded memory-intelligence behavior.",
+            }
+        )
+    if (
+        isinstance(ctx_summary["source_counts"], dict)
+        and not ctx_summary["source_counts"]
+        and int(ctx_summary["python_fallbacks"]) == 0
+    ):
+        recs.append(
+            {
+                "id": "CONTEXTLATTICE_ZERO_SOURCE_COVERAGE",
+                "severity": "P1",
+                "title": "ContextLattice source coverage is empty",
+                "recommendation": "Use broader same-project context-pack and ensure topic rollups/primary stores return at least one grounded hit.",
+            }
+        )
+    if int(ctx_summary["queue_pending_total"]) > 8:
+        recs.append(
+            {
+                "id": "CONTEXTLATTICE_QUEUE_PRESSURE",
+                "severity": "P2",
+                "title": "ContextLattice queue pressure elevated",
+                "recommendation": "Reduce write burst size or raise checkpoint spacing for long loops until pending queue normalizes.",
             }
         )
 
@@ -203,6 +318,22 @@ def write_env(path: pathlib.Path, report: dict[str, Any]) -> None:
                 "HERMES_REPLAY_ENABLED=1",
             ]
         )
+    if any(
+        key in rec_ids
+        for key in (
+            "CONTEXTLATTICE_PREFLIGHT_FAIL",
+            "CONTEXTLATTICE_UNHEALTHY",
+            "CONTEXTLATTICE_PYTHON_FALLBACK",
+            "CONTEXTLATTICE_ZERO_SOURCE_COVERAGE",
+        )
+    ):
+        lines.extend(
+            [
+                "HERMES_CONTEXTLATTICE_MODE=max",
+                "HERMES_CONTEXTLATTICE_RETRIEVAL_MODE=deep",
+                "HERMES_CONTEXTLATTICE_REQUIRE_READBACK=1",
+            ]
+        )
     if rec_ids == {"PERF_STABLE"}:
         lines.append("HERMES_PERF_AUTOPILOT_STATUS=stable")
     lines.append(f"HERMES_PERF_AUTOPILOT_PROFILE={report.get('profile_recommendation', 'balanced')}")
@@ -216,10 +347,14 @@ def write_env(path: pathlib.Path, report: dict[str, Any]) -> None:
 
 
 def compute_adaptive_indexes(
-    hotpath: dict[str, Any], eval_gate: dict[str, Any], mcp_gate: dict[str, Any], recommendations: list[dict[str, str]]
+    hotpath: dict[str, Any],
+    eval_gate: dict[str, Any],
+    mcp_gate: dict[str, Any],
+    context_gate: dict[str, Any],
+    recommendations: list[dict[str, str]],
 ) -> dict[str, Any]:
     ns = parse_hotpath_ns((hotpath.get("stdout_tail") or "") + "\n" + (hotpath.get("stderr_tail") or ""))
-    checks = [hotpath.get("ok"), eval_gate.get("ok"), mcp_gate.get("ok")]
+    checks = [hotpath.get("ok"), eval_gate.get("ok"), mcp_gate.get("ok"), context_gate.get("ok")]
     pass_count = sum(1 for ok in checks if ok)
     fail_count = len(checks) - pass_count
     base_performance = 100.0
@@ -231,6 +366,8 @@ def compute_adaptive_indexes(
         base_performance -= 35.0
     if not mcp_gate.get("ok"):
         base_performance -= 20.0
+    if not context_gate.get("ok"):
+        base_performance -= 25.0
     base_performance = max(0.0, min(100.0, base_performance))
 
     severity_weight = {"P0": 22.0, "P1": 12.0, "P2": 6.0, "P3": 2.0}
@@ -241,6 +378,20 @@ def compute_adaptive_indexes(
     base_intelligence = 100.0 - penalty
     if not eval_gate.get("ok"):
         base_intelligence -= 18.0
+    if not context_gate.get("ok"):
+        base_intelligence -= 20.0
+    ctx_payload = parse_contextlattice_payload(context_gate)
+    ctx_summary = contextlattice_summary(ctx_payload)
+    if ctx_summary["python_fallbacks"] > 0:
+        base_intelligence -= min(12.0, float(ctx_summary["python_fallbacks"]))
+    if (
+        isinstance(ctx_summary["source_counts"], dict)
+        and not ctx_summary["source_counts"]
+        and int(ctx_summary["python_fallbacks"]) == 0
+    ):
+        base_intelligence -= 10.0
+    if int(ctx_summary["queue_pending_total"]) > 8:
+        base_intelligence -= 8.0
     base_intelligence = max(0.0, min(100.0, base_intelligence))
 
     adaptive_index = round(base_performance * 0.55 + base_intelligence * 0.45, 2)
@@ -250,6 +401,8 @@ def compute_adaptive_indexes(
     if fail_count >= 2:
         profile = "safety"
     elif not eval_gate.get("ok"):
+        profile = "quality"
+    elif not context_gate.get("ok"):
         profile = "quality"
     elif not mcp_gate.get("ok"):
         profile = "reliability"
@@ -318,9 +471,16 @@ def main() -> int:
     hotpath = run_shell(args.hotpath_cmd, repo_root)
     eval_gate = run_shell(args.eval_cmd, repo_root)
     mcp_gate = run_shell(args.mcp_cmd, repo_root)
-    recommendations = build_recommendations(hotpath, eval_gate, mcp_gate)
-    ok = all(section.get("ok") for section in [hotpath, eval_gate, mcp_gate])
-    adaptive = compute_adaptive_indexes(hotpath, eval_gate, mcp_gate, recommendations)
+    context_gate = run_shell(args.contextlattice_cmd, repo_root, max_tail=240000)
+    recommendations = build_recommendations(hotpath, eval_gate, mcp_gate, context_gate)
+    ok = all(section.get("ok") for section in [hotpath, eval_gate, mcp_gate, context_gate])
+    adaptive = compute_adaptive_indexes(
+        hotpath,
+        eval_gate,
+        mcp_gate,
+        context_gate,
+        recommendations,
+    )
 
     report = {
         "generated_at": dt.datetime.now(dt.timezone.utc).isoformat(),
@@ -330,6 +490,7 @@ def main() -> int:
             "hotpath": hotpath,
             "eval_trend": eval_gate,
             "mcp_stale_recovery": mcp_gate,
+            "contextlattice_preflight": context_gate,
         },
         "recommendations": recommendations,
         "performance_index": adaptive["performance_index"],

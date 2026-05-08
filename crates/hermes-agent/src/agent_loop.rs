@@ -4038,6 +4038,11 @@ impl AgentLoop {
         if let Some(hint) = objective_mode_system_hint(ctx.get_messages()) {
             ctx.add_message(Message::system(hint));
         }
+        if let Some(hint) =
+            contextlattice_intelligence_system_hint(ctx.get_messages(), &tool_schemas)
+        {
+            ctx.add_message(Message::system(hint));
+        }
 
         let persist_user_idx = if self.config.persist_user_message.is_some() {
             ctx.get_messages()
@@ -5074,6 +5079,11 @@ impl AgentLoop {
             ctx.add_message(Message::system(hint));
         }
         if let Some(hint) = objective_mode_system_hint(ctx.get_messages()) {
+            ctx.add_message(Message::system(hint));
+        }
+        if let Some(hint) =
+            contextlattice_intelligence_system_hint(ctx.get_messages(), &tool_schemas)
+        {
             ctx.add_message(Message::system(hint));
         }
 
@@ -7839,6 +7849,42 @@ fn contextlattice_connect_system_hint(messages: &[Message]) -> Option<String> {
          (3) if needed call `contextlattice_context_pack` for broader grounding; \
          (4) call `contextlattice_write` to checkpoint what was verified. \
          Never use terminal command `contextlattice` for this workflow."
+            .to_string(),
+    )
+}
+
+fn contextlattice_intelligence_system_hint(
+    messages: &[Message],
+    tool_schemas: &[ToolSchema],
+) -> Option<String> {
+    let has_context_tools = tool_schemas.iter().any(|t| {
+        matches!(
+            t.name.as_str(),
+            "contextlattice_search"
+                | "contextlattice_context_pack"
+                | "contextlattice_write"
+                | "memory"
+        )
+    });
+    if !has_context_tools {
+        return None;
+    }
+
+    let objective_active = objective_guard_policy(messages).0;
+    let repo_intent = detect_repo_review_intent(messages);
+    let connect_intent = detect_contextlattice_connect_intent(messages);
+    if !(objective_active || repo_intent || connect_intent) {
+        return None;
+    }
+
+    Some(
+        "[SYSTEM] ContextLattice-first intelligence policy active.\n\
+         1) Start with scoped retrieval (`contextlattice_search`) using project + topic path.\n\
+         2) If scoped retrieval is empty/degraded, run one broader retrieval in the same project and compare.\n\
+         3) For broad or multi-file tasks, run `contextlattice_context_pack` before deep tool loops.\n\
+         4) During long execution, checkpoint durable progress with `contextlattice_write`.\n\
+         5) Before final answer, run one scoped readback and report contradictions as `unproven` rather than guessing.\n\
+         6) Copy numeric facts verbatim; do not normalize or round unless explicitly requested."
             .to_string(),
     )
 }
@@ -11779,6 +11825,38 @@ mod tests {
         assert!(hint.contains("contextlattice_search"));
         assert!(hint.contains("scripts/agent_orchestration.py"));
         assert!(hint.contains("Never use terminal command `contextlattice`"));
+    }
+
+    #[test]
+    fn test_contextlattice_intelligence_system_hint_requires_tools_and_intent() {
+        let msgs = vec![Message::user(
+            "perform deep repo audit and objective verification on /tmp/repo",
+        )];
+        let tools = vec![
+            ToolSchema::new("contextlattice_search", "search", JsonSchema::new("object")),
+            ToolSchema::new(
+                "contextlattice_context_pack",
+                "pack",
+                JsonSchema::new("object"),
+            ),
+        ];
+        let hint = contextlattice_intelligence_system_hint(&msgs, &tools).expect("expected hint");
+        assert!(hint.contains("ContextLattice-first intelligence policy active"));
+        assert!(hint.contains("scoped retrieval"));
+        assert!(hint.contains("Copy numeric facts verbatim"));
+    }
+
+    #[test]
+    fn test_contextlattice_intelligence_system_hint_skips_without_tools() {
+        let msgs = vec![Message::user(
+            "perform deep repo audit and objective verification on /tmp/repo",
+        )];
+        let tools = vec![ToolSchema::new(
+            "terminal",
+            "terminal",
+            JsonSchema::new("object"),
+        )];
+        assert!(contextlattice_intelligence_system_hint(&msgs, &tools).is_none());
     }
 
     #[test]

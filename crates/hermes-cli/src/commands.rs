@@ -27,13 +27,14 @@ use crate::alpha_runtime::{
     append_counterfactual, append_objective_learning_entry, build_objective_dag_from_contract,
     clear_objective_contract, clear_objective_dag, clear_objective_learning_ledger,
     enqueue_loop_event, ensure_alpha_runtime_bootstrap, ensure_trading_runtime_bootstrap,
-    load_alpha_loops, load_claim_verifier_policy, load_last_trading_alpha_report,
-    load_objective_contract, load_objective_dag, load_objective_ensemble_policy,
-    load_objective_eval_trend, load_objective_learning_ledger, load_objective_profile,
-    load_objective_simulation_policy, load_quorum_policy, objective_profile_specialized_for,
-    recover_orphan_loop_events, refresh_trading_alpha_report, render_mission_board,
-    render_trading_alpha_board, replay_loop_queue, reset_objective_profile_generalized,
-    set_claim_verifier_enabled, set_objective_ensemble_mode, set_objective_profile,
+    load_alpha_loops, load_claim_verifier_policy, load_contextlattice_policy,
+    load_last_trading_alpha_report, load_objective_contract, load_objective_dag,
+    load_objective_ensemble_policy, load_objective_eval_trend, load_objective_learning_ledger,
+    load_objective_profile, load_objective_simulation_policy, load_quorum_policy,
+    objective_profile_specialized_for, recover_orphan_loop_events, refresh_trading_alpha_report,
+    render_mission_board, render_trading_alpha_board, replay_loop_queue,
+    reset_objective_profile_generalized, set_claim_verifier_enabled,
+    set_contextlattice_policy_mode, set_objective_ensemble_mode, set_objective_profile,
     set_objective_simulation_mode, set_quorum_policy, summarize_objective_contract,
     upsert_objective_contract, utility_terms_from_contract, ObjectiveLearningLedgerEntry,
 };
@@ -161,7 +162,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ),
     (
         "/objective",
-        "Set/show objective contract + profile/policies (`status|plan|constraints|counterfactual|profile|simulator|ensemble|ledger|dag|eval|clear`)",
+        "Set/show objective contract + profile/policies (`status|plan|constraints|counterfactual|profile|context|simulator|ensemble|ledger|dag|eval|clear`)",
     ),
     (
         "/claims",
@@ -8473,10 +8474,138 @@ fn handle_capability_surface_command(
 }
 
 fn handle_objective_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
-    let objective_usage = "Usage: `/objective <text>` or `/objective status|plan|constraints|counterfactual <scenario> | <expected_delta>|profile [status|list|general|me|set <id>]|simulator [status|balanced|strict|aggressive]|ensemble [status|committee|single|debate]|ledger [status|tail [n]|clear]|dag [status|rebuild|clear]|eval [status|tail [n]]|clear`.";
+    let objective_usage = "Usage: `/objective <text>` or `/objective status|plan|constraints|counterfactual <scenario> | <expected_delta>|profile [status|list|general|me|set <id>]|context [status|list|max|balanced|fast]|simulator [status|balanced|strict|aggressive]|ensemble [status|committee|single|debate]|ledger [status|tail [n]|clear]|dag [status|rebuild|clear]|eval [status|tail [n]]|clear`.";
 
     if let Some(first) = args.first() {
         let cmd = first.trim().to_ascii_lowercase();
+        if cmd == "context" || cmd == "contextlattice" {
+            let sub = args
+                .get(1)
+                .map(|v| v.trim().to_ascii_lowercase())
+                .unwrap_or_else(|| "status".to_string());
+            match sub.as_str() {
+                "status" | "show" => {
+                    let p = load_contextlattice_policy()?;
+                    let mut out = String::new();
+                    out.push_str("ContextLattice policy\n");
+                    out.push_str("--------------------\n");
+                    let _ = writeln!(out, "mode_hint: {}", p.preferred_retrieval_mode);
+                    let _ = writeln!(out, "preflight_required: {}", p.preflight_required);
+                    let _ = writeln!(
+                        out,
+                        "auto_context_pack_on_mission_start: {}",
+                        p.auto_context_pack_on_mission_start
+                    );
+                    let _ = writeln!(
+                        out,
+                        "degradation_aware_planning: {}",
+                        p.degradation_aware_planning
+                    );
+                    let _ = writeln!(
+                        out,
+                        "include_grounding_required: {}",
+                        p.include_grounding_required
+                    );
+                    let _ = writeln!(
+                        out,
+                        "include_retrieval_debug_for_execution: {}",
+                        p.include_retrieval_debug_for_execution
+                    );
+                    let _ = writeln!(
+                        out,
+                        "broaden_scope_on_zero_hits: {}",
+                        p.broaden_scope_on_zero_hits
+                    );
+                    let _ = writeln!(
+                        out,
+                        "scoped_recency_pass_before_finalize: {}",
+                        p.scoped_recency_pass_before_finalize
+                    );
+                    let _ = writeln!(
+                        out,
+                        "objective_analytics_writeback_required: {}",
+                        p.objective_analytics_writeback_required
+                    );
+                    let _ = writeln!(
+                        out,
+                        "contradiction_check_across_layers: {}",
+                        p.contradiction_check_across_layers
+                    );
+                    let _ = writeln!(
+                        out,
+                        "numeric_fact_verbatim_copy: {}",
+                        p.numeric_fact_verbatim_copy
+                    );
+                    let _ = writeln!(
+                        out,
+                        "required_project_scoping: {}",
+                        p.required_project_scoping
+                    );
+                    let _ = writeln!(
+                        out,
+                        "checkpoint_payload_requires_project_file_topic: {}",
+                        p.checkpoint_payload_requires_project_file_topic
+                    );
+                    let _ = writeln!(
+                        out,
+                        "readback_verification_required: {}",
+                        p.readback_verification_required
+                    );
+                    let _ = writeln!(
+                        out,
+                        "conflict_resolution_mode: {}",
+                        p.conflict_resolution_mode
+                    );
+                    let _ = writeln!(
+                        out,
+                        "deep_retry_budget_secs: {:?}",
+                        p.deep_retry_budget_secs
+                    );
+                    let _ = writeln!(
+                        out,
+                        "regular_retry_budget_secs: {:?}",
+                        p.regular_retry_budget_secs
+                    );
+                    let _ = writeln!(
+                        out,
+                        "summary_sink_order: {}",
+                        p.summary_sink_order.join(",")
+                    );
+                    emit_command_output(app, out.trim_end());
+                    return Ok(CommandResult::Handled);
+                }
+                "list" => {
+                    emit_command_output(
+                        app,
+                        "ContextLattice policy presets:\n- max: full evidence + deep retrieval + strict recency/readback gates\n- balanced: full evidence with moderate deep/regular retry budgets\n- fast: grounded but lower retrieval-debug overhead for speed-sensitive loops",
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+                "max" | "strict" | "balanced" | "fast" | "speed" => {
+                    let p = set_contextlattice_policy_mode(&sub)?;
+                    emit_command_output(
+                        app,
+                        format!(
+                            "ContextLattice policy updated.\nmode={} preflight={} retrieval_mode={} deep_retries={:?} regular_retries={:?}",
+                            sub,
+                            p.preflight_required,
+                            p.preferred_retrieval_mode,
+                            p.deep_retry_budget_secs,
+                            p.regular_retry_budget_secs
+                        ),
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+                _ => {
+                    emit_command_output(
+                        app,
+                        "Usage: /objective context [status|list|max|balanced|fast]",
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+            }
+        }
+
         if cmd == "profile" {
             let sub = args
                 .get(1)
@@ -8839,6 +8968,18 @@ fn handle_objective_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                     out,
                     "\nObjective profile\n-----------------\nprofile_id: {}\noperator_hint: {}\nmemory_backend: {}\ndefault_shell: {}",
                     profile.profile_id, profile.operator_hint, profile.memory_backend, profile.default_shell
+                );
+            }
+            if let Ok(ctx_policy) = load_contextlattice_policy() {
+                let _ = writeln!(
+                    out,
+                    "\nContextLattice policy\n---------------------\nmode_hint: {}\npreflight_required: {}\nretrieval_debug: {}\nreadback_required: {}\ndeep_retries: {:?}\nregular_retries: {:?}",
+                    ctx_policy.preferred_retrieval_mode,
+                    ctx_policy.preflight_required,
+                    ctx_policy.include_retrieval_debug_for_execution,
+                    ctx_policy.readback_verification_required,
+                    ctx_policy.deep_retry_budget_secs,
+                    ctx_policy.regular_retry_budget_secs
                 );
             }
             if let Ok(sim) = load_objective_simulation_policy() {
