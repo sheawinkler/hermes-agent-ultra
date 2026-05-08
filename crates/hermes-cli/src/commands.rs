@@ -10403,30 +10403,6 @@ fn handle_session_compat_command(
                 Err(err) => format!("Branch marker requested, but snapshot failed: {}", err),
             }
         }
-        "/snapshot" => "Snapshot compatibility command acknowledged. Use `hermes backup` / `hermes import` for persisted state snapshots.".to_string(),
-        "/rollback" => "Rollback checkpoints are managed through saved sessions. Use `/save`, `/load`, and `/history`.".to_string(),
-        "/queue" => {
-            if arg_joined.trim().is_empty() {
-                "Usage: /queue <prompt>".to_string()
-            } else {
-                format!("Queued prompt hint: {}", arg_joined.trim())
-            }
-        }
-        "/steer" => {
-            if arg_joined.trim().is_empty() {
-                "Usage: /steer <instruction>".to_string()
-            } else {
-                format!("Steering note recorded: {}", arg_joined.trim())
-            }
-        }
-        "/btw" => {
-            if arg_joined.trim().is_empty() {
-                "Usage: /btw <question>".to_string()
-            } else {
-                format!("Side-question captured: {}", arg_joined.trim())
-            }
-        }
-        "/sethome" => "Home-session marker command is primarily gateway-facing; local CLI session remains active.".to_string(),
         _ => "Compatibility command acknowledged.".to_string(),
     };
     emit_command_output(app, msg);
@@ -10567,9 +10543,17 @@ fn handle_compatibility_notice_command(
 }
 
 fn handle_paste_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
-    let text = arboard::Clipboard::new()
-        .and_then(|mut cb| cb.get_text())
-        .map_err(|e| AgentError::Config(format!("Clipboard unavailable: {}", e)))?;
+    let text = if let Some(mock) = std::env::var("HERMES_TEST_CLIPBOARD_TEXT")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+    {
+        mock
+    } else {
+        arboard::Clipboard::new()
+            .and_then(|mut cb| cb.get_text())
+            .map_err(|e| AgentError::Config(format!("Clipboard unavailable: {}", e)))?
+    };
     let trimmed = text.trim();
     if trimmed.is_empty() {
         emit_command_output(app, "Clipboard is empty.");
@@ -16122,10 +16106,86 @@ pub fn handle_cli_version() -> Result<(), hermes_core::AgentError> {
 mod tests {
     use super::*;
     use crate::test_env_lock;
+    use clap::Parser;
     use tempfile::tempdir;
+    use tokio::sync::mpsc;
 
     fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
         test_env_lock::lock()
+    }
+
+    struct TempHomeGuard {
+        previous_home: Option<String>,
+        previous_clipboard_mock: Option<String>,
+        previous_runtime_env: Vec<(&'static str, Option<String>)>,
+    }
+
+    impl TempHomeGuard {
+        fn new(path: &Path) -> Self {
+            let previous_home = std::env::var("HERMES_HOME").ok();
+            std::env::set_var("HERMES_HOME", path);
+            let previous_clipboard_mock = std::env::var("HERMES_TEST_CLIPBOARD_TEXT").ok();
+            std::env::remove_var("HERMES_TEST_CLIPBOARD_TEXT");
+            let previous_runtime_env = [
+                "HERMES_MODEL",
+                "HERMES_INFERENCE_MODEL",
+                "HERMES_INFERENCE_PROVIDER",
+                "HERMES_TUI_PROVIDER",
+            ]
+            .iter()
+            .map(|key| (*key, std::env::var(key).ok()))
+            .collect();
+            Self {
+                previous_home,
+                previous_clipboard_mock,
+                previous_runtime_env,
+            }
+        }
+    }
+
+    impl Drop for TempHomeGuard {
+        fn drop(&mut self) {
+            match self.previous_home.take() {
+                Some(value) => std::env::set_var("HERMES_HOME", value),
+                None => std::env::remove_var("HERMES_HOME"),
+            }
+            match self.previous_clipboard_mock.take() {
+                Some(value) => std::env::set_var("HERMES_TEST_CLIPBOARD_TEXT", value),
+                None => std::env::remove_var("HERMES_TEST_CLIPBOARD_TEXT"),
+            }
+            for (key, value) in self.previous_runtime_env.drain(..) {
+                match value {
+                    Some(v) => std::env::set_var(key, v),
+                    None => std::env::remove_var(key),
+                }
+            }
+        }
+    }
+
+    async fn build_test_app_with_stream(home: &Path) -> App {
+        let config_dir = home.join("config");
+        std::fs::create_dir_all(&config_dir).expect("create config dir");
+        let cli = crate::cli::Cli::try_parse_from(vec![
+            "hermes".to_string(),
+            "-C".to_string(),
+            config_dir.display().to_string(),
+            "--ignore-user-config".to_string(),
+            "--ignore-rules".to_string(),
+        ])
+        .expect("parse cli");
+        let mut app = App::new(cli).await.expect("build app");
+        let (tx, _rx) = mpsc::unbounded_channel::<crate::tui::Event>();
+        app.set_stream_handle(Some(tx.into()));
+        app
+    }
+
+    fn latest_ui_assistant_text(app: &App) -> String {
+        app.ui_messages
+            .iter()
+            .rev()
+            .find(|row| row.message.role == hermes_core::MessageRole::Assistant)
+            .and_then(|row| row.message.content.clone())
+            .unwrap_or_default()
     }
 
     #[test]
@@ -16138,6 +16198,160 @@ mod tests {
     fn test_autocomplete_partial() {
         let results = autocomplete("/m");
         assert!(results.contains(&"/model"));
+    }
+
+    #[tokio::test]
+    async fn promoted_snapshot_command_lists_snapshots() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        let result = handle_snapshot_command(&mut app, &[]).expect("snapshot list");
+        assert_eq!(result, CommandResult::Handled);
+
+        let output = latest_ui_assistant_text(&app);
+        assert!(output.contains("Session snapshots:") || output.contains("No snapshots found in"));
+    }
+
+    #[tokio::test]
+    async fn promoted_rollback_command_shows_controls() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        let result = handle_rollback_command(&mut app, &[]).expect("rollback list");
+        assert_eq!(result, CommandResult::Handled);
+        assert!(latest_ui_assistant_text(&app).contains("Rollback controls:"));
+    }
+
+    #[tokio::test]
+    async fn promoted_queue_command_shows_usage_and_status() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        let usage = handle_queue_command(&mut app, &[]).expect("queue usage");
+        assert_eq!(usage, CommandResult::Handled);
+        assert!(latest_ui_assistant_text(&app).contains("Usage: /queue <prompt>"));
+
+        let status = handle_queue_command(&mut app, &["status"]).expect("queue status");
+        assert_eq!(status, CommandResult::Handled);
+        assert!(latest_ui_assistant_text(&app).contains("Background queue status:"));
+    }
+
+    #[tokio::test]
+    async fn promoted_steer_command_sets_and_clears_instruction() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        handle_steer_command(&mut app, &["focus", "on", "repo", "map"]).expect("set steer");
+        assert_eq!(
+            current_session_steer(&app).as_deref(),
+            Some("focus on repo map")
+        );
+        assert!(latest_ui_assistant_text(&app).contains("Steering instruction set."));
+
+        handle_steer_command(&mut app, &["clear"]).expect("clear steer");
+        assert!(current_session_steer(&app).is_none());
+        assert!(latest_ui_assistant_text(&app).contains("Cleared session steering instruction."));
+    }
+
+    #[tokio::test]
+    async fn promoted_btw_command_queues_ephemeral_background_task() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        let result =
+            handle_btw_command(&mut app, &["why", "is", "latency", "high?"]).expect("btw command");
+        assert_eq!(result, CommandResult::Handled);
+        let output = latest_ui_assistant_text(&app);
+        assert!(output.contains("[/btw queued]"));
+        assert!(output.contains("Question: why is latency high?"));
+    }
+
+    #[tokio::test]
+    async fn promoted_sethome_command_sets_status_and_clears_marker() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        handle_sethome_command(&mut app, &["alpha-room"]).expect("set home");
+        assert!(latest_ui_assistant_text(&app).contains("Home marker updated."));
+        let marker = load_home_session_marker().expect("home marker");
+        assert_eq!(
+            marker.get("home").and_then(|v| v.as_str()),
+            Some("alpha-room")
+        );
+
+        handle_sethome_command(&mut app, &["status"]).expect("home status");
+        assert!(latest_ui_assistant_text(&app).contains("Home marker file:"));
+
+        handle_sethome_command(&mut app, &["clear"]).expect("home clear");
+        assert!(latest_ui_assistant_text(&app).contains("Cleared home marker."));
+        assert!(load_home_session_marker().is_none());
+    }
+
+    #[tokio::test]
+    async fn promoted_paste_command_uses_test_clipboard_override() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        std::env::set_var("HERMES_TEST_CLIPBOARD_TEXT", "alpha clipboard payload");
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        let result = handle_paste_command(&mut app, &[]).expect("paste command");
+        assert_eq!(result, CommandResult::Handled);
+        let output = latest_ui_assistant_text(&app);
+        assert!(output.contains("Clipboard captured:"));
+        assert!(output.contains("alpha clipboard payload"));
+    }
+
+    #[tokio::test]
+    async fn promoted_gquota_command_emits_provider_diagnostics() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        let result = handle_gquota_command(&mut app, &[]).await.expect("gquota");
+        assert_eq!(result, CommandResult::Handled);
+        let output = latest_ui_assistant_text(&app);
+        assert!(output.contains("Gemini quota/auth diagnostics"));
+        assert!(output.contains("active provider:"));
+    }
+
+    #[tokio::test]
+    async fn promoted_approve_and_deny_commands_operate_on_pairing_store() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        let store = PairingStore::open_default();
+        store
+            .save(&[crate::pairing_store::PairedDevice {
+                device_id: "device-01".to_string(),
+                name: Some("Test device".to_string()),
+                status: PairingStatus::Pending,
+                created_at: chrono::Utc::now().to_rfc3339(),
+                last_seen: None,
+                shared_secret: None,
+            }])
+            .expect("seed pairing store");
+
+        handle_approve_command(&mut app, &["device-01"]).expect("approve");
+        assert!(latest_ui_assistant_text(&app).contains("Approved device 'device-01'"));
+
+        handle_deny_command(&mut app, &["device-01"]).expect("deny");
+        assert!(latest_ui_assistant_text(&app).contains("Revoked device 'device-01'"));
     }
 
     #[test]
@@ -17228,10 +17442,17 @@ install_command: "uv pip install -r requirements.txt"
 
     #[test]
     fn resolve_cli_chat_provider_model_defaults_to_config_when_no_overrides() {
+        let _lock = env_test_lock();
+        let prev_inference_model = std::env::var("HERMES_INFERENCE_MODEL").ok();
+        std::env::remove_var("HERMES_INFERENCE_MODEL");
         let resolved =
             resolve_cli_chat_provider_model(Some("nous:moonshotai/kimi-k2.6"), None, None)
                 .expect("resolve");
         assert_eq!(resolved, "nous:moonshotai/kimi-k2.6");
+        match prev_inference_model {
+            Some(value) => std::env::set_var("HERMES_INFERENCE_MODEL", value),
+            None => std::env::remove_var("HERMES_INFERENCE_MODEL"),
+        }
     }
 
     #[test]
