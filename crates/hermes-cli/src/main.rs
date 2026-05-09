@@ -269,6 +269,7 @@ async fn main() {
             clone_all,
             clone_from,
             no_alias,
+            no_skills,
         } => {
             run_profile(
                 cli,
@@ -284,6 +285,7 @@ async fn main() {
                 clone_all,
                 clone_from,
                 no_alias,
+                no_skills,
             )
             .await
         }
@@ -12211,6 +12213,29 @@ fn save_profile_yaml(path: &Path, value: &serde_yaml::Value) -> Result<(), Agent
         .map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))
 }
 
+fn validate_profile_name(name: &str) -> Result<String, AgentError> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(AgentError::Config("profile name cannot be empty".into()));
+    }
+    if trimmed == "." || trimmed == ".." || trimmed.contains('/') || trimmed.contains('\\') {
+        return Err(AgentError::Config(format!(
+            "invalid profile name '{}': path separators are not allowed",
+            trimmed
+        )));
+    }
+    if !trimmed
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.'))
+    {
+        return Err(AgentError::Config(format!(
+            "invalid profile name '{}': use letters, numbers, '-', '_' or '.'",
+            trimmed
+        )));
+    }
+    Ok(trimmed.to_string())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_profile(
     cli: Cli,
@@ -12226,6 +12251,7 @@ async fn run_profile(
     clone_all: bool,
     clone_from: Option<String>,
     no_alias: bool,
+    no_skills: bool,
 ) -> Result<(), AgentError> {
     let config_dir = cli
         .config_dir
@@ -12319,10 +12345,7 @@ async fn run_profile(
                     "Missing profile name. Usage: hermes profile create <name>".into(),
                 )
             })?;
-            let profile_name = profile_name.trim().to_string();
-            if profile_name.is_empty() {
-                return Err(AgentError::Config("profile create: empty name".into()));
-            }
+            let profile_name = validate_profile_name(&profile_name)?;
 
             std::fs::create_dir_all(&profiles_dir)
                 .map_err(|e| AgentError::Io(format!("Failed to create profiles dir: {}", e)))?;
@@ -12380,6 +12403,13 @@ async fn run_profile(
                         }
                     }
                 }
+            }
+
+            if no_skills {
+                let skills_key = serde_yaml::Value::String("skills".to_string());
+                let overrides_key = serde_yaml::Value::String("skill_overrides".to_string());
+                out_map.remove(&skills_key);
+                out_map.remove(&overrides_key);
             }
 
             out_map
@@ -12527,6 +12557,7 @@ async fn run_profile(
             let new_name = secondary.ok_or_else(|| {
                 AgentError::Config("profile rename usage: hermes profile rename <old> <new>".into())
             })?;
+            let new_name = validate_profile_name(&new_name)?;
             let old_resolved = resolve_profile_name(&old_requested, &aliases);
             let old_path =
                 resolve_profile_yaml_path(&profiles_dir, &old_resolved).ok_or_else(|| {
@@ -12607,21 +12638,33 @@ async fn run_profile(
                 )));
             }
             let mut value = load_profile_yaml(&source_path)?;
-            let target_name = import_name.unwrap_or_else(|| {
+            let target_name_raw = import_name.unwrap_or_else(|| {
                 source_path
                     .file_stem()
                     .unwrap_or_default()
                     .to_string_lossy()
                     .into_owned()
             });
+            let target_name = validate_profile_name(&target_name_raw)?;
             std::fs::create_dir_all(&profiles_dir)
                 .map_err(|e| AgentError::Io(format!("mkdir {}: {}", profiles_dir.display(), e)))?;
             let target_path = profiles_dir.join(format!("{}.yaml", target_name));
-            if target_path.exists() && !yes {
-                return Err(AgentError::Config(format!(
-                    "Target profile exists at {} (re-run with -y to overwrite)",
-                    target_path.display()
-                )));
+            if target_path.exists() {
+                let metadata = std::fs::metadata(&target_path).map_err(|e| {
+                    AgentError::Io(format!("stat {}: {}", target_path.display(), e))
+                })?;
+                if metadata.is_dir() {
+                    return Err(AgentError::Config(format!(
+                        "Refusing to import profile: target path is a directory ({})",
+                        target_path.display()
+                    )));
+                }
+                if !yes {
+                    return Err(AgentError::Config(format!(
+                        "Target profile exists at {} (re-run with -y to overwrite)",
+                        target_path.display()
+                    )));
+                }
             }
             if let Some(map) = value.as_mapping_mut() {
                 map.insert(
@@ -12629,7 +12672,26 @@ async fn run_profile(
                     serde_yaml::Value::String(target_name.clone()),
                 );
             }
-            save_profile_yaml(&target_path, &value)?;
+            let staged_path = profiles_dir.join(format!(
+                ".{}.import-{}.yaml.tmp",
+                target_name,
+                uuid::Uuid::new_v4()
+            ));
+            save_profile_yaml(&staged_path, &value)?;
+            if target_path.exists() {
+                std::fs::remove_file(&target_path).map_err(|e| {
+                    AgentError::Io(format!("remove {}: {}", target_path.display(), e))
+                })?;
+            }
+            if let Err(err) = std::fs::rename(&staged_path, &target_path) {
+                let _ = std::fs::remove_file(&staged_path);
+                return Err(AgentError::Io(format!(
+                    "rename {} -> {}: {}",
+                    staged_path.display(),
+                    target_path.display(),
+                    err
+                )));
+            }
             if !no_alias {
                 if let Some(alias) = alias_name
                     .or(secondary)
@@ -13289,6 +13351,128 @@ mod tests {
         assert!(raw.contains("HERMES_AUTH_DEFAULT_PROVIDER=nous"));
         assert!(raw.contains("NOUS_API_KEY=tok"));
         assert!(!raw.contains("HERMES_AUTH_DEFAULT_PROVIDER=openai"));
+    }
+
+    #[tokio::test]
+    async fn profile_create_no_skills_strips_cloned_skill_overrides() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cli = cli_for_temp_state_root(tmp.path());
+        let profiles_dir = tmp.path().join("profiles");
+        std::fs::create_dir_all(&profiles_dir).expect("create profiles dir");
+
+        let source_profile = profiles_dir.join("source.yaml");
+        std::fs::write(
+            &source_profile,
+            r#"
+name: source
+model: openai:gpt-4o
+personality: technical
+max_turns: 50
+skills:
+  enabled:
+    - contextlattice-agent-contract
+  disabled:
+    - noisy-skill
+"#,
+        )
+        .expect("write source profile");
+        write_active_profile_name(&profiles_dir, "source").expect("set active profile");
+
+        run_profile(
+            cli,
+            Some("create".to_string()),
+            Some("target".to_string()),
+            None,
+            None,
+            None,
+            None,
+            false,
+            false,
+            true,
+            true,
+            Some("source".to_string()),
+            true,
+            true,
+        )
+        .await
+        .expect("create profile");
+
+        let target_profile = profiles_dir.join("target.yaml");
+        let parsed: serde_yaml::Value = serde_yaml::from_str(
+            &std::fs::read_to_string(&target_profile).expect("read target profile"),
+        )
+        .expect("parse target profile");
+        let map = parsed.as_mapping().expect("mapping profile");
+        let skills_key = serde_yaml::Value::String("skills".to_string());
+        assert!(
+            !map.contains_key(&skills_key),
+            "skills key should be stripped"
+        );
+    }
+
+    #[test]
+    fn validate_profile_name_rejects_paths() {
+        let err = validate_profile_name("../danger").expect_err("should reject traversal");
+        assert!(
+            err.to_string().contains("path separators"),
+            "unexpected error: {err}"
+        );
+        let err = validate_profile_name("alpha beta").expect_err("should reject spaces");
+        assert!(
+            err.to_string().contains("letters, numbers"),
+            "unexpected error: {err}"
+        );
+        assert_eq!(
+            validate_profile_name("prod-profile_1.2").expect("valid"),
+            "prod-profile_1.2"
+        );
+    }
+
+    #[tokio::test]
+    async fn profile_import_refuses_directory_clobber_target() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let cli = cli_for_temp_state_root(tmp.path());
+        let profiles_dir = tmp.path().join("profiles");
+        std::fs::create_dir_all(&profiles_dir).expect("create profiles dir");
+
+        let source_profile = tmp.path().join("source.yaml");
+        std::fs::write(
+            &source_profile,
+            r#"
+name: source
+model: openai:gpt-4o
+personality: default
+max_turns: 50
+"#,
+        )
+        .expect("write source profile");
+
+        let clobber_target_dir = profiles_dir.join("target.yaml");
+        std::fs::create_dir_all(&clobber_target_dir).expect("create clobber directory");
+
+        let err = run_profile(
+            cli,
+            Some("import".to_string()),
+            Some(source_profile.to_string_lossy().into_owned()),
+            None,
+            None,
+            Some("target".to_string()),
+            None,
+            false,
+            true,
+            false,
+            false,
+            None,
+            true,
+            false,
+        )
+        .await
+        .expect_err("directory clobber should be rejected");
+
+        assert!(
+            err.to_string().contains("target path is a directory"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

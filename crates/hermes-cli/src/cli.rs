@@ -292,6 +292,9 @@ pub enum CliCommand {
         /// Skip alias creation during profile create.
         #[arg(long = "no-alias")]
         no_alias: bool,
+        /// Do not carry skill overrides from cloned source profiles.
+        #[arg(long = "no-skills")]
+        no_skills: bool,
     },
 
     /// Authentication management.
