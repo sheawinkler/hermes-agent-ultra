@@ -11,7 +11,7 @@ use rand::RngCore;
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 
-use crate::providers::provider_capability_for;
+use crate::providers::{canonical_provider_id, provider_capability_for};
 const NOUS_DEFAULT_INFERENCE_BASE_URL: &str = "https://inference-api.nousresearch.com/v1";
 const PROVIDER_CATALOG_CACHE_VERSION: u32 = 1;
 const OLLAMA_LOCAL_DEFAULT_BASE_URL: &str = "http://127.0.0.1:11434/v1";
@@ -454,7 +454,7 @@ pub fn merge_with_models_dev(models_dev: &[String], curated: &[&str]) -> Vec<Str
 }
 
 pub fn provider_curated_models(provider: &str) -> &'static [&'static str] {
-    let normalized = provider.trim().to_ascii_lowercase();
+    let normalized = canonical_provider_id(provider);
     for (slug, models) in CURATED_PROVIDER_MODELS {
         if slug.eq_ignore_ascii_case(&normalized) {
             return models;
@@ -683,11 +683,11 @@ pub async fn provider_model_ids_with_client(
     provider: &str,
     client: &ModelsDevClient,
 ) -> Vec<String> {
-    let curated = provider_curated_models(provider);
+    let normalized = canonical_provider_id(provider);
+    let curated = provider_curated_models(&normalized);
     if curated.is_empty() {
         return Vec::new();
     }
-    let normalized = provider.trim().to_ascii_lowercase();
     if let Some(cached) = load_provider_catalog_cache(&normalized) {
         if !cached.is_empty() {
             return cached;
@@ -882,6 +882,22 @@ mod tests {
     }
 
     #[test]
+    fn provider_curated_models_accepts_aliases() {
+        assert_eq!(
+            provider_curated_models("ollama"),
+            provider_curated_models("ollama-local")
+        );
+        assert_eq!(
+            provider_curated_models("llama.cpp"),
+            provider_curated_models("llama-cpp")
+        );
+        assert_eq!(
+            provider_curated_models("llvm"),
+            provider_curated_models("vllm")
+        );
+    }
+
+    #[test]
     fn openrouter_curated_models_include_gpt55_variants() {
         let models = provider_curated_models("openrouter");
         assert!(models.contains(&"openai/gpt-5.5"));
@@ -970,6 +986,14 @@ mod tests {
                 "missing model {model}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn provider_model_ids_normalizes_provider_aliases() {
+        let client = seeded_client(json!({}));
+        let aliased = provider_model_ids_with_client("ollama", &client).await;
+        let canonical = provider_model_ids_with_client("ollama-local", &client).await;
+        assert_eq!(aliased, canonical);
     }
 
     #[tokio::test]

@@ -84,8 +84,32 @@ pub fn oauth_capable_providers() -> Vec<&'static str> {
     OAUTH_CAPABLE_PROVIDERS.to_vec()
 }
 
-pub fn provider_capability_for(provider: &str) -> Option<ProviderCapability> {
+pub fn canonical_provider_id(provider: &str) -> String {
     let normalized = provider.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "codex" => "openai-codex".to_string(),
+        "claude" | "claude-code" => "anthropic".to_string(),
+        "qwen-cli" | "qwen-portal" => "qwen-oauth".to_string(),
+        "gemini-cli" | "gemini-oauth" => "google-gemini-cli".to_string(),
+        "step" | "step-plan" => "stepfun".to_string(),
+        "moonshot" | "kimi-coding" | "kimi-coding-cn" => "kimi".to_string(),
+        "alibaba" | "alibaba-coding-plan" => "qwen".to_string(),
+        "minimax-cn" => "minimax".to_string(),
+        "kilo" | "kilo-code" | "kilo-gateway" => "kilocode".to_string(),
+        "opencode" | "opencode-zen" | "zen" => "opencode-zen".to_string(),
+        "go" => "opencode-go".to_string(),
+        "ollama" => "ollama-local".to_string(),
+        "llama.cpp" | "llamacpp" => "llama-cpp".to_string(),
+        "ollvm" | "llvm" => "vllm".to_string(),
+        "mlx-lm" | "apple-mlx" => "mlx".to_string(),
+        "ane" | "apple-neural-engine" | "neural-engine" => "apple-ane".to_string(),
+        "text-generation-inference" => "tgi".to_string(),
+        _ => normalized,
+    }
+}
+
+pub fn provider_capability_for(provider: &str) -> Option<ProviderCapability> {
+    let normalized = canonical_provider_id(provider);
     if normalized.is_empty() {
         return None;
     }
@@ -109,7 +133,7 @@ mod tests {
     use serde::Deserialize;
 
     use super::{
-        known_providers, oauth_capable_providers, provider_capability_for,
+        canonical_provider_id, known_providers, oauth_capable_providers, provider_capability_for,
         MODELS_DEV_MERGED_PROVIDERS,
     };
 
@@ -233,5 +257,14 @@ mod tests {
                 "{provider} should not require models.dev merge"
             );
         }
+    }
+
+    #[test]
+    fn canonical_provider_id_normalizes_common_aliases() {
+        assert_eq!(canonical_provider_id("moonshot"), "kimi");
+        assert_eq!(canonical_provider_id("gemini-cli"), "google-gemini-cli");
+        assert_eq!(canonical_provider_id("ollama"), "ollama-local");
+        assert_eq!(canonical_provider_id("llama.cpp"), "llama-cpp");
+        assert_eq!(canonical_provider_id("llvm"), "vllm");
     }
 }
