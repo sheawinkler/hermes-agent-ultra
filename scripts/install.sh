@@ -237,19 +237,30 @@ prompt_yes_no() {
 
 run_post_install_flow() {
   local bin_path="$1"
+  local -a clean_python_env=(
+    env
+    -u PYTHONHOME
+    -u PYTHONPATH
+    -u PYTHONSTARTUP
+    -u VIRTUAL_ENV
+    -u CONDA_PREFIX
+    -u CONDA_DEFAULT_ENV
+    -u PIP_REQUIRE_VIRTUALENV
+    -u PYTHONUSERBASE
+  )
 
   echo
   echo "Running post-install verification..."
-  "${bin_path}" doctor || true
+  "${clean_python_env[@]}" "${bin_path}" doctor || true
 
   echo
   echo "Current auth/platform status:"
-  "${bin_path}" auth status || true
+  "${clean_python_env[@]}" "${bin_path}" auth status || true
 
   if [[ -t 0 ]]; then
     echo
     if prompt_yes_no "Run interactive setup now?" "yes"; then
-      "${bin_path}" setup || true
+      "${clean_python_env[@]}" "${bin_path}" setup || true
     else
       echo "Skipped setup. Run this anytime:"
       echo "  ${bin_path} setup"
