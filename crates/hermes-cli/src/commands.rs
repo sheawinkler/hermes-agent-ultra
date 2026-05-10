@@ -5598,6 +5598,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
              \n\
              Quick actions:\n\
                /ops model [provider|provider:model]\n\
+               /ops mode [status|list|strict|standard|dev]\n\
                /ops personality [list|name]\n\
                /ops mouse [on|off|toggle]\n\
                /ops yolo\n\
@@ -5645,6 +5646,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                 "Operator control plane commands:\n\
                  - /ops status\n\
                  - /ops model [provider|provider:model]\n\
+                 - /ops mode [status|list|strict|standard|dev]\n\
                  - /ops personality [list|name]\n\
                  - /ops mouse [on|off|toggle]\n\
                  - /ops yolo\n\
@@ -5662,6 +5664,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
             Ok(CommandResult::Handled)
         }
         "model" => handle_model_command(app, &args[1..]).await,
+        "mode" => handle_policy_command(app, &args[1..]),
         "personality" => handle_personality_command(app, &args[1..]),
         "mouse" => handle_mouse_command(app, &args[1..]),
         "yolo" => handle_yolo_command(app),

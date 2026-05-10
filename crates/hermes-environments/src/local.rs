@@ -343,8 +343,26 @@ fn with_login_profile_sources(command: &str) -> String {
         let zsh_command = shell_single_quote(&format!(
             "[ -f \"$HOME/.zshenv\" ] && . \"$HOME/.zshenv\"; [ -f \"$HOME/.zprofile\" ] && . \"$HOME/.zprofile\"; [ -f \"$HOME/.zshrc\" ] && . \"$HOME/.zshrc\"; [ -f \"$HOME/.profile\" ] && . \"$HOME/.profile\"; {command}"
         ));
+        let preferred_shell = std::env::var("SHELL")
+            .ok()
+            .and_then(|raw| {
+                std::path::Path::new(raw.trim())
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .map(|name| name.to_ascii_lowercase())
+            })
+            .filter(|name| matches!(name.as_str(), "bash" | "zsh"));
+        let preferred_branch = match preferred_shell.as_deref() {
+            Some("zsh") => {
+                format!("if command -v zsh >/dev/null 2>&1; then exec zsh -lc {zsh_command}; fi; ")
+            }
+            Some("bash") => format!(
+                "if command -v bash >/dev/null 2>&1; then exec bash -lc {bash_command}; fi; "
+            ),
+            _ => String::new(),
+        };
         format!(
-            "if command -v bash >/dev/null 2>&1; then exec bash -lc {bash_command}; \
+            "{preferred_branch}if command -v bash >/dev/null 2>&1; then exec bash -lc {bash_command}; \
 elif command -v zsh >/dev/null 2>&1; then exec zsh -lc {zsh_command}; \
 else printf '%s\n' \"Hermes could not find bash or zsh in PATH. Run 'exec zsh -l' or set your default shell where env vars are available.\" >&2; exit 127; fi"
         )
@@ -1088,6 +1106,21 @@ mod tests {
         assert!(wrapped.contains("exec zsh -lc"));
         assert!(wrapped.contains(". \"$HOME/.zshrc\""));
         assert!(wrapped.contains("echo hi"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_with_login_profile_sources_prefers_user_shell_when_supported() {
+        let _shell = EnvGuard::set("SHELL", "/bin/zsh");
+        let wrapped = with_login_profile_sources("echo hi");
+        let preferred = "if command -v zsh >/dev/null 2>&1; then exec zsh -lc";
+        let fallback = "if command -v bash >/dev/null 2>&1; then exec bash -lc";
+        let preferred_idx = wrapped.find(preferred).expect("preferred zsh branch");
+        let fallback_idx = wrapped.find(fallback).expect("fallback bash branch");
+        assert!(
+            preferred_idx < fallback_idx,
+            "preferred shell branch should come before fallback"
+        );
     }
 
     #[cfg(not(unix))]
