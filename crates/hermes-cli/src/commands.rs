@@ -124,7 +124,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/rollback", "List rollback checkpoints"),
     (
         "/model",
-        "Show/switch models, or run capability diagnostics (`/model explain`, `why-not`, `--cap`)",
+        "Show/switch models, run capability diagnostics (`/model explain`, `why-not`, `--cap`), or configure failover (`/model failover`)",
     ),
     ("/provider", "List configured providers and availability"),
     (
@@ -201,14 +201,17 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/question", "Alias for /ask"),
     ("/steer", "Inject non-interrupt steering instruction"),
     ("/btw", "Run an ephemeral side-question"),
-    ("/plan", "Queue planning work or inspect planner queue status"),
+    (
+        "/plan",
+        "Queue planning work or inspect planner queue status (`/plan caps ...` optional)",
+    ),
     ("/lsp", "Show code-index/LSP context status and controls"),
     ("/graph", "Show graph-memory and ContextLattice status"),
     ("/image", "Attach/clear an image hint consumed by next prompt"),
     ("/config", "Show or modify configuration"),
     (
         "/autocompact",
-        "Show auto-compaction status (`/autocompact status|now`)",
+        "Show auto-compaction status (`/autocompact status|now|governance`)",
     ),
     ("/autocompress", "Alias for /autocompact"),
     ("/compress", "Trigger context compression"),
@@ -3733,8 +3736,115 @@ async fn pick_model_for_provider(
     Ok(true)
 }
 
+fn parse_failover_chain(raw: &str) -> Result<Vec<String>, AgentError> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for token in raw.split(',') {
+        let trimmed = token.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let normalized = normalize_provider_model(trimmed)?;
+        let key = normalized.to_ascii_lowercase();
+        if seen.insert(key) {
+            out.push(normalized);
+        }
+    }
+    Ok(out)
+}
+
+fn read_failover_chain_from_env() -> Vec<String> {
+    if let Ok(raw) = std::env::var("HERMES_FALLBACK_MODELS") {
+        let parsed: Vec<String> = raw
+            .split(',')
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(ToString::to_string)
+            .collect();
+        if !parsed.is_empty() {
+            return parsed;
+        }
+    }
+    if let Ok(raw) = std::env::var("HERMES_FALLBACK_MODEL") {
+        let value = raw.trim();
+        if !value.is_empty() {
+            return vec![value.to_string()];
+        }
+    }
+    Vec::new()
+}
+
+fn handle_model_failover_command(
+    app: &mut App,
+    args: &[&str],
+) -> Result<CommandResult, AgentError> {
+    let action = args
+        .first()
+        .copied()
+        .unwrap_or("status")
+        .to_ascii_lowercase();
+    match action.as_str() {
+        "status" | "show" => {
+            let chain_items = read_failover_chain_from_env();
+            let fallback = chain_items.first().map(|s| s.as_str()).unwrap_or("(none)");
+            let chain = if chain_items.is_empty() {
+                "(none)".to_string()
+            } else {
+                chain_items.join(", ")
+            };
+            emit_command_output(
+                app,
+                format!(
+                    "Failover fabric\nprimary_fallback: {}\nchain: {}\nusage: `/model failover set provider:model[,provider:model...]` or `/model failover clear`",
+                    fallback, chain
+                ),
+            );
+        }
+        "clear" | "reset" => {
+            std::env::remove_var("HERMES_FALLBACK_MODEL");
+            std::env::remove_var("HERMES_FALLBACK_MODELS");
+            let current = app.current_model.clone();
+            app.switch_model(&current);
+            emit_command_output(app, "Cleared retry failover chain.");
+        }
+        "set" => {
+            let raw = args
+                .get(1)
+                .ok_or_else(|| {
+                    AgentError::Config(
+                        "Usage: /model failover set provider:model[,provider:model...]".to_string(),
+                    )
+                })?
+                .trim();
+            let chain = parse_failover_chain(raw)?;
+            if chain.is_empty() {
+                return Err(AgentError::Config(
+                    "Failover chain cannot be empty.".to_string(),
+                ));
+            }
+            std::env::set_var("HERMES_FALLBACK_MODELS", chain.join(","));
+            if let Some(first) = chain.first() {
+                std::env::set_var("HERMES_FALLBACK_MODEL", first);
+            }
+            let current = app.current_model.clone();
+            app.switch_model(&current);
+            emit_command_output(app, format!("Failover chain set: {}", chain.join(", ")));
+        }
+        _ => {
+            emit_command_output(
+                app,
+                "Usage: /model failover [status|set provider:model[,provider:model...]|clear]",
+            );
+        }
+    }
+    Ok(CommandResult::Handled)
+}
+
 async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     if let Some(sub) = args.first().map(|v| v.trim()) {
+        if sub.eq_ignore_ascii_case("failover") {
+            return handle_model_failover_command(app, &args[1..]);
+        }
         if sub.eq_ignore_ascii_case("explain") {
             return handle_model_explain_command(app, &args[1..], false).await;
         }
@@ -3910,7 +4020,7 @@ fn parse_skills_slash_invocation(args: &[&str]) -> Result<SkillsSlashInvocation,
     };
 
     let parsed = match action.as_str() {
-        "list" | "browse" | "audit" => SkillsSlashInvocation {
+        "list" | "browse" | "audit" | "quality" => SkillsSlashInvocation {
             action: Some(action),
             name: build_joined(rest),
             extra: None,
@@ -3957,7 +4067,7 @@ fn parse_skills_slash_invocation(args: &[&str]) -> Result<SkillsSlashInvocation,
         },
         _ => {
             return Err(format!(
-                "Unknown /skills subcommand '{}'. Use `/skills list` or `/skills search <query>`.",
+                "Unknown /skills subcommand '{}'. Use `/skills list`, `/skills quality`, or `/skills search <query>`.",
                 action
             ))
         }
@@ -4080,6 +4190,7 @@ async fn handle_skills_command(app: &mut App, args: &[&str]) -> Result<CommandRe
             out.push_str(&format!("- `{}` — {}\n", name, title));
         }
         out.push_str("\nUse `hermes skills inspect <name>` for details.");
+        out.push_str("\nUse `/skills quality` for score + fallback recommendations.");
         emit_command_output(app, out.trim_end());
     }
     Ok(CommandResult::Handled)
@@ -4295,6 +4406,40 @@ fn handle_compress_command(app: &mut App) -> Result<CommandResult, AgentError> {
     Ok(CommandResult::Handled)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompactionGovernanceMode {
+    Off,
+    Advisory,
+    Enforce,
+}
+
+impl CompactionGovernanceMode {
+    fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "off" | "disable" | "disabled" | "0" => Some(Self::Off),
+            "on" | "advisory" | "warn" | "1" => Some(Self::Advisory),
+            "enforce" | "strict" => Some(Self::Enforce),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Advisory => "advisory",
+            Self::Enforce => "enforce",
+        }
+    }
+}
+
+fn compaction_governance_mode() -> CompactionGovernanceMode {
+    std::env::var("HERMES_CONTEXTLATTICE_COMPACTION_GOVERNANCE")
+        .ok()
+        .as_deref()
+        .and_then(CompactionGovernanceMode::parse)
+        .unwrap_or(CompactionGovernanceMode::Advisory)
+}
+
 fn handle_autocompact_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     let action = args
         .first()
@@ -4302,22 +4447,56 @@ fn handle_autocompact_command(app: &mut App, args: &[&str]) -> Result<CommandRes
         .unwrap_or_else(|| "status".to_string());
     match action.as_str() {
         "status" | "show" => {
+            let mode = compaction_governance_mode();
             emit_command_output(
                 app,
-                "Auto-compaction: enabled.\n\
+                format!(
+                    "Auto-compaction: enabled.\n\
                  Trigger policy: when context exceeds 80% of budget.\n\
                  Runs: once before first LLM call and after each turn.\n\
+                 ContextLattice governance: {}.\n\
                  Manual override: `/autocompact now` or `/compress`.",
+                    mode.as_str()
+                ),
             );
             Ok(CommandResult::Handled)
         }
         "now" | "run" => handle_compress_command(app),
+        "governance" | "govern" => {
+            let Some(next) = args.get(1).copied() else {
+                emit_command_output(
+                    app,
+                    format!(
+                        "Compaction governance: {}.\nUsage: `/autocompact governance [off|advisory|enforce]`",
+                        compaction_governance_mode().as_str()
+                    ),
+                );
+                return Ok(CommandResult::Handled);
+            };
+            let Some(mode) = CompactionGovernanceMode::parse(next) else {
+                emit_command_output(
+                    app,
+                    format!(
+                        "Unknown governance mode '{}'. Use `off`, `advisory`, or `enforce`.",
+                        next
+                    ),
+                );
+                return Ok(CommandResult::Handled);
+            };
+            std::env::set_var("HERMES_CONTEXTLATTICE_COMPACTION_GOVERNANCE", mode.as_str());
+            emit_command_output(
+                app,
+                format!("Compaction governance mode set to `{}`.", mode.as_str()),
+            );
+            Ok(CommandResult::Handled)
+        }
         "help" => {
             emit_command_output(
                 app,
-                "Usage: `/autocompact [status|now]`\n\
+                "Usage: `/autocompact [status|now|governance]`\n\
                  - `status`: show current auto-compaction behavior\n\
-                 - `now`: run immediate compaction pass",
+                 - `now`: run immediate compaction pass\n\
+                 - `governance [off|advisory|enforce]`: ContextLattice checkpoint posture for compaction events",
             );
             Ok(CommandResult::Handled)
         }
@@ -4325,7 +4504,7 @@ fn handle_autocompact_command(app: &mut App, args: &[&str]) -> Result<CommandRes
             emit_command_output(
                 app,
                 format!(
-                    "Unknown /autocompact action '{}'. Use `status`, `now`, or `help`.",
+                    "Unknown /autocompact action '{}'. Use `status`, `now`, `governance`, or `help`.",
                     other
                 ),
             );
@@ -5518,6 +5697,53 @@ async fn handle_ops_autopilot_command(
     }
 }
 
+async fn handle_ops_cockpit_command(
+    app: &mut App,
+    _args: &[&str],
+) -> Result<CommandResult, AgentError> {
+    let counters = app.tool_registry.policy_counters();
+    let board = render_mission_board(
+        &app.current_model,
+        app.session_objective.as_deref(),
+        background_job_counts(),
+    )
+    .await?;
+    let mut out = String::new();
+    out.push_str("Ops Cockpit\n");
+    out.push_str("===========\n");
+    let _ = writeln!(out, "session: {}", app.session_id);
+    let _ = writeln!(out, "model: {}", app.current_model);
+    let _ = writeln!(
+        out,
+        "policy: profile={} mode={} preset={} sandbox={} skills_tier={}",
+        current_policy_profile_name(),
+        std::env::var("HERMES_TOOL_POLICY_MODE").unwrap_or_else(|_| "enforce".into()),
+        std::env::var("HERMES_TOOL_POLICY_PRESET").unwrap_or_else(|_| "balanced".into()),
+        std::env::var("HERMES_EXECUTION_SANDBOX_PROFILE").unwrap_or_else(|_| "balanced".into()),
+        std::env::var("HERMES_SKILLS_EXECUTION_TIER").unwrap_or_else(|_| "balanced".into())
+    );
+    let _ = writeln!(
+        out,
+        "planner_capability_router={} compaction_governance={} replay_trace={}",
+        plan_capability_mode().as_str(),
+        compaction_governance_mode().as_str(),
+        if replay_enabled_runtime() {
+            "on"
+        } else {
+            "off"
+        }
+    );
+    let _ = writeln!(
+        out,
+        "policy_counters: allow={} deny={} audit_only={} simulate={} would_block={}",
+        counters.allow, counters.deny, counters.audit_only, counters.simulate, counters.would_block
+    );
+    out.push('\n');
+    out.push_str(&board);
+    emit_command_output(app, out.trim_end());
+    Ok(CommandResult::Handled)
+}
+
 fn shell_escape(input: &str) -> String {
     let escaped = input.replace('\'', "'\"'\"'");
     format!("'{}'", escaped)
@@ -5610,6 +5836,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                /ops evolve [status|run|recommend]\n\
                /ops autopilot [status|run|recommend|apply|profile|mode|clear]\n\
                /ops gate [status|eval|elite|slo]\n\
+               /ops cockpit\n\
                /mission [status|init]\n\
                /ops help",
             app.session_id,
@@ -5659,6 +5886,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
                  - /ops evolve [status|run|recommend]\n\
                  - /ops autopilot [status|run|recommend|apply|profile|mode|clear]\n\
                  - /ops gate [status|eval|elite|slo]\n\
+                 - /ops cockpit\n\
                  - /mission [status|init]",
             );
             Ok(CommandResult::Handled)
@@ -5677,6 +5905,7 @@ async fn handle_ops_command(app: &mut App, args: &[&str]) -> Result<CommandResul
         "evolve" => handle_ops_evolve_command(app, &args[1..]).await,
         "autopilot" => handle_ops_autopilot_command(app, &args[1..]).await,
         "gate" => handle_ops_gate_command(app, &args[1..]).await,
+        "cockpit" => handle_ops_cockpit_command(app, &args[1..]).await,
         other => {
             emit_command_output(
                 app,
@@ -7087,6 +7316,115 @@ fn render_replay_trace_tail(path: &Path, limit: usize) -> Result<String, AgentEr
     Ok(out.trim_end().to_string())
 }
 
+fn replay_entries(path: &Path, limit: usize) -> Result<Vec<serde_json::Value>, AgentError> {
+    let raw = std::fs::read_to_string(path).map_err(|e| {
+        AgentError::Io(format!(
+            "Failed to read replay log {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+    Ok(raw
+        .lines()
+        .rev()
+        .take(limit.max(1))
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect())
+}
+
+fn render_replay_trace_focus(
+    path: &Path,
+    trace_id: &str,
+    limit: usize,
+) -> Result<String, AgentError> {
+    let trace_filter = trace_id.trim();
+    if trace_filter.is_empty() {
+        return Ok("Usage: /raw trace focus <trace-id> [N]".to_string());
+    }
+    let rows = replay_entries(path, limit)?;
+    let filtered: Vec<serde_json::Value> = rows
+        .into_iter()
+        .filter(|row| {
+            row.get("trace_id")
+                .and_then(|v| v.as_str())
+                .is_some_and(|v| v == trace_filter || v.contains(trace_filter))
+        })
+        .collect();
+    if filtered.is_empty() {
+        return Ok(format!(
+            "No replay events found for trace '{}' in {}.",
+            trace_filter,
+            path.display()
+        ));
+    }
+    let mut out = String::new();
+    let _ = writeln!(out, "Replay trace focus: {}", trace_filter);
+    let _ = writeln!(out, "events: {}", filtered.len());
+    let _ = writeln!(out, "path: {}", path.display());
+    let _ = writeln!(out);
+    for row in filtered {
+        let seq = row.get("seq").and_then(|v| v.as_u64()).unwrap_or(0);
+        let event = row
+            .get("event")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        let turn = row
+            .get("payload")
+            .and_then(|payload| payload.get("turn"))
+            .and_then(|turn| turn.as_u64())
+            .unwrap_or(0);
+        let preview = row
+            .get("payload")
+            .map(|v| truncate_chars(&v.to_string(), 120))
+            .unwrap_or_else(|| "{}".to_string());
+        let _ = writeln!(out, "#{seq:<4} turn={turn:<3} event={event:<24} {preview}");
+    }
+    Ok(out.trim_end().to_string())
+}
+
+fn render_replay_trace_graph(path: &Path, limit: usize) -> Result<String, AgentError> {
+    let rows = replay_entries(path, limit)?;
+    if rows.is_empty() {
+        return Ok("Replay graph: no entries in current window.".to_string());
+    }
+    let mut out = String::new();
+    let _ = writeln!(out, "Replay lineage graph");
+    let _ = writeln!(out, "--------------------");
+    let _ = writeln!(out, "window={} path={}", rows.len(), path.display());
+    for row in rows {
+        let seq = row
+            .get("seq")
+            .and_then(|value| value.as_u64())
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "?".to_string());
+        let event = row
+            .get("event")
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown");
+        let trace_id = row
+            .get("trace_id")
+            .and_then(|value| value.as_str())
+            .unwrap_or("missing");
+        let prev = row
+            .get("prev_hash")
+            .and_then(|value| value.as_str())
+            .unwrap_or("-");
+        let hash = row
+            .get("event_hash")
+            .and_then(|value| value.as_str())
+            .unwrap_or("-");
+        let _ = writeln!(
+            out,
+            "#{:<4} {:<20} trace={} {} -> {}",
+            seq, event, trace_id, prev, hash
+        );
+    }
+    Ok(out.trim_end().to_string())
+}
+
 fn replay_trace_integrity(path: &Path) -> Result<(usize, usize, usize), AgentError> {
     let raw = std::fs::read_to_string(path).map_err(|e| {
         AgentError::Io(format!(
@@ -7190,7 +7528,7 @@ fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Age
                 emit_command_output(
                     app,
                     format!(
-                        "Replay trace: {}{}\nSession: {}\nPath: {}\nUsage: /raw trace [on|off|toggle|status|tail [N]|verify|export [N] [PATH]|path]",
+                        "Replay trace: {}{}\nSession: {}\nPath: {}\nUsage: /raw trace [on|off|toggle|status|tail [N]|focus <trace-id> [N]|graph [N]|verify|export [N] [PATH]|path]",
                         if replay_enabled_runtime() { "ON" } else { "OFF" },
                         if replay_path.exists() { "" } else { " (no log yet)" },
                         app.session_id,
@@ -7218,6 +7556,48 @@ fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Age
                     return Ok(CommandResult::Handled);
                 }
                 let rendered = render_replay_trace_tail(&replay_path, limit)?;
+                emit_command_output(app, rendered);
+            }
+            Some("focus") => {
+                let Some(trace_id) = args.get(2).copied() else {
+                    emit_command_output(app, "Usage: /raw trace focus <trace-id> [N]");
+                    return Ok(CommandResult::Handled);
+                };
+                let limit = args
+                    .get(3)
+                    .and_then(|raw| raw.trim().parse::<usize>().ok())
+                    .unwrap_or(150)
+                    .clamp(1, 1000);
+                if !replay_path.exists() {
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Replay log not found for current session yet: {}",
+                            replay_path.display()
+                        ),
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+                let rendered = render_replay_trace_focus(&replay_path, trace_id, limit)?;
+                emit_command_output(app, rendered);
+            }
+            Some("graph") => {
+                let limit = args
+                    .get(2)
+                    .and_then(|raw| raw.trim().parse::<usize>().ok())
+                    .unwrap_or(80)
+                    .clamp(1, 500);
+                if !replay_path.exists() {
+                    emit_command_output(
+                        app,
+                        format!(
+                            "Replay log not found for current session yet: {}",
+                            replay_path.display()
+                        ),
+                    );
+                    return Ok(CommandResult::Handled);
+                }
+                let rendered = render_replay_trace_graph(&replay_path, limit)?;
                 emit_command_output(app, rendered);
             }
             Some("verify") => {
@@ -7297,11 +7677,11 @@ fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Age
             }
             Some("help") | Some("--help") | Some("-h") => emit_command_output(
                 app,
-                "Replay trace controls:\n  /raw trace status              Show enabled state + current log path\n  /raw trace on|off              Enable or disable deterministic replay trace logs\n  /raw trace toggle              Toggle replay trace logs\n  /raw trace tail [N]            Show latest trace events with lineage hashes\n  /raw trace verify              Validate replay hash-chain integrity\n  /raw trace export [N] [PATH]   Export tail events to JSON\n  /raw trace path                Show trace log file for current session",
+                "Replay trace controls:\n  /raw trace status              Show enabled state + current log path\n  /raw trace on|off              Enable or disable deterministic replay trace logs\n  /raw trace toggle              Toggle replay trace logs\n  /raw trace tail [N]            Show latest trace events with lineage hashes\n  /raw trace focus <id> [N]      Filter replay rows by trace_id\n  /raw trace graph [N]           Show lineage edges for recent rows\n  /raw trace verify              Validate replay hash-chain integrity\n  /raw trace export [N] [PATH]   Export tail events to JSON\n  /raw trace path                Show trace log file for current session",
             ),
             _ => emit_command_output(
                 app,
-                "Usage: /raw trace [on|off|toggle|status|tail [N]|verify|export [N] [PATH]|path]",
+                "Usage: /raw trace [on|off|toggle|status|tail [N]|focus <trace-id> [N]|graph [N]|verify|export [N] [PATH]|path]",
             ),
         }
         return Ok(CommandResult::Handled);
@@ -7368,6 +7748,7 @@ struct PolicyProfile {
     preset: &'static str,
     mode: &'static str,
     sandbox: &'static str,
+    skills_tier: &'static str,
     description: &'static str,
 }
 
@@ -7377,6 +7758,7 @@ const POLICY_PROFILES: &[PolicyProfile] = &[
         preset: "strict",
         mode: "enforce",
         sandbox: "strict",
+        skills_tier: "trusted",
         description: "maximum guardrails; strongest deny + sandbox posture",
     },
     PolicyProfile {
@@ -7384,6 +7766,7 @@ const POLICY_PROFILES: &[PolicyProfile] = &[
         preset: "balanced",
         mode: "enforce",
         sandbox: "balanced",
+        skills_tier: "balanced",
         description: "default production posture with balanced safety and throughput",
     },
     PolicyProfile {
@@ -7391,6 +7774,7 @@ const POLICY_PROFILES: &[PolicyProfile] = &[
         preset: "dev",
         mode: "audit",
         sandbox: "dev",
+        skills_tier: "open",
         description: "development posture with audit/simulate-friendly behavior",
     },
 ];
@@ -7421,6 +7805,7 @@ fn apply_policy_profile(app: &mut App, profile: PolicyProfile) {
     std::env::set_var("HERMES_TOOL_POLICY_PRESET", profile.preset);
     std::env::set_var("HERMES_TOOL_POLICY_MODE", profile.mode);
     std::env::set_var("HERMES_EXECUTION_SANDBOX_PROFILE", profile.sandbox);
+    std::env::set_var("HERMES_SKILLS_EXECUTION_TIER", profile.skills_tier);
     app.tool_registry.set_policy(ToolPolicyEngine::from_env());
 }
 
@@ -7430,11 +7815,13 @@ fn handle_policy_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
         emit_command_output(
             app,
             format!(
-                "Policy profile: {}\nPreset: {}\nMode: {}\nSandbox: {}\nCounters: allow={} deny={} audit_only={} simulate={} would_block={}\n\nUse `/policy list` or `/policy strict|standard|dev`.",
+                "Policy profile: {}\nPreset: {}\nMode: {}\nSandbox: {}\nSkills tier: {}\nCounters: allow={} deny={} audit_only={} simulate={} would_block={}\n\nUse `/policy list` or `/policy strict|standard|dev`.",
                 current_policy_profile_name(),
                 std::env::var("HERMES_TOOL_POLICY_PRESET").unwrap_or_else(|_| "balanced".into()),
                 std::env::var("HERMES_TOOL_POLICY_MODE").unwrap_or_else(|_| "enforce".into()),
                 std::env::var("HERMES_EXECUTION_SANDBOX_PROFILE")
+                    .unwrap_or_else(|_| "balanced".into()),
+                std::env::var("HERMES_SKILLS_EXECUTION_TIER")
                     .unwrap_or_else(|_| "balanced".into()),
                 counters.allow,
                 counters.deny,
@@ -7456,12 +7843,13 @@ fn handle_policy_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
             };
             let _ = writeln!(
                 out,
-                "{} {:<9} preset={} mode={} sandbox={} — {}",
+                "{} {:<9} preset={} mode={} sandbox={} skills_tier={} — {}",
                 marker,
                 profile.name,
                 profile.preset,
                 profile.mode,
                 profile.sandbox,
+                profile.skills_tier,
                 profile.description
             );
         }
@@ -7475,8 +7863,8 @@ fn handle_policy_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
         emit_command_output(
             app,
             format!(
-                "Policy profile switched to `{}`.\nPreset={} Mode={} Sandbox={}",
-                profile.name, profile.preset, profile.mode, profile.sandbox
+                "Policy profile switched to `{}`.\nPreset={} Mode={} Sandbox={} SkillsTier={}",
+                profile.name, profile.preset, profile.mode, profile.sandbox, profile.skills_tier
             ),
         );
         return Ok(CommandResult::Handled);
@@ -8678,6 +9066,149 @@ fn handle_kanban_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
     Ok(CommandResult::Handled)
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlanCapabilityMode {
+    Off,
+    Advisory,
+    Enforce,
+}
+
+impl PlanCapabilityMode {
+    fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "off" | "disable" | "disabled" | "0" => Some(Self::Off),
+            "advisory" | "warn" | "on" | "1" => Some(Self::Advisory),
+            "enforce" | "strict" => Some(Self::Enforce),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Advisory => "advisory",
+            Self::Enforce => "enforce",
+        }
+    }
+}
+
+fn plan_capability_mode() -> PlanCapabilityMode {
+    std::env::var("HERMES_PLAN_CAPABILITY_ROUTER")
+        .ok()
+        .as_deref()
+        .and_then(PlanCapabilityMode::parse)
+        .unwrap_or(PlanCapabilityMode::Off)
+}
+
+fn infer_plan_requirements(task: &str) -> ModelCapabilityRequirements {
+    let lower = task.to_ascii_lowercase();
+    let mut req = ModelCapabilityRequirements::default();
+
+    if [
+        "repo",
+        "code",
+        "patch",
+        "implement",
+        "fix",
+        "test",
+        "lint",
+        "build",
+        "deploy",
+        "file",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+    {
+        req.require_tools = true;
+    }
+    if [
+        "audit",
+        "parity",
+        "objective",
+        "investigate",
+        "diagnose",
+        "analysis",
+        "architecture",
+        "production",
+        "security",
+        "trading",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+    {
+        req.require_reasoning = true;
+    }
+    if [
+        "full repo",
+        "entire repo",
+        "all files",
+        "large codebase",
+        "multi-repo",
+        "end to end",
+        "end-to-end",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
+    {
+        req.require_long_context = true;
+    }
+    if ["image", "screenshot", "diagram", "figma"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+    {
+        req.require_vision = true;
+    }
+
+    req
+}
+
+fn plan_capability_preflight(app: &App, task: &str) -> (Option<String>, bool) {
+    let mode = plan_capability_mode();
+    if matches!(mode, PlanCapabilityMode::Off) {
+        return (None, true);
+    }
+
+    let req = infer_plan_requirements(task);
+    if req.is_empty() {
+        return (None, true);
+    }
+
+    let (provider, model_id) = split_provider_model(&app.current_model);
+    let client = default_client();
+    let caps = resolve_model_capabilities(provider, model_id, client);
+    let unmet = unmet_model_requirements(caps, req);
+    if unmet.is_empty() {
+        return (
+            Some(format!(
+                "planner capability preflight: PASS ({}) for `{}`",
+                req.summary(),
+                app.current_model
+            )),
+            true,
+        );
+    }
+
+    let explain_hint = format!(
+        "/model explain {} --cap tools,reasoning --min-context 128000",
+        app.current_model
+    );
+    let message = format!(
+        "planner capability preflight: {} ({}) for `{}`.\nmissing: {}\nhint: run `{}` or switch with `/model` before queuing this task.",
+        if matches!(mode, PlanCapabilityMode::Enforce) {
+            "BLOCKED"
+        } else {
+            "WARN"
+        },
+        req.summary(),
+        app.current_model,
+        unmet.join(", "),
+        explain_hint
+    );
+
+    let allowed = !matches!(mode, PlanCapabilityMode::Enforce);
+    (Some(message), allowed)
+}
+
 fn handle_plan_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     if args.is_empty()
         || args
@@ -8686,12 +9217,41 @@ fn handle_plan_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Ag
     {
         emit_command_output(
             app,
-            "Planner controls:\n  /plan <task>          Queue a planning/research task in background\n  /plan status          Show queue health + active steering\n  /plan list            Show queue health + active steering\n  /plan clear           Clear queued/running status records",
+            "Planner controls:\n  /plan <task>          Queue a planning/research task in background\n  /plan status          Show queue health + active steering\n  /plan list            Show queue health + active steering\n  /plan clear           Clear queued/running status records\n  /plan caps [mode]     Optional capability router (`off|advisory|enforce`)",
         );
         return Ok(CommandResult::Handled);
     }
 
     let sub = args[0].to_ascii_lowercase();
+    if sub == "caps" || sub == "capability" || sub == "capabilities" {
+        let next = args
+            .get(1)
+            .copied()
+            .unwrap_or("status")
+            .to_ascii_lowercase();
+        match next.as_str() {
+            "status" | "show" => {
+                emit_command_output(
+                    app,
+                    format!(
+                        "planner capability router mode={}\nUse `/plan caps [off|advisory|enforce]`.",
+                        plan_capability_mode().as_str()
+                    ),
+                );
+            }
+            "off" | "advisory" | "enforce" => {
+                if let Some(mode) = PlanCapabilityMode::parse(&next) {
+                    std::env::set_var("HERMES_PLAN_CAPABILITY_ROUTER", mode.as_str());
+                    emit_command_output(
+                        app,
+                        format!("planner capability router set to `{}`.", mode.as_str()),
+                    );
+                }
+            }
+            _ => emit_command_output(app, "Usage: /plan caps [status|off|advisory|enforce]"),
+        }
+        return Ok(CommandResult::Handled);
+    }
     if sub == "status" || sub == "list" {
         let (queued, running, completed, failed) = background_job_counts();
         let mut out = String::new();
@@ -8711,11 +9271,26 @@ fn handle_plan_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Ag
         } else {
             let _ = writeln!(out, "  objective=(none)");
         }
+        let _ = writeln!(
+            out,
+            "  capability_router={}",
+            plan_capability_mode().as_str()
+        );
         emit_command_output(app, out.trim_end());
         return Ok(CommandResult::Handled);
     }
     if sub == "clear" {
         return handle_clear_queue_command(app);
+    }
+    let task = args.join(" ");
+    if !task.trim().is_empty() {
+        let (note, allowed) = plan_capability_preflight(app, &task);
+        if let Some(msg) = note {
+            emit_command_output(app, msg);
+        }
+        if !allowed {
+            return Ok(CommandResult::Handled);
+        }
     }
     handle_background_command(app, args)
 }
@@ -12603,6 +13178,141 @@ pub async fn handle_cli_skills(
                 }
             }
         }
+        "quality" => {
+            println!("Skill quality scorecard");
+            println!("======================\n");
+            if !skills_dir.exists() {
+                println!("No skills installed.");
+                return Ok(());
+            }
+
+            #[derive(Debug)]
+            struct SkillQualityRow {
+                name: String,
+                score: i32,
+                tier: &'static str,
+                notes: Vec<String>,
+            }
+
+            let mut rows: Vec<SkillQualityRow> = Vec::new();
+            let weak_regex = Regex::new(r"(?i)\b(todo|fixme|placeholder|stub)\b")
+                .map_err(|e| AgentError::Config(format!("quality regex error: {}", e)))?;
+            let risky_regex = Regex::new(r"(?i)\b(rm\s+-rf|mkfs|dd\s+if=|eval\s*\(|exec\s*\()")
+                .map_err(|e| AgentError::Config(format!("quality regex error: {}", e)))?;
+
+            if let Ok(entries) = std::fs::read_dir(&skills_dir) {
+                for entry in entries.filter_map(|e| e.ok()) {
+                    let path = entry.path();
+                    let skill_md = path.join("SKILL.md");
+                    if !path.is_dir() || !skill_md.exists() {
+                        continue;
+                    }
+                    let name = path
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .to_string();
+
+                    let mut score = 100i32;
+                    let mut notes = Vec::new();
+                    let content = std::fs::read_to_string(&skill_md).unwrap_or_default();
+                    let (frontmatter, _) =
+                        hermes_tools::tools::skill_utils::parse_frontmatter(&content);
+                    for required in ["name", "version", "description", "category"] {
+                        if frontmatter.get(required).and_then(|v| v.as_str()).is_none() {
+                            score -= 8;
+                            notes.push(format!("missing_frontmatter:{}", required));
+                        }
+                    }
+
+                    let line_count = content.lines().count();
+                    if line_count < 20 {
+                        score -= 10;
+                        notes.push("short_skill_doc".to_string());
+                    } else if line_count > 80 {
+                        score += 4;
+                    }
+
+                    let scripts_dir = path.join("scripts");
+                    if scripts_dir.exists() {
+                        score += 6;
+                    } else {
+                        score -= 4;
+                        notes.push("no_scripts".to_string());
+                    }
+                    if path.join("examples").exists() {
+                        score += 4;
+                    } else {
+                        notes.push("no_examples".to_string());
+                    }
+                    if path.join("templates").exists() {
+                        score += 3;
+                    }
+                    if path.join("tests").exists() {
+                        score += 4;
+                    }
+
+                    if weak_regex.is_match(&content) {
+                        score -= 8;
+                        notes.push("contains_placeholder_markers".to_string());
+                    }
+                    if risky_regex.is_match(&content) {
+                        score -= 20;
+                        notes.push("contains_risky_exec_pattern".to_string());
+                    }
+
+                    score = score.clamp(0, 100);
+                    let tier = if score >= 85 {
+                        "excellent"
+                    } else if score >= 70 {
+                        "good"
+                    } else if score >= 55 {
+                        "watch"
+                    } else {
+                        "fallback"
+                    };
+                    rows.push(SkillQualityRow {
+                        name,
+                        score,
+                        tier,
+                        notes,
+                    });
+                }
+            }
+
+            if rows.is_empty() {
+                println!("No skills installed.");
+                return Ok(());
+            }
+            rows.sort_by(|a, b| b.score.cmp(&a.score).then_with(|| a.name.cmp(&b.name)));
+            println!("{:28} {:>5} {:>10}  notes", "skill", "score", "tier");
+            println!("{}", "-".repeat(84));
+            for row in &rows {
+                let notes = if row.notes.is_empty() {
+                    "-".to_string()
+                } else {
+                    row.notes.join(",")
+                };
+                println!(
+                    "{:28} {:>5} {:>10}  {}",
+                    row.name, row.score, row.tier, notes
+                );
+            }
+
+            let fallback: Vec<&SkillQualityRow> =
+                rows.iter().filter(|row| row.score < 55).collect();
+            if !fallback.is_empty() {
+                println!("\nFallback recommendations:");
+                for row in fallback {
+                    println!(
+                        "- {}: run `hermes skills update --apply` or reinstall from a trusted registry source.",
+                        row.name
+                    );
+                }
+            } else {
+                println!("\nFallback recommendations: none (all tracked skills >= watch tier).");
+            }
+        }
         "audit" => {
             println!("Security audit of installed skills");
             println!("==================================\n");
@@ -12837,7 +13547,7 @@ pub async fn handle_cli_skills(
         }
         other => {
             println!("Skills action '{}' is not recognized.", other);
-            println!("Available actions: list, browse, search, install, inspect, uninstall, check, update, publish, snapshot, tap, config, audit");
+            println!("Available actions: list, browse, search, install, inspect, uninstall, check, update, publish, snapshot, tap, config, quality, audit");
         }
     }
     Ok(())

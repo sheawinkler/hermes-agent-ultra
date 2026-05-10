@@ -9,6 +9,7 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Write;
 use std::path::PathBuf;
+use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -149,6 +150,9 @@ pub struct RetryConfig {
     /// Optional fallback model identifier (tried after all retries on the primary model fail).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback_model: Option<String>,
+    /// Optional ordered failover chain. Entries are attempted in order after retries.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fallback_models: Vec<String>,
 }
 
 fn default_max_retries() -> u32 {
@@ -168,6 +172,7 @@ impl Default for RetryConfig {
             base_delay_ms: default_base_delay_ms(),
             max_delay_ms: default_max_delay_ms(),
             fallback_model: None,
+            fallback_models: Vec::new(),
         }
     }
 }
@@ -264,6 +269,61 @@ const CONTEXTLATTICE_OPERATIONAL_GUIDANCE: &str = "# ContextLattice operational 
 const OPENAI_MODEL_EXECUTION_GUIDANCE: &str = "# Execution discipline (OpenAI)\nUse tools whenever they improve correctness, completeness, or grounding. Do not stop early when another tool call would materially improve the result. Verify outcomes before declaring completion.";
 
 const GOOGLE_MODEL_OPERATIONAL_GUIDANCE: &str = "# Operational guidance (Google)\nBe concise and execution-first. Prefer absolute paths, parallel tool calls when safe, and verify each substantive change.";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CompactionGovernanceMode {
+    Off,
+    Advisory,
+    Enforce,
+}
+
+impl CompactionGovernanceMode {
+    fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "off" | "disable" | "disabled" | "0" => Some(Self::Off),
+            "on" | "advisory" | "warn" | "1" => Some(Self::Advisory),
+            "enforce" | "strict" => Some(Self::Enforce),
+            _ => None,
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Off => "off",
+            Self::Advisory => "advisory",
+            Self::Enforce => "enforce",
+        }
+    }
+}
+
+fn compaction_governance_mode_runtime() -> CompactionGovernanceMode {
+    std::env::var("HERMES_CONTEXTLATTICE_COMPACTION_GOVERNANCE")
+        .ok()
+        .as_deref()
+        .and_then(CompactionGovernanceMode::parse)
+        .unwrap_or(CompactionGovernanceMode::Advisory)
+}
+
+fn contextlattice_orchestration_script_path() -> Option<PathBuf> {
+    if let Ok(path) = std::env::var("HERMES_CONTEXTLATTICE_ORCH_SCRIPT") {
+        let candidate = PathBuf::from(path);
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    let default =
+        PathBuf::from("/Users/sheawinkler/Documents/Projects/scripts/agent_orchestration.py");
+    if default.exists() {
+        return Some(default);
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let candidate = cwd.join("scripts").join("agent_orchestration.py");
+        if candidate.exists() {
+            return Some(candidate);
+        }
+    }
+    None
+}
 
 fn should_inject_tool_enforcement_for_model(_model: &str) -> bool {
     let disabled = std::env::var("HERMES_DISABLE_TOOL_ENFORCEMENT_PROMPT")
@@ -3233,6 +3293,112 @@ impl AgentLoop {
             ctx.add_message(Message::system(note));
         }
         ctx.compress();
+        let after_chars = ctx.total_chars();
+        self.emit_compaction_contextlattice_checkpoint(total_chars, after_chars, max_c);
+    }
+
+    fn emit_compaction_contextlattice_checkpoint(
+        &self,
+        before_chars: usize,
+        after_chars: usize,
+        max_context_chars: usize,
+    ) {
+        let mode = compaction_governance_mode_runtime();
+        if matches!(mode, CompactionGovernanceMode::Off) {
+            return;
+        }
+
+        let Some(script_path) = contextlattice_orchestration_script_path() else {
+            if matches!(mode, CompactionGovernanceMode::Enforce) {
+                self.emit_status(
+                    "lifecycle",
+                    "Compaction governance enforce-mode: ContextLattice script missing; checkpoint skipped.",
+                );
+            }
+            return;
+        };
+
+        let session = self
+            .config
+            .session_id
+            .as_deref()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or("session");
+        let topic = format!("runbooks/alpha/compaction/{}", session);
+        let pressure_before = ((before_chars as f64 / max_context_chars as f64) * 100.0).round();
+        let pressure_after = ((after_chars as f64 / max_context_chars as f64) * 100.0).round();
+        let content = format!(
+            "compaction_event mode={} session={} before_chars={} after_chars={} max_chars={} pressure_before_pct={} pressure_after_pct={}",
+            mode.as_str(),
+            session,
+            before_chars,
+            after_chars,
+            max_context_chars,
+            pressure_before,
+            pressure_after
+        );
+
+        let output = Command::new("python3")
+            .arg(script_path)
+            .arg("write")
+            .arg("hermes-agent-ultra")
+            .arg(topic)
+            .arg(content)
+            .env(
+                "MEMMCP_ORCHESTRATOR_URL",
+                std::env::var("MEMMCP_ORCHESTRATOR_URL")
+                    .unwrap_or_else(|_| "http://127.0.0.1:8075".to_string()),
+            )
+            .env(
+                "CONTEXTLATTICE_ORCHESTRATOR_URL",
+                std::env::var("CONTEXTLATTICE_ORCHESTRATOR_URL")
+                    .unwrap_or_else(|_| "http://127.0.0.1:8075".to_string()),
+            )
+            .env(
+                "CONTEXTLATTICE_AGENT_ID",
+                std::env::var("CONTEXTLATTICE_AGENT_ID")
+                    .unwrap_or_else(|_| "codex_gpt5".to_string()),
+            )
+            .env(
+                "MEMMCP_AGENT_ID",
+                std::env::var("MEMMCP_AGENT_ID").unwrap_or_else(|_| "codex_gpt5".to_string()),
+            )
+            .output();
+
+        match output {
+            Ok(out) if out.status.success() => {
+                self.emit_status(
+                    "lifecycle",
+                    &format!(
+                        "ContextLattice compaction checkpoint written ({}% -> {}%).",
+                        pressure_before, pressure_after
+                    ),
+                );
+            }
+            Ok(out) => {
+                if matches!(mode, CompactionGovernanceMode::Enforce) {
+                    self.emit_status(
+                        "lifecycle",
+                        &format!(
+                            "Compaction governance enforce-mode: checkpoint failed (exit={}) {}",
+                            out.status.code().unwrap_or(-1),
+                            String::from_utf8_lossy(&out.stderr)
+                        ),
+                    );
+                }
+            }
+            Err(err) => {
+                if matches!(mode, CompactionGovernanceMode::Enforce) {
+                    self.emit_status(
+                        "lifecycle",
+                        &format!(
+                            "Compaction governance enforce-mode: checkpoint error: {}",
+                            err
+                        ),
+                    );
+                }
+            }
+        }
     }
 
     /// Emit explicit preflight compression status before first LLM call.
@@ -3716,8 +3882,10 @@ impl AgentLoop {
                         }
                         ErrorClass::RateLimit | ErrorClass::Retryable => {
                             if attempt >= effective_max_retries {
-                                if let Some(ref fallback) = retry.fallback_model {
-                                    if model != fallback.as_str() {
+                                let failover_chain = self.resolve_retry_failover_chain(model);
+                                if !failover_chain.is_empty() {
+                                    let mut failover_errors = Vec::new();
+                                    for fallback in failover_chain {
                                         tracing::info!(
                                             "All retries exhausted on {}. Trying fallback: {}",
                                             model,
@@ -3730,13 +3898,32 @@ impl AgentLoop {
                                                 tool_schemas,
                                                 effective_max_tokens,
                                                 self.config.temperature,
-                                                Some(self.extract_provider_and_model(fallback).1),
+                                                Some(self.extract_provider_and_model(&fallback).1),
                                                 default_extra_body.as_ref(),
                                             )
                                             .await;
-                                        return fallback_result
-                                            .map_err(|e| AgentError::LlmApi(e.to_string()));
+                                        match fallback_result {
+                                            Ok(resp) => {
+                                                self.emit_status(
+                                                    "lifecycle",
+                                                    &format!(
+                                                        "Failover recovered request via {}",
+                                                        fallback
+                                                    ),
+                                                );
+                                                return Ok(resp);
+                                            }
+                                            Err(err) => {
+                                                failover_errors
+                                                    .push(format!("{} => {}", fallback, err));
+                                            }
+                                        }
                                     }
+                                    return Err(AgentError::LlmApi(format!(
+                                        "{} | failover attempts failed: {}",
+                                        err_str,
+                                        failover_errors.join(" ; ")
+                                    )));
                                 }
                                 return Err(AgentError::LlmApi(err_str));
                             }
@@ -6695,6 +6882,38 @@ impl AgentLoop {
             return Some("openai:gpt-4o-mini".to_string());
         }
         None
+    }
+
+    fn resolve_retry_failover_chain(&self, active_model: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let active_lc = active_model.trim().to_ascii_lowercase();
+
+        let mut push_candidate = |candidate: &str| {
+            let trimmed = candidate.trim();
+            if trimmed.is_empty() {
+                return;
+            }
+            let normalized = trimmed.to_ascii_lowercase();
+            if normalized == active_lc {
+                return;
+            }
+            if seen.insert(normalized) {
+                out.push(trimmed.to_string());
+            }
+        };
+
+        for model in &self.config.retry.fallback_models {
+            push_candidate(model);
+        }
+        if let Some(ref fallback) = self.config.retry.fallback_model {
+            push_candidate(fallback);
+        }
+        if let Some(dynamic) = self.resolve_reliability_degrade_model(active_model, None) {
+            push_candidate(&dynamic);
+        }
+
+        out
     }
 
     /// Ask the LLM for a final summary when the turn budget is exhausted.

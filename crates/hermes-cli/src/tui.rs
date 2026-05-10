@@ -102,6 +102,12 @@ pub enum ViewDensity {
     Detailed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivityLaneMode {
+    Live,
+    Cockpit,
+}
+
 #[derive(Debug, Clone)]
 enum PickerKind {
     ModelProvider,
@@ -437,6 +443,8 @@ pub struct TuiState {
     pub background_jobs_running: usize,
     /// Whether the right-side live activity lane is open.
     pub activity_lane_open: bool,
+    /// Right-side lane mode.
+    pub activity_lane_mode: ActivityLaneMode,
     /// Whether transcript headers show timestamp labels.
     pub show_timestamps: bool,
     /// Transcript density mode.
@@ -543,6 +551,7 @@ impl Default for TuiState {
             sticky_prompt: String::new(),
             background_jobs_running: 0,
             activity_lane_open: true,
+            activity_lane_mode: ActivityLaneMode::Live,
             show_timestamps: false,
             view_density: ViewDensity::Detailed,
             modal: None,
@@ -936,6 +945,17 @@ impl TuiState {
                         "Activity lane enabled".to_string()
                     } else {
                         "Activity lane hidden".to_string()
+                    };
+                    return false;
+                }
+                KeyCode::Char('o') => {
+                    self.activity_lane_mode = match self.activity_lane_mode {
+                        ActivityLaneMode::Live => ActivityLaneMode::Cockpit,
+                        ActivityLaneMode::Cockpit => ActivityLaneMode::Live,
+                    };
+                    self.status_message = match self.activity_lane_mode {
+                        ActivityLaneMode::Live => "Activity lane mode: live".to_string(),
+                        ActivityLaneMode::Cockpit => "Activity lane mode: ops cockpit".to_string(),
                     };
                     return false;
                 }
@@ -1530,7 +1550,7 @@ pub fn render(frame: &mut Frame, app: &App, state: &mut TuiState, theme: &Theme)
     render_messages(frame, app, state, messages_area, &resolved, &colors);
 
     if let Some(details_area) = details_area {
-        render_live_details(frame, state, details_area, &colors);
+        render_live_details(frame, app, state, details_area, &colors);
     }
 
     // --- Render input area ---
@@ -1571,7 +1591,7 @@ fn should_render_completions_popup(state: &TuiState) -> bool {
 fn render_header(frame: &mut Frame, app: &App, area: Rect, colors: &crate::theme::RatatuiColors) {
     let session_short = &app.session_id[..8.min(app.session_id.len())];
     let title = format!(
-        " HERMES AGENT ULTRA  •  session {}  •  Enter send  •  Shift+Enter/Ctrl+J newline  •  / commands  •  Ctrl+L lane  •  Ctrl+D density  •  Ctrl+T timestamps  •  Ctrl+G refresh-tail",
+        " HERMES AGENT ULTRA  •  session {}  •  Enter send  •  Shift+Enter/Ctrl+J newline  •  / commands  •  Ctrl+L lane  •  Ctrl+O cockpit  •  Ctrl+D density  •  Ctrl+T timestamps  •  Ctrl+G refresh-tail",
         session_short
     );
     let text = Text::from(vec![Line::from(vec![Span::styled(
@@ -1588,6 +1608,7 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect, colors: &crate::theme
 
 fn render_live_details(
     frame: &mut Frame,
+    app: &App,
     state: &TuiState,
     area: Rect,
     colors: &crate::theme::RatatuiColors,
@@ -1595,12 +1616,135 @@ fn render_live_details(
     if area.width == 0 || area.height == 0 {
         return;
     }
+    let lane_title = match state.activity_lane_mode {
+        ActivityLaneMode::Live => " Activity Lane ",
+        ActivityLaneMode::Cockpit => " Ops Cockpit ",
+    };
     let block = Block::default()
         .borders(Borders::ALL)
-        .title(" Activity Lane ")
+        .title(lane_title)
         .style(Style::default().bg(colors.background))
         .border_style(Style::default().fg(colors.status_bar_dim));
     let mut rows: Vec<Line<'static>> = Vec::new();
+
+    if matches!(state.activity_lane_mode, ActivityLaneMode::Cockpit) {
+        rows.push(Line::from(vec![
+            Span::styled(
+                " mode: ",
+                Style::default()
+                    .fg(colors.status_bar_dim)
+                    .bg(colors.background),
+            ),
+            Span::styled(
+                if state.processing {
+                    format!(
+                        "processing ({:.1}s)",
+                        state.processing_elapsed().as_secs_f64()
+                    )
+                } else {
+                    "idle".to_string()
+                },
+                Style::default()
+                    .fg(colors.status_bar_strong)
+                    .bg(colors.background)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]));
+        rows.push(Line::from(vec![
+            Span::styled(
+                " model: ",
+                Style::default()
+                    .fg(colors.status_bar_dim)
+                    .bg(colors.background),
+            ),
+            Span::styled(
+                truncate_chars(&app.current_model, area.width.saturating_sub(10) as usize),
+                Style::default()
+                    .fg(colors.status_bar_text)
+                    .bg(colors.background),
+            ),
+        ]));
+        rows.push(Line::from(vec![
+            Span::styled(
+                " planner: ",
+                Style::default()
+                    .fg(colors.status_bar_dim)
+                    .bg(colors.background),
+            ),
+            Span::styled(
+                std::env::var("HERMES_PLAN_CAPABILITY_ROUTER")
+                    .unwrap_or_else(|_| "off".to_string()),
+                Style::default()
+                    .fg(colors.status_bar_text)
+                    .bg(colors.background),
+            ),
+            Span::styled(
+                "  compaction: ",
+                Style::default()
+                    .fg(colors.status_bar_dim)
+                    .bg(colors.background),
+            ),
+            Span::styled(
+                std::env::var("HERMES_CONTEXTLATTICE_COMPACTION_GOVERNANCE")
+                    .unwrap_or_else(|_| "advisory".to_string()),
+                Style::default()
+                    .fg(colors.status_bar_text)
+                    .bg(colors.background),
+            ),
+        ]));
+        rows.push(Line::from(vec![
+            Span::styled(
+                " policy: ",
+                Style::default()
+                    .fg(colors.status_bar_dim)
+                    .bg(colors.background),
+            ),
+            Span::styled(
+                format!(
+                    "preset={} mode={} skills={}",
+                    std::env::var("HERMES_TOOL_POLICY_PRESET")
+                        .unwrap_or_else(|_| "balanced".to_string()),
+                    std::env::var("HERMES_TOOL_POLICY_MODE")
+                        .unwrap_or_else(|_| "enforce".to_string()),
+                    std::env::var("HERMES_SKILLS_EXECUTION_TIER")
+                        .unwrap_or_else(|_| "balanced".to_string()),
+                ),
+                Style::default()
+                    .fg(colors.status_bar_text)
+                    .bg(colors.background),
+            ),
+        ]));
+        if let Some((prompt, completion, total)) = state.last_usage {
+            rows.push(Line::from(vec![
+                Span::styled(
+                    " usage: ",
+                    Style::default()
+                        .fg(colors.status_bar_dim)
+                        .bg(colors.background),
+                ),
+                Span::styled(
+                    format!("in={} out={} total={}", prompt, completion, total),
+                    Style::default()
+                        .fg(colors.status_bar_text)
+                        .bg(colors.background),
+                ),
+            ]));
+        }
+        rows.push(Line::from(vec![Span::styled(
+            " Ctrl+O live lane",
+            Style::default()
+                .fg(colors.status_bar_dim)
+                .bg(colors.background)
+                .add_modifier(Modifier::ITALIC),
+        )]));
+
+        let paragraph = Paragraph::new(Text::from(rows))
+            .block(block)
+            .wrap(Wrap { trim: true });
+        frame.render_widget(Clear, area);
+        frame.render_widget(paragraph, area);
+        return;
+    }
 
     if state.processing {
         let elapsed = state.processing_elapsed().as_secs_f64();
@@ -1746,7 +1890,7 @@ fn render_live_details(
         )]));
     }
     rows.push(Line::from(vec![Span::styled(
-        " Ctrl+L toggle lane",
+        " Ctrl+L toggle lane • Ctrl+O cockpit",
         Style::default()
             .fg(colors.status_bar_dim)
             .bg(colors.background)
@@ -3412,6 +3556,10 @@ fn render_status(
     } else {
         status_text.push_str(" | lane:off");
     }
+    status_text.push_str(match state.activity_lane_mode {
+        ActivityLaneMode::Live => " (live)",
+        ActivityLaneMode::Cockpit => " (cockpit)",
+    });
     if state.background_jobs_running > 0 {
         status_text.push_str(&format!(" | bg:{}", state.background_jobs_running));
     }
