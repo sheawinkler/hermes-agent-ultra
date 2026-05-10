@@ -461,6 +461,12 @@ pub struct TuiState {
     stream_char_count: usize,
     /// Whether first response token has been observed in this cycle.
     saw_first_token: bool,
+    /// Current structured phase name for active processing cycle.
+    processing_phase: String,
+    /// Current structured phase label for active processing cycle.
+    processing_phase_label: String,
+    /// Current structured phase progress percentage (0..=100).
+    processing_phase_progress: u8,
     /// Whether the current cycle used fallback/remediation paths.
     processing_degraded: bool,
     /// Degraded lifecycle notes captured during current cycle.
@@ -549,6 +555,9 @@ impl Default for TuiState {
             stream_chunk_count: 0,
             stream_char_count: 0,
             saw_first_token: false,
+            processing_phase: String::new(),
+            processing_phase_label: String::new(),
+            processing_phase_progress: 0,
             processing_degraded: false,
             degraded_notes: Vec::new(),
         }
@@ -624,6 +633,9 @@ impl TuiState {
         self.stream_needs_break = false;
         self.active_tools.clear();
         self.live_thinking.clear();
+        self.processing_phase = "preflight".to_string();
+        self.processing_phase_label = "preparing request".to_string();
+        self.processing_phase_progress = 0;
         self.push_activity(format!("⟳ dispatching request to {model}"));
     }
 
@@ -656,6 +668,9 @@ impl TuiState {
         self.stream_chunk_count = 0;
         self.stream_char_count = 0;
         self.saw_first_token = false;
+        self.processing_phase.clear();
+        self.processing_phase_label.clear();
+        self.processing_phase_progress = 0;
         self.processing_degraded = false;
         self.degraded_notes.clear();
         self.jump_to_latest();
@@ -682,9 +697,18 @@ impl TuiState {
         } else {
             format!("{} active tool(s)", self.active_tools.len())
         };
+        let phase_state = if self.processing_phase_label.is_empty() {
+            "phase: n/a".to_string()
+        } else {
+            format!(
+                "phase: {} ({}%)",
+                truncate_chars(&self.processing_phase_label, 64),
+                self.processing_phase_progress
+            )
+        };
         self.push_activity(format!(
-            "… working {:.1}s • {} chunks • {} chars • {}",
-            elapsed, self.stream_chunk_count, self.stream_char_count, tool_state
+            "… working {:.1}s • {} chunks • {} chars • {} • {}",
+            elapsed, self.stream_chunk_count, self.stream_char_count, tool_state, phase_state
         ));
         self.last_progress_pulse_at = Some(now);
     }
@@ -699,6 +723,9 @@ impl TuiState {
         if !self.processing {
             return "idle";
         }
+        if !self.processing_phase_label.is_empty() {
+            return "phase-driven";
+        }
         if !self.saw_first_token {
             if self.active_tools.is_empty() {
                 "awaiting first token"
@@ -710,6 +737,35 @@ impl TuiState {
         } else {
             "running tools + streaming"
         }
+    }
+
+    fn update_processing_phase(&mut self, phase: &str, label: &str, progress_pct: Option<u8>) {
+        if !self.processing {
+            return;
+        }
+        let phase = phase.trim().to_ascii_lowercase();
+        let label = label.trim();
+        if phase.is_empty() && label.is_empty() && progress_pct.is_none() {
+            return;
+        }
+        if !phase.is_empty() {
+            self.processing_phase = phase;
+        }
+        if !label.is_empty() {
+            self.processing_phase_label = truncate_chars(label, 120);
+        }
+        if let Some(progress) = progress_pct {
+            self.processing_phase_progress = progress.min(100);
+        }
+        let activity_label = if self.processing_phase_label.is_empty() {
+            self.processing_phase.as_str()
+        } else {
+            self.processing_phase_label.as_str()
+        };
+        self.push_activity(format!(
+            "◈ phase {}% • {}",
+            self.processing_phase_progress, activity_label
+        ));
     }
 
     fn refresh_sticky_prompt(&mut self, app: &App) {
@@ -1572,10 +1628,19 @@ fn render_live_details(
         ]));
         rows.push(Line::from(vec![Span::styled(
             format!(
-                " [{}] chunks:{} chars:{}",
+                " [{}] chunks:{} chars:{} phase:{}% {}",
                 animated_processing_bar(state.spinner_frame, 18),
                 state.stream_chunk_count,
-                state.stream_char_count
+                state.stream_char_count,
+                state.processing_phase_progress,
+                truncate_chars(
+                    if state.processing_phase_label.is_empty() {
+                        state.processing_phase.as_str()
+                    } else {
+                        state.processing_phase_label.as_str()
+                    },
+                    38
+                )
             ),
             Style::default().fg(colors.accent).bg(colors.background),
         )]));
@@ -4174,6 +4239,19 @@ fn process_stream_lane_event(app: &mut App, state: &mut TuiState, event: Event) 
                                     state.push_activity(format!("[{}] {}", event_type, message));
                                 }
                             }
+                            "phase" => {
+                                let phase = extra
+                                    .get("phase")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("phase");
+                                let label =
+                                    extra.get("label").and_then(|v| v.as_str()).unwrap_or("");
+                                let progress_pct = extra
+                                    .get("progress_pct")
+                                    .and_then(|v| v.as_u64())
+                                    .and_then(|v| u8::try_from(v).ok());
+                                state.update_processing_phase(phase, label, progress_pct);
+                            }
                             "lifecycle" => {
                                 let message = extra
                                     .get("message")
@@ -4871,13 +4949,28 @@ mod tests {
         let mut state = TuiState::default();
         assert_eq!(state.processing_stage_label(), "idle");
         state.begin_processing_cycle("nous:test-model");
-        assert_eq!(state.processing_stage_label(), "awaiting first token");
+        assert_eq!(state.processing_stage_label(), "phase-driven");
+        state.processing_phase_label.clear();
         state.active_tools.push("terminal".to_string());
         assert_eq!(state.processing_stage_label(), "running tools (pre-token)");
         state.saw_first_token = true;
         assert_eq!(state.processing_stage_label(), "running tools + streaming");
         state.active_tools.clear();
         assert_eq!(state.processing_stage_label(), "streaming response");
+    }
+
+    #[test]
+    fn test_phase_updates_set_progress_and_activity() {
+        let mut state = TuiState::default();
+        state.begin_processing_cycle("nous:test-model");
+        state.update_processing_phase("retrieval", "collecting evidence", Some(42));
+        assert_eq!(state.processing_phase, "retrieval");
+        assert_eq!(state.processing_phase_label, "collecting evidence");
+        assert_eq!(state.processing_phase_progress, 42);
+        assert!(state
+            .recent_activity
+            .last()
+            .is_some_and(|line| line.contains("phase 42%")));
     }
 
     #[test]

@@ -31,6 +31,7 @@ use hermes_cron::cron_scheduler_for_data_dir;
 use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_tools::ToolRegistry;
 
+use crate::alpha_runtime::load_objective_contract;
 use crate::auth::{
     resolve_gemini_oauth_runtime_credentials, resolve_nous_runtime_credentials,
     resolve_qwen_runtime_credentials, DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
@@ -543,6 +544,97 @@ impl App {
         );
     }
 
+    fn emit_phase_event(
+        shared: &Arc<StdMutex<Option<StreamHandle>>>,
+        phase: &str,
+        label: &str,
+        progress_pct: u8,
+    ) {
+        let phase = phase.trim();
+        let label = App::preview_for_status(label, 220);
+        if phase.is_empty() || label.is_empty() {
+            return;
+        }
+        App::push_stream_extra_event(
+            shared,
+            serde_json::json!({
+                "ui_event": "phase",
+                "phase": phase,
+                "label": label,
+                "progress_pct": progress_pct.min(100),
+            }),
+        );
+    }
+
+    fn objective_context_autopin_enabled() -> bool {
+        !matches!(
+            std::env::var("HERMES_OBJECTIVE_CONTEXT_AUTOPIN")
+                .ok()
+                .as_deref()
+                .map(|v| v.trim().to_ascii_lowercase()),
+            Some(v) if matches!(v.as_str(), "0" | "false" | "off" | "no")
+        )
+    }
+
+    fn sanitize_topic_path_segment(raw: &str) -> String {
+        let mut out = String::with_capacity(raw.len());
+        for ch in raw.chars() {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '/') {
+                out.push(ch);
+            } else {
+                out.push('-');
+            }
+        }
+        out.trim_matches('-').to_string()
+    }
+
+    fn maybe_autopin_contextlattice_topic_from_objective(&self) {
+        if !Self::objective_context_autopin_enabled() {
+            return;
+        }
+        let Ok(Some(contract)) = load_objective_contract() else {
+            return;
+        };
+        let objective_id = Self::sanitize_topic_path_segment(contract.id.trim());
+        if objective_id.is_empty() {
+            return;
+        }
+        let target_topic = format!("runbooks/objective/{}", objective_id);
+        let current_topic = std::env::var("CONTEXTLATTICE_TOPIC_PATH")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+        let should_override = match current_topic.as_deref() {
+            None => true,
+            Some("runbooks/hermes") => true,
+            Some(existing)
+                if existing.eq_ignore_ascii_case(target_topic.as_str())
+                    || !existing
+                        .to_ascii_lowercase()
+                        .starts_with("runbooks/objective/") =>
+            {
+                false
+            }
+            Some(_) => true,
+        };
+        if should_override {
+            std::env::set_var("CONTEXTLATTICE_TOPIC_PATH", &target_topic);
+            Self::emit_lifecycle_event(
+                &self.stream_handle_shared,
+                format!(
+                    "ContextLattice objective autopin set topic_path={} (objective_id={})",
+                    target_topic, contract.id
+                ),
+            );
+            Self::emit_phase_event(
+                &self.stream_handle_shared,
+                "context",
+                "objective context autopin",
+                8,
+            );
+        }
+    }
+
     /// Create a new `App` from the parsed CLI arguments.
     ///
     /// This loads (or creates) the gateway configuration, builds a tool
@@ -961,8 +1053,21 @@ impl App {
     /// Checks the interrupt controller before running and clears it after.
     async fn run_agent(&mut self) -> Result<(), AgentError> {
         let run_started_at = Instant::now();
+        self.maybe_autopin_contextlattice_topic_from_objective();
+        Self::emit_phase_event(
+            &self.stream_handle_shared,
+            "preflight",
+            "runtime preflight + credential hydration",
+            5,
+        );
         self.refresh_runtime_provider_credentials_if_needed(false)
             .await;
+        Self::emit_phase_event(
+            &self.stream_handle_shared,
+            "dispatch",
+            "dispatching model request",
+            15,
+        );
         self.interrupt_controller.clear_interrupt();
         let mut remediation_attempted = false;
         let mut auth_refresh_attempted = false;
@@ -974,6 +1079,12 @@ impl App {
                     self.current_model,
                     self.messages.len()
                 ),
+            );
+            Self::emit_phase_event(
+                &self.stream_handle_shared,
+                "inference",
+                "model inference + tool execution",
+                35,
             );
             let messages = self.messages.clone();
             let result = if self.config.streaming.enabled {
@@ -1008,6 +1119,12 @@ impl App {
                             run_started_at.elapsed().as_secs_f64(),
                             result.total_turns
                         ),
+                    );
+                    Self::emit_phase_event(
+                        &self.stream_handle_shared,
+                        "finalize",
+                        "transcript finalization + persistence",
+                        100,
                     );
                     if let Some(handle) = &self.stream_handle {
                         handle.send_done();
@@ -1059,6 +1176,12 @@ impl App {
                             run_started_at.elapsed().as_secs_f64(),
                             e
                         ),
+                    );
+                    Self::emit_phase_event(
+                        &self.stream_handle_shared,
+                        "recovery",
+                        "error handling + remediation",
+                        60,
                     );
                     if let Some(handle) = &self.stream_handle {
                         handle.send_done();
@@ -1530,6 +1653,7 @@ fn apply_cli_runtime_overrides(config: &mut GatewayConfig, cli: &Cli) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::alpha_runtime::upsert_objective_contract;
     use crate::test_env_lock;
     use hermes_config::LlmProviderConfig;
     use std::collections::HashMap;
@@ -2221,6 +2345,70 @@ mod tests {
                 .unwrap_or_default()
                 .starts_with("[SESSION_OBJECTIVE] ")
         }));
+    }
+
+    #[test]
+    fn test_objective_context_autopin_sets_topic_for_default_path() {
+        let _guard = env_test_lock();
+        let prev_home = std::env::var("HERMES_HOME").ok();
+        let prev_topic = std::env::var("CONTEXTLATTICE_TOPIC_PATH").ok();
+        let prev_toggle = std::env::var("HERMES_OBJECTIVE_CONTEXT_AUTOPIN").ok();
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::env::set_var("HERMES_HOME", tmp.path());
+        std::env::set_var("CONTEXTLATTICE_TOPIC_PATH", "runbooks/hermes");
+        std::env::set_var("HERMES_OBJECTIVE_CONTEXT_AUTOPIN", "1");
+
+        let contract = upsert_objective_contract("grow wallet safely", true).expect("objective");
+        let app = build_minimal_test_app();
+        app.maybe_autopin_contextlattice_topic_from_objective();
+        let expected = format!("runbooks/objective/{}", contract.id);
+        assert_eq!(
+            std::env::var("CONTEXTLATTICE_TOPIC_PATH").ok().as_deref(),
+            Some(expected.as_str())
+        );
+
+        match prev_toggle {
+            Some(v) => std::env::set_var("HERMES_OBJECTIVE_CONTEXT_AUTOPIN", v),
+            None => std::env::remove_var("HERMES_OBJECTIVE_CONTEXT_AUTOPIN"),
+        }
+        match prev_topic {
+            Some(v) => std::env::set_var("CONTEXTLATTICE_TOPIC_PATH", v),
+            None => std::env::remove_var("CONTEXTLATTICE_TOPIC_PATH"),
+        }
+        match prev_home {
+            Some(v) => std::env::set_var("HERMES_HOME", v),
+            None => std::env::remove_var("HERMES_HOME"),
+        }
+    }
+
+    #[test]
+    fn test_objective_context_autopin_respects_custom_topic_pin() {
+        let _guard = env_test_lock();
+        let prev_home = std::env::var("HERMES_HOME").ok();
+        let prev_topic = std::env::var("CONTEXTLATTICE_TOPIC_PATH").ok();
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::env::set_var("HERMES_HOME", tmp.path());
+        std::env::set_var("CONTEXTLATTICE_TOPIC_PATH", "runbooks/custom/keep-me");
+
+        let _contract =
+            upsert_objective_contract("objective override regression test", false).expect("obj");
+        let app = build_minimal_test_app();
+        app.maybe_autopin_contextlattice_topic_from_objective();
+        assert_eq!(
+            std::env::var("CONTEXTLATTICE_TOPIC_PATH").ok().as_deref(),
+            Some("runbooks/custom/keep-me")
+        );
+
+        match prev_topic {
+            Some(v) => std::env::set_var("CONTEXTLATTICE_TOPIC_PATH", v),
+            None => std::env::remove_var("CONTEXTLATTICE_TOPIC_PATH"),
+        }
+        match prev_home {
+            Some(v) => std::env::set_var("HERMES_HOME", v),
+            None => std::env::remove_var("HERMES_HOME"),
+        }
     }
 }
 
