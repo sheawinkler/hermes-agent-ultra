@@ -38,6 +38,12 @@ Hermes Agent Ultra keeps that surface in scope while focusing on:
 Ultra keeps parity work separate from intentional extensions.
 
 - `Runtime policy engine`: enforce/audit/simulate tool policy decisions at runtime
+- `Session branching + time-travel`: checkpoint/rollback/replay navigation from the TUI
+- `Tool-call simulator`: preview policy allow/deny outcomes before running risky tool invocations
+- `Adaptive repo-review budget controls`: tune discovery-loop trimming live (`balanced/aggressive/relaxed/off`)
+- `Semantic repo graph`: inspect dependency hubs/edges with inline Mermaid preview
+- `Provider QoS router controls`: inspect route learning/health and apply autotune from chat
+- `Live session eval harness`: score real saved sessions and gate quality trends from actual usage
 - `RTK raw-mode controls`: inspect unwrapped tool payloads when debugging integrations
 - `Memory fusion`: ContextLattice + external memory providers with scoring/fusion logic
 - `Advanced sync gates`: differential parity checks, red-team/adversarial gating, elite sync gate
@@ -128,6 +134,17 @@ Key operator commands:
 /ops autopilot run
 /ops autopilot recommend
 /ops autopilot apply
+
+# Session time-travel + simulation
+/timetravel list
+/timetravel goto <snapshot>
+/simulate terminal {"cmd":"ls -la"}
+
+# QoS + eval runtime surfaces
+/qos status
+/qos health
+/ops budget balanced
+/ops eval run
 ```
 
 ## Local Backends
