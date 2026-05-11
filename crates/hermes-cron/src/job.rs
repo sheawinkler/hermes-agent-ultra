@@ -147,6 +147,15 @@ pub struct CronJob {
     /// Optional script content to execute instead of an agent prompt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub script: Option<String>,
+    /// Run in script-only mode (no LLM/agent loop), watchdog-style.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub no_agent: bool,
+    /// Optional per-job script timeout in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script_timeout_seconds: Option<u64>,
+    /// Optional shell override for script execution.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script_shell: Option<String>,
     /// Optional source cron job IDs whose most recent output should be injected
     /// into this job prompt before execution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -158,6 +167,10 @@ pub struct CronJob {
 
 fn default_job_status() -> JobStatus {
     JobStatus::Active
+}
+
+fn is_false(v: &bool) -> bool {
+    !*v
 }
 
 impl CronJob {
@@ -181,6 +194,9 @@ impl CronJob {
             repeat: None,
             run_count: 0,
             script: None,
+            no_agent: false,
+            script_timeout_seconds: None,
+            script_shell: None,
             context_from: None,
             last_output: None,
         }
@@ -209,6 +225,9 @@ impl CronJob {
             && self.script.as_ref().map_or(true, |s| s.trim().is_empty())
         {
             return Err("Either prompt or script must be non-empty".to_string());
+        }
+        if self.no_agent && self.script.as_ref().map_or(true, |s| s.trim().is_empty()) {
+            return Err("no_agent mode requires non-empty script".to_string());
         }
 
         // Validate repeat
@@ -331,6 +350,14 @@ mod tests {
     fn test_validate_zero_repeat() {
         let mut job = CronJob::new("0 9 * * *", "Say hello");
         job.repeat = Some(0);
+        assert!(job.validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_no_agent_requires_script() {
+        let mut job = CronJob::new("0 9 * * *", "Say hello");
+        job.no_agent = true;
+        job.script = None;
         assert!(job.validate().is_err());
     }
 

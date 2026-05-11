@@ -23,6 +23,8 @@ pub trait CronjobBackend: Send + Sync {
         task: &str,
         toolset: Option<&str>,
         context_from: Option<&Value>,
+        script: Option<&str>,
+        no_agent: Option<bool>,
     ) -> Result<String, ToolError>;
     /// List all cron jobs.
     async fn list(&self) -> Result<String, ToolError>;
@@ -34,6 +36,8 @@ pub trait CronjobBackend: Send + Sync {
         task: Option<&str>,
         enabled: Option<bool>,
         context_from: Option<&Value>,
+        script: Option<&str>,
+        no_agent: Option<bool>,
     ) -> Result<String, ToolError>;
     /// Pause a cron job.
     async fn pause(&self, id: &str) -> Result<String, ToolError>;
@@ -87,8 +91,18 @@ impl ToolHandler for CronjobHandler {
                     .ok_or_else(|| ToolError::InvalidParams("Missing 'task' parameter".into()))?;
                 let toolset = params.get("toolset").and_then(|v| v.as_str());
                 let context_from = params.get("context_from");
+                let script = params.get("script").and_then(|v| v.as_str());
+                let no_agent = params.get("no_agent").and_then(|v| v.as_bool());
                 self.backend
-                    .create(name, schedule, task, toolset, context_from)
+                    .create(
+                        name,
+                        schedule,
+                        task,
+                        toolset,
+                        context_from,
+                        script,
+                        no_agent,
+                    )
                     .await
             }
             "list" => self.backend.list().await,
@@ -101,8 +115,10 @@ impl ToolHandler for CronjobHandler {
                 let task = params.get("task").and_then(|v| v.as_str());
                 let enabled = params.get("enabled").and_then(|v| v.as_bool());
                 let context_from = params.get("context_from");
+                let script = params.get("script").and_then(|v| v.as_str());
+                let no_agent = params.get("no_agent").and_then(|v| v.as_bool());
                 self.backend
-                    .update(id, schedule, task, enabled, context_from)
+                    .update(id, schedule, task, enabled, context_from, script, no_agent)
                     .await
             }
             "pause" => {
@@ -179,10 +195,24 @@ impl ToolHandler for CronjobHandler {
             }),
         );
         props.insert(
+            "script".into(),
+            json!({
+                "type": "string",
+                "description": "Optional script path or inline script content."
+            }),
+        );
+        props.insert(
             "toolset".into(),
             json!({
                 "type": "string",
                 "description": "Toolset to assign to the cron job's agent"
+            }),
+        );
+        props.insert(
+            "no_agent".into(),
+            json!({
+                "type": "boolean",
+                "description": "Run script-only mode (skip LLM/agent loop). Requires `script`."
             }),
         );
         props.insert(
@@ -235,6 +265,8 @@ mod tests {
             _task: &str,
             _toolset: Option<&str>,
             _context_from: Option<&Value>,
+            _script: Option<&str>,
+            _no_agent: Option<bool>,
         ) -> Result<String, ToolError> {
             Ok(format!("Created cronjob: {}", name))
         }
@@ -248,6 +280,8 @@ mod tests {
             _task: Option<&str>,
             _enabled: Option<bool>,
             _context_from: Option<&Value>,
+            _script: Option<&str>,
+            _no_agent: Option<bool>,
         ) -> Result<String, ToolError> {
             Ok(format!("Updated cronjob: {}", id))
         }

@@ -373,6 +373,18 @@ pub enum CliCommand {
         /// Script path/content field.
         #[arg(long)]
         script: Option<String>,
+        /// Run in script-only mode (skip LLM/agent loop). Requires `--script`.
+        #[arg(long)]
+        no_agent: bool,
+        /// Re-enable agent execution mode when editing a script-only job.
+        #[arg(long)]
+        agent: bool,
+        /// Per-job script timeout in seconds (script/no-agent mode).
+        #[arg(long)]
+        script_timeout_seconds: Option<u64>,
+        /// Per-job shell override for inline scripts.
+        #[arg(long)]
+        script_shell: Option<String>,
         /// Include inactive jobs (list action).
         #[arg(long)]
         all: bool,

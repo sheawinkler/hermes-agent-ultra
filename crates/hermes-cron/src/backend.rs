@@ -119,6 +119,8 @@ impl CronjobBackend for ScheduledCronjobBackend {
         task: &str,
         toolset: Option<&str>,
         context_from: Option<&Value>,
+        script: Option<&str>,
+        no_agent: Option<bool>,
     ) -> Result<String, ToolError> {
         let mut job = CronJob::new(schedule, task);
         if !name.trim().is_empty() {
@@ -127,6 +129,15 @@ impl CronjobBackend for ScheduledCronjobBackend {
         if let Some(ts) = toolset.filter(|s| !s.trim().is_empty()) {
             // Toolset arrives as a simple name; store it as a single-skill hint.
             job.skills = Some(vec![ts.to_string()]);
+        }
+        if let Some(script) = script {
+            let trimmed = script.trim();
+            if !trimmed.is_empty() {
+                job.script = Some(trimmed.to_string());
+            }
+        }
+        if let Some(no_agent) = no_agent {
+            job.no_agent = no_agent;
         }
         let context_from = parse_context_from_create(context_from)?;
         if let Some(ref refs) = context_from {
@@ -147,6 +158,8 @@ impl CronjobBackend for ScheduledCronjobBackend {
             "schedule": schedule,
             "task": task,
             "toolset": toolset,
+            "script": script,
+            "no_agent": no_agent.unwrap_or(false),
             "context_from": context_from,
         })
         .to_string())
@@ -185,6 +198,8 @@ impl CronjobBackend for ScheduledCronjobBackend {
         task: Option<&str>,
         enabled: Option<bool>,
         context_from: Option<&Value>,
+        script: Option<&str>,
+        no_agent: Option<bool>,
     ) -> Result<String, ToolError> {
         let mut job = self
             .scheduler
@@ -198,6 +213,17 @@ impl CronjobBackend for ScheduledCronjobBackend {
         }
         if let Some(t) = task {
             job.prompt = t.to_string();
+        }
+        if let Some(script) = script {
+            let trimmed = script.trim();
+            job.script = if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            };
+        }
+        if let Some(no_agent) = no_agent {
+            job.no_agent = no_agent;
         }
         if let Some(context_update) = parse_context_from_update(context_from)? {
             if let Some(ref refs) = context_update {
@@ -333,6 +359,8 @@ mod tests {
                 "consume context",
                 None,
                 Some(&json!(source_id.clone())),
+                None,
+                None,
             )
             .await
             .expect("create");
@@ -349,6 +377,8 @@ mod tests {
                 None,
                 None,
                 Some(&json!([source_id.clone()])),
+                None,
+                None,
             )
             .await
             .expect("update set");
@@ -359,7 +389,7 @@ mod tests {
         assert_eq!(loaded.context_from, Some(vec![source_id.clone()]));
 
         backend
-            .update(consumer_id, None, None, None, Some(&json!([])))
+            .update(consumer_id, None, None, None, Some(&json!([])), None, None)
             .await
             .expect("update clear");
         let loaded = scheduler

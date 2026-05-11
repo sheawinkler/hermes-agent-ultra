@@ -534,6 +534,10 @@ async fn main() {
             remove_skills,
             clear_skills,
             script,
+            no_agent,
+            agent,
+            script_timeout_seconds,
+            script_shell,
             all,
         } => {
             run_cron(
@@ -551,6 +555,10 @@ async fn main() {
                 remove_skills,
                 clear_skills,
                 script,
+                no_agent,
+                agent,
+                script_timeout_seconds,
+                script_shell,
                 all,
             )
             .await
@@ -3302,7 +3310,7 @@ fn build_agent_for_gateway_context(
             Path::new(h),
         );
     }
-    AgentLoop::new(agent_config, agent_tools, provider)
+    hermes_agent::attach_discovered_memory(AgentLoop::new(agent_config, agent_tools, provider))
 }
 
 fn extract_last_assistant_reply(messages: &[hermes_core::Message]) -> String {
@@ -7445,6 +7453,10 @@ async fn run_cron(
     remove_skills: Vec<String>,
     clear_skills: bool,
     script: Option<String>,
+    no_agent: bool,
+    agent: bool,
+    script_timeout_seconds: Option<u64>,
+    script_shell: Option<String>,
     all: bool,
 ) -> Result<(), AgentError> {
     let data_dir = hermes_state_root(&cli).join("cron");
@@ -7475,8 +7487,16 @@ async fn run_cron(
         }
         "create" | "add" => {
             let schedule = schedule.unwrap_or_else(|| "0 * * * *".to_string());
-            let prompt = prompt
-                .ok_or_else(|| AgentError::Config("cron create: use --prompt \"...\"".into()))?;
+            let prompt = match prompt {
+                Some(p) => p,
+                None if no_agent => "[script-only cron job]".to_string(),
+                None => {
+                    return Err(AgentError::Config(
+                        "cron create: use --prompt \"...\" (or pass --no-agent with --script)"
+                            .into(),
+                    ));
+                }
+            };
             let mut job = hermes_cron::CronJob::new(schedule, prompt);
             if let Some(name) = name.filter(|s| !s.trim().is_empty()) {
                 job.name = Some(name);
@@ -7501,6 +7521,23 @@ async fn run_cron(
                 if !script.trim().is_empty() {
                     job.script = Some(script);
                 }
+            }
+            if no_agent {
+                job.no_agent = true;
+            }
+            if agent {
+                job.no_agent = false;
+            }
+            if job.no_agent && job.script.as_ref().map_or(true, |s| s.trim().is_empty()) {
+                return Err(AgentError::Config(
+                    "cron create: --no-agent requires --script".into(),
+                ));
+            }
+            if let Some(timeout_secs) = script_timeout_seconds.filter(|v| *v > 0) {
+                job.script_timeout_seconds = Some(timeout_secs);
+            }
+            if let Some(shell) = script_shell.filter(|v| !v.trim().is_empty()) {
+                job.script_shell = Some(shell.trim().to_string());
             }
             let jid = sched.create_job(job).await.map_err(cron_cli_error)?;
             println!(
@@ -7574,6 +7611,31 @@ async fn run_cron(
                 } else {
                     job.script = Some(script);
                 }
+            }
+            if no_agent {
+                job.no_agent = true;
+            }
+            if agent {
+                job.no_agent = false;
+            }
+            if let Some(timeout_secs) = script_timeout_seconds {
+                job.script_timeout_seconds = if timeout_secs == 0 {
+                    None
+                } else {
+                    Some(timeout_secs)
+                };
+            }
+            if let Some(shell) = script_shell {
+                if shell.trim().is_empty() {
+                    job.script_shell = None;
+                } else {
+                    job.script_shell = Some(shell.trim().to_string());
+                }
+            }
+            if job.no_agent && job.script.as_ref().map_or(true, |s| s.trim().is_empty()) {
+                return Err(AgentError::Config(
+                    "cron edit: no_agent mode requires a non-empty script".into(),
+                ));
             }
             sched.update_job(&jid, job).await.map_err(cron_cli_error)?;
             println!("Updated job {}", jid);

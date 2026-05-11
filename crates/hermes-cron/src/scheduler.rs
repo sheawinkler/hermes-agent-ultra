@@ -298,6 +298,17 @@ impl CronScheduler {
                             }
                             Err(e) => {
                                 tracing::error!("Cron job '{}' failed: {}", job.id, e);
+                                if let Some(ref deliver) = job.deliver {
+                                    if let Err(deliver_err) =
+                                        runner.deliver_error(&e.to_string(), deliver).await
+                                    {
+                                        tracing::warn!(
+                                            "Cron job '{}' failed to deliver error alert: {}",
+                                            job.id,
+                                            deliver_err
+                                        );
+                                    }
+                                }
                                 Self::emit_completion(
                                     &completion_tx,
                                     &job,
@@ -535,6 +546,17 @@ impl CronScheduler {
         match &run_result {
             Ok(result) => Self::emit_completion(&self.completion_tx, &job, "manual", Ok(result)),
             Err(e) => {
+                if let Some(ref deliver) = job.deliver {
+                    if let Err(deliver_err) =
+                        self.runner.deliver_error(&e.to_string(), deliver).await
+                    {
+                        tracing::warn!(
+                            "Cron job '{}' failed to deliver manual error alert: {}",
+                            job.id,
+                            deliver_err
+                        );
+                    }
+                }
                 Self::emit_completion(&self.completion_tx, &job, "manual", Err(e.to_string()))
             }
         }
