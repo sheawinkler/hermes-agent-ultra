@@ -7463,6 +7463,7 @@ async fn run_cron(
     std::fs::create_dir_all(&data_dir)
         .map_err(|e| AgentError::Io(format!("cron dir {}: {}", data_dir.display(), e)))?;
     let sched = cron_scheduler_for_data_dir(data_dir.clone());
+    sched.load_persisted_jobs().await.map_err(cron_cli_error)?;
     let resolved_id = job_id.or(id).filter(|s| !s.trim().is_empty());
 
     match action.as_deref().unwrap_or("list") {
@@ -7659,6 +7660,10 @@ async fn run_cron(
                 }
                 "run" => {
                     let live_sched = build_live_cron_scheduler(&cli, &data_dir)?;
+                    live_sched
+                        .load_persisted_jobs()
+                        .await
+                        .map_err(cron_cli_error)?;
                     let result = live_sched.run_job(&jid).await.map_err(cron_cli_error)?;
                     let json = serde_json::to_string_pretty(&result)
                         .unwrap_or_else(|_| format!("{result:#?}"));
