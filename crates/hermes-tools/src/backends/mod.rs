@@ -17,5 +17,6 @@ pub mod messaging;
 pub mod session_search;
 pub mod todo;
 pub mod tts;
+pub mod video;
 pub mod vision;
 pub mod web;

@@ -82,6 +82,7 @@ pub use tools::transcription::TranscriptionHandler;
 pub use tools::tts::{TextToSpeechHandler, TtsBackend};
 pub use tools::tts_premium::TtsPremiumHandler;
 pub use tools::url_safety::UrlSafetyHandler;
+pub use tools::video::{VideoAnalyzeHandler, VideoBackend};
 pub use tools::vision::{VisionAnalyzeHandler, VisionBackend};
 pub use tools::voice_mode::VoiceModeHandler;
 pub use tools::web::{WebExtractBackend, WebExtractHandler, WebSearchBackend, WebSearchHandler};
@@ -100,6 +101,7 @@ pub use backends::messaging::SignalMessagingBackend;
 pub use backends::session_search::SqliteSessionSearchBackend;
 pub use backends::todo::FileTodoBackend;
 pub use backends::tts::MultiTtsBackend;
+pub use backends::video::VisionFrameSamplingVideoBackend;
 pub use backends::vision::OpenAiVisionBackend;
 pub use backends::web::{
     search_backend_from_env_or_fallback, ExaSearchBackend, FallbackSearchBackend,

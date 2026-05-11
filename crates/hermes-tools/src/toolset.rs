@@ -35,7 +35,7 @@ pub const TOOLSET_BROWSER: &[&str] = &[
     "browser_console",
 ];
 /// Vision analysis tools.
-pub const TOOLSET_VISION: &[&str] = &["vision_analyze"];
+pub const TOOLSET_VISION: &[&str] = &["vision_analyze", "video_analyze"];
 /// Image generation tools.
 pub const TOOLSET_IMAGE_GEN: &[&str] = &["image_generate"];
 /// Skills management tools.

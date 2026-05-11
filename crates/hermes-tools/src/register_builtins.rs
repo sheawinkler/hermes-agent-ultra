@@ -136,13 +136,23 @@ pub fn register_builtin_tools(
                     "gpt-4o".into(),
                 )
             });
+        let vision_backend: Arc<dyn crate::tools::vision::VisionBackend> = Arc::new(backend);
         reg(
             registry,
             "vision",
-            Arc::new(crate::tools::vision::VisionAnalyzeHandler::new(Arc::new(
-                backend,
-            ))),
+            Arc::new(crate::tools::vision::VisionAnalyzeHandler::new(
+                vision_backend.clone(),
+            )),
             "👁️",
+            vec!["HERMES_OPENAI_API_KEY".into(), "OPENAI_API_KEY".into()],
+        );
+        reg(
+            registry,
+            "vision",
+            Arc::new(crate::tools::video::VideoAnalyzeHandler::new(Arc::new(
+                crate::backends::video::VisionFrameSamplingVideoBackend::new(vision_backend),
+            ))),
+            "🎬",
             vec!["HERMES_OPENAI_API_KEY".into(), "OPENAI_API_KEY".into()],
         );
     }

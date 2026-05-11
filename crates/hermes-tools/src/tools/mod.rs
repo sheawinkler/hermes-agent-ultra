@@ -31,6 +31,7 @@ pub mod transcription;
 pub mod tts;
 pub mod tts_premium;
 pub mod url_safety;
+pub mod video;
 pub mod vision;
 pub mod voice_mode;
 pub mod web;
