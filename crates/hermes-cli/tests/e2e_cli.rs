@@ -1,5 +1,6 @@
 use assert_cmd::Command;
 use std::fs;
+use std::process::Command as StdCommand;
 
 #[test]
 fn e2e_cli_model_command_prints_current_model() {
@@ -66,4 +67,28 @@ fn e2e_cli_config_set_dotted_llm_and_get_masks_key() {
         text.contains("***"),
         "expected masked api key, got: {text:?}"
     );
+}
+
+#[test]
+fn e2e_cli_interactive_refuses_parallel_session_when_lock_pid_is_alive() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let lock_path = dir.path().join("interactive.session.lock");
+    let mut sleeper = StdCommand::new("sleep")
+        .arg("30")
+        .spawn()
+        .expect("spawn sleep process");
+
+    fs::write(&lock_path, format!("{}\n", sleeper.id())).expect("write lock");
+
+    let mut cmd = Command::cargo_bin("hermes").expect("binary exists");
+    cmd.env("HERMES_HOME", dir.path());
+    let assert = cmd.assert().failure();
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    assert!(
+        stderr.contains("Another Hermes interactive session is running"),
+        "expected lock guard error in stderr, got: {stderr:?}"
+    );
+
+    let _ = sleeper.kill();
+    let _ = sleeper.wait();
 }

@@ -86,6 +86,13 @@ Interactive session:
 hermes-ultra
 ```
 
+Interactive mode is single-instance per Hermes home by default (prevents accidental parallel TUI sessions sharing the same state).  
+If you intentionally want parallel interactive sessions, run:
+
+```bash
+HERMES_ALLOW_PARALLEL_INTERACTIVE=1 hermes-ultra
+```
+
 One-shot query:
 
 ```bash
