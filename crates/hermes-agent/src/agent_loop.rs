@@ -587,6 +587,18 @@ fn default_max_concurrent_delegates() -> u32 {
     1
 }
 
+fn delegation_spawning_paused() -> bool {
+    std::env::var("HERMES_DELEGATION_PAUSED")
+        .ok()
+        .map(|raw| {
+            matches!(
+                raw.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
 fn default_memory_flush_interval() -> u32 {
     5
 }
@@ -7343,6 +7355,20 @@ impl AgentLoop {
 
     /// Cap concurrent delegate_task calls based on config.
     fn cap_delegates(&self, tool_calls: &mut Vec<ToolCall>) {
+        if delegation_spawning_paused() {
+            let delegate_count = tool_calls
+                .iter()
+                .filter(|tc| tc.function.name == "delegate_task")
+                .count();
+            if delegate_count > 0 {
+                tracing::warn!(
+                    "Dropping {} delegate_task call(s): delegation spawning is paused",
+                    delegate_count
+                );
+                tool_calls.retain(|tc| tc.function.name != "delegate_task");
+            }
+            return;
+        }
         let delegate_count = tool_calls
             .iter()
             .filter(|tc| tc.function.name == "delegate_task")
@@ -8662,6 +8688,18 @@ mod tests {
         assert!(!config.smart_model_routing.enabled);
         assert!(config.background_review_metrics_enabled);
         assert_eq!(config.stream_read_max_retries, 2);
+    }
+
+    #[test]
+    fn delegation_spawning_paused_honors_env_toggle() {
+        std::env::remove_var("HERMES_DELEGATION_PAUSED");
+        assert!(!delegation_spawning_paused());
+        std::env::set_var("HERMES_DELEGATION_PAUSED", "1");
+        assert!(delegation_spawning_paused());
+        std::env::set_var("HERMES_DELEGATION_PAUSED", "true");
+        assert!(delegation_spawning_paused());
+        std::env::set_var("HERMES_DELEGATION_PAUSED", "0");
+        assert!(!delegation_spawning_paused());
     }
 
     #[test]

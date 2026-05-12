@@ -173,7 +173,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/reload_mcp", "Alias for /reload-mcp"),
     ("/cron", "Show cron scheduler status"),
     ("/scheduler", "Alias for /background"),
-    ("/agents", "Show active/background task state"),
+    (
+        "/agents",
+        "Show active/background task state (`status|pause|resume|doctor`)",
+    ),
     ("/tasks", "Alias for /kanban"),
     ("/queue", "Queue a follow-up prompt"),
     ("/q", "Alias for /queue"),
@@ -3112,7 +3115,7 @@ pub async fn handle_slash_command(
         "/mcp" => handle_mcp_command(app),
         "/reload" | "/reload-mcp" => handle_reload_command(app, canonical_command(cmd)),
         "/cron" => handle_cron_command(app),
-        "/agents" => handle_agents_command(app),
+        "/agents" => handle_agents_command(app, args),
         "/kanban" => handle_kanban_command(app, args),
         "/plan" => handle_plan_command(app, args),
         "/lsp" => handle_lsp_command(app, args),
@@ -9623,20 +9626,66 @@ fn background_status_rows() -> Vec<String> {
     rows
 }
 
-fn handle_agents_command(app: &mut App) -> Result<CommandResult, AgentError> {
+fn env_truthy(raw: &str) -> bool {
+    matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+fn handle_agents_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let sub = args.first().map(|s| s.trim().to_ascii_lowercase());
+
+    if matches!(sub.as_deref(), Some("pause")) {
+        std::env::set_var("HERMES_DELEGATION_PAUSED", "1");
+        emit_command_output(
+            app,
+            "Delegation spawning paused for this runtime.\nSet with `/agents resume`.\nStatus: `/agents status`.",
+        );
+        return Ok(CommandResult::Handled);
+    }
+    if matches!(sub.as_deref(), Some("resume" | "unpause")) {
+        std::env::set_var("HERMES_DELEGATION_PAUSED", "0");
+        emit_command_output(
+            app,
+            "Delegation spawning resumed for this runtime.\nStatus: `/agents status`.",
+        );
+        return Ok(CommandResult::Handled);
+    }
+    if matches!(sub.as_deref(), Some("doctor")) {
+        emit_command_output(
+            app,
+            "Agents doctor\n- queue manifest audit: `python3 scripts/audit_background_queue.py`\n- optional repair: `python3 scripts/audit_background_queue.py --repair`\n- delegation state: `/agents status`\n- spawn tree UI: `/agents` (TUI overlay)",
+        );
+        return Ok(CommandResult::Handled);
+    }
+
+    if matches!(sub.as_deref(), Some(other) if other != "status" && other != "list") {
+        emit_command_output(app, "Usage: /agents [status|pause|resume|doctor]");
+        return Ok(CommandResult::Handled);
+    }
+
+    let paused = std::env::var("HERMES_DELEGATION_PAUSED")
+        .ok()
+        .map(|raw| env_truthy(&raw))
+        .unwrap_or(false);
     let rows = background_status_rows();
     if rows.is_empty() {
         emit_command_output(
             app,
-            "No background jobs found.\nAudit/repair queue manifests with `python3 scripts/audit_background_queue.py [--repair]`.",
+            format!(
+                "Delegation spawning: {}\nBackground jobs: 0\n\nNo background jobs found.\nAudit/repair queue manifests with `python3 scripts/audit_background_queue.py [--repair]`.",
+                if paused { "paused" } else { "active" }
+            ),
         );
     } else {
         let joined = rows.into_iter().take(20).collect::<Vec<_>>().join("\n");
         emit_command_output(
             app,
             format!(
-                "Background jobs:\n{}\n\nQueue audit: `python3 scripts/audit_background_queue.py`",
-                joined
+                "Delegation spawning: {}\nBackground jobs (top 20):\n{}\n\nQueue audit: `python3 scripts/audit_background_queue.py`\nPause/resume: `/agents pause` or `/agents resume`",
+                if paused { "paused" } else { "active" },
+                joined,
             ),
         );
     }
@@ -19805,6 +19854,41 @@ mod tests {
             .expect("telemetry status");
         assert_eq!(telemetry, CommandResult::Handled);
         assert!(latest_ui_assistant_text(&app).contains("Telemetry snapshot"));
+    }
+
+    #[tokio::test]
+    async fn slash_agents_pause_resume_and_status_are_handled() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+        std::env::remove_var("HERMES_DELEGATION_PAUSED");
+
+        let status = handle_slash_command(&mut app, "/agents", &["status"])
+            .await
+            .expect("agents status");
+        assert_eq!(status, CommandResult::Handled);
+        assert!(latest_ui_assistant_text(&app).contains("Delegation spawning: active"));
+
+        let pause = handle_slash_command(&mut app, "/agents", &["pause"])
+            .await
+            .expect("agents pause");
+        assert_eq!(pause, CommandResult::Handled);
+        assert_eq!(
+            std::env::var("HERMES_DELEGATION_PAUSED").ok().as_deref(),
+            Some("1")
+        );
+        assert!(latest_ui_assistant_text(&app).contains("paused for this runtime"));
+
+        let resume = handle_slash_command(&mut app, "/agents", &["resume"])
+            .await
+            .expect("agents resume");
+        assert_eq!(resume, CommandResult::Handled);
+        assert_eq!(
+            std::env::var("HERMES_DELEGATION_PAUSED").ok().as_deref(),
+            Some("0")
+        );
+        assert!(latest_ui_assistant_text(&app).contains("resumed for this runtime"));
     }
 
     #[tokio::test]
