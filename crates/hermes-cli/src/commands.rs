@@ -46,7 +46,10 @@ use crate::kanban::{
     lane_counts, load_store, maybe_checkpoint_to_contextlattice, move_task, save_store,
     set_blocked, KanbanActionInput, KanbanBoard, KanbanLane, NewKanbanTaskInput,
 };
-use crate::model_switch::{curated_provider_slugs, normalize_provider_model, provider_model_ids};
+use crate::model_switch::{
+    cached_provider_catalog_status, curated_provider_slugs, normalize_provider_model,
+    provider_model_ids,
+};
 use crate::pairing_store::{PairingStatus, PairingStore};
 use crate::skin_engine::{canonical_skin_name, BUILTIN_SKINS};
 use hermes_config::{GatewayConfig, LlmProviderConfig};
@@ -131,7 +134,7 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ("/rollback", "List rollback checkpoints"),
     (
         "/model",
-        "Show/switch models, run capability diagnostics (`/model explain`, `why-not`, `--cap`), or configure failover (`/model failover`)",
+        "Show/switch models, run capability diagnostics (`/model explain`, `why-not`, `harness`, `backend`), or configure failover (`/model failover`)",
     ),
     (
         "/auth",
@@ -233,7 +236,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
         "Queue planning work or inspect planner queue status (`/plan caps ...`, `/plan depth ...`)",
     ),
     ("/lsp", "Show code-index/LSP context status and controls"),
-    ("/graph", "Show graph-memory and ContextLattice status"),
+    (
+        "/graph",
+        "Show graph-memory, ContextLattice status, and embedding diagnostics",
+    ),
     (
         "/qos",
         "Provider QoS router controls (`status|health|autotune [plan|apply]`)",
@@ -312,7 +318,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
         "/sessions",
         "Browse saved sessions, or resume one by name (`/sessions [name]`)",
     ),
-    ("/background", "Run a task in the background"),
+    (
+        "/background",
+        "Run a task in the background (`status|tail <job-id> [N]`)",
+    ),
     ("/bg", "Alias for /background"),
     ("/mouse", "Toggle mouse interactions in the TUI"),
     ("/verbose", "Toggle verbose mode"),
@@ -3119,7 +3128,7 @@ pub async fn handle_slash_command(
         "/kanban" => handle_kanban_command(app, args),
         "/plan" => handle_plan_command(app, args),
         "/lsp" => handle_lsp_command(app, args),
-        "/graph" => handle_graph_command(app, args),
+        "/graph" => handle_graph_command(app, args).await,
         "/qos" => handle_qos_command(app, args).await,
         "/image" => handle_image_command(app, args),
         "/config" => handle_config_command(app, args),
@@ -3896,10 +3905,415 @@ fn handle_model_failover_command(
     Ok(CommandResult::Handled)
 }
 
+#[derive(Debug, Clone, Copy)]
+struct BackendBestPracticeProfile {
+    provider: &'static str,
+    profile: &'static str,
+    summary: &'static str,
+    launch_hint: &'static str,
+    env_overrides: &'static [(&'static str, &'static str)],
+}
+
+const VLLM_PROFILE_BALANCED_ENV: &[(&str, &str)] = &[
+    ("VLLM_GPU_MEMORY_UTILIZATION", "0.88"),
+    ("VLLM_ENABLE_PREFIX_CACHING", "1"),
+    ("VLLM_ENABLE_CHUNKED_PREFILL", "1"),
+];
+const VLLM_PROFILE_THROUGHPUT_ENV: &[(&str, &str)] = &[
+    ("VLLM_GPU_MEMORY_UTILIZATION", "0.92"),
+    ("VLLM_MAX_NUM_SEQS", "256"),
+    ("VLLM_ENABLE_PREFIX_CACHING", "1"),
+];
+const VLLM_PROFILE_RELIABILITY_ENV: &[(&str, &str)] = &[
+    ("VLLM_GPU_MEMORY_UTILIZATION", "0.80"),
+    ("VLLM_MAX_NUM_SEQS", "64"),
+    ("VLLM_ENABLE_CHUNKED_PREFILL", "0"),
+];
+const LLAMA_CPP_PROFILE_BALANCED_ENV: &[(&str, &str)] = &[
+    ("LLAMA_CPP_THREADS", "8"),
+    ("LLAMA_CPP_CTX_SIZE", "8192"),
+    ("LLAMA_CPP_BATCH", "512"),
+];
+const MLX_PROFILE_BALANCED_ENV: &[(&str, &str)] = &[
+    ("MLX_QUANT", "4bit"),
+    ("MLX_MAX_BATCH_SIZE", "16"),
+    ("MLX_ENABLE_PROMPT_CACHE", "1"),
+];
+const SGLANG_PROFILE_BALANCED_ENV: &[(&str, &str)] = &[
+    ("SGLANG_ENABLE_RADIX_CACHE", "1"),
+    ("SGLANG_MAX_RUNNING_REQUESTS", "256"),
+];
+const TGI_PROFILE_BALANCED_ENV: &[(&str, &str)] = &[
+    ("TGI_MAX_BATCH_TOTAL_TOKENS", "32768"),
+    ("TGI_WAITING_SERVED_RATIO", "0.30"),
+];
+const APPLE_ANE_PROFILE_BALANCED_ENV: &[(&str, &str)] = &[
+    ("APPLE_ANE_ENABLE_LOW_LATENCY", "1"),
+    ("APPLE_ANE_PREFILL_TOKENS", "1024"),
+];
+const MISTRAL_RS_PROFILE_BALANCED_ENV: &[(&str, &str)] = &[
+    ("MISTRAL_RS_PAGED_ATTENTION", "1"),
+    ("MISTRAL_RS_KV_CACHE_DTYPE", "fp16"),
+    ("MISTRAL_RS_SPECULATIVE_DECODING", "0"),
+];
+
+const BACKEND_BEST_PRACTICE_PROFILES: &[BackendBestPracticeProfile] = &[
+    BackendBestPracticeProfile {
+        provider: "vllm",
+        profile: "balanced",
+        summary: "Default SOTA profile for stable throughput and latency.",
+        launch_hint:
+            "vllm serve MODEL --enable-prefix-caching --enable-chunked-prefill --gpu-memory-utilization 0.88",
+        env_overrides: VLLM_PROFILE_BALANCED_ENV,
+    },
+    BackendBestPracticeProfile {
+        provider: "vllm",
+        profile: "throughput",
+        summary: "Higher concurrency profile for heavy parallel workloads.",
+        launch_hint:
+            "vllm serve MODEL --enable-prefix-caching --max-num-seqs 256 --gpu-memory-utilization 0.92",
+        env_overrides: VLLM_PROFILE_THROUGHPUT_ENV,
+    },
+    BackendBestPracticeProfile {
+        provider: "vllm",
+        profile: "reliability",
+        summary: "Lower-pressure profile tuned for long sessions and fewer OOM events.",
+        launch_hint:
+            "vllm serve MODEL --max-num-seqs 64 --gpu-memory-utilization 0.80 --disable-chunked-prefill",
+        env_overrides: VLLM_PROFILE_RELIABILITY_ENV,
+    },
+    BackendBestPracticeProfile {
+        provider: "llama-cpp",
+        profile: "balanced",
+        summary: "General local GGUF serving profile with predictable latency.",
+        launch_hint:
+            "llama-server -m MODEL.gguf -c 8192 -t 8 -b 512 --host 127.0.0.1 --port 8080",
+        env_overrides: LLAMA_CPP_PROFILE_BALANCED_ENV,
+    },
+    BackendBestPracticeProfile {
+        provider: "mlx",
+        profile: "balanced",
+        summary: "Apple Silicon profile prioritizing cache reuse and compact memory.",
+        launch_hint:
+            "python -m mlx_lm.server --model mlx-community/Qwen3-8B-4bit --host 127.0.0.1 --port 8080",
+        env_overrides: MLX_PROFILE_BALANCED_ENV,
+    },
+    BackendBestPracticeProfile {
+        provider: "apple-ane",
+        profile: "balanced",
+        summary: "ANE-optimized low-latency settings for on-device endpoints.",
+        launch_hint: "Use your ANE OpenAI-compatible server with low-latency prefill settings.",
+        env_overrides: APPLE_ANE_PROFILE_BALANCED_ENV,
+    },
+    BackendBestPracticeProfile {
+        provider: "sglang",
+        profile: "balanced",
+        summary: "SGLang cache-first profile for sustained request loads.",
+        launch_hint:
+            "python -m sglang.launch_server --model-path MODEL --host 127.0.0.1 --port 30000",
+        env_overrides: SGLANG_PROFILE_BALANCED_ENV,
+    },
+    BackendBestPracticeProfile {
+        provider: "tgi",
+        profile: "balanced",
+        summary: "Text-Generation-Inference profile balancing batch depth and tail latency.",
+        launch_hint:
+            "text-generation-launcher --model-id MODEL --port 8082 --max-batch-total-tokens 32768",
+        env_overrides: TGI_PROFILE_BALANCED_ENV,
+    },
+    BackendBestPracticeProfile {
+        provider: "mistral-rs",
+        profile: "balanced",
+        summary: "mistral.rs runtime baseline for robust local serving.",
+        launch_hint: "mistralrs-server --model MODEL --port 8083 --paged-attention",
+        env_overrides: MISTRAL_RS_PROFILE_BALANCED_ENV,
+    },
+];
+
+fn normalize_backend_provider(value: &str) -> String {
+    let raw = value.trim().to_ascii_lowercase();
+    match raw.as_str() {
+        "llvm" | "ollvm" => "vllm".to_string(),
+        "llama.cpp" | "llamacpp" => "llama-cpp".to_string(),
+        "ane" => "apple-ane".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn backend_profile_lookup(
+    provider: &str,
+    profile: Option<&str>,
+) -> Option<&'static BackendBestPracticeProfile> {
+    let normalized = normalize_backend_provider(provider);
+    let profile = profile.unwrap_or("balanced").trim().to_ascii_lowercase();
+    BACKEND_BEST_PRACTICE_PROFILES.iter().find(|row| {
+        row.provider.eq_ignore_ascii_case(&normalized) && row.profile.eq_ignore_ascii_case(&profile)
+    })
+}
+
+fn render_backend_profiles(provider: Option<&str>) -> String {
+    let mut out = String::new();
+    out.push_str("Backend best-practice profiles\n");
+    out.push_str("-------------------------------\n");
+    let filtered: Vec<&BackendBestPracticeProfile> = if let Some(provider) = provider {
+        let normalized = normalize_backend_provider(provider);
+        BACKEND_BEST_PRACTICE_PROFILES
+            .iter()
+            .filter(|row| row.provider.eq_ignore_ascii_case(&normalized))
+            .collect()
+    } else {
+        BACKEND_BEST_PRACTICE_PROFILES.iter().collect()
+    };
+    if filtered.is_empty() {
+        let selected = provider.unwrap_or("(none)");
+        let _ = writeln!(out, "No backend profile presets found for '{}'.", selected);
+        return out.trim_end().to_string();
+    }
+    for row in filtered {
+        let _ = writeln!(
+            out,
+            "- {}:{}\n  {}\n  launch: {}\n  env: {}",
+            row.provider,
+            row.profile,
+            row.summary,
+            row.launch_hint,
+            row.env_overrides
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<String>>()
+                .join(", ")
+        );
+    }
+    out.push_str("\nUse `/model backend apply <provider> [profile]` to load env overrides for current runtime.");
+    out.trim_end().to_string()
+}
+
+fn persist_backend_profile_env(
+    provider: &str,
+    profile: &str,
+    env_pairs: &[(&str, &str)],
+) -> Result<PathBuf, AgentError> {
+    let dir = hermes_config::hermes_home()
+        .join("runtime")
+        .join("backend_profiles");
+    std::fs::create_dir_all(&dir).map_err(|e| {
+        AgentError::Io(format!(
+            "Failed to create backend profile directory {}: {}",
+            dir.display(),
+            e
+        ))
+    })?;
+    let path = dir.join(format!(
+        "{}-{}.env",
+        normalize_backend_provider(provider),
+        profile.trim().to_ascii_lowercase()
+    ));
+    let mut body = String::new();
+    for (key, value) in env_pairs {
+        let _ = writeln!(body, "{}={}", key, value);
+    }
+    std::fs::write(&path, body).map_err(|e| {
+        AgentError::Io(format!(
+            "Failed to write backend profile file {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+    Ok(path)
+}
+
+fn model_current_provider_and_id(model: &str) -> (String, String) {
+    if let Some((provider, model_id)) = model.split_once(':') {
+        (
+            provider.trim().to_ascii_lowercase(),
+            model_id.trim().to_string(),
+        )
+    } else {
+        ("openai".to_string(), model.trim().to_string())
+    }
+}
+
+async fn handle_model_harness_command(
+    app: &mut App,
+    args: &[&str],
+) -> Result<CommandResult, AgentError> {
+    let (current_provider, current_model_id) = model_current_provider_and_id(&app.current_model);
+    let target = args.first().copied().unwrap_or_default().trim();
+    let (provider, requested_model) = if target.is_empty() {
+        (current_provider.clone(), current_model_id.clone())
+    } else if target.contains(':') {
+        let normalized = normalize_provider_model(target)?;
+        let (prov, model_id) = model_current_provider_and_id(&normalized);
+        (prov, model_id)
+    } else {
+        (normalize_backend_provider(target), current_model_id.clone())
+    };
+
+    let catalog = provider_model_ids(&provider).await;
+    let catalog_total = catalog.len();
+    let selected_model = requested_model.trim().to_string();
+    let selected_lc = selected_model.to_ascii_lowercase();
+    let selected_ok = catalog.iter().any(|candidate| {
+        let lower = candidate.trim().to_ascii_lowercase();
+        lower == selected_lc || lower.ends_with(&format!("/{selected_lc}"))
+    });
+    let credential_present = crate::app::provider_api_key_from_env(&provider).is_some();
+    let auth_state_present = crate::auth::read_provider_auth_state(&provider)
+        .ok()
+        .flatten()
+        .is_some();
+    let cache_status = cached_provider_catalog_status(&provider);
+    let mut out = String::new();
+    let _ = writeln!(out, "Model/provider harness");
+    let _ = writeln!(out, "provider: {}", provider);
+    let _ = writeln!(out, "selected_model: {}", selected_model);
+    let _ = writeln!(
+        out,
+        "credentials: api_key={} oauth_state={}",
+        yes_no(credential_present),
+        yes_no(auth_state_present)
+    );
+    let _ = writeln!(out, "catalog_total: {}", catalog_total);
+    let _ = writeln!(out, "selected_in_catalog: {}", yes_no(selected_ok));
+    if let Some(status) = cache_status {
+        let _ = writeln!(
+            out,
+            "catalog_cache: verified={} age_secs={}",
+            yes_no(status.verified),
+            status
+                .age_secs
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "n/a".to_string())
+        );
+    } else {
+        let _ = writeln!(out, "catalog_cache: unavailable");
+    }
+    if !selected_ok {
+        let sample = catalog
+            .iter()
+            .take(6)
+            .cloned()
+            .collect::<Vec<String>>()
+            .join(", ");
+        let _ = writeln!(
+            out,
+            "remediation: switch via `/model {} --provider {}` (or run `/model {}`)",
+            selected_model, provider, provider
+        );
+        if !sample.is_empty() {
+            let _ = writeln!(out, "catalog_sample: {}", sample);
+        }
+    }
+    if provider == "openrouter" && !credential_present && !auth_state_present {
+        let _ = writeln!(
+            out,
+            "openrouter_hint: set OPENROUTER_API_KEY or use a provider with OAuth (`/auth refresh`)."
+        );
+    }
+    if provider == "huggingface" {
+        let _ = writeln!(
+            out,
+            "huggingface_hint: prefer HF_TOKEN + HF_BASE_URL for full catalog enumeration."
+        );
+    }
+    emit_command_output(app, out.trim_end());
+    Ok(CommandResult::Handled)
+}
+
+fn handle_model_backend_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let action = args.first().copied().unwrap_or("list").to_ascii_lowercase();
+    match action.as_str() {
+        "list" | "status" => {
+            let provider = args.get(1).copied();
+            emit_command_output(app, render_backend_profiles(provider));
+        }
+        "show" => {
+            let Some(provider) = args.get(1).copied() else {
+                emit_command_output(app, "Usage: /model backend show <provider> [profile]");
+                return Ok(CommandResult::Handled);
+            };
+            let profile = args.get(2).copied();
+            let Some(row) = backend_profile_lookup(provider, profile) else {
+                emit_command_output(
+                    app,
+                    format!(
+                        "No backend profile found for {}:{}.",
+                        provider,
+                        profile.unwrap_or("balanced")
+                    ),
+                );
+                return Ok(CommandResult::Handled);
+            };
+            emit_command_output(
+                app,
+                format!(
+                    "{}:{}\n{}\nlaunch: {}\nenv: {}",
+                    row.provider,
+                    row.profile,
+                    row.summary,
+                    row.launch_hint,
+                    row.env_overrides
+                        .iter()
+                        .map(|(k, v)| format!("{k}={v}"))
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                ),
+            );
+        }
+        "apply" => {
+            let Some(provider) = args.get(1).copied() else {
+                emit_command_output(app, "Usage: /model backend apply <provider> [profile]");
+                return Ok(CommandResult::Handled);
+            };
+            let profile = args.get(2).copied().unwrap_or("balanced");
+            let Some(row) = backend_profile_lookup(provider, Some(profile)) else {
+                emit_command_output(
+                    app,
+                    format!("No backend profile found for {}:{}.", provider, profile),
+                );
+                return Ok(CommandResult::Handled);
+            };
+            for (key, value) in row.env_overrides {
+                std::env::set_var(key, value);
+            }
+            std::env::set_var("HERMES_LOCAL_BACKEND_PROFILE", row.profile);
+            std::env::set_var("HERMES_LOCAL_BACKEND_PROVIDER", row.provider);
+            let persisted = persist_backend_profile_env(row.provider, row.profile, row.env_overrides)?;
+            let (current_provider, _) = model_current_provider_and_id(&app.current_model);
+            if current_provider == row.provider {
+                let current = app.current_model.clone();
+                app.switch_model(&current);
+            }
+            emit_command_output(
+                app,
+                format!(
+                    "Applied backend profile {}:{}.\nlaunch: {}\npersisted_env_file: {}\nUse `set -a && source {}` before launching external backend processes.",
+                    row.provider,
+                    row.profile,
+                    row.launch_hint,
+                    persisted.display(),
+                    persisted.display()
+                ),
+            );
+        }
+        _ => emit_command_output(
+            app,
+            "Usage: /model backend [list|status [provider]|show <provider> [profile]|apply <provider> [profile]]",
+        ),
+    }
+    Ok(CommandResult::Handled)
+}
+
 async fn handle_model_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     if let Some(sub) = args.first().map(|v| v.trim()) {
         if sub.eq_ignore_ascii_case("failover") {
             return handle_model_failover_command(app, &args[1..]);
+        }
+        if sub.eq_ignore_ascii_case("backend") {
+            return handle_model_backend_command(app, &args[1..]);
+        }
+        if sub.eq_ignore_ascii_case("harness") {
+            return handle_model_harness_command(app, &args[1..]).await;
         }
         if sub.eq_ignore_ascii_case("explain") {
             return handle_model_explain_command(app, &args[1..], false).await;
@@ -6660,6 +7074,153 @@ fn background_job_counts() -> (usize, usize, usize, usize) {
     (queued, running, completed, failed)
 }
 
+#[derive(Debug, Clone)]
+struct BackgroundJobRecord {
+    id: String,
+    status: String,
+    task: String,
+    attempts: u64,
+    created_at: String,
+    started_at: String,
+    finished_at: String,
+    log_path: PathBuf,
+    status_path: PathBuf,
+}
+
+fn collect_background_jobs(limit: usize) -> Vec<BackgroundJobRecord> {
+    let jobs_dir = hermes_config::hermes_home().join("background_jobs");
+    let Ok(entries) = std::fs::read_dir(jobs_dir) else {
+        return Vec::new();
+    };
+    let mut rows = Vec::new();
+    for entry in entries.filter_map(Result::ok) {
+        let status_path = entry.path();
+        if status_path.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let map = read_json_map(&status_path);
+        if map.is_empty() {
+            continue;
+        }
+        let id = map
+            .get("id")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(ToString::to_string)
+            .or_else(|| {
+                status_path
+                    .file_stem()
+                    .and_then(|v| v.to_str())
+                    .map(ToString::to_string)
+            })
+            .unwrap_or_else(|| "unknown".to_string());
+        let status = map
+            .get("status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown")
+            .to_string();
+        let task = map
+            .get("task")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let attempts = map.get("attempts").and_then(|v| v.as_u64()).unwrap_or(0);
+        let created_at = map
+            .get("created_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let started_at = map
+            .get("started_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let finished_at = map
+            .get("finished_at")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let log_path = map
+            .get("log_path")
+            .and_then(|v| v.as_str())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| status_path.with_extension("log"));
+        rows.push(BackgroundJobRecord {
+            id,
+            status,
+            task,
+            attempts,
+            created_at,
+            started_at,
+            finished_at,
+            log_path,
+            status_path,
+        });
+    }
+    rows.sort_by(|a, b| b.id.cmp(&a.id));
+    rows.truncate(limit.max(1));
+    rows
+}
+
+fn resolve_background_job(id_or_prefix: &str) -> Option<BackgroundJobRecord> {
+    let needle = id_or_prefix.trim().to_ascii_lowercase();
+    if needle.is_empty() {
+        return None;
+    }
+    collect_background_jobs(500).into_iter().find(|job| {
+        let id = job.id.to_ascii_lowercase();
+        id == needle || id.starts_with(&needle)
+    })
+}
+
+fn tail_text_lines(text: &str, limit: usize) -> String {
+    let rows: Vec<&str> = text.lines().collect();
+    let cap = limit.max(1);
+    let start = rows.len().saturating_sub(cap);
+    rows[start..].join("\n")
+}
+
+fn tail_file_lines(path: &Path, limit: usize) -> Result<String, AgentError> {
+    let body = std::fs::read_to_string(path).map_err(|e| {
+        AgentError::Io(format!(
+            "Failed to read background log {}: {}",
+            path.display(),
+            e
+        ))
+    })?;
+    Ok(tail_text_lines(&body, limit))
+}
+
+fn render_background_status(limit: usize) -> String {
+    let (queued, running, completed, failed) = background_job_counts();
+    let rows = collect_background_jobs(limit);
+    let mut out = String::new();
+    let _ = writeln!(
+        out,
+        "Background queue status: queued={} running={} completed={} failed={}",
+        queued, running, completed, failed
+    );
+    if rows.is_empty() {
+        out.push_str("\nNo background jobs found.");
+        return out;
+    }
+    out.push_str("\nRecent background jobs:\n");
+    for (idx, row) in rows.iter().enumerate() {
+        let _ = writeln!(
+            out,
+            "{}. {} [{}] attempts={} task={}",
+            idx + 1,
+            row.id,
+            row.status,
+            row.attempts,
+            truncate_chars(row.task.trim(), 84)
+        );
+    }
+    out.push_str("\nUse `/background tail <job-id> [N]` to inspect logs.");
+    out
+}
+
 async fn handle_mission_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     let action = args
         .first()
@@ -7654,7 +8215,71 @@ fn handle_background_command(app: &mut App, args: &[&str]) -> Result<CommandResu
     if args.is_empty() {
         emit_command_output(
             app,
-            "Usage: /background <message>\nQueues a task to run in the background while you continue chatting.",
+            "Usage: /background <message>\n\
+             - /background status|list\n\
+             - /background tail <job-id> [N]\n\
+             Queues a task to run in the background while you continue chatting.",
+        );
+        return Ok(CommandResult::Handled);
+    }
+    let sub = args[0].trim().to_ascii_lowercase();
+    if sub == "status" || sub == "list" {
+        emit_command_output(app, render_background_status(12));
+        return Ok(CommandResult::Handled);
+    }
+    if sub == "tail" || sub == "log" || sub == "logs" || sub == "show" {
+        let limit = args
+            .get(2)
+            .and_then(|raw| raw.trim().parse::<usize>().ok())
+            .unwrap_or(80)
+            .clamp(5, 800);
+        let requested_id = args
+            .get(1)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                collect_background_jobs(1)
+                    .into_iter()
+                    .next()
+                    .map(|row| row.id)
+            });
+        let Some(id_or_prefix) = requested_id else {
+            emit_command_output(
+                app,
+                "Usage: /background tail <job-id> [N]\nNo jobs available yet.",
+            );
+            return Ok(CommandResult::Handled);
+        };
+        let Some(job) = resolve_background_job(&id_or_prefix) else {
+            emit_command_output(
+                app,
+                format!(
+                    "Background job '{}' not found. Use `/background status`.",
+                    id_or_prefix
+                ),
+            );
+            return Ok(CommandResult::Handled);
+        };
+        let tail = if job.log_path.exists() {
+            tail_file_lines(&job.log_path, limit)?
+        } else {
+            "(log file does not exist yet)".to_string()
+        };
+        emit_command_output(
+            app,
+            format!(
+                "Background job\nid: {}\nstatus: {}\nattempts: {}\ncreated_at: {}\nstarted_at: {}\nfinished_at: {}\nstatus_file: {}\nlog_file: {}\n\n--- log tail ({}) ---\n{}",
+                job.id,
+                job.status,
+                job.attempts,
+                if job.created_at.is_empty() { "(n/a)" } else { job.created_at.as_str() },
+                if job.started_at.is_empty() { "(n/a)" } else { job.started_at.as_str() },
+                if job.finished_at.is_empty() { "(n/a)" } else { job.finished_at.as_str() },
+                job.status_path.display(),
+                job.log_path.display(),
+                limit,
+                if tail.trim().is_empty() { "(empty)" } else { tail.trim_end() }
+            ),
         );
         return Ok(CommandResult::Handled);
     }
@@ -10807,7 +11432,165 @@ fn sanitize_graph_node(raw: &str) -> String {
         .collect()
 }
 
-fn handle_graph_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+fn contextlattice_base_url_for_graph() -> String {
+    std::env::var("CONTEXTLATTICE_ORCHESTRATOR_URL")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| std::env::var("MEMMCP_ORCHESTRATOR_URL").ok())
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| "http://127.0.0.1:8075".to_string())
+}
+
+fn contextlattice_api_key_for_graph() -> Option<String> {
+    std::env::var("CONTEXTLATTICE_API_KEY")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| std::env::var("MEMMCP_API_KEY").ok())
+        .filter(|v| !v.trim().is_empty())
+}
+
+fn extract_json_path<'a>(
+    value: &'a serde_json::Value,
+    path: &[&str],
+) -> Option<&'a serde_json::Value> {
+    let mut cur = value;
+    for key in path {
+        cur = cur.get(*key)?;
+    }
+    Some(cur)
+}
+
+fn extract_embedding_diag_line(payload: &serde_json::Value) -> String {
+    let backend = [
+        &["backend"][..],
+        &["embedding_backend"][..],
+        &["embeddings", "backend"][..],
+        &["retrieval", "embedding_backend"][..],
+    ]
+    .into_iter()
+    .find_map(|path| extract_json_path(payload, path))
+    .and_then(|v| v.as_str())
+    .unwrap_or("unknown");
+    let dimension = [
+        &["dimension"][..],
+        &["embeddings", "dimension"][..],
+        &["retrieval", "embedding_dimension"][..],
+    ]
+    .into_iter()
+    .find_map(|path| extract_json_path(payload, path))
+    .and_then(|v| v.as_u64())
+    .map(|v| v.to_string())
+    .unwrap_or_else(|| "n/a".to_string());
+    let model = [
+        &["model"][..],
+        &["embeddings", "model"][..],
+        &["retrieval", "embedding_model"][..],
+    ]
+    .into_iter()
+    .find_map(|path| extract_json_path(payload, path))
+    .and_then(|v| v.as_str())
+    .unwrap_or("unknown");
+    format!(
+        "embedding_diagnostics: backend={} model={} dimension={}",
+        backend, model, dimension
+    )
+}
+
+async fn contextlattice_embedding_diagnostics_lines() -> Vec<String> {
+    let base_url = contextlattice_base_url_for_graph();
+    let mut lines = Vec::new();
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(2))
+        .build()
+    {
+        Ok(client) => client,
+        Err(err) => {
+            lines.push(format!("client_error: {}", err));
+            return lines;
+        }
+    };
+
+    let mut health_req = client.get(format!("{}/health", base_url.trim_end_matches('/')));
+    if let Some(key) = contextlattice_api_key_for_graph() {
+        health_req = health_req.header("x-api-key", key);
+    }
+    match health_req.send().await {
+        Ok(resp) => {
+            let code = resp.status().as_u16();
+            lines.push(format!("health_status: {}", code));
+        }
+        Err(err) => {
+            lines.push(format!("health_status: unreachable ({})", err));
+        }
+    }
+
+    let mut emb_req = client.get(format!(
+        "{}/telemetry/embeddings",
+        base_url.trim_end_matches('/')
+    ));
+    if let Some(key) = contextlattice_api_key_for_graph() {
+        emb_req = emb_req.header("x-api-key", key);
+    }
+    match emb_req.send().await {
+        Ok(resp) => {
+            let status = resp.status();
+            if status.is_success() {
+                match resp.json::<serde_json::Value>().await {
+                    Ok(payload) => lines.push(extract_embedding_diag_line(&payload)),
+                    Err(err) => {
+                        lines.push(format!("embedding_diagnostics: invalid_json ({})", err))
+                    }
+                }
+            } else {
+                lines.push(format!(
+                    "embedding_diagnostics: endpoint_status={} (fallback to recall telemetry)",
+                    status
+                ));
+            }
+        }
+        Err(err) => lines.push(format!("embedding_diagnostics: unreachable ({})", err)),
+    }
+
+    let mut recall_req = client.get(format!(
+        "{}/telemetry/recall",
+        base_url.trim_end_matches('/')
+    ));
+    if let Some(key) = contextlattice_api_key_for_graph() {
+        recall_req = recall_req.header("x-api-key", key);
+    }
+    match recall_req.send().await {
+        Ok(resp) if resp.status().is_success() => match resp.json::<serde_json::Value>().await {
+            Ok(payload) => {
+                let qps = payload
+                    .get("query_per_sec")
+                    .or_else(|| payload.get("qps"))
+                    .and_then(|v| v.as_f64())
+                    .map(|v| format!("{:.3}", v))
+                    .unwrap_or_else(|| "n/a".to_string());
+                let hit_rate = payload
+                    .get("hit_rate")
+                    .or_else(|| payload.get("grounded_hit_rate"))
+                    .and_then(|v| v.as_f64())
+                    .map(|v| format!("{:.3}", v))
+                    .unwrap_or_else(|| "n/a".to_string());
+                lines.push(format!(
+                    "recall_telemetry: qps={} hit_rate={}",
+                    qps, hit_rate
+                ));
+            }
+            Err(err) => lines.push(format!("recall_telemetry: invalid_json ({})", err)),
+        },
+        Ok(resp) => lines.push(format!(
+            "recall_telemetry: endpoint_status={}",
+            resp.status()
+        )),
+        Err(err) => lines.push(format!("recall_telemetry: unreachable ({})", err)),
+    }
+
+    lines
+}
+
+async fn handle_graph_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
     let sub = args
         .first()
         .map(|v| v.to_ascii_lowercase())
@@ -10827,6 +11610,10 @@ fn handle_graph_command(app: &mut App, args: &[&str]) -> Result<CommandResult, A
             let mut out = String::new();
             let _ = writeln!(out, "Graph-memory status");
             let _ = writeln!(out, "  contextlattice_mcp: {}", yes_no(contextlattice_mcp));
+            let diag = contextlattice_embedding_diagnostics_lines().await;
+            for row in &diag {
+                let _ = writeln!(out, "  {}", row);
+            }
             if let Some(policy) = policy {
                 let _ = writeln!(
                     out,
@@ -10847,6 +11634,21 @@ fn handle_graph_command(app: &mut App, args: &[&str]) -> Result<CommandResult, A
             } else {
                 let _ = writeln!(out, "  contextlattice_policy: unavailable");
             }
+            emit_command_output(app, out.trim_end());
+        }
+        "embeddings" | "embedding" | "diag" => {
+            let mut out = String::new();
+            let _ = writeln!(out, "ContextLattice embedding diagnostics");
+            let _ = writeln!(out, "base_url: {}", contextlattice_base_url_for_graph());
+            let lines = contextlattice_embedding_diagnostics_lines().await;
+            if lines.is_empty() {
+                out.push_str("no diagnostic lines returned.");
+            } else {
+                for line in lines {
+                    let _ = writeln!(out, "- {}", line);
+                }
+            }
+            out.push_str("\nIf endpoint support is partial, Hermes falls back to `/telemetry/recall` snapshots.");
             emit_command_output(app, out.trim_end());
         }
         "repo" | "semantic" => {
@@ -10948,8 +11750,14 @@ fn handle_graph_command(app: &mut App, args: &[&str]) -> Result<CommandResult, A
             let _ = writeln!(out, "```");
             emit_command_output(app, out.trim_end());
         }
-        "help" => emit_command_output(app, "Usage: /graph [status|repo [path] [--max-files N]]"),
-        _ => emit_command_output(app, "Usage: /graph [status|repo [path] [--max-files N]]"),
+        "help" => emit_command_output(
+            app,
+            "Usage: /graph [status|embeddings|repo [path] [--max-files N]]",
+        ),
+        _ => emit_command_output(
+            app,
+            "Usage: /graph [status|embeddings|repo [path] [--max-files N]]",
+        ),
     }
     Ok(CommandResult::Handled)
 }
@@ -13015,14 +13823,7 @@ fn handle_queue_command(app: &mut App, args: &[&str]) -> Result<CommandResult, A
     }
 
     if args[0].eq_ignore_ascii_case("status") || args[0].eq_ignore_ascii_case("list") {
-        let (queued, running, completed, failed) = background_job_counts();
-        emit_command_output(
-            app,
-            format!(
-                "Background queue status: queued={} running={} completed={} failed={}",
-                queued, running, completed, failed
-            ),
-        );
+        emit_command_output(app, render_background_status(12));
         return Ok(CommandResult::Handled);
     }
 
@@ -21066,6 +21867,35 @@ install_command: "uv pip install -r requirements.txt"
         let providers = vec!["openai", "nous", "anthropic"];
         let req = parse_model_switch_request(&[], &providers);
         assert_eq!(req, ModelSwitchRequest::PickProviderThenModel);
+    }
+
+    #[test]
+    fn tail_text_lines_returns_last_n_lines() {
+        let body = "a\nb\nc\nd\ne\n";
+        assert_eq!(tail_text_lines(body, 2), "d\ne");
+        assert_eq!(tail_text_lines(body, 10), "a\nb\nc\nd\ne");
+    }
+
+    #[test]
+    fn backend_profile_lookup_resolves_aliases() {
+        let row = backend_profile_lookup("llvm", Some("throughput")).expect("profile");
+        assert_eq!(row.provider, "vllm");
+        assert_eq!(row.profile, "throughput");
+    }
+
+    #[test]
+    fn extract_embedding_diag_line_supports_nested_payload() {
+        let payload = serde_json::json!({
+            "retrieval": {
+                "embedding_backend": "qdrant",
+                "embedding_model": "text-embedding-3-large",
+                "embedding_dimension": 3072
+            }
+        });
+        let line = extract_embedding_diag_line(&payload);
+        assert!(line.contains("backend=qdrant"));
+        assert!(line.contains("model=text-embedding-3-large"));
+        assert!(line.contains("dimension=3072"));
     }
 
     #[test]

@@ -21,6 +21,7 @@ const MLX_DEFAULT_BASE_URL: &str = "http://127.0.0.1:8080/v1";
 const APPLE_ANE_DEFAULT_BASE_URL: &str = "http://127.0.0.1:8081/v1";
 const SGLANG_DEFAULT_BASE_URL: &str = "http://127.0.0.1:30000/v1";
 const TGI_DEFAULT_BASE_URL: &str = "http://127.0.0.1:8082/v1";
+const HUGGINGFACE_ROUTER_DEFAULT_BASE_URL: &str = "https://router.huggingface.co/v1";
 
 const CURATED_PROVIDER_MODELS: &[(&str, &[&str])] = &[
     (
@@ -533,6 +534,40 @@ fn local_provider_resolved_base_url(provider: &str) -> Option<String> {
         .or_else(|| local_provider_default_base_url(provider).map(ToString::to_string))
 }
 
+fn parse_boolish_env(name: &str) -> bool {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_ascii_lowercase())
+        .is_some_and(|value| matches!(value.as_str(), "1" | "true" | "yes" | "on"))
+}
+
+fn huggingface_live_catalog_disabled() -> bool {
+    parse_boolish_env("HERMES_HF_CATALOG_DISABLE_LIVE")
+}
+
+fn huggingface_catalog_limit() -> usize {
+    std::env::var("HERMES_HF_CATALOG_LIMIT")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .map(|v| v.clamp(10, 500))
+        .unwrap_or(120)
+}
+
+fn resolve_huggingface_catalog_endpoint_and_token() -> (String, Option<String>) {
+    let base_url = std::env::var("HF_BASE_URL")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| std::env::var("HUGGINGFACE_BASE_URL").ok())
+        .filter(|v| !v.trim().is_empty())
+        .unwrap_or_else(|| HUGGINGFACE_ROUTER_DEFAULT_BASE_URL.to_string());
+    let token = std::env::var("HF_TOKEN")
+        .ok()
+        .filter(|v| !v.trim().is_empty())
+        .or_else(|| std::env::var("HUGGINGFACE_API_KEY").ok())
+        .filter(|v| !v.trim().is_empty());
+    (base_url, token)
+}
+
 async fn fetch_openai_compatible_live_models(base_url: &str, api_key: Option<&str>) -> Vec<String> {
     if cfg!(test) {
         return Vec::new();
@@ -730,6 +765,39 @@ pub async fn provider_model_ids_with_client(
         } else {
             merged
         }
+    } else if normalized == "huggingface" {
+        // For Hugging Face, prefer curated stable picks first, then append live
+        // router models and models.dev-discovered agentic entries.
+        let mut seen: HashSet<String> = HashSet::new();
+        let mut merged: Vec<String> = Vec::new();
+        for model in curated {
+            let key = model.to_ascii_lowercase();
+            if seen.insert(key) {
+                merged.push((*model).to_string());
+            }
+        }
+
+        if !huggingface_live_catalog_disabled() {
+            let (base_url, token) = resolve_huggingface_catalog_endpoint_and_token();
+            let live =
+                fetch_openai_compatible_live_models(base_url.as_str(), token.as_deref()).await;
+            for model in live.into_iter().take(huggingface_catalog_limit()) {
+                let key = model.to_ascii_lowercase();
+                if seen.insert(key) {
+                    merged.push(model);
+                }
+            }
+        }
+
+        client.fetch(false).await;
+        let models_dev = client.list_agentic_models("huggingface");
+        for model in models_dev {
+            let key = model.to_ascii_lowercase();
+            if seen.insert(key) {
+                merged.push(model);
+            }
+        }
+        merged
     } else if is_local_openai_compatible_provider(&normalized) {
         let mut seen: HashSet<String> = HashSet::new();
         let mut merged: Vec<String> = Vec::new();
@@ -810,7 +878,7 @@ mod tests {
         cached_provider_catalog_status, is_models_dev_preferred_provider,
         load_provider_catalog_cache, merge_with_models_dev, persist_provider_catalog_cache,
         provider_catalog_cache_path, provider_catalog_entries, provider_curated_models,
-        provider_model_ids_with_client,
+        provider_model_ids_with_client, resolve_huggingface_catalog_endpoint_and_token,
     };
 
     fn env_guard() -> std::sync::MutexGuard<'static, ()> {
@@ -906,6 +974,10 @@ mod tests {
 
     #[tokio::test]
     async fn preferred_provider_merges_models_dev_with_curated() {
+        let _guard = env_guard();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let prior_home = std::env::var("HERMES_HOME").ok();
+        std::env::set_var("HERMES_HOME", tmp.path());
         let client = seeded_client(json!({
             "opencode-go": {
                 "models": {
@@ -932,6 +1004,11 @@ mod tests {
         assert!(mimo25 < qwen);
         assert!(mimo2 < qwen);
         assert!(merged.iter().any(|m| m == "qwen3.6-plus"));
+        if let Some(value) = prior_home {
+            std::env::set_var("HERMES_HOME", value);
+        } else {
+            std::env::remove_var("HERMES_HOME");
+        }
     }
 
     #[tokio::test]
@@ -1064,6 +1141,46 @@ mod tests {
         // Smoke-test the function shape with unknown providers only, avoiding network use.
         let entries = provider_catalog_entries(&["unknown-provider"], 2).await;
         assert!(entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn huggingface_catalog_keeps_curated_then_models_dev_agentic_entries() {
+        let _guard = env_guard();
+        std::env::set_var("HERMES_HF_CATALOG_DISABLE_LIVE", "1");
+        let client = seeded_client(json!({
+            "huggingface": {
+                "models": {
+                    "meta-llama/Llama-3.3-70B-Instruct": {"tool_call": true},
+                    "Qwen/Qwen3.5-Coder-30B-A3B-Instruct": {"tool_call": true}
+                }
+            }
+        }));
+        let out = provider_model_ids_with_client("huggingface", &client).await;
+        assert!(
+            out.starts_with(&[
+                "moonshotai/Kimi-K2.5".to_string(),
+                "Qwen/Qwen3.5-397B-A17B".to_string(),
+                "deepseek-ai/DeepSeek-V3.2".to_string()
+            ]),
+            "curated huggingface picks should remain first"
+        );
+        assert!(
+            out.iter().any(|m| m == "meta-llama/Llama-3.3-70B-Instruct"),
+            "models.dev agentic entries should be appended"
+        );
+        std::env::remove_var("HERMES_HF_CATALOG_DISABLE_LIVE");
+    }
+
+    #[test]
+    fn huggingface_catalog_endpoint_prefers_hf_base_url_and_token() {
+        let _guard = env_guard();
+        std::env::set_var("HF_BASE_URL", "https://example-hf-router.test/v1");
+        std::env::set_var("HF_TOKEN", "hf_test_token");
+        let (base_url, token) = resolve_huggingface_catalog_endpoint_and_token();
+        assert_eq!(base_url, "https://example-hf-router.test/v1");
+        assert_eq!(token.as_deref(), Some("hf_test_token"));
+        std::env::remove_var("HF_BASE_URL");
+        std::env::remove_var("HF_TOKEN");
     }
 
     #[test]

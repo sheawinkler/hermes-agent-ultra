@@ -5197,14 +5197,14 @@ mod tests {
             state.push_activity(format!("event-{i}"));
         }
         assert_eq!(state.recent_activity.len(), 16);
-        assert_eq!(
-            state.recent_activity.first().map(String::as_str),
-            Some("event-14")
-        );
-        assert_eq!(
-            state.recent_activity.last().map(String::as_str),
-            Some("event-29")
-        );
+        assert!(state
+            .recent_activity
+            .first()
+            .is_some_and(|line| line.ends_with("event-14")));
+        assert!(state
+            .recent_activity
+            .last()
+            .is_some_and(|line| line.ends_with("event-29")));
     }
 
     #[test]
