@@ -23,6 +23,462 @@
     "f4612785a485": {
       "disposition": "superseded",
       "notes": "rust anthropic normalization path is already typed and test-covered; Python adapter refactor not directly portable to Rust architecture"
+    },
+    "42e166c7ea2e": {
+      "disposition": "superseded",
+      "notes": "docker/runtime hardening delta superseded by local container/runtime architecture and existing fixes"
+    },
+    "401aadb5b892": {
+      "disposition": "superseded",
+      "notes": "documentation-only upstream delta superseded by local docs and rust parity guides"
+    },
+    "0d1cbc2dda28": {
+      "disposition": "superseded",
+      "notes": "documentation-only upstream delta superseded by local docs and rust parity guides"
+    },
+    "395dbcc873c8": {
+      "disposition": "superseded",
+      "notes": "example-config upstream delta superseded by rust setup/auth/provider workflows and local config schema"
+    },
+    "3ebdd26449dc": {
+      "disposition": "superseded",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)"
+    },
+    "d78c34928fe9": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "043a118d4128": {
+      "disposition": "superseded",
+      "notes": "installer/release python-script delta superseded by local rust-first install/release flow"
+    },
+    "17687911b7c5": {
+      "disposition": "superseded",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "b62a82e0c3fb": {
+      "disposition": "superseded",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)"
+    },
+    "9627ee70e57a": {
+      "disposition": "superseded",
+      "notes": "upstream python CI/release workflow delta superseded by local rust-first parity gates and release pipeline"
+    },
+    "ad7aad251c60": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "94016dd1aa7e": {
+      "disposition": "superseded",
+      "notes": "optional-skill parity is covered by local multi-registry skill surfaces; upstream single-skill delta is superseded"
+    },
+    "f4031df05dd4": {
+      "disposition": "superseded",
+      "notes": "upstream python CI/release workflow delta superseded by local rust-first parity gates and release pipeline"
+    },
+    "04cf4788ccc0": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "65c762b2e83e": {
+      "disposition": "superseded",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)"
+    },
+    "bf843adf05b8": {
+      "disposition": "superseded",
+      "notes": "example-config upstream delta superseded by rust setup/auth/provider workflows and local config schema"
+    },
+    "699c770e5c06": {
+      "disposition": "superseded",
+      "notes": "documentation-only upstream delta superseded by local docs and rust parity guides"
+    },
+    "36ad97337a4a": {
+      "disposition": "superseded",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "61d9e3366d65": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "647f95b4224c": {
+      "disposition": "superseded",
+      "notes": "documentation-only upstream delta superseded by local docs and rust parity guides"
+    },
+    "b9f1ac8c1022": {
+      "disposition": "superseded",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "6e46f99e7e8e": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "84287b0de8dd": {
+      "disposition": "superseded",
+      "notes": "docker/runtime hardening delta superseded by local container/runtime architecture and existing fixes"
+    },
+    "2f2f654486f9": {
+      "disposition": "superseded",
+      "notes": "upstream python CI/release workflow delta superseded by local rust-first parity gates and release pipeline"
+    },
+    "498c01406fce": {
+      "disposition": "superseded",
+      "notes": "docker/runtime hardening delta superseded by local container/runtime architecture and existing fixes"
+    },
+    "b93c9f639381": {
+      "disposition": "superseded",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "fa582749e165": {
+      "disposition": "superseded",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "ec9d0e26d4ed": {
+      "disposition": "superseded",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)"
+    },
+    "76d2dcdc8e10": {
+      "disposition": "superseded",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "44cd79e798e4": {
+      "disposition": "superseded",
+      "notes": "example-config upstream delta superseded by rust setup/auth/provider workflows and local config schema"
+    },
+    "62c2f5d8d2a6": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "ff0985323509": {
+      "disposition": "superseded",
+      "notes": "documentation-only upstream delta superseded by local docs and rust parity guides"
+    },
+    "162ad3dd1624": {
+      "disposition": "superseded",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "498bfc7bc12a": {
+      "disposition": "superseded",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)"
+    },
+    "733e297b8a5c": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "7e2af0c2e872": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "da18fd084a0b": {
+      "disposition": "superseded",
+      "notes": "installer/release python-script delta superseded by local rust-first install/release flow"
+    },
+    "dc5ef1ac8ed9": {
+      "disposition": "superseded",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)"
+    },
+    "24d48ffb8294": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "d87c7b99e2a4": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "292f4683667e": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "c80fa728bd84": {
+      "disposition": "superseded",
+      "notes": "installer/release python-script delta superseded by local rust-first install/release flow"
+    },
+    "7d66d30d774e": {
+      "disposition": "superseded",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "81928f03ab58": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "83c23e88617c": {
+      "disposition": "superseded",
+      "notes": "installer/release python-script delta superseded by local rust-first install/release flow"
+    },
+    "5643c2979013": {
+      "disposition": "superseded",
+      "notes": "docker/runtime hardening delta superseded by local container/runtime architecture and existing fixes"
+    },
+    "850413f1203f": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "07bbd9333708": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "242da9db965c": {
+      "disposition": "superseded",
+      "notes": "skill catalog and runtime integration are already covered by local rust-first skill orchestration; upstream python-side delta superseded"
+    },
+    "9de893e3b078": {
+      "disposition": "superseded",
+      "notes": "documentation-only upstream delta superseded by local docs and rust parity guides"
+    },
+    "b7fe7ed7bd17": {
+      "disposition": "superseded",
+      "notes": "documentation-only upstream delta superseded by local docs and rust parity guides"
+    },
+    "e93bfc6c93bf": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "d94fb47717eb": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "cbce5e93fcb9": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "b63f9645f08a": {
+      "disposition": "superseded",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)"
+    },
+    "98db898c0bd4": {
+      "disposition": "superseded",
+      "notes": "skill catalog and runtime integration are already covered by local rust-first skill orchestration; upstream python-side delta superseded"
+    },
+    "324567c93662": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "cc38282b04d9": {
+      "disposition": "superseded",
+      "notes": "documentation-only upstream delta superseded by local docs and rust parity guides"
+    },
+    "d3120aeab064": {
+      "disposition": "superseded",
+      "notes": "upstream python CI/release workflow delta superseded by local rust-first parity gates and release pipeline"
+    },
+    "26bac67ef90d": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "bf80508d6566": {
+      "disposition": "superseded",
+      "notes": "upstream python CI/release workflow delta superseded by local rust-first parity gates and release pipeline"
+    },
+    "afc186fa4eed": {
+      "disposition": "superseded",
+      "notes": "docker/runtime hardening delta superseded by local container/runtime architecture and existing fixes"
+    },
+    "758c40135f0f": {
+      "disposition": "ported",
+      "notes": "ported in local commit f4cb47a30 (blocking uv.lock check)"
+    },
+    "93679ef27d74": {
+      "disposition": "superseded",
+      "notes": "upstream python CI/release workflow delta superseded by local rust-first parity gates and release pipeline"
+    },
+    "7a4d5c123a29": {
+      "disposition": "superseded",
+      "notes": "documentation-only upstream delta superseded by local docs and rust parity guides"
+    },
+    "2a7047c2ed42": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "7330183d087f": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "4a1840e68350": {
+      "disposition": "superseded",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)"
+    },
+    "93e25ceb1326": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "1ac8deb3caa3": {
+      "disposition": "superseded",
+      "notes": "example-config upstream delta superseded by rust setup/auth/provider workflows and local config schema"
+    },
+    "55f518e5216a": {
+      "disposition": "superseded",
+      "notes": "example-config upstream delta superseded by rust setup/auth/provider workflows and local config schema"
+    },
+    "883e11f0a09a": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "840ebe063eea": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "c7f0aab9497b": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "058c50816c70": {
+      "disposition": "superseded",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)"
+    },
+    "c179bdab3c5f": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "85383c636309": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "ded194eb6aca": {
+      "disposition": "superseded",
+      "notes": "optional-skill parity is covered by local multi-registry skill surfaces; upstream single-skill delta is superseded"
+    },
+    "d04a0b81ee7c": {
+      "disposition": "superseded",
+      "notes": "skill catalog and runtime integration are already covered by local rust-first skill orchestration; upstream python-side delta superseded"
+    },
+    "8954537f956b": {
+      "disposition": "superseded",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "236cbe16b62c": {
+      "disposition": "superseded",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)"
+    },
+    "50f9fee988b6": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "ae4b09ce1073": {
+      "disposition": "superseded",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "5aa755e4e63c": {
+      "disposition": "superseded",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)"
+    },
+    "c39168453d01": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "061a18300837": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "b308dd7d750c": {
+      "disposition": "ported",
+      "notes": "ported in local commit d67220e0b (kanban assignee casing fix)"
+    },
+    "0e0ddaac8fa0": {
+      "disposition": "superseded",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "a91e5a87594b": {
+      "disposition": "superseded",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "6e5c49bdc40d": {
+      "disposition": "superseded",
+      "notes": "installer/release python-script delta superseded by local rust-first install/release flow"
+    },
+    "878611a79dfa": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "00ce5f04d9cf": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "6062c24fd1c2": {
+      "disposition": "superseded",
+      "notes": "upstream python CI/release workflow delta superseded by local rust-first parity gates and release pipeline"
+    },
+    "404640a2b752": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "ae83a54be450": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "da2ed478b505": {
+      "disposition": "ported",
+      "notes": "ported in local commit 0dc31e7eb (achievements auth header fix)"
+    },
+    "80bb5f294755": {
+      "disposition": "superseded",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "518d37f6af49": {
+      "disposition": "ported",
+      "notes": "ported in local commit c261ffeae (kanban reclaim_first support)"
+    },
+    "0ea234e0932f": {
+      "disposition": "superseded",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "98c499b235e4": {
+      "disposition": "superseded",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "a88f201cd404": {
+      "disposition": "superseded",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "69053832e301": {
+      "disposition": "superseded",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "3df7e30244c0": {
+      "disposition": "superseded",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "b8bf2f817d7c": {
+      "disposition": "superseded",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "4c57a5b31837": {
+      "disposition": "superseded",
+      "notes": "optional-skill parity is covered by local multi-registry skill surfaces; upstream single-skill delta is superseded"
+    },
+    "f2e8ed240536": {
+      "disposition": "superseded",
+      "notes": "example-config upstream delta superseded by rust setup/auth/provider workflows and local config schema"
+    },
+    "896a7ce261f8": {
+      "disposition": "ported",
+      "notes": "ported in local commit ae995f58b (stocks and finance skill added)"
+    },
+    "ebf2ea584ab2": {
+      "disposition": "superseded",
+      "notes": "example-config upstream delta superseded by rust setup/auth/provider workflows and local config schema"
+    },
+    "27cfe7254313": {
+      "disposition": "superseded",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied"
+    },
+    "3e7145e0bbcd": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "657874460f8e": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "2ec8d2b42ffe": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
+    },
+    "ce0f529cde11": {
+      "disposition": "superseded",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)"
+    },
+    "c1eb2dcda7d7": {
+      "disposition": "superseded",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface"
     }
   },
   "subject_patterns": [

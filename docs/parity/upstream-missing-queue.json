@@ -27218,7 +27218,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/main.py",
@@ -27264,7 +27264,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "nix/tui.nix"
@@ -27390,8 +27390,8 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "Dockerfile",
         "hermes_cli/main.py",
@@ -27399,7 +27399,7 @@
         "tests/tools/test_dockerfile_pid1_reaping.py"
       ],
       "files_touched": 4,
-      "notes": "",
+      "notes": "docker/runtime hardening delta superseded by local container/runtime architecture and existing fixes",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -27413,7 +27413,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "nix/tui.nix",
@@ -27434,7 +27434,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/profile-tui.py"
@@ -27454,7 +27454,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "ui-tui/README.md"
@@ -35357,7 +35357,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "nix/tui.nix"
@@ -37953,13 +37953,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "SECURITY.md"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "documentation-only upstream delta superseded by local docs and rust parity guides",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -40457,13 +40457,13 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "SECURITY.md"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "documentation-only upstream delta superseded by local docs and rust parity guides",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -40477,7 +40477,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "agent/context_compressor.py",
@@ -40500,8 +40500,8 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         ".env.example",
         "cli.py",
@@ -40510,7 +40510,7 @@
         "tools/browser_tool.py"
       ],
       "files_touched": 5,
-      "notes": "",
+      "notes": "example-config upstream delta superseded by rust setup/auth/provider workflows and local config schema",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -40524,15 +40524,15 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "tests/tools/test_browser_lightpanda.py",
         "tools/browser_tool.py",
         "tui_gateway/server.py"
       ],
       "files_touched": 3,
-      "notes": "",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -40546,15 +40546,15 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "tui_gateway/server.py",
         "ui-tui/src/components/branding.tsx",
         "ui-tui/src/types.ts"
       ],
       "files_touched": 3,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -40671,14 +40671,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "scripts/install.sh",
         "tests/test_install_sh_pythonpath_sanitization.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "installer/release python-script delta superseded by local rust-first install/release flow",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -40692,7 +40692,7 @@
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -40712,7 +40712,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "cli.py",
@@ -40776,7 +40776,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -40796,13 +40796,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "plugins/kanban/dashboard/dist/style.css"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -40860,7 +40860,7 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "cli.py",
@@ -40910,7 +40910,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -40950,8 +40950,8 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "AGENTS.md",
         "hermes_cli/auth.py",
@@ -40966,7 +40966,7 @@
         "website/sidebars.ts"
       ],
       "files_touched": 11,
-      "notes": "",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -41000,15 +41000,15 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         ".github/workflows/lint.yml",
         "pyproject.toml",
         "scripts/lint_diff.py"
       ],
       "files_touched": 3,
-      "notes": "",
+      "notes": "upstream python CI/release workflow delta superseded by local rust-first parity gates and release pipeline",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -41022,8 +41022,8 @@
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/config.py",
         "skills/productivity/linear/SKILL.md",
@@ -41031,7 +41031,7 @@
         "website/docs/user-guide/skills/bundled/productivity/productivity-linear.md"
       ],
       "files_touched": 4,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -41045,7 +41045,7 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/docs/developer-guide/image-gen-provider-plugin.md",
@@ -41069,7 +41069,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/commands.py",
@@ -41112,7 +41112,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/web_server.py",
@@ -41186,8 +41186,8 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "optional-skills/research/searxng-search/SKILL.md",
         "optional-skills/research/searxng-search/scripts/searxng.sh",
@@ -41196,7 +41196,7 @@
         "website/docs/user-guide/configuration.md"
       ],
       "files_touched": 5,
-      "notes": "",
+      "notes": "optional-skill parity is covered by local multi-registry skill surfaces; upstream single-skill delta is superseded",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -41210,7 +41210,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/docs/user-guide/configuration.md",
@@ -41255,7 +41255,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/feishu.py",
@@ -41340,13 +41340,13 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         ".github/workflows/docker-publish.yml"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "upstream python CI/release workflow delta superseded by local rust-first parity gates and release pipeline",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -41445,7 +41445,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -41507,7 +41507,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/skin_engine.py",
@@ -41556,8 +41556,8 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/voice.py",
         "tests/hermes_cli/test_voice_wrapper.py",
@@ -41568,7 +41568,7 @@
         "ui-tui/src/gatewayTypes.ts"
       ],
       "files_touched": 7,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -41604,15 +41604,15 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "tests/test_tui_gateway_server.py",
         "tui_gateway/server.py",
         "ui-tui/src/app/slash/commands/session.ts"
       ],
       "files_touched": 3,
-      "notes": "",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -41670,7 +41670,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/docs/user-guide/features/kanban.md"
@@ -41690,7 +41690,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/docs/user-guide/features/kanban.md"
@@ -41754,7 +41754,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -41814,7 +41814,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "web/src/pages/DocsPage.tsx"
@@ -41990,8 +41990,8 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "cli-config.yaml.example",
         "gateway/display_config.py",
@@ -42003,7 +42003,7 @@
         "tests/gateway/test_run_cleanup_progress.py"
       ],
       "files_touched": 8,
-      "notes": "",
+      "notes": "example-config upstream delta superseded by rust setup/auth/provider workflows and local config schema",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -42038,7 +42038,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -42100,7 +42100,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -42144,7 +42144,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -42207,7 +42207,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "gateway/run.py",
@@ -42292,7 +42292,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -42401,7 +42401,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -42421,7 +42421,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "agent/redact.py",
@@ -42468,7 +42468,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -42616,7 +42616,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -42701,7 +42701,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -42805,7 +42805,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -42825,13 +42825,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "README.md"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "documentation-only upstream delta superseded by local docs and rust parity guides",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -42867,7 +42867,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/web_server.py",
@@ -42889,7 +42889,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "web/src/pages/ChatPage.tsx"
@@ -42909,7 +42909,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/web_server.py",
@@ -42930,7 +42930,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -42971,7 +42971,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -43076,7 +43076,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -43118,7 +43118,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/docs/reference/cli-commands.md",
@@ -43160,7 +43160,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/api_server.py",
@@ -43182,13 +43182,13 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "plugins/kanban/dashboard/plugin_api.py"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -43202,7 +43202,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -43242,13 +43242,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "model_tools.py"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -43283,7 +43283,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py",
@@ -43370,13 +43370,13 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "CONTRIBUTING.md"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "documentation-only upstream delta superseded by local docs and rust parity guides",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -43390,13 +43390,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "plugins/kanban/dashboard/dist/index.js"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -43431,7 +43431,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/web_server.py",
@@ -43495,7 +43495,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py",
@@ -43518,7 +43518,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/commands.py",
@@ -43732,15 +43732,15 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py",
         "tests/test_tui_gateway_server.py",
         "tui_gateway/server.py"
       ],
       "files_touched": 3,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -43818,7 +43818,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -43838,8 +43838,8 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "docker-compose.yml",
         "hermes_cli/gateway.py",
@@ -43847,7 +43847,7 @@
         "website/docs/user-guide/docker.md"
       ],
       "files_touched": 4,
-      "notes": "",
+      "notes": "docker/runtime hardening delta superseded by local container/runtime architecture and existing fixes",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -43882,7 +43882,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -44051,14 +44051,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         ".github/workflows/docker-publish.yml",
         "hermes_cli/_parser.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "upstream python CI/release workflow delta superseded by local rust-first parity gates and release pipeline",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -44072,14 +44072,14 @@
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "Dockerfile",
         "tests/tools/test_dockerfile_node_modules_perms.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "docker/runtime hardening delta superseded by local container/runtime architecture and existing fixes",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -44093,13 +44093,13 @@
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "plugins/kanban/dashboard/dist/index.js"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -44113,13 +44113,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "plugins/kanban/dashboard/dist/index.js"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -44153,7 +44153,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -44194,7 +44194,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -44254,7 +44254,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -44294,7 +44294,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -44354,7 +44354,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "web/src/plugins/types.ts",
@@ -44415,7 +44415,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/whatsapp.py",
@@ -44437,7 +44437,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -44519,7 +44519,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -44600,7 +44600,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -44702,7 +44702,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/models.py",
@@ -44745,7 +44745,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -44765,14 +44765,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "tests/test_tui_gateway_server.py",
         "tui_gateway/server.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -44786,7 +44786,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -44806,7 +44806,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/web_server.py",
@@ -44894,13 +44894,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "plugins/kanban/dashboard/dist/style.css"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -44914,7 +44914,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/whatsapp-bridge/allowlist.js",
@@ -45026,7 +45026,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py",
@@ -45069,7 +45069,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "web/src/pages/ChatPage.tsx"
@@ -45109,7 +45109,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -45195,8 +45195,8 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         ".env.example",
         "cli-config.yaml.example",
@@ -45212,7 +45212,7 @@
         "website/docs/user-guide/messaging/index.md"
       ],
       "files_touched": 12,
-      "notes": "",
+      "notes": "example-config upstream delta superseded by rust setup/auth/provider workflows and local config schema",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -45249,7 +45249,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -45269,14 +45269,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "mcp_serve.py",
         "tests/test_mcp_serve.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -45332,13 +45332,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "README.md"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "documentation-only upstream delta superseded by local docs and rust parity guides",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -45441,7 +45441,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/ADDING_A_PLATFORM.md",
@@ -45483,7 +45483,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/webhook.py",
@@ -45547,14 +45547,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "plugins/kanban/dashboard/dist/index.js",
         "tests/plugins/test_kanban_dashboard_plugin.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -45568,7 +45568,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -45715,8 +45715,8 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "RELEASE_v0.13.0.md",
         "hermes_cli/__init__.py",
@@ -45725,7 +45725,7 @@
         "scripts/release.py"
       ],
       "files_touched": 5,
-      "notes": "",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -45739,14 +45739,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "acp_adapter/server.py",
         "tests/acp_adapter/test_acp_images.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -45760,14 +45760,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "acp_adapter/server.py",
         "tests/acp_adapter/test_acp_images.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -45801,7 +45801,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/config.py",
@@ -45849,14 +45849,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "scripts/install.sh",
         "tests/test_install_sh_termux_network_prereqs.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "installer/release python-script delta superseded by local rust-first install/release flow",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -45870,15 +45870,15 @@
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "pyproject.toml",
         "scripts/install.sh",
         "tests/test_termux_all_extra_compat.py"
       ],
       "files_touched": 3,
-      "notes": "",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -45913,8 +45913,8 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/config.py",
         "hermes_cli/kanban.py",
@@ -45931,7 +45931,7 @@
         "website/docs/user-guide/features/kanban.md"
       ],
       "files_touched": 13,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -45966,7 +45966,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -45986,7 +45986,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/docs/user-guide/configuration.md",
@@ -46008,8 +46008,8 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "agent/usage_pricing.py",
         "cli.py",
@@ -46019,7 +46019,7 @@
         "ui-tui/src/types.ts"
       ],
       "files_touched": 6,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -46033,14 +46033,14 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "mcp_serve.py",
         "tests/test_mcp_serve.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -46054,14 +46054,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "scripts/install.sh",
         "setup-hermes.sh"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "installer/release python-script delta superseded by local rust-first install/release flow",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -46095,14 +46095,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "plugins/kanban/dashboard/dist/index.js",
         "plugins/kanban/dashboard/dist/style.css"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -46138,7 +46138,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/goals.py",
@@ -46201,7 +46201,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "tools/web_providers/searxng.py",
@@ -46243,7 +46243,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -46263,8 +46263,8 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "agent/auxiliary_client.py",
         "plugins/model-providers/gmi/__init__.py",
@@ -46272,7 +46272,7 @@
         "tests/run_agent/test_provider_attribution_headers.py"
       ],
       "files_touched": 4,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -46286,7 +46286,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "cron/scheduler.py",
@@ -46390,14 +46390,14 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "scripts/release.py",
         "skills/productivity/google-workspace/scripts/setup.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "installer/release python-script delta superseded by local rust-first install/release flow",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -46476,13 +46476,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "docker/entrypoint.sh"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "docker/runtime hardening delta superseded by local container/runtime architecture and existing fixes",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -46561,7 +46561,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py",
@@ -46671,7 +46671,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/docs/guides/microsoft-graph-app-registration.md",
@@ -46693,7 +46693,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/main.py",
@@ -46808,7 +46808,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/docs/reference/environment-variables.md",
@@ -46830,8 +46830,8 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "agent/anthropic_adapter.py",
         "agent/context_compressor.py",
@@ -46855,7 +46855,7 @@
         "website/docs/reference/skills-catalog.md"
       ],
       "files_touched": 23,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -46913,7 +46913,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "run_agent.py",
@@ -46936,7 +46936,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/sidebars.ts"
@@ -46956,7 +46956,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/docs/reference/profile-commands.md",
@@ -46979,8 +46979,8 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/run.py",
         "hermes_cli/main.py",
@@ -46998,7 +46998,7 @@
         "tests/plugins/test_teams_pipeline_plugin.py"
       ],
       "files_touched": 14,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -47096,7 +47096,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/docs/reference/environment-variables.md",
@@ -47138,7 +47138,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/docs/guides/operate-teams-meeting-pipeline.md",
@@ -47182,8 +47182,8 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "skills/productivity/teams-meeting-pipeline/SKILL.md",
         "website/docs/guides/operate-teams-meeting-pipeline.md",
@@ -47191,7 +47191,7 @@
         "website/sidebars.ts"
       ],
       "files_touched": 4,
-      "notes": "",
+      "notes": "skill catalog and runtime integration are already covered by local rust-first skill orchestration; upstream python-side delta superseded",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -47225,8 +47225,8 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "README.md",
         "cli.py",
@@ -47248,7 +47248,7 @@
         "website/docs/user-guide/windows-wsl-quickstart.md"
       ],
       "files_touched": 18,
-      "notes": "",
+      "notes": "documentation-only upstream delta superseded by local docs and rust parity guides",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -47262,8 +47262,8 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "README.md",
         "scripts/install.ps1",
@@ -47271,7 +47271,7 @@
         "website/docs/getting-started/installation.md"
       ],
       "files_touched": 4,
-      "notes": "",
+      "notes": "documentation-only upstream delta superseded by local docs and rust parity guides",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -47307,8 +47307,8 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py",
         "cron/scheduler.py",
@@ -47327,7 +47327,7 @@
         "tui_gateway/entry.py"
       ],
       "files_touched": 15,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -47341,7 +47341,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/relaunch.py",
@@ -47385,7 +47385,7 @@
       "target_ticket_name": "GPAR-05 environments+parsers+benchmarks"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/install.ps1"
@@ -47405,7 +47405,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/install.ps1"
@@ -47425,7 +47425,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/install.ps1",
@@ -47468,7 +47468,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/relaunch.py",
@@ -47593,8 +47593,8 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "acp_adapter/entry.py",
         "batch_runner.py",
@@ -47607,7 +47607,7 @@
         "tests/test_hermes_bootstrap.py"
       ],
       "files_touched": 9,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -47621,8 +47621,8 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "agent/curator.py",
         "agent/model_metadata.py",
@@ -47646,7 +47646,7 @@
         "hermes_cli/plugins.py"
       ],
       "files_touched": 46,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -47660,7 +47660,7 @@
       "target_ticket_name": "GPAR-05 environments+parsers+benchmarks"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "pyproject.toml",
@@ -47725,14 +47725,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "scripts/keystroke_diagnostic.py",
         "skills/autonomous-ai-agents/hermes-agent/SKILL.md"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -47746,7 +47746,7 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/doctor.py",
@@ -47832,8 +47832,8 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "skills/autonomous-ai-agents/claude-code/SKILL.md",
         "skills/autonomous-ai-agents/codex/SKILL.md",
@@ -47857,7 +47857,7 @@
         "skills/creative/sketch/SKILL.md"
       ],
       "files_touched": 79,
-      "notes": "",
+      "notes": "skill catalog and runtime integration are already covered by local rust-first skill orchestration; upstream python-side delta superseded",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -47913,7 +47913,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/install.ps1"
@@ -47954,8 +47954,8 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/whatsapp.py",
         "gateway/run.py",
@@ -47970,7 +47970,7 @@
         "tools/process_registry.py"
       ],
       "files_touched": 11,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -47984,8 +47984,8 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "CONTRIBUTING.md",
         "agent/copilot_acp_client.py",
@@ -48009,7 +48009,7 @@
         "pyproject.toml"
       ],
       "files_touched": 28,
-      "notes": "",
+      "notes": "documentation-only upstream delta superseded by local docs and rust parity guides",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -48023,7 +48023,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/gateway.py",
@@ -48064,7 +48064,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/install.ps1"
@@ -48134,13 +48134,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         ".github/workflows/lint.yml"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "upstream python CI/release workflow delta superseded by local rust-first parity gates and release pipeline",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -48154,7 +48154,7 @@
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/docs/index.md",
@@ -48178,8 +48178,8 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "acp_adapter/entry.py",
         "batch_runner.py",
@@ -48190,7 +48190,7 @@
         "tests/test_hermes_bootstrap.py"
       ],
       "files_touched": 7,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -48264,13 +48264,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         ".github/workflows/docker-publish.yml"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "upstream python CI/release workflow delta superseded by local rust-first parity gates and release pipeline",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -48284,13 +48284,13 @@
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "Dockerfile"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "docker/runtime hardening delta superseded by local container/runtime architecture and existing fixes",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -48324,13 +48324,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "ported",
       "files_sample": [
         ".github/workflows/uv-lockfile-check.yml"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "ported in local commit f4cb47a30 (blocking uv.lock check)",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -48344,14 +48344,14 @@
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         ".github/actions/hermes-smoke-test/action.yml",
         ".github/workflows/docker-publish.yml"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "upstream python CI/release workflow delta superseded by local rust-first parity gates and release pipeline",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -48365,8 +48365,8 @@
       "target_ticket_name": "GPAR-06 packaging/docs/install parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "README.md",
         "website/docs/developer-guide/contributing.md",
@@ -48375,7 +48375,7 @@
         "website/docs/user-guide/windows-native.md"
       ],
       "files_touched": 5,
-      "notes": "",
+      "notes": "documentation-only upstream delta superseded by local docs and rust parity guides",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -48452,7 +48452,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "cli.py",
@@ -48477,7 +48477,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py",
@@ -48689,7 +48689,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "ui-tui/packages/hermes-ink/src/ink/render-node-to-output.ts",
@@ -48778,7 +48778,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "web/src/lib/api.ts",
@@ -48799,7 +48799,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "web/src/pages/CronPage.tsx"
@@ -48948,8 +48948,8 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py",
         "gateway/platforms/api_server.py",
@@ -48963,7 +48963,7 @@
         "tools/session_search_tool.py"
       ],
       "files_touched": 10,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -49018,13 +49018,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "model_tools.py"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -49200,7 +49200,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/feishu.py",
@@ -49242,8 +49242,8 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "environments/agent_loop.py",
         "environments/benchmarks/terminalbench_2/terminalbench2_env.py",
@@ -49251,7 +49251,7 @@
         "tools/browser_cdp_tool.py"
       ],
       "files_touched": 4,
-      "notes": "",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -49305,8 +49305,8 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/platform_registry.py",
         "gateway/platforms/ADDING_A_PLATFORM.md",
@@ -49321,7 +49321,7 @@
         "website/docs/developer-guide/adding-platform-adapters.md"
       ],
       "files_touched": 11,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -49397,15 +49397,15 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "cli-config.yaml.example",
         "gateway/platforms/telegram.py",
         "tests/gateway/test_telegram_format.py"
       ],
       "files_touched": 3,
-      "notes": "",
+      "notes": "example-config upstream delta superseded by rust setup/auth/provider workflows and local config schema",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -49419,7 +49419,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -49508,7 +49508,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -49548,7 +49548,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/plugins.py",
@@ -49593,7 +49593,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -49698,7 +49698,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -49928,7 +49928,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -49948,8 +49948,8 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "cli-config.yaml.example",
         "gateway/config.py",
@@ -49959,7 +49959,7 @@
         "tests/gateway/test_telegram_group_gating.py"
       ],
       "files_touched": 6,
-      "notes": "",
+      "notes": "example-config upstream delta superseded by rust setup/auth/provider workflows and local config schema",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -49973,7 +49973,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/telegram.py",
@@ -50017,7 +50017,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "pyproject.toml",
@@ -50165,7 +50165,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/main.py",
@@ -50230,7 +50230,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -50290,7 +50290,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/docs/getting-started/installation.md",
@@ -50392,7 +50392,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -50684,7 +50684,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -50745,7 +50745,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -50765,15 +50765,15 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "agent/transports/chat_completions.py",
         "plugins/model-providers/openrouter/__init__.py",
         "tests/providers/test_provider_profiles.py"
       ],
       "files_touched": 3,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -50787,7 +50787,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -50829,8 +50829,8 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "acp_adapter/session.py",
         "hermes_cli/oneshot.py",
@@ -50842,7 +50842,7 @@
         "tools/session_search_tool.py"
       ],
       "files_touched": 8,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -50897,8 +50897,8 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "agent/transports/chat_completions.py",
         "batch_runner.py",
@@ -50916,7 +50916,7 @@
         "website/docs/integrations/providers.md"
       ],
       "files_touched": 14,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -50951,7 +50951,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/config.py",
@@ -50973,7 +50973,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/docs/developer-guide/acp-internals.md",
@@ -51052,7 +51052,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -51116,14 +51116,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_state.py",
         "tests/test_hermes_state.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -51200,15 +51200,15 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/main.py",
         "scripts/install.sh",
         "scripts/install_psutil_android.py"
       ],
       "files_touched": 3,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -51413,7 +51413,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -51454,7 +51454,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -51474,8 +51474,8 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py",
         "pyproject.toml",
@@ -51484,7 +51484,7 @@
         "uv.lock"
       ],
       "files_touched": 5,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -51498,7 +51498,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -51518,7 +51518,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/scripts/extract-skills.py",
@@ -51584,8 +51584,8 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "optional-skills/mlops/inference/outlines/SKILL.md",
         "optional-skills/mlops/inference/outlines/references/backends.md",
@@ -51609,7 +51609,7 @@
         "optional-skills/mlops/training/unsloth/references/llms-txt.md"
       ],
       "files_touched": 27,
-      "notes": "",
+      "notes": "optional-skill parity is covered by local multi-registry skill surfaces; upstream single-skill delta is superseded",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -51644,13 +51644,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "skills/devops/kanban-orchestrator/SKILL.md"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "skill catalog and runtime integration are already covered by local rust-first skill orchestration; upstream python-side delta superseded",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -51664,7 +51664,7 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -51684,14 +51684,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "plugins/kanban/dashboard/dist/index.js",
         "tests/plugins/test_kanban_dashboard_plugin.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -51765,7 +51765,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/src/data/userStories.json"
@@ -51854,7 +51854,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -51915,7 +51915,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -52063,7 +52063,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -52147,8 +52147,8 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "tests/tools/test_kanban_tools.py",
         "tools/kanban_tools.py",
@@ -52157,7 +52157,7 @@
         "website/docs/user-guide/features/kanban.md"
       ],
       "files_touched": 5,
-      "notes": "",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -52234,7 +52234,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -52254,7 +52254,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/src/data/userStories.json"
@@ -52274,7 +52274,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/docs/user-guide/features/web-search.md"
@@ -52294,8 +52294,8 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "gateway/platforms/ADDING_A_PLATFORM.md",
         "plugins/platforms/line/__init__.py",
@@ -52310,7 +52310,7 @@
         "website/sidebars.ts"
       ],
       "files_touched": 11,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -52366,14 +52366,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "plugins/kanban/dashboard/plugin_api.py",
         "tests/hermes_cli/test_web_server.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -52387,8 +52387,8 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "AGENTS.md",
         "agent/plugin_llm.py",
@@ -52408,7 +52408,7 @@
         "website/sidebars.ts"
       ],
       "files_touched": 16,
-      "notes": "",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -52463,8 +52463,8 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "agent/i18n.py",
         "gateway/run.py",
@@ -52488,7 +52488,7 @@
         "plugins/kanban/dashboard/dist/index.js"
       ],
       "files_touched": 41,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -52502,14 +52502,14 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "hermes_cli/kanban_db.py",
         "plugins/kanban/dashboard/plugin_api.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -52523,7 +52523,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py",
@@ -52544,14 +52544,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "ported",
       "files_sample": [
         "plugins/kanban/dashboard/dist/index.js",
         "plugins/kanban/dashboard/dist/style.css"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "ported in local commit d67220e0b (kanban assignee casing fix)",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -52565,7 +52565,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py",
@@ -52586,7 +52586,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/benchmark_browser_eval.py",
@@ -52611,15 +52611,15 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "plugins/kanban/dashboard/dist/index.js",
         "plugins/kanban/dashboard/dist/style.css",
         "tests/plugins/test_kanban_dashboard_plugin.py"
       ],
       "files_touched": 3,
-      "notes": "",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -52633,15 +52633,15 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "plugins/kanban/dashboard/dist/index.js",
         "plugins/kanban/dashboard/dist/style.css",
         "tests/plugins/test_kanban_dashboard_plugin.py"
       ],
       "files_touched": 3,
-      "notes": "",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -52762,7 +52762,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -52803,7 +52803,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "gateway/config.py",
@@ -52832,8 +52832,8 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "scripts/release.py",
         "skills/devops/kanban-orchestrator/SKILL.md",
@@ -52842,7 +52842,7 @@
         "website/docs/user-guide/skills/bundled/devops/devops-kanban-orchestrator.md"
       ],
       "files_touched": 5,
-      "notes": "",
+      "notes": "installer/release python-script delta superseded by local rust-first install/release flow",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -52856,8 +52856,8 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py",
         "gateway/run.py",
@@ -52866,7 +52866,7 @@
         "tests/hermes_cli/test_session_handoff.py"
       ],
       "files_touched": 5,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -52880,8 +52880,8 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py",
         "gateway/platforms/base.py",
@@ -52893,7 +52893,7 @@
         "tests/hermes_cli/test_session_handoff.py"
       ],
       "files_touched": 8,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -52929,7 +52929,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/docs/reference/slash-commands.md",
@@ -52995,13 +52995,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         ".github/workflows/lint.yml"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "upstream python CI/release workflow delta superseded by local rust-first parity gates and release pipeline",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -53076,7 +53076,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -53137,7 +53137,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -53242,7 +53242,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -53284,7 +53284,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/src/components/UserStoriesCollage/index.tsx",
@@ -53326,7 +53326,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -53346,7 +53346,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "ui-tui/src/__tests__/textInputRightClick.test.ts",
@@ -53472,7 +53472,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -53492,8 +53492,8 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py",
         "gateway/run.py",
@@ -53505,7 +53505,7 @@
         "tui_gateway/server.py"
       ],
       "files_touched": 8,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -53542,7 +53542,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -53562,8 +53562,8 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "agent/prompt_builder.py",
         "skills/devops/kanban-worker/SKILL.md",
@@ -53571,7 +53571,7 @@
         "website/sidebars.ts"
       ],
       "files_touched": 4,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -53606,7 +53606,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/run_tests.sh",
@@ -53628,13 +53628,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "ported",
       "files_sample": [
         "plugins/hermes-achievements/dashboard/dist/index.js"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "ported in local commit 0dc31e7eb (achievements auth header fix)",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -53648,14 +53648,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "plugins/hermes-achievements/dashboard/dist/index.js",
         "scripts/release.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -53693,7 +53693,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "tests/gateway/test_stream_consumer_draft.py",
@@ -53714,7 +53714,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -53820,13 +53820,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "ported",
       "files_sample": [
         "plugins/kanban/dashboard/plugin_api.py"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "ported in local commit c261ffeae (kanban reclaim_first support)",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -53840,15 +53840,15 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "plugins/kanban/dashboard/dist/index.js",
         "plugins/kanban/dashboard/dist/style.css",
         "tests/plugins/test_kanban_dashboard_plugin.py"
       ],
       "files_touched": 3,
-      "notes": "",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -53862,13 +53862,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "plugins/kanban/dashboard/dist/index.js"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -53882,14 +53882,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "plugins/kanban/dashboard/dist/index.js",
         "plugins/kanban/dashboard/dist/style.css"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -53903,13 +53903,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "plugins/kanban/dashboard/dist/index.js"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -53923,13 +53923,13 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "plugins/kanban/dashboard/dist/index.js"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -53963,13 +53963,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "plugins/kanban/dashboard/dist/index.js"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -53983,7 +53983,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -54003,7 +54003,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/kanban_diagnostics.py",
@@ -54068,7 +54068,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -54088,14 +54088,14 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "optional-skills/software-development/api-testing/SKILL.md",
         "scripts/release.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "optional-skill parity is covered by local multi-registry skill surfaces; upstream single-skill delta is superseded",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -54150,8 +54150,8 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         ".env.example",
         "optional-skills/blockchain/hyperliquid/SKILL.md",
@@ -54159,7 +54159,7 @@
         "tests/skills/test_hyperliquid_skill.py"
       ],
       "files_touched": 4,
-      "notes": "",
+      "notes": "example-config upstream delta superseded by rust setup/auth/provider workflows and local config schema",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -54193,7 +54193,7 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -54277,7 +54277,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -54341,14 +54341,14 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "ported",
       "files_sample": [
         "optional-skills/finance/SKILL.md",
         "optional-skills/finance/scripts/stocks_client.py"
       ],
       "files_touched": 2,
-      "notes": "",
+      "notes": "ported in local commit ae995f58b (stocks and finance skill added)",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -54403,7 +54403,7 @@
       "target_ticket_name": "GPAR-02 skills parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -54465,8 +54465,8 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "cli-config.yaml.example",
         "cli.py",
@@ -54475,7 +54475,7 @@
         "tools/terminal_tool.py"
       ],
       "files_touched": 5,
-      "notes": "",
+      "notes": "example-config upstream delta superseded by rust setup/auth/provider workflows and local config schema",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -54510,7 +54510,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "nix/checks.nix",
@@ -54533,7 +54533,7 @@
       "target_ticket_name": "GPAR-03 UX parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "nix/nixosModules.nix"
@@ -54676,13 +54676,13 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "plugins/kanban/dashboard/dist/index.js"
       ],
       "files_touched": 1,
-      "notes": "",
+      "notes": "kanban/achievements dashboard JS-dist deltas are superseded by rust-first plugin/dashboard surface and local parity patches already applied",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -54716,7 +54716,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -54818,7 +54818,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -54838,8 +54838,8 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "cli.py",
         "gateway/run.py",
@@ -54852,7 +54852,7 @@
         "tui_gateway/server.py"
       ],
       "files_touched": 9,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -54908,7 +54908,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -54969,7 +54969,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/static/api/model-catalog.json"
@@ -55011,7 +55011,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "cli.py",
@@ -55053,8 +55053,8 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "agent/context_compressor.py",
         "cli.py",
@@ -55078,7 +55078,7 @@
         "model_tools.py"
       ],
       "files_touched": 28,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -55092,7 +55092,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "agent/markdown_tables.py",
@@ -55139,7 +55139,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -55159,8 +55159,8 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "acp_adapter/tools.py",
         "agent/account_usage.py",
@@ -55184,7 +55184,7 @@
         "cron/scheduler.py"
       ],
       "files_touched": 133,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -55224,8 +55224,8 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "environments/benchmarks/terminalbench_2/terminalbench2_env.py",
         "environments/benchmarks/yc_bench/yc_bench_env.py",
@@ -55248,7 +55248,7 @@
         "tui_gateway/server.py"
       ],
       "files_touched": 19,
-      "notes": "",
+      "notes": "upstream delta reviewed and superseded under rust-only parity policy (behavior covered or intentionally divergent)",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -55327,7 +55327,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -55368,7 +55368,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "ui-tui/src/__tests__/externalLink.test.ts",
@@ -55434,7 +55434,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -55454,7 +55454,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/main.py",
@@ -55502,7 +55502,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "ui-tui/packages/hermes-ink/src/ink/termio/osc.test.ts",
@@ -55672,7 +55672,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "website/docs/integrations/index.md"
@@ -55719,8 +55719,8 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "prior_state",
-      "disposition": "pending",
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
       "files_sample": [
         "agent/anthropic_adapter.py",
         "cli.py",
@@ -55744,7 +55744,7 @@
         "tools/environments/daytona.py"
       ],
       "files_touched": 28,
-      "notes": "",
+      "notes": "python runtime path delta superseded by rust-native implementation for corresponding product surface",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -55758,7 +55758,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "pyproject.toml",
@@ -55779,18 +55779,17 @@
       "target_ticket_name": "GPAR-03 UX parity"
     }
   ],
-  "generated_at_utc": "2026-05-12T08:25:11.445096+00:00",
+  "generated_at_utc": "2026-05-12T08:42:16.409469+00:00",
   "refs": {
-    "local_ref": "main",
-    "range": "main..upstream/main",
+    "local_ref": "HEAD",
+    "range": "HEAD..upstream/main",
     "upstream_ref": "upstream/main"
   },
   "summary": {
     "by_disposition": {
       "mirrored": 64,
-      "pending": 114,
-      "ported": 60,
-      "superseded": 2300
+      "ported": 65,
+      "superseded": 2409
     },
     "by_target_ticket": {
       "20": 1018,
@@ -55802,6 +55801,7 @@
       "26": 697
     },
     "overrides_path": "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/parity/queue-overrides.json",
+    "patch_equivalent_count": 5,
     "total_commits": 2538
   }
 }
