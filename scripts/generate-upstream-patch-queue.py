@@ -187,6 +187,30 @@ def parse_log_blocks(raw: str) -> list[dict[str, Any]]:
     return blocks
 
 
+def patch_equivalent_commits(repo_root: Path, local_ref: str, upstream_ref: str) -> set[str]:
+    proc = subprocess.run(
+        ["git", "cherry", local_ref, upstream_ref],
+        cwd=repo_root,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return set()
+    out: set[str] = set()
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) != 2:
+            continue
+        marker, sha = parts
+        if marker == "-":
+            out.add(sha.strip())
+    return out
+
+
 def load_existing_state(path: Path) -> dict[str, dict[str, Any]]:
     if not path.exists():
         return {}
@@ -362,6 +386,7 @@ def main() -> int:
     overrides_path = (repo_root / args.overrides).resolve()
     prior = load_existing_state(out_json)
     sha_overrides, subject_pattern_overrides = load_overrides(overrides_path)
+    patch_equivalent = patch_equivalent_commits(repo_root, args.local_ref, upstream_ref)
 
     rows = []
     by_ticket: Counter[int] = Counter()
@@ -384,6 +409,13 @@ def main() -> int:
                 notes = override["notes"]
             if override.get("owner"):
                 owner = override["owner"]
+
+        if disposition in {"", "pending"} and sha in patch_equivalent:
+            disposition = "ported"
+            classification_rule = "patch_equivalent_cherry"
+            if notes:
+                notes += " | "
+            notes += f"patch-equivalent commit already present on {args.local_ref}"
 
         if disposition in {"", "pending"}:
             key = (args.local_ref, sha)
@@ -477,6 +509,7 @@ def main() -> int:
             "by_target_ticket": {str(k): v for k, v in sorted(by_ticket.items())},
             "by_disposition": dict(sorted(by_disposition.items())),
             "overrides_path": str(overrides_path),
+            "patch_equivalent_count": len(patch_equivalent),
         },
         "commits": rows,
     }
