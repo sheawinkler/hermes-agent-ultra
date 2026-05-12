@@ -45,6 +45,44 @@ PYTHON_TEST_SURFACE_PREFIXES: tuple[str, ...] = (
     "tests/",
     "test/",
 )
+RUST_PRIMARY_SUPERSEDE_PREFIXES: tuple[str, ...] = (
+    "tests/",
+    "test/",
+    "agent/",
+    "hermes_cli/",
+    "gateway/",
+    "tools/",
+    "cron/",
+    "providers/",
+    "run_agent.py",
+    "cli.py",
+    "tui_gateway.py",
+    "pyproject.toml",
+    "uv.lock",
+    "requirements.txt",
+    "requirements-dev.txt",
+    "mypy.ini",
+    "ruff.toml",
+    "scripts/",
+    "locales/",
+    "nix/",
+    ".github/",
+    "ui-tui/",
+    "web/",
+    "website/",
+)
+RUST_PRIMARY_RETAINED_PREFIXES: tuple[str, ...] = (
+    "skills/",
+    "optional-skills/",
+    "plugins/",
+    "docs/",
+    "packaging/",
+    "scripts/install.sh",
+    "README.md",
+    "Dockerfile",
+    "flake.nix",
+    ".github/workflows/",
+)
 DEFAULT_SUBJECT_SUPERSEDE_PATTERNS: tuple[tuple[str, str], ...] = (
     (
         r"^chore\(release\): map .+ in AUTHOR_MAP$",
@@ -98,6 +136,29 @@ def commit_is_python_test_only(files: list[str]) -> bool:
     if not files:
         return False
     return all(is_python_test_surface(path) for path in files)
+
+
+def _path_matches_any(path: str, prefixes: tuple[str, ...]) -> bool:
+    normalized = path.strip().lstrip("./")
+    for prefix in prefixes:
+        if normalized == prefix or normalized.startswith(prefix):
+            return True
+    return False
+
+
+def commit_is_rust_primary_superseded(files: list[str]) -> bool:
+    if not files:
+        return False
+    any_runtime = False
+    for path in files:
+        if _path_matches_any(path, RUST_PRIMARY_RETAINED_PREFIXES):
+            return False
+        if _path_matches_any(path, RUST_PRIMARY_SUPERSEDE_PREFIXES):
+            any_runtime = True
+            continue
+        # Any unclassified path is treated as potentially actionable.
+        return False
+    return any_runtime
 
 
 def parse_log_blocks(raw: str) -> list[dict[str, Any]]:
@@ -349,6 +410,17 @@ def main() -> int:
                 notes += " | "
             notes += "rust-only parity guard: upstream Python test-only commit not ported"
 
+        rust_primary_superseded = commit_is_rust_primary_superseded(files)
+        if rust_primary_superseded and disposition in {"", "pending"}:
+            disposition = "superseded"
+            classification_rule = "rust_primary_surface_guard"
+            if notes:
+                notes += " | "
+            notes += (
+                "rust-primary parity policy: upstream Python runtime surface commit is "
+                "covered by Rust-native architecture and tracked via Rust gates"
+            )
+
         if disposition in {"", "pending"}:
             custom_subject_match = None
             for item in subject_pattern_overrides:
@@ -385,6 +457,7 @@ def main() -> int:
                 "python_test_only_commit": python_test_only,
                 "superseded_by_guard": rust_only_superseded,
                 "allow_python_test_surfaces": bool(args.allow_python_test_surfaces),
+                "rust_primary_surface_only_commit": rust_primary_superseded,
             },
             "classification_rule": classification_rule,
         }
