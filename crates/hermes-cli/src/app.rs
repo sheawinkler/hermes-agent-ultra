@@ -2305,7 +2305,7 @@ mod tests {
     #[test]
     fn test_default_mouse_enabled_respects_env_override() {
         std::env::remove_var("HERMES_TUI_MOUSE");
-        assert!(default_mouse_enabled());
+        assert!(!default_mouse_enabled());
 
         std::env::set_var("HERMES_TUI_MOUSE", "off");
         assert!(!default_mouse_enabled());
@@ -2826,7 +2826,7 @@ fn default_mouse_enabled() -> bool {
             value.trim().to_ascii_lowercase().as_str(),
             "0" | "false" | "off" | "no"
         ),
-        Err(_) => true,
+        Err(_) => false,
     }
 }
 

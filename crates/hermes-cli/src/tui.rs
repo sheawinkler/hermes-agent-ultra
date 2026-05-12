@@ -313,6 +313,8 @@ pub struct Tui {
     theme: Theme,
     /// Whether terminal cleanup has already run.
     restored: bool,
+    /// Whether mouse capture is currently enabled on the terminal backend.
+    mouse_capture_enabled: bool,
 }
 
 impl Tui {
@@ -321,7 +323,6 @@ impl Tui {
         enable_raw_mode()?;
         let mut stdout = std::io::stdout();
         stdout.execute(EnterAlternateScreen)?;
-        stdout.execute(EnableMouseCapture)?;
         let backend = CrosstermBackend::new(stdout);
         let terminal = ratatui::Terminal::new(backend)?;
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
@@ -336,7 +337,21 @@ impl Tui {
             stream_sender,
             theme: crate::skin_engine::resolve_theme(requested_theme.as_str()),
             restored: false,
+            mouse_capture_enabled: false,
         })
+    }
+
+    pub fn set_mouse_capture(&mut self, enabled: bool) -> Result<(), Box<dyn std::error::Error>> {
+        if self.mouse_capture_enabled == enabled {
+            return Ok(());
+        }
+        if enabled {
+            self.terminal.backend_mut().execute(EnableMouseCapture)?;
+        } else {
+            self.terminal.backend_mut().execute(DisableMouseCapture)?;
+        }
+        self.mouse_capture_enabled = enabled;
+        Ok(())
     }
 
     /// Restore the terminal to its original state.
@@ -345,7 +360,10 @@ impl Tui {
             return Ok(());
         }
         disable_raw_mode()?;
-        self.terminal.backend_mut().execute(DisableMouseCapture)?;
+        if self.mouse_capture_enabled {
+            self.terminal.backend_mut().execute(DisableMouseCapture)?;
+            self.mouse_capture_enabled = false;
+        }
         self.terminal.backend_mut().execute(LeaveAlternateScreen)?;
         self.terminal.show_cursor()?;
         self.restored = true;
@@ -404,7 +422,7 @@ pub struct TuiState {
     /// Currently selected completion index (if any).
     pub completion_index: Option<usize>,
     /// Scroll offset from newest transcript content (0 = newest).
-    pub scroll_offset: u16,
+    pub scroll_offset: usize,
     /// Keep transcript pinned to newest content unless user scrolls away.
     auto_follow_transcript: bool,
     /// Whether the agent is currently processing.
@@ -584,12 +602,12 @@ impl Default for TuiState {
 
 impl TuiState {
     fn scroll_history_up(&mut self, lines: u16) {
-        self.scroll_offset = self.scroll_offset.saturating_add(lines.max(1));
+        self.scroll_offset = self.scroll_offset.saturating_add(usize::from(lines.max(1)));
         self.auto_follow_transcript = false;
     }
 
     fn scroll_history_down(&mut self, lines: u16) {
-        self.scroll_offset = self.scroll_offset.saturating_sub(lines.max(1));
+        self.scroll_offset = self.scroll_offset.saturating_sub(usize::from(lines.max(1)));
         if self.scroll_offset == 0 {
             self.auto_follow_transcript = true;
         }
@@ -1254,8 +1272,16 @@ impl TuiState {
         }
     }
 
+    fn clamp_char_boundary(input: &str, cursor_byte: usize) -> usize {
+        let mut clamped = cursor_byte.min(input.len());
+        while clamped > 0 && !input.is_char_boundary(clamped) {
+            clamped = clamped.saturating_sub(1);
+        }
+        clamped
+    }
+
     fn cursor_row_col(input: &str, cursor_byte: usize) -> (usize, usize) {
-        let clamped = cursor_byte.min(input.len());
+        let clamped = Self::clamp_char_boundary(input, cursor_byte);
         let before = &input[..clamped];
         let row = before.bytes().filter(|b| *b == b'\n').count();
         let line_start = before.rfind('\n').map(|i| i + 1).unwrap_or(0);
@@ -1319,7 +1345,7 @@ impl TuiState {
     }
 
     fn insert_newline_at_cursor(&mut self) {
-        let at = self.cursor_position.min(self.input.len());
+        let at = Self::clamp_char_boundary(&self.input, self.cursor_position);
         self.input.insert(at, '\n');
         self.cursor_position = at.saturating_add(1);
     }
@@ -3030,11 +3056,13 @@ fn render_messages(
         frame.render_widget(block, area);
         return;
     }
-    let wrap_width = transcript_wrap_width(inner.width);
+    let reserved_scrollbar_col = if inner.width > 1 { 1 } else { 0 };
+    let transcript_width = inner.width.saturating_sub(reserved_scrollbar_col).max(1);
+    let wrap_width = transcript_wrap_width(transcript_width);
     let content_area = Rect {
         x: inner.x,
         y: inner.y,
-        width: wrap_width.min(inner.width),
+        width: wrap_width.min(transcript_width),
         height: inner.height,
     };
     let transcript = app.transcript_messages();
@@ -3094,7 +3122,7 @@ fn render_messages(
             {
                 let old_view_rows = viewport_rows.min(prev_len.max(1));
                 let max_hidden = prev_len.saturating_sub(old_view_rows);
-                let hidden = usize::from(state.scroll_offset).min(max_hidden);
+                let hidden = state.scroll_offset.min(max_hidden);
                 let old_end = prev_len.saturating_sub(hidden);
                 let old_start = old_end.saturating_sub(old_view_rows);
                 state
@@ -3122,7 +3150,7 @@ fn render_messages(
                     let new_len = new_lines.len();
                     let visible = viewport_rows.min(new_len.max(1));
                     let new_hidden = new_len.saturating_sub((new_idx + visible).min(new_len));
-                    state.scroll_offset = new_hidden.min(u16::MAX as usize) as u16;
+                    state.scroll_offset = new_hidden;
                 }
             }
             state.transcript_cache = TranscriptCache {
@@ -3146,22 +3174,29 @@ fn render_messages(
     }
     let total_visual_rows = state.transcript_cache.visual_rows.max(1);
     let max_hidden_from_bottom = total_visual_rows.saturating_sub(viewport_rows);
-    let hidden_from_bottom = usize::from(state.scroll_offset).min(max_hidden_from_bottom);
-    if usize::from(state.scroll_offset) != hidden_from_bottom {
-        state.scroll_offset = hidden_from_bottom.min(u16::MAX as usize) as u16;
+    let hidden_from_bottom = state.scroll_offset.min(max_hidden_from_bottom);
+    if state.scroll_offset != hidden_from_bottom {
+        state.scroll_offset = hidden_from_bottom;
     }
     let top_visual_row = total_visual_rows.saturating_sub(viewport_rows + hidden_from_bottom);
+    let top_visual_row_u16 = top_visual_row.min(u16::MAX as usize) as u16;
 
     frame.render_widget(Clear, area);
     frame.render_widget(block, area);
     frame.render_widget(
         Paragraph::new(text)
             .wrap(Wrap { trim: false })
-            .scroll((top_visual_row as u16, 0)),
+            .scroll((top_visual_row_u16, 0)),
         content_area,
     );
 
     if total_visual_rows > viewport_rows {
+        let scrollbar_area = Rect {
+            x: content_area.x + content_area.width,
+            y: content_area.y,
+            width: 1,
+            height: content_area.height,
+        };
         let mut scrollbar_state = ScrollbarState::new(total_visual_rows)
             .position(top_visual_row)
             .viewport_content_length(viewport_rows);
@@ -3180,7 +3215,7 @@ fn render_messages(
                     .fg(colors.status_bar_strong)
                     .bg(colors.background),
             );
-        frame.render_stateful_widget(scrollbar, content_area, &mut scrollbar_state);
+        frame.render_stateful_widget(scrollbar, scrollbar_area, &mut scrollbar_state);
     }
 }
 
@@ -4710,6 +4745,9 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
 
     // Main event loop
     while app.running {
+        tui.set_mouse_capture(app.mouse_enabled())
+            .map_err(|e| AgentError::Config(e.to_string()))?;
+
         if let Some(theme_name) = app.take_pending_theme_change() {
             let applied = crate::skin_engine::resolve_theme(&theme_name);
             tui.set_theme(applied);
@@ -5413,6 +5451,31 @@ mod tests {
         state.insert_newline_at_cursor();
         assert_eq!(state.input, "hello\n");
         assert_eq!(state.cursor_position, 6);
+    }
+
+    #[test]
+    fn test_insert_newline_at_cursor_clamps_non_char_boundary() {
+        let mut state = TuiState::default();
+        state.input = "éx".to_string();
+        state.cursor_position = 1; // interior byte of 'é'
+        state.insert_newline_at_cursor();
+        assert_eq!(state.input, "\néx");
+        assert_eq!(state.cursor_position, 1);
+    }
+
+    #[test]
+    fn test_cursor_row_col_clamps_non_char_boundary() {
+        assert_eq!(TuiState::cursor_row_col("éx", 1), (0, 0));
+        assert_eq!(TuiState::cursor_row_col("éx", 2), (0, 1));
+    }
+
+    #[test]
+    fn test_scroll_history_offset_not_capped_to_u16() {
+        let mut state = TuiState::default();
+        state.scroll_offset = (u16::MAX as usize).saturating_sub(1);
+        state.scroll_history_up(8);
+        assert_eq!(state.scroll_offset, (u16::MAX as usize).saturating_add(7));
+        assert!(!state.auto_follow_transcript);
     }
 
     #[test]
