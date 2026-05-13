@@ -618,6 +618,12 @@ impl TuiState {
         self.auto_follow_transcript = true;
     }
 
+    fn jump_to_oldest(&mut self) {
+        // Render path clamps this to current transcript max hidden rows.
+        self.scroll_offset = usize::MAX;
+        self.auto_follow_transcript = false;
+    }
+
     fn push_activity(&mut self, text: impl Into<String>) {
         let trimmed = text.into().trim().to_string();
         if trimmed.is_empty() {
@@ -948,6 +954,9 @@ impl TuiState {
             KeyCode::PageDown => {
                 self.scroll_history_down(8);
             }
+            KeyCode::Home => {
+                self.jump_to_oldest();
+            }
             KeyCode::End => {
                 self.jump_to_latest();
             }
@@ -1078,6 +1087,18 @@ impl TuiState {
                 self.scroll_history_down(8);
                 false
             }
+            KeyCode::Home => {
+                self.jump_to_oldest();
+                false
+            }
+            KeyCode::End if mods.contains(KeyModifiers::CONTROL) => {
+                self.jump_to_latest();
+                false
+            }
+            KeyCode::End => {
+                self.jump_to_latest();
+                false
+            }
             // Fine-grained transcript scroll.
             KeyCode::Up if mods.contains(KeyModifiers::CONTROL) => {
                 self.scroll_history_up(1);
@@ -1098,11 +1119,6 @@ impl TuiState {
                 if mods.contains(KeyModifiers::ALT) || mods.contains(KeyModifiers::SHIFT) =>
             {
                 self.scroll_history_down(1);
-                false
-            }
-            // Jump back to newest transcript content.
-            KeyCode::End if mods.contains(KeyModifiers::CONTROL) => {
-                self.jump_to_latest();
                 false
             }
             // Force refresh + pin to newest transcript content.
@@ -3208,7 +3224,6 @@ fn render_messages(
         }
     }
     let lines = &state.transcript_cache.lines;
-    let text = Text::from(lines.clone());
     if state.auto_follow_transcript {
         state.scroll_offset = 0;
     }
@@ -3219,7 +3234,11 @@ fn render_messages(
         state.scroll_offset = hidden_from_bottom;
     }
     let top_visual_row = total_visual_rows.saturating_sub(viewport_rows + hidden_from_bottom);
-    let top_visual_row_u16 = top_visual_row.min(u16::MAX as usize) as u16;
+
+    let (render_lines, scroll_rows_in_window) =
+        project_transcript_window(lines, wrap_width, top_visual_row, viewport_rows);
+    let text = Text::from(render_lines);
+    let top_visual_row_u16 = scroll_rows_in_window.min(u16::MAX as usize) as u16;
 
     frame.render_widget(Clear, area);
     frame.render_widget(block, area);
@@ -3263,12 +3282,72 @@ fn approximate_visual_rows(lines: &[Line<'static>], wrap_width: u16) -> usize {
     let width = usize::from(wrap_width.max(1));
     lines
         .iter()
-        .map(|line| {
-            let display_width = UnicodeWidthStr::width(line.to_string().as_str()).max(1);
-            ((display_width - 1) / width) + 1
-        })
+        .map(|line| line_visual_rows(line, width))
         .sum::<usize>()
         .max(1)
+}
+
+fn line_visual_rows(line: &Line<'static>, width: usize) -> usize {
+    let display_width = UnicodeWidthStr::width(line.to_string().as_str()).max(1);
+    ((display_width - 1) / width.max(1)) + 1
+}
+
+fn project_transcript_window(
+    lines: &[Line<'static>],
+    wrap_width: u16,
+    top_visual_row: usize,
+    viewport_rows: usize,
+) -> (Vec<Line<'static>>, usize) {
+    if lines.is_empty() {
+        return (Vec::new(), 0);
+    }
+
+    let width = usize::from(wrap_width.max(1));
+    let mut cumulative = 0usize;
+    let mut start_idx = 0usize;
+    let mut intra_line_offset = 0usize;
+
+    for (idx, line) in lines.iter().enumerate() {
+        let line_rows = line_visual_rows(line, width);
+        if cumulative + line_rows > top_visual_row {
+            start_idx = idx;
+            intra_line_offset = top_visual_row.saturating_sub(cumulative);
+            break;
+        }
+        cumulative = cumulative.saturating_add(line_rows);
+        start_idx = idx.saturating_add(1);
+    }
+
+    if start_idx >= lines.len() {
+        start_idx = lines.len().saturating_sub(1);
+        intra_line_offset = 0;
+    }
+
+    // Keep paragraph scroll offset representable (u16) by rebasing start line forward when needed.
+    while intra_line_offset > u16::MAX as usize && start_idx + 1 < lines.len() {
+        let consume = line_visual_rows(&lines[start_idx], width);
+        if consume == 0 {
+            break;
+        }
+        intra_line_offset = intra_line_offset.saturating_sub(consume);
+        start_idx += 1;
+    }
+
+    let needed_rows = intra_line_offset.saturating_add(viewport_rows.max(1));
+    let mut collected_rows = 0usize;
+    let mut window: Vec<Line<'static>> = Vec::new();
+    for line in lines.iter().skip(start_idx) {
+        collected_rows = collected_rows.saturating_add(line_visual_rows(line, width));
+        window.push(line.clone());
+        if collected_rows >= needed_rows {
+            break;
+        }
+    }
+    if window.is_empty() {
+        window.push(lines[lines.len() - 1].clone());
+    }
+
+    (window, intra_line_offset)
 }
 
 /// Render slash-command completions as a popup over the conversation panel.
@@ -5519,6 +5598,25 @@ mod tests {
         state.scroll_history_up(8);
         assert_eq!(state.scroll_offset, (u16::MAX as usize).saturating_add(7));
         assert!(!state.auto_follow_transcript);
+    }
+
+    #[test]
+    fn test_jump_to_oldest_sets_unbounded_offset() {
+        let mut state = TuiState::default();
+        state.jump_to_oldest();
+        assert_eq!(state.scroll_offset, usize::MAX);
+        assert!(!state.auto_follow_transcript);
+    }
+
+    #[test]
+    fn test_project_transcript_window_virtualizes_large_offsets() {
+        let lines: Vec<Line<'static>> = (0..100_000)
+            .map(|idx| Line::from(format!("line-{idx}")))
+            .collect();
+        let (window, local_scroll) = project_transcript_window(&lines, 80, 70_000, 30);
+        assert!(!window.is_empty());
+        assert_eq!(local_scroll, 0);
+        assert_eq!(window[0].to_string(), "line-70000");
     }
 
     #[test]
