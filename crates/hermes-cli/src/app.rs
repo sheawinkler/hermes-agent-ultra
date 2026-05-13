@@ -381,6 +381,34 @@ impl App {
         true
     }
 
+    fn bool_env(key: &str) -> Option<bool> {
+        let raw = std::env::var(key).ok()?;
+        let normalized = raw.trim().to_ascii_lowercase();
+        match normalized.as_str() {
+            "1" | "true" | "yes" | "on" => Some(true),
+            "0" | "false" | "no" | "off" => Some(false),
+            _ => None,
+        }
+    }
+
+    fn auth_refresh_retry_limit() -> usize {
+        std::env::var("HERMES_AUTH_REFRESH_MAX_RETRIES")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(3)
+    }
+
+    fn should_force_preflight_auth_refresh(provider: &str) -> bool {
+        if let Some(explicit) = Self::bool_env("HERMES_FORCE_RUNTIME_AUTH_REFRESH") {
+            return explicit;
+        }
+        matches!(
+            provider,
+            "nous" | "qwen-oauth" | "google-gemini-cli" | "gemini-cli" | "gemini-oauth"
+        )
+    }
+
     async fn refresh_runtime_provider_credentials_if_needed(&mut self, force_refresh: bool) {
         let (provider_name, _) = resolve_provider_and_model(&self.config, &self.current_model);
         let provider = normalize_runtime_provider_name(provider_name.as_str());
@@ -1209,8 +1237,16 @@ impl App {
             "runtime preflight + credential hydration",
             5,
         );
-        self.refresh_runtime_provider_credentials_if_needed(false)
+        let provider = self.current_runtime_provider();
+        let force_refresh = Self::should_force_preflight_auth_refresh(provider.as_str());
+        self.refresh_runtime_provider_credentials_if_needed(force_refresh)
             .await;
+        if force_refresh {
+            Self::emit_lifecycle_event(
+                &self.stream_handle_shared,
+                format!("preflight auth refresh forced for provider {}", provider),
+            );
+        }
         Self::emit_phase_event(
             &self.stream_handle_shared,
             "dispatch",
@@ -1219,7 +1255,8 @@ impl App {
         );
         self.interrupt_controller.clear_interrupt();
         let mut remediation_attempted = false;
-        let mut auth_refresh_attempted = false;
+        let mut auth_refresh_attempts = 0usize;
+        let auth_refresh_retry_limit = Self::auth_refresh_retry_limit();
         loop {
             Self::emit_lifecycle_event(
                 &self.stream_handle_shared,
@@ -1342,12 +1379,28 @@ impl App {
                     if let Some(handle) = &self.stream_handle {
                         handle.send_done();
                     }
-                    if !auth_refresh_attempted
-                        && Self::is_provider_auth_or_session_error(&e)
-                        && self.force_auth_refresh_after_error().await
-                    {
-                        auth_refresh_attempted = true;
-                        continue;
+                    if Self::is_provider_auth_or_session_error(&e) {
+                        if auth_refresh_attempts < auth_refresh_retry_limit {
+                            if self.force_auth_refresh_after_error().await {
+                                auth_refresh_attempts += 1;
+                                Self::emit_lifecycle_event(
+                                    &self.stream_handle_shared,
+                                    format!(
+                                        "auth refresh retry {}/{}",
+                                        auth_refresh_attempts, auth_refresh_retry_limit
+                                    ),
+                                );
+                                continue;
+                            }
+                        } else {
+                            Self::emit_lifecycle_event(
+                                &self.stream_handle_shared,
+                                format!(
+                                    "auth refresh retries exhausted ({})",
+                                    auth_refresh_retry_limit
+                                ),
+                            );
+                        }
                     }
                     if !remediation_attempted {
                         if let Some((next_model, notice)) =
@@ -1643,7 +1696,7 @@ impl App {
     async fn force_auth_refresh_after_error(&mut self) -> bool {
         let (provider_name, _) = resolve_provider_and_model(&self.config, &self.current_model);
         let provider = normalize_runtime_provider_name(provider_name.as_str());
-        let notice = match provider.as_str() {
+        let (notice, refreshed) = match provider.as_str() {
             "nous" => match resolve_nous_runtime_credentials(
                 true,
                 true,
@@ -1662,9 +1715,15 @@ impl App {
                     if changed {
                         self.switch_model(&self.current_model.clone());
                     }
-                    Some("Nous auth auto-refresh succeeded; retrying request.".to_string())
+                    (
+                        Some("Nous auth auto-refresh succeeded; retrying request.".to_string()),
+                        true,
+                    )
                 }
-                Err(err) => Some(format!("Nous auth auto-refresh failed: {}", err)),
+                Err(err) => (
+                    Some(format!("Nous auth auto-refresh failed: {}", err)),
+                    false,
+                ),
             },
             "qwen-oauth" => {
                 match resolve_qwen_runtime_credentials(
@@ -1686,9 +1745,17 @@ impl App {
                         if changed {
                             self.switch_model(&self.current_model.clone());
                         }
-                        Some("Qwen OAuth auto-refresh succeeded; retrying request.".to_string())
+                        (
+                            Some(
+                                "Qwen OAuth auto-refresh succeeded; retrying request.".to_string(),
+                            ),
+                            true,
+                        )
                     }
-                    Err(err) => Some(format!("Qwen OAuth auto-refresh failed: {}", err)),
+                    Err(err) => (
+                        Some(format!("Qwen OAuth auto-refresh failed: {}", err)),
+                        false,
+                    ),
                 }
             }
             "google-gemini-cli" | "gemini-cli" | "gemini-oauth" => {
@@ -1702,12 +1769,21 @@ impl App {
                         if changed {
                             self.switch_model(&self.current_model.clone());
                         }
-                        Some("Gemini OAuth auto-refresh succeeded; retrying request.".to_string())
+                        (
+                            Some(
+                                "Gemini OAuth auto-refresh succeeded; retrying request."
+                                    .to_string(),
+                            ),
+                            true,
+                        )
                     }
-                    Err(err) => Some(format!("Gemini OAuth auto-refresh failed: {}", err)),
+                    Err(err) => (
+                        Some(format!("Gemini OAuth auto-refresh failed: {}", err)),
+                        false,
+                    ),
                 }
             }
-            _ => None,
+            _ => (None, false),
         };
 
         if let Some(text) = notice {
@@ -1717,9 +1793,8 @@ impl App {
             } else {
                 println!("{}", text);
             }
-            return true;
         }
-        false
+        refreshed
     }
 
     async fn model_auto_remediation_target(&self, err: &AgentError) -> Option<(String, String)> {
