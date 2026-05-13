@@ -3097,20 +3097,14 @@ fn render_messages(
     styles: &crate::theme::ResolvedStyles,
     colors: &crate::theme::RatatuiColors,
 ) {
-    let title = if state.scroll_offset > 0 {
-        format!(" Conversation (+{}) ", state.scroll_offset)
-    } else {
-        " Conversation ".to_string()
-    };
-    let block = Block::default()
+    let base_block = Block::default()
         .borders(Borders::ALL)
-        .title(title)
         .style(Style::default().bg(colors.background))
         .border_style(Style::default().fg(colors.status_bar_dim));
-    let inner = block.inner(area);
+    let inner = base_block.inner(area);
     if inner.width == 0 || inner.height == 0 {
         frame.render_widget(Clear, area);
-        frame.render_widget(block, area);
+        frame.render_widget(base_block.title(" Conversation "), area);
         return;
     }
     let reserved_scrollbar_col = if inner.width > 1 { 1 } else { 0 };
@@ -3241,6 +3235,12 @@ fn render_messages(
     let text = Text::from(render_lines);
     let top_visual_row_u16 = scroll_rows_in_window.min(u16::MAX as usize) as u16;
 
+    let title = if hidden_from_bottom > 0 {
+        format!(" Conversation (+{}) ", hidden_from_bottom)
+    } else {
+        " Conversation ".to_string()
+    };
+    let block = base_block.title(title);
     frame.render_widget(Clear, area);
     frame.render_widget(block, area);
     frame.render_widget(
