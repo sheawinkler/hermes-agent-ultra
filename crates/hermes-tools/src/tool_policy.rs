@@ -24,6 +24,7 @@ enum ToolPolicyPreset {
     Strict,
     Balanced,
     Dev,
+    Relaxed,
 }
 
 impl ToolPolicyPreset {
@@ -32,6 +33,7 @@ impl ToolPolicyPreset {
             "strict" => Some(Self::Strict),
             "balanced" => Some(Self::Balanced),
             "dev" => Some(Self::Dev),
+            "relaxed" | "loose" | "permissive" => Some(Self::Relaxed),
             _ => None,
         }
     }
@@ -228,6 +230,14 @@ impl ToolPolicyEngine {
                 denylist: HashSet::new(),
                 deny_param_patterns: compile_patterns(&default_deny_patterns()),
                 max_param_bytes: 512 * 1024,
+                sandbox_profile: ExecutionSandboxProfile::Dev,
+            },
+            ToolPolicyPreset::Relaxed => Self {
+                mode: ToolPolicyMode::Enforce,
+                allowlist: HashSet::new(),
+                denylist: HashSet::new(),
+                deny_param_patterns: compile_patterns(&default_relaxed_deny_patterns()),
+                max_param_bytes: 1024 * 1024,
                 sandbox_profile: ExecutionSandboxProfile::Dev,
             },
         }
@@ -523,6 +533,13 @@ fn default_deny_patterns() -> Vec<String> {
         r"(?i)aws_secret_access_key".to_string(),
         r"(?i)bearer\s+[a-z0-9\-_\.]{20,}".to_string(),
         r"(?i)api[_-]?key".to_string(),
+    ]
+}
+
+fn default_relaxed_deny_patterns() -> Vec<String> {
+    vec![
+        // Relaxed mode keeps only destructive remove-command blocking.
+        r"(?i)\brm\s+".to_string(),
     ]
 }
 
@@ -905,6 +922,20 @@ mod tests {
         );
         assert!(!decision.allow);
         assert_eq!(decision.code.as_deref(), Some("params_pattern_denied"));
+    }
+
+    #[test]
+    fn relaxed_preset_allows_api_key_strings_but_blocks_rm_commands() {
+        let relaxed = ToolPolicyEngine::from_preset(ToolPolicyPreset::Relaxed);
+        let allow = relaxed.evaluate(
+            "terminal",
+            &serde_json::json!({"cmd":"python3 - <<'PY'\nprint(\"api_key=abc123\")\nPY"}),
+        );
+        assert!(allow.allow, "relaxed mode should not block api_key tokens");
+
+        let deny = relaxed.evaluate("terminal", &serde_json::json!({"cmd":"rm -rf /tmp/demo"}));
+        assert!(!deny.allow, "relaxed mode should still block rm operations");
+        assert_eq!(deny.code.as_deref(), Some("params_pattern_denied"));
     }
 
     #[test]

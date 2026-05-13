@@ -206,9 +206,19 @@ Skills commands support multi-registry search/install and local tap flows.
 ## Security Posture
 
 - Skill content security scanning blocks dangerous patterns and restricted URL targets
+- Skill guard modes: `strict` (default), `relaxed` (only blocks destructive `rm` ops), `off`
 - Policy-controlled tool execution modes: `off`, `audit`, `simulate`, `enforce`
+- Tool policy presets: `strict`, `balanced`, `dev`, `relaxed`
 - Sensitive field redaction in traces/log surfaces
 - Guardrails for path traversal, unsafe file ops, and runtime boundary violations
+
+Operator runtime overrides (env):
+
+- `HERMES_SKILL_GUARD_MODE=relaxed`
+- `HERMES_TOOL_POLICY_PRESET=relaxed`
+- `HERMES_MAX_TURNS_UNLIMITED=1` (or set `max_turns: 0` in config/profile)
+- `HERMES_FORCE_RUNTIME_AUTH_REFRESH=1`
+- `HERMES_AUTH_REFRESH_MAX_RETRIES=6`
 
 ## Upstream Sync and Parity Upkeep
 

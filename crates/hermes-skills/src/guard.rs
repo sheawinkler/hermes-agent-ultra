@@ -127,6 +127,38 @@ static COMPILED_BLOCKED_URLS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         .collect()
 });
 
+static COMPILED_RELAXED_RM_BLOCKS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+    [
+        // In relaxed mode we intentionally keep only destructive file-removal blocks.
+        r"(?i)(?:^|[\s;&|`])rm\s+",
+        r"(?i)\brm\s+-[^\n]*\b(?:r|f)\b",
+    ]
+    .iter()
+    .filter_map(|p| Regex::new(p).ok())
+    .collect()
+});
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SkillGuardMode {
+    Strict,
+    Relaxed,
+    Off,
+}
+
+impl SkillGuardMode {
+    fn from_env() -> Self {
+        let raw = std::env::var("HERMES_SKILL_GUARD_MODE")
+            .ok()
+            .or_else(|| std::env::var("HERMES_GUARD_MODE").ok())
+            .unwrap_or_else(|| "strict".to_string());
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "off" | "disabled" | "none" => Self::Off,
+            "relaxed" | "loose" | "permissive" => Self::Relaxed,
+            _ => Self::Strict,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // SkillGuard
 // ---------------------------------------------------------------------------
@@ -206,14 +238,30 @@ impl SkillGuard {
     /// Unlike `validate_skill`, this does not enforce formatting/structure
     /// requirements and is safe to run against third-party skill bundles.
     pub fn scan_security_only(&self, skill: &Skill) -> Result<(), SkillError> {
-        // Check built-in dangerous patterns.
-        for (regex, reason) in COMPILED_DANGEROUS.iter() {
-            if regex.is_match(&skill.content) {
-                return Err(SkillError::GuardViolation(format!(
-                    "Blocked content: {}",
-                    reason
-                )));
+        let mode = SkillGuardMode::from_env();
+        match mode {
+            SkillGuardMode::Strict => {
+                // Check built-in dangerous patterns.
+                for (regex, reason) in COMPILED_DANGEROUS.iter() {
+                    if regex.is_match(&skill.content) {
+                        return Err(SkillError::GuardViolation(format!(
+                            "Blocked content: {}",
+                            reason
+                        )));
+                    }
+                }
             }
+            SkillGuardMode::Relaxed => {
+                // User-relaxed mode: only block destructive rm operations.
+                for regex in COMPILED_RELAXED_RM_BLOCKS.iter() {
+                    if regex.is_match(&skill.content) {
+                        return Err(SkillError::GuardViolation(
+                            "Blocked content: destructive rm operation detected".to_string(),
+                        ));
+                    }
+                }
+            }
+            SkillGuardMode::Off => {}
         }
 
         // Check custom blocked patterns.
@@ -228,8 +276,10 @@ impl SkillGuard {
             }
         }
 
-        // Validate any URLs found in the content.
-        self.validate_urls_in_content(&skill.content)?;
+        if mode == SkillGuardMode::Strict {
+            // Validate any URLs found in the content.
+            self.validate_urls_in_content(&skill.content)?;
+        }
 
         Ok(())
     }
