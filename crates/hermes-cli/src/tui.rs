@@ -3933,15 +3933,54 @@ fn hard_wrap_segments(text: &str, max_chars: usize) -> Vec<String> {
     if text.is_empty() {
         return vec![String::new()];
     }
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return vec![String::new()];
+    }
     let mut segments = Vec::new();
     let mut current = String::new();
-    let mut count = 0usize;
-    for ch in text.chars() {
-        current.push(ch);
-        count += 1;
-        if count >= width {
+    let mut current_len = 0usize;
+
+    for token in trimmed.split_whitespace() {
+        let token_len = token.chars().count();
+        if token_len > width {
+            if !current.is_empty() {
+                segments.push(std::mem::take(&mut current));
+                current_len = 0;
+            }
+            let mut chunk = String::new();
+            let mut chunk_len = 0usize;
+            for ch in token.chars() {
+                chunk.push(ch);
+                chunk_len += 1;
+                if chunk_len >= width {
+                    segments.push(std::mem::take(&mut chunk));
+                    chunk_len = 0;
+                }
+            }
+            if !chunk.is_empty() {
+                current = chunk;
+                current_len = chunk_len;
+            }
+            continue;
+        }
+
+        let needed = if current.is_empty() {
+            token_len
+        } else {
+            current_len + 1 + token_len
+        };
+        if needed <= width {
+            if !current.is_empty() {
+                current.push(' ');
+                current_len += 1;
+            }
+            current.push_str(token);
+            current_len += token_len;
+        } else {
             segments.push(std::mem::take(&mut current));
-            count = 0;
+            current.push_str(token);
+            current_len = token_len;
         }
     }
     if !current.is_empty() {
@@ -4584,6 +4623,32 @@ fn extract_file_like_hints(text: &str, limit: usize) -> Vec<String> {
     out
 }
 
+fn stream_chunk_has_progress(chunk: &StreamChunk) -> bool {
+    if let Some(delta) = chunk.delta.as_ref() {
+        let has_content = delta
+            .content
+            .as_ref()
+            .is_some_and(|text| !text.trim().is_empty());
+        let has_tool_calls = delta
+            .tool_calls
+            .as_ref()
+            .is_some_and(|calls| !calls.is_empty());
+        let has_extra_event = delta.extra.as_ref().is_some_and(|extra| match extra {
+            serde_json::Value::Null => false,
+            serde_json::Value::Object(map) => !map.is_empty(),
+            _ => true,
+        });
+        if has_content || has_tool_calls || has_extra_event {
+            return true;
+        }
+    }
+    chunk
+        .finish_reason
+        .as_ref()
+        .is_some_and(|reason| !reason.trim().is_empty())
+        || chunk.usage.is_some()
+}
+
 fn process_stream_lane_event(app: &mut App, state: &mut TuiState, event: Event) -> bool {
     match event {
         Event::StreamDelta(delta) => {
@@ -4605,15 +4670,14 @@ fn process_stream_lane_event(app: &mut App, state: &mut TuiState, event: Event) 
             true
         }
         Event::StreamChunk(chunk) => {
+            if stream_chunk_has_progress(&chunk) {
+                state.stream_chunk_count = state.stream_chunk_count.saturating_add(1);
+            }
             if let Some(delta) = chunk.delta {
-                let has_stream_payload =
-                    delta.content.as_ref().is_some_and(|text| !text.is_empty())
-                        || delta
-                            .tool_calls
-                            .as_ref()
-                            .is_some_and(|calls| !calls.is_empty());
-                if has_stream_payload {
-                    state.stream_chunk_count = state.stream_chunk_count.saturating_add(1);
+                if let Some(content) = delta.content.as_ref().filter(|text| !text.is_empty()) {
+                    state.stream_char_count = state
+                        .stream_char_count
+                        .saturating_add(content.chars().count());
                 }
                 if let Some(extra) = delta.extra.as_ref() {
                     if let Some(control) = extra.get("control").and_then(|v| v.as_str()) {
@@ -5759,6 +5823,52 @@ mod tests {
         assert_eq!(transcript_wrap_width(12), 12);
         assert_eq!(transcript_wrap_width(80), 80);
         assert_eq!(transcript_wrap_width(140), 80);
+    }
+
+    #[test]
+    fn test_hard_wrap_segments_prefers_word_boundaries() {
+        let wrapped = hard_wrap_segments("context lattice integration is core", 12);
+        assert_eq!(
+            wrapped,
+            vec![
+                "context".to_string(),
+                "lattice".to_string(),
+                "integration".to_string(),
+                "is core".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_hard_wrap_segments_splits_overlong_token() {
+        let wrapped = hard_wrap_segments("supercalifragilisticexpialidocious", 8);
+        assert_eq!(
+            wrapped,
+            vec![
+                "supercal".to_string(),
+                "ifragili".to_string(),
+                "sticexpi".to_string(),
+                "alidocio".to_string(),
+                "us".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_stream_chunk_has_progress_for_extra_only_events() {
+        let chunk = StreamChunk {
+            delta: Some(hermes_core::StreamDelta {
+                content: None,
+                tool_calls: None,
+                extra: Some(serde_json::json!({
+                    "ui_event": "lifecycle",
+                    "message": "dispatching request"
+                })),
+            }),
+            finish_reason: None,
+            usage: None,
+        };
+        assert!(stream_chunk_has_progress(&chunk));
     }
 
     #[test]

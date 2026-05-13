@@ -31,7 +31,7 @@ use hermes_cron::cron_scheduler_for_data_dir;
 use hermes_skills::{FileSkillStore, SkillManager};
 use hermes_tools::ToolRegistry;
 
-use crate::alpha_runtime::load_objective_contract;
+use crate::alpha_runtime::{load_objective_contract, objective_lifecycle_is_active};
 use crate::auth::{
     resolve_gemini_oauth_runtime_credentials, resolve_nous_runtime_credentials,
     resolve_qwen_runtime_credentials, DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
@@ -323,6 +323,7 @@ pub struct UiTranscriptMessage {
 
 impl App {
     const SESSION_OBJECTIVE_PREFIX: &'static str = "[SESSION_OBJECTIVE] ";
+    const RUNTIME_REFORMULATION_PREFIX: &'static str = "[HERMES_RUNTIME_REFORMULATION] ";
 
     fn ensure_session_stub_snapshot(&self) {
         if let Err(err) = self.persist_session_snapshot(None) {
@@ -633,6 +634,109 @@ impl App {
                 8,
             );
         }
+    }
+
+    fn runtime_prompt_reformulation_enabled() -> bool {
+        !matches!(
+            std::env::var("HERMES_RUNTIME_PROMPT_REFORMULATION")
+                .ok()
+                .as_deref()
+                .map(|v| v.trim().to_ascii_lowercase()),
+            Some(v) if matches!(v.as_str(), "0" | "false" | "off" | "no")
+        )
+    }
+
+    fn runtime_contradiction_self_check_enabled() -> bool {
+        !matches!(
+            std::env::var("HERMES_RUNTIME_CONTRADICTION_SELF_CHECK")
+                .ok()
+                .as_deref()
+                .map(|v| v.trim().to_ascii_lowercase()),
+            Some(v) if matches!(v.as_str(), "0" | "false" | "off" | "no")
+        )
+    }
+
+    fn current_tool_profile_mode() -> String {
+        std::env::var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE")
+            .ok()
+            .map(|v| v.trim().to_ascii_lowercase())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| "balanced".to_string())
+    }
+
+    fn build_runtime_reformulation_message(&self, latest_user_prompt: &str) -> Option<String> {
+        if !Self::runtime_prompt_reformulation_enabled() {
+            return None;
+        }
+        let prompt = latest_user_prompt.trim();
+        if prompt.is_empty() {
+            return None;
+        }
+        let tool_profile_mode = Self::current_tool_profile_mode();
+        let contradiction_check = Self::runtime_contradiction_self_check_enabled();
+        let context_topic = std::env::var("CONTEXTLATTICE_TOPIC_PATH")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| "runbooks/hermes".to_string());
+
+        let objective_line = load_objective_contract()
+            .ok()
+            .flatten()
+            .filter(|contract| objective_lifecycle_is_active(&contract.lifecycle_status))
+            .map(|contract| {
+                format!(
+                    "objective(active): {} | behavior={} | text={}",
+                    contract.id,
+                    contract.behavior_mode.trim(),
+                    Self::preview_for_status(&contract.objective_text, 220)
+                )
+            })
+            .unwrap_or_else(|| "objective(active): none".to_string());
+
+        let contradiction_line = if contradiction_check {
+            "before final response: self-audit contradictions across tool outputs, runtime facts, and claims; unresolved items must be marked UNPROVEN/CONTRADICTORY."
+        } else {
+            "before final response: consistency self-audit optional (disabled by runtime toggle)."
+        };
+
+        let mut out = String::new();
+        out.push_str(Self::RUNTIME_REFORMULATION_PREFIX);
+        out.push_str(
+            "\nRuntime execution reformulation (internal):\n\
+             1) apply anti-scheming evidence-first discipline\n\
+             2) pull ContextLattice context first when relevant\n\
+             3) route tool usage intentionally and avoid repetitive low-signal loops\n",
+        );
+        out.push_str(&format!(
+            "tool-profile(mode): {}\ncontextlattice(topic): {}\n{}\n",
+            tool_profile_mode, context_topic, objective_line
+        ));
+        out.push_str(contradiction_line);
+        out.push_str("\nuser-request(original):\n");
+        out.push_str(prompt);
+        Some(out)
+    }
+
+    fn build_inference_messages(&self) -> (Vec<hermes_core::Message>, bool) {
+        let mut messages = self.messages.clone();
+        let Some(last_user_idx) = messages
+            .iter()
+            .rposition(|m| m.role == hermes_core::MessageRole::User)
+        else {
+            return (messages, false);
+        };
+        let user_prompt = messages[last_user_idx]
+            .content
+            .as_deref()
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let Some(reformulation) = self.build_runtime_reformulation_message(&user_prompt) else {
+            return (messages, false);
+        };
+        messages.insert(last_user_idx, hermes_core::Message::system(reformulation));
+        (messages, true)
     }
 
     /// Create a new `App` from the parsed CLI arguments.
@@ -1130,7 +1234,13 @@ impl App {
                 "model inference + tool execution",
                 35,
             );
-            let messages = self.messages.clone();
+            let (messages, reformulated) = self.build_inference_messages();
+            if reformulated {
+                Self::emit_lifecycle_event(
+                    &self.stream_handle_shared,
+                    "runtime prompt reformulation injected (anti-scheming + context + tool routing + contradiction self-check)",
+                );
+            }
             let result = if self.config.streaming.enabled {
                 let stream_handle = self.stream_handle.clone();
                 let stream_cb: Option<Box<dyn Fn(hermes_core::StreamChunk) + Send + Sync>> =
@@ -2362,6 +2472,62 @@ mod tests {
         assert!(default_mouse_enabled());
 
         std::env::remove_var("HERMES_TUI_MOUSE");
+    }
+
+    #[test]
+    fn test_build_inference_messages_injects_runtime_reformulation() {
+        let _lock = env_test_lock();
+        let prev_home = std::env::var("HERMES_HOME").ok();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::env::set_var("HERMES_HOME", tmp.path());
+        std::env::set_var("HERMES_RUNTIME_PROMPT_REFORMULATION", "1");
+        std::env::set_var("HERMES_RUNTIME_CONTRADICTION_SELF_CHECK", "1");
+        std::env::set_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE", "focus");
+        std::env::set_var(
+            "CONTEXTLATTICE_TOPIC_PATH",
+            "runbooks/objective/test-objective",
+        );
+        let contract =
+            upsert_objective_contract("Grow SOL with controlled risk", true).expect("obj");
+
+        let mut app = build_minimal_test_app();
+        app.messages.push(hermes_core::Message::user(
+            "provide 3 more ideas with contextlattice being one",
+        ));
+        let (messages, injected) = app.build_inference_messages();
+        assert!(injected);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, hermes_core::MessageRole::System);
+        let injected_text = messages[0].content.as_deref().unwrap_or_default();
+        assert!(injected_text.contains(App::RUNTIME_REFORMULATION_PREFIX));
+        assert!(injected_text.contains("tool-profile(mode): focus"));
+        assert!(injected_text.contains("contextlattice(topic): runbooks/objective/test-objective"));
+        assert!(injected_text.contains(contract.id.as_str()));
+        assert!(injected_text.contains("UNPROVEN/CONTRADICTORY"));
+        assert_eq!(messages[1].role, hermes_core::MessageRole::User);
+
+        match prev_home {
+            Some(val) => std::env::set_var("HERMES_HOME", val),
+            None => std::env::remove_var("HERMES_HOME"),
+        }
+        std::env::remove_var("HERMES_RUNTIME_PROMPT_REFORMULATION");
+        std::env::remove_var("HERMES_RUNTIME_CONTRADICTION_SELF_CHECK");
+        std::env::remove_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE");
+        std::env::remove_var("CONTEXTLATTICE_TOPIC_PATH");
+    }
+
+    #[test]
+    fn test_build_inference_messages_respects_reformulation_toggle_off() {
+        let _lock = env_test_lock();
+        std::env::set_var("HERMES_RUNTIME_PROMPT_REFORMULATION", "off");
+        let mut app = build_minimal_test_app();
+        app.messages
+            .push(hermes_core::Message::user("plain request"));
+        let (messages, injected) = app.build_inference_messages();
+        assert!(!injected);
+        assert_eq!(messages.len(), 1);
+        assert_eq!(messages[0].role, hermes_core::MessageRole::User);
+        std::env::remove_var("HERMES_RUNTIME_PROMPT_REFORMULATION");
     }
 
     #[test]
