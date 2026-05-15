@@ -4,6 +4,10 @@
 
 This tranche adds operator reliability hardening (`P2a`) and adaptive intelligence surfaces (`P2b`) on top of the prior OpenHuman-aligned command surfaces.
 
+Follow-on tranche:
+
+- `docs/implementation/openhuman-p3-swarms-runbook.md`
+
 ## P2a: Reliability + Control Plane
 
 ### 1) Trigger triage learning loop
@@ -117,4 +121,3 @@ Broader command tests:
 Package regression:
 
 - `cargo test -p hermes-cli --lib`
-

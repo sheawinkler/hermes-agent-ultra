@@ -124,6 +124,9 @@ Key operator commands:
 # Capability diagnostics for current or target model
 /model explain
 /model why-not --cap tools,reasoning --min-context 200000
+/swarm status
+/swarm plan graph
+/swarm run 4 sequential
 
 # Deterministic trace controls
 /raw trace status
@@ -220,9 +223,13 @@ Skills commands support multi-registry search/install and local tap flows.
   - `claude-marketplace/...`
 - Mandatory skill security scanning runs before install and before use.
 
-OpenHuman P0/P1 runbook and matrix:
+OpenHuman runbooks and matrices:
 - `docs/implementation/openhuman-p0-p1-runbook.md`
 - `docs/implementation/openhuman-p0-p1-surface-matrix.md`
+- `docs/implementation/openhuman-p2a-p2b-runbook.md`
+- `docs/implementation/openhuman-p2a-p2b-surface-matrix.md`
+- `docs/implementation/openhuman-p3-swarms-runbook.md`
+- `docs/implementation/openhuman-p3-swarms-surface-matrix.md`
 
 ## Security Posture
 

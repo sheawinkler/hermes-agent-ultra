@@ -18,6 +18,7 @@ pub mod prompt;
 pub mod redact;
 pub mod router;
 pub mod session_insights;
+pub mod swarm_runtime;
 pub mod title;
 pub mod usage;
 pub mod usage_pricing;
@@ -28,6 +29,10 @@ pub use prompt::PromptBuilder;
 pub use redact::{RedactionPattern, Redactor};
 pub use router::{
     ModelCapability, ModelInfo as RouterModelInfo, ModelRequirements, RouterError, SmartModelRouter,
+};
+pub use swarm_runtime::{
+    build_swarm_execution_plan, swarm_runtime_status, SwarmExecutionMode, SwarmExecutionPlan,
+    SwarmRuntimeStatus,
 };
 pub use title::{TitleError, TitleGenerator};
 pub use usage::{ModelPricing, ModelUsage, UsageRecord, UsageSummary, UsageTracker};

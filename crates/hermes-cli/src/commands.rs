@@ -18,6 +18,7 @@ use hermes_agent::plugins::PluginManifest;
 use hermes_core::AgentError;
 use hermes_intelligence::model_metadata::{get_model_context_length, get_model_info};
 use hermes_intelligence::models_dev::default_client;
+use hermes_intelligence::{build_swarm_execution_plan, swarm_runtime_status, SwarmExecutionMode};
 use hermes_tools::ToolPolicyEngine;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -207,6 +208,11 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
         "/quorum",
         "Optional multi-voter deep-reasoning mode (`status|on|off|models|run`)",
     ),
+    (
+        "/swarm",
+        "Swarm orchestration surface (`status|plan|run|cancel|artifact`) with quorum-compatible controls",
+    ),
+    ("/swarms", "Alias for /swarm"),
     (
         "/simulate",
         "Simulate tool-policy decisions without executing tools (`status|<tool> [json-params]`)",
@@ -3059,6 +3065,7 @@ fn canonical_command(cmd: &str) -> &str {
         "/q" => "/queue",
         "/bg" => "/background",
         "/goal" => "/objective",
+        "/swarms" => "/swarm",
         "/question" => "/ask",
         "/autocompress" => "/autocompact",
         "/skins" => "/skin",
@@ -3124,6 +3131,7 @@ pub async fn handle_slash_command(
         "/objective" => handle_objective_command(app, args),
         "/claims" => handle_claims_command(app, args),
         "/quorum" => handle_quorum_command(app, args).await,
+        "/swarm" => handle_swarm_command(app, args).await,
         "/simulate" => handle_simulate_command(app, args),
         "/specpatch" => handle_specpatch_command(app, args).await,
         "/heatmap" => handle_heatmap_command(app, args).await,
@@ -14609,6 +14617,221 @@ async fn handle_quorum_command(app: &mut App, args: &[&str]) -> Result<CommandRe
     Ok(CommandResult::Handled)
 }
 
+fn parse_swarm_mode(input: Option<&str>) -> SwarmExecutionMode {
+    match input
+        .unwrap_or("concurrent")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "sequential" | "sequence" => SwarmExecutionMode::Sequential,
+        "graph" | "dag" => SwarmExecutionMode::Graph,
+        _ => SwarmExecutionMode::Concurrent,
+    }
+}
+
+fn read_swarm_pass_cap() -> usize {
+    std::env::var("HERMES_QUORUM_VOTER_PASSES")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<usize>().ok())
+        .unwrap_or(3)
+        .clamp(1, 8)
+}
+
+fn latest_quorum_artifact_path(app: &App) -> Option<PathBuf> {
+    let dir = app.state_root.join("quorum");
+    let entries = std::fs::read_dir(&dir).ok()?;
+    let mut best_session: Option<(SystemTime, PathBuf)> = None;
+    let mut best_any: Option<(SystemTime, PathBuf)> = None;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("json") {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .unwrap_or(SystemTime::UNIX_EPOCH);
+        if let Some((best_time, _)) = &best_any {
+            if modified > *best_time {
+                best_any = Some((modified, path.clone()));
+            }
+        } else {
+            best_any = Some((modified, path.clone()));
+        }
+
+        let file_name = path
+            .file_name()
+            .and_then(|v| v.to_str())
+            .unwrap_or_default();
+        if !file_name.starts_with(&format!("{}-", app.session_id)) {
+            continue;
+        }
+        if let Some((best_time, _)) = &best_session {
+            if modified > *best_time {
+                best_session = Some((modified, path.clone()));
+            }
+        } else {
+            best_session = Some((modified, path.clone()));
+        }
+    }
+    best_session.or(best_any).map(|(_, path)| path)
+}
+
+async fn handle_swarm_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let sub = args
+        .first()
+        .copied()
+        .unwrap_or("status")
+        .trim()
+        .to_ascii_lowercase();
+
+    match sub.as_str() {
+        "status" => {
+            let policy = load_quorum_policy()?;
+            let runtime = swarm_runtime_status();
+            let artifact_path = latest_quorum_artifact_path(app)
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "(none yet)".to_string());
+            let mut out = String::new();
+            let _ = writeln!(out, "Swarm runtime");
+            let _ = writeln!(out, "engine={}", runtime.engine);
+            let _ = writeln!(out, "feature_enabled={}", runtime.feature_enabled);
+            let _ = writeln!(
+                out,
+                "supported_modes={}",
+                runtime
+                    .supported_modes
+                    .iter()
+                    .map(|m| m.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            let _ = writeln!(
+                out,
+                "quorum_policy=enabled:{} voters:{} models:{} armed_once:{}",
+                policy.enabled,
+                policy.voters,
+                if policy.models.is_empty() {
+                    "(current model)".to_string()
+                } else {
+                    policy.models.join(", ")
+                },
+                app.quorum_armed_once
+            );
+            let _ = writeln!(out, "latest_artifact={}", artifact_path);
+            if !runtime.notes.is_empty() {
+                let _ = writeln!(out, "notes:");
+                for note in runtime.notes {
+                    let _ = writeln!(out, "- {}", note);
+                }
+            }
+            emit_command_output(app, out.trim_end());
+        }
+        "plan" => {
+            let policy = load_quorum_policy()?;
+            let mode = parse_swarm_mode(args.get(1).copied());
+            let pass_cap = read_swarm_pass_cap();
+            let models = if policy.models.is_empty() {
+                vec![app.current_model.clone()]
+            } else {
+                policy.models.clone()
+            };
+            let plan = build_swarm_execution_plan(
+                mode,
+                policy.voters,
+                models,
+                app.session_objective.clone(),
+                pass_cap,
+            );
+            let pretty = serde_json::to_string_pretty(&plan)
+                .map_err(|e| AgentError::Config(format!("failed to render swarm plan: {e}")))?;
+            emit_command_output(
+                app,
+                format!(
+                    "Swarm execution plan\n{}\n\nUsage: /swarm run [passes] [mode]\nmode: concurrent|sequential|graph",
+                    pretty
+                ),
+            );
+        }
+        "run" => {
+            let pass_override = args
+                .get(1)
+                .and_then(|raw| raw.trim().parse::<usize>().ok())
+                .map(|v| v.clamp(1, 8));
+            let mode = if pass_override.is_some() {
+                parse_swarm_mode(args.get(2).copied())
+            } else {
+                parse_swarm_mode(args.get(1).copied())
+            };
+            if let Some(passes) = pass_override {
+                std::env::set_var("HERMES_QUORUM_VOTER_PASSES", passes.to_string());
+            }
+            let policy = load_quorum_policy()?;
+            if !policy.enabled {
+                emit_command_output(
+                    app,
+                    "Swarm run blocked: quorum policy is OFF.\nRun `/swarm on` (or `/quorum on`) first to keep cost explicit.",
+                );
+                return Ok(CommandResult::Handled);
+            }
+            install_quorum_system_hint(app, policy.voters, &policy.models);
+            app.quorum_armed_once = true;
+            emit_command_output(
+                app,
+                format!(
+                    "Swarm run armed.\nmode={}\npass_cap={}\nnext user prompt will execute multi-voter fan-out + synthesis and persist an artifact.",
+                    mode.as_str(),
+                    read_swarm_pass_cap(),
+                ),
+            );
+        }
+        "cancel" => {
+            app.quorum_armed_once = false;
+            clear_quorum_system_hints(app);
+            emit_command_output(app, "Swarm run canceled. Pending one-shot fan-out was disarmed.");
+        }
+        "artifact" => {
+            let Some(path) = latest_quorum_artifact_path(app) else {
+                emit_command_output(app, "No swarm/quorum artifact exists yet for this runtime.");
+                return Ok(CommandResult::Handled);
+            };
+            let summary = std::fs::read_to_string(&path)
+                .ok()
+                .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+                .map(|v| {
+                    let session_id = v
+                        .get("session_id")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("unknown");
+                    let saved_at = v
+                        .get("saved_at")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("unknown");
+                    let voters = v
+                        .get("voters")
+                        .and_then(|x| x.as_array())
+                        .map(|arr| arr.len())
+                        .unwrap_or(0);
+                    format!("session_id={session_id}\nsaved_at={saved_at}\nvoters={voters}")
+                })
+                .unwrap_or_else(|| "(unable to parse artifact summary)".to_string());
+            emit_command_output(
+                app,
+                format!("Latest swarm artifact\npath={}\n{}", path.display(), summary),
+            );
+        }
+        "on" | "off" | "enable" | "disable" | "true" | "false" | "1" | "0" | "voters"
+        | "models" => return handle_quorum_command(app, args).await,
+        _ => emit_command_output(
+            app,
+            "Usage: /swarm [status|plan [mode]|run [passes] [mode]|cancel|artifact|on|off|voters <2..5>|models <a,b,c>]",
+        ),
+    }
+    Ok(CommandResult::Handled)
+}
+
 fn specpatch_block_reason(command: &str) -> Option<&'static str> {
     let lower = command.to_ascii_lowercase();
     if lower.contains("rm -rf /")
@@ -24388,6 +24611,7 @@ mod tests {
         assert_eq!(canonical_command("/topic"), "/title");
         assert_eq!(canonical_command("/reload-skills"), "/reload");
         assert_eq!(canonical_command("/reload_skills"), "/reload");
+        assert_eq!(canonical_command("/swarms"), "/swarm");
         assert_eq!(canonical_command("/summary"), "/recap");
         assert_eq!(canonical_command("/whoami"), "/profile");
         assert_eq!(canonical_command("/footer"), "/statusbar");
@@ -24399,6 +24623,50 @@ mod tests {
         assert_eq!(canonical_command("/curator"), "/skills");
         assert_eq!(canonical_command("/tt"), "/timetravel");
         assert_eq!(canonical_command("/rb"), "/runbook");
+    }
+
+    #[test]
+    fn p3_swarm_commands_registered_and_completable() {
+        assert!(SLASH_COMMANDS.iter().any(|(name, _)| *name == "/swarm"));
+        assert!(SLASH_COMMANDS.iter().any(|(name, _)| *name == "/swarms"));
+        assert!(autocomplete("/swa").contains(&"/swarm"));
+    }
+
+    #[tokio::test]
+    async fn p3_swarm_status_plan_run_cancel_surface_is_handled() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+
+        handle_slash_command(&mut app, "/swarm", &["status"])
+            .await
+            .expect("swarm status");
+        let status = latest_ui_assistant_text(&app);
+        assert!(status.contains("Swarm runtime"));
+
+        handle_slash_command(&mut app, "/swarm", &["plan", "graph"])
+            .await
+            .expect("swarm plan");
+        let plan = latest_ui_assistant_text(&app);
+        assert!(plan.contains("Swarm execution plan"));
+        assert!(plan.contains("\"mode\": \"graph\""));
+
+        handle_slash_command(&mut app, "/swarm", &["on"])
+            .await
+            .expect("swarm on");
+        handle_slash_command(&mut app, "/swarm", &["run", "4", "sequential"])
+            .await
+            .expect("swarm run");
+        assert!(app.quorum_armed_once, "swarm run should arm quorum fanout");
+        let run_msg = latest_ui_assistant_text(&app);
+        assert!(run_msg.contains("Swarm run armed."));
+        assert!(run_msg.contains("mode=sequential"));
+
+        handle_slash_command(&mut app, "/swarm", &["cancel"])
+            .await
+            .expect("swarm cancel");
+        assert!(!app.quorum_armed_once, "cancel should disarm run");
     }
 
     #[test]

@@ -23,6 +23,10 @@ futures = { workspace = true }
 strsim = "0.11"
 dirs = "6"
 tempfile = "3"
+swarms = { version = "0.2.1", package = "swarms-rs", optional = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
+
+[features]
+swarms = ["dep:swarms"]
