@@ -12,3 +12,7 @@ vout-endianness-analysis.md
 __pycache__/
 **/__pycache__/
 *.pyc
+
+# Local quorum/model run captures can include private prompts, trading research,
+# and provider error details. Keep them off public main.
+artifacts/quorum/
