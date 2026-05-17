@@ -2473,14 +2473,6 @@ impl App {
         run_started_at: Instant,
         policy: QuorumPolicy,
     ) -> Result<bool, AgentError> {
-        // Explore-first quorum runtime: keep safety observable but do not pre-trim exploration.
-        std::env::set_var("HERMES_SKILL_GUARD_MODE", "off");
-        std::env::set_var("HERMES_GUARD_MODE", "off");
-        std::env::set_var("HERMES_TOOL_POLICY_PRESET", "dev");
-        std::env::set_var("HERMES_TOOL_POLICY_MODE", "audit");
-        std::env::set_var("HERMES_MAX_TURNS_UNLIMITED", "1");
-        std::env::set_var("HERMES_REPO_REVIEW_BUDGET_PROFILE", "off");
-
         let quorum_contract = self.load_quorum_agent_contract_text();
         let (voter_models, model_resolution_notes) = self.resolve_quorum_models(&policy).await;
         for note in model_resolution_notes {
