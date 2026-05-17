@@ -27,9 +27,10 @@ use hermes_cli::auth::{
     resolve_gemini_oauth_runtime_credentials, resolve_nous_runtime_credentials,
     resolve_qwen_runtime_credentials, save_codex_auth_state, save_nous_auth_state,
     save_openai_auth_state, save_provider_auth_state, AnthropicOAuthLoginOptions,
-    CodexDeviceCodeOptions, GeminiOAuthLoginOptions, NousDeviceCodeOptions,
-    ANTHROPIC_OAUTH_CLIENT_ID, ANTHROPIC_OAUTH_TOKEN_URL, CODEX_OAUTH_CLIENT_ID,
-    CODEX_OAUTH_TOKEN_URL, DEFAULT_CODEX_BASE_URL, DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
+    CodexDeviceCodeOptions, GeminiOAuthLoginOptions, NousAuthState, NousDeviceCodeOptions,
+    NousRuntimeCredentials, ANTHROPIC_OAUTH_CLIENT_ID, ANTHROPIC_OAUTH_TOKEN_URL,
+    CODEX_OAUTH_CLIENT_ID, CODEX_OAUTH_TOKEN_URL, DEFAULT_CODEX_BASE_URL,
+    DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS, DEFAULT_NOUS_CLIENT_ID, DEFAULT_NOUS_PORTAL_URL,
     DEFAULT_OPENAI_BASE_URL, NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
     QWEN_ACCESS_TOKEN_REFRESH_SKEW_SECONDS, QWEN_OAUTH_CLIENT_ID, QWEN_OAUTH_TOKEN_URL,
 };
@@ -6254,6 +6255,95 @@ fn print_auth_verify_result(result: &AuthVerifyResult) {
     );
 }
 
+fn nous_auth_error_requires_fresh_login(err: &AgentError) -> bool {
+    let text = err.to_string().to_ascii_lowercase();
+    text.contains("invalid_grant")
+        || text.contains("refresh token reuse")
+        || text.contains("refresh session has been revoked")
+        || text.contains("session has been revoked")
+        || text.contains("stored nous auth state is invalid")
+        || text.contains("missing refresh token")
+        || text.contains("no refresh token")
+}
+
+async fn save_nous_runtime_credential(
+    manager: &AuthManager,
+    resolved: &NousRuntimeCredentials,
+) -> Result<(), AgentError> {
+    manager
+        .save_credential(OAuthCredential {
+            provider: "nous".to_string(),
+            access_token: resolved.api_key.clone(),
+            refresh_token: resolved.refresh_token.clone(),
+            token_type: resolved.token_type.clone(),
+            scope: resolved.scope.clone(),
+            expires_at: parse_rfc3339_utc(resolved.expires_at.as_deref()),
+        })
+        .await
+}
+
+async fn fresh_nous_login_and_save(
+    manager: &AuthManager,
+) -> Result<(NousRuntimeCredentials, std::path::PathBuf, NousAuthState), AgentError> {
+    let _ = clear_provider_auth_state("nous")?;
+    let state = login_nous_device_code(NousDeviceCodeOptions::default()).await?;
+    let auth_path = save_nous_auth_state(&state)?;
+    let resolved = resolve_nous_runtime_credentials(
+        true,
+        true,
+        NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+        DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
+    )
+    .await?;
+    save_nous_runtime_credential(manager, &resolved).await?;
+    Ok((resolved, auth_path, state))
+}
+
+async fn resolve_or_fresh_login_nous(
+    manager: &AuthManager,
+    use_existing: bool,
+) -> Result<
+    (
+        NousRuntimeCredentials,
+        std::path::PathBuf,
+        bool,
+        NousAuthState,
+    ),
+    AgentError,
+> {
+    if use_existing {
+        if let Some(imported) = discover_existing_nous_oauth()? {
+            println!(
+                "Detected existing Nous OAuth session at {}.",
+                imported.source_path.display()
+            );
+            let imported_state = imported.state.clone();
+            let auth_path = save_nous_auth_state(&imported.state)?;
+            match resolve_nous_runtime_credentials(
+                true,
+                true,
+                NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
+                DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
+            )
+            .await
+            {
+                Ok(resolved) => {
+                    save_nous_runtime_credential(manager, &resolved).await?;
+                    return Ok((resolved, auth_path, true, imported_state));
+                }
+                Err(err) if nous_auth_error_requires_fresh_login(&err) => {
+                    eprintln!(
+                        "Existing Nous OAuth session is stale/revoked; starting a fresh login flow."
+                    );
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+    let (resolved, auth_path, state) = fresh_nous_login_and_save(manager).await?;
+    Ok((resolved, auth_path, false, state))
+}
+
 async fn verify_single_oauth_provider(
     provider: &str,
     token_store: &FileTokenStore,
@@ -6621,38 +6711,8 @@ async fn run_auth(
             if auth_type == "oauth" {
                 match provider.as_str() {
                     "nous" => {
-                        let imported = discover_existing_nous_oauth()?;
-                        let (state, imported_existing) = if let Some(imported) = imported {
-                            println!(
-                                "Detected existing Nous OAuth session at {}.",
-                                imported.source_path.display()
-                            );
-                            (imported.state, true)
-                        } else {
-                            (
-                                login_nous_device_code(NousDeviceCodeOptions::default()).await?,
-                                false,
-                            )
-                        };
-                        let auth_path = save_nous_auth_state(&state)?;
-                        let resolved = resolve_nous_runtime_credentials(
-                            imported_existing,
-                            true,
-                            NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
-                            DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
-                        )
-                        .await?;
-                        let expires_at = parse_rfc3339_utc(resolved.expires_at.as_deref());
-                        manager
-                            .save_credential(OAuthCredential {
-                                provider: "nous".to_string(),
-                                access_token: resolved.api_key.clone(),
-                                refresh_token: resolved.refresh_token.clone(),
-                                token_type: resolved.token_type.clone(),
-                                scope: resolved.scope.clone(),
-                                expires_at,
-                            })
-                            .await?;
+                        let (resolved, auth_path, _imported_existing, state) =
+                            resolve_or_fresh_login_nous(&manager, true).await?;
                         let entries = pool_store.providers.entry(provider.clone()).or_default();
                         let default_label = format!("{provider}-{}", entries.len() + 1);
                         let entry = AuthPoolEntry {
@@ -7268,38 +7328,8 @@ async fn run_auth(
                 return Ok(());
             }
             if provider == "nous" {
-                let imported = discover_existing_nous_oauth()?;
-                let (state, imported_existing) = if let Some(imported) = imported {
-                    println!(
-                        "Detected existing Nous OAuth session at {}.",
-                        imported.source_path.display()
-                    );
-                    (imported.state, true)
-                } else {
-                    (
-                        login_nous_device_code(NousDeviceCodeOptions::default()).await?,
-                        false,
-                    )
-                };
-                let auth_path = save_nous_auth_state(&state)?;
-                let resolved = resolve_nous_runtime_credentials(
-                    imported_existing,
-                    true,
-                    NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
-                    DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
-                )
-                .await?;
-                let expires_at = parse_rfc3339_utc(resolved.expires_at.as_deref());
-                manager
-                    .save_credential(OAuthCredential {
-                        provider: "nous".to_string(),
-                        access_token: resolved.api_key,
-                        refresh_token: resolved.refresh_token,
-                        token_type: resolved.token_type,
-                        scope: resolved.scope,
-                        expires_at,
-                    })
-                    .await?;
+                let (_resolved, auth_path, _imported_existing, _state) =
+                    resolve_or_fresh_login_nous(&manager, true).await?;
                 println!("Nous OAuth credential saved as provider 'nous'.");
                 println!("Saved OAuth state: {}", auth_path.display());
                 return Ok(());
@@ -9449,44 +9479,23 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
             let manager = AuthManager::new(store);
             match selected_provider.as_str() {
                 "nous" => {
-                    let imported = discover_existing_nous_oauth()?;
-                    let (state, imported_existing) = if let Some(imported) = imported {
-                        println!(
-                            "  ✓ Detected existing Nous OAuth session: {}",
-                            imported.source_path.display()
-                        );
-                        (imported.state, true)
-                    } else {
-                        (
-                            login_nous_device_code(NousDeviceCodeOptions::default()).await?,
-                            false,
-                        )
-                    };
-                    let auth_path = save_nous_auth_state(&state)?;
+                    let (resolved, auth_path, _imported_existing, state) =
+                        resolve_or_fresh_login_nous(&manager, true).await?;
                     println!("  ✓ Saved Nous OAuth state: {}", auth_path.display());
-                    let resolved = resolve_nous_runtime_credentials(
-                        imported_existing,
-                        true,
-                        NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS,
-                        DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS,
-                    )
-                    .await?;
-                    manager
-                        .save_credential(OAuthCredential {
-                            provider: "nous".to_string(),
-                            access_token: resolved.api_key,
-                            refresh_token: resolved.refresh_token,
-                            token_type: resolved.token_type,
-                            scope: resolved.scope,
-                            expires_at: parse_rfc3339_utc(resolved.expires_at.as_deref()),
-                        })
-                        .await?;
                     selected_base_url_override = Some(resolved.base_url);
                     selected_oauth_token_url = Some(format!(
                         "{}/api/oauth/token",
-                        state.portal_base_url.trim_end_matches('/')
+                        if state.portal_base_url.trim().is_empty() {
+                            DEFAULT_NOUS_PORTAL_URL
+                        } else {
+                            state.portal_base_url.trim_end_matches('/')
+                        }
                     ));
-                    selected_oauth_client_id = Some(state.client_id.clone());
+                    selected_oauth_client_id = Some(if state.client_id.trim().is_empty() {
+                        DEFAULT_NOUS_CLIENT_ID.to_string()
+                    } else {
+                        state.client_id.clone()
+                    });
                     stored_provider_secret_in_vault = true;
                     selected_nous_oauth_authenticated = true;
                 }
