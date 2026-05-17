@@ -1685,6 +1685,7 @@ impl App {
                  - if you cannot verify a claim, mark it UNPROVEN (never guess)\n\
                  - include evidence bullets from tools/data/reasoning traces\n\
                  - include at least one counter-argument before final answer.\n\
+                 Language requirement: answer in English unless the user explicitly requests another language.\n\
                  This is pass {}/{}.",
                 model,
                 pass_index + 1,
@@ -1697,6 +1698,7 @@ impl App {
              - Assume the previous draft is partially wrong.\n\
              - Remove any unverified file names/modules/metrics.\n\
              - Fix weak claims, tighten evidence, and improve actionability.\n\
+             - Keep the answer in English unless the user explicitly requested another language.\n\
              - Keep objective truth over optimism.",
             pass_index + 1,
             total_passes
@@ -2506,10 +2508,7 @@ impl App {
                     ),
                 );
 
-                let mut pass_messages = base_messages.clone();
-                if pass_idx > 0 && !combined_output.trim().is_empty() {
-                    pass_messages.push(hermes_core::Message::assistant(combined_output.clone()));
-                }
+                let mut pass_messages = Vec::new();
                 if let Some((contract_path, contract_text)) = quorum_contract.as_ref() {
                     pass_messages.push(hermes_core::Message::system(format!(
                         "[QUORUM_AGENT_CONTRACT]\npath={}\nApply this contract strictly for this voter pass:\n{}",
@@ -2520,6 +2519,15 @@ impl App {
                 pass_messages.push(hermes_core::Message::system(
                     Self::build_quorum_voter_prompt(pass_idx, voter_passes, model),
                 ));
+                pass_messages.extend(base_messages.clone());
+                if pass_idx > 0 && !combined_output.trim().is_empty() {
+                    pass_messages.push(hermes_core::Message::user(format!(
+                        "[PRIOR_VOTER_DRAFT]\n{}\n\nCritique and strengthen this prior draft for pass {}/{}.",
+                        combined_output,
+                        pass_idx + 1,
+                        voter_passes
+                    )));
+                }
 
                 let mut attempts = 0usize;
                 let mut maybe_result: Option<hermes_core::AgentResult> = None;
