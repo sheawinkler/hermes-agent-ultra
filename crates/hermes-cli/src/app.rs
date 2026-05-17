@@ -1340,6 +1340,46 @@ impl App {
         (messages, true)
     }
 
+    fn compose_quorum_messages(
+        system_sections: Vec<String>,
+        base_messages: Vec<hermes_core::Message>,
+        trailing_user_context: Option<String>,
+    ) -> Vec<hermes_core::Message> {
+        let mut merged_system_sections: Vec<String> = system_sections
+            .into_iter()
+            .map(|section| section.trim().to_string())
+            .filter(|section| !section.is_empty())
+            .collect();
+        let mut non_system_messages: Vec<hermes_core::Message> = Vec::new();
+
+        for message in base_messages {
+            if message.role == hermes_core::MessageRole::System {
+                if let Some(content) = message.content.as_deref().map(str::trim) {
+                    if !content.is_empty() {
+                        merged_system_sections.push(content.to_string());
+                    }
+                }
+            } else {
+                non_system_messages.push(message);
+            }
+        }
+
+        let mut messages = Vec::new();
+        if !merged_system_sections.is_empty() {
+            messages.push(hermes_core::Message::system(
+                merged_system_sections.join("\n\n"),
+            ));
+        }
+        messages.extend(non_system_messages);
+        if let Some(context) = trailing_user_context
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+        {
+            messages.push(hermes_core::Message::user(context));
+        }
+        messages
+    }
+
     fn quorum_mode_armed_for_turn(&self) -> Option<QuorumPolicy> {
         let policy = match load_quorum_policy() {
             Ok(policy) => policy,
@@ -2517,26 +2557,34 @@ impl App {
                     ),
                 );
 
-                let mut pass_messages = Vec::new();
+                let mut system_sections = Vec::new();
                 if let Some((contract_path, contract_text)) = quorum_contract.as_ref() {
-                    pass_messages.push(hermes_core::Message::system(format!(
+                    system_sections.push(format!(
                         "[QUORUM_AGENT_CONTRACT]\npath={}\nApply this contract strictly for this voter pass:\n{}",
                         contract_path.display(),
                         contract_text
-                    )));
+                    ));
                 }
-                pass_messages.push(hermes_core::Message::system(
-                    Self::build_quorum_voter_prompt(pass_idx, voter_passes, model),
+                system_sections.push(Self::build_quorum_voter_prompt(
+                    pass_idx,
+                    voter_passes,
+                    model,
                 ));
-                pass_messages.extend(base_messages.clone());
-                if pass_idx > 0 && !combined_output.trim().is_empty() {
-                    pass_messages.push(hermes_core::Message::user(format!(
+                let trailing_user_context = if pass_idx > 0 && !combined_output.trim().is_empty() {
+                    Some(format!(
                         "[PRIOR_VOTER_DRAFT]\n{}\n\nCritique and strengthen this prior draft for pass {}/{}.",
                         combined_output,
                         pass_idx + 1,
                         voter_passes
-                    )));
-                }
+                    ))
+                } else {
+                    None
+                };
+                let pass_messages = Self::compose_quorum_messages(
+                    system_sections,
+                    base_messages.clone(),
+                    trailing_user_context,
+                );
 
                 let mut attempts = 0usize;
                 let mut maybe_result: Option<hermes_core::AgentResult> = None;
@@ -2724,15 +2772,17 @@ impl App {
         }
 
         let synthesis_system = Self::build_quorum_synthesis_prompt(&policy, &outcomes);
-        let mut synthesis_messages = base_messages;
+        let mut synthesis_system_sections = Vec::new();
         if let Some((contract_path, contract_text)) = quorum_contract.as_ref() {
-            synthesis_messages.push(hermes_core::Message::system(format!(
+            synthesis_system_sections.push(format!(
                 "[QUORUM_AGENT_CONTRACT]\npath={}\nApply this contract strictly for synthesis:\n{}",
                 contract_path.display(),
                 contract_text
-            )));
+            ));
         }
-        synthesis_messages.push(hermes_core::Message::system(synthesis_system));
+        synthesis_system_sections.push(synthesis_system);
+        let synthesis_messages =
+            Self::compose_quorum_messages(synthesis_system_sections, base_messages, None);
 
         Self::emit_phase_event(
             &self.stream_handle_shared,
@@ -4559,6 +4609,29 @@ mod tests {
 
         std::env::remove_var("HERMES_RUNTIME_PROMPT_REFORMULATION");
         std::env::remove_var("HERMES_RUNTIME_REFORMULATION_PROMPT_PREVIEW_CHARS");
+    }
+
+    #[test]
+    fn test_compose_quorum_messages_coalesces_systems_before_user_messages() {
+        let messages = App::compose_quorum_messages(
+            vec!["contract rules".to_string(), "voter prompt".to_string()],
+            vec![
+                hermes_core::Message::system("runtime reformulation"),
+                hermes_core::Message::user("mission prompt"),
+            ],
+            Some("prior draft".to_string()),
+        );
+
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0].role, hermes_core::MessageRole::System);
+        assert_eq!(messages[1].role, hermes_core::MessageRole::User);
+        assert_eq!(messages[2].role, hermes_core::MessageRole::User);
+        let system = messages[0].content.as_deref().unwrap_or_default();
+        assert!(system.contains("contract rules"));
+        assert!(system.contains("voter prompt"));
+        assert!(system.contains("runtime reformulation"));
+        assert_eq!(messages[1].content.as_deref(), Some("mission prompt"));
+        assert_eq!(messages[2].content.as_deref(), Some("prior draft"));
     }
 
     #[test]
