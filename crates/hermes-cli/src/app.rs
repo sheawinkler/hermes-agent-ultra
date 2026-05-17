@@ -1341,15 +1341,17 @@ impl App {
     }
 
     fn compose_quorum_messages(
-        system_sections: Vec<String>,
+        control_sections: Vec<String>,
         base_messages: Vec<hermes_core::Message>,
         trailing_user_context: Option<String>,
     ) -> Vec<hermes_core::Message> {
-        let mut merged_system_sections: Vec<String> = system_sections
+        let control_context = control_sections
             .into_iter()
             .map(|section| section.trim().to_string())
             .filter(|section| !section.is_empty())
-            .collect();
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        let mut merged_system_sections: Vec<String> = Vec::new();
         let mut non_system_messages: Vec<hermes_core::Message> = Vec::new();
 
         for message in base_messages {
@@ -1369,6 +1371,12 @@ impl App {
             messages.push(hermes_core::Message::system(
                 merged_system_sections.join("\n\n"),
             ));
+        }
+        if !control_context.is_empty() {
+            messages.push(hermes_core::Message::user(format!(
+                "[QUORUM_CONTROL]\n{}",
+                control_context
+            )));
         }
         messages.extend(non_system_messages);
         if let Some(context) = trailing_user_context
@@ -4614,16 +4622,20 @@ mod tests {
             Some("prior draft".to_string()),
         );
 
-        assert_eq!(messages.len(), 3);
+        assert_eq!(messages.len(), 4);
         assert_eq!(messages[0].role, hermes_core::MessageRole::System);
         assert_eq!(messages[1].role, hermes_core::MessageRole::User);
         assert_eq!(messages[2].role, hermes_core::MessageRole::User);
+        assert_eq!(messages[3].role, hermes_core::MessageRole::User);
         let system = messages[0].content.as_deref().unwrap_or_default();
-        assert!(system.contains("contract rules"));
-        assert!(system.contains("voter prompt"));
         assert!(system.contains("runtime reformulation"));
-        assert_eq!(messages[1].content.as_deref(), Some("mission prompt"));
-        assert_eq!(messages[2].content.as_deref(), Some("prior draft"));
+        assert!(!system.contains("contract rules"));
+        let control = messages[1].content.as_deref().unwrap_or_default();
+        assert!(control.contains("[QUORUM_CONTROL]"));
+        assert!(control.contains("contract rules"));
+        assert!(control.contains("voter prompt"));
+        assert_eq!(messages[2].content.as_deref(), Some("mission prompt"));
+        assert_eq!(messages[3].content.as_deref(), Some("prior draft"));
     }
 
     #[test]
