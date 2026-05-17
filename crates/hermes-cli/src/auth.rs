@@ -19,6 +19,7 @@ pub const DEFAULT_NOUS_CLIENT_ID: &str = "hermes-cli";
 pub const DEFAULT_NOUS_SCOPE: &str = "inference:mint_agent_key";
 pub const DEFAULT_NOUS_AGENT_KEY_MIN_TTL_SECONDS: u32 = 30 * 60;
 pub const NOUS_ACCESS_TOKEN_REFRESH_SKEW_SECONDS: i64 = 120;
+const NOUS_DEVICE_AUTH_POLL_INTERVAL_CAP_SECONDS: u64 = 1;
 
 pub const DEFAULT_CODEX_ISSUER: &str = "https://auth.openai.com";
 pub const DEFAULT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
@@ -2645,12 +2646,14 @@ pub async fn login_nous_device_code(
         })?
         .to_string();
     let expires_in = device_data.expires_in.unwrap_or(900).max(60) as u64;
-    let mut poll_interval = device_data.interval.unwrap_or(5).clamp(1, 30) as u64;
+    let mut poll_interval = (device_data.interval.unwrap_or(5).max(1) as u64)
+        .min(NOUS_DEVICE_AUTH_POLL_INTERVAL_CAP_SECONDS);
 
     println!();
     println!("To continue:");
     println!("  1. Open: {}", verification_uri);
     println!("  2. If prompted, enter code: {}", user_code);
+    println!("  3. Click Connect/Refresh in Nous Portal before the code expires.");
     if options.open_browser {
         match try_open_url(&verification_uri) {
             Ok(_) => println!("  (Opened browser for verification)"),
