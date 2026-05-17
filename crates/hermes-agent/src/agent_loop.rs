@@ -948,6 +948,12 @@ fn is_tool_payload_validation_error(err: &str) -> bool {
     (lower.contains("invalid input") && lower.contains("function"))
         || lower.contains("provider returned error")
             && (lower.contains("request is not valid") || lower.contains("check the model name"))
+        || (lower.contains("no choices in response") || lower.contains("empty choices array"))
+            && (lower.contains("request is not valid")
+                || lower.contains("valid payload")
+                || lower.contains("provider returned error")
+                || lower.contains("tool"))
+        || lower.contains("unprocessable entity") && lower.contains("valid payload")
         || lower.contains("tools") && lower.contains("invalid")
 }
 
@@ -3736,24 +3742,11 @@ impl AgentLoop {
             .filter(|s| !s.is_empty())
             .map(str::to_string);
         let active_provider = route_provider_hint.unwrap_or(inferred_provider);
-        let forced_tool_model = if tool_schemas.is_empty() {
-            None
-        } else {
-            preferred_tool_payload_fallback_model(active_provider.as_str(), model_name)
-                .filter(|candidate| !candidate.eq_ignore_ascii_case(model_name))
-        };
-        if let Some(ref fallback_model) = forced_tool_model {
-            self.emit_status(
-                "lifecycle",
-                &format!(
-                    "Routing tool-enabled turn via {}:{} (requested model '{}' does not accept current tool schema).",
-                    active_provider, fallback_model, model_name
-                ),
-            );
-        }
-        let effective_model_name = forced_tool_model
-            .clone()
-            .unwrap_or_else(|| model_name.to_string());
+        // Always try the requested model first. Some providers only reveal tool
+        // schema limitations at request time, so proactive substitution hides
+        // the real model behavior and makes quorum voters appear to "succeed"
+        // on a different backend.
+        let effective_model_name = model_name.to_string();
         if let Some(rt) = route {
             if let Some(ref label) = rt.route_label {
                 tracing::debug!(%label, model = %rt.model, ?rt.signature, "smart model route");
@@ -9124,6 +9117,11 @@ mod tests {
         assert!(is_tool_payload_validation_error(strict_shape));
         let provider_generic = "API error 400 Bad Request: This request is not valid. Check the model name and other parameters. Additional info: Provider returned error";
         assert!(is_tool_payload_validation_error(provider_generic));
+        let no_choices_provider_shape = "No choices in response (status=400; message=This request is not valid. Check the model name and other parameters. Additional info: Provider returned error)";
+        assert!(is_tool_payload_validation_error(no_choices_provider_shape));
+        let unprocessable_payload =
+            "API error 422 Unprocessable Entity: Check that you're sending a valid payload";
+        assert!(is_tool_payload_validation_error(unprocessable_payload));
         assert!(!is_tool_payload_validation_error(
             "API error 400 Bad Request: max_tokens must be positive"
         ));

@@ -1954,11 +1954,19 @@ fn parse_openai_response(json: &Value) -> Result<LlmResponse, AgentError> {
     let choices = json
         .get("choices")
         .and_then(|c| c.as_array())
-        .ok_or_else(|| AgentError::LlmApi("No choices in response".to_string()))?;
+        .ok_or_else(|| {
+            AgentError::LlmApi(format!(
+                "No choices in response ({})",
+                summarize_openai_response_shape(json)
+            ))
+        })?;
 
-    let choice = choices
-        .first()
-        .ok_or_else(|| AgentError::LlmApi("Empty choices array".to_string()))?;
+    let choice = choices.first().ok_or_else(|| {
+        AgentError::LlmApi(format!(
+            "Empty choices array ({})",
+            summarize_openai_response_shape(json)
+        ))
+    })?;
 
     let message_obj = choice
         .get("message")
@@ -2050,6 +2058,44 @@ fn parse_openai_response(json: &Value) -> Result<LlmResponse, AgentError> {
         model,
         finish_reason,
     })
+}
+
+fn summarize_openai_response_shape(json: &Value) -> String {
+    fn truncate_chars(value: &str, max_chars: usize) -> String {
+        if value.chars().count() <= max_chars {
+            return value.to_string();
+        }
+        let mut out = value
+            .chars()
+            .take(max_chars.saturating_sub(1))
+            .collect::<String>();
+        out.push('…');
+        out
+    }
+
+    let mut parts = Vec::new();
+    if let Some(status) = json.get("status").and_then(|v| v.as_i64()) {
+        parts.push(format!("status={status}"));
+    }
+    if let Some(message) = json.get("message").and_then(|v| v.as_str()) {
+        parts.push(format!("message={}", truncate_chars(message, 240)));
+    }
+    if let Some(error) = json.get("error") {
+        let error_text = error
+            .get("message")
+            .and_then(|v| v.as_str())
+            .map(str::to_string)
+            .unwrap_or_else(|| error.to_string());
+        parts.push(format!("error={}", truncate_chars(&error_text, 240)));
+    }
+    if parts.is_empty() {
+        let keys = json
+            .as_object()
+            .map(|obj| obj.keys().cloned().collect::<Vec<_>>().join(","))
+            .unwrap_or_else(|| json.to_string());
+        parts.push(format!("keys={}", truncate_chars(&keys, 240)));
+    }
+    parts.join("; ")
 }
 
 #[cfg(test)]
@@ -2166,6 +2212,29 @@ mod tests {
         assert_eq!(resp.message.content.as_deref(), Some("Hello!"));
         assert_eq!(resp.finish_reason.as_deref(), Some("stop"));
         assert_eq!(resp.usage.as_ref().unwrap().total_tokens, 15);
+    }
+
+    #[test]
+    fn test_parse_openai_response_no_choices_includes_provider_context() {
+        let json = serde_json::json!({
+            "status": 400,
+            "message": "This request is not valid. Check the model name and other parameters. Additional info: Provider returned error",
+        });
+        let err = parse_openai_response(&json).unwrap_err().to_string();
+        assert!(err.contains("No choices in response"));
+        assert!(err.contains("status=400"));
+        assert!(err.contains("Provider returned error"));
+    }
+
+    #[test]
+    fn test_parse_openai_response_empty_choices_includes_error_context() {
+        let json = serde_json::json!({
+            "choices": [],
+            "error": {"message": "Check that you're sending a valid payload."},
+        });
+        let err = parse_openai_response(&json).unwrap_err().to_string();
+        assert!(err.contains("Empty choices array"));
+        assert!(err.contains("valid payload"));
     }
 
     #[test]

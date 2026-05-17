@@ -2518,41 +2518,45 @@ impl App {
                             break;
                         }
                         Err(err) => {
+                            if Self::is_provider_tool_payload_error(&err)
+                                && Self::quorum_toolless_provider_fallback_enabled()
+                                && voter_tools_enabled
+                                && !toolless_fallback_used
+                            {
+                                toolless_fallback_used = true;
+                                pass_errors.push(format!(
+                                    "pass {}: provider rejected tool schema on requested model; retried this voter pass without tool schemas",
+                                    pass_idx + 1
+                                ));
+                                Self::emit_lifecycle_event(
+                                    &self.stream_handle_shared,
+                                    format!(
+                                        "quorum voter {}/{} provider rejected tool schema; retrying this voter pass without tool schemas",
+                                        display_index,
+                                        voter_models.len()
+                                    ),
+                                );
+                                match self
+                                    .run_messages_with_current_agent_tools(
+                                        pass_messages.clone(),
+                                        false,
+                                        false,
+                                    )
+                                    .await
+                                {
+                                    Ok(result) => {
+                                        maybe_result = Some(result);
+                                        break;
+                                    }
+                                    Err(fallback_err) => {
+                                        last_err = Some(fallback_err);
+                                        break;
+                                    }
+                                }
+                            }
                             if Self::is_provider_auth_or_session_error(&err)
                                 && attempts < max_attempts
                             {
-                                if Self::quorum_toolless_provider_fallback_enabled()
-                                    && voter_tools_enabled
-                                    && !toolless_fallback_used
-                                    && attempts >= 2
-                                {
-                                    toolless_fallback_used = true;
-                                    Self::emit_lifecycle_event(
-                                        &self.stream_handle_shared,
-                                        format!(
-                                            "quorum voter {}/{} provider rejected tool-enabled request; retrying pass without tool schemas",
-                                            display_index,
-                                            voter_models.len()
-                                        ),
-                                    );
-                                    match self
-                                        .run_messages_with_current_agent_tools(
-                                            pass_messages.clone(),
-                                            false,
-                                            false,
-                                        )
-                                        .await
-                                    {
-                                        Ok(result) => {
-                                            maybe_result = Some(result);
-                                            break;
-                                        }
-                                        Err(fallback_err) => {
-                                            last_err = Some(fallback_err);
-                                            break;
-                                        }
-                                    }
-                                }
                                 let refreshed = self.force_auth_refresh_after_error().await;
                                 if refreshed {
                                     continue;
@@ -2605,8 +2609,12 @@ impl App {
 
             if !combined_output.trim().is_empty() {
                 let output = Self::truncate_for_quorum(&combined_output, output_char_cap);
+                let degraded = Self::quorum_output_is_degraded_non_answer(&output);
                 let status = if output.trim().is_empty() {
                     "empty"
+                } else if degraded {
+                    pass_errors.push("voter returned degraded non-answer".to_string());
+                    "degraded"
                 } else {
                     succeeded += 1;
                     "ok"
@@ -3258,7 +3266,46 @@ impl App {
             || message.contains("expired")
             || message.contains("authentication")
             || message.contains("session expired")
-            || message.contains("provider rejected")
+    }
+
+    fn is_provider_tool_payload_error(err: &AgentError) -> bool {
+        let message = match err {
+            AgentError::LlmApi(msg)
+            | AgentError::Config(msg)
+            | AgentError::ToolExecution(msg)
+            | AgentError::Gateway(msg)
+            | AgentError::AuthFailed(msg) => msg.to_ascii_lowercase(),
+            _ => return false,
+        };
+        let provider_payload_rejected = message.contains("provider returned error")
+            && (message.contains("request is not valid")
+                || message.contains("valid payload")
+                || message.contains("check the model name"));
+        let openai_shape_rejected = (message.contains("no choices in response")
+            || message.contains("empty choices array"))
+            && (message.contains("request is not valid")
+                || message.contains("valid payload")
+                || message.contains("provider returned error")
+                || message.contains("tool"));
+        let explicit_tool_schema_rejected =
+            message.contains("tool") && (message.contains("invalid") || message.contains("schema"));
+        let strict_function_shape =
+            message.contains("invalid input") && message.contains("function");
+        provider_payload_rejected
+            || openai_shape_rejected
+            || explicit_tool_schema_rejected
+            || strict_function_shape
+            || (message.contains("422") && message.contains("valid payload"))
+    }
+
+    fn quorum_output_is_degraded_non_answer(output: &str) -> bool {
+        let lower = output.to_ascii_lowercase();
+        lower.contains("objective delivery compromised")
+            || lower.contains("reverting to hermes")
+            || lower.contains("safe-mode response")
+            || lower.contains("safe mode response")
+            || (lower.contains("i do not have") && lower.contains("tools"))
+            || (lower.contains("cannot access") && lower.contains("tools"))
     }
 
     async fn force_auth_refresh_after_error(&mut self) -> bool {
@@ -4575,6 +4622,42 @@ mod tests {
         assert!(App::is_provider_auth_or_session_error(&err));
         let non_auth = AgentError::LlmApi("API error 404 Not Found: model missing".to_string());
         assert!(!App::is_provider_auth_or_session_error(&non_auth));
+        let provider_payload = AgentError::LlmApi(
+            "API error 400 Bad Request: This request is not valid. Additional info: Provider returned error"
+                .to_string(),
+        );
+        assert!(!App::is_provider_auth_or_session_error(&provider_payload));
+    }
+
+    #[test]
+    fn test_is_provider_tool_payload_error_detects_schema_rejections() {
+        let generic_provider = AgentError::LlmApi(
+            "API error 400 Bad Request: This request is not valid. Check the model name and other parameters. Additional info: Provider returned error"
+                .to_string(),
+        );
+        assert!(App::is_provider_tool_payload_error(&generic_provider));
+        let no_choices = AgentError::LlmApi(
+            "No choices in response (status=400; message=This request is not valid. Additional info: Provider returned error)"
+                .to_string(),
+        );
+        assert!(App::is_provider_tool_payload_error(&no_choices));
+        let invalid_tool = AgentError::LlmApi("tools schema is invalid".to_string());
+        assert!(App::is_provider_tool_payload_error(&invalid_tool));
+        let rate_limit = AgentError::LlmApi("HTTP 429 Too Many Requests".to_string());
+        assert!(!App::is_provider_tool_payload_error(&rate_limit));
+    }
+
+    #[test]
+    fn test_quorum_output_is_degraded_non_answer() {
+        assert!(App::quorum_output_is_degraded_non_answer(
+            "Objective delivery compromised; reverting to Hermes base model"
+        ));
+        assert!(App::quorum_output_is_degraded_non_answer(
+            "I do not have access to tools in this environment"
+        ));
+        assert!(!App::quorum_output_is_degraded_non_answer(
+            "Strategy table: edge hypothesis, required data, implementation delta"
+        ));
     }
 
     #[test]
