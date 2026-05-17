@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 
 use crate::providers::{canonical_provider_id, provider_capability_for};
 const NOUS_DEFAULT_INFERENCE_BASE_URL: &str = "https://inference-api.nousresearch.com/v1";
-const PROVIDER_CATALOG_CACHE_VERSION: u32 = 1;
+const PROVIDER_CATALOG_CACHE_VERSION: u32 = 2;
 const OLLAMA_LOCAL_DEFAULT_BASE_URL: &str = "http://127.0.0.1:11434/v1";
 const LLAMA_CPP_DEFAULT_BASE_URL: &str = "http://127.0.0.1:8080/v1";
 const VLLM_DEFAULT_BASE_URL: &str = "http://127.0.0.1:8000/v1";
@@ -37,9 +37,12 @@ const CURATED_PROVIDER_MODELS: &[(&str, &[&str])] = &[
     (
         "nous",
         &[
+            "openai/gpt-5.5-pro-20260423",
             "openai/gpt-5.5-pro",
             "openai/gpt-5.5",
+            "anthropic/claude-4.7-opus-fast-20260512",
             "anthropic/claude-opus-4.7",
+            "qwen/qwen3.6-max-preview-20260420",
             "qwen/qwen3.6-max-preview",
             "deepseek/deepseek-v4-pro",
             "moonshotai/kimi-k2.6",
@@ -1126,9 +1129,12 @@ mod tests {
         let out = provider_model_ids_with_client("nous", &client).await;
         assert!(
             out.starts_with(&[
+                "openai/gpt-5.5-pro-20260423".to_string(),
                 "openai/gpt-5.5-pro".to_string(),
                 "openai/gpt-5.5".to_string(),
+                "anthropic/claude-4.7-opus-fast-20260512".to_string(),
                 "anthropic/claude-opus-4.7".to_string(),
+                "qwen/qwen3.6-max-preview-20260420".to_string(),
                 "qwen/qwen3.6-max-preview".to_string(),
                 "deepseek/deepseek-v4-pro".to_string(),
                 "moonshotai/kimi-k2.6".to_string(),

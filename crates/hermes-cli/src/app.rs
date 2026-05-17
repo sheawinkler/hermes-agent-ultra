@@ -1458,6 +1458,18 @@ impl App {
         }
     }
 
+    fn looks_like_version_pinned_model(model_id: &str) -> bool {
+        let tail = model_id
+            .trim()
+            .rsplit('/')
+            .next()
+            .unwrap_or(model_id)
+            .to_ascii_lowercase();
+        tail.as_bytes()
+            .windows(8)
+            .any(|window| window.iter().all(|byte| byte.is_ascii_digit()))
+    }
+
     fn resolve_quorum_catalog_candidate(
         requested_model: &str,
         catalog: &[String],
@@ -1482,6 +1494,9 @@ impl App {
             lower.ends_with(&slash_suffix) || lower == requested_lc
         }) {
             return Some(hit.clone());
+        }
+        if Self::looks_like_version_pinned_model(requested_trimmed) {
+            return None;
         }
         Self::rank_catalog_candidates(requested_trimmed, catalog, 1)
             .into_iter()
@@ -1590,6 +1605,11 @@ impl App {
                             normalized, final_target
                         ));
                     }
+                } else if Self::looks_like_version_pinned_model(model_id) {
+                    notes.push(format!(
+                        "quorum model preserved despite catalog miss: {}",
+                        normalized
+                    ));
                 } else if let Some(fallback) = catalog.first() {
                     let ranked = Self::rank_catalog_candidates(model_id, &catalog, 3);
                     final_target = format!("{}:{}", provider, fallback.trim());
@@ -4712,6 +4732,36 @@ mod tests {
         ];
         let resolved = App::resolve_quorum_catalog_candidate("qwen3.6-max", &catalog);
         assert_eq!(resolved.as_deref(), Some("qwen/qwen3.6-max-preview"));
+    }
+
+    #[test]
+    fn test_resolve_quorum_catalog_candidate_preserves_version_pinned_miss() {
+        let catalog = vec![
+            "openai/gpt-5.5-pro".to_string(),
+            "anthropic/claude-opus-4.7".to_string(),
+            "qwen/qwen3.6-max-preview".to_string(),
+        ];
+
+        let gpt = App::resolve_quorum_catalog_candidate("openai/gpt-5.5-pro-20260423", &catalog);
+        let claude = App::resolve_quorum_catalog_candidate(
+            "anthropic/claude-4.7-opus-fast-20260512",
+            &catalog,
+        );
+        let qwen =
+            App::resolve_quorum_catalog_candidate("qwen/qwen3.6-max-preview-20260420", &catalog);
+
+        assert!(
+            gpt.is_none(),
+            "version-pinned GPT ID should not fuzzy-remap"
+        );
+        assert!(
+            claude.is_none(),
+            "version-pinned Claude ID should not fuzzy-remap"
+        );
+        assert!(
+            qwen.is_none(),
+            "version-pinned Qwen ID should not fuzzy-remap"
+        );
     }
 
     #[test]
