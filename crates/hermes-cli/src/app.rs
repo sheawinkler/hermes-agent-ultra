@@ -54,6 +54,7 @@ const SESSION_SNAPSHOT_MIN_FREE_BYTES_DEFAULT: u64 = 128 * 1024 * 1024;
 const QUORUM_HINT_PREFIX: &str = "[QUORUM_MODE] ";
 const QUORUM_MAX_VOTER_OUTPUT_CHARS: usize = 120_000;
 const QUORUM_DEFAULT_VOTER_PASSES: usize = 6;
+const RUNTIME_REFORMULATION_PROMPT_PREVIEW_CHARS: usize = 1_600;
 const QUORUM_AGENT_CONTRACT_DEFAULT_PATH: &str =
     "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/QUORUM_AGENTS.md";
 
@@ -446,7 +447,7 @@ impl App {
     fn is_unbounded_token(raw: &str) -> bool {
         matches!(
             raw.trim().to_ascii_lowercase().as_str(),
-            "0" | "off" | "unlimited" | "infinite" | "max"
+            "off" | "unlimited" | "infinite" | "max"
         )
     }
 
@@ -1198,6 +1199,14 @@ impl App {
         )
     }
 
+    fn runtime_reformulation_prompt_preview_chars() -> usize {
+        std::env::var("HERMES_RUNTIME_REFORMULATION_PROMPT_PREVIEW_CHARS")
+            .ok()
+            .and_then(|v| v.trim().parse::<usize>().ok())
+            .filter(|v| *v > 0)
+            .unwrap_or(RUNTIME_REFORMULATION_PROMPT_PREVIEW_CHARS)
+    }
+
     fn current_tool_profile_mode() -> String {
         std::env::var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE")
             .ok()
@@ -1296,8 +1305,17 @@ impl App {
              - continue: state next action with no soft deferral\n",
         );
         out.push_str(contradiction_line);
-        out.push_str("\nuser-request(original):\n");
-        out.push_str(prompt);
+        out.push_str("\nuser-request(routing-preview):\n");
+        let preview_cap = Self::runtime_reformulation_prompt_preview_chars();
+        let prompt_preview = Self::preview_for_status(prompt, preview_cap);
+        out.push_str(&prompt_preview);
+        if prompt.chars().count() > preview_cap {
+            out.push_str(
+                "\n[preview truncated; the full user request remains available as the next user message]",
+            );
+        } else {
+            out.push_str("\n[full user request remains available as the next user message]");
+        }
         Some(out)
     }
 
@@ -1758,6 +1776,11 @@ impl App {
              5) Do not claim quorum executed unless voter outputs are present.\n\
              6) Reject placeholder names/fake files/fake metrics; keep only verified claims.\n\
              7) Any file claim in final synthesis must include absolute path + exists_now status or be marked UNPROVEN.\n",
+        );
+        prompt.push_str(
+            "             8) Do not invent commands, tool calls, benchmark results, repository paths, execution evidence, or research citations.\n\
+             9) Only cite a command/file/result if it appears verbatim in the voter output or the original user prompt; otherwise mark it UNPROVEN.\n\
+             10) If voter evidence is thin or failed, say that directly instead of filling the gap.\n",
         );
         prompt.push_str(&format!(
             "Configured voters: {} | mode={} | enabled={} | required_success={}\n\n",
@@ -2417,20 +2440,6 @@ impl App {
         std::env::set_var("HERMES_TOOL_POLICY_MODE", "audit");
         std::env::set_var("HERMES_MAX_TURNS_UNLIMITED", "1");
         std::env::set_var("HERMES_REPO_REVIEW_BUDGET_PROFILE", "off");
-        if std::env::var("HERMES_QUORUM_VOTER_PASSES")
-            .ok()
-            .map(|v| v.trim().is_empty())
-            .unwrap_or(true)
-        {
-            std::env::set_var("HERMES_QUORUM_VOTER_PASSES", "0");
-        }
-        if std::env::var("HERMES_QUORUM_VOTER_MAX_RETRIES")
-            .ok()
-            .map(|v| v.trim().is_empty())
-            .unwrap_or(true)
-        {
-            std::env::set_var("HERMES_QUORUM_VOTER_MAX_RETRIES", "0");
-        }
 
         let quorum_contract = self.load_quorum_agent_contract_text();
         let (voter_models, model_resolution_notes) = self.resolve_quorum_models(&policy).await;
@@ -3305,16 +3314,21 @@ impl App {
             | AgentError::AuthFailed(msg) => msg.to_ascii_lowercase(),
             _ => return false,
         };
+        let mentions_tool_payload =
+            message.contains("tool") || message.contains("function") || message.contains("schema");
         let provider_payload_rejected = message.contains("provider returned error")
+            && mentions_tool_payload
             && (message.contains("request is not valid")
                 || message.contains("valid payload")
-                || message.contains("check the model name"));
+                || message.contains("check the model name")
+                || message.contains("invalid"));
         let openai_shape_rejected = (message.contains("no choices in response")
             || message.contains("empty choices array"))
+            && mentions_tool_payload
             && (message.contains("request is not valid")
                 || message.contains("valid payload")
                 || message.contains("provider returned error")
-                || message.contains("tool"));
+                || message.contains("invalid"));
         let explicit_tool_schema_rejected =
             message.contains("tool") && (message.contains("invalid") || message.contains("schema"));
         let strict_function_shape =
@@ -4503,6 +4517,10 @@ mod tests {
         assert!(injected_text.contains("objective behavior directives:"));
         assert!(injected_text.contains("objective success criteria:"));
         assert!(injected_text.contains("objective loop protocol:"));
+        assert!(injected_text.contains("user-request(routing-preview):"));
+        assert!(
+            injected_text.contains("full user request remains available as the next user message")
+        );
         assert_eq!(messages[1].role, hermes_core::MessageRole::User);
 
         match prev_home {
@@ -4513,6 +4531,34 @@ mod tests {
         std::env::remove_var("HERMES_RUNTIME_CONTRADICTION_SELF_CHECK");
         std::env::remove_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE");
         std::env::remove_var("CONTEXTLATTICE_TOPIC_PATH");
+    }
+
+    #[test]
+    fn test_runtime_reformulation_caps_long_prompt_preview_without_losing_user_message() {
+        let _lock = env_test_lock();
+        std::env::set_var("HERMES_RUNTIME_PROMPT_REFORMULATION", "1");
+        std::env::set_var("HERMES_RUNTIME_REFORMULATION_PROMPT_PREVIEW_CHARS", "48");
+
+        let long_prompt =
+            "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu".repeat(12);
+        let mut app = build_minimal_test_app();
+        app.messages
+            .push(hermes_core::Message::user(long_prompt.clone()));
+
+        let (messages, injected) = app.build_inference_messages();
+        assert!(injected);
+        assert_eq!(messages.len(), 2);
+        let injected_text = messages[0].content.as_deref().unwrap_or_default();
+        assert!(injected_text.contains("user-request(routing-preview):"));
+        assert!(injected_text.contains("preview truncated"));
+        assert!(!injected_text.contains(&long_prompt));
+        assert_eq!(
+            messages[1].content.as_deref().unwrap_or_default(),
+            long_prompt
+        );
+
+        std::env::remove_var("HERMES_RUNTIME_PROMPT_REFORMULATION");
+        std::env::remove_var("HERMES_RUNTIME_REFORMULATION_PROMPT_PREVIEW_CHARS");
     }
 
     #[test]
@@ -4663,16 +4709,33 @@ mod tests {
             "API error 400 Bad Request: This request is not valid. Check the model name and other parameters. Additional info: Provider returned error"
                 .to_string(),
         );
-        assert!(App::is_provider_tool_payload_error(&generic_provider));
+        assert!(!App::is_provider_tool_payload_error(&generic_provider));
         let no_choices = AgentError::LlmApi(
             "No choices in response (status=400; message=This request is not valid. Additional info: Provider returned error)"
                 .to_string(),
         );
-        assert!(App::is_provider_tool_payload_error(&no_choices));
+        assert!(!App::is_provider_tool_payload_error(&no_choices));
+        let provider_tool = AgentError::LlmApi(
+            "API error 400 Bad Request: tools request is not valid. Additional info: Provider returned error"
+                .to_string(),
+        );
+        assert!(App::is_provider_tool_payload_error(&provider_tool));
         let invalid_tool = AgentError::LlmApi("tools schema is invalid".to_string());
         assert!(App::is_provider_tool_payload_error(&invalid_tool));
         let rate_limit = AgentError::LlmApi("HTTP 429 Too Many Requests".to_string());
         assert!(!App::is_provider_tool_payload_error(&rate_limit));
+    }
+
+    #[test]
+    fn test_quorum_zero_env_no_longer_means_unbounded() {
+        let _lock = env_test_lock();
+        std::env::remove_var("HERMES_QUORUM_VOTER_PASSES");
+        assert_eq!(App::quorum_voter_passes(), QUORUM_DEFAULT_VOTER_PASSES);
+        std::env::set_var("HERMES_QUORUM_VOTER_PASSES", "0");
+        assert_eq!(App::quorum_voter_passes(), QUORUM_DEFAULT_VOTER_PASSES);
+        std::env::set_var("HERMES_QUORUM_VOTER_PASSES", "max");
+        assert_eq!(App::quorum_voter_passes(), 16);
+        std::env::remove_var("HERMES_QUORUM_VOTER_PASSES");
     }
 
     #[test]
