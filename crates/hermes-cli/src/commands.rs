@@ -18853,6 +18853,14 @@ pub async fn handle_cli_chat(
         let skill_provider: Arc<dyn hermes_core::SkillProvider> =
             Arc::new(SkillManager::new(skill_store));
         hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
+        let live_count =
+            crate::live_messaging::enable_live_messaging_tool(&config, &tool_registry).await;
+        if live_count > 0 {
+            println!(
+                "[send_message live delivery enabled via {} configured adapter(s)]",
+                live_count
+            );
+        }
         wire_stdio_clarify_backend(&tool_registry);
         let cron_data_dir = hermes_config::cron_dir();
         std::fs::create_dir_all(&cron_data_dir)

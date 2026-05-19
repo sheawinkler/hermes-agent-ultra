@@ -2054,6 +2054,14 @@ impl App {
         let skill_provider: Arc<dyn hermes_core::SkillProvider> =
             Arc::new(SkillManager::new(skill_store));
         hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
+        let live_count =
+            crate::live_messaging::enable_live_messaging_tool(&config, &tool_registry).await;
+        if live_count > 0 {
+            tracing::info!(
+                adapters = live_count,
+                "send_message live delivery enabled via configured gateway adapters"
+            );
+        }
         wire_stdio_clarify_backend(&tool_registry);
         let cron_data_dir = state_root.join("cron");
         std::fs::create_dir_all(&cron_data_dir)
