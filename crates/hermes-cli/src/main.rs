@@ -14,7 +14,8 @@ use hermes_auth::{
     exchange_refresh_token, AuthManager, FileTokenStore, OAuth2Endpoints, OAuthCredential,
 };
 use hermes_cli::app::{
-    bridge_tool_registry, build_agent_config, build_provider, provider_api_key_from_env,
+    async_tool_dispatch_for, bridge_tool_registry, build_agent_config, build_provider,
+    provider_api_key_from_env,
 };
 use hermes_cli::auth::{
     clear_provider_auth_state, discover_existing_anthropic_oauth, discover_existing_nous_oauth,
@@ -2947,9 +2948,13 @@ async fn run_gateway(
                             on_step_complete: Some(on_step_complete),
                             ..Default::default()
                         };
-                        let agent =
-                            build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools)
-                                .with_callbacks(callbacks);
+                        let agent = build_agent_for_gateway_context(
+                            config.as_ref(),
+                            &ctx,
+                            agent_tools,
+                            runtime_tools.clone(),
+                        )
+                        .with_callbacks(callbacks);
                         let result = agent
                             .run(messages, Some(tool_schemas))
                             .await
@@ -3165,9 +3170,13 @@ async fn run_gateway(
                             on_step_complete: Some(on_step_complete),
                             ..Default::default()
                         };
-                        let agent =
-                            build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools)
-                                .with_callbacks(callbacks);
+                        let agent = build_agent_for_gateway_context(
+                            config.as_ref(),
+                            &ctx,
+                            agent_tools,
+                            runtime_tools.clone(),
+                        )
+                        .with_callbacks(callbacks);
                         let emit = on_chunk.clone();
                         let ui_state = Arc::new(Mutex::new((false, false))); // (muted, needs_break)
                         let ui_state_cb = ui_state.clone();
@@ -3919,6 +3928,7 @@ fn build_agent_for_gateway_context(
     config: &hermes_config::GatewayConfig,
     ctx: &GatewayRuntimeContext,
     agent_tools: Arc<hermes_agent::agent_loop::ToolRegistry>,
+    runtime_tools: Arc<hermes_tools::ToolRegistry>,
 ) -> AgentLoop {
     let effective_model =
         resolve_model_for_gateway(config.model.as_deref().unwrap_or("gpt-4o"), ctx);
@@ -3950,7 +3960,10 @@ fn build_agent_for_gateway_context(
             Path::new(h),
         );
     }
-    hermes_agent::attach_discovered_memory(AgentLoop::new(agent_config, agent_tools, provider))
+    hermes_agent::attach_discovered_memory(
+        AgentLoop::new(agent_config, agent_tools, provider)
+            .with_async_tool_dispatch(async_tool_dispatch_for(runtime_tools)),
+    )
 }
 
 fn extract_last_assistant_reply(messages: &[hermes_core::Message]) -> String {

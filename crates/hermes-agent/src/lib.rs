@@ -35,8 +35,8 @@ pub mod subdirectory_hints;
 
 // Re-export primary agent types
 pub use agent_loop::{
-    AgentCallbacks, AgentConfig, AgentLoop, ApiMode, CheapModelRouteConfig, ErrorClass,
-    RetryConfig, SmartModelRoutingConfig, TurnMetrics,
+    AgentCallbacks, AgentConfig, AgentLoop, ApiMode, AsyncToolDispatch, CheapModelRouteConfig,
+    ErrorClass, RetryConfig, SmartModelRoutingConfig, TurnMetrics,
 };
 
 // Re-export context management

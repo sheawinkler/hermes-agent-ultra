@@ -1647,7 +1647,22 @@ pub struct AgentLoop {
     active_runtime: Mutex<PrimaryRuntime>,
     /// Turn-scoped fallback activation (Python `_fallback_activated` / chain index).
     turn_fallback: Mutex<TurnFallbackState>,
+    /// When set, tool calls use this async path instead of sync `ToolRegistry` handlers
+    /// (avoids `block_in_place` + `block_on` from inside `JoinSet` tasks on the gateway).
+    async_tool_dispatch: Option<AsyncToolDispatch>,
 }
+
+/// Async tool execution hook (gateway: `hermes_tools::ToolRegistry::dispatch_async`).
+pub type AsyncToolDispatch = Arc<
+    dyn Fn(
+            String,
+            Value,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<String, hermes_core::ToolError>> + Send>,
+        >
+        + Send
+        + Sync,
+>;
 
 #[derive(Debug, Clone)]
 struct TurnRuntimeRoute {
@@ -1953,7 +1968,14 @@ impl AgentLoop {
             stored_primary_runtime,
             active_runtime,
             turn_fallback: Mutex::new(TurnFallbackState::new()),
+            async_tool_dispatch: None,
         }
+    }
+
+    /// Route tool execution through an async dispatcher (e.g. `hermes_tools::dispatch_async`).
+    pub fn with_async_tool_dispatch(mut self, dispatch: AsyncToolDispatch) -> Self {
+        self.async_tool_dispatch = Some(dispatch);
+        self
     }
 
     /// Create a new agent loop with a shared interrupt controller.
@@ -1987,6 +2009,7 @@ impl AgentLoop {
             stored_primary_runtime,
             active_runtime,
             turn_fallback: Mutex::new(TurnFallbackState::new()),
+            async_tool_dispatch: None,
         }
     }
 
@@ -7497,6 +7520,15 @@ impl AgentLoop {
         Ok(Some(response.message))
     }
 
+    fn tool_result_from_dispatch_output(output: String) -> Result<String, hermes_core::ToolError> {
+        if let Ok(value) = serde_json::from_str::<Value>(&output) {
+            if let Some(err) = value.get("error").and_then(|v| v.as_str()) {
+                return Err(hermes_core::ToolError::ExecutionFailed(err.to_string()));
+            }
+        }
+        Ok(output)
+    }
+
     /// Execute a batch of tool calls in parallel using a JoinSet.
     async fn execute_tool_calls(
         &self,
@@ -7513,6 +7545,7 @@ impl AgentLoop {
         let max_delegate_depth = self.resolve_max_delegate_depth();
         let current_delegate_depth = self.delegate_depth;
         let orchestrator = self.sub_agent_orchestrator.clone();
+        let async_tool_dispatch = self.async_tool_dispatch.clone();
 
         // Run orchestrated `delegate_task` calls sequentially in the caller's
         // task ??? this keeps the inner AgentLoop future out of the Send-bound
@@ -7608,58 +7641,112 @@ impl AgentLoop {
             let tool_name = tc.function.name.clone();
             let raw_args = tc.function.arguments.clone();
             let registry = self.tool_registry.clone();
+            let async_tool_dispatch = async_tool_dispatch.clone();
             let max_delegate_depth = max_delegate_depth;
             let current_delegate_depth = current_delegate_depth;
             let parent_budget_remaining_usd = parent_budget_remaining_usd;
 
             join_set.spawn(async move {
                 let started = Instant::now();
-                match registry.get(&tool_name) {
-                    Some(entry) => {
-                        tracing::debug!(tool = %tool_name, "agent tool call start");
-                        // Parse arguments
-                        let mut params: Value = match serde_json::from_str(&raw_args) {
-                            Ok(v) => v,
-                            Err(e) => {
-                                let error_msg = format!(
-                                    "Invalid JSON params for tool '{}': {}. \
-                                     Please check your parameters and retry with valid JSON.",
-                                    tool_name, e
-                                );
-                                return ToolResult::err(&tool_call_id, error_msg);
-                            }
-                        };
-
-                        if tool_name == "delegate_task" {
-                            if current_delegate_depth >= max_delegate_depth {
-                                return ToolResult::err(
-                                    &tool_call_id,
-                                    format!(
-                                        "Delegation depth limit reached ({}/{}).",
-                                        current_delegate_depth, max_delegate_depth
-                                    ),
-                                );
-                            }
-                            if let Some(obj) = params.as_object_mut() {
+                let dispatch_result = if let Some(dispatch) = async_tool_dispatch.as_ref() {
+                    tracing::debug!(tool = %tool_name, "agent tool call start (async dispatch)");
+                    let mut params: Value = match serde_json::from_str(&raw_args) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            let error_msg = format!(
+                                "Invalid JSON params for tool '{}': {}. \
+                                 Please check your parameters and retry with valid JSON.",
+                                tool_name, e
+                            );
+                            return ToolResult::err(&tool_call_id, error_msg);
+                        }
+                    };
+                    if tool_name == "delegate_task" {
+                        if current_delegate_depth >= max_delegate_depth {
+                            return ToolResult::err(
+                                &tool_call_id,
+                                format!(
+                                    "Delegation depth limit reached ({}/{}).",
+                                    current_delegate_depth, max_delegate_depth
+                                ),
+                            );
+                        }
+                        if let Some(obj) = params.as_object_mut() {
+                            obj.insert(
+                                "child_depth".to_string(),
+                                Value::from(current_delegate_depth + 1),
+                            );
+                            obj.insert(
+                                "max_depth".to_string(),
+                                Value::from(max_delegate_depth),
+                            );
+                            if let Some(remaining) = parent_budget_remaining_usd {
                                 obj.insert(
-                                    "child_depth".to_string(),
-                                    Value::from(current_delegate_depth + 1),
+                                    "parent_budget_remaining_usd".to_string(),
+                                    Value::from(remaining),
                                 );
-                                obj.insert(
-                                    "max_depth".to_string(),
-                                    Value::from(max_delegate_depth),
-                                );
-                                if let Some(remaining) = parent_budget_remaining_usd {
-                                    obj.insert(
-                                        "parent_budget_remaining_usd".to_string(),
-                                        Value::from(remaining),
-                                    );
-                                }
                             }
                         }
+                    }
+                    dispatch(tool_name.clone(), params).await
+                } else {
+                    match registry.get(&tool_name) {
+                        Some(entry) => {
+                            tracing::debug!(tool = %tool_name, "agent tool call start");
+                            let mut params: Value = match serde_json::from_str(&raw_args) {
+                                Ok(v) => v,
+                                Err(e) => {
+                                    let error_msg = format!(
+                                        "Invalid JSON params for tool '{}': {}. \
+                                         Please check your parameters and retry with valid JSON.",
+                                        tool_name, e
+                                    );
+                                    return ToolResult::err(&tool_call_id, error_msg);
+                                }
+                            };
+                            if tool_name == "delegate_task" {
+                                if current_delegate_depth >= max_delegate_depth {
+                                    return ToolResult::err(
+                                        &tool_call_id,
+                                        format!(
+                                            "Delegation depth limit reached ({}/{}).",
+                                            current_delegate_depth, max_delegate_depth
+                                        ),
+                                    );
+                                }
+                                if let Some(obj) = params.as_object_mut() {
+                                    obj.insert(
+                                        "child_depth".to_string(),
+                                        Value::from(current_delegate_depth + 1),
+                                    );
+                                    obj.insert(
+                                        "max_depth".to_string(),
+                                        Value::from(max_delegate_depth),
+                                    );
+                                    if let Some(remaining) = parent_budget_remaining_usd {
+                                        obj.insert(
+                                            "parent_budget_remaining_usd".to_string(),
+                                            Value::from(remaining),
+                                        );
+                                    }
+                                }
+                            }
+                            (entry.handler)(params)
+                        }
+                        None => {
+                            let available = registry.names().join(", ");
+                            let error_msg = format!(
+                                "Unknown tool '{}'. Available tools: [{}]",
+                                tool_name, available
+                            );
+                            return ToolResult::err(&tool_call_id, error_msg);
+                        }
+                    }
+                };
 
-                        // Execute the handler
-                        match (entry.handler)(params) {
+                match dispatch_result {
+                    Ok(output) if async_tool_dispatch.is_some() => {
+                        match Self::tool_result_from_dispatch_output(output) {
                             Ok(output) => {
                                 tracing::debug!(
                                     tool = %tool_name,
@@ -7684,13 +7771,27 @@ impl AgentLoop {
                             }
                         }
                     }
-                    None => {
-                        let available = registry.names().join(", ");
-                        let error_msg = format!(
-                            "Unknown tool '{}'. Available tools: [{}]",
-                            tool_name, available
+                    Ok(output) => {
+                        tracing::debug!(
+                            tool = %tool_name,
+                            elapsed_ms = started.elapsed().as_millis() as u64,
+                            output_chars = output.chars().count(),
+                            "agent tool call finished"
                         );
-                        ToolResult::err(&tool_call_id, error_msg)
+                        if looks_like_tool_error_output(&output) {
+                            ToolResult::err(&tool_call_id, output)
+                        } else {
+                            ToolResult::ok(&tool_call_id, output)
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!(
+                            tool = %tool_name,
+                            elapsed_ms = started.elapsed().as_millis() as u64,
+                            error = %e,
+                            "agent tool call failed"
+                        );
+                        ToolResult::err(&tool_call_id, e.to_string())
                     }
                 }
             });

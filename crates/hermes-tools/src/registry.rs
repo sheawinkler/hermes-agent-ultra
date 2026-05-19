@@ -258,11 +258,21 @@ impl ToolRegistry {
         }
         maybe_log_audit(name, &policy_decision);
 
-        // Use tokio to run the async handler
-        let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current()
-                .block_on(async { handler.execute(effective_params.clone()).await })
-        });
+        // Sync entry point: only safe outside a tokio worker. Gateway agents use
+        // `dispatch_async` via `AgentLoop::with_async_tool_dispatch` instead.
+        let result = if tokio::runtime::Handle::try_current().is_ok() {
+            return Self::tool_error(
+                "ToolRegistry::dispatch called from async context; use dispatch_async",
+            );
+        } else {
+            tokio::runtime::Runtime::new()
+                .map(|rt| {
+                    rt.block_on(async { handler.execute(effective_params.clone()).await })
+                })
+                .unwrap_or_else(|e| {
+                    Err(hermes_core::ToolError::ExecutionFailed(e.to_string()))
+                })
+        };
 
         let output = match result {
             Ok(output) => {

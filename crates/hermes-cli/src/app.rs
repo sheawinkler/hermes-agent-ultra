@@ -5152,6 +5152,26 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
 // Helper: bridge hermes_tools::ToolRegistry → agent_loop::ToolRegistry
 // ---------------------------------------------------------------------------
 
+/// Build async tool dispatch for gateway agents (uses `dispatch_async`, no `block_in_place`).
+pub fn async_tool_dispatch_for(tools: Arc<ToolRegistry>) -> hermes_agent::AsyncToolDispatch {
+    Arc::new(move |name, params| {
+        let tools = tools.clone();
+        Box::pin(async move {
+            let output = tools.dispatch_async(&name, params).await;
+            hermes_tools_dispatch_output(output)
+        })
+    })
+}
+
+fn hermes_tools_dispatch_output(output: String) -> Result<String, hermes_core::ToolError> {
+    if let Ok(value) = serde_json::from_str::<serde_json::Value>(&output) {
+        if let Some(err) = value.get("error").and_then(|v| v.as_str()) {
+            return Err(hermes_core::ToolError::ExecutionFailed(err.to_string()));
+        }
+    }
+    Ok(output)
+}
+
 pub fn bridge_tool_registry(tools: &ToolRegistry) -> AgentToolRegistry {
     let mut agent_registry = AgentToolRegistry::new();
     for schema in tools.get_definitions() {

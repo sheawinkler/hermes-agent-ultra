@@ -157,18 +157,25 @@ impl HttpServerState {
         let config_arc = Arc::new(config.clone());
         let config_arc_stream = config_arc.clone();
         let agent_tools_stream = agent_tools.clone();
+        let runtime_tools_stream = tool_registry.clone();
 
         gateway
             .set_message_handler_with_context(Arc::new(move |messages, ctx| {
                 let config = config_arc.clone();
                 let agent_tools = agent_tools.clone();
+                let runtime_tools = tool_registry.clone();
                 Box::pin(async move {
                     hermes_telemetry::record_llm_request();
                     let effective_model = resolve_model_for_gateway(
                         config.model.as_deref().unwrap_or("gpt-4o"),
                         &ctx,
                     );
-                    let agent = build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools);
+                    let agent = build_agent_for_gateway_context(
+                        config.as_ref(),
+                        &ctx,
+                        agent_tools,
+                        runtime_tools,
+                    );
                     let result = agent
                         .run(messages, None)
                         .await
@@ -202,13 +209,19 @@ impl HttpServerState {
             .set_streaming_handler_with_context(Arc::new(move |messages, ctx, on_chunk| {
                 let config = config_arc_stream.clone();
                 let agent_tools = agent_tools_stream.clone();
+                let runtime_tools = runtime_tools_stream.clone();
                 Box::pin(async move {
                     hermes_telemetry::record_llm_request();
                     let effective_model = resolve_model_for_gateway(
                         config.model.as_deref().unwrap_or("gpt-4o"),
                         &ctx,
                     );
-                    let agent = build_agent_for_gateway_context(config.as_ref(), &ctx, agent_tools);
+                    let agent = build_agent_for_gateway_context(
+                        config.as_ref(),
+                        &ctx,
+                        agent_tools,
+                        runtime_tools,
+                    );
                     let emit = on_chunk.clone();
                     let ui_state = Arc::new(Mutex::new((false, false))); // (muted, needs_break)
                     let ui_state_cb = ui_state.clone();
@@ -740,6 +753,21 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
     }
 }
 
+fn async_tool_dispatch_for(tools: Arc<ToolRegistry>) -> hermes_agent::AsyncToolDispatch {
+    Arc::new(move |name, params| {
+        let tools = tools.clone();
+        Box::pin(async move {
+            let output = tools.dispatch_async(&name, params).await;
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&output) {
+                if let Some(err) = value.get("error").and_then(|v| v.as_str()) {
+                    return Err(hermes_core::ToolError::ExecutionFailed(err.to_string()));
+                }
+            }
+            Ok(output)
+        })
+    })
+}
+
 pub fn bridge_tool_registry(tools: &ToolRegistry) -> AgentToolRegistry {
     let mut agent_registry = AgentToolRegistry::new();
     for schema in tools.get_definitions() {
@@ -834,6 +862,7 @@ fn build_agent_for_gateway_context(
     config: &GatewayConfig,
     ctx: &GatewayRuntimeContext,
     agent_tools: Arc<hermes_agent::agent_loop::ToolRegistry>,
+    runtime_tools: Arc<ToolRegistry>,
 ) -> AgentLoop {
     let effective_model =
         resolve_model_for_gateway(config.model.as_deref().unwrap_or("gpt-4o"), ctx);
@@ -857,7 +886,10 @@ fn build_agent_for_gateway_context(
             FsPath::new(h),
         );
     }
-    hermes_agent::attach_discovered_memory(AgentLoop::new(agent_config, agent_tools, provider))
+    hermes_agent::attach_discovered_memory(
+        AgentLoop::new(agent_config, agent_tools, provider)
+            .with_async_tool_dispatch(async_tool_dispatch_for(runtime_tools)),
+    )
 }
 
 fn extract_last_assistant_reply(messages: &[Message]) -> String {
