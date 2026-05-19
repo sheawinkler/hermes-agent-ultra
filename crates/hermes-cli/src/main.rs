@@ -3588,12 +3588,17 @@ async fn configure_platform_basic_prompts(
             set_extra_string_if_nonempty(p, "encrypt_key", &encrypt_key);
         }
         "wecom" => {
-            let corp_id = prompt_line("WeCom corp_id: ").await?;
-            set_extra_string_if_nonempty(p, "corp_id", &corp_id);
-            let agent_id = prompt_line("WeCom agent_id: ").await?;
-            set_extra_string_if_nonempty(p, "agent_id", &agent_id);
-            let secret = prompt_line("WeCom secret: ").await?;
+            let bot_id = prompt_line("WeCom AI Bot bot_id (WECOM_BOT_ID): ").await?;
+            set_extra_string_if_nonempty(p, "bot_id", &bot_id);
+            let secret = prompt_line("WeCom AI Bot secret (WECOM_SECRET): ").await?;
             set_extra_string_if_nonempty(p, "secret", &secret);
+            let ws = prompt_line(
+                "WeCom websocket_url (default wss://openws.work.weixin.qq.com): ",
+            )
+            .await?;
+            if !ws.trim().is_empty() {
+                set_extra_string_if_nonempty(p, "websocket_url", &ws);
+            }
         }
         "wecom_callback" => {
             let corp_id = prompt_line("WeCom callback corp_id: ").await?;
@@ -4225,6 +4230,17 @@ fn gateway_requirement_issues(config: &hermes_config::GatewayConfig) -> Vec<Stri
             issues.push("qqbot.enabled=true 但缺少 app_id 或 client_secret".to_string());
         }
     }
+    if let Some(p) = config.platforms.get("wecom") {
+        let bot_id = extra_string(p, "bot_id").is_some()
+            || !std::env::var("WECOM_BOT_ID").unwrap_or_default().trim().is_empty();
+        let secret = extra_string(p, "secret").is_some()
+            || !std::env::var("WECOM_SECRET").unwrap_or_default().trim().is_empty();
+        if check(p.enabled, bot_id && secret) {
+            issues.push(
+                "wecom.enabled=true 但缺少 bot_id/secret（或 WECOM_BOT_ID/WECOM_SECRET）".to_string(),
+            );
+        }
+    }
     if let Some(p) = config.platforms.get("wecom_callback") {
         let ready = extra_string(p, "corp_id").is_some()
             && extra_string(p, "corp_secret").is_some()
@@ -4281,6 +4297,8 @@ async fn run_api_server_inbound_loop(
             chat_id: req.session_id.clone(),
             user_id: req.user_id.clone(),
             text: req.prompt.clone(),
+            media_urls: vec![],
+            media_types: vec![],
             message_id: Some(req.request_id.clone()),
             is_dm: true,
         };
@@ -4299,6 +4317,8 @@ async fn run_webhook_inbound_loop(gateway: Arc<Gateway>, mut rx: mpsc::Receiver<
                 .user_id
                 .unwrap_or_else(|| "webhook-client".to_string()),
             text: payload.text,
+            media_urls: vec![],
+            media_types: vec![],
             message_id: None,
             is_dm: true,
         };
@@ -4580,22 +4600,23 @@ async fn register_gateway_adapters(
 
     if let Some(platform_cfg) = config.platforms.get("wecom") {
         if platform_cfg.enabled {
-            let corp_id = extra_string(platform_cfg, "corp_id").unwrap_or_default();
-            let agent_id = extra_string(platform_cfg, "agent_id").unwrap_or_default();
-            let secret = extra_string(platform_cfg, "secret").unwrap_or_default();
-            if corp_id.is_empty() || agent_id.is_empty() || secret.is_empty() {
+            let wecom_cfg = WeComConfig::from_platform_config(platform_cfg);
+            if wecom_cfg.bot_id.is_empty() || wecom_cfg.secret.is_empty() {
                 println!(
-                    "WeCom is enabled but corp_id/agent_id/secret is missing; skipping wecom adapter."
+                    "WeCom is enabled but bot_id/secret is missing (set platforms.wecom.extra.bot_id + secret or WECOM_BOT_ID/WECOM_SECRET); skipping wecom adapter."
                 );
             } else {
-                let wecom_cfg = WeComConfig {
-                    corp_id,
-                    agent_id,
-                    secret,
-                    proxy: Default::default(),
-                };
                 match WeComAdapter::new(wecom_cfg) {
-                    Ok(adapter) => gateway.register_adapter("wecom", Arc::new(adapter)).await,
+                    Ok(adapter) => {
+                        let adapter = Arc::new(adapter);
+                        let (tx, rx) = mpsc::channel::<GatewayIncomingMessage>(512);
+                        adapter.set_inbound_sender(tx).await;
+                        gateway.register_adapter("wecom", adapter).await;
+                        let gw_clone = gateway.clone();
+                        sidecar_tasks.push(tokio::spawn(async move {
+                            run_gateway_incoming_loop(gw_clone, rx, "wecom").await;
+                        }));
+                    }
                     Err(e) => println!("WeCom enabled but failed to initialize: {}", e),
                 }
             }
@@ -4890,6 +4911,8 @@ async fn run_telegram_poll_loop(gateway: Arc<Gateway>, adapter: Arc<TelegramAdap
                         chat_id: msg.chat_id.to_string(),
                         user_id,
                         text,
+                        media_urls: vec![],
+                        media_types: vec![],
                         message_id: Some(msg.message_id.to_string()),
                         is_dm: msg.chat_id > 0,
                     };
