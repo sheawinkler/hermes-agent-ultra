@@ -4354,6 +4354,29 @@ impl AgentLoop {
         ))
     }
 
+    /// Expand `@file:` / `@diff` / … tokens in user messages before the LLM sees them.
+    ///
+    /// Mirrors Python `agent.context_references.preprocess_context_references_async`
+    /// (also invoked from gateway/CLI before `run_conversation` on some paths). Both
+    /// `run` and `run_stream` call this so streaming callers get the same expansion.
+    async fn preprocess_user_message_context_references(&self, messages: &mut [Message]) {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let context_length = get_model_context_length(&self.config.model);
+        for msg in messages.iter_mut() {
+            if msg.role != MessageRole::User {
+                continue;
+            }
+            let Some(content) = msg.content.clone() else {
+                continue;
+            };
+            let result =
+                preprocess_context_references_async(&content, &cwd, context_length, None).await;
+            if result.expanded && result.message != content {
+                msg.content = Some(result.message);
+            }
+        }
+    }
+
     /// Run the agent loop (non-streaming).
     ///
     /// Sends the initial messages to the LLM, then iteratively:
@@ -4375,21 +4398,8 @@ impl AgentLoop {
             }
         }
         strip_budget_warnings_from_messages(&mut messages);
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let context_length = get_model_context_length(&self.config.model);
-        for msg in messages.iter_mut() {
-            if msg.role != MessageRole::User {
-                continue;
-            }
-            let Some(content) = msg.content.clone() else {
-                continue;
-            };
-            let result =
-                preprocess_context_references_async(&content, &cwd, context_length, None).await;
-            if result.expanded && result.message != content {
-                msg.content = Some(result.message);
-            }
-        }
+        self.preprocess_user_message_context_references(&mut messages)
+            .await;
 
         let task_hint = messages
             .iter()
@@ -5510,6 +5520,8 @@ impl AgentLoop {
             }
         }
         strip_budget_warnings_from_messages(&mut messages);
+        self.preprocess_user_message_context_references(&mut messages)
+            .await;
 
         let task_hint = messages
             .iter()
@@ -9057,6 +9069,58 @@ mod tests {
         LOCK.get_or_init(|| Mutex::new(()))
             .lock()
             .expect("env test lock poisoned")
+    }
+
+    #[tokio::test]
+    async fn preprocess_user_message_context_references_expands_at_file() {
+        let _guard = env_test_lock();
+        let td = tempfile::tempdir().expect("tempdir");
+        std::fs::write(td.path().join("note.txt"), "hello context\n").expect("write");
+        let prev_cwd = std::env::current_dir().expect("cwd");
+        std::env::set_current_dir(td.path()).expect("chdir");
+
+        struct NoopProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for NoopProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<LlmResponse, AgentError> {
+                Err(AgentError::LlmApi("noop".into()))
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                Box::pin(futures::stream::empty())
+            }
+        }
+
+        let loop_engine = AgentLoop::new(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(NoopProvider),
+        );
+        let mut messages = vec![Message::user("summarize @file:note.txt")];
+        loop_engine
+            .preprocess_user_message_context_references(&mut messages)
+            .await;
+
+        std::env::set_current_dir(prev_cwd).expect("restore cwd");
+        let content = messages[0].content.as_deref().expect("content");
+        assert!(content.contains("Attached Context"));
+        assert!(content.contains("hello context"));
     }
 
     #[test]
