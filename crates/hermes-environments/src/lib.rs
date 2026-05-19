@@ -40,4 +40,4 @@ pub use file_sync::FileSync;
 pub use hermes_core::TerminalBackend;
 pub use local::LocalBackend;
 pub use manager::BackendManager;
-pub use training::{HermesBaseEnv, HermesEpisode};
+pub use training::{HermesBaseEnv, HermesEpisode, Trajectory, TrajectoryStep};

@@ -16,6 +16,7 @@ hermes-agent = { workspace = true, optional = true }
 hermes-cli = { workspace = true }
 hermes-config = { workspace = true }
 hermes-core = { workspace = true }
+hermes-environments = { workspace = true }
 hermes-skills = { workspace = true }
 hermes-tools = { workspace = true }
 clap = { workspace = true, features = ["derive"] }

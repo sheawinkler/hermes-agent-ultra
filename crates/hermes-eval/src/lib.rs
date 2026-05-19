@@ -38,12 +38,15 @@
 pub mod adapter;
 #[cfg(feature = "agent-loop")]
 pub mod agent_rollout;
+pub mod batch_runner;
 pub mod configured;
 pub mod error;
+pub mod mini_swe_runner;
 pub mod reporter;
 pub mod result;
 pub mod runner;
 pub mod tblite;
+pub mod trajectory_compressor;
 pub mod verifier;
 
 pub use adapter::{BenchmarkAdapter, BenchmarkMetadata, TaskSpec};
