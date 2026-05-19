@@ -1756,7 +1756,7 @@ impl AgentLoop {
         session_started_hooks_fired: bool,
         persist_user_idx: Option<usize>,
     ) -> AgentResult {
-        self.memory_on_session_end(ctx.get_messages());
+        self.session_end_hooks(ctx.get_messages(), false, true);
         AgentResult {
             messages: self.messages_for_persisted_result(ctx, persist_user_idx),
             finished_naturally: false,
@@ -2511,6 +2511,83 @@ impl AgentLoop {
             .filter_map(|m| serde_json::to_value(m).ok())
             .collect();
         mm.on_session_end(&as_values);
+    }
+
+    fn plugin_on_session_end(&self, completed: bool, interrupted: bool) {
+        let hook_ctx = serde_json::json!({
+            "session_id": self.config().session_id.as_deref().unwrap_or(""),
+            "completed": completed,
+            "interrupted": interrupted,
+            "model": self.active_model(),
+            "platform": self.config().platform.as_deref().unwrap_or(""),
+        });
+        let _results = self.invoke_hook(HookType::OnSessionEnd, &hook_ctx);
+    }
+
+    fn session_end_hooks(&self, messages: &[Message], completed: bool, interrupted: bool) {
+        self.memory_on_session_end(messages);
+        self.plugin_on_session_end(completed, interrupted);
+    }
+
+    fn api_mode_as_hook_str(mode: &ApiMode) -> &'static str {
+        match mode {
+            ApiMode::ChatCompletions => "chat_completions",
+            ApiMode::AnthropicMessages => "anthropic_messages",
+            ApiMode::CodexResponses => "codex_responses",
+        }
+    }
+
+    fn invoke_pre_api_request_hook(
+        &self,
+        api_call_count: u32,
+        api_messages: &[Message],
+        tool_count: usize,
+        model: &str,
+        provider: &str,
+        base_url: Option<&str>,
+        api_mode: &ApiMode,
+        max_tokens: Option<u32>,
+    ) {
+        let request_messages: Vec<Value> = api_messages
+            .iter()
+            .filter_map(|m| serde_json::to_value(m).ok())
+            .collect();
+        let message_count = api_messages.len();
+        let request_char_count: usize = api_messages
+            .iter()
+            .map(|m| {
+                m.content.as_deref().map(str::len).unwrap_or(0)
+                    + m
+                        .reasoning_content
+                        .as_deref()
+                        .map(str::len)
+                        .unwrap_or(0)
+            })
+            .sum();
+        let approx_input_tokens = (request_char_count / 4).max(1);
+        let user_message = api_messages
+            .iter()
+            .rev()
+            .find(|m| m.role == MessageRole::User)
+            .and_then(|m| m.content.clone())
+            .unwrap_or_default();
+        let hook_ctx = serde_json::json!({
+            "session_id": self.config().session_id.as_deref().unwrap_or(""),
+            "user_message": user_message,
+            "platform": self.config().platform.as_deref().unwrap_or(""),
+            "model": model,
+            "provider": provider,
+            "base_url": base_url.unwrap_or(""),
+            "api_mode": Self::api_mode_as_hook_str(api_mode),
+            "api_call_count": api_call_count,
+            "request_messages": request_messages,
+            "message_count": message_count,
+            "tool_count": tool_count,
+            "approx_input_tokens": approx_input_tokens,
+            "request_char_count": request_char_count,
+            "max_tokens": max_tokens,
+        });
+        let _ = self.invoke_hook(HookType::PreApiRequest, &hook_ctx);
     }
 
     fn code_index_repo_map_block(&self) -> Option<String> {
@@ -3959,6 +4036,7 @@ impl AgentLoop {
         tool_schemas: &'a [ToolSchema],
         route: Option<&'a TurnRuntimeRoute>,
         max_tokens_override: Option<u32>,
+        api_call_count: &'a mut u32,
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<Output = Result<hermes_core::LlmResponse, AgentError>>
@@ -3966,7 +4044,13 @@ impl AgentLoop {
                 + 'a,
         >,
     > {
-        Box::pin(self.call_llm_with_retry_inner(ctx, tool_schemas, route, max_tokens_override))
+        Box::pin(self.call_llm_with_retry_inner(
+            ctx,
+            tool_schemas,
+            route,
+            max_tokens_override,
+            api_call_count,
+        ))
     }
 
     async fn call_llm_with_retry_inner(
@@ -3975,6 +4059,7 @@ impl AgentLoop {
         tool_schemas: &[ToolSchema],
         route: Option<&TurnRuntimeRoute>,
         max_tokens_override: Option<u32>,
+        api_call_count: &mut u32,
     ) -> Result<hermes_core::LlmResponse, AgentError> {
         let default_model = self.active_model();
         let model = route
@@ -4011,6 +4096,24 @@ impl AgentLoop {
 
         for attempt in 0..=effective_max_retries {
             self.interrupt.check_interrupt()?;
+            *api_call_count = api_call_count.saturating_add(1);
+            let hook_api_mode = route
+                .and_then(|rt| rt.api_mode.as_ref())
+                .unwrap_or(&default_api_mode);
+            let hook_base_url = self.resolve_runtime_base_url(
+                active_provider.as_str(),
+                route.and_then(|rt| rt.base_url.as_deref()),
+            );
+            self.invoke_pre_api_request_hook(
+                *api_call_count,
+                &api_messages,
+                tool_schemas.len(),
+                model,
+                active_provider.as_str(),
+                hook_base_url.as_deref(),
+                hook_api_mode,
+                effective_max_tokens,
+            );
             let result = if let Some(rt) = route {
                 let (provider_name, _) = self.extract_provider_and_model(model);
                 let mode = rt.api_mode.as_ref().unwrap_or(&default_api_mode);
@@ -4390,9 +4493,11 @@ impl AgentLoop {
         active_model: &str,
         max_tokens_override: Option<u32>,
         on_chunk: &(dyn Fn(StreamChunk) + Send + Sync),
+        api_call_count: &mut u32,
     ) -> Result<StreamCollectOutcome, AgentError> {
         let api_messages = self.messages_for_api_call(ctx);
         let (_, active_model_name) = self.extract_provider_and_model(active_model);
+        let (active_provider, _) = self.extract_provider_and_model(active_model);
         let default_api_mode = self.primary_runtime_snapshot().api_mode.clone();
         let default_extra_body = self.extra_body_for_api_mode(&default_api_mode);
         let effective_max_tokens = max_tokens_override.or(self.config().max_tokens);
@@ -4403,6 +4508,24 @@ impl AgentLoop {
             .unwrap_or(self.config().stream_read_max_retries.min(10));
 
         'stream_attempt: for stream_attempt in 0..=max_stream_retries {
+            *api_call_count = api_call_count.saturating_add(1);
+            let hook_api_mode = route
+                .and_then(|rt| rt.api_mode.as_ref())
+                .unwrap_or(&default_api_mode);
+            let hook_base_url = self.resolve_runtime_base_url(
+                active_provider.as_str(),
+                route.and_then(|rt| rt.base_url.as_deref()),
+            );
+            self.invoke_pre_api_request_hook(
+                *api_call_count,
+                &api_messages,
+                tool_schemas.len(),
+                active_model,
+                active_provider.as_str(),
+                hook_base_url.as_deref(),
+                hook_api_mode,
+                effective_max_tokens,
+            );
             let mut stream = if let Some(rt) = route {
                 let (provider_name, model_name) = self.extract_provider_and_model(active_model);
                 let mode = rt.api_mode.as_ref().unwrap_or(&default_api_mode);
@@ -4752,6 +4875,7 @@ impl AgentLoop {
                 }
             }
         }
+        let mut api_call_count: u32 = 0;
 
         // Memory prefetch for first user message
         let first_user = ctx
@@ -4830,7 +4954,7 @@ impl AgentLoop {
                     if let Some(msg) = summary_msg {
                         ctx.add_message(msg);
                     }
-                    self.memory_on_session_end(ctx.get_messages());
+                    self.session_end_hooks(ctx.get_messages(), false, false);
                     replay.record(
                         "session_end",
                         serde_json::json!({
@@ -4978,6 +5102,7 @@ impl AgentLoop {
                         &tool_schemas,
                         turn_runtime_route.as_ref(),
                         llm_governor.max_tokens,
+                        &mut api_call_count,
                     )
                     .await
                 {
@@ -5134,7 +5259,7 @@ impl AgentLoop {
                         "Cost guard tripped: session spend ${:.4} exceeded max_cost_usd ${:.4}. Stopping loop.",
                         session_cost_usd, limit
                     )));
-                    self.memory_on_session_end(ctx.get_messages());
+                    self.session_end_hooks(ctx.get_messages(), false, false);
                     return Ok(AgentResult {
                         messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
                         finished_naturally: false,
@@ -5313,7 +5438,7 @@ impl AgentLoop {
                 let (u, a) = extract_last_user_assistant(ctx.get_messages());
                 self.memory_sync(&u, &a, session_id);
                 self.spawn_background_review(total_turns, &ctx, review_memory_at_end);
-                self.memory_on_session_end(ctx.get_messages());
+                self.session_end_hooks(ctx.get_messages(), true, false);
                 replay.record(
                     "session_end",
                     serde_json::json!({
@@ -5389,7 +5514,7 @@ impl AgentLoop {
                         "Max invalid tool retries reached ({}). Last invalid tool: {}",
                         self.config().invalid_tool_call_max_retries, invalid_tool_calls[0]
                     )));
-                    self.memory_on_session_end(ctx.get_messages());
+                    self.session_end_hooks(ctx.get_messages(), false, false);
                     return Ok(AgentResult {
                         messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
                         finished_naturally: false,
@@ -5676,7 +5801,7 @@ impl AgentLoop {
                 {
                     ctx.add_message(summary);
                 }
-                self.memory_on_session_end(ctx.get_messages());
+                self.session_end_hooks(ctx.get_messages(), false, false);
                 return Ok(AgentResult {
                     messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
                     finished_naturally: false,
@@ -5878,6 +6003,7 @@ impl AgentLoop {
                 }
             }
         }
+        let mut api_call_count: u32 = 0;
 
         // Memory prefetch
         let first_user = ctx
@@ -5956,7 +6082,7 @@ impl AgentLoop {
                     if let Some(msg) = summary_msg {
                         ctx.add_message(msg);
                     }
-                    self.memory_on_session_end(ctx.get_messages());
+                    self.session_end_hooks(ctx.get_messages(), false, false);
                     replay.record(
                         "session_end",
                         serde_json::json!({
@@ -6103,6 +6229,7 @@ impl AgentLoop {
                             active_model,
                             llm_governor.max_tokens,
                             &*on_chunk,
+                            &mut api_call_count,
                         )
                         .await
                     {
@@ -6145,6 +6272,7 @@ impl AgentLoop {
                             &tool_schemas,
                             turn_runtime_route.as_ref(),
                             llm_governor.max_tokens,
+                            &mut api_call_count,
                         )
                         .await
                     {
@@ -6302,7 +6430,7 @@ impl AgentLoop {
                         "Cost guard tripped: session spend ${:.4} exceeded max_cost_usd ${:.4}. Stopping loop.",
                         session_cost_usd, limit
                     )));
-                    self.memory_on_session_end(ctx.get_messages());
+                    self.session_end_hooks(ctx.get_messages(), false, false);
                     replay.record(
                         "session_end",
                         serde_json::json!({
@@ -6507,7 +6635,7 @@ impl AgentLoop {
                 let (u, a) = extract_last_user_assistant(ctx.get_messages());
                 self.memory_sync(&u, &a, session_id);
                 self.spawn_background_review(total_turns, &ctx, review_memory_at_end);
-                self.memory_on_session_end(ctx.get_messages());
+                self.session_end_hooks(ctx.get_messages(), true, false);
                 replay.record(
                     "session_end",
                     serde_json::json!({
@@ -6620,7 +6748,7 @@ impl AgentLoop {
                         "Max invalid tool retries reached ({}). Last invalid tool: {}",
                         self.config().invalid_tool_call_max_retries, invalid_tool_calls[0]
                     )));
-                    self.memory_on_session_end(ctx.get_messages());
+                    self.session_end_hooks(ctx.get_messages(), false, false);
                     return Ok(AgentResult {
                         messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
                         finished_naturally: false,
@@ -6912,7 +7040,7 @@ impl AgentLoop {
                         usage: None,
                     });
                 }
-                self.memory_on_session_end(ctx.get_messages());
+                self.session_end_hooks(ctx.get_messages(), false, false);
                 return Ok(AgentResult {
                     messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
                     finished_naturally: false,
@@ -10158,8 +10286,9 @@ mod tests {
         let mut ctx = ContextManager::new(32);
         ctx.add_message(Message::user("hello"));
 
+        let mut api_call_count = 0u32;
         let resp = agent
-            .call_llm_with_retry_inner(&ctx, &[], None, None)
+            .call_llm_with_retry_inner(&ctx, &[], None, None, &mut api_call_count)
             .await
             .expect("fallback should recover");
         assert_eq!(resp.message.content.as_deref(), Some("ok"));
@@ -10340,7 +10469,11 @@ mod tests {
             scenario.id, scenario.seed
         )));
 
-        match agent.call_llm_with_retry_inner(&ctx, &[], None, None).await {
+        let mut api_call_count = 0u32;
+        match agent
+            .call_llm_with_retry_inner(&ctx, &[], None, None, &mut api_call_count)
+            .await
+        {
             Ok(_) => ChaosHarnessRun {
                 outcome: "success",
                 attempts: provider.attempts(),
@@ -10838,15 +10971,24 @@ mod tests {
         ctx.add_message(Message::user("run"));
         let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let seen_ref = seen.clone();
+        let mut api_call_count = 0u32;
 
         let out = agent
-            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, &move |chunk| {
-                if let Some(delta) = chunk.delta {
-                    if let Some(text) = delta.content {
-                        seen_ref.lock().expect("seen lock").push(text);
+            .collect_stream_llm_response(
+                &ctx,
+                &[],
+                None,
+                "dummy-model",
+                None,
+                &move |chunk| {
+                    if let Some(delta) = chunk.delta {
+                        if let Some(text) = delta.content {
+                            seen_ref.lock().expect("seen lock").push(text);
+                        }
                     }
-                }
-            })
+                },
+                &mut api_call_count,
+            )
             .await;
 
         let StreamCollectOutcome::Complete(resp) = out.expect("stream should recover") else {
@@ -10881,15 +11023,24 @@ mod tests {
         ctx.add_message(Message::user("run"));
         let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let seen_ref = seen.clone();
+        let mut api_call_count = 0u32;
 
         let out = agent
-            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, &move |chunk| {
-                if let Some(delta) = chunk.delta {
-                    if let Some(text) = delta.content {
-                        seen_ref.lock().expect("seen lock").push(text);
+            .collect_stream_llm_response(
+                &ctx,
+                &[],
+                None,
+                "dummy-model",
+                None,
+                &move |chunk| {
+                    if let Some(delta) = chunk.delta {
+                        if let Some(text) = delta.content {
+                            seen_ref.lock().expect("seen lock").push(text);
+                        }
                     }
-                }
-            })
+                },
+                &mut api_call_count,
+            )
             .await;
 
         let err = match out {
@@ -10917,15 +11068,24 @@ mod tests {
         ctx.add_message(Message::user("run"));
         let seen = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
         let seen_ref = seen.clone();
+        let mut api_call_count = 0u32;
 
         let out = agent
-            .collect_stream_llm_response(&ctx, &[], None, "dummy-model", None, &move |chunk| {
-                if let Some(delta) = chunk.delta {
-                    if let Some(text) = delta.content {
-                        seen_ref.lock().expect("seen lock").push(text);
+            .collect_stream_llm_response(
+                &ctx,
+                &[],
+                None,
+                "dummy-model",
+                None,
+                &move |chunk| {
+                    if let Some(delta) = chunk.delta {
+                        if let Some(text) = delta.content {
+                            seen_ref.lock().expect("seen lock").push(text);
+                        }
                     }
-                }
-            })
+                },
+                &mut api_call_count,
+            )
             .await;
 
         let err = match out {

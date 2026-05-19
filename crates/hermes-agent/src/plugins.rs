@@ -546,6 +546,76 @@ mod tests {
         }
     }
 
+    struct SessionEndHookPlugin;
+
+    #[async_trait::async_trait]
+    impl Plugin for SessionEndHookPlugin {
+        fn meta(&self) -> PluginMeta {
+            PluginMeta {
+                name: "session_end_hook_test".to_string(),
+                version: "0.1.0".to_string(),
+                description: "on_session_end hook test".to_string(),
+                author: None,
+            }
+        }
+        async fn initialize(&self) -> Result<(), AgentError> {
+            Ok(())
+        }
+        async fn shutdown(&self) -> Result<(), AgentError> {
+            Ok(())
+        }
+        fn register(&self, ctx: &mut PluginContext) {
+            ctx.on(
+                HookType::OnSessionEnd,
+                Arc::new(|ctx_val| {
+                    let completed = ctx_val
+                        .get("completed")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    let interrupted = ctx_val
+                        .get("interrupted")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    HookResult::InjectContext(format!(
+                        "session_end:{completed}:{interrupted}"
+                    ))
+                }),
+            );
+        }
+    }
+
+    struct PreApiRequestHookPlugin;
+
+    #[async_trait::async_trait]
+    impl Plugin for PreApiRequestHookPlugin {
+        fn meta(&self) -> PluginMeta {
+            PluginMeta {
+                name: "pre_api_request_hook_test".to_string(),
+                version: "0.1.0".to_string(),
+                description: "pre_api_request hook test".to_string(),
+                author: None,
+            }
+        }
+        async fn initialize(&self) -> Result<(), AgentError> {
+            Ok(())
+        }
+        async fn shutdown(&self) -> Result<(), AgentError> {
+            Ok(())
+        }
+        fn register(&self, ctx: &mut PluginContext) {
+            ctx.on(
+                HookType::PreApiRequest,
+                Arc::new(|ctx_val| {
+                    let count = ctx_val
+                        .get("api_call_count")
+                        .and_then(Value::as_u64)
+                        .unwrap_or(0);
+                    HookResult::InjectContext(format!("pre_api_request:{count}"))
+                }),
+            );
+        }
+    }
+
     #[test]
     fn test_plugin_register() {
         let mut mgr = PluginManager::new();
@@ -568,6 +638,47 @@ mod tests {
         let mgr = PluginManager::new();
         let results = mgr.invoke_hook(HookType::OnSessionStart, &serde_json::json!({}));
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_on_session_end_hook_invocation() {
+        let mut mgr = PluginManager::new();
+        mgr.register(Arc::new(SessionEndHookPlugin));
+        let results = mgr.invoke_hook(
+            HookType::OnSessionEnd,
+            &serde_json::json!({
+                "session_id": "sess-1",
+                "completed": true,
+                "interrupted": false,
+                "model": "gpt-4o",
+                "platform": "cli",
+            }),
+        );
+        assert_eq!(results.len(), 1);
+        assert!(matches!(
+            &results[0],
+            HookResult::InjectContext(text) if text == "session_end:true:false"
+        ));
+    }
+
+    #[test]
+    fn test_pre_api_request_hook_invocation() {
+        let mut mgr = PluginManager::new();
+        mgr.register(Arc::new(PreApiRequestHookPlugin));
+        let results = mgr.invoke_hook(
+            HookType::PreApiRequest,
+            &serde_json::json!({
+                "session_id": "sess-1",
+                "api_call_count": 2,
+                "model": "claude-sonnet-4-6",
+                "provider": "anthropic",
+            }),
+        );
+        assert_eq!(results.len(), 1);
+        assert!(matches!(
+            &results[0],
+            HookResult::InjectContext(text) if text == "pre_api_request:2"
+        ));
     }
 
     #[test]
