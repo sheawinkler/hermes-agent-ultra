@@ -36,7 +36,9 @@ use hermes_agent::providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
 };
 use hermes_agent::session_persistence::SessionPersistence;
-use hermes_agent::{leading_system_prompt_for_persist, AgentConfig, AgentLoop};
+use hermes_agent::{
+    split_messages_for_run_conversation, AgentConfig, AgentLoop, RunConversationParams,
+};
 use hermes_config::GatewayConfig;
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
@@ -167,7 +169,7 @@ impl HttpServerState {
                 let runtime_tools = tool_registry_handler.clone();
                 Box::pin(async move {
                     hermes_telemetry::record_llm_request();
-                    let effective_model = resolve_model_for_gateway(
+                    let _effective_model = resolve_model_for_gateway(
                         config.model.as_deref().unwrap_or("gpt-4o"),
                         &ctx,
                     );
@@ -177,31 +179,27 @@ impl HttpServerState {
                         agent_tools,
                         runtime_tools,
                     );
-                    let result = agent
-                        .run(messages, None)
+                    let (history, user_message) =
+                        split_messages_for_run_conversation(messages).ok_or_else(|| {
+                            GatewayError::Platform(
+                                "session has no user message for run_conversation".into(),
+                            )
+                        })?;
+                    let conv = agent
+                        .run_conversation(RunConversationParams {
+                            user_message,
+                            conversation_history: history,
+                            task_id: None,
+                            stream_callback: None,
+                            persist_user_message: None,
+                            tools: None,
+                            persist_session: true,
+                        })
                         .await
                         .map_err(|e| GatewayError::Platform(e.to_string()))?;
-                    let home = ctx
-                        .home
-                        .as_deref()
-                        .or(config.home_dir.as_deref())
-                        .map(str::trim)
-                        .filter(|s| !s.is_empty());
-                    if let Some(h) = home {
-                        if !ctx.session_key.trim().is_empty() {
-                            let sp = SessionPersistence::new(FsPath::new(h));
-                            let sys = leading_system_prompt_for_persist(&result.messages);
-                            let _ = sp.persist_session(
-                                &ctx.session_key,
-                                &result.messages,
-                                Some(&effective_model),
-                                Some(ctx.platform.as_str()),
-                                None,
-                                sys.as_deref(),
-                            );
-                        }
-                    }
-                    Ok(extract_last_assistant_reply(&result.messages))
+                    Ok(conv
+                        .final_response
+                        .unwrap_or_else(|| extract_last_assistant_reply(&conv.messages)))
                 })
             }))
             .await;
@@ -213,7 +211,7 @@ impl HttpServerState {
                 let runtime_tools = runtime_tools_stream.clone();
                 Box::pin(async move {
                     hermes_telemetry::record_llm_request();
-                    let effective_model = resolve_model_for_gateway(
+                    let _effective_model = resolve_model_for_gateway(
                         config.model.as_deref().unwrap_or("gpt-4o"),
                         &ctx,
                     );
@@ -263,31 +261,27 @@ impl HttpServerState {
                             }
                         });
 
-                    let result = agent
-                        .run_stream(messages, None, Some(stream_cb))
+                    let (history, user_message) =
+                        split_messages_for_run_conversation(messages).ok_or_else(|| {
+                            GatewayError::Platform(
+                                "session has no user message for run_conversation".into(),
+                            )
+                        })?;
+                    let conv = agent
+                        .run_conversation(RunConversationParams {
+                            user_message,
+                            conversation_history: history,
+                            task_id: None,
+                            stream_callback: Some(stream_cb),
+                            persist_user_message: None,
+                            tools: None,
+                            persist_session: true,
+                        })
                         .await
                         .map_err(|e| GatewayError::Platform(e.to_string()))?;
-                    let home = ctx
-                        .home
-                        .as_deref()
-                        .or(config.home_dir.as_deref())
-                        .map(str::trim)
-                        .filter(|s| !s.is_empty());
-                    if let Some(h) = home {
-                        if !ctx.session_key.trim().is_empty() {
-                            let sp = SessionPersistence::new(FsPath::new(h));
-                            let sys = leading_system_prompt_for_persist(&result.messages);
-                            let _ = sp.persist_session(
-                                &ctx.session_key,
-                                &result.messages,
-                                Some(&effective_model),
-                                Some(ctx.platform.as_str()),
-                                None,
-                                sys.as_deref(),
-                            );
-                        }
-                    }
-                    Ok(extract_last_assistant_reply(&result.messages))
+                    Ok(conv
+                        .final_response
+                        .unwrap_or_else(|| extract_last_assistant_reply(&conv.messages)))
                 })
             }))
             .await;
@@ -882,10 +876,14 @@ fn build_agent_for_gateway_context(
         .map(str::trim)
         .filter(|s| !s.is_empty());
     if let Some(h) = home {
+        agent_config.hermes_home = Some(h.to_string());
         let _ = AgentLoop::hydrate_stored_system_prompt_from_hermes_home(
             &mut agent_config,
             FsPath::new(h),
         );
+    }
+    if !ctx.platform.trim().is_empty() {
+        agent_config.platform = Some(ctx.platform.clone());
     }
     hermes_agent::attach_agent_runtime(
         AgentLoop::new(agent_config, agent_tools, provider)

@@ -1637,7 +1637,7 @@ fn governor_for_turn(
 /// Owns the configuration, a tool registry, and an LLM provider.
 /// Call `run()` or `run_stream()` to begin an autonomous loop.
 pub struct AgentLoop {
-    config_runtime: std::sync::RwLock<AgentConfig>,
+    pub(crate) config_runtime: std::sync::RwLock<AgentConfig>,
     pub tool_registry: Arc<ToolRegistry>,
     pub llm_provider: Arc<dyn LlmProvider>,
     pub interrupt: InterruptController,
@@ -1676,6 +1676,8 @@ pub struct AgentLoop {
     async_tool_dispatch: Option<AsyncToolDispatch>,
     /// Mid-run `/steer` queue (Python `_pending_steer`).
     pending_steer: PendingSteer,
+    /// Active turn task id (Python `_current_task_id`).
+    pub(crate) current_task_id: Arc<Mutex<Option<String>>>,
 }
 
 /// Async tool execution hook (gateway: `hermes_tools::ToolRegistry::dispatch_async`).
@@ -1774,7 +1776,7 @@ impl AgentLoop {
         }
     }
 
-    fn finalize_agent_result(&self, mut result: AgentResult) -> AgentResult {
+    pub(crate) fn finalize_agent_result(&self, mut result: AgentResult) -> AgentResult {
         if result.pending_steer.is_none() {
             result.pending_steer = self.pending_steer.drain();
         }
@@ -1846,7 +1848,7 @@ impl AgentLoop {
     }
 
     /// Restore primary model/provider at the start of a new turn (Python `run_conversation` prelude).
-    fn restore_primary_runtime_at_turn_start(&self) {
+    pub(crate) fn restore_primary_runtime_at_turn_start(&self) {
         let mut active = match self.active_runtime.lock() {
             Ok(guard) => guard,
             Err(_) => return,
@@ -1948,7 +1950,7 @@ impl AgentLoop {
         }
     }
 
-    fn active_model(&self) -> String {
+    pub(crate) fn active_model(&self) -> String {
         self.active_runtime
             .lock()
             .map(|rt| rt.model.clone())
@@ -2010,6 +2012,7 @@ impl AgentLoop {
             turn_fallback: Mutex::new(TurnFallbackState::new()),
             async_tool_dispatch: None,
             pending_steer: PendingSteer::new(),
+            current_task_id: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -2065,6 +2068,7 @@ impl AgentLoop {
             turn_fallback: Mutex::new(TurnFallbackState::new()),
             async_tool_dispatch: None,
             pending_steer: PendingSteer::new(),
+            current_task_id: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -2249,7 +2253,7 @@ impl AgentLoop {
 
     // -- Plugin hook helpers ------------------------------------------------
 
-    fn invoke_hook(&self, hook: HookType, ctx_val: &Value) -> Vec<HookResult> {
+    pub(crate) fn invoke_hook(&self, hook: HookType, ctx_val: &Value) -> Vec<HookResult> {
         if let Some(ref pm) = self.plugin_manager {
             if let Ok(pm) = pm.lock() {
                 return pm.invoke_hook(hook, ctx_val);
@@ -4789,7 +4793,23 @@ impl AgentLoop {
             })
     }
 
-    async fn preprocess_user_message_context_references(&self, messages: &mut [Message]) {
+    /// Per-turn message prelude (sanitize, budget strip, @file expansion, restore primary).
+    pub(crate) async fn apply_turn_message_prelude(&self, messages: &mut Vec<Message>) {
+        for msg in messages.iter_mut() {
+            if let Some(ref mut c) = msg.content {
+                *c = sanitize_surrogates(c).into_owned();
+            }
+        }
+        strip_budget_warnings_from_messages(messages);
+        self.preprocess_user_message_context_references(messages)
+            .await;
+        self.restore_primary_runtime_at_turn_start();
+    }
+
+    pub(crate) async fn preprocess_user_message_context_references(
+        &self,
+        messages: &mut [Message],
+    ) {
         let cwd = Self::context_reference_workspace_root();
         let context_length = get_model_context_length(&self.active_model());
         for msg in messages.iter_mut() {
@@ -4823,6 +4843,24 @@ impl AgentLoop {
         messages: Vec<Message>,
         tools: Option<Vec<ToolSchema>>,
     ) -> Result<AgentResult, AgentError> {
+        self.run_with_message_prelude(messages, tools, false).await
+    }
+
+    /// Like [`Self::run`] after [`crate::conversation_loop::AgentLoop::prepare_turn`] applied the message prelude.
+    pub(crate) async fn run_prepared(
+        &self,
+        messages: Vec<Message>,
+        tools: Option<Vec<ToolSchema>>,
+    ) -> Result<AgentResult, AgentError> {
+        self.run_with_message_prelude(messages, tools, true).await
+    }
+
+    async fn run_with_message_prelude(
+        &self,
+        mut messages: Vec<Message>,
+        tools: Option<Vec<ToolSchema>>,
+        skip_message_prelude: bool,
+    ) -> Result<AgentResult, AgentError> {
         let mut ctx = ContextManager::default_budget();
         let mut tool_errors: Vec<hermes_core::ToolErrorRecord> = Vec::new();
         let session_id_owned = self
@@ -4831,16 +4869,9 @@ impl AgentLoop {
             .clone()
             .unwrap_or_default();
         let session_id = session_id_owned.as_str();
-        let mut messages = messages;
-        for msg in messages.iter_mut() {
-            if let Some(ref mut c) = msg.content {
-                *c = sanitize_surrogates(c).into_owned();
-            }
+        if !skip_message_prelude {
+            self.apply_turn_message_prelude(&mut messages).await;
         }
-        strip_budget_warnings_from_messages(&mut messages);
-        self.preprocess_user_message_context_references(&mut messages)
-            .await;
-        self.restore_primary_runtime_at_turn_start();
 
         let task_hint = messages
             .iter()
@@ -5932,10 +5963,34 @@ impl AgentLoop {
         tools: Option<Vec<ToolSchema>>,
         on_chunk: Option<Box<dyn Fn(StreamChunk) + Send + Sync>>,
     ) -> Result<AgentResult, AgentError> {
+        self.run_stream_with_message_prelude(messages, tools, on_chunk, false)
+            .await
+    }
+
+    /// Like [`Self::run_stream`] after B-segment [`crate::conversation_loop`] prelude.
+    pub(crate) async fn run_stream_prepared(
+        &self,
+        messages: Vec<Message>,
+        tools: Option<Vec<ToolSchema>>,
+        on_chunk: Option<Box<dyn Fn(StreamChunk) + Send + Sync>>,
+    ) -> Result<AgentResult, AgentError> {
+        self.run_stream_with_message_prelude(messages, tools, on_chunk, true)
+            .await
+    }
+
+    async fn run_stream_with_message_prelude(
+        &self,
+        messages: Vec<Message>,
+        tools: Option<Vec<ToolSchema>>,
+        on_chunk: Option<Box<dyn Fn(StreamChunk) + Send + Sync>>,
+        skip_message_prelude: bool,
+    ) -> Result<AgentResult, AgentError> {
         let on_chunk = match on_chunk {
             Some(cb) => cb,
             None => {
-                return self.run(messages, tools).await;
+                return self
+                    .run_with_message_prelude(messages, tools, skip_message_prelude)
+                    .await;
             }
         };
         let stream_mute = Arc::new(AtomicBool::new(false));
@@ -5993,15 +6048,9 @@ impl AgentLoop {
             .unwrap_or_default();
         let session_id = session_id_owned.as_str();
         let mut messages = messages;
-        for msg in messages.iter_mut() {
-            if let Some(ref mut c) = msg.content {
-                *c = sanitize_surrogates(c).into_owned();
-            }
+        if !skip_message_prelude {
+            self.apply_turn_message_prelude(&mut messages).await;
         }
-        strip_budget_warnings_from_messages(&mut messages);
-        self.preprocess_user_message_context_references(&mut messages)
-            .await;
-        self.restore_primary_runtime_at_turn_start();
 
         let task_hint = messages
             .iter()

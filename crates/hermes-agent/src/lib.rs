@@ -5,6 +5,7 @@
 //! model finishes naturally or the turn budget is exhausted.
 
 pub mod agent_loop;
+pub mod conversation_loop;
 pub mod api_bridge;
 pub mod auxiliary_builder;
 pub mod budget;
@@ -39,6 +40,10 @@ pub mod subdirectory_hints;
 pub use agent_loop::{
     AgentCallbacks, AgentConfig, AgentLoop, ApiMode, AsyncToolDispatch, CheapModelRouteConfig,
     ErrorClass, RetryConfig, SmartModelRoutingConfig, TurnMetrics,
+};
+pub use conversation_loop::{
+    extract_last_assistant_reply, split_messages_for_run_conversation, ConversationResult,
+    RunConversationParams,
 };
 
 // Re-export context management

@@ -22,7 +22,8 @@ use hermes_agent::providers_extra::{
 };
 use hermes_agent::sub_agent_orchestrator::SubAgentOrchestrator;
 use hermes_agent::{
-    AgentCallbacks, AgentConfig, AgentLoop, InterruptController, SessionPersistence,
+    split_messages_for_run_conversation, AgentCallbacks, AgentConfig, AgentLoop,
+    InterruptController, RunConversationParams, SessionPersistence,
 };
 use hermes_config::{hermes_home as hermes_home_dir, load_config, state_dir, GatewayConfig};
 use hermes_core::ToolSchema;
@@ -2460,6 +2461,8 @@ impl App {
         include_tools: bool,
     ) -> Result<hermes_core::AgentResult, AgentError> {
         let tool_schemas = include_tools.then(|| self.tool_schemas.clone());
+        let (history, user_message) = split_messages_for_run_conversation(messages)
+            .ok_or_else(|| AgentError::Config("no user message in turn".into()))?;
         if stream_enabled && self.config.streaming.enabled {
             let stream_handle = self.stream_handle.clone();
             let stream_cb: Option<Box<dyn Fn(hermes_core::StreamChunk) + Send + Sync>> =
@@ -2468,11 +2471,33 @@ impl App {
                         h.send_chunk(chunk);
                     }) as Box<dyn Fn(hermes_core::StreamChunk) + Send + Sync>
                 });
-            self.agent
-                .run_stream(messages, tool_schemas, stream_cb)
-                .await
+            let conv = self
+                .agent
+                .run_conversation(RunConversationParams {
+                    user_message,
+                    conversation_history: history,
+                    task_id: None,
+                    stream_callback: stream_cb,
+                    persist_user_message: None,
+                    tools: tool_schemas,
+                    persist_session: false,
+                })
+                .await?;
+            Ok(conv.inner)
         } else {
-            self.agent.run(messages, tool_schemas).await
+            let conv = self
+                .agent
+                .run_conversation(RunConversationParams {
+                    user_message,
+                    conversation_history: history,
+                    task_id: None,
+                    stream_callback: None,
+                    persist_user_message: None,
+                    tools: tool_schemas,
+                    persist_session: false,
+                })
+                .await?;
+            Ok(conv.inner)
         }
     }
 

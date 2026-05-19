@@ -9,7 +9,9 @@ use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use base64::Engine as _;
 use clap_complete::{generate, Shell as CompletionShell};
 use hermes_agent::session_persistence::SessionPersistence;
-use hermes_agent::{leading_system_prompt_for_persist, AgentCallbacks, AgentLoop};
+use hermes_agent::{
+    split_messages_for_run_conversation, AgentCallbacks, AgentLoop, RunConversationParams,
+};
 use hermes_auth::{
     exchange_refresh_token, AuthManager, FileTokenStore, OAuth2Endpoints, OAuthCredential,
 };
@@ -2788,7 +2790,7 @@ async fn run_gateway(
                             );
                         }
                         let agent_tools = Arc::new(bridge_tool_registry(&runtime_tools));
-                        let effective_model = resolve_model_for_gateway(
+                        let _effective_model = resolve_model_for_gateway(
                             config.model.as_deref().unwrap_or("gpt-4o"),
                             &ctx,
                         );
@@ -2959,31 +2961,27 @@ async fn run_gateway(
                             runtime_tools.clone(),
                         )
                         .with_callbacks(callbacks);
-                        let result = agent
-                            .run(messages, Some(tool_schemas))
+                        let (history, user_message) =
+                            split_messages_for_run_conversation(messages).ok_or_else(|| {
+                                hermes_gateway::GatewayError::Platform(
+                                    "session has no user message for run_conversation".into(),
+                                )
+                            })?;
+                        let conv = agent
+                            .run_conversation(RunConversationParams {
+                                user_message,
+                                conversation_history: history,
+                                task_id: None,
+                                stream_callback: None,
+                                persist_user_message: None,
+                                tools: Some(tool_schemas),
+                                persist_session: true,
+                            })
                             .await
                             .map_err(|e| hermes_gateway::GatewayError::Platform(e.to_string()))?;
-                        let home = ctx
-                            .home
-                            .as_deref()
-                            .or(config.home_dir.as_deref())
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty());
-                        if let Some(h) = home {
-                            if !ctx.session_key.trim().is_empty() {
-                                let sp = SessionPersistence::new(Path::new(h));
-                                let sys = leading_system_prompt_for_persist(&result.messages);
-                                let _ = sp.persist_session(
-                                    &ctx.session_key,
-                                    &result.messages,
-                                    Some(&effective_model),
-                                    Some(ctx.platform.as_str()),
-                                    None,
-                                    sys.as_deref(),
-                                );
-                            }
-                        }
-                        Ok(extract_last_assistant_reply(&result.messages))
+                        Ok(conv
+                            .final_response
+                            .unwrap_or_else(|| extract_last_assistant_reply(&conv.messages)))
                     })
                 }))
                 .await;
@@ -3010,7 +3008,7 @@ async fn run_gateway(
                             );
                         }
                         let agent_tools = Arc::new(bridge_tool_registry(&runtime_tools));
-                        let effective_model = resolve_model_for_gateway(
+                        let _effective_model = resolve_model_for_gateway(
                             config.model.as_deref().unwrap_or("gpt-4o"),
                             &ctx,
                         );
@@ -3221,31 +3219,27 @@ async fn run_gateway(
                                 }
                             });
 
-                        let result = agent
-                            .run_stream(messages, Some(tool_schemas), Some(stream_cb))
+                        let (history, user_message) =
+                            split_messages_for_run_conversation(messages).ok_or_else(|| {
+                                hermes_gateway::GatewayError::Platform(
+                                    "session has no user message for run_conversation".into(),
+                                )
+                            })?;
+                        let conv = agent
+                            .run_conversation(RunConversationParams {
+                                user_message,
+                                conversation_history: history,
+                                task_id: None,
+                                stream_callback: Some(stream_cb),
+                                persist_user_message: None,
+                                tools: Some(tool_schemas),
+                                persist_session: true,
+                            })
                             .await
                             .map_err(|e| hermes_gateway::GatewayError::Platform(e.to_string()))?;
-                        let home = ctx
-                            .home
-                            .as_deref()
-                            .or(config.home_dir.as_deref())
-                            .map(str::trim)
-                            .filter(|s| !s.is_empty());
-                        if let Some(h) = home {
-                            if !ctx.session_key.trim().is_empty() {
-                                let sp = SessionPersistence::new(Path::new(h));
-                                let sys = leading_system_prompt_for_persist(&result.messages);
-                                let _ = sp.persist_session(
-                                    &ctx.session_key,
-                                    &result.messages,
-                                    Some(&effective_model),
-                                    Some(ctx.platform.as_str()),
-                                    None,
-                                    sys.as_deref(),
-                                );
-                            }
-                        }
-                        Ok(extract_last_assistant_reply(&result.messages))
+                        Ok(conv
+                            .final_response
+                            .unwrap_or_else(|| extract_last_assistant_reply(&conv.messages)))
                     })
                 }))
                 .await;
@@ -3959,6 +3953,7 @@ fn build_agent_for_gateway_context(
         .map(str::trim)
         .filter(|s| !s.is_empty());
     if let Some(h) = home {
+        agent_config.hermes_home = Some(h.to_string());
         let _ = AgentLoop::hydrate_stored_system_prompt_from_hermes_home(
             &mut agent_config,
             Path::new(h),
