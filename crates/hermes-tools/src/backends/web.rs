@@ -2,6 +2,7 @@
 
 use async_trait::async_trait;
 use regex::Regex;
+use reqwest::header::{HeaderMap, HeaderValue, ACCEPT};
 use reqwest::{Client, Url};
 use serde_json::{json, Value};
 use std::time::Instant;
@@ -526,6 +527,26 @@ const MAX_EXTRACT_BYTES: usize = 512_000; // 500 KB
 const TAVILY_BASE_URL_DEFAULT: &str = "https://api.tavily.com";
 const SEARXNG_SEARCH_PATH: &str = "/search";
 
+/// Chrome-like User-Agent for direct HTML fetches (many sites block bot UAs with 403).
+const BROWSER_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36";
+
+const BROWSER_ACCEPT_HTML: &str =
+    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8";
+
+fn build_browser_like_http_client(timeout_secs: u64) -> Client {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        ACCEPT,
+        HeaderValue::from_static(BROWSER_ACCEPT_HTML),
+    );
+    Client::builder()
+        .timeout(std::time::Duration::from_secs(timeout_secs))
+        .user_agent(BROWSER_USER_AGENT)
+        .default_headers(headers)
+        .build()
+        .unwrap_or_else(|_| Client::new())
+}
+
 /// A web extraction backend that fetches HTML via reqwest with no external API dependency.
 pub struct SimpleExtractBackend {
     client: Client,
@@ -534,11 +555,7 @@ pub struct SimpleExtractBackend {
 impl SimpleExtractBackend {
     pub fn new() -> Self {
         Self {
-            client: Client::builder()
-                .timeout(std::time::Duration::from_secs(30))
-                .user_agent("hermes-agent/1.0")
-                .build()
-                .unwrap_or_else(|_| Client::new()),
+            client: build_browser_like_http_client(30),
         }
     }
 }
@@ -1273,6 +1290,17 @@ impl WebExtractBackend for FirecrawlExtractBackend {
 
         serde_json::to_string_pretty(&result)
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize result: {}", e)))
+    }
+}
+
+#[cfg(test)]
+mod browser_client_tests {
+    use super::*;
+
+    #[test]
+    fn browser_user_agent_looks_like_chrome() {
+        assert!(BROWSER_USER_AGENT.contains("Chrome/"));
+        assert!(BROWSER_ACCEPT_HTML.starts_with("text/html,application/xhtml+xml"));
     }
 }
 
