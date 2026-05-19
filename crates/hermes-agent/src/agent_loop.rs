@@ -1532,6 +1532,29 @@ fn governor_runtime_state(
     }
 }
 
+/// Whether to force a reliability-guard runtime route this turn.
+///
+/// Tool-error degradation needs sustained failures (`consecutive_error_turns >= 2`).
+/// Latency degradation needs multiple samples so one slow LLM call cannot hop providers.
+fn should_apply_turn_reliability_guard(
+    runtime: &GovernorRuntimeState,
+    llm_governor: &TurnGovernor,
+    llm_latency_window_len: usize,
+) -> bool {
+    if !llm_governor.error_degraded && !llm_governor.latency_degraded {
+        return false;
+    }
+    if runtime.consecutive_error_turns >= 2 {
+        return true;
+    }
+    llm_governor.latency_degraded
+        && llm_latency_window_len >= 2
+        && runtime
+            .avg_llm_latency_ms
+            .map(|v| v >= governor_latency_warn_ms())
+            .unwrap_or(false)
+}
+
 fn governor_for_turn(
     config: &AgentConfig,
     ctx: &ContextManager,
@@ -1976,6 +1999,19 @@ impl AgentLoop {
     pub fn with_async_tool_dispatch(mut self, dispatch: AsyncToolDispatch) -> Self {
         self.async_tool_dispatch = Some(dispatch);
         self
+    }
+
+    pub(crate) fn maybe_with_async_tool_dispatch(self, dispatch: Option<AsyncToolDispatch>) -> Self {
+        if let Some(dispatch) = dispatch {
+            self.with_async_tool_dispatch(dispatch)
+        } else {
+            self
+        }
+    }
+
+    /// Clone the async tool dispatch hook (for background review / sub-agents).
+    pub(crate) fn async_tool_dispatch(&self) -> Option<AsyncToolDispatch> {
+        self.async_tool_dispatch.clone()
     }
 
     /// Create a new agent loop with a shared interrupt controller.
@@ -4868,24 +4904,23 @@ impl AgentLoop {
             let llm_governor =
                 governor_for_turn(&self.config(), &ctx, 0, Some(&turn_governor_runtime));
             if forced_runtime_route.is_none()
-                && (turn_governor_runtime.consecutive_error_turns >= 2
-                    || turn_governor_runtime
-                        .avg_llm_latency_ms
-                        .map(|v| v >= governor_latency_warn_ms())
-                        .unwrap_or(false))
-                && (llm_governor.error_degraded || llm_governor.latency_degraded)
+                && should_apply_turn_reliability_guard(
+                    &turn_governor_runtime,
+                    &llm_governor,
+                    governor_llm_latency_window.len(),
+                )
             {
                 if let Some(model) = self
                     .resolve_reliability_degrade_model(active_model, turn_runtime_route.as_ref())
                 {
-                    forced_runtime_route = Some(self.turn_route_reliability_guard(model.clone()));
-                    self.emit_status(
-                        "lifecycle",
-                        &format!(
-                            "Reliability guard switching route to `{}` after degradation.",
-                            model
-                        ),
+                    tracing::info!(
+                        turn = total_turns,
+                        model = %model,
+                        consecutive_error_turns = turn_governor_runtime.consecutive_error_turns,
+                        avg_llm_latency_ms = ?turn_governor_runtime.avg_llm_latency_ms,
+                        "reliability guard switching runtime route after degradation"
                     );
+                    forced_runtime_route = Some(self.turn_route_reliability_guard(model.clone()));
                     ctx.add_message(Message::system(format!(
                         "Reliability guard: runtime degradation detected. Switching next turns to `{}`.",
                         model
@@ -5990,24 +6025,23 @@ impl AgentLoop {
             let llm_governor =
                 governor_for_turn(&self.config(), &ctx, 0, Some(&turn_governor_runtime));
             if forced_runtime_route.is_none()
-                && (turn_governor_runtime.consecutive_error_turns >= 2
-                    || turn_governor_runtime
-                        .avg_llm_latency_ms
-                        .map(|v| v >= governor_latency_warn_ms())
-                        .unwrap_or(false))
-                && (llm_governor.error_degraded || llm_governor.latency_degraded)
+                && should_apply_turn_reliability_guard(
+                    &turn_governor_runtime,
+                    &llm_governor,
+                    governor_llm_latency_window.len(),
+                )
             {
                 if let Some(model) = self
                     .resolve_reliability_degrade_model(active_model, turn_runtime_route.as_ref())
                 {
-                    forced_runtime_route = Some(self.turn_route_reliability_guard(model.clone()));
-                    self.emit_status(
-                        "lifecycle",
-                        &format!(
-                            "Reliability guard switching route to `{}` after degradation.",
-                            model
-                        ),
+                    tracing::info!(
+                        turn = total_turns,
+                        model = %model,
+                        consecutive_error_turns = turn_governor_runtime.consecutive_error_turns,
+                        avg_llm_latency_ms = ?turn_governor_runtime.avg_llm_latency_ms,
+                        "reliability guard switching runtime route after degradation"
                     );
+                    forced_runtime_route = Some(self.turn_route_reliability_guard(model.clone()));
                     ctx.add_message(Message::system(format!(
                         "Reliability guard: runtime degradation detected. Switching next turns to `{}`.",
                         model
@@ -7076,11 +7110,12 @@ impl AgentLoop {
 
     fn turn_route_reliability_guard(&self, model: String) -> TurnRuntimeRoute {
         let pri = self.primary_runtime_snapshot();
+        let (provider, _) = self.extract_provider_and_model(model.as_str());
         let mut sig = pri.to_signature();
         sig.model = model.clone();
         TurnRuntimeRoute {
             model,
-            provider: None,
+            provider: Some(provider),
             base_url: None,
             api_key_env: None,
             api_mode: None,
@@ -7427,9 +7462,6 @@ impl AgentLoop {
             if !normalized.eq_ignore_ascii_case(active_model) {
                 return Some(normalized);
             }
-        }
-        if !active_model.eq_ignore_ascii_case("openai:gpt-4o-mini") {
-            return Some("openai:gpt-4o-mini".to_string());
         }
         None
     }
@@ -7979,9 +8011,12 @@ impl AgentLoop {
         };
         let tools = self.tool_registry.clone();
         let provider = self.llm_provider.clone();
+        let async_tool_dispatch = self.async_tool_dispatch();
         let review_cb = self.callbacks.background_review_callback.clone();
         tokio::spawn(async move {
-            let agent = AgentLoop::new(cfg, tools, provider);
+            let agent = AgentLoop::new(cfg, tools, provider).maybe_with_async_tool_dispatch(
+                async_tool_dispatch,
+            );
             match agent.run(hist, None).await {
                 Ok(result) => {
                     if let Some(cb) = review_cb.as_ref() {
@@ -13240,6 +13275,107 @@ mod tests {
         assert!(gov.error_degraded);
         assert!(gov.max_tokens.unwrap_or(1200) < 1200);
         assert!(gov.tool_concurrency <= 2);
+    }
+
+    #[test]
+    fn test_reliability_guard_requires_sustained_tool_errors_or_multi_sample_latency() {
+        let ctx = ContextManager::default_budget();
+        let config = AgentConfig {
+            max_tokens: Some(1200),
+            ..AgentConfig::default()
+        };
+        let one_error_turn = GovernorRuntimeState {
+            avg_llm_latency_ms: Some(1000.0),
+            avg_tool_error_rate: 0.0,
+            consecutive_error_turns: 1,
+        };
+        let gov_one = governor_for_turn(&config, &ctx, 0, Some(&one_error_turn));
+        assert!(!should_apply_turn_reliability_guard(
+            &one_error_turn,
+            &gov_one,
+            1
+        ));
+
+        let slow_single_sample = GovernorRuntimeState {
+            avg_llm_latency_ms: Some(7000.0),
+            avg_tool_error_rate: 0.0,
+            consecutive_error_turns: 0,
+        };
+        let gov_slow = governor_for_turn(&config, &ctx, 0, Some(&slow_single_sample));
+        assert!(!should_apply_turn_reliability_guard(
+            &slow_single_sample,
+            &gov_slow,
+            1
+        ));
+        assert!(should_apply_turn_reliability_guard(
+            &slow_single_sample,
+            &gov_slow,
+            2
+        ));
+
+        let two_error_turns = GovernorRuntimeState {
+            avg_llm_latency_ms: Some(1000.0),
+            avg_tool_error_rate: 0.0,
+            consecutive_error_turns: 2,
+        };
+        let gov_two = governor_for_turn(&config, &ctx, 0, Some(&two_error_turns));
+        assert!(should_apply_turn_reliability_guard(
+            &two_error_turns,
+            &gov_two,
+            0
+        ));
+    }
+
+    #[test]
+    fn test_resolve_reliability_degrade_model_does_not_hop_to_openai_by_default() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let agent = AgentLoop::new(
+            AgentConfig {
+                provider: Some("anthropic".to_string()),
+                model: "anthropic:claude-sonnet-4-20250514".to_string(),
+                ..AgentConfig::default()
+            },
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        assert_eq!(
+            agent.resolve_reliability_degrade_model("anthropic:claude-sonnet-4-20250514", None),
+            None
+        );
     }
 
     #[test]

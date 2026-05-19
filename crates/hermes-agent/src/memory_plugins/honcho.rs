@@ -217,6 +217,8 @@ impl HonchoConfig {
 
 /// Honcho AI-native memory with dialectic Q&A and persistent user modeling.
 pub struct HonchoMemoryPlugin {
+    /// Shared async HTTP client (must not use `reqwest::blocking` on tokio workers).
+    http: reqwest::Client,
     config: Mutex<Option<HonchoConfig>>,
     session_key: Mutex<String>,
     prefetch_result: Arc<Mutex<String>>,
@@ -226,7 +228,11 @@ pub struct HonchoMemoryPlugin {
 
 impl HonchoMemoryPlugin {
     pub fn new() -> Self {
+        let http = reqwest::Client::builder()
+            .build()
+            .expect("Honcho reqwest client");
         Self {
+            http,
             config: Mutex::new(None),
             session_key: Mutex::new(String::new()),
             prefetch_result: Arc::new(Mutex::new(String::new())),
@@ -268,21 +274,18 @@ impl HonchoMemoryPlugin {
         }
     }
 
-    fn client(config: &HonchoConfig) -> Result<reqwest::blocking::Client, String> {
-        reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs_f64(config.timeout_secs))
-            .build()
-            .map_err(|e| format!("Honcho HTTP client build failed: {e}"))
-    }
-
-    fn send_json(
+    /// Blocking HTTP for dedicated `std::thread` workers only (no tokio runtime).
+    fn send_json_blocking(
         config: &HonchoConfig,
         method: Method,
         path: &str,
         body: Option<&Value>,
         query: Option<&[(&str, String)]>,
     ) -> Result<Value, String> {
-        let client = Self::client(config)?;
+        let client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs_f64(config.timeout_secs))
+            .build()
+            .map_err(|e| format!("Honcho HTTP client build failed: {e}"))?;
         let url = Self::build_url(config, path);
         let mut req = client
             .request(method.clone(), &url)
@@ -301,8 +304,49 @@ impl HonchoMemoryPlugin {
         let resp = req
             .send()
             .map_err(|e| format!("Honcho request {} {} failed: {e}", method, url))?;
+        Self::parse_http_response(method, &url, resp.status(), resp.text().unwrap_or_default())
+    }
+
+    async fn send_json_async(
+        http: &reqwest::Client,
+        config: &HonchoConfig,
+        method: Method,
+        path: &str,
+        body: Option<&Value>,
+        query: Option<&[(String, String)]>,
+    ) -> Result<Value, String> {
+        let url = Self::build_url(config, path);
+        let timeout = Duration::from_secs_f64(config.timeout_secs);
+        let mut req = http
+            .request(method.clone(), &url)
+            .timeout(timeout)
+            .header("Content-Type", "application/json");
+        if !config.api_key.is_empty() {
+            req = req
+                .header("Authorization", format!("Bearer {}", config.api_key))
+                .header("X-API-Key", &config.api_key);
+        }
+        if let Some(items) = query {
+            req = req.query(items);
+        }
+        if let Some(payload) = body {
+            req = req.json(payload);
+        }
+        let resp = req
+            .send()
+            .await
+            .map_err(|e| format!("Honcho request {} {} failed: {e}", method, url))?;
         let status = resp.status();
-        let body_text = resp.text().unwrap_or_default();
+        let body_text = resp.text().await.unwrap_or_default();
+        Self::parse_http_response(method, &url, status, body_text)
+    }
+
+    fn parse_http_response(
+        method: Method,
+        url: &str,
+        status: reqwest::StatusCode,
+        body_text: String,
+    ) -> Result<Value, String> {
         if !status.is_success() {
             return Err(format!(
                 "Honcho request {} {} returned {}: {}",
@@ -314,6 +358,44 @@ impl HonchoMemoryPlugin {
         }
         serde_json::from_str::<Value>(&body_text)
             .map_err(|e| format!("Honcho response parse error: {e}; body={body_text}"))
+    }
+
+    /// Sync entry point safe from tokio workers (uses `block_in_place` + async client).
+    fn send_json(
+        &self,
+        config: &HonchoConfig,
+        method: Method,
+        path: &str,
+        body: Option<&Value>,
+        query: Option<&[(&str, String)]>,
+    ) -> Result<Value, String> {
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let http = self.http.clone();
+            let config = config.clone();
+            let path = path.to_string();
+            let body = body.cloned();
+            let query: Option<Vec<(String, String)>> = query.map(|items| {
+                items
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.clone()))
+                    .collect()
+            });
+            tokio::task::block_in_place(|| {
+                handle.block_on(async move {
+                    Self::send_json_async(
+                        &http,
+                        &config,
+                        method,
+                        &path,
+                        body.as_ref(),
+                        query.as_deref(),
+                    )
+                    .await
+                })
+            })
+        } else {
+            Self::send_json_blocking(config, method, path, body, query)
+        }
     }
 
     fn extract_text_result(v: &Value) -> Option<String> {
@@ -345,7 +427,7 @@ impl HonchoMemoryPlugin {
         None
     }
 
-    fn context_query(
+    fn context_query_blocking(
         config: &HonchoConfig,
         session_id: &str,
         query: &str,
@@ -360,7 +442,26 @@ impl HonchoMemoryPlugin {
             "query": query,
             "max_tokens": max_tokens,
         });
-        Self::send_json(config, Method::POST, &path, Some(&payload), None)
+        Self::send_json_blocking(config, Method::POST, &path, Some(&payload), None)
+    }
+
+    fn context_query(
+        &self,
+        config: &HonchoConfig,
+        session_id: &str,
+        query: &str,
+        max_tokens: usize,
+        peer: &str,
+    ) -> Result<Value, String> {
+        let path = config.endpoint("context", "/v1/context/query");
+        let payload = json!({
+            "workspace_id": config.workspace_id,
+            "session_id": session_id,
+            "peer": peer,
+            "query": query,
+            "max_tokens": max_tokens,
+        });
+        self.send_json(config, Method::POST, &path, Some(&payload), None)
     }
 }
 
@@ -456,7 +557,7 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
         let query = trimmed.to_string();
         let max_tokens = config.context_tokens.unwrap_or(800).min(2000).max(64);
         std::thread::spawn(move || {
-            match Self::context_query(&config, &session_id, &query, max_tokens, "user") {
+            match Self::context_query_blocking(&config, &session_id, &query, max_tokens, "user") {
                 Ok(v) => {
                     if let Some(text) = Self::extract_text_result(&v) {
                         if !text.trim().is_empty() {
@@ -497,9 +598,13 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
         });
         let rendered_path = Self::apply_template(&path, "user", &session_id);
         std::thread::spawn(move || {
-            if let Err(e) =
-                Self::send_json(&config, Method::POST, &rendered_path, Some(&payload), None)
-            {
+            if let Err(e) = Self::send_json_blocking(
+                &config,
+                Method::POST,
+                &rendered_path,
+                Some(&payload),
+                None,
+            ) {
                 tracing::debug!("Honcho sync_turn failed: {}", e);
             }
         });
@@ -538,14 +643,14 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
                         "peer": peer,
                         "card": card
                     });
-                    Self::send_json(&config, Method::POST, &path, Some(&body), None)
+                    self.send_json(&config, Method::POST, &path, Some(&body), None)
                 } else {
                     let query = vec![
                         ("workspace_id", config.workspace_id.clone()),
                         ("session_id", session_id.clone()),
                         ("peer", peer.clone()),
                     ];
-                    Self::send_json(&config, Method::GET, &path, None, Some(&query))
+                    self.send_json(&config, Method::GET, &path, None, Some(&query))
                 };
                 match result {
                     Ok(v) => {
@@ -579,7 +684,7 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
                     "query": query_text,
                     "max_tokens": max_tokens
                 });
-                match Self::send_json(&config, Method::POST, &path, Some(&body), None) {
+                match self.send_json(&config, Method::POST, &path, Some(&body), None) {
                     Ok(v) => {
                         let text = Self::extract_text_result(&v).unwrap_or_default();
                         if text.is_empty() {
@@ -597,7 +702,7 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
                     return json!({"error": "Missing required parameter: query"}).to_string();
                 }
                 let max_tokens = config.context_tokens.unwrap_or(800).min(2000).max(64);
-                match Self::context_query(&config, &session_id, query_text, max_tokens, &peer) {
+                match self.context_query(&config, &session_id, query_text, max_tokens, &peer) {
                     Ok(v) => {
                         let text = Self::extract_text_result(&v).unwrap_or_default();
                         if text.is_empty() {
@@ -635,7 +740,7 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
                         ("session_id", session_id.clone()),
                         ("peer", peer.clone()),
                     ];
-                    return match Self::send_json(
+                    return match self.send_json(
                         &config,
                         Method::DELETE,
                         &delete_path,
@@ -654,7 +759,7 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
                     "peer": peer,
                     "conclusion": conclusion
                 });
-                match Self::send_json(&config, Method::POST, &template, Some(&body), None) {
+                match self.send_json(&config, Method::POST, &template, Some(&body), None) {
                     Ok(v) => json!({"result": "Conclusion saved.", "raw": v}).to_string(),
                     Err(e) => json!({"error": format!("Honcho conclude failed: {e}")}).to_string(),
                 }
@@ -679,7 +784,7 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
             "workspace_id": config.workspace_id,
             "session_id": session_id
         });
-        if let Err(e) = Self::send_json(&config, Method::POST, &path, Some(&body), None) {
+        if let Err(e) = self.send_json(&config, Method::POST, &path, Some(&body), None) {
             tracing::debug!("Honcho session end flush failed: {}", e);
         }
     }
@@ -702,7 +807,9 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
             "source": "memory_write_hook"
         });
         std::thread::spawn(move || {
-            if let Err(e) = Self::send_json(&config, Method::POST, &template, Some(&body), None) {
+            if let Err(e) =
+                Self::send_json_blocking(&config, Method::POST, &template, Some(&body), None)
+            {
                 tracing::debug!("Honcho memory mirror failed: {}", e);
             }
         });

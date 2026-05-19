@@ -31,7 +31,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tokio::time::timeout;
 
-use crate::agent_loop::{AgentConfig, AgentLoop, ToolRegistry};
+use crate::agent_loop::{AgentConfig, AgentLoop, AsyncToolDispatch, ToolRegistry};
 use crate::interrupt::InterruptController;
 
 /// Boxed `Send` future type alias used to short-circuit async-recursion
@@ -118,6 +118,7 @@ pub struct SubAgentOrchestratorConfig {
     pub hermes_home: PathBuf,
     pub parent_session_id: Option<String>,
     pub timeout: Duration,
+    pub async_tool_dispatch: Option<AsyncToolDispatch>,
 }
 
 /// In-process executor for `delegate_task` tool calls.
@@ -145,6 +146,7 @@ impl SubAgentOrchestrator {
                 hermes_home,
                 parent_session_id: parent.config().session_id.clone(),
                 timeout: Duration::from_secs(DEFAULT_SUB_AGENT_TIMEOUT_SECS),
+                async_tool_dispatch: parent.async_tool_dispatch(),
             },
         }
     }
@@ -283,6 +285,7 @@ impl SubAgentOrchestrator {
         let child_interrupt_for_spawn = child_interrupt.clone();
         let tool_registry = self.cfg.tool_registry.clone();
         let llm_provider = self.cfg.llm_provider.clone();
+        let async_tool_dispatch = self.cfg.async_tool_dispatch.clone();
         let child_depth = req.child_depth;
         let initial = initial_messages(&req.task, req.context.as_deref());
 
@@ -299,7 +302,8 @@ impl SubAgentOrchestrator {
                 llm_provider,
                 child_interrupt_for_spawn,
             )
-            .with_delegate_depth(child_depth);
+            .with_delegate_depth(child_depth)
+            .maybe_with_async_tool_dispatch(async_tool_dispatch);
             child_agent.run(initial, None).await
         });
 
@@ -517,6 +521,7 @@ mod tests {
             hermes_home: tmp.path().to_path_buf(),
             parent_session_id: Some("parent".into()),
             timeout: Duration::from_millis(50),
+            async_tool_dispatch: None,
         }));
         let out = orch
             .execute(SubAgentRequest {
@@ -557,6 +562,7 @@ mod tests {
             hermes_home: tmp.path().to_path_buf(),
             parent_session_id: None,
             timeout: Duration::from_secs(2),
+            async_tool_dispatch: None,
         }));
         let out = orch
             .execute(SubAgentRequest {
@@ -591,6 +597,7 @@ mod tests {
             hermes_home: tmp.path().to_path_buf(),
             parent_session_id: Some("root".into()),
             timeout: Duration::from_secs(1),
+            async_tool_dispatch: None,
         });
         let child = orch.build_child_config(
             &SubAgentRequest {
