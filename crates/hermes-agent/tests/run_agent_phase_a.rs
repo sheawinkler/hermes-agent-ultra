@@ -246,3 +246,43 @@ async fn phase_a1_new_session_fires_on_session_start() {
         "expected on_session_start, got {fired:?}"
     );
 }
+
+// --- Phase A-2: continue session --------------------------------------------
+
+#[tokio::test]
+async fn phase_a2_continue_session_skips_on_session_start() {
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let counter = HookCounter(events.clone());
+    let mut pm = PluginManager::new();
+    register_hook(&counter, &mut pm, HookType::OnSessionStart, "on_session_start");
+
+    const STORED: &str = "STORED_SYSTEM_PROMPT_FOR_PHASE_A2";
+    let cfg = AgentConfig {
+        stored_system_prompt: Some(STORED.into()),
+        session_id: Some("phase-a2-continue".into()),
+        max_turns: 1,
+        ..AgentConfig::default()
+    };
+    let agent = AgentLoop::new(
+        cfg,
+        Arc::new(ToolRegistry::new()),
+        Arc::new(StopAssistantProvider),
+    )
+    .with_plugins(Arc::new(Mutex::new(pm)));
+
+    let result = agent.run(vec![Message::user("hi")], None).await;
+    assert!(result.is_ok(), "{result:?}");
+    let inner = result.unwrap();
+    assert!(!inner.session_started_hooks_fired);
+    let fired = events.lock().expect("events lock");
+    assert!(
+        !fired.iter().any(|e| e == "on_session_start"),
+        "on_session_start must not fire when stored_system_prompt is set, got {fired:?}"
+    );
+    let system = inner
+        .messages
+        .iter()
+        .find(|m| m.role == MessageRole::System)
+        .and_then(|m| m.content.as_deref());
+    assert_eq!(system, Some(STORED));
+}
