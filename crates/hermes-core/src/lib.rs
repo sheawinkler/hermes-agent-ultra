@@ -4,6 +4,7 @@
 //! used across the hermes-agent-rust workspace.
 
 pub mod errors;
+pub mod inbound;
 pub mod tool_call_parser;
 pub mod tool_schema;
 pub mod traits;
@@ -25,6 +26,10 @@ pub use types::{
 
 // Re-export tool schema types
 pub use tool_schema::{tool_schema, JsonSchema, ToolSchema};
+
+pub use inbound::{
+    transport_fallback_message, InboundEvent, InboundMessagePreparer, InboundPrepareContext,
+};
 
 // Re-export trait definitions
 pub use traits::{

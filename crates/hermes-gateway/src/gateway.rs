@@ -20,6 +20,9 @@ use tracing::{debug, error, info, trace, warn};
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
 use hermes_core::types::{Message, MessageRole};
+use hermes_core::{
+    transport_fallback_message, InboundEvent, InboundMessagePreparer, InboundPrepareContext,
+};
 
 use crate::background::{BackgroundTaskManager, TaskStatus};
 use crate::commands::{handle_command, GatewayCommandResult};
@@ -262,6 +265,8 @@ pub struct Gateway {
     hook_registry: RwLock<Option<Arc<HookRegistry>>>,
     /// Per-platform allowlist policy for group and slash-command traffic.
     platform_access_policies: RwLock<HashMap<String, PlatformAccessPolicy>>,
+    /// Optional agent-layer inbound preparer (vision routing, transcription).
+    inbound_preparer: RwLock<Option<Arc<dyn InboundMessagePreparer>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -340,6 +345,25 @@ impl Gateway {
             mcp_reload_generation: RwLock::new(0),
             hook_registry: RwLock::new(None),
             platform_access_policies: RwLock::new(HashMap::new()),
+            inbound_preparer: RwLock::new(None),
+        }
+    }
+
+    /// Register the agent inbound preparer (vision enrich, native multimodal, etc.).
+    pub async fn set_inbound_preparer(&self, preparer: Arc<dyn InboundMessagePreparer>) {
+        *self.inbound_preparer.write().await = Some(preparer);
+    }
+
+    fn incoming_to_event(incoming: &IncomingMessage) -> InboundEvent {
+        InboundEvent {
+            platform: incoming.platform.clone(),
+            chat_id: incoming.chat_id.clone(),
+            user_id: incoming.user_id.clone(),
+            text: incoming.text.clone(),
+            media_urls: incoming.media_urls.clone(),
+            media_types: incoming.media_types.clone(),
+            message_id: incoming.message_id.clone(),
+            is_dm: incoming.is_dm,
         }
     }
 
@@ -672,17 +696,21 @@ impl Gateway {
             }
         }
 
-        let inbound_text = self.enrich_message_with_media(incoming);
-        let enriched_text =
-            self.enrich_message_with_transcription(&self.enrich_message_with_vision(&inbound_text));
-        self.maybe_apply_smart_model_routing(&session_key, &enriched_text)
+        let user_message = self
+            .prepare_inbound_user_message(incoming, &session_key)
             .await;
+        let input_chars = user_message
+            .content
+            .as_deref()
+            .unwrap_or("")
+            .chars()
+            .count();
 
         // 3. Add the user message to the session
         self.session_manager
-            .add_message(&session_key, Message::user(enriched_text))
+            .add_message(&session_key, user_message)
             .await;
-        self.bump_input_usage(&session_key, inbound_text.chars().count())
+        self.bump_input_usage(&session_key, input_chars)
             .await;
 
         // 4. Get all session messages for the agent loop
@@ -2146,52 +2174,44 @@ impl Gateway {
         }
     }
 
-    /// Attach vision hint for image-bearing messages.
-    pub fn enrich_message_with_vision(&self, text: &str) -> String {
-        if text.contains("http://") || text.contains("https://") {
-            format!("[vision_candidate]\n{}", text)
-        } else {
-            text.to_string()
-        }
-    }
-
-    /// Attach transcription hint for audio-bearing messages.
-    pub fn enrich_message_with_transcription(&self, text: &str) -> String {
-        if text.contains(".mp3") || text.contains(".wav") || text.contains(".m4a") {
-            format!("[transcription_candidate]\n{}", text)
-        } else {
-            text.to_string()
-        }
-    }
-
-    /// Convert structured media fields into stable text lines for downstream consumers.
-    pub fn enrich_message_with_media(&self, incoming: &IncomingMessage) -> String {
-        if incoming.media_urls.is_empty() {
-            return incoming.text.clone();
-        }
-        let mut media_lines = Vec::with_capacity(incoming.media_urls.len());
-        for (idx, media_url) in incoming.media_urls.iter().enumerate() {
-            let media_url = media_url.trim();
-            if media_url.is_empty() {
-                continue;
+    /// Prepare the user turn via the injected agent preparer (vision routing, etc.).
+    async fn prepare_inbound_user_message(
+        &self,
+        incoming: &IncomingMessage,
+        session_key: &str,
+    ) -> Message {
+        let event = Self::incoming_to_event(incoming);
+        let (provider, model) = {
+            let states = self.runtime_state.read().await;
+            states
+                .get(session_key)
+                .map(|s| (s.provider.clone(), s.model.clone()))
+                .unwrap_or((None, None))
+        };
+        let ctx = InboundPrepareContext {
+            session_key: session_key.to_string(),
+            provider,
+            model,
+            image_input_mode: "auto".to_string(),
+            aux_vision_provider: None,
+            aux_vision_model: None,
+            aux_vision_base_url: None,
+        };
+        let preparer = self.inbound_preparer.read().await.clone();
+        if let Some(preparer) = preparer {
+            match preparer.prepare(&event, &ctx).await {
+                Ok(message) => return message,
+                Err(err) => {
+                    warn!(
+                        platform = %incoming.platform,
+                        session_key = %session_key,
+                        error = %err,
+                        "Inbound preparer failed; using transport fallback"
+                    );
+                }
             }
-            let media_type = incoming
-                .media_types
-                .get(idx)
-                .map(String::as_str)
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .unwrap_or("file");
-            media_lines.push(format!("[media:{media_type}] {media_url}"));
         }
-        if media_lines.is_empty() {
-            return incoming.text.clone();
-        }
-        if incoming.text.trim().is_empty() {
-            media_lines.join("\n")
-        } else {
-            format!("{}\n{}", incoming.text, media_lines.join("\n"))
-        }
+        transport_fallback_message(&event)
     }
 
     /// Build deterministic signature for config-change detection.
@@ -2218,21 +2238,6 @@ impl Gateway {
             .ok()
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
-    }
-
-    /// Resolve model routing candidate for a message (static heuristics only; no adaptive policy store).
-    pub fn load_smart_model_routing(&self, text: &str) -> Option<String> {
-        Self::heuristic_model_hint(text)
-    }
-
-    fn heuristic_model_hint(text: &str) -> Option<String> {
-        if text.len() > 2000 || text.contains("analyze") || text.contains("refactor") {
-            Some("openai:gpt-4o".to_string())
-        } else if text.contains("quick") || text.contains("summary") {
-            Some("openai:gpt-4o-mini".to_string())
-        } else {
-            None
-        }
     }
 
     /// Authorize user based on DM manager and platform context.
@@ -2274,22 +2279,6 @@ impl Gateway {
         Ok(())
     }
 
-    async fn maybe_apply_smart_model_routing(&self, session_key: &str, text: &str) {
-        let has_model = self
-            .runtime_state
-            .read()
-            .await
-            .get(session_key)
-            .and_then(|s| s.model.clone())
-            .is_some();
-        if has_model {
-            return;
-        }
-        if let Some(model) = Self::heuristic_model_hint(text) {
-            let mut states = self.runtime_state.write().await;
-            states.entry(session_key.to_string()).or_default().model = Some(model);
-        }
-    }
 }
 
 #[cfg(test)]

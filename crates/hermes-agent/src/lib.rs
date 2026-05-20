@@ -8,6 +8,7 @@ pub mod agent_loop;
 pub mod conversation_loop;
 pub mod api_bridge;
 pub mod auxiliary_builder;
+pub mod inbound_prepare;
 pub mod tools_wiring;
 pub mod vision_adapter;
 pub mod budget;
@@ -65,6 +66,7 @@ pub use auxiliary_builder::{
     build_auxiliary_client, build_default_auxiliary_client, AuxiliaryBuildParams,
     AuxiliaryWiringSummary,
 };
+pub use inbound_prepare::AgentInboundPreparer;
 pub use tools_wiring::register_builtin_tools as register_agent_builtin_tools;
 pub use vision_adapter::AuxiliaryVisionAdapter;
 pub use provider::{AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider};

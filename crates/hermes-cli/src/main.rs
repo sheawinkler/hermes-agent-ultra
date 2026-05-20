@@ -2757,7 +2757,14 @@ async fn run_gateway(
             let skill_store = Arc::new(FileSkillStore::new(FileSkillStore::default_dir()));
             let skill_provider: Arc<dyn hermes_core::SkillProvider> =
                 Arc::new(SkillManager::new(skill_store));
-            hermes_tools::register_builtin_tools(&tool_registry, terminal_backend, skill_provider);
+            hermes_cli::gateway_inbound_wiring::wire_gateway_inbound_vision(
+                &gateway,
+                &tool_registry,
+                &config,
+                terminal_backend.clone(),
+                skill_provider.clone(),
+            )
+            .await;
             let clarify_dispatcher = ClarifyDispatcher::new();
             let tool_registry_for_msg = tool_registry.clone();
             let tool_registry_for_stream = tool_registry.clone();
