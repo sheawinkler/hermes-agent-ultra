@@ -18,7 +18,8 @@ use regex::Regex;
 use tokio::process::Command;
 use tokio::time::timeout;
 
-use crate::job::{CronJob, DeliverConfig, DeliverTarget};
+use crate::delivery::{deliver_text, CronDeliveryBackend};
+use crate::job::CronJob;
 use crate::scheduler::CronError;
 
 /// Prompt-injection patterns blocked for scheduled jobs.
@@ -120,7 +121,16 @@ fn python_for_scripts() -> String {
                 .ok()
                 .filter(|v| !v.trim().is_empty())
         })
-        .unwrap_or_else(|| "python3".to_string())
+        .unwrap_or_else(|| {
+            #[cfg(windows)]
+            {
+                "python".to_string()
+            }
+            #[cfg(not(windows))]
+            {
+                "python3".to_string()
+            }
+        })
 }
 
 fn shell_for_inline_script(job: &CronJob) -> String {
@@ -132,7 +142,48 @@ fn shell_for_inline_script(job: &CronJob) -> String {
                 .ok()
                 .filter(|v| !v.trim().is_empty())
         })
-        .unwrap_or_else(|| "/bin/bash".to_string())
+        .unwrap_or_else(default_inline_script_shell)
+}
+
+fn default_inline_script_shell() -> String {
+    #[cfg(windows)]
+    {
+        std::env::var("COMSPEC").unwrap_or_else(|_| "cmd.exe".to_string())
+    }
+    #[cfg(not(windows))]
+    {
+        "/bin/bash".to_string()
+    }
+}
+
+fn command_for_inline_script(shell: &str, script: &str) -> Command {
+    #[cfg(windows)]
+    {
+        let mut command = Command::new(shell);
+        command.arg("/C").arg(script);
+        command
+    }
+    #[cfg(not(windows))]
+    {
+        let mut command = Command::new(shell);
+        command.arg("-lc").arg(script);
+        command
+    }
+}
+
+fn command_for_shell_script(shell: &str, script_path: &std::path::Path) -> Command {
+    #[cfg(windows)]
+    {
+        let mut command = Command::new(shell);
+        command.arg("/C").arg(script_path);
+        command
+    }
+    #[cfg(not(windows))]
+    {
+        let mut command = Command::new(shell);
+        command.arg(script_path);
+        command
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -141,10 +192,9 @@ fn shell_for_inline_script(job: &CronJob) -> String {
 
 /// Executes cron jobs by spinning up a fresh agent loop for each invocation.
 pub struct CronRunner {
-    /// LLM provider for agent completions.
     llm_provider: Arc<dyn LlmProvider>,
-    /// Tool registry providing available tools.
     tool_registry: Arc<ToolRegistry>,
+    delivery: Option<Arc<dyn CronDeliveryBackend>>,
 }
 
 impl CronRunner {
@@ -153,7 +203,14 @@ impl CronRunner {
         Self {
             llm_provider,
             tool_registry,
+            delivery: None,
         }
+    }
+
+    /// Attach a gateway-backed delivery implementation.
+    pub fn with_delivery(mut self, delivery: Arc<dyn CronDeliveryBackend>) -> Self {
+        self.delivery = Some(delivery);
+        self
     }
 
     /// Run a cron job.
@@ -223,11 +280,8 @@ impl CronRunner {
             .await
             .map_err(CronError::Agent)?;
 
-        // Deliver results if configured
-        if let Some(ref deliver) = job.deliver {
-            if let Err(e) = self.deliver_result(&result, deliver).await {
-                tracing::warn!("Failed to deliver result for job '{}': {}", job.id, e);
-            }
+        if let Err(e) = self.deliver_result(job, &result).await {
+            tracing::warn!("Failed to deliver result for job '{}': {}", job.id, e);
         }
 
         Ok(result)
@@ -252,16 +306,16 @@ impl CronRunner {
                 .map(|v| v.to_ascii_lowercase())
                 .unwrap_or_default();
             if ext == "sh" || ext == "bash" {
-                command = Command::new("/bin/bash");
-                command.arg(script_path);
+                let shell = shell_for_inline_script(job);
+                command = command_for_shell_script(&shell, script_path);
             } else {
-                command = Command::new(python_for_scripts());
-                command.arg(script_path);
+                let mut cmd = Command::new(python_for_scripts());
+                cmd.arg(script_path);
+                command = cmd;
             }
         } else {
             let shell = shell_for_inline_script(job);
-            command = Command::new(shell);
-            command.arg("-lc").arg(script);
+            command = command_for_inline_script(&shell, script);
         }
 
         let timeout_secs = script_timeout_secs(job);
@@ -342,15 +396,7 @@ impl CronRunner {
             .collect()
     }
 
-    /// Deliver the agent result to the configured target.
-    ///
-    /// This is a best-effort delivery; errors are logged but do not fail the job.
-    async fn deliver_result(
-        &self,
-        result: &AgentResult,
-        deliver: &DeliverConfig,
-    ) -> Result<(), CronError> {
-        // Extract the final text from the agent result
+    async fn deliver_result(&self, job: &CronJob, result: &AgentResult) -> Result<(), CronError> {
         let text = result
             .messages
             .iter()
@@ -367,81 +413,25 @@ impl CronRunner {
             tracing::debug!("Suppressing cron delivery due to silent response gate");
             return Ok(());
         }
-
-        match deliver.target {
-            DeliverTarget::Origin => {
-                // Result is returned directly to caller; nothing extra to do
-                tracing::debug!("Delivering result to origin");
+        if let Some(backend) = self.delivery.as_ref() {
+            if let Some(err) = deliver_text(backend.as_ref(), job, &text).await {
+                return Err(CronError::Scheduler(format!("delivery failed: {err}")));
             }
-            DeliverTarget::Local => {
-                // Log locally
-                tracing::info!("Cron job result (local delivery):\n{}", text);
-            }
-            DeliverTarget::Telegram
-            | DeliverTarget::Discord
-            | DeliverTarget::Slack
-            | DeliverTarget::Email
-            | DeliverTarget::WhatsApp
-            | DeliverTarget::Signal
-            | DeliverTarget::Matrix
-            | DeliverTarget::Mattermost
-            | DeliverTarget::DingTalk
-            | DeliverTarget::Feishu
-            | DeliverTarget::WeCom
-            | DeliverTarget::Weixin
-            | DeliverTarget::BlueBubbles
-            | DeliverTarget::Sms
-            | DeliverTarget::HomeAssistant => {
-                // Platform delivery requires a platform adapter, which is not
-                // directly available in the runner. This would be wired up
-                // through the gateway crate. For now, log the intended delivery.
-                tracing::info!(
-                    "Cron job result delivery to {:?} (platform: {:?}):\n{}",
-                    deliver.target,
-                    deliver.platform,
-                    text
-                );
-            }
+        } else {
+            tracing::warn!(
+                "Cron job '{}' produced output but no CronDeliveryBackend is configured",
+                job.id
+            );
         }
-
         Ok(())
     }
 
     /// Deliver an explicit error payload to the configured target.
-    pub async fn deliver_error(
-        &self,
-        error_text: &str,
-        deliver: &DeliverConfig,
-    ) -> Result<(), CronError> {
+    pub async fn deliver_error(&self, job: &CronJob, error_text: &str) -> Result<(), CronError> {
         let text = format!("Cron job failed:\n{}", error_text.trim());
-        match deliver.target {
-            DeliverTarget::Origin => {
-                tracing::debug!("Delivering cron error to origin");
-            }
-            DeliverTarget::Local => {
-                tracing::warn!("Cron job error (local delivery):\n{}", text);
-            }
-            DeliverTarget::Telegram
-            | DeliverTarget::Discord
-            | DeliverTarget::Slack
-            | DeliverTarget::Email
-            | DeliverTarget::WhatsApp
-            | DeliverTarget::Signal
-            | DeliverTarget::Matrix
-            | DeliverTarget::Mattermost
-            | DeliverTarget::DingTalk
-            | DeliverTarget::Feishu
-            | DeliverTarget::WeCom
-            | DeliverTarget::Weixin
-            | DeliverTarget::BlueBubbles
-            | DeliverTarget::Sms
-            | DeliverTarget::HomeAssistant => {
-                tracing::warn!(
-                    "Cron job error delivery to {:?} (platform: {:?}):\n{}",
-                    deliver.target,
-                    deliver.platform,
-                    text
-                );
+        if let Some(backend) = self.delivery.as_ref() {
+            if let Some(err) = deliver_text(backend.as_ref(), job, &text).await {
+                return Err(CronError::Scheduler(format!("error delivery failed: {err}")));
             }
         }
         Ok(())
@@ -487,10 +477,7 @@ mod tests {
             }),
         );
 
-        let runner = CronRunner {
-            llm_provider: Arc::new(MockLlmProvider),
-            tool_registry: Arc::new(registry),
-        };
+        let runner = CronRunner::new(Arc::new(MockLlmProvider), Arc::new(registry));
 
         let schemas = runner.filtered_tool_schemas();
         let names: Vec<&str> = schemas.iter().map(|s| s.name.as_str()).collect();
@@ -503,10 +490,10 @@ mod tests {
         let mut job = CronJob::new("0 9 * * *", "Say hello");
         job.skills = Some(vec!["web_search".to_string(), "terminal".to_string()]);
 
-        let runner = CronRunner {
-            llm_provider: Arc::new(MockLlmProvider),
-            tool_registry: Arc::new(ToolRegistry::new()),
-        };
+        let runner = CronRunner::new(
+            Arc::new(MockLlmProvider),
+            Arc::new(ToolRegistry::new()),
+        );
 
         let messages = runner.build_messages(&job);
         // Should have skill context + prompt message
@@ -520,10 +507,10 @@ mod tests {
         let mut job = CronJob::new("0 9 * * *", "Say hello");
         job.script = Some("echo hello world".to_string());
 
-        let runner = CronRunner {
-            llm_provider: Arc::new(MockLlmProvider),
-            tool_registry: Arc::new(ToolRegistry::new()),
-        };
+        let runner = CronRunner::new(
+            Arc::new(MockLlmProvider),
+            Arc::new(ToolRegistry::new()),
+        );
 
         let messages = runner.build_messages(&job);
         // Script overrides prompt as user message
@@ -566,10 +553,7 @@ mod tests {
                 Ok("ok".to_string())
             }),
         );
-        let runner = CronRunner {
-            llm_provider: Arc::new(MockLlmProvider),
-            tool_registry: Arc::new(registry),
-        };
+        let runner = CronRunner::new(Arc::new(MockLlmProvider), Arc::new(registry));
 
         let mut job = CronJob::new("* * * * *", "unused");
         job.no_agent = true;
