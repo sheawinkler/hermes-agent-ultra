@@ -314,6 +314,132 @@ mod tests {
         assert_eq!(hist.len(), 2);
     }
 
+    #[tokio::test]
+    async fn prepare_turn_appends_user_and_sets_task_id() {
+        use crate::agent_loop::AgentConfig;
+        use futures::StreamExt;
+        use hermes_core::ToolRegistry;
+        use std::sync::Arc;
+
+        struct StopProvider;
+        #[async_trait::async_trait]
+        impl hermes_core::LlmProvider for StopProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[hermes_core::ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("ok"),
+                    usage: None,
+                    model: "t".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[hermes_core::ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> futures::stream::BoxStream<
+                'static,
+                Result<hermes_core::StreamChunk, AgentError>,
+            > {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let agent = AgentLoop::new(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(StopProvider),
+        );
+        let prepared = agent
+            .prepare_turn(&RunConversationParams {
+                user_message: "current".into(),
+                conversation_history: vec![Message::user("prior")],
+                task_id: Some("task-x".into()),
+                stream_callback: None,
+                persist_user_message: None,
+                tools: None,
+                persist_session: false,
+            })
+            .await
+            .expect("prepare");
+        assert_eq!(prepared.meta.task_id, "task-x");
+        assert_eq!(agent.current_task_id().as_deref(), Some("task-x"));
+        assert_eq!(prepared.messages.len(), 2);
+    }
+
+    #[test]
+    fn hydrate_memory_nudge_from_history() {
+        use crate::agent_loop::AgentConfig;
+        use futures::StreamExt;
+        use hermes_core::ToolRegistry;
+        use std::sync::Arc;
+
+        struct StopProvider;
+        #[async_trait::async_trait]
+        impl hermes_core::LlmProvider for StopProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[hermes_core::ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("ok"),
+                    usage: None,
+                    model: "t".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[hermes_core::ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> futures::stream::BoxStream<
+                'static,
+                Result<hermes_core::StreamChunk, AgentError>,
+            > {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let agent = AgentLoop::new(
+            AgentConfig {
+                memory_nudge_interval: 4,
+                ..AgentConfig::default()
+            },
+            Arc::new(ToolRegistry::new()),
+            Arc::new(StopProvider),
+        );
+        let history: Vec<Message> = (0..5).map(|i| Message::user(format!("u{i}"))).collect();
+        agent.hydrate_memory_nudge_counters_from_history(&history);
+        let turns = agent
+            .evolution_counters
+            .lock()
+            .expect("lock")
+            .turns_since_memory;
+        assert_eq!(turns, 1);
+    }
+
     #[test]
     fn last_reasoning_stops_at_turn_boundary() {
         let mut stale = Message::assistant("old");
