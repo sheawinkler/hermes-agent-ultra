@@ -12,6 +12,9 @@
 //! 8. **Streaming**: deltas forwarded; interrupt checked during stream collection.
 //! 9. **Hooks**: `pre_llm_call` / `post_llm_call` / tool hooks / `on_session_start` for new sessions.
 //! 10. **Result**: `AgentResult` carries `session_cost_usd` / `interrupted` when applicable.
+//! 11. **`run_conversation`**: B/E via `conversation_loop` (`prepare_turn` / `finalize_turn`); C–D via `run_prepared` / `run_stream_prepared`.
+//! 12. **Session end / API hooks**: `on_session_end` at turn exit; `pre_api_request` before each LLM HTTP call (`tests/run_conversation_hooks.rs`).
+//! 13. **Steer**: pre-API drain into last tool result (`steer.rs`); `pending_steer` on `ConversationResult`.
 
 use std::borrow::Cow;
 
