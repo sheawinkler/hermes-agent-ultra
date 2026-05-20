@@ -117,6 +117,10 @@ pub struct AuxiliaryClient {
     /// provider is anything other than `"auto"`.
     by_label: HashMap<String, ProviderCandidate>,
     config: AuxiliaryConfig,
+    /// Active primary provider (for vision debug comparison).
+    primary_provider: Option<String>,
+    /// Active primary model slug (for vision debug comparison).
+    primary_model: Option<String>,
 }
 
 fn remove_extra_body_param(extra_body: Option<Value>, key: &str) -> Option<Value> {
@@ -257,12 +261,32 @@ impl AuxiliaryClient {
 
                 match outcome {
                     Ok(Ok(response)) => {
-                        tracing::debug!(
-                            "auxiliary {}: succeeded via {} ({})",
-                            task.as_key(),
-                            label,
-                            model
-                        );
+                        if task == AuxiliaryTask::Vision {
+                            let (primary_provider, primary_model) = (
+                                self.primary_provider.as_deref().unwrap_or(""),
+                                self.primary_model.as_deref().unwrap_or(""),
+                            );
+                            let same_model = !primary_model.is_empty()
+                                && primary_model == model.as_str()
+                                && (primary_provider == label.as_str()
+                                    || (primary_provider == "custom"
+                                        && label.as_str() == "custom"));
+                            tracing::debug!(
+                                primary_provider = %primary_provider,
+                                primary_model = %primary_model,
+                                auxiliary_label = %label,
+                                auxiliary_model = %model,
+                                same_model,
+                                "auxiliary vision attempt"
+                            );
+                        } else {
+                            tracing::debug!(
+                                "auxiliary {}: succeeded via {} ({})",
+                                task.as_key(),
+                                label,
+                                model
+                            );
+                        }
                         return Ok(AuxiliaryResponse {
                             provider_label: label,
                             model,
@@ -368,6 +392,8 @@ impl AuxiliaryClient {
 pub struct AuxiliaryClientBuilder {
     chain: ProviderChain,
     config: AuxiliaryConfig,
+    primary_provider: Option<String>,
+    primary_model: Option<String>,
 }
 
 impl AuxiliaryClientBuilder {
@@ -391,6 +417,16 @@ impl AuxiliaryClientBuilder {
         self
     }
 
+    pub fn primary_context(
+        mut self,
+        provider: Option<String>,
+        model: Option<String>,
+    ) -> Self {
+        self.primary_provider = provider;
+        self.primary_model = model;
+        self
+    }
+
     pub fn build(self) -> AuxiliaryClient {
         let mut by_label = HashMap::new();
         for c in self.chain.iter() {
@@ -400,6 +436,8 @@ impl AuxiliaryClientBuilder {
             base_chain: self.chain,
             by_label,
             config: self.config,
+            primary_provider: self.primary_provider,
+            primary_model: self.primary_model,
         }
     }
 }

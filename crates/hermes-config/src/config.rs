@@ -225,6 +225,9 @@ pub struct AgentLoopBehaviorConfig {
     /// Character budget for injected LSP context block.
     #[serde(default = "default_agent_lsp_context_max_chars")]
     pub lsp_context_max_chars: usize,
+    /// Inbound image routing: `auto` | `native` | `text` (parity with Python `agent.image_input_mode`).
+    #[serde(default = "default_agent_image_input_mode")]
+    pub image_input_mode: String,
 }
 
 fn default_agent_memory_nudge_interval() -> u32 {
@@ -263,6 +266,10 @@ fn default_agent_lsp_context_max_chars() -> usize {
     2_800
 }
 
+fn default_agent_image_input_mode() -> String {
+    "auto".to_string()
+}
+
 impl Default for AgentLoopBehaviorConfig {
     fn default() -> Self {
         Self {
@@ -275,6 +282,7 @@ impl Default for AgentLoopBehaviorConfig {
             code_index_max_symbols: default_agent_code_index_max_symbols(),
             lsp_context_enabled: default_agent_lsp_context_enabled(),
             lsp_context_max_chars: default_agent_lsp_context_max_chars(),
+            image_input_mode: default_agent_image_input_mode(),
         }
     }
 }

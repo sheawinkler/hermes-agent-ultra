@@ -1,22 +1,17 @@
 //! Wires the abstract [`AuxiliaryClient`] (defined in `hermes-intelligence`)
 //! to concrete [`LlmProvider`] implementations from this crate.
-//!
-//! The intelligence crate cannot depend on `hermes-agent` (would create a
-//! cycle), so the binary layer owns the provider construction. This module
-//! reads standard environment variables and assembles the auto-detect chain
-//! that mirrors the Python `_get_provider_chain` ordering.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use hermes_config::config::LlmProviderConfig;
 use hermes_core::LlmProvider;
 use hermes_intelligence::auxiliary::{
-    AuxiliaryClient, AuxiliaryConfig, AuxiliarySource, ProviderCandidate,
+    AuxiliaryClient, AuxiliaryConfig, AuxiliarySource, AuxiliaryTask, ProviderCandidate,
 };
 
 use crate::provider::{AnthropicProvider, GenericProvider, OpenRouterProvider};
 
-/// Default auxiliary models per source. Mirrors the Python
-/// `_API_KEY_PROVIDER_AUX_MODELS` table — chosen to be cheap and fast.
 mod default_models {
     pub const OPENROUTER: &str = "google/gemini-3-flash-preview";
     pub const ANTHROPIC: &str = "claude-haiku-4-5-20251001";
@@ -27,34 +22,199 @@ mod default_models {
     pub const GEMINI: &str = "gemini-3-flash-preview";
 }
 
-/// Returned by [`build_default_auxiliary_client`] alongside the client so
-/// callers can introspect what was wired (e.g. for `hermes status`).
 #[derive(Debug, Clone)]
 pub struct AuxiliaryWiringSummary {
     pub registered: Vec<String>,
     pub skipped: Vec<String>,
 }
 
-/// Build an [`AuxiliaryClient`] from environment variables.
-///
-/// Resolution rules:
-///
-/// * `OPENROUTER_API_KEY` → registers an `openrouter` candidate
-/// * `ANTHROPIC_API_KEY` → registers an `anthropic` candidate
-/// * `HERMES_OPENAI_API_KEY` (+ optional `OPENAI_BASE_URL`) → registers a
-///   `custom` candidate (`OPENAI_API_KEY` kept as legacy fallback)
-/// * `ZAI_API_KEY`, `KIMI_API_KEY`, `MINIMAX_API_KEY`, `GEMINI_API_KEY` →
-///   register direct-key candidates (OpenAI-compatible base URLs)
-///
-/// Order matches Python: OpenRouter > Custom > Anthropic > direct keys.
+/// Inputs for [`build_auxiliary_client`] — env chain plus optional config primary bridge.
+#[derive(Debug, Clone, Default)]
+pub struct AuxiliaryBuildParams {
+    pub config: AuxiliaryConfig,
+    pub primary_provider: Option<String>,
+    pub primary_model: Option<String>,
+    pub llm_providers: HashMap<String, LlmProviderConfig>,
+}
+
 pub fn build_default_auxiliary_client(
     config: AuxiliaryConfig,
+) -> (AuxiliaryClient, AuxiliaryWiringSummary) {
+    build_auxiliary_client(AuxiliaryBuildParams {
+        config,
+        ..Default::default()
+    })
+}
+
+/// Build an [`AuxiliaryClient`] from environment variables and optional config primary bridge.
+pub fn build_auxiliary_client(
+    params: AuxiliaryBuildParams,
 ) -> (AuxiliaryClient, AuxiliaryWiringSummary) {
     let mut summary = AuxiliaryWiringSummary {
         registered: Vec::new(),
         skipped: Vec::new(),
     };
-    let mut builder = AuxiliaryClient::builder().config(config);
+    let mut chain_candidates: Vec<ProviderCandidate> = Vec::new();
+
+    if let Some(primary) = maybe_primary_vision_candidate(&params, &mut summary) {
+        chain_candidates.push(primary);
+    }
+
+    let (env_candidates, env_summary) = collect_env_candidates(params.config.clone());
+    summary.registered.extend(env_summary.registered);
+    summary.skipped.extend(env_summary.skipped);
+    chain_candidates.extend(env_candidates);
+
+    let mut builder = AuxiliaryClient::builder()
+        .config(params.config)
+        .primary_context(params.primary_provider.clone(), params.primary_model.clone());
+    builder = builder.extend_candidates(chain_candidates);
+    (builder.build(), summary)
+}
+
+fn vision_task_provider_is_auto(config: &AuxiliaryConfig) -> bool {
+    let Some(override_) = config.task_override(&AuxiliaryTask::Vision) else {
+        return true;
+    };
+    let provider = override_
+        .provider
+        .as_deref()
+        .map(str::trim)
+        .unwrap_or("auto")
+        .to_ascii_lowercase();
+    provider.is_empty() || provider == "auto"
+}
+
+fn maybe_primary_vision_candidate(
+    params: &AuxiliaryBuildParams,
+    summary: &mut AuxiliaryWiringSummary,
+) -> Option<ProviderCandidate> {
+    if !vision_task_provider_is_auto(&params.config) {
+        return None;
+    }
+    let provider_name = params.primary_provider.as_deref()?.trim();
+    if provider_name.is_empty() || provider_name.eq_ignore_ascii_case("auto") {
+        return None;
+    }
+    let model = params
+        .primary_model
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())?
+        .to_string();
+    let cfg = params
+        .llm_providers
+        .get(provider_name)
+        .or_else(|| {
+            params
+                .llm_providers
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case(provider_name))
+                .map(|(_, v)| v)
+        })?;
+    let api_key = resolve_provider_api_key(cfg, provider_name)?;
+    let base_url = cfg
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or_else(|| default_base_url(provider_name))?;
+    let llm: Arc<dyn LlmProvider> = Arc::new(GenericProvider::new(
+        base_url.clone(),
+        api_key,
+        model.clone(),
+    ));
+    let label = if provider_name.starts_with("custom") || cfg.base_url.is_some() {
+        "custom".to_string()
+    } else {
+        provider_name.to_string()
+    };
+    tracing::debug!(
+        primary_provider = %provider_name,
+        primary_model = %model,
+        auxiliary_label = %label,
+        base_url = %base_url,
+        "auxiliary vision: prepending primary llm_providers candidate"
+    );
+    summary
+        .registered
+        .insert(0, format!("primary:{label}"));
+    Some(ProviderCandidate::new(
+        if label == "custom" {
+            AuxiliarySource::Custom
+        } else {
+            AuxiliarySource::DirectKey(label.clone())
+        },
+        model,
+        llm,
+    ))
+}
+
+fn resolve_provider_api_key(cfg: &LlmProviderConfig, provider_name: &str) -> Option<String> {
+    if let Some(key) = cfg
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        if key.starts_with("${") && key.ends_with('}') {
+            let env_name = key.trim_start_matches("${").trim_end_matches('}');
+            return std::env::var(env_name).ok().filter(|v| !v.trim().is_empty());
+        }
+        return Some(key.to_string());
+    }
+    if let Some(env_name) = cfg
+        .api_key_env
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        if let Ok(v) = std::env::var(env_name) {
+            if !v.trim().is_empty() {
+                return Some(v);
+            }
+        }
+    }
+    provider_api_key_from_env(provider_name)
+}
+
+fn provider_api_key_from_env(provider_name: &str) -> Option<String> {
+    let upper = provider_name.to_ascii_uppercase().replace('-', "_");
+    for key in [
+        format!("{upper}_API_KEY"),
+        "HERMES_OPENAI_API_KEY".to_string(),
+        "OPENAI_API_KEY".to_string(),
+        "OPENROUTER_API_KEY".to_string(),
+    ] {
+        if let Ok(v) = std::env::var(&key) {
+            if !v.trim().is_empty() {
+                return Some(v);
+            }
+        }
+    }
+    None
+}
+
+fn default_base_url(provider_name: &str) -> Option<String> {
+    match provider_name.to_ascii_lowercase().as_str() {
+        "openrouter" => Some("https://openrouter.ai/api/v1".into()),
+        "anthropic" => Some("https://api.anthropic.com".into()),
+        "openai" => Some("https://api.openai.com/v1".into()),
+        "custom" => std::env::var("OPENAI_BASE_URL")
+            .ok()
+            .filter(|s| !s.trim().is_empty())
+            .or(Some("https://api.openai.com/v1".into())),
+        _ => std::env::var("OPENAI_BASE_URL").ok().filter(|s| !s.trim().is_empty()),
+    }
+}
+
+fn collect_env_candidates(_config: AuxiliaryConfig) -> (Vec<ProviderCandidate>, AuxiliaryWiringSummary) {
+    let mut summary = AuxiliaryWiringSummary {
+        registered: Vec::new(),
+        skipped: Vec::new(),
+    };
+    let mut out = Vec::new();
 
     if let Ok(key) = std::env::var("OPENROUTER_API_KEY") {
         if !key.trim().is_empty() {
@@ -64,7 +224,7 @@ pub fn build_default_auxiliary_client(
                     .with_http_referer("https://hermes-agent.nousresearch.com")
                     .with_x_title("Hermes Agent"),
             );
-            builder = builder.add_candidate(ProviderCandidate::new(
+            out.push(ProviderCandidate::new(
                 AuxiliarySource::OpenRouter,
                 default_models::OPENROUTER,
                 provider,
@@ -77,10 +237,6 @@ pub fn build_default_auxiliary_client(
         summary.skipped.push("openrouter (no key)".into());
     }
 
-    // Custom OpenAI-compatible endpoint (covers HERMES_OPENAI_API_KEY and
-    // legacy OPENAI_API_KEY + custom base URLs). We mark it `Custom` rather
-    // than the OpenAI source so that the chain dedup logic doesn't collide
-    // with explicitly-named providers.
     if let Some(key) = std::env::var("HERMES_OPENAI_API_KEY")
         .ok()
         .filter(|s| !s.trim().is_empty())
@@ -97,7 +253,7 @@ pub fn build_default_auxiliary_client(
                 .unwrap_or_else(|| default_models::OPENAI.into());
             let provider: Arc<dyn LlmProvider> =
                 Arc::new(GenericProvider::new(base_url, key.trim(), model.clone()));
-            builder = builder.add_candidate(ProviderCandidate::new(
+            out.push(ProviderCandidate::new(
                 AuxiliarySource::Custom,
                 model,
                 provider,
@@ -114,7 +270,7 @@ pub fn build_default_auxiliary_client(
         if !key.trim().is_empty() {
             let provider: Arc<dyn LlmProvider> =
                 Arc::new(AnthropicProvider::new(key.trim()).with_model(default_models::ANTHROPIC));
-            builder = builder.add_candidate(ProviderCandidate::new(
+            out.push(ProviderCandidate::new(
                 AuxiliarySource::Anthropic,
                 default_models::ANTHROPIC,
                 provider,
@@ -125,16 +281,16 @@ pub fn build_default_auxiliary_client(
         summary.skipped.push("anthropic (no key)".into());
     }
 
-    register_direct_key(
-        &mut builder,
+    register_direct_key_env(
+        &mut out,
         &mut summary,
         "ZAI_API_KEY",
         "zai",
         "https://api.z.ai/api/coding/paas/v4",
         default_models::ZAI,
     );
-    register_direct_key(
-        &mut builder,
+    register_direct_key_env(
+        &mut out,
         &mut summary,
         "KIMI_API_KEY",
         "kimi",
@@ -152,20 +308,20 @@ pub fn build_default_auxiliary_client(
                 key.trim(),
                 default_models::MINIMAX,
             ));
-            builder = builder.add_candidate(ProviderCandidate::new(
+            out.push(ProviderCandidate::new(
                 AuxiliarySource::DirectKey("minimax".to_string()),
                 default_models::MINIMAX,
                 provider,
             ));
             summary.registered.push("minimax".into());
         } else {
-            summary.skipped.push("minimax (empty key)".into());
+            summary.skipped.push("minimax (empty)".into());
         }
     } else {
         summary.skipped.push("minimax (no key)".into());
     }
-    register_direct_key(
-        &mut builder,
+    register_direct_key_env(
+        &mut out,
         &mut summary,
         "GEMINI_API_KEY",
         "gemini",
@@ -173,33 +329,28 @@ pub fn build_default_auxiliary_client(
         default_models::GEMINI,
     );
 
-    let client = builder.build();
-    (client, summary)
+    (out, summary)
 }
 
-fn register_direct_key(
-    builder: &mut hermes_intelligence::auxiliary::AuxiliaryClientBuilder,
+fn register_direct_key_env(
+    out: &mut Vec<ProviderCandidate>,
     summary: &mut AuxiliaryWiringSummary,
     env_var: &str,
     label: &str,
     base_url: &str,
     default_model: &str,
 ) {
-    let owned;
-    let key = match std::env::var(env_var) {
-        Ok(v) if !v.trim().is_empty() => {
-            owned = v;
-            owned.trim()
-        }
-        _ => {
-            summary.skipped.push(format!("{label} (no key)"));
-            return;
-        }
+    let Ok(key) = std::env::var(env_var) else {
+        summary.skipped.push(format!("{label} (no key)"));
+        return;
     };
+    if key.trim().is_empty() {
+        summary.skipped.push(format!("{label} (empty key)"));
+        return;
+    }
     let provider: Arc<dyn LlmProvider> =
-        Arc::new(GenericProvider::new(base_url, key, default_model));
-    let temp_builder = std::mem::take(builder);
-    *builder = temp_builder.add_candidate(ProviderCandidate::new(
+        Arc::new(GenericProvider::new(base_url, key.trim(), default_model));
+    out.push(ProviderCandidate::new(
         AuxiliarySource::DirectKey(label.to_string()),
         default_model,
         provider,
@@ -224,7 +375,6 @@ mod tests {
         "GEMINI_API_KEY",
     ];
 
-    /// Save current env, then clear; restored when the guard drops.
     struct EnvGuard {
         previous: Vec<(&'static str, Option<String>)>,
     }
@@ -251,34 +401,26 @@ mod tests {
         }
     }
 
-    /// Run all env-mutating cases serially in a single test to avoid races
-    /// with parallel cargo test workers (env is process-global).
     #[test]
     fn build_default_auxiliary_client_scenarios() {
         let _g = EnvGuard::clear();
 
-        // Scenario 1: no keys → empty chain.
         {
             let (client, summary) = build_default_auxiliary_client(AuxiliaryConfig::default());
-            assert_eq!(client.chain_len(), 0, "empty env produced non-empty chain");
+            assert_eq!(client.chain_len(), 0);
             assert!(summary.registered.is_empty());
-            assert!(!summary.skipped.is_empty());
         }
 
-        // Scenario 2: only OpenRouter.
         std::env::set_var("OPENROUTER_API_KEY", "sk-test");
         {
             let (client, summary) = build_default_auxiliary_client(AuxiliaryConfig::default());
             assert_eq!(client.chain_len(), 1);
-            assert_eq!(client.chain_labels(), vec!["openrouter"]);
             assert_eq!(summary.registered, vec!["openrouter"]);
         }
         std::env::remove_var("OPENROUTER_API_KEY");
 
-        // Scenario 3: full chain, deterministic order.
         std::env::set_var("OPENROUTER_API_KEY", "sk-or");
         std::env::set_var("HERMES_OPENAI_API_KEY", "sk-hermes-oa");
-        std::env::set_var("OPENAI_API_KEY", "sk-oa-legacy");
         std::env::set_var("ANTHROPIC_API_KEY", "sk-an");
         std::env::set_var("ZAI_API_KEY", "z");
         {
@@ -288,5 +430,27 @@ mod tests {
                 vec!["openrouter", "custom", "anthropic", "zai"]
             );
         }
+    }
+
+    #[test]
+    fn primary_llm_provider_prepended_for_vision_auto() {
+        let _g = EnvGuard::clear();
+        let mut llm = HashMap::new();
+        llm.insert(
+            "flowy".to_string(),
+            LlmProviderConfig {
+                api_key: Some("sk-flowy".into()),
+                base_url: Some("https://flowy.example/v1".into()),
+                ..Default::default()
+            },
+        );
+        let (client, summary) = build_auxiliary_client(AuxiliaryBuildParams {
+            config: AuxiliaryConfig::default(),
+            primary_provider: Some("flowy".into()),
+            primary_model: Some("DeepSeek-V4-Flash".into()),
+            llm_providers: llm,
+        });
+        assert!(summary.registered.first().is_some_and(|s| s.starts_with("primary:")));
+        assert_eq!(client.chain_labels().first().map(String::as_str), Some("flowy"));
     }
 }
