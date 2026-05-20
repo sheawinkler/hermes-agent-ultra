@@ -2453,7 +2453,7 @@ impl App {
         ))
     }
 
-    async fn run_messages_with_current_agent(
+    pub(crate) async fn run_messages_with_current_agent(
         &self,
         messages: Vec<hermes_core::Message>,
         stream_enabled: bool,
@@ -2469,6 +2469,7 @@ impl App {
         include_tools: bool,
     ) -> Result<hermes_core::AgentResult, AgentError> {
         let tool_schemas = include_tools.then(|| self.tool_schemas.clone());
+        let task_id = Some(self.session_id.clone());
         let (history, user_message) = split_messages_for_run_conversation(messages)
             .ok_or_else(|| AgentError::Config("no user message in turn".into()))?;
         if stream_enabled && self.config.streaming.enabled {
@@ -2484,7 +2485,7 @@ impl App {
                 .run_conversation(RunConversationParams {
                     user_message,
                     conversation_history: history,
-                    task_id: None,
+                    task_id,
                     stream_callback: stream_cb,
                     persist_user_message: None,
                     tools: tool_schemas,
@@ -2498,7 +2499,7 @@ impl App {
                 .run_conversation(RunConversationParams {
                     user_message,
                     conversation_history: history,
-                    task_id: None,
+                    task_id,
                     stream_callback: None,
                     persist_user_message: None,
                     tools: tool_schemas,

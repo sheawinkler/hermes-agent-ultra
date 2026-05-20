@@ -5406,9 +5406,30 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                             let tool_schemas = app.tool_schemas.clone();
                                             let messages = app.messages.clone();
                                             let stream_handle = app.stream_handle.clone();
+                                            let task_id = Some(app.session_id.clone());
 
                                             let task = tokio::spawn(async move {
                                                 let started = Instant::now();
+                                                let (history, user_message) =
+                                                    match hermes_agent::split_messages_for_run_conversation(
+                                                        messages,
+                                                    ) {
+                                                        Some(pair) => pair,
+                                                        None => {
+                                                            let _ = stream_tx.send(
+                                                                Event::AgentRunComplete {
+                                                                    result: Err(
+                                                                        "no user message in turn"
+                                                                            .to_string(),
+                                                                    ),
+                                                                    elapsed_secs: started
+                                                                        .elapsed()
+                                                                        .as_secs_f64(),
+                                                                },
+                                                            );
+                                                            return;
+                                                        }
+                                                    };
                                                 let result = if stream_enabled {
                                                     let stream_cb: Option<
                                                         Box<
@@ -5428,14 +5449,35 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                                                                     + Sync,
                                                             >
                                                     });
-                                                    agent.run_stream(
-                                                        messages,
-                                                        Some(tool_schemas),
-                                                        stream_cb,
-                                                    )
-                                                    .await
+                                                    agent
+                                                        .run_conversation(
+                                                            hermes_agent::RunConversationParams {
+                                                                user_message,
+                                                                conversation_history: history,
+                                                                task_id,
+                                                                stream_callback: stream_cb,
+                                                                persist_user_message: None,
+                                                                tools: Some(tool_schemas),
+                                                                persist_session: false,
+                                                            },
+                                                        )
+                                                        .await
+                                                        .map(|c| c.inner)
                                                 } else {
-                                                    agent.run(messages, Some(tool_schemas)).await
+                                                    agent
+                                                        .run_conversation(
+                                                            hermes_agent::RunConversationParams {
+                                                                user_message,
+                                                                conversation_history: history,
+                                                                task_id,
+                                                                stream_callback: None,
+                                                                persist_user_message: None,
+                                                                tools: Some(tool_schemas),
+                                                                persist_session: false,
+                                                            },
+                                                        )
+                                                        .await
+                                                        .map(|c| c.inner)
                                                 };
                                                 let _ = stream_tx.send(Event::AgentRunComplete {
                                                     result: result.map_err(|e| e.to_string()),

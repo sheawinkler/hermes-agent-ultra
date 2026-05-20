@@ -14,7 +14,9 @@ use std::{
 };
 
 use bytes::Bytes;
-use hermes_agent::plugins::PluginManifest;
+use hermes_agent::{
+    plugins::PluginManifest, split_messages_for_run_conversation, RunConversationParams,
+};
 use hermes_core::AgentError;
 use hermes_intelligence::model_metadata::{get_model_context_length, get_model_info};
 use hermes_intelligence::models_dev::default_client;
@@ -18921,7 +18923,6 @@ pub async fn handle_cli_chat(
 
     match query {
         Some(q) => {
-            let messages = vec![hermes_core::Message::user(&q)];
             let mut active_model = current_model.clone();
             if let Some((next_model, close)) = query_mode_remediation_target(&active_model).await {
                 println!(
@@ -18938,8 +18939,19 @@ pub async fn handle_cli_chat(
             }
             apply_cli_chat_runtime_env(&active_model);
             let agent = build_query_agent(&active_model);
-            let result = match agent.run(messages, Some(tool_schemas.clone())).await {
-                Ok(result) => result,
+            let result = match agent
+                .run_conversation(RunConversationParams {
+                    user_message: q.clone(),
+                    conversation_history: vec![],
+                    task_id: None,
+                    stream_callback: None,
+                    persist_user_message: None,
+                    tools: Some(tool_schemas.clone()),
+                    persist_session: false,
+                })
+                .await
+            {
+                Ok(conv) => conv.inner,
                 Err(err) => {
                     if query_mode_model_not_found(&err) {
                         if let Some((next_model, close)) =
@@ -23989,11 +24001,24 @@ impl hermes_acp::AcpPromptExecutor for CliAcpPromptExecutor {
             provider,
         ));
         let messages = acp_history_to_messages(history, user_text);
-
-        let result = agent
-            .run(messages, Some(self.tool_schemas.clone()))
+        let (conversation_history, user_message) =
+            split_messages_for_run_conversation(messages).ok_or_else(|| {
+                "ACP prompt has no user message for run_conversation".to_string()
+            })?;
+        let task_id = Some(session.session_id.clone());
+        let conv = agent
+            .run_conversation(RunConversationParams {
+                user_message,
+                conversation_history,
+                task_id,
+                stream_callback: None,
+                persist_user_message: None,
+                tools: Some(self.tool_schemas.clone()),
+                persist_session: false,
+            })
             .await
             .map_err(|e| e.to_string())?;
+        let result = conv.inner;
         let response_text = result
             .messages
             .iter()
