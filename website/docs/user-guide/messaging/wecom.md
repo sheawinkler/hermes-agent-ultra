@@ -290,3 +290,6 @@ Inbound messages are deduplicated using message IDs with a 5-minute window and a
 | Images sent as files | Images > 10 MB exceed the native image limit and are auto-downgraded to file attachments. |
 | `Timeout sending message to WeCom` | The WebSocket may have disconnected. Check logs for reconnection messages. |
 | `WeCom websocket closed during authentication` | Network issue or incorrect credentials. Verify bot_id and secret. |
+| Bot ignores **image-only** messages (no text) | Check logs for `Blocked unsafe URL (SSRF protection)` or `WeCom inbound media download failed`. On Windows with **Clash Fake-IP**, `nslookup` on the COS hostname may show `198.18.x.x` — upgrade to a build with platform CDN SSRF exceptions, or set `security.allow_private_urls: true` as a last resort. Success: log line `media_count=1` and the agent describes the image. |
+| `Blocked unsafe URL (SSRF protection)` on inbound images | Same as above. WeCom image URLs use `*.cos.*.myqcloud.com`; Fake-IP DNS is allowed for that hostname pattern without opening all private URLs. |
+| User gets a fallback “download failed” reply | Media was present in the callback but caching failed (network, decrypt, size). Retry or send text with the image. |

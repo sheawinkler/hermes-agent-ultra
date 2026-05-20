@@ -499,9 +499,22 @@ All URL-capable tools (web search, web extract, vision, browser) validate URLs b
 - **Link-local**: `169.254.0.0/16` (includes cloud metadata at `169.254.169.254`)
 - **CGNAT / shared address space** (RFC 6598): `100.64.0.0/10` (Tailscale, WireGuard VPNs)
 - **Cloud metadata hostnames**: `metadata.google.internal`, `metadata.goog`
+- **Benchmark / Fake-IP range**: `198.18.0.0/15` (common with Clash, Surge, Mihomo TUN Fake-IP)
 - **Reserved, multicast, and unspecified addresses**
 
 SSRF protection is always active for internet-facing use and DNS failures are treated as blocked (fail-closed). Redirect chains are re-validated at each hop to prevent redirect-based bypasses.
+
+#### Platform CDN host exceptions (Fake-IP / TUN)
+
+Some messaging platforms host inbound attachments on known Tencent CDNs. On Windows or Linux with **Clash TUN + Fake-IP**, DNS may return `198.18.x.x` for legitimate CDN hostnames (for example `*.cos.*.myqcloud.com` for WeCom AI Bot images). Hermes treats **HTTPS** URLs on these hostnames as trusted platform media and still allows the fetch (HTTP requests continue through your local proxy stack). Cloud metadata IPs and hostnames are **always** blocked.
+
+Trusted host patterns (exact or suffix match, HTTPS only):
+
+- `multimedia.nt.qq.com.cn` (QQ Bot multimedia)
+- `*.cos.*.myqcloud.com` (Tencent COS, including WeCom AI Bot image buckets)
+- `*.cdn.weixin.qq.com` (Weixin iLink CDN)
+
+This is narrower than `security.allow_private_urls`: arbitrary `http://192.168.x.x` URLs remain blocked. Trust assumes the gateway machine's DNS/hosts file is not maliciously tampering with these platform domains.
 
 #### Intentionally allowing private URLs
 
