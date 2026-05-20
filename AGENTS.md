@@ -26,13 +26,14 @@
 ## 通用移植 SOP（所有 `registry.json` active 模块）
 
 ```
+0. Rust edition 2024
 1. 读 registry 条目 → python 路径、rust 位置、fixture_dirs、note
 2. 读 docs/sop/<id>.md → 打开列出的 Python / Rust 源文件
 3. 实现或修改 Rust（仅 touched crate；API 命名 snake_case，与 Python 一致）
 4. 验证编译：cargo build -p <crate>   （失败则只修报错，重复至多 3 次，见防御规则）
 5. 验证 parity：cargo test -p hermes-parity-tests
 6. 验证风格：cargo clippy -p <crate> -- -D warnings  （仅 touched crate）
-7. 提交：parity(<id>): port from python v2026.4.13
+7. 提交：parity(<id>): port from python@commit for example port from python@d85f24f  
 ```
 
 ### 编码约定（所有移植）

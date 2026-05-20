@@ -5,7 +5,7 @@ pub fn load_env_from_path(path: &std::path::Path) {
                 continue;
             }
             if let Some((k, v)) = line.split_once('=') {
-                std::env::set_var(k.trim(), v.trim());
+                crate::env_vars::set_var(k.trim(), v.trim());
             }
         }
     }

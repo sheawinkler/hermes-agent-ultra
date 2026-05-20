@@ -114,7 +114,7 @@ fn normalize_model_block(map: &mut Mapping) {
                 let prov_entry = llm
                     .entry(Value::String(p.to_string()))
                     .or_insert_with(|| Value::Mapping(Mapping::new()));
-                if let Value::Mapping(ref mut em) = prov_entry {
+                if let Value::Mapping(em) = prov_entry {
                     em.insert(key("base_url"), Value::String(bu.to_string()));
                 }
                 map.insert(llm_key, Value::Mapping(llm));

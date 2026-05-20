@@ -1019,7 +1019,7 @@ mod tests {
         let _guard = env_guard();
         let tmp = tempfile::tempdir().expect("tempdir");
         let prior_home = std::env::var("HERMES_HOME").ok();
-        std::env::set_var("HERMES_HOME", tmp.path());
+        crate::env_vars::set_var("HERMES_HOME", tmp.path());
         let client = seeded_client(json!({
             "opencode-go": {
                 "models": {
@@ -1047,9 +1047,9 @@ mod tests {
         assert!(mimo2 < qwen);
         assert!(merged.iter().any(|m| m == "qwen3.6-plus"));
         if let Some(value) = prior_home {
-            std::env::set_var("HERMES_HOME", value);
+            crate::env_vars::set_var("HERMES_HOME", value);
         } else {
-            std::env::remove_var("HERMES_HOME");
+            crate::env_vars::remove_var("HERMES_HOME");
         }
     }
 
@@ -1196,7 +1196,7 @@ mod tests {
     #[tokio::test]
     async fn huggingface_catalog_keeps_curated_then_models_dev_agentic_entries() {
         let _guard = env_guard();
-        std::env::set_var("HERMES_HF_CATALOG_DISABLE_LIVE", "1");
+        crate::env_vars::set_var("HERMES_HF_CATALOG_DISABLE_LIVE", "1");
         let client = seeded_client(json!({
             "huggingface": {
                 "models": {
@@ -1218,19 +1218,19 @@ mod tests {
             out.iter().any(|m| m == "meta-llama/Llama-3.3-70B-Instruct"),
             "models.dev agentic entries should be appended"
         );
-        std::env::remove_var("HERMES_HF_CATALOG_DISABLE_LIVE");
+        crate::env_vars::remove_var("HERMES_HF_CATALOG_DISABLE_LIVE");
     }
 
     #[test]
     fn huggingface_catalog_endpoint_prefers_hf_base_url_and_token() {
         let _guard = env_guard();
-        std::env::set_var("HF_BASE_URL", "https://example-hf-router.test/v1");
-        std::env::set_var("HF_TOKEN", "hf_test_token");
+        crate::env_vars::set_var("HF_BASE_URL", "https://example-hf-router.test/v1");
+        crate::env_vars::set_var("HF_TOKEN", "hf_test_token");
         let (base_url, token) = resolve_huggingface_catalog_endpoint_and_token();
         assert_eq!(base_url, "https://example-hf-router.test/v1");
         assert_eq!(token.as_deref(), Some("hf_test_token"));
-        std::env::remove_var("HF_BASE_URL");
-        std::env::remove_var("HF_TOKEN");
+        crate::env_vars::remove_var("HF_BASE_URL");
+        crate::env_vars::remove_var("HF_TOKEN");
     }
 
     #[test]
@@ -1239,8 +1239,8 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let prior_home = std::env::var("HERMES_HOME").ok();
         let prior_signing = std::env::var("HERMES_PROVENANCE_SIGNING_KEY").ok();
-        std::env::set_var("HERMES_HOME", tmp.path());
-        std::env::remove_var("HERMES_PROVENANCE_SIGNING_KEY");
+        crate::env_vars::set_var("HERMES_HOME", tmp.path());
+        crate::env_vars::remove_var("HERMES_PROVENANCE_SIGNING_KEY");
 
         let models = vec!["gpt-4o".to_string(), "gpt-4o-mini".to_string()];
         persist_provider_catalog_cache("openai", &models);
@@ -1250,14 +1250,14 @@ mod tests {
         let status = cached_provider_catalog_status("openai").expect("cache status");
         assert!(status.verified);
         if let Some(value) = prior_home {
-            std::env::set_var("HERMES_HOME", value);
+            crate::env_vars::set_var("HERMES_HOME", value);
         } else {
-            std::env::remove_var("HERMES_HOME");
+            crate::env_vars::remove_var("HERMES_HOME");
         }
         if let Some(value) = prior_signing {
-            std::env::set_var("HERMES_PROVENANCE_SIGNING_KEY", value);
+            crate::env_vars::set_var("HERMES_PROVENANCE_SIGNING_KEY", value);
         } else {
-            std::env::remove_var("HERMES_PROVENANCE_SIGNING_KEY");
+            crate::env_vars::remove_var("HERMES_PROVENANCE_SIGNING_KEY");
         }
     }
 
@@ -1267,8 +1267,8 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let prior_home = std::env::var("HERMES_HOME").ok();
         let prior_signing = std::env::var("HERMES_PROVENANCE_SIGNING_KEY").ok();
-        std::env::set_var("HERMES_HOME", tmp.path());
-        std::env::remove_var("HERMES_PROVENANCE_SIGNING_KEY");
+        crate::env_vars::set_var("HERMES_HOME", tmp.path());
+        crate::env_vars::remove_var("HERMES_PROVENANCE_SIGNING_KEY");
 
         let models = vec!["gpt-4o".to_string()];
         persist_provider_catalog_cache("openai", &models);
@@ -1284,14 +1284,14 @@ mod tests {
         let status = cached_provider_catalog_status("openai").expect("cache status");
         assert!(!status.verified);
         if let Some(value) = prior_home {
-            std::env::set_var("HERMES_HOME", value);
+            crate::env_vars::set_var("HERMES_HOME", value);
         } else {
-            std::env::remove_var("HERMES_HOME");
+            crate::env_vars::remove_var("HERMES_HOME");
         }
         if let Some(value) = prior_signing {
-            std::env::set_var("HERMES_PROVENANCE_SIGNING_KEY", value);
+            crate::env_vars::set_var("HERMES_PROVENANCE_SIGNING_KEY", value);
         } else {
-            std::env::remove_var("HERMES_PROVENANCE_SIGNING_KEY");
+            crate::env_vars::remove_var("HERMES_PROVENANCE_SIGNING_KEY");
         }
     }
 }

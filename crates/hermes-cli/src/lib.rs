@@ -22,6 +22,7 @@ pub mod config_env;
 pub mod copilot_auth;
 pub mod doctor;
 pub mod env_loader;
+pub mod env_vars;
 pub mod gateway_cmd;
 pub mod kanban;
 pub mod live_messaging;

@@ -4677,7 +4677,7 @@ async fn process_modal_confirm(state: &mut TuiState, app: &mut App) -> Result<()
             let skin = crate::skin_engine::canonical_skin_name(item.value.as_str())
                 .unwrap_or("ultra-sunburst")
                 .to_string();
-            std::env::set_var("HERMES_THEME", &skin);
+            crate::env_vars::set_var("HERMES_THEME", &skin);
             app.request_theme_change(&skin);
             app.push_ui_assistant(format!("Switched skin to `{}`.", skin));
             state.close_modal();

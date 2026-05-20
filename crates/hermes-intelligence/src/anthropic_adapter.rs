@@ -559,14 +559,14 @@ fn enforce_role_alternation(messages: &mut Vec<AnthropicMessage>) {
 
 fn merge_same_role_content(target: &mut AnthropicMessage, source: AnthropicMessage) {
     match (&mut target.content, source.content) {
-        (AnthropicContent::Text(ref mut a), AnthropicContent::Text(b)) => {
+        (AnthropicContent::Text(a), AnthropicContent::Text(b)) => {
             a.push('\n');
             a.push_str(&b);
         }
-        (AnthropicContent::Blocks(ref mut a), AnthropicContent::Blocks(b)) => {
+        (AnthropicContent::Blocks(a), AnthropicContent::Blocks(b)) => {
             a.extend(b);
         }
-        (AnthropicContent::Text(ref a), AnthropicContent::Blocks(b)) => {
+        (AnthropicContent::Text(a), AnthropicContent::Blocks(b)) => {
             let mut blocks = vec![AnthropicContentBlock::Text {
                 text: a.clone(),
                 cache_control: None,
@@ -574,7 +574,7 @@ fn merge_same_role_content(target: &mut AnthropicMessage, source: AnthropicMessa
             blocks.extend(b);
             target.content = AnthropicContent::Blocks(blocks);
         }
-        (AnthropicContent::Blocks(ref mut a), AnthropicContent::Text(b)) => {
+        (AnthropicContent::Blocks(a), AnthropicContent::Text(b)) => {
             a.push(AnthropicContentBlock::Text {
                 text: b,
                 cache_control: None,

@@ -3138,7 +3138,7 @@ mod tests {
             serde_json::to_string_pretty(&raw).expect("serialize auth fixture"),
         )
         .expect("write auth fixture");
-        std::env::set_var(
+        crate::env_vars::set_var(
             "HERMES_OPENAI_OAUTH_FILE",
             auth_path.to_string_lossy().to_string(),
         );
@@ -3158,7 +3158,7 @@ mod tests {
             imported.state.tokens.expires_in.unwrap_or_default() > 100,
             "expected imported token TTL from id_token exp"
         );
-        std::env::remove_var("HERMES_OPENAI_OAUTH_FILE");
+        crate::env_vars::remove_var("HERMES_OPENAI_OAUTH_FILE");
     }
 
     #[test]
@@ -3185,7 +3185,7 @@ mod tests {
             serde_json::to_string_pretty(&raw).expect("serialize auth fixture"),
         )
         .expect("write auth fixture");
-        std::env::set_var(
+        crate::env_vars::set_var(
             "HERMES_OPENAI_CODEX_OAUTH_FILE",
             auth_path.to_string_lossy().to_string(),
         );
@@ -3201,7 +3201,7 @@ mod tests {
         );
         assert_eq!(imported.state.base_url, DEFAULT_CODEX_BASE_URL.to_string());
         assert_eq!(imported.state.auth_mode.as_deref(), Some("chatgpt"));
-        std::env::remove_var("HERMES_OPENAI_CODEX_OAUTH_FILE");
+        crate::env_vars::remove_var("HERMES_OPENAI_CODEX_OAUTH_FILE");
     }
 
     #[test]
@@ -3222,7 +3222,7 @@ mod tests {
             serde_json::to_string_pretty(&raw).expect("serialize credentials"),
         )
         .expect("write credentials");
-        std::env::set_var(
+        crate::env_vars::set_var(
             "CLAUDE_CODE_CREDENTIALS_FILE",
             cred_path.to_string_lossy().to_string(),
         );
@@ -3235,7 +3235,7 @@ mod tests {
         assert_eq!(imported.state.access_token, "ant-access");
         assert_eq!(imported.state.refresh_token.as_deref(), Some("ant-refresh"));
         assert_eq!(imported.state.expires_at_ms, Some(expires_at));
-        std::env::remove_var("CLAUDE_CODE_CREDENTIALS_FILE");
+        crate::env_vars::remove_var("CLAUDE_CODE_CREDENTIALS_FILE");
     }
 
     #[test]
@@ -3264,8 +3264,8 @@ mod tests {
             serde_json::to_string_pretty(&raw).expect("serialize auth store"),
         )
         .expect("write auth store");
-        std::env::set_var("HERMES_AUTH_FILE", auth_store.to_string_lossy().to_string());
-        std::env::remove_var("HERMES_NOUS_OAUTH_FILE");
+        crate::env_vars::set_var("HERMES_AUTH_FILE", auth_store.to_string_lossy().to_string());
+        crate::env_vars::remove_var("HERMES_NOUS_OAUTH_FILE");
 
         let imported = discover_existing_nous_oauth()
             .expect("discover")
@@ -3280,7 +3280,7 @@ mod tests {
             imported.state.runtime_api_key().as_deref(),
             Some("nous-agent-key")
         );
-        std::env::remove_var("HERMES_AUTH_FILE");
+        crate::env_vars::remove_var("HERMES_AUTH_FILE");
     }
 
     #[test]
@@ -3291,8 +3291,8 @@ mod tests {
         let prev_hermes_home = std::env::var("HERMES_HOME").ok();
         let prev_auth_file = std::env::var("HERMES_AUTH_FILE").ok();
 
-        std::env::set_var("HOME", tmp.path());
-        std::env::remove_var("HERMES_HOME");
+        crate::env_vars::set_var("HOME", tmp.path());
+        crate::env_vars::remove_var("HERMES_HOME");
 
         let primary_store = tmp.path().join("profile-auth.json");
         let primary_raw = serde_json::json!({
@@ -3306,7 +3306,7 @@ mod tests {
             serde_json::to_string_pretty(&primary_raw).expect("serialize primary auth"),
         )
         .expect("write primary auth");
-        std::env::set_var(
+        crate::env_vars::set_var(
             "HERMES_AUTH_FILE",
             primary_store.to_string_lossy().to_string(),
         );
@@ -3344,16 +3344,16 @@ mod tests {
         );
 
         match prev_auth_file {
-            Some(v) => std::env::set_var("HERMES_AUTH_FILE", v),
-            None => std::env::remove_var("HERMES_AUTH_FILE"),
+            Some(v) => crate::env_vars::set_var("HERMES_AUTH_FILE", v),
+            None => crate::env_vars::remove_var("HERMES_AUTH_FILE"),
         }
         match prev_hermes_home {
-            Some(v) => std::env::set_var("HERMES_HOME", v),
-            None => std::env::remove_var("HERMES_HOME"),
+            Some(v) => crate::env_vars::set_var("HERMES_HOME", v),
+            None => crate::env_vars::remove_var("HERMES_HOME"),
         }
         match prev_home {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
+            Some(v) => crate::env_vars::set_var("HOME", v),
+            None => crate::env_vars::remove_var("HOME"),
         }
     }
 
@@ -3389,7 +3389,7 @@ mod tests {
         let _guard = test_env_lock::lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         let auth_path = tmp.path().join("google_oauth.json");
-        std::env::set_var(
+        crate::env_vars::set_var(
             "HERMES_GEMINI_OAUTH_FILE",
             auth_path.to_string_lossy().to_string(),
         );
@@ -3412,7 +3412,7 @@ mod tests {
         );
         assert_eq!(loaded.project_id.as_deref(), Some("proj-1"));
         assert_eq!(loaded.managed_project_id.as_deref(), Some("managed-1"));
-        std::env::remove_var("HERMES_GEMINI_OAUTH_FILE");
+        crate::env_vars::remove_var("HERMES_GEMINI_OAUTH_FILE");
     }
 
     #[tokio::test]
@@ -3430,11 +3430,11 @@ mod tests {
         });
         std::fs::write(&auth_path, serde_json::to_string_pretty(&payload).unwrap())
             .expect("write auth file");
-        std::env::set_var(
+        crate::env_vars::set_var(
             "HERMES_QWEN_CLI_AUTH_FILE",
             auth_path.to_string_lossy().to_string(),
         );
-        std::env::set_var("HERMES_QWEN_BASE_URL", "https://portal.qwen.ai/v1");
+        crate::env_vars::set_var("HERMES_QWEN_BASE_URL", "https://portal.qwen.ai/v1");
 
         let resolved = resolve_qwen_runtime_credentials(false, false, 120)
             .await
@@ -3448,7 +3448,7 @@ mod tests {
             Some("qwen-refresh-token")
         );
 
-        std::env::remove_var("HERMES_QWEN_CLI_AUTH_FILE");
-        std::env::remove_var("HERMES_QWEN_BASE_URL");
+        crate::env_vars::remove_var("HERMES_QWEN_CLI_AUTH_FILE");
+        crate::env_vars::remove_var("HERMES_QWEN_BASE_URL");
     }
 }

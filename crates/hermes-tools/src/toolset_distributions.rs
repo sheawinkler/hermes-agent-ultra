@@ -353,13 +353,13 @@ pub fn sample_toolsets_from_distribution(dist: &ToolsetDistribution) -> Vec<Stri
 
     dist.toolset_weights
         .iter()
-        .filter(|(_, &weight)| {
-            if weight >= 1.0 {
+        .filter(|&(_, weight)| {
+            if *weight >= 1.0 {
                 true
-            } else if weight <= 0.0 {
+            } else if *weight <= 0.0 {
                 false
             } else {
-                rng.gen::<f64>() < weight
+                rng.r#gen::<f64>() < *weight
             }
         })
         .map(|(name, _)| name.clone())
@@ -370,7 +370,7 @@ pub fn sample_toolsets_from_distribution(dist: &ToolsetDistribution) -> Vec<Stri
 pub fn select_toolsets_deterministic(dist: &ToolsetDistribution) -> Vec<String> {
     dist.toolset_weights
         .iter()
-        .filter(|(_, &weight)| weight > 0.0)
+        .filter(|&(_, weight)| *weight > 0.0)
         .map(|(name, _)| name.clone())
         .collect()
 }

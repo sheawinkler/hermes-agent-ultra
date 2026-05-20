@@ -445,9 +445,9 @@ mod tests {
 
     #[test]
     fn test_batch_generator_trajectories() {
-        let gen = BatchGenerator::new();
+        let batch_gen = BatchGenerator::new();
         let config = BatchConfig::default();
-        let result = gen.generate_batch(vec!["prompt1".to_string()], &config);
+        let result = batch_gen.generate_batch(vec!["prompt1".to_string()], &config);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].messages.len(), 2);
         assert_eq!(result[0].outcome, TrajectoryOutcome::Success);

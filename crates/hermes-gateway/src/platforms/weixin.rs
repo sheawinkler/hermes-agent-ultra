@@ -1119,9 +1119,9 @@ impl WeChatAdapter {
         let (filekey, aes_key, aeskey_hex) = {
             let mut rng = rand::thread_rng();
             let filekey: String = (0..16)
-                .map(|_| format!("{:02x}", rng.gen::<u8>()))
+                .map(|_| format!("{:02x}", rng.r#gen::<u8>()))
                 .collect();
-            let aes_key: [u8; 16] = rng.gen();
+            let aes_key: [u8; 16] = rng.r#gen();
             let aeskey_hex: String = aes_key.iter().map(|b| format!("{b:02x}")).collect();
             (filekey, aes_key, aeskey_hex)
         };

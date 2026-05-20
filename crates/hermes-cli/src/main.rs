@@ -289,17 +289,17 @@ async fn async_main(cli: Cli) {
 
 async fn run(cli: Cli) {
     if let Some(config_dir) = cli.config_dir.as_deref() {
-        std::env::set_var("HERMES_HOME", config_dir);
+        hermes_cli::env_vars::set_var("HERMES_HOME", config_dir);
     }
     if cli.ignore_user_config {
-        std::env::set_var("HERMES_IGNORE_USER_CONFIG", "1");
+        hermes_cli::env_vars::set_var("HERMES_IGNORE_USER_CONFIG", "1");
     }
     if cli.ignore_rules {
-        std::env::set_var("HERMES_IGNORE_RULES", "1");
-        std::env::set_var("HERMES_AGENT_SKIP_CONTEXT_FILES", "1");
+        hermes_cli::env_vars::set_var("HERMES_IGNORE_RULES", "1");
+        hermes_cli::env_vars::set_var("HERMES_AGENT_SKIP_CONTEXT_FILES", "1");
     }
     if cli.accept_hooks {
-        std::env::set_var("HERMES_ACCEPT_HOOKS", "1");
+        hermes_cli::env_vars::set_var("HERMES_ACCEPT_HOOKS", "1");
         hermes_agent::shell_hooks::set_process_accept_hooks(true);
     }
     let effective_command = cli.effective_command();
@@ -889,7 +889,7 @@ fn init_tracing(verbose: bool, interactive_tui: bool) {
             .as_deref()
             != Some("1")
     {
-        std::env::set_var("RUST_LOG", default);
+        hermes_cli::env_vars::set_var("RUST_LOG", default);
     }
     init_telemetry_from_env("hermes-cli", default);
 }
@@ -2198,7 +2198,7 @@ fn apply_route_autotune_env_overrides(cli: &Cli) -> Vec<String> {
             continue;
         }
         if let Some(value) = parsed.get(*key) {
-            std::env::set_var(key, value);
+            hermes_cli::env_vars::set_var(key, value);
             applied.push((*key).to_string());
         }
     }
@@ -5189,7 +5189,7 @@ async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentE
     let mut hydrated_nous_from_vault = false;
 
     if let Some((_provider, token)) = lookup_secret_from_vault(&store, "nous").await {
-        std::env::set_var("NOUS_API_KEY", token);
+        hermes_cli::env_vars::set_var("NOUS_API_KEY", token);
         hydrated_nous_from_vault = true;
     }
 
@@ -5203,9 +5203,9 @@ async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentE
         .await
         {
             Ok(creds) => {
-                std::env::set_var("NOUS_API_KEY", creds.api_key.clone());
+                hermes_cli::env_vars::set_var("NOUS_API_KEY", creds.api_key.clone());
                 if !creds.base_url.trim().is_empty() {
-                    std::env::set_var("NOUS_INFERENCE_BASE_URL", creds.base_url.clone());
+                    hermes_cli::env_vars::set_var("NOUS_INFERENCE_BASE_URL", creds.base_url.clone());
                 }
                 let expires_at = parse_rfc3339_utc(creds.expires_at.as_deref());
                 let _ = manager
@@ -5279,14 +5279,14 @@ async fn hydrate_provider_env_from_vault_for_cli(cli: &Cli) -> Result<(), AgentE
                 if let Some((_provider, secret)) = lookup_secret_from_vault(&store, provider).await
                 {
                     if secret.trim() != current.trim() {
-                        std::env::set_var(env_var, secret);
+                        hermes_cli::env_vars::set_var(env_var, secret);
                     }
                 }
             }
             continue;
         }
         if let Some((_provider, secret)) = lookup_secret_from_vault(&store, provider).await {
-            std::env::set_var(env_var, secret);
+            hermes_cli::env_vars::set_var(env_var, secret);
         }
     }
     Ok(())
@@ -13849,12 +13849,12 @@ mod tests {
     #[test]
     fn oauth_refresh_config_defaults_cover_core_oauth_providers() {
         let _guard = env_lock();
-        std::env::remove_var("HERMES_OPENAI_OAUTH_TOKEN_URL");
-        std::env::remove_var("HERMES_OPENAI_CODEX_OAUTH_TOKEN_URL");
-        std::env::remove_var("HERMES_OPENAI_OAUTH_CLIENT_ID");
-        std::env::remove_var("HERMES_OPENAI_CODEX_OAUTH_CLIENT_ID");
-        std::env::remove_var("HERMES_ANTHROPIC_OAUTH_TOKEN_URL");
-        std::env::remove_var("HERMES_ANTHROPIC_OAUTH_CLIENT_ID");
+        hermes_cli::env_vars::remove_var("HERMES_OPENAI_OAUTH_TOKEN_URL");
+        hermes_cli::env_vars::remove_var("HERMES_OPENAI_CODEX_OAUTH_TOKEN_URL");
+        hermes_cli::env_vars::remove_var("HERMES_OPENAI_OAUTH_CLIENT_ID");
+        hermes_cli::env_vars::remove_var("HERMES_OPENAI_CODEX_OAUTH_CLIENT_ID");
+        hermes_cli::env_vars::remove_var("HERMES_ANTHROPIC_OAUTH_TOKEN_URL");
+        hermes_cli::env_vars::remove_var("HERMES_ANTHROPIC_OAUTH_CLIENT_ID");
 
         let (openai_token_url, openai_client_id) =
             oauth_refresh_config_for_provider("openai").expect("openai config");
@@ -13923,7 +13923,7 @@ mod tests {
         platform
             .extra
             .insert("room_id".to_string(), serde_json::json!("!cfg:matrix.org"));
-        std::env::set_var("MATRIX_HOME_ROOM", "!env:matrix.org");
+        hermes_cli::env_vars::set_var("MATRIX_HOME_ROOM", "!env:matrix.org");
         assert_eq!(
             matrix_home_room_for_platform(&platform).as_deref(),
             Some("!cfg:matrix.org")
@@ -13936,8 +13936,8 @@ mod tests {
         );
 
         match previous {
-            Some(value) => std::env::set_var("MATRIX_HOME_ROOM", value),
-            None => std::env::remove_var("MATRIX_HOME_ROOM"),
+            Some(value) => hermes_cli::env_vars::set_var("MATRIX_HOME_ROOM", value),
+            None => hermes_cli::env_vars::remove_var("MATRIX_HOME_ROOM"),
         }
     }
 
@@ -14087,7 +14087,7 @@ mod tests {
             .expect("save vault credential");
 
         let previous = std::env::var("NOUS_API_KEY").ok();
-        std::env::set_var("NOUS_API_KEY", "env-stale-key");
+        hermes_cli::env_vars::set_var("NOUS_API_KEY", "env-stale-key");
 
         hydrate_provider_env_from_vault_for_cli(&cli)
             .await
@@ -14098,8 +14098,8 @@ mod tests {
         );
 
         match previous {
-            Some(value) => std::env::set_var("NOUS_API_KEY", value),
-            None => std::env::remove_var("NOUS_API_KEY"),
+            Some(value) => hermes_cli::env_vars::set_var("NOUS_API_KEY", value),
+            None => hermes_cli::env_vars::remove_var("NOUS_API_KEY"),
         }
     }
 
@@ -14529,7 +14529,7 @@ max_turns: 50
     #[test]
     fn interactive_session_lock_guard_replaces_stale_pid_and_cleans_up() {
         let old_bypass = std::env::var_os(INTERACTIVE_SESSION_LOCK_BYPASS_ENV);
-        std::env::remove_var(INTERACTIVE_SESSION_LOCK_BYPASS_ENV);
+        hermes_cli::env_vars::remove_var(INTERACTIVE_SESSION_LOCK_BYPASS_ENV);
         let tmp = tempfile::tempdir().expect("tempdir");
         let cli = cli_for_temp_state_root(tmp.path());
         let lock_path = interactive_lock_path_for_cli(&cli);
@@ -14547,7 +14547,7 @@ max_turns: 50
         drop(guard);
         assert!(!lock_path.exists(), "lock file should be removed on drop");
         if let Some(value) = old_bypass {
-            std::env::set_var(INTERACTIVE_SESSION_LOCK_BYPASS_ENV, value);
+            hermes_cli::env_vars::set_var(INTERACTIVE_SESSION_LOCK_BYPASS_ENV, value);
         }
     }
 
@@ -14555,7 +14555,7 @@ max_turns: 50
     #[test]
     fn interactive_session_lock_guard_rejects_live_pid() {
         let old_bypass = std::env::var_os(INTERACTIVE_SESSION_LOCK_BYPASS_ENV);
-        std::env::remove_var(INTERACTIVE_SESSION_LOCK_BYPASS_ENV);
+        hermes_cli::env_vars::remove_var(INTERACTIVE_SESSION_LOCK_BYPASS_ENV);
         let tmp = tempfile::tempdir().expect("tempdir");
         let cli = cli_for_temp_state_root(tmp.path());
         let lock_path = interactive_lock_path_for_cli(&cli);
@@ -14572,7 +14572,7 @@ max_turns: 50
         assert!(msg.contains("Another Hermes interactive session is running"));
         assert_eq!(read_interactive_lock_pid(&lock_path), Some(1));
         if let Some(value) = old_bypass {
-            std::env::set_var(INTERACTIVE_SESSION_LOCK_BYPASS_ENV, value);
+            hermes_cli::env_vars::set_var(INTERACTIVE_SESSION_LOCK_BYPASS_ENV, value);
         }
     }
 
@@ -15117,7 +15117,7 @@ max_turns: 50
         )
         .expect("write legacy session");
 
-        std::env::set_var("HOME", &fake_home);
+        hermes_cli::env_vars::set_var("HOME", &fake_home);
         let state_root = tmp.path().join("ultra-state");
         let cli = cli_for_temp_state_root(&state_root);
         let payload = load_resume_payload(&cli, Some("legacy-abc")).expect("load payload");
@@ -15127,8 +15127,8 @@ max_turns: 50
         assert!(payload.source_path.starts_with(&legacy_sessions));
 
         match prev_home {
-            Some(home) => std::env::set_var("HOME", home),
-            None => std::env::remove_var("HOME"),
+            Some(home) => hermes_cli::env_vars::set_var("HOME", home),
+            None => hermes_cli::env_vars::remove_var("HOME"),
         }
     }
 
@@ -15213,7 +15213,7 @@ max_turns: 50
         )
         .expect("write legacy non-empty session");
 
-        std::env::set_var("HOME", &fake_home);
+        hermes_cli::env_vars::set_var("HOME", &fake_home);
         let state_root = tmp.path().join("ultra-state");
         let cli = cli_for_temp_state_root(&state_root);
         let sessions_dir = hermes_state_root(&cli).join("sessions");
@@ -15233,8 +15233,8 @@ max_turns: 50
         assert!(payload.source_path.starts_with(&legacy_sessions));
 
         match prev_home {
-            Some(home) => std::env::set_var("HOME", home),
-            None => std::env::remove_var("HOME"),
+            Some(home) => hermes_cli::env_vars::set_var("HOME", home),
+            None => hermes_cli::env_vars::remove_var("HOME"),
         }
     }
 
@@ -15343,8 +15343,8 @@ max_turns: 50
         )
         .expect("write env");
 
-        std::env::remove_var("HERMES_SMART_ROUTING_LEARNING_ALPHA");
-        std::env::set_var("HERMES_SMART_ROUTING_LEARNING_SWITCH_MARGIN", "0.999");
+        hermes_cli::env_vars::remove_var("HERMES_SMART_ROUTING_LEARNING_ALPHA");
+        hermes_cli::env_vars::set_var("HERMES_SMART_ROUTING_LEARNING_SWITCH_MARGIN", "0.999");
         let applied = apply_route_autotune_env_overrides(&cli);
         assert!(applied
             .iter()
@@ -15358,8 +15358,8 @@ max_turns: 50
             Some("0.999".to_string()),
             "explicit env var should not be overridden"
         );
-        std::env::remove_var("HERMES_SMART_ROUTING_LEARNING_ALPHA");
-        std::env::remove_var("HERMES_SMART_ROUTING_LEARNING_SWITCH_MARGIN");
+        hermes_cli::env_vars::remove_var("HERMES_SMART_ROUTING_LEARNING_ALPHA");
+        hermes_cli::env_vars::remove_var("HERMES_SMART_ROUTING_LEARNING_SWITCH_MARGIN");
     }
 
     #[test]

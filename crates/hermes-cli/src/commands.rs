@@ -4272,8 +4272,8 @@ fn handle_model_failover_command(
             );
         }
         "clear" | "reset" => {
-            std::env::remove_var("HERMES_FALLBACK_MODEL");
-            std::env::remove_var("HERMES_FALLBACK_MODELS");
+            crate::env_vars::remove_var("HERMES_FALLBACK_MODEL");
+            crate::env_vars::remove_var("HERMES_FALLBACK_MODELS");
             let current = app.current_model.clone();
             app.switch_model(&current);
             emit_command_output(app, "Cleared retry failover chain.");
@@ -4293,9 +4293,9 @@ fn handle_model_failover_command(
                     "Failover chain cannot be empty.".to_string(),
                 ));
             }
-            std::env::set_var("HERMES_FALLBACK_MODELS", chain.join(","));
+            crate::env_vars::set_var("HERMES_FALLBACK_MODELS", chain.join(","));
             if let Some(first) = chain.first() {
-                std::env::set_var("HERMES_FALLBACK_MODEL", first);
+                crate::env_vars::set_var("HERMES_FALLBACK_MODEL", first);
             }
             let current = app.current_model.clone();
             app.switch_model(&current);
@@ -4680,10 +4680,10 @@ fn handle_model_backend_command(app: &mut App, args: &[&str]) -> Result<CommandR
                 return Ok(CommandResult::Handled);
             };
             for (key, value) in row.env_overrides {
-                std::env::set_var(key, value);
+                crate::env_vars::set_var(key, value);
             }
-            std::env::set_var("HERMES_LOCAL_BACKEND_PROFILE", row.profile);
-            std::env::set_var("HERMES_LOCAL_BACKEND_PROVIDER", row.provider);
+            crate::env_vars::set_var("HERMES_LOCAL_BACKEND_PROFILE", row.profile);
+            crate::env_vars::set_var("HERMES_LOCAL_BACKEND_PROVIDER", row.provider);
             let persisted = persist_backend_profile_env(row.provider, row.profile, row.env_overrides)?;
             let (current_provider, _) = model_current_provider_and_id(&app.current_model);
             if current_provider == row.provider {
@@ -5345,19 +5345,19 @@ fn merged_compression_policy() -> (
 }
 
 fn apply_compression_policy_env(policy: &CompressionRenderPolicy) {
-    std::env::set_var(
+    crate::env_vars::set_var(
         "HERMES_TUI_MAX_ASSISTANT_RENDER_LINES",
         policy.max_assistant_render_lines.to_string(),
     );
-    std::env::set_var(
+    crate::env_vars::set_var(
         "HERMES_TUI_MAX_TOOL_OUTPUT_LINES",
         policy.max_tool_output_lines.to_string(),
     );
-    std::env::set_var(
+    crate::env_vars::set_var(
         "HERMES_TUI_MAX_TOOL_OUTPUT_LINE_CHARS",
         policy.max_tool_output_line_chars.to_string(),
     );
-    std::env::set_var(
+    crate::env_vars::set_var(
         "HERMES_TUI_MAX_TOOL_OUTPUT_TOTAL_CHARS",
         policy.max_tool_output_total_chars.to_string(),
     );
@@ -5848,7 +5848,7 @@ fn handle_autocompact_command(app: &mut App, args: &[&str]) -> Result<CommandRes
                 );
                 return Ok(CommandResult::Handled);
             };
-            std::env::set_var("HERMES_CONTEXTLATTICE_COMPACTION_GOVERNANCE", mode.as_str());
+            crate::env_vars::set_var("HERMES_CONTEXTLATTICE_COMPACTION_GOVERNANCE", mode.as_str());
             emit_command_output(
                 app,
                 format!("Compaction governance mode set to `{}`.", mode.as_str()),
@@ -6420,24 +6420,24 @@ fn apply_repo_review_budget_profile(profile: RepoReviewBudgetProfile) {
             RepoReviewBudgetProfile::Relaxed => (3usize, 3usize, 3usize, 2usize, 0.15f64),
             RepoReviewBudgetProfile::Off => (12usize, 12usize, 12usize, 12usize, 0.01f64),
         };
-    std::env::set_var(
+    crate::env_vars::set_var(
         REPO_REVIEW_BUDGET_ENV_REPEAT_THRESHOLD,
         repeat_threshold.to_string(),
     );
-    std::env::set_var(
+    crate::env_vars::set_var(
         REPO_REVIEW_BUDGET_ENV_LOW_SIGNAL_THRESHOLD,
         low_signal_threshold.to_string(),
     );
-    std::env::set_var(REPO_REVIEW_BUDGET_ENV_KEEP_REPEAT, keep_repeat.to_string());
-    std::env::set_var(
+    crate::env_vars::set_var(REPO_REVIEW_BUDGET_ENV_KEEP_REPEAT, keep_repeat.to_string());
+    crate::env_vars::set_var(
         REPO_REVIEW_BUDGET_ENV_KEEP_LOW_SIGNAL,
         keep_low_signal.to_string(),
     );
-    std::env::set_var(
+    crate::env_vars::set_var(
         REPO_REVIEW_BUDGET_ENV_MIN_SIGNAL_SCORE,
         format!("{:.3}", min_signal_score),
     );
-    std::env::set_var(REPO_REVIEW_BUDGET_ENV_PROFILE, profile.as_str());
+    crate::env_vars::set_var(REPO_REVIEW_BUDGET_ENV_PROFILE, profile.as_str());
 }
 
 fn latest_json_report(report_dir: &Path, prefix: &str) -> Option<PathBuf> {
@@ -7015,7 +7015,7 @@ fn handle_ops_budget_command(app: &mut App, args: &[&str]) -> Result<CommandResu
                 REPO_REVIEW_BUDGET_ENV_MIN_SIGNAL_SCORE,
                 REPO_REVIEW_BUDGET_ENV_PROFILE,
             ] {
-                std::env::remove_var(key);
+                crate::env_vars::remove_var(key);
             }
             emit_command_output(app, "Cleared repo-review budget runtime overrides.");
         }
@@ -7076,7 +7076,7 @@ fn handle_ops_tool_profile_command(
         return Ok(CommandResult::Handled);
     }
     if args[0].eq_ignore_ascii_case("clear") {
-        std::env::remove_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE");
+        crate::env_vars::remove_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE");
         emit_command_output(
             app,
             "Cleared repo-review tool profile override (default=balanced).",
@@ -7091,7 +7091,7 @@ fn handle_ops_tool_profile_command(
         );
         return Ok(CommandResult::Handled);
     }
-    std::env::set_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE", next.as_str());
+    crate::env_vars::set_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE", next.as_str());
     emit_command_output(
         app,
         format!("repo_review_tool_profile mode set to `{}`", next),
@@ -7298,7 +7298,7 @@ fn handle_ops_skills_tier_command(
         );
         return Ok(CommandResult::Handled);
     };
-    std::env::set_var("HERMES_SKILLS_EXECUTION_TIER", next.as_str());
+    crate::env_vars::set_var("HERMES_SKILLS_EXECUTION_TIER", next.as_str());
     emit_command_output(
         app,
         format!(
@@ -7562,7 +7562,7 @@ async fn handle_ops_autopilot_command(
                     .iter()
                     .any(|allowed| *allowed == k)
                 {
-                    std::env::set_var(&k, &v);
+                    crate::env_vars::set_var(&k, &v);
                     applied.push((k, v));
                 }
             }
@@ -7598,7 +7598,7 @@ async fn handle_ops_autopilot_command(
                 ),
                 Some("balanced" | "throughput" | "quality" | "reliability" | "safety") => {
                     let value = next.unwrap_or_else(|| "off".to_string());
-                    std::env::set_var("HERMES_PERF_AUTOPILOT_PROFILE", &value);
+                    crate::env_vars::set_var("HERMES_PERF_AUTOPILOT_PROFILE", &value);
                     emit_command_output(app, format!("autopilot profile set to '{}'", value));
                 }
                 Some(other) => {
@@ -7623,7 +7623,7 @@ async fn handle_ops_autopilot_command(
                 ),
                 Some("off" | "advisory" | "enforce") => {
                     let value = next.unwrap_or_else(|| "advisory".to_string());
-                    std::env::set_var("HERMES_PERF_AUTOPILOT_MODE", &value);
+                    crate::env_vars::set_var("HERMES_PERF_AUTOPILOT_MODE", &value);
                     emit_command_output(app, format!("autopilot mode set to '{}'", value));
                 }
                 Some(other) => {
@@ -7636,9 +7636,9 @@ async fn handle_ops_autopilot_command(
             Ok(CommandResult::Handled)
         }
         "clear" => {
-            std::env::remove_var("HERMES_PERF_AUTOPILOT_MODE");
-            std::env::remove_var("HERMES_PERF_AUTOPILOT_PROFILE");
-            std::env::remove_var("HERMES_PERF_AUTOPILOT_STATUS");
+            crate::env_vars::remove_var("HERMES_PERF_AUTOPILOT_MODE");
+            crate::env_vars::remove_var("HERMES_PERF_AUTOPILOT_PROFILE");
+            crate::env_vars::remove_var("HERMES_PERF_AUTOPILOT_STATUS");
             emit_command_output(
                 app,
                 "Cleared autopilot runtime overrides (mode/profile/status).",
@@ -9047,7 +9047,7 @@ async fn handle_browser_command(app: &mut App, args: &[&str]) -> Result<CommandR
         }
         "connect" => {
             let endpoint = args.get(1).copied().unwrap_or("http://localhost:9222");
-            std::env::set_var("CHROME_CDP_URL", endpoint);
+            crate::env_vars::set_var("CHROME_CDP_URL", endpoint);
             persist_browser_cdp_url(Some(endpoint))?;
             match browser_probe(endpoint).await {
                 Ok(summary) => emit_command_output(
@@ -9069,7 +9069,7 @@ async fn handle_browser_command(app: &mut App, args: &[&str]) -> Result<CommandR
             Ok(CommandResult::Handled)
         }
         "disconnect" => {
-            std::env::remove_var("CHROME_CDP_URL");
+            crate::env_vars::remove_var("CHROME_CDP_URL");
             persist_browser_cdp_url(None)?;
             emit_command_output(
                 app,
@@ -9729,7 +9729,7 @@ fn handle_subconscious_command(app: &mut App, args: &[&str]) -> Result<CommandRe
                     "Subconscious profiles:\n- strict: only low-risk non-approval tasks auto-dispatch\n- balanced: low/medium dispatch, high-risk blocked\n- dev: permit all pending tasks\nSet with `/subconscious profile <name>`.",
                 ),
                 "clear" => {
-                    std::env::remove_var("HERMES_SUBCONSCIOUS_PROFILE");
+                    crate::env_vars::remove_var("HERMES_SUBCONSCIOUS_PROFILE");
                     emit_command_output(
                         app,
                         "Cleared subconscious profile override (default=balanced).",
@@ -9743,7 +9743,7 @@ fn handle_subconscious_command(app: &mut App, args: &[&str]) -> Result<CommandRe
                         );
                         return Ok(CommandResult::Handled);
                     };
-                    std::env::set_var("HERMES_SUBCONSCIOUS_PROFILE", next.as_str());
+                    crate::env_vars::set_var("HERMES_SUBCONSCIOUS_PROFILE", next.as_str());
                     emit_command_output(app, format!("Subconscious profile set to {}.", next.as_str()));
                 }
             }
@@ -11190,7 +11190,7 @@ fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Age
                     "toggle" => !replay_enabled_runtime(),
                     _ => replay_enabled_runtime(),
                 };
-                std::env::set_var("HERMES_REPLAY_ENABLED", if next { "1" } else { "0" });
+                crate::env_vars::set_var("HERMES_REPLAY_ENABLED", if next { "1" } else { "0" });
                 emit_command_output(
                     app,
                     format!(
@@ -11251,7 +11251,7 @@ fn handle_raw_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Age
                 _ => state.enabled,
             };
             app.tool_registry.set_raw_mode(next);
-            std::env::set_var("HERMES_RTK_RAW", if next { "1" } else { "0" });
+            crate::env_vars::set_var("HERMES_RTK_RAW", if next { "1" } else { "0" });
             emit_command_output(
                 app,
                 format!(
@@ -11326,10 +11326,10 @@ fn current_policy_profile_name() -> &'static str {
 }
 
 fn apply_policy_profile(app: &mut App, profile: PolicyProfile) {
-    std::env::set_var("HERMES_TOOL_POLICY_PRESET", profile.preset);
-    std::env::set_var("HERMES_TOOL_POLICY_MODE", profile.mode);
-    std::env::set_var("HERMES_EXECUTION_SANDBOX_PROFILE", profile.sandbox);
-    std::env::set_var("HERMES_SKILLS_EXECUTION_TIER", profile.skills_tier);
+    crate::env_vars::set_var("HERMES_TOOL_POLICY_PRESET", profile.preset);
+    crate::env_vars::set_var("HERMES_TOOL_POLICY_MODE", profile.mode);
+    crate::env_vars::set_var("HERMES_EXECUTION_SANDBOX_PROFILE", profile.sandbox);
+    crate::env_vars::set_var("HERMES_SKILLS_EXECUTION_TIER", profile.skills_tier);
     app.tool_registry.set_policy(ToolPolicyEngine::from_env());
 }
 
@@ -11888,7 +11888,7 @@ fn handle_runtime_ui_mode_command(
                 if requested.trim().is_empty() {
                     "Usage: `/skin list` or `/skin <name>`".to_string()
                 } else if let Some(canonical) = canonical_skin_name(requested) {
-                    std::env::set_var("HERMES_THEME", canonical);
+                    crate::env_vars::set_var("HERMES_THEME", canonical);
                     app.request_theme_change(canonical);
                     format!(
                         "Skin switched to `{}`.\nApplied in this TUI session and exported as HERMES_THEME for child processes.",
@@ -12242,7 +12242,7 @@ fn handle_agents_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
     let sub = args.first().map(|s| s.trim().to_ascii_lowercase());
 
     if matches!(sub.as_deref(), Some("pause")) {
-        std::env::set_var("HERMES_DELEGATION_PAUSED", "1");
+        crate::env_vars::set_var("HERMES_DELEGATION_PAUSED", "1");
         emit_command_output(
             app,
             "Delegation spawning paused for this runtime.\nSet with `/agents resume`.\nStatus: `/agents status`.",
@@ -12250,7 +12250,7 @@ fn handle_agents_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
         return Ok(CommandResult::Handled);
     }
     if matches!(sub.as_deref(), Some("resume" | "unpause")) {
-        std::env::set_var("HERMES_DELEGATION_PAUSED", "0");
+        crate::env_vars::set_var("HERMES_DELEGATION_PAUSED", "0");
         emit_command_output(
             app,
             "Delegation spawning resumed for this runtime.\nStatus: `/agents status`.",
@@ -13014,15 +13014,15 @@ impl TaskDepthProfile {
 }
 
 fn set_env_var_u64(key: &str, value: u64) {
-    std::env::set_var(key, value.to_string());
+    crate::env_vars::set_var(key, value.to_string());
 }
 
 fn set_env_var_f64(key: &str, value: f64) {
-    std::env::set_var(key, format!("{value:.2}"));
+    crate::env_vars::set_var(key, format!("{value:.2}"));
 }
 
 fn apply_task_depth_profile(profile: TaskDepthProfile) {
-    std::env::set_var("HERMES_TASK_DEPTH_PROFILE", profile.as_str());
+    crate::env_vars::set_var("HERMES_TASK_DEPTH_PROFILE", profile.as_str());
     match profile {
         TaskDepthProfile::Shallow => {
             set_env_var_u64("HERMES_MAX_ITERATIONS", 18);
@@ -13031,7 +13031,7 @@ fn apply_task_depth_profile(profile: TaskDepthProfile) {
             set_env_var_u64("HERMES_PERF_GOV_WINDOW", 6);
             set_env_var_f64("HERMES_PERF_GOV_LATENCY_WARN_MS", 2800.0);
             set_env_var_f64("HERMES_PERF_GOV_LATENCY_CRITICAL_MS", 5200.0);
-            std::env::set_var("HERMES_REPO_REVIEW_BUDGET_PROFILE", "aggressive");
+            crate::env_vars::set_var("HERMES_REPO_REVIEW_BUDGET_PROFILE", "aggressive");
         }
         TaskDepthProfile::Balanced => {
             set_env_var_u64("HERMES_MAX_ITERATIONS", 250);
@@ -13040,7 +13040,7 @@ fn apply_task_depth_profile(profile: TaskDepthProfile) {
             set_env_var_u64("HERMES_PERF_GOV_WINDOW", 8);
             set_env_var_f64("HERMES_PERF_GOV_LATENCY_WARN_MS", 3500.0);
             set_env_var_f64("HERMES_PERF_GOV_LATENCY_CRITICAL_MS", 6500.0);
-            std::env::set_var("HERMES_REPO_REVIEW_BUDGET_PROFILE", "off");
+            crate::env_vars::set_var("HERMES_REPO_REVIEW_BUDGET_PROFILE", "off");
         }
         TaskDepthProfile::Deep => {
             set_env_var_u64("HERMES_MAX_ITERATIONS", 120);
@@ -13049,7 +13049,7 @@ fn apply_task_depth_profile(profile: TaskDepthProfile) {
             set_env_var_u64("HERMES_PERF_GOV_WINDOW", 10);
             set_env_var_f64("HERMES_PERF_GOV_LATENCY_WARN_MS", 4800.0);
             set_env_var_f64("HERMES_PERF_GOV_LATENCY_CRITICAL_MS", 9000.0);
-            std::env::set_var("HERMES_REPO_REVIEW_BUDGET_PROFILE", "relaxed");
+            crate::env_vars::set_var("HERMES_REPO_REVIEW_BUDGET_PROFILE", "relaxed");
         }
         TaskDepthProfile::Max => {
             set_env_var_u64("HERMES_MAX_ITERATIONS", 250);
@@ -13058,7 +13058,7 @@ fn apply_task_depth_profile(profile: TaskDepthProfile) {
             set_env_var_u64("HERMES_PERF_GOV_WINDOW", 12);
             set_env_var_f64("HERMES_PERF_GOV_LATENCY_WARN_MS", 6500.0);
             set_env_var_f64("HERMES_PERF_GOV_LATENCY_CRITICAL_MS", 12000.0);
-            std::env::set_var("HERMES_REPO_REVIEW_BUDGET_PROFILE", "off");
+            crate::env_vars::set_var("HERMES_REPO_REVIEW_BUDGET_PROFILE", "off");
         }
     }
 }
@@ -13122,7 +13122,7 @@ fn handle_plan_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Ag
             }
             "off" | "advisory" | "enforce" => {
                 if let Some(mode) = PlanCapabilityMode::parse(&next) {
-                    std::env::set_var("HERMES_PLAN_CAPABILITY_ROUTER", mode.as_str());
+                    crate::env_vars::set_var("HERMES_PLAN_CAPABILITY_ROUTER", mode.as_str());
                     emit_command_output(
                         app,
                         format!("planner capability router set to `{}`.", mode.as_str()),
@@ -13146,7 +13146,7 @@ fn handle_plan_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Ag
                 "Task depth profiles:\n- shallow: quickest turn cadence; strict exploration trim\n- balanced: default profile for most sessions\n- deep: larger turn budget + lower concurrency for heavier analysis\n- max: exhaustive mode for very complex objective work\nUse `/plan depth <profile>` to apply.",
             ),
             "clear" => {
-                std::env::remove_var("HERMES_TASK_DEPTH_PROFILE");
+                crate::env_vars::remove_var("HERMES_TASK_DEPTH_PROFILE");
                 for key in [
                     "HERMES_MAX_ITERATIONS",
                     "HERMES_TOOL_CALL_MAX_CONCURRENCY",
@@ -13156,7 +13156,7 @@ fn handle_plan_command(app: &mut App, args: &[&str]) -> Result<CommandResult, Ag
                     "HERMES_PERF_GOV_LATENCY_CRITICAL_MS",
                     "HERMES_REPO_REVIEW_BUDGET_PROFILE",
                 ] {
-                    std::env::remove_var(key);
+                    crate::env_vars::remove_var(key);
                 }
                 apply_task_depth_profile(TaskDepthProfile::Balanced);
                 emit_command_output(
@@ -14842,7 +14842,7 @@ fn handle_claims_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
         }
         "on" | "enable" | "true" | "1" => {
             let policy = set_claim_verifier_enabled(true)?;
-            std::env::set_var("HERMES_CLAIM_VERIFIER_ENABLED", "1");
+            crate::env_vars::set_var("HERMES_CLAIM_VERIFIER_ENABLED", "1");
             emit_command_output(
                 app,
                 format!(
@@ -14853,7 +14853,7 @@ fn handle_claims_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
         }
         "off" | "disable" | "false" | "0" => {
             let policy = set_claim_verifier_enabled(false)?;
-            std::env::set_var("HERMES_CLAIM_VERIFIER_ENABLED", "0");
+            crate::env_vars::set_var("HERMES_CLAIM_VERIFIER_ENABLED", "0");
             emit_command_output(
                 app,
                 format!(
@@ -14921,7 +14921,7 @@ async fn handle_quorum_command(app: &mut App, args: &[&str]) -> Result<CommandRe
         }
         "on" | "enable" | "true" | "1" => {
             let policy = set_quorum_policy(true, None, None)?;
-            std::env::set_var("HERMES_QUORUM_ENABLED", "1");
+            crate::env_vars::set_var("HERMES_QUORUM_ENABLED", "1");
             install_quorum_system_hint(app, policy.voters, &policy.models);
             app.quorum_armed_once = false;
             emit_command_output(
@@ -14939,7 +14939,7 @@ async fn handle_quorum_command(app: &mut App, args: &[&str]) -> Result<CommandRe
         }
         "off" | "disable" | "false" | "0" => {
             let policy = set_quorum_policy(false, None, None)?;
-            std::env::set_var("HERMES_QUORUM_ENABLED", "0");
+            crate::env_vars::set_var("HERMES_QUORUM_ENABLED", "0");
             clear_quorum_system_hints(app);
             app.quorum_armed_once = false;
             emit_command_output(
@@ -15231,7 +15231,7 @@ async fn handle_swarm_command(app: &mut App, args: &[&str]) -> Result<CommandRes
                 parse_swarm_mode(args.get(1).copied())
             };
             if let Some(passes) = pass_override {
-                std::env::set_var("HERMES_QUORUM_VOTER_PASSES", passes.to_string());
+                crate::env_vars::set_var("HERMES_QUORUM_VOTER_PASSES", passes.to_string());
             }
             let policy = load_quorum_policy()?;
             if !policy.enabled {
@@ -17544,7 +17544,7 @@ fn handle_mouse_command(app: &mut App, args: &[&str]) -> Result<CommandResult, A
         match parse_toggle_arg(args.get(1).copied(), app.mouse_enabled()) {
             Ok(next) => {
                 app.set_mouse_enabled(next);
-                std::env::set_var("HERMES_TUI_MOUSE", if next { "1" } else { "0" });
+                crate::env_vars::set_var("HERMES_TUI_MOUSE", if next { "1" } else { "0" });
                 emit_command_output(
                     app,
                     format!("Mouse interactions: {}", if next { "ON" } else { "OFF" }),
@@ -17569,7 +17569,7 @@ fn handle_mouse_command(app: &mut App, args: &[&str]) -> Result<CommandResult, A
     match parse_toggle_arg(args.first().copied(), app.mouse_enabled()) {
         Ok(next) => {
             app.set_mouse_enabled(next);
-            std::env::set_var("HERMES_TUI_MOUSE", if next { "1" } else { "0" });
+            crate::env_vars::set_var("HERMES_TUI_MOUSE", if next { "1" } else { "0" });
             emit_command_output(
                 app,
                 format!("Mouse interactions: {}", if next { "ON" } else { "OFF" }),
@@ -18225,7 +18225,7 @@ async fn handle_boot_command(app: &mut App, args: &[&str]) -> Result<CommandResu
                 "Boot profiles:\n- dev: warnings are advisory; only FAIL blocks overall\n- standard: current balanced pass/warn/fail behavior\n- prod: warnings and fails both block overall PASS",
             ),
             "clear" => {
-                std::env::remove_var("HERMES_BOOT_PROFILE");
+                crate::env_vars::remove_var("HERMES_BOOT_PROFILE");
                 emit_command_output(app, "Cleared boot profile override (default=standard).");
             }
             other => {
@@ -18236,7 +18236,7 @@ async fn handle_boot_command(app: &mut App, args: &[&str]) -> Result<CommandResu
                     );
                     return Ok(CommandResult::Handled);
                 };
-                std::env::set_var("HERMES_BOOT_PROFILE", profile.as_str());
+                crate::env_vars::set_var("HERMES_BOOT_PROFILE", profile.as_str());
                 emit_command_output(app, format!("Boot profile set to {}.", profile.as_str()));
             }
         }
@@ -18737,14 +18737,14 @@ fn apply_cli_chat_runtime_env(provider_model: &str) {
     if provider_model.is_empty() {
         return;
     }
-    std::env::set_var("HERMES_MODEL", provider_model);
-    std::env::set_var("HERMES_INFERENCE_MODEL", provider_model);
+    crate::env_vars::set_var("HERMES_MODEL", provider_model);
+    crate::env_vars::set_var("HERMES_INFERENCE_MODEL", provider_model);
     if let Some((provider, _)) = provider_model.split_once(':') {
         let provider = provider.trim();
         if !provider.is_empty() {
-            std::env::set_var("HERMES_INFERENCE_PROVIDER", provider);
+            crate::env_vars::set_var("HERMES_INFERENCE_PROVIDER", provider);
             if std::env::var_os("HERMES_TUI_PROVIDER").is_some() {
-                std::env::set_var("HERMES_TUI_PROVIDER", provider);
+                crate::env_vars::set_var("HERMES_TUI_PROVIDER", provider);
             }
         }
     }
@@ -24198,9 +24198,9 @@ mod tests {
     impl TempHomeGuard {
         fn new(path: &Path) -> Self {
             let previous_home = std::env::var("HERMES_HOME").ok();
-            std::env::set_var("HERMES_HOME", path);
+            crate::env_vars::set_var("HERMES_HOME", path);
             let previous_clipboard_mock = std::env::var("HERMES_TEST_CLIPBOARD_TEXT").ok();
-            std::env::remove_var("HERMES_TEST_CLIPBOARD_TEXT");
+            crate::env_vars::remove_var("HERMES_TEST_CLIPBOARD_TEXT");
             let previous_runtime_env = [
                 "HERMES_MODEL",
                 "HERMES_INFERENCE_MODEL",
@@ -24221,17 +24221,17 @@ mod tests {
     impl Drop for TempHomeGuard {
         fn drop(&mut self) {
             match self.previous_home.take() {
-                Some(value) => std::env::set_var("HERMES_HOME", value),
-                None => std::env::remove_var("HERMES_HOME"),
+                Some(value) => crate::env_vars::set_var("HERMES_HOME", value),
+                None => crate::env_vars::remove_var("HERMES_HOME"),
             }
             match self.previous_clipboard_mock.take() {
-                Some(value) => std::env::set_var("HERMES_TEST_CLIPBOARD_TEXT", value),
-                None => std::env::remove_var("HERMES_TEST_CLIPBOARD_TEXT"),
+                Some(value) => crate::env_vars::set_var("HERMES_TEST_CLIPBOARD_TEXT", value),
+                None => crate::env_vars::remove_var("HERMES_TEST_CLIPBOARD_TEXT"),
             }
             for (key, value) in self.previous_runtime_env.drain(..) {
                 match value {
-                    Some(v) => std::env::set_var(key, v),
-                    None => std::env::remove_var(key),
+                    Some(v) => crate::env_vars::set_var(key, v),
+                    None => crate::env_vars::remove_var(key),
                 }
             }
         }
@@ -24413,7 +24413,7 @@ mod tests {
         let tmp = tempdir().expect("tempdir");
         let _home_guard = TempHomeGuard::new(tmp.path());
         let mut app = build_test_app_with_stream(tmp.path()).await;
-        std::env::remove_var("HERMES_DELEGATION_PAUSED");
+        crate::env_vars::remove_var("HERMES_DELEGATION_PAUSED");
 
         let status = handle_slash_command(&mut app, "/agents", &["status"])
             .await
@@ -24470,7 +24470,7 @@ mod tests {
         let _guard = env_test_lock();
         let tmp = tempdir().expect("tempdir");
         let _home_guard = TempHomeGuard::new(tmp.path());
-        std::env::set_var("HERMES_TEST_CLIPBOARD_TEXT", "alpha clipboard payload");
+        crate::env_vars::set_var("HERMES_TEST_CLIPBOARD_TEXT", "alpha clipboard payload");
         let mut app = build_test_app_with_stream(tmp.path()).await;
 
         let result = handle_paste_command(&mut app, &[]).expect("paste command");
@@ -24926,7 +24926,7 @@ mod tests {
         let tmp = tempdir().expect("tempdir");
         let _home_guard = TempHomeGuard::new(tmp.path());
         let mut app = build_test_app_with_stream(tmp.path()).await;
-        std::env::remove_var("HERMES_TUI_MAX_ASSISTANT_RENDER_LINES");
+        crate::env_vars::remove_var("HERMES_TUI_MAX_ASSISTANT_RENDER_LINES");
 
         handle_slash_command(
             &mut app,
@@ -24955,7 +24955,7 @@ mod tests {
     #[test]
     fn p1_trigger_triage_escalates_high_severity_events() {
         let _guard = env_test_lock();
-        std::env::set_var("HERMES_TRIGGER_TRIAGE_MODE", "strict");
+        crate::env_vars::set_var("HERMES_TRIGGER_TRIAGE_MODE", "strict");
         let assessment = evaluate_trigger_triage(
             "webhook",
             "critical outage with secret key leak and panic in runtime",
@@ -24963,7 +24963,7 @@ mod tests {
         assert_eq!(assessment.decision, TriggerTriageDecision::Escalate);
         assert!(assessment.requires_approval);
         assert!(assessment.severity >= 7);
-        std::env::remove_var("HERMES_TRIGGER_TRIAGE_MODE");
+        crate::env_vars::remove_var("HERMES_TRIGGER_TRIAGE_MODE");
     }
 
     #[test]
@@ -25073,7 +25073,7 @@ mod tests {
         let tmp = tempdir().expect("tempdir");
         let _home_guard = TempHomeGuard::new(tmp.path());
         let mut app = build_test_app_with_stream(tmp.path()).await;
-        std::env::remove_var("HERMES_TUI_MAX_TOOL_OUTPUT_TOTAL_CHARS");
+        crate::env_vars::remove_var("HERMES_TUI_MAX_TOOL_OUTPUT_TOTAL_CHARS");
 
         handle_slash_command(
             &mut app,
@@ -25106,12 +25106,12 @@ mod tests {
 }"#,
         )
         .expect("write manifest");
-        std::env::set_var("HERMES_OAUTH_GATE_MANIFEST_PATH", &manifest);
+        crate::env_vars::set_var("HERMES_OAUTH_GATE_MANIFEST_PATH", &manifest);
         let (ok, detail) = oauth_runtime_gate_for_provider("nous").expect("oauth gate");
         assert!(!ok);
         assert!(detail.contains("required>=99.0.0"));
         assert!(detail.contains("oauth-manifest.json"));
-        std::env::remove_var("HERMES_OAUTH_GATE_MANIFEST_PATH");
+        crate::env_vars::remove_var("HERMES_OAUTH_GATE_MANIFEST_PATH");
     }
 
     #[test]
@@ -25253,7 +25253,7 @@ mod tests {
     #[tokio::test]
     async fn guard_provider_model_selection_soft_accepts_unlisted_codex_models() {
         let _guard = env_test_lock();
-        std::env::set_var("HERMES_MODEL_CATALOG_GUARD", "1");
+        crate::env_vars::set_var("HERMES_MODEL_CATALOG_GUARD", "1");
         let (guarded, note) = guard_provider_model_selection("openai-codex:gpt-9-codex-preview")
             .await
             .expect("codex soft-accept");
@@ -25262,21 +25262,21 @@ mod tests {
             .as_deref()
             .unwrap_or_default()
             .contains("soft-accepted"));
-        std::env::remove_var("HERMES_MODEL_CATALOG_GUARD");
+        crate::env_vars::remove_var("HERMES_MODEL_CATALOG_GUARD");
     }
 
     #[test]
     fn alpha_loop_defaults_are_written_and_loadable() {
         let _guard = env_test_lock();
         let tmp = tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", tmp.path());
+        crate::env_vars::set_var("HERMES_HOME", tmp.path());
         let path = crate::alpha_runtime::write_default_alpha_loops(true).expect("write defaults");
         assert!(path.exists());
         let loops = crate::alpha_runtime::load_alpha_loops().expect("load defaults");
         assert_eq!(loops.len(), 3);
         assert!(loops.iter().any(|l| l.id == "primary-objective-loop"));
         assert!(loops.iter().all(|l| !l.trading_sensitive));
-        std::env::remove_var("HERMES_HOME");
+        crate::env_vars::remove_var("HERMES_HOME");
     }
 
     #[test]
@@ -26247,14 +26247,14 @@ install_command: "uv pip install -r requirements.txt"
     fn resolve_cli_chat_provider_model_defaults_to_config_when_no_overrides() {
         let _lock = env_test_lock();
         let prev_inference_model = std::env::var("HERMES_INFERENCE_MODEL").ok();
-        std::env::remove_var("HERMES_INFERENCE_MODEL");
+        crate::env_vars::remove_var("HERMES_INFERENCE_MODEL");
         let resolved =
             resolve_cli_chat_provider_model(Some("nous:moonshotai/kimi-k2.6"), None, None)
                 .expect("resolve");
         assert_eq!(resolved, "nous:moonshotai/kimi-k2.6");
         match prev_inference_model {
-            Some(value) => std::env::set_var("HERMES_INFERENCE_MODEL", value),
-            None => std::env::remove_var("HERMES_INFERENCE_MODEL"),
+            Some(value) => crate::env_vars::set_var("HERMES_INFERENCE_MODEL", value),
+            None => crate::env_vars::remove_var("HERMES_INFERENCE_MODEL"),
         }
     }
 
@@ -26279,11 +26279,11 @@ install_command: "uv pip install -r requirements.txt"
     #[test]
     fn resolve_cli_chat_provider_model_uses_inference_model_env_when_no_flag_override() {
         let _lock = env_test_lock();
-        std::env::set_var("HERMES_INFERENCE_MODEL", "nous:moonshotai/kimi-k2.6");
+        crate::env_vars::set_var("HERMES_INFERENCE_MODEL", "nous:moonshotai/kimi-k2.6");
         let resolved =
             resolve_cli_chat_provider_model(Some("openai:gpt-4o"), None, None).expect("resolve");
         assert_eq!(resolved, "nous:moonshotai/kimi-k2.6");
-        std::env::remove_var("HERMES_INFERENCE_MODEL");
+        crate::env_vars::remove_var("HERMES_INFERENCE_MODEL");
     }
 
     #[test]
@@ -26296,9 +26296,9 @@ install_command: "uv pip install -r requirements.txt"
             "HERMES_TUI_PROVIDER",
         ];
         for key in keys {
-            std::env::remove_var(key);
+            crate::env_vars::remove_var(key);
         }
-        std::env::set_var("HERMES_TUI_PROVIDER", "openai");
+        crate::env_vars::set_var("HERMES_TUI_PROVIDER", "openai");
 
         apply_cli_chat_runtime_env("nous:openai/gpt-5.5");
 
@@ -26320,15 +26320,15 @@ install_command: "uv pip install -r requirements.txt"
         );
 
         for key in keys {
-            std::env::remove_var(key);
+            crate::env_vars::remove_var(key);
         }
     }
 
     #[test]
     fn query_mode_tools_enabled_defaults_on_for_query_mode() {
         let _lock = env_test_lock();
-        std::env::remove_var("HERMES_QUERY_DISABLE_TOOLS");
-        std::env::remove_var("HERMES_QUERY_ALLOW_TOOLS");
+        crate::env_vars::remove_var("HERMES_QUERY_DISABLE_TOOLS");
+        crate::env_vars::remove_var("HERMES_QUERY_ALLOW_TOOLS");
         assert!(query_mode_tools_enabled(true, false));
         assert!(query_mode_tools_enabled(false, false));
     }
@@ -26336,22 +26336,22 @@ install_command: "uv pip install -r requirements.txt"
     #[test]
     fn query_mode_tools_enabled_respects_disable_env_and_flag_override() {
         let _lock = env_test_lock();
-        std::env::remove_var("HERMES_QUERY_ALLOW_TOOLS");
-        std::env::set_var("HERMES_QUERY_DISABLE_TOOLS", "1");
+        crate::env_vars::remove_var("HERMES_QUERY_ALLOW_TOOLS");
+        crate::env_vars::set_var("HERMES_QUERY_DISABLE_TOOLS", "1");
         assert!(!query_mode_tools_enabled(true, false));
         assert!(query_mode_tools_enabled(true, true));
-        std::env::remove_var("HERMES_QUERY_DISABLE_TOOLS");
+        crate::env_vars::remove_var("HERMES_QUERY_DISABLE_TOOLS");
     }
 
     #[test]
     fn query_mode_tools_enabled_respects_legacy_allow_env() {
         let _lock = env_test_lock();
-        std::env::remove_var("HERMES_QUERY_DISABLE_TOOLS");
-        std::env::remove_var("HERMES_QUERY_ALLOW_TOOLS");
+        crate::env_vars::remove_var("HERMES_QUERY_DISABLE_TOOLS");
+        crate::env_vars::remove_var("HERMES_QUERY_ALLOW_TOOLS");
         assert!(query_mode_tools_enabled(true, false));
-        std::env::set_var("HERMES_QUERY_ALLOW_TOOLS", "1");
+        crate::env_vars::set_var("HERMES_QUERY_ALLOW_TOOLS", "1");
         assert!(query_mode_tools_enabled(true, false));
-        std::env::remove_var("HERMES_QUERY_ALLOW_TOOLS");
+        crate::env_vars::remove_var("HERMES_QUERY_ALLOW_TOOLS");
     }
 
     #[test]
@@ -26381,16 +26381,16 @@ install_command: "uv pip install -r requirements.txt"
     #[test]
     fn secret_stdout_gate_defaults_false() {
         let _lock = env_test_lock();
-        std::env::remove_var("HERMES_ALLOW_SECRET_STDOUT");
+        crate::env_vars::remove_var("HERMES_ALLOW_SECRET_STDOUT");
         assert!(!secret_stdout_allowed());
     }
 
     #[test]
     fn secret_stdout_gate_accepts_truthy_values() {
         let _lock = env_test_lock();
-        std::env::set_var("HERMES_ALLOW_SECRET_STDOUT", "yes");
+        crate::env_vars::set_var("HERMES_ALLOW_SECRET_STDOUT", "yes");
         assert!(secret_stdout_allowed());
-        std::env::remove_var("HERMES_ALLOW_SECRET_STDOUT");
+        crate::env_vars::remove_var("HERMES_ALLOW_SECRET_STDOUT");
     }
 
     #[test]

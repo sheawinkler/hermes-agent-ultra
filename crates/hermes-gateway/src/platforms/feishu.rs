@@ -1151,7 +1151,7 @@ impl FeishuCard {
             value,
             url: None,
         };
-        if let Some(CardElement::Action { ref mut actions }) = self.elements.last_mut() {
+        if let Some(CardElement::Action { actions }) = self.elements.last_mut() {
             actions.push(action);
         } else {
             self.elements.push(CardElement::Action {

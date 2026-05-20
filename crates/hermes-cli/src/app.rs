@@ -431,7 +431,7 @@ impl App {
         if current == next {
             return false;
         }
-        std::env::set_var(key, next);
+        crate::env_vars::set_var(key, next);
         true
     }
 
@@ -1163,7 +1163,7 @@ impl App {
             Some(_) => true,
         };
         if should_override {
-            std::env::set_var("CONTEXTLATTICE_TOPIC_PATH", &target_topic);
+            crate::env_vars::set_var("CONTEXTLATTICE_TOPIC_PATH", &target_topic);
             Self::emit_lifecycle_event(
                 &self.stream_handle_shared,
                 format!(
@@ -1934,56 +1934,56 @@ impl App {
             .map(|v| v.trim().is_empty())
             .unwrap_or(true)
         {
-            std::env::set_var("HERMES_SKILL_GUARD_MODE", "off");
+            crate::env_vars::set_var("HERMES_SKILL_GUARD_MODE", "off");
         }
         if std::env::var("HERMES_GUARD_MODE")
             .ok()
             .map(|v| v.trim().is_empty())
             .unwrap_or(true)
         {
-            std::env::set_var("HERMES_GUARD_MODE", "off");
+            crate::env_vars::set_var("HERMES_GUARD_MODE", "off");
         }
         if std::env::var("HERMES_TOOL_POLICY_PRESET")
             .ok()
             .map(|v| v.trim().is_empty())
             .unwrap_or(true)
         {
-            std::env::set_var("HERMES_TOOL_POLICY_PRESET", "dev");
+            crate::env_vars::set_var("HERMES_TOOL_POLICY_PRESET", "dev");
         }
         if std::env::var("HERMES_TOOL_POLICY_MODE")
             .ok()
             .map(|v| v.trim().is_empty())
             .unwrap_or(true)
         {
-            std::env::set_var("HERMES_TOOL_POLICY_MODE", "audit");
+            crate::env_vars::set_var("HERMES_TOOL_POLICY_MODE", "audit");
         }
         if std::env::var("HERMES_REPO_REVIEW_BUDGET_PROFILE")
             .ok()
             .map(|v| v.trim().is_empty())
             .unwrap_or(true)
         {
-            std::env::set_var("HERMES_REPO_REVIEW_BUDGET_PROFILE", "off");
+            crate::env_vars::set_var("HERMES_REPO_REVIEW_BUDGET_PROFILE", "off");
         }
         if std::env::var("HERMES_MAX_ITERATIONS")
             .ok()
             .map(|v| v.trim().is_empty())
             .unwrap_or(true)
         {
-            std::env::set_var("HERMES_MAX_ITERATIONS", "250");
+            crate::env_vars::set_var("HERMES_MAX_ITERATIONS", "250");
         }
         if std::env::var("HERMES_TOOL_CALL_MAX_CONCURRENCY")
             .ok()
             .map(|v| v.trim().is_empty())
             .unwrap_or(true)
         {
-            std::env::set_var("HERMES_TOOL_CALL_MAX_CONCURRENCY", "12");
+            crate::env_vars::set_var("HERMES_TOOL_CALL_MAX_CONCURRENCY", "12");
         }
         if std::env::var("HERMES_MAX_DELEGATE_DEPTH")
             .ok()
             .map(|v| v.trim().is_empty())
             .unwrap_or(true)
         {
-            std::env::set_var("HERMES_MAX_DELEGATE_DEPTH", "4");
+            crate::env_vars::set_var("HERMES_MAX_DELEGATE_DEPTH", "4");
         }
     }
 
@@ -3815,7 +3815,7 @@ mod tests {
         let _guard = env_test_lock();
         let prev_home = std::env::var("HERMES_HOME").ok();
         let tmp = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", tmp.path());
+        crate::env_vars::set_var("HERMES_HOME", tmp.path());
 
         let _ = set_quorum_policy(
             true,
@@ -3858,8 +3858,8 @@ mod tests {
         );
 
         match prev_home {
-            Some(v) => std::env::set_var("HERMES_HOME", v),
-            None => std::env::remove_var("HERMES_HOME"),
+            Some(v) => crate::env_vars::set_var("HERMES_HOME", v),
+            None => crate::env_vars::remove_var("HERMES_HOME"),
         }
     }
 
@@ -3891,7 +3891,7 @@ mod tests {
         let _guard = env_test_lock();
         let prev_home = std::env::var("HERMES_HOME").ok();
         let tmp = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", tmp.path());
+        crate::env_vars::set_var("HERMES_HOME", tmp.path());
 
         let _ = set_quorum_policy(
             true,
@@ -3946,8 +3946,8 @@ mod tests {
         );
 
         match prev_home {
-            Some(v) => std::env::set_var("HERMES_HOME", v),
-            None => std::env::remove_var("HERMES_HOME"),
+            Some(v) => crate::env_vars::set_var("HERMES_HOME", v),
+            None => crate::env_vars::remove_var("HERMES_HOME"),
         }
     }
 
@@ -3956,7 +3956,7 @@ mod tests {
         let _guard = env_test_lock();
         let prev_home = std::env::var("HERMES_HOME").ok();
         let tmp = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", tmp.path());
+        crate::env_vars::set_var("HERMES_HOME", tmp.path());
 
         let mut app = build_minimal_test_app();
         app.session_id = "resume-test".to_string();
@@ -3989,8 +3989,8 @@ mod tests {
         );
 
         match prev_home {
-            Some(val) => std::env::set_var("HERMES_HOME", val),
-            None => std::env::remove_var("HERMES_HOME"),
+            Some(val) => crate::env_vars::set_var("HERMES_HOME", val),
+            None => crate::env_vars::remove_var("HERMES_HOME"),
         }
     }
 
@@ -4088,10 +4088,10 @@ mod tests {
         let prev_max_total = std::env::var("HERMES_SESSION_SNAPSHOT_MAX_TOTAL_BYTES").ok();
         let prev_min_free = std::env::var("HERMES_SESSION_SNAPSHOT_MIN_FREE_BYTES").ok();
         let tmp = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", tmp.path());
-        std::env::set_var("HERMES_SESSION_SNAPSHOT_MAX_FILES", "2");
-        std::env::set_var("HERMES_SESSION_SNAPSHOT_MAX_TOTAL_BYTES", "999999999");
-        std::env::set_var("HERMES_SESSION_SNAPSHOT_MIN_FREE_BYTES", "0");
+        crate::env_vars::set_var("HERMES_HOME", tmp.path());
+        crate::env_vars::set_var("HERMES_SESSION_SNAPSHOT_MAX_FILES", "2");
+        crate::env_vars::set_var("HERMES_SESSION_SNAPSHOT_MAX_TOTAL_BYTES", "999999999");
+        crate::env_vars::set_var("HERMES_SESSION_SNAPSHOT_MIN_FREE_BYTES", "0");
 
         let mut app = build_minimal_test_app();
         app.session_id = "snap-prune".to_string();
@@ -4119,20 +4119,20 @@ mod tests {
         assert_eq!(remaining.len(), 2, "snapshot file count should be capped");
 
         match prev_min_free {
-            Some(v) => std::env::set_var("HERMES_SESSION_SNAPSHOT_MIN_FREE_BYTES", v),
-            None => std::env::remove_var("HERMES_SESSION_SNAPSHOT_MIN_FREE_BYTES"),
+            Some(v) => crate::env_vars::set_var("HERMES_SESSION_SNAPSHOT_MIN_FREE_BYTES", v),
+            None => crate::env_vars::remove_var("HERMES_SESSION_SNAPSHOT_MIN_FREE_BYTES"),
         }
         match prev_max_total {
-            Some(v) => std::env::set_var("HERMES_SESSION_SNAPSHOT_MAX_TOTAL_BYTES", v),
-            None => std::env::remove_var("HERMES_SESSION_SNAPSHOT_MAX_TOTAL_BYTES"),
+            Some(v) => crate::env_vars::set_var("HERMES_SESSION_SNAPSHOT_MAX_TOTAL_BYTES", v),
+            None => crate::env_vars::remove_var("HERMES_SESSION_SNAPSHOT_MAX_TOTAL_BYTES"),
         }
         match prev_max_files {
-            Some(v) => std::env::set_var("HERMES_SESSION_SNAPSHOT_MAX_FILES", v),
-            None => std::env::remove_var("HERMES_SESSION_SNAPSHOT_MAX_FILES"),
+            Some(v) => crate::env_vars::set_var("HERMES_SESSION_SNAPSHOT_MAX_FILES", v),
+            None => crate::env_vars::remove_var("HERMES_SESSION_SNAPSHOT_MAX_FILES"),
         }
         match prev_home {
-            Some(v) => std::env::set_var("HERMES_HOME", v),
-            None => std::env::remove_var("HERMES_HOME"),
+            Some(v) => crate::env_vars::set_var("HERMES_HOME", v),
+            None => crate::env_vars::remove_var("HERMES_HOME"),
         }
     }
 
@@ -4242,11 +4242,11 @@ mod tests {
 
     #[test]
     fn test_build_agent_config_maps_failover_chain_from_env() {
-        std::env::set_var(
+        crate::env_vars::set_var(
             "HERMES_FALLBACK_MODELS",
             "nous:moonshotai/kimi-k2.6,openai:gpt-4o-mini",
         );
-        std::env::remove_var("HERMES_FALLBACK_MODEL");
+        crate::env_vars::remove_var("HERMES_FALLBACK_MODEL");
         let cfg = GatewayConfig::default();
         let agent_cfg = build_agent_config(&cfg, "nous:openai/gpt-5.5");
         assert_eq!(
@@ -4260,13 +4260,13 @@ mod tests {
                 "openai:gpt-4o-mini".to_string()
             ]
         );
-        std::env::remove_var("HERMES_FALLBACK_MODELS");
+        crate::env_vars::remove_var("HERMES_FALLBACK_MODELS");
     }
 
     #[test]
     fn test_build_agent_config_maps_single_failover_model_from_env() {
-        std::env::remove_var("HERMES_FALLBACK_MODELS");
-        std::env::set_var("HERMES_FALLBACK_MODEL", "anthropic:claude-3-5-sonnet");
+        crate::env_vars::remove_var("HERMES_FALLBACK_MODELS");
+        crate::env_vars::set_var("HERMES_FALLBACK_MODEL", "anthropic:claude-3-5-sonnet");
         let cfg = GatewayConfig::default();
         let agent_cfg = build_agent_config(&cfg, "nous:openai/gpt-5.5");
         assert_eq!(
@@ -4277,7 +4277,7 @@ mod tests {
             agent_cfg.retry.fallback_models,
             vec!["anthropic:claude-3-5-sonnet".to_string()]
         );
-        std::env::remove_var("HERMES_FALLBACK_MODEL");
+        crate::env_vars::remove_var("HERMES_FALLBACK_MODEL");
     }
 
     #[test]
@@ -4317,9 +4317,9 @@ mod tests {
             "HERMES_TUI_PROVIDER",
         ];
         for key in keys {
-            std::env::remove_var(key);
+            crate::env_vars::remove_var(key);
         }
-        std::env::set_var("HERMES_TUI_PROVIDER", "openai");
+        crate::env_vars::set_var("HERMES_TUI_PROVIDER", "openai");
 
         sync_runtime_model_env(&cfg, "anthropic:claude-sonnet-4-6");
 
@@ -4341,7 +4341,7 @@ mod tests {
         );
 
         for key in keys {
-            std::env::remove_var(key);
+            crate::env_vars::remove_var(key);
         }
     }
 
@@ -4349,35 +4349,35 @@ mod tests {
     fn test_provider_api_key_from_env_supports_stepfun() {
         let hermes_var = "HERMES_STEPFUN_API_KEY";
         let stepfun_var = "STEPFUN_API_KEY";
-        std::env::remove_var(hermes_var);
-        std::env::remove_var(stepfun_var);
+        crate::env_vars::remove_var(hermes_var);
+        crate::env_vars::remove_var(stepfun_var);
 
-        std::env::set_var(stepfun_var, "stepfun-direct");
+        crate::env_vars::set_var(stepfun_var, "stepfun-direct");
         assert_eq!(
             provider_api_key_from_env("stepfun").as_deref(),
             Some("stepfun-direct")
         );
 
-        std::env::set_var(hermes_var, "stepfun-hermes");
+        crate::env_vars::set_var(hermes_var, "stepfun-hermes");
         assert_eq!(
             provider_api_key_from_env("stepfun").as_deref(),
             Some("stepfun-hermes")
         );
 
-        std::env::remove_var(hermes_var);
-        std::env::remove_var(stepfun_var);
+        crate::env_vars::remove_var(hermes_var);
+        crate::env_vars::remove_var(stepfun_var);
     }
 
     #[test]
     fn test_provider_api_key_from_env_supports_openai_codex() {
         let var = "HERMES_OPENAI_CODEX_API_KEY";
-        std::env::remove_var(var);
-        std::env::set_var(var, "codex-oauth-token");
+        crate::env_vars::remove_var(var);
+        crate::env_vars::set_var(var, "codex-oauth-token");
         assert_eq!(
             provider_api_key_from_env("openai-codex").as_deref(),
             Some("codex-oauth-token")
         );
-        std::env::remove_var(var);
+        crate::env_vars::remove_var(var);
     }
 
     #[test]
@@ -4385,66 +4385,66 @@ mod tests {
         let primary = "ANTHROPIC_API_KEY";
         let secondary = "ANTHROPIC_TOKEN";
         let tertiary = "CLAUDE_CODE_OAUTH_TOKEN";
-        std::env::remove_var(primary);
-        std::env::remove_var(secondary);
-        std::env::remove_var(tertiary);
+        crate::env_vars::remove_var(primary);
+        crate::env_vars::remove_var(secondary);
+        crate::env_vars::remove_var(tertiary);
 
-        std::env::set_var(tertiary, "claude-oauth-token");
+        crate::env_vars::set_var(tertiary, "claude-oauth-token");
         assert_eq!(
             provider_api_key_from_env("anthropic").as_deref(),
             Some("claude-oauth-token")
         );
 
-        std::env::set_var(secondary, "anthropic-token");
+        crate::env_vars::set_var(secondary, "anthropic-token");
         assert_eq!(
             provider_api_key_from_env("anthropic").as_deref(),
             Some("anthropic-token")
         );
 
-        std::env::set_var(primary, "anthropic-api-key");
+        crate::env_vars::set_var(primary, "anthropic-api-key");
         assert_eq!(
             provider_api_key_from_env("anthropic").as_deref(),
             Some("anthropic-api-key")
         );
 
-        std::env::remove_var(primary);
-        std::env::remove_var(secondary);
-        std::env::remove_var(tertiary);
+        crate::env_vars::remove_var(primary);
+        crate::env_vars::remove_var(secondary);
+        crate::env_vars::remove_var(tertiary);
     }
 
     #[test]
     fn test_provider_api_key_from_env_supports_qwen_oauth() {
         let oauth_var = "HERMES_QWEN_OAUTH_API_KEY";
         let fallback_var = "DASHSCOPE_API_KEY";
-        std::env::remove_var(oauth_var);
-        std::env::remove_var(fallback_var);
+        crate::env_vars::remove_var(oauth_var);
+        crate::env_vars::remove_var(fallback_var);
 
-        std::env::set_var(fallback_var, "dashscope-fallback");
+        crate::env_vars::set_var(fallback_var, "dashscope-fallback");
         assert_eq!(
             provider_api_key_from_env("qwen-oauth").as_deref(),
             Some("dashscope-fallback")
         );
 
-        std::env::set_var(oauth_var, "qwen-oauth-token");
+        crate::env_vars::set_var(oauth_var, "qwen-oauth-token");
         assert_eq!(
             provider_api_key_from_env("qwen-oauth").as_deref(),
             Some("qwen-oauth-token")
         );
 
-        std::env::remove_var(oauth_var);
-        std::env::remove_var(fallback_var);
+        crate::env_vars::remove_var(oauth_var);
+        crate::env_vars::remove_var(fallback_var);
     }
 
     #[test]
     fn test_provider_api_key_from_env_supports_google_gemini_cli() {
         let var = "HERMES_GEMINI_OAUTH_API_KEY";
-        std::env::remove_var(var);
-        std::env::set_var(var, "google-gemini-oauth-token");
+        crate::env_vars::remove_var(var);
+        crate::env_vars::set_var(var, "google-gemini-oauth-token");
         assert_eq!(
             provider_api_key_from_env("google-gemini-cli").as_deref(),
             Some("google-gemini-oauth-token")
         );
-        std::env::remove_var(var);
+        crate::env_vars::remove_var(var);
     }
 
     #[test]
@@ -4469,14 +4469,14 @@ mod tests {
             ("GLM_API_KEY", "zai"),
         ];
         for (env_var, provider) in checks {
-            std::env::remove_var(env_var);
+            crate::env_vars::remove_var(env_var);
             let expected = format!("token-for-{provider}");
-            std::env::set_var(env_var, expected.clone());
+            crate::env_vars::set_var(env_var, expected.clone());
             assert_eq!(
                 provider_api_key_from_env(provider).as_deref(),
                 Some(expected.as_str())
             );
-            std::env::remove_var(env_var);
+            crate::env_vars::remove_var(env_var);
         }
     }
 
@@ -4527,42 +4527,42 @@ mod tests {
 
     #[test]
     fn test_default_mouse_enabled_respects_env_override() {
-        std::env::remove_var("HERMES_TUI_MOUSE");
+        crate::env_vars::remove_var("HERMES_TUI_MOUSE");
         assert!(!default_mouse_enabled());
 
-        std::env::set_var("HERMES_TUI_MOUSE", "off");
+        crate::env_vars::set_var("HERMES_TUI_MOUSE", "off");
         assert!(!default_mouse_enabled());
 
-        std::env::set_var("HERMES_TUI_MOUSE", "1");
+        crate::env_vars::set_var("HERMES_TUI_MOUSE", "1");
         assert!(default_mouse_enabled());
 
-        std::env::remove_var("HERMES_TUI_MOUSE");
+        crate::env_vars::remove_var("HERMES_TUI_MOUSE");
     }
 
     #[test]
     fn test_contextlattice_orchestrator_url_prefers_contextlattice_env_then_memmcp() {
         let _lock = env_test_lock();
-        std::env::remove_var("CONTEXTLATTICE_ORCHESTRATOR_URL");
-        std::env::remove_var("MEMMCP_ORCHESTRATOR_URL");
+        crate::env_vars::remove_var("CONTEXTLATTICE_ORCHESTRATOR_URL");
+        crate::env_vars::remove_var("MEMMCP_ORCHESTRATOR_URL");
         assert_eq!(
             App::contextlattice_orchestrator_url(),
             "http://127.0.0.1:8075"
         );
 
-        std::env::set_var("MEMMCP_ORCHESTRATOR_URL", "http://127.0.0.1:9999/");
+        crate::env_vars::set_var("MEMMCP_ORCHESTRATOR_URL", "http://127.0.0.1:9999/");
         assert_eq!(
             App::contextlattice_orchestrator_url(),
             "http://127.0.0.1:9999"
         );
 
-        std::env::set_var("CONTEXTLATTICE_ORCHESTRATOR_URL", "http://127.0.0.1:7777/");
+        crate::env_vars::set_var("CONTEXTLATTICE_ORCHESTRATOR_URL", "http://127.0.0.1:7777/");
         assert_eq!(
             App::contextlattice_orchestrator_url(),
             "http://127.0.0.1:7777"
         );
 
-        std::env::remove_var("CONTEXTLATTICE_ORCHESTRATOR_URL");
-        std::env::remove_var("MEMMCP_ORCHESTRATOR_URL");
+        crate::env_vars::remove_var("CONTEXTLATTICE_ORCHESTRATOR_URL");
+        crate::env_vars::remove_var("MEMMCP_ORCHESTRATOR_URL");
     }
 
     #[test]
@@ -4570,11 +4570,11 @@ mod tests {
         let _lock = env_test_lock();
         let prev_home = std::env::var("HERMES_HOME").ok();
         let tmp = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", tmp.path());
-        std::env::set_var("HERMES_RUNTIME_PROMPT_REFORMULATION", "1");
-        std::env::set_var("HERMES_RUNTIME_CONTRADICTION_SELF_CHECK", "1");
-        std::env::set_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE", "focus");
-        std::env::set_var(
+        crate::env_vars::set_var("HERMES_HOME", tmp.path());
+        crate::env_vars::set_var("HERMES_RUNTIME_PROMPT_REFORMULATION", "1");
+        crate::env_vars::set_var("HERMES_RUNTIME_CONTRADICTION_SELF_CHECK", "1");
+        crate::env_vars::set_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE", "focus");
+        crate::env_vars::set_var(
             "CONTEXTLATTICE_TOPIC_PATH",
             "runbooks/objective/test-objective",
         );
@@ -4607,20 +4607,20 @@ mod tests {
         assert_eq!(messages[1].role, hermes_core::MessageRole::User);
 
         match prev_home {
-            Some(val) => std::env::set_var("HERMES_HOME", val),
-            None => std::env::remove_var("HERMES_HOME"),
+            Some(val) => crate::env_vars::set_var("HERMES_HOME", val),
+            None => crate::env_vars::remove_var("HERMES_HOME"),
         }
-        std::env::remove_var("HERMES_RUNTIME_PROMPT_REFORMULATION");
-        std::env::remove_var("HERMES_RUNTIME_CONTRADICTION_SELF_CHECK");
-        std::env::remove_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE");
-        std::env::remove_var("CONTEXTLATTICE_TOPIC_PATH");
+        crate::env_vars::remove_var("HERMES_RUNTIME_PROMPT_REFORMULATION");
+        crate::env_vars::remove_var("HERMES_RUNTIME_CONTRADICTION_SELF_CHECK");
+        crate::env_vars::remove_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE");
+        crate::env_vars::remove_var("CONTEXTLATTICE_TOPIC_PATH");
     }
 
     #[test]
     fn test_runtime_reformulation_caps_long_prompt_preview_without_losing_user_message() {
         let _lock = env_test_lock();
-        std::env::set_var("HERMES_RUNTIME_PROMPT_REFORMULATION", "1");
-        std::env::set_var("HERMES_RUNTIME_REFORMULATION_PROMPT_PREVIEW_CHARS", "48");
+        crate::env_vars::set_var("HERMES_RUNTIME_PROMPT_REFORMULATION", "1");
+        crate::env_vars::set_var("HERMES_RUNTIME_REFORMULATION_PROMPT_PREVIEW_CHARS", "48");
 
         let long_prompt =
             "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu".repeat(12);
@@ -4640,8 +4640,8 @@ mod tests {
             long_prompt
         );
 
-        std::env::remove_var("HERMES_RUNTIME_PROMPT_REFORMULATION");
-        std::env::remove_var("HERMES_RUNTIME_REFORMULATION_PROMPT_PREVIEW_CHARS");
+        crate::env_vars::remove_var("HERMES_RUNTIME_PROMPT_REFORMULATION");
+        crate::env_vars::remove_var("HERMES_RUNTIME_REFORMULATION_PROMPT_PREVIEW_CHARS");
     }
 
     #[test]
@@ -4674,7 +4674,7 @@ mod tests {
     #[test]
     fn test_build_inference_messages_respects_reformulation_toggle_off() {
         let _lock = env_test_lock();
-        std::env::set_var("HERMES_RUNTIME_PROMPT_REFORMULATION", "off");
+        crate::env_vars::set_var("HERMES_RUNTIME_PROMPT_REFORMULATION", "off");
         let mut app = build_minimal_test_app();
         app.messages
             .push(hermes_core::Message::user("plain request"));
@@ -4682,7 +4682,7 @@ mod tests {
         assert!(!injected);
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].role, hermes_core::MessageRole::User);
-        std::env::remove_var("HERMES_RUNTIME_PROMPT_REFORMULATION");
+        crate::env_vars::remove_var("HERMES_RUNTIME_PROMPT_REFORMULATION");
     }
 
     #[test]
@@ -4700,8 +4700,8 @@ mod tests {
         let _lock = env_test_lock();
         let prev_home = std::env::var("HERMES_HOME").ok();
         let tmp = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", tmp.path());
-        std::env::set_var("HERMES_OBJECTIVE_EXECUTION_ENFORCER", "1");
+        crate::env_vars::set_var("HERMES_HOME", tmp.path());
+        crate::env_vars::set_var("HERMES_OBJECTIVE_EXECUTION_ENFORCER", "1");
 
         let mut app = build_minimal_test_app();
         app.messages.push(hermes_core::Message::user(
@@ -4730,10 +4730,10 @@ mod tests {
         assert!(reason.is_some());
 
         match prev_home {
-            Some(val) => std::env::set_var("HERMES_HOME", val),
-            None => std::env::remove_var("HERMES_HOME"),
+            Some(val) => crate::env_vars::set_var("HERMES_HOME", val),
+            None => crate::env_vars::remove_var("HERMES_HOME"),
         }
-        std::env::remove_var("HERMES_OBJECTIVE_EXECUTION_ENFORCER");
+        crate::env_vars::remove_var("HERMES_OBJECTIVE_EXECUTION_ENFORCER");
     }
 
     #[test]
@@ -4757,7 +4757,7 @@ mod tests {
     fn test_load_pet_settings_uses_persisted_file_if_present() {
         let _lock = env_test_lock();
         let tmp = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", tmp.path());
+        crate::env_vars::set_var("HERMES_HOME", tmp.path());
         std::fs::write(
             tmp.path().join("pet.json"),
             r#"{"enabled":true,"species":"fox","mood":"hyped","dock":"left","tick_ms":180}"#,
@@ -4769,21 +4769,21 @@ mod tests {
         assert_eq!(loaded.mood, "hyped");
         assert_eq!(loaded.dock, PetDock::Left);
         assert_eq!(loaded.tick_ms, 180);
-        std::env::remove_var("HERMES_HOME");
+        crate::env_vars::remove_var("HERMES_HOME");
     }
 
     #[test]
     fn test_default_rtk_raw_mode_respects_env_override() {
-        std::env::remove_var("HERMES_RTK_RAW");
+        crate::env_vars::remove_var("HERMES_RTK_RAW");
         assert!(!default_rtk_raw_mode());
 
-        std::env::set_var("HERMES_RTK_RAW", "on");
+        crate::env_vars::set_var("HERMES_RTK_RAW", "on");
         assert!(default_rtk_raw_mode());
 
-        std::env::set_var("HERMES_RTK_RAW", "0");
+        crate::env_vars::set_var("HERMES_RTK_RAW", "0");
         assert!(!default_rtk_raw_mode());
 
-        std::env::remove_var("HERMES_RTK_RAW");
+        crate::env_vars::remove_var("HERMES_RTK_RAW");
     }
 
     #[test]
@@ -4839,13 +4839,13 @@ mod tests {
     #[test]
     fn test_quorum_zero_env_no_longer_means_unbounded() {
         let _lock = env_test_lock();
-        std::env::remove_var("HERMES_QUORUM_VOTER_PASSES");
+        crate::env_vars::remove_var("HERMES_QUORUM_VOTER_PASSES");
         assert_eq!(App::quorum_voter_passes(), QUORUM_DEFAULT_VOTER_PASSES);
-        std::env::set_var("HERMES_QUORUM_VOTER_PASSES", "0");
+        crate::env_vars::set_var("HERMES_QUORUM_VOTER_PASSES", "0");
         assert_eq!(App::quorum_voter_passes(), QUORUM_DEFAULT_VOTER_PASSES);
-        std::env::set_var("HERMES_QUORUM_VOTER_PASSES", "max");
+        crate::env_vars::set_var("HERMES_QUORUM_VOTER_PASSES", "max");
         assert_eq!(App::quorum_voter_passes(), 16);
-        std::env::remove_var("HERMES_QUORUM_VOTER_PASSES");
+        crate::env_vars::remove_var("HERMES_QUORUM_VOTER_PASSES");
     }
 
     #[test]
@@ -4886,11 +4886,11 @@ mod tests {
     #[test]
     fn test_auto_nous_reauth_toggle_defaults_on() {
         let _guard = env_test_lock();
-        std::env::remove_var("HERMES_AUTO_NOUS_REAUTH");
+        crate::env_vars::remove_var("HERMES_AUTO_NOUS_REAUTH");
         assert!(App::auto_nous_reauth_enabled());
-        std::env::set_var("HERMES_AUTO_NOUS_REAUTH", "0");
+        crate::env_vars::set_var("HERMES_AUTO_NOUS_REAUTH", "0");
         assert!(!App::auto_nous_reauth_enabled());
-        std::env::remove_var("HERMES_AUTO_NOUS_REAUTH");
+        crate::env_vars::remove_var("HERMES_AUTO_NOUS_REAUTH");
     }
 
     #[test]
@@ -5000,9 +5000,9 @@ mod tests {
         let prev_toggle = std::env::var("HERMES_OBJECTIVE_CONTEXT_AUTOPIN").ok();
 
         let tmp = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", tmp.path());
-        std::env::set_var("CONTEXTLATTICE_TOPIC_PATH", "runbooks/hermes");
-        std::env::set_var("HERMES_OBJECTIVE_CONTEXT_AUTOPIN", "1");
+        crate::env_vars::set_var("HERMES_HOME", tmp.path());
+        crate::env_vars::set_var("CONTEXTLATTICE_TOPIC_PATH", "runbooks/hermes");
+        crate::env_vars::set_var("HERMES_OBJECTIVE_CONTEXT_AUTOPIN", "1");
 
         let contract = upsert_objective_contract("grow wallet safely", true).expect("objective");
         let app = build_minimal_test_app();
@@ -5014,16 +5014,16 @@ mod tests {
         );
 
         match prev_toggle {
-            Some(v) => std::env::set_var("HERMES_OBJECTIVE_CONTEXT_AUTOPIN", v),
-            None => std::env::remove_var("HERMES_OBJECTIVE_CONTEXT_AUTOPIN"),
+            Some(v) => crate::env_vars::set_var("HERMES_OBJECTIVE_CONTEXT_AUTOPIN", v),
+            None => crate::env_vars::remove_var("HERMES_OBJECTIVE_CONTEXT_AUTOPIN"),
         }
         match prev_topic {
-            Some(v) => std::env::set_var("CONTEXTLATTICE_TOPIC_PATH", v),
-            None => std::env::remove_var("CONTEXTLATTICE_TOPIC_PATH"),
+            Some(v) => crate::env_vars::set_var("CONTEXTLATTICE_TOPIC_PATH", v),
+            None => crate::env_vars::remove_var("CONTEXTLATTICE_TOPIC_PATH"),
         }
         match prev_home {
-            Some(v) => std::env::set_var("HERMES_HOME", v),
-            None => std::env::remove_var("HERMES_HOME"),
+            Some(v) => crate::env_vars::set_var("HERMES_HOME", v),
+            None => crate::env_vars::remove_var("HERMES_HOME"),
         }
     }
 
@@ -5034,8 +5034,8 @@ mod tests {
         let prev_topic = std::env::var("CONTEXTLATTICE_TOPIC_PATH").ok();
 
         let tmp = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", tmp.path());
-        std::env::set_var("CONTEXTLATTICE_TOPIC_PATH", "runbooks/custom/keep-me");
+        crate::env_vars::set_var("HERMES_HOME", tmp.path());
+        crate::env_vars::set_var("CONTEXTLATTICE_TOPIC_PATH", "runbooks/custom/keep-me");
 
         let _contract =
             upsert_objective_contract("objective override regression test", false).expect("obj");
@@ -5047,12 +5047,12 @@ mod tests {
         );
 
         match prev_topic {
-            Some(v) => std::env::set_var("CONTEXTLATTICE_TOPIC_PATH", v),
-            None => std::env::remove_var("CONTEXTLATTICE_TOPIC_PATH"),
+            Some(v) => crate::env_vars::set_var("CONTEXTLATTICE_TOPIC_PATH", v),
+            None => crate::env_vars::remove_var("CONTEXTLATTICE_TOPIC_PATH"),
         }
         match prev_home {
-            Some(v) => std::env::set_var("HERMES_HOME", v),
-            None => std::env::remove_var("HERMES_HOME"),
+            Some(v) => crate::env_vars::set_var("HERMES_HOME", v),
+            None => crate::env_vars::remove_var("HERMES_HOME"),
         }
     }
 }
@@ -5378,11 +5378,11 @@ fn sync_runtime_model_env(config: &GatewayConfig, provider_model: &str) {
         return;
     }
     let (provider, _) = resolve_provider_and_model(config, model);
-    std::env::set_var("HERMES_MODEL", model);
-    std::env::set_var("HERMES_INFERENCE_MODEL", model);
-    std::env::set_var("HERMES_INFERENCE_PROVIDER", provider.as_str());
+    crate::env_vars::set_var("HERMES_MODEL", model);
+    crate::env_vars::set_var("HERMES_INFERENCE_MODEL", model);
+    crate::env_vars::set_var("HERMES_INFERENCE_PROVIDER", provider.as_str());
     if std::env::var_os("HERMES_TUI_PROVIDER").is_some() {
-        std::env::set_var("HERMES_TUI_PROVIDER", provider.as_str());
+        crate::env_vars::set_var("HERMES_TUI_PROVIDER", provider.as_str());
     }
 }
 

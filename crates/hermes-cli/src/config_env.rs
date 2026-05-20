@@ -129,7 +129,7 @@ fn set_if_absent_owned<K: Into<String>>(key: K, value: String) -> usize {
     if value.is_empty() || std::env::var_os(&key).is_some() {
         return 0;
     }
-    std::env::set_var(key, value);
+    crate::env_vars::set_var(key, value);
     1
 }
 
@@ -193,8 +193,8 @@ mod tests {
         fn drop(&mut self) {
             for (key, original) in &self.pairs {
                 match original {
-                    Some(v) => std::env::set_var(key, v),
-                    None => std::env::remove_var(key),
+                    Some(v) => crate::env_vars::set_var(key, v),
+                    None => crate::env_vars::remove_var(key),
                 }
             }
         }
@@ -210,11 +210,11 @@ mod tests {
             "HERMES_PLATFORM_DISCORD_ALLOWED_USERS",
             "DISCORD_CUSTOM_FLAG",
         ]);
-        std::env::remove_var("HERMES_MODEL");
-        std::env::remove_var("HERMES_MAX_TURNS");
-        std::env::remove_var("DISCORD_ALLOWED_USERS");
-        std::env::remove_var("HERMES_PLATFORM_DISCORD_ALLOWED_USERS");
-        std::env::remove_var("DISCORD_CUSTOM_FLAG");
+        crate::env_vars::remove_var("HERMES_MODEL");
+        crate::env_vars::remove_var("HERMES_MAX_TURNS");
+        crate::env_vars::remove_var("DISCORD_ALLOWED_USERS");
+        crate::env_vars::remove_var("HERMES_PLATFORM_DISCORD_ALLOWED_USERS");
+        crate::env_vars::remove_var("DISCORD_CUSTOM_FLAG");
 
         let mut cfg = GatewayConfig {
             model: Some("openai:gpt-4o".to_string()),
@@ -257,8 +257,8 @@ mod tests {
     fn hydrate_env_never_overwrites_existing_values() {
         let _lock = ENV_TEST_LOCK.lock().expect("env test lock");
         let _guard = EnvGuard::capture(&["HERMES_MODEL", "DISCORD_ALLOWED_USERS"]);
-        std::env::set_var("HERMES_MODEL", "existing:model");
-        std::env::set_var("DISCORD_ALLOWED_USERS", "from-env");
+        crate::env_vars::set_var("HERMES_MODEL", "existing:model");
+        crate::env_vars::set_var("DISCORD_ALLOWED_USERS", "from-env");
 
         let mut cfg = GatewayConfig {
             model: Some("openai:gpt-4o".to_string()),

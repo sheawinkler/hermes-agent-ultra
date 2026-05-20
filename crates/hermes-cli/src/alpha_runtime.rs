@@ -3495,7 +3495,7 @@ mod tests {
     impl ScopedHermesHome {
         fn set(path: &Path) -> Self {
             let previous = std::env::var_os("HERMES_HOME");
-            std::env::set_var("HERMES_HOME", path);
+            crate::env_vars::set_var("HERMES_HOME", path);
             Self { previous }
         }
     }
@@ -3503,8 +3503,8 @@ mod tests {
     impl Drop for ScopedHermesHome {
         fn drop(&mut self) {
             match self.previous.take() {
-                Some(value) => std::env::set_var("HERMES_HOME", value),
-                None => std::env::remove_var("HERMES_HOME"),
+                Some(value) => crate::env_vars::set_var("HERMES_HOME", value),
+                None => crate::env_vars::remove_var("HERMES_HOME"),
             }
         }
     }

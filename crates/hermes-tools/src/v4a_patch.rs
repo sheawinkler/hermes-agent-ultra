@@ -176,7 +176,7 @@ pub fn parse_v4a_patch(patch_content: &str) -> (Vec<PatchOperation>, Option<Stri
         } else if line.starts_with("@@") {
             if current_op.is_some() {
                 // Save current hunk if it has lines
-                if let Some(ref mut op) = current_op {
+                if let Some(op) = &mut current_op {
                     if let Some(hunk) = current_hunk.take() {
                         if !hunk.lines.is_empty() {
                             op.hunks.push(hunk);
@@ -194,7 +194,7 @@ pub fn parse_v4a_patch(patch_content: &str) -> (Vec<PatchOperation>, Option<Stri
             if current_hunk.is_none() {
                 current_hunk = Some(Hunk::default());
             }
-            if let Some(ref mut hunk) = current_hunk {
+            if let Some(hunk) = &mut current_hunk {
                 if line.starts_with('+') {
                     hunk.lines.push(HunkLine {
                         prefix: '+',
@@ -237,7 +237,7 @@ fn finalize_op(
     current_hunk: &mut Option<Hunk>,
     operations: &mut Vec<PatchOperation>,
 ) {
-    if let Some(ref mut op) = current_op {
+    if let Some(op) = current_op {
         if let Some(hunk) = current_hunk.take() {
             if !hunk.lines.is_empty() {
                 op.hunks.push(hunk);

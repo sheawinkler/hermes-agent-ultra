@@ -540,11 +540,11 @@ mod tests {
         let _guard = env_test_lock();
         let tmp = tempfile::tempdir().expect("tempdir");
         let prev = std::env::var_os("HERMES_HOME");
-        std::env::set_var("HERMES_HOME", tmp.path());
+        crate::env_vars::set_var("HERMES_HOME", tmp.path());
         let result = f();
         match prev {
-            Some(value) => std::env::set_var("HERMES_HOME", value),
-            None => std::env::remove_var("HERMES_HOME"),
+            Some(value) => crate::env_vars::set_var("HERMES_HOME", value),
+            None => crate::env_vars::remove_var("HERMES_HOME"),
         }
         result
     }
@@ -593,7 +593,7 @@ mod tests {
     #[test]
     fn contextlattice_checkpoint_disabled_path() {
         with_temp_home(|| {
-            std::env::set_var("HERMES_KANBAN_CONTEXTLATTICE_SYNC", "0");
+            crate::env_vars::set_var("HERMES_KANBAN_CONTEXTLATTICE_SYNC", "0");
             let board = KanbanBoard {
                 id: "main".to_string(),
                 name: "Main".to_string(),
@@ -614,7 +614,7 @@ mod tests {
                 },
             );
             assert!(!res.attempted);
-            std::env::remove_var("HERMES_KANBAN_CONTEXTLATTICE_SYNC");
+            crate::env_vars::remove_var("HERMES_KANBAN_CONTEXTLATTICE_SYNC");
         });
     }
 }

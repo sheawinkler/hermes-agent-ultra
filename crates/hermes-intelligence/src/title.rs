@@ -158,23 +158,23 @@ mod tests {
 
     #[test]
     fn test_truncate_messages() {
-        let gen = TitleGenerator::for_test();
+        let generator = TitleGenerator::for_test();
         let messages = vec![
             Message::user("Hello, can you help me with Rust programming?"),
             Message::assistant("Of course! I'd be happy to help with Rust."),
         ];
-        let result = gen.truncate_messages(&messages);
+        let result = generator.truncate_messages(&messages);
         assert!(result.contains("User:"));
         assert!(result.contains("Assistant:"));
     }
 
     #[test]
     fn test_truncate_long_messages() {
-        let gen = TitleGenerator::for_test().with_max_message_chars(20);
+        let generator = TitleGenerator::for_test().with_max_message_chars(20);
         let messages = vec![Message::user(
             "This is a very long message that should be truncated",
         )];
-        let result = gen.truncate_messages(&messages);
+        let result = generator.truncate_messages(&messages);
         // The truncated content should be at most 20 chars
         let content_line = result.split(':').nth(1).unwrap().trim();
         assert!(content_line.len() <= 20);
@@ -182,9 +182,9 @@ mod tests {
 
     #[test]
     fn test_empty_messages_error() {
-        let gen = TitleGenerator::for_test();
+        let generator = TitleGenerator::for_test();
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt.block_on(gen.generate_title(&[]));
+        let result = rt.block_on(generator.generate_title(&[]));
         assert!(matches!(result, Err(TitleError::NoMessages)));
     }
 

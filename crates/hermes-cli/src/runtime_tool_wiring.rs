@@ -358,7 +358,7 @@ mod tests {
 
     #[tokio::test]
     async fn stdio_clarify_backend_uses_auto_answer_in_non_interactive_mode() {
-        std::env::set_var("HERMES_CLARIFY_AUTO_ANSWER", "from-env");
+        crate::env_vars::set_var("HERMES_CLARIFY_AUTO_ANSWER", "from-env");
         let backend = StdioClarifyBackend::new();
         let out = backend
             .ask("pick?", Some(&["a".to_string(), "b".to_string()]))
@@ -366,6 +366,6 @@ mod tests {
             .expect("clarify should succeed with env override");
         let parsed: serde_json::Value = serde_json::from_str(&out).expect("json output");
         assert_eq!(parsed["answer"], "from-env");
-        std::env::remove_var("HERMES_CLARIFY_AUTO_ANSWER");
+        crate::env_vars::remove_var("HERMES_CLARIFY_AUTO_ANSWER");
     }
 }
