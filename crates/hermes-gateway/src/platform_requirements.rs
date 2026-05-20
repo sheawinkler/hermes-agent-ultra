@@ -415,6 +415,8 @@ pub fn evaluate_gateway_requirements(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "wecom")]
+    use crate::test_env;
     use hermes_config::PlatformConfig;
     use std::sync::{Mutex, OnceLock};
 
@@ -538,8 +540,8 @@ mod tests {
         let wecom = make_platform(true, None);
         config.platforms.insert("wecom".to_string(), wecom);
 
-        std::env::set_var("WECOM_BOT_ID", "env-bot");
-        std::env::set_var("WECOM_SECRET", "env-secret");
+        test_env::set_var("WECOM_BOT_ID", "env-bot");
+        test_env::set_var("WECOM_SECRET", "env-secret");
 
         let issues = evaluate_gateway_requirements(&config, RequirementScope::RuntimeStart);
         assert!(
@@ -549,8 +551,8 @@ mod tests {
             "{issues:?}"
         );
 
-        std::env::remove_var("WECOM_BOT_ID");
-        std::env::remove_var("WECOM_SECRET");
+        test_env::remove_var("WECOM_BOT_ID");
+        test_env::remove_var("WECOM_SECRET");
     }
 
     #[test]
@@ -561,9 +563,9 @@ mod tests {
         let wecom = make_platform(true, None);
         config.platforms.insert("wecom".to_string(), wecom);
 
-        std::env::set_var("WECOM_BOT_ID", "");
-        std::env::set_var("WECHATY_PUPPET_SERVICE_TOKEN", "legacy-wechaty-token");
-        std::env::set_var("WECOM_SECRET", "env-secret");
+        test_env::set_var("WECOM_BOT_ID", "");
+        test_env::set_var("WECHATY_PUPPET_SERVICE_TOKEN", "legacy-wechaty-token");
+        test_env::set_var("WECOM_SECRET", "env-secret");
 
         let issues = evaluate_gateway_requirements(&config, RequirementScope::RuntimeStart);
         assert!(
@@ -573,8 +575,8 @@ mod tests {
             "{issues:?}"
         );
 
-        std::env::remove_var("WECOM_BOT_ID");
-        std::env::remove_var("WECHATY_PUPPET_SERVICE_TOKEN");
-        std::env::remove_var("WECOM_SECRET");
+        test_env::remove_var("WECOM_BOT_ID");
+        test_env::remove_var("WECHATY_PUPPET_SERVICE_TOKEN");
+        test_env::remove_var("WECOM_SECRET");
     }
 }

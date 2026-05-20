@@ -403,6 +403,7 @@ pub fn validate_url(url: &str) -> Result<Url, GatewayError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_env;
     use std::sync::Mutex;
 
     static ENV_TEST_LOCK: Mutex<()> = Mutex::new(());
@@ -424,8 +425,8 @@ mod tests {
     impl Drop for EnvVarGuard {
         fn drop(&mut self) {
             match &self.old {
-                Some(v) => std::env::set_var(self.key, v),
-                None => std::env::remove_var(self.key),
+                Some(v) => test_env::set_var(self.key, v),
+                None => test_env::remove_var(self.key),
             }
             reset_allow_private_cache_for_tests();
         }
@@ -484,11 +485,17 @@ mod tests {
         assert!(!is_cloud_metadata(&ip));
     }
 
+    fn env_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     #[test]
     fn test_is_safe_url_public_and_invalid() {
-        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _lock = env_test_lock();
         let _guard = EnvVarGuard::capture("HERMES_ALLOW_PRIVATE_URLS");
-        std::env::set_var("HERMES_ALLOW_PRIVATE_URLS", "false");
+        test_env::set_var("HERMES_ALLOW_PRIVATE_URLS", "false");
         reset_allow_private_cache_for_tests();
 
         assert!(is_safe_url("http://8.8.8.8/api"));
@@ -498,15 +505,15 @@ mod tests {
 
     #[test]
     fn test_validate_url_private_ip_toggle() {
-        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _lock = env_test_lock();
         let _guard = EnvVarGuard::capture("HERMES_ALLOW_PRIVATE_URLS");
 
-        std::env::set_var("HERMES_ALLOW_PRIVATE_URLS", "false");
+        test_env::set_var("HERMES_ALLOW_PRIVATE_URLS", "false");
         reset_allow_private_cache_for_tests();
         assert!(validate_url("http://192.168.1.1/api").is_err());
         assert!(validate_url("http://localhost/api").is_err());
 
-        std::env::set_var("HERMES_ALLOW_PRIVATE_URLS", "true");
+        test_env::set_var("HERMES_ALLOW_PRIVATE_URLS", "true");
         reset_allow_private_cache_for_tests();
         assert!(validate_url("http://192.168.1.1/api").is_ok());
         assert!(validate_url("http://localhost/api").is_ok());
@@ -516,9 +523,9 @@ mod tests {
 
     #[test]
     fn test_validate_url_metadata_always_blocked() {
-        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _lock = env_test_lock();
         let _guard = EnvVarGuard::capture("HERMES_ALLOW_PRIVATE_URLS");
-        std::env::set_var("HERMES_ALLOW_PRIVATE_URLS", "true");
+        test_env::set_var("HERMES_ALLOW_PRIVATE_URLS", "true");
         reset_allow_private_cache_for_tests();
 
         assert!(validate_url("http://169.254.169.254/latest/meta-data").is_err());
@@ -533,13 +540,16 @@ mod tests {
 
     #[test]
     fn test_validate_url_dns_failure_is_blocked() {
-        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let _lock = env_test_lock();
         let _guard = EnvVarGuard::capture("HERMES_ALLOW_PRIVATE_URLS");
-        std::env::set_var("HERMES_ALLOW_PRIVATE_URLS", "true");
+        test_env::set_var("HERMES_ALLOW_PRIVATE_URLS", "false");
         reset_allow_private_cache_for_tests();
 
-        assert!(validate_url("https://definitely-nonexistent.invalid").is_err());
-        assert!(!is_safe_url("https://definitely-nonexistent.invalid"));
+        let url = "https://definitely-nonexistent.invalid";
+        // Keep allow_private_urls off: Clash Fake-IP may synthesize 198.18.x.x for NXDOMAIN
+        // names, which must still be blocked for non-trusted hosts.
+        assert!(validate_url(url).is_err(), "expected SSRF block for {url}");
+        assert!(!is_safe_url(url));
     }
 
     #[test]

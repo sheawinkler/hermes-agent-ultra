@@ -175,13 +175,14 @@ impl ClarifyDispatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_env;
 
     #[tokio::test]
     async fn dispatcher_roundtrip() {
         let dispatcher = ClarifyDispatcher::new();
         let backend = ChannelClarifyBackend::new(dispatcher.clone());
 
-        std::env::set_var("HERMES_CLARIFY_TIMEOUT_SECS", "5");
+        test_env::set_var("HERMES_CLARIFY_TIMEOUT_SECS", "5");
 
         let ask = tokio::spawn(async move {
             backend
@@ -206,7 +207,7 @@ mod tests {
     async fn dispatcher_times_out() {
         let dispatcher = ClarifyDispatcher::new();
         let backend = ChannelClarifyBackend::new(dispatcher.clone());
-        std::env::set_var("HERMES_CLARIFY_TIMEOUT_SECS", "1");
+        test_env::set_var("HERMES_CLARIFY_TIMEOUT_SECS", "1");
 
         let err = backend.ask("q?", None).await.unwrap_err();
         assert!(err.to_string().contains("timed out"));

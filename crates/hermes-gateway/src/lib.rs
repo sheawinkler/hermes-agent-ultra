@@ -30,6 +30,8 @@ pub mod platform_requirements;
 pub mod platforms;
 pub mod session;
 pub mod ssrf;
+#[cfg(test)]
+mod test_env;
 pub mod sticker_cache;
 pub mod stream;
 pub mod tool_backends;
