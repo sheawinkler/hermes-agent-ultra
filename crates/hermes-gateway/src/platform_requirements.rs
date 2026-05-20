@@ -244,15 +244,48 @@ pub fn evaluate_gateway_requirements(
     #[cfg(feature = "wecom")]
     if let Some(p) = config.platforms.get("wecom") {
         if p.enabled {
-            let ready = extra_string(p, "corp_id").is_some()
-                && extra_string(p, "agent_id").is_some()
-                && extra_string(p, "secret").is_some();
+            let env_non_empty = |key: &str| {
+                std::env::var(key)
+                    .ok()
+                    .map(|v| v.trim().to_string())
+                    .filter(|v| !v.is_empty())
+                    .is_some()
+            };
+            // WeCom AI Bot websocket mode uses bot_id + secret.
+            // Keep corp_id as compatibility fallback for older configs.
+            let bot_id = extra_string(p, "bot_id")
+                .or_else(|| extra_string(p, "corp_id"))
+                .or_else(|| {
+                    if env_non_empty("WECOM_BOT_ID") {
+                        Some(String::new())
+                    } else {
+                        None
+                    }
+                })
+                .or_else(|| {
+                    if env_non_empty("WECHATY_PUPPET_SERVICE_TOKEN") {
+                        Some(String::new())
+                    } else {
+                        None
+                    }
+                })
+                .is_some();
+            let secret = extra_string(p, "secret")
+                .or_else(|| {
+                    if env_non_empty("WECOM_SECRET") {
+                        Some(String::new())
+                    } else {
+                        None
+                    }
+                })
+                .is_some();
+            let ready = bot_id && secret;
             if check(p.enabled, ready) {
                 push_fatal(
                     &mut issues,
                     "wecom",
                     "missing_wecom_credentials",
-                    "wecom.enabled=true 但缺少 corp_id/agent_id/secret",
+                    "wecom.enabled=true 但缺少 bot_id（兼容 corp_id）或 secret",
                 );
             }
         }
@@ -459,5 +492,64 @@ mod tests {
         assert!(!live
             .iter()
             .any(|i| i.code == "adapter_partial_implementation"));
+    }
+
+    #[test]
+    #[cfg(feature = "wecom")]
+    fn wecom_websocket_credentials_use_bot_id_secret_with_corp_id_fallback() {
+        let mut config = GatewayConfig::default();
+        let mut wecom = make_platform(true, None);
+        wecom
+            .extra
+            .insert("bot_id".to_string(), serde_json::json!("wb_123"));
+        wecom
+            .extra
+            .insert("secret".to_string(), serde_json::json!("sec_123"));
+        config.platforms.insert("wecom".to_string(), wecom);
+        let issues = evaluate_gateway_requirements(&config, RequirementScope::RuntimeStart);
+        assert!(
+            !issues
+                .iter()
+                .any(|i| i.platform == "wecom" && i.severity == RequirementSeverity::Fatal),
+            "{issues:?}"
+        );
+
+        let mut legacy = make_platform(true, None);
+        legacy
+            .extra
+            .insert("corp_id".to_string(), serde_json::json!("legacy-corp"));
+        legacy
+            .extra
+            .insert("secret".to_string(), serde_json::json!("legacy-secret"));
+        config.platforms.insert("wecom".to_string(), legacy);
+        let issues = evaluate_gateway_requirements(&config, RequirementScope::RuntimeStart);
+        assert!(
+            !issues
+                .iter()
+                .any(|i| i.platform == "wecom" && i.severity == RequirementSeverity::Fatal),
+            "{issues:?}"
+        );
+    }
+
+    #[test]
+    #[cfg(feature = "wecom")]
+    fn wecom_websocket_credentials_allow_env_fallback() {
+        let mut config = GatewayConfig::default();
+        let wecom = make_platform(true, None);
+        config.platforms.insert("wecom".to_string(), wecom);
+
+        std::env::set_var("WECOM_BOT_ID", "env-bot");
+        std::env::set_var("WECOM_SECRET", "env-secret");
+
+        let issues = evaluate_gateway_requirements(&config, RequirementScope::RuntimeStart);
+        assert!(
+            !issues
+                .iter()
+                .any(|i| i.platform == "wecom" && i.severity == RequirementSeverity::Fatal),
+            "{issues:?}"
+        );
+
+        std::env::remove_var("WECOM_BOT_ID");
+        std::env::remove_var("WECOM_SECRET");
     }
 }
