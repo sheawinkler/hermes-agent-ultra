@@ -12187,8 +12187,25 @@ fn handle_cron_command(app: &mut App) -> Result<CommandResult, AgentError> {
     let count = std::fs::read_to_string(&jobs_file)
         .ok()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| v.as_array().map(|arr| arr.len()))
-        .unwrap_or(0);
+        .and_then(|v| {
+            v.get("jobs")
+                .and_then(|j| j.as_array())
+                .map(|arr| arr.len())
+                .or_else(|| v.as_array().map(|arr| arr.len()))
+        })
+        .unwrap_or_else(|| {
+            std::fs::read_dir(&cron_data)
+                .ok()
+                .map(|rd| {
+                    rd.flatten()
+                        .filter(|e| {
+                            e.path().extension().and_then(|x| x.to_str()) == Some("json")
+                                && e.file_name().to_string_lossy() != "jobs.json"
+                        })
+                        .count()
+                })
+                .unwrap_or(0)
+        });
     emit_command_output(
         app,
         format!(

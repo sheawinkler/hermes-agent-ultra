@@ -10,6 +10,9 @@ use async_trait::async_trait;
 use tokio::fs;
 
 use crate::job::CronJob;
+use crate::python_job::load_python_jobs_file;
+
+const JOBS_JSON: &str = "jobs.json";
 
 // ---------------------------------------------------------------------------
 // JobPersistence trait
@@ -156,25 +159,54 @@ impl JobPersistence for FileJobPersistence {
 
     async fn load_jobs(&self) -> Result<Vec<CronJob>, CronPersistenceError> {
         self.ensure_dir().await?;
-        let mut jobs = Vec::new();
+        let mut by_id: std::collections::HashMap<String, CronJob> = std::collections::HashMap::new();
 
+        // 1) Python jobs.json (lower precedence than per-id files)
+        let jobs_json_path = self.data_dir.join(JOBS_JSON);
+        if jobs_json_path.exists() {
+            if let Ok(contents) = fs::read_to_string(&jobs_json_path).await {
+                match load_python_jobs_file(&contents) {
+                    Ok(py_jobs) => {
+                        for mut job in py_jobs {
+                            job.normalize_schedule();
+                            job.refresh_next_run();
+                            by_id.insert(job.id.clone(), job);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to parse {}: {}", jobs_json_path.display(), e);
+                    }
+                }
+            }
+        }
+
+        // 2) Per-job `{id}.json` (overrides jobs.json on same id)
         let mut entries = fs::read_dir(&self.data_dir).await?;
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
+            let file_name = path
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default();
+            if file_name == JOBS_JSON || file_name.ends_with(".python.bak") {
+                continue;
+            }
             if path.extension().map_or(false, |ext| ext == "json") {
                 let contents = fs::read_to_string(&path).await?;
-                let job = serde_json::from_str::<CronJob>(&contents).map_err(|e| {
+                let mut job = serde_json::from_str::<CronJob>(&contents).map_err(|e| {
                     CronPersistenceError::Corrupted(format!(
                         "failed to parse job file {}: {}",
                         path.display(),
                         e
                     ))
                 })?;
-                jobs.push(job);
+                job.normalize_schedule();
+                job.refresh_next_run();
+                by_id.insert(job.id.clone(), job);
             }
         }
 
-        Ok(jobs)
+        Ok(by_id.into_values().collect())
     }
 
     async fn save_job(&self, job: &CronJob) -> Result<(), CronPersistenceError> {
@@ -420,6 +452,34 @@ mod tests {
             assert!(!name.ends_with(".tmp"), "unexpected temp file: {name}");
         }
     }
+
+    #[tokio::test]
+    async fn test_load_python_jobs_json_wrapper() {
+        let dir = tempdir().unwrap();
+        let persistence = FileJobPersistence::with_dir(dir.path().to_path_buf());
+        let jobs_json = r#"{
+            "jobs": [{
+                "id": "62f791f4",
+                "name": "喝水提醒",
+                "prompt": "提醒喝水",
+                "schedule": {"kind": "interval", "minutes": 120, "display": "every 2h"},
+                "schedule_display": "every 2h",
+                "deliver": "wecom",
+                "enabled": true,
+                "state": "scheduled",
+                "created_at": "2026-05-11T10:00:00+00:00",
+                "repeat": {"times": null, "completed": 0}
+            }],
+            "updated_at": "2026-05-11T10:00:00+00:00"
+        }"#;
+        std::fs::write(dir.path().join("jobs.json"), jobs_json).unwrap();
+        let loaded = persistence.load_jobs().await.unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].id, "62f791f4");
+        assert!(loaded[0].schedule_spec.is_some());
+        assert!(loaded[0].next_run.is_some());
+    }
+
 
     #[tokio::test]
     async fn test_file_load_jobs_fails_on_corrupt_json() {
