@@ -298,6 +298,20 @@ impl Default for TranscriptCache {
     }
 }
 
+/// Cached stable-prefix markdown for in-flight assistant streaming (Python `StreamingMd` parity).
+#[derive(Debug, Clone, Default)]
+struct StreamMarkdownCache {
+    stable_prefix: String,
+    stable_lines: Vec<Line<'static>>,
+    cached_width: u16,
+}
+
+impl StreamMarkdownCache {
+    fn clear(&mut self) {
+        *self = Self::default();
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ModalAction {
     None,
@@ -640,6 +654,8 @@ pub struct TuiState {
     modal: Option<PickerModal>,
     /// Cached transcript render to reduce full rebuild churn.
     transcript_cache: TranscriptCache,
+    /// Incremental markdown cache for `stream_buffer` (stable prefix + tail re-parse).
+    stream_md_cache: StreamMarkdownCache,
     /// Expand state for tool cards by transcript key.
     expanded_tool_cards: HashSet<String>,
     /// Stable timestamp labels keyed by message fingerprint.
@@ -747,6 +763,7 @@ impl Default for TuiState {
             view_density: ViewDensity::Detailed,
             modal: None,
             transcript_cache: TranscriptCache::default(),
+            stream_md_cache: StreamMarkdownCache::default(),
             expanded_tool_cards: HashSet::new(),
             message_time_labels: HashMap::new(),
             pet_frame: 0,
@@ -839,6 +856,7 @@ impl TuiState {
         self.processing_degraded = false;
         self.degraded_notes.clear();
         self.stream_buffer.clear();
+        self.stream_md_cache.clear();
         self.stream_muted = false;
         self.stream_needs_break = false;
         self.active_tools.clear();
@@ -2643,6 +2661,118 @@ fn split_reasoning_from_content(input: &str) -> (String, String) {
     (text.trim().to_string(), reasoning.join("\n\n"))
 }
 
+fn line_toggles_code_fence(line: &str) -> bool {
+    let trimmed = line.trim();
+    let bytes = trimmed.as_bytes();
+    (bytes.len() >= 3 && bytes.iter().take(3).all(|b| *b == b'`'))
+        || (bytes.len() >= 3 && bytes.iter().take(3).all(|b| *b == b'~'))
+}
+
+/// True when `end` falls inside an open fenced code or display-math block (Python `fenceOpenAt`).
+fn fence_open_at(text: &str, end: usize) -> bool {
+    let end = end.min(text.len());
+    let mut code_open = false;
+    let mut math_open = false;
+    let mut math_opener: Option<char> = None;
+    let mut i = 0usize;
+
+    while i < end {
+        let line_end = text[i..end]
+            .find('\n')
+            .map(|off| i + off)
+            .unwrap_or(end);
+        let line = text[i..line_end].trim();
+
+        if line_toggles_code_fence(line) {
+            code_open = !code_open;
+        } else if !code_open {
+            if !math_open && line.starts_with("$$") {
+                let is_single_line = line.len() >= 4 && line.ends_with("$$");
+                if !is_single_line {
+                    math_open = true;
+                    math_opener = Some('$');
+                }
+            } else if !math_open && line.starts_with("\\[") {
+                let is_single_line = line.ends_with("\\]");
+                if !is_single_line {
+                    math_open = true;
+                    math_opener = Some('[');
+                }
+            } else if math_open && math_opener == Some('$') && line.ends_with("$$") {
+                math_open = false;
+                math_opener = None;
+            } else if math_open && math_opener == Some('[') && line.ends_with("\\]") {
+                math_open = false;
+                math_opener = None;
+            }
+        }
+
+        if line_end >= end {
+            break;
+        }
+        i = line_end + 1;
+    }
+
+    code_open || math_open
+}
+
+/// Last safe `\n\n` split index (start of next block), outside open fences (Python `findStableBoundary`).
+fn find_stable_boundary(text: &str) -> Option<usize> {
+    let mut idx = text.len();
+    while idx > 0 {
+        let boundary = text[..idx].rfind("\n\n")?;
+        let split_at = boundary + 2;
+        if !fence_open_at(text, split_at) {
+            return Some(split_at);
+        }
+        if boundary == 0 {
+            break;
+        }
+        idx = boundary;
+    }
+    None
+}
+
+/// Render streaming assistant markdown with monotonic stable-prefix cache (Python `StreamingMd`).
+fn render_streaming_assistant_markdown_lines(
+    cache: &mut StreamMarkdownCache,
+    text: &str,
+    styles: &crate::theme::ResolvedStyles,
+    colors: &crate::theme::RatatuiColors,
+    width: u16,
+) -> Vec<Line<'static>> {
+    if !text.starts_with(&cache.stable_prefix) {
+        cache.clear();
+    }
+
+    if cache.cached_width != width {
+        cache.cached_width = width;
+        if cache.stable_prefix.is_empty() {
+            cache.stable_lines.clear();
+        } else {
+            cache.stable_lines =
+                render_assistant_markdown_lines(&cache.stable_prefix, styles, colors);
+        }
+    }
+
+    if let Some(boundary) = find_stable_boundary(text) {
+        if boundary > cache.stable_prefix.len() {
+            cache.stable_prefix = text[..boundary].to_string();
+            cache.stable_lines =
+                render_assistant_markdown_lines(&cache.stable_prefix, styles, colors);
+        }
+    }
+
+    let suffix = &text[cache.stable_prefix.len()..];
+    if suffix.is_empty() {
+        return cache.stable_lines.clone();
+    }
+
+    let mut out = cache.stable_lines.clone();
+    out.extend(render_assistant_markdown_lines(suffix, styles, colors));
+    out
+}
+
 fn tool_complete_looks_failed(extra: &serde_json::Value, result_preview: &str) -> bool {
     if extra
         .get("error")
@@ -3356,7 +3486,13 @@ fn build_transcript_lines(
                 styles.assistant_response.add_modifier(Modifier::BOLD),
             ),
         ]));
-        let stream_lines = render_assistant_markdown_lines(&state.stream_buffer, styles, colors);
+        let stream_lines = render_streaming_assistant_markdown_lines(
+            &mut state.stream_md_cache,
+            &state.stream_buffer,
+            styles,
+            colors,
+            content_width,
+        );
         lines.extend(tail_render_lines_with_notice(
             stream_lines,
             MAX_STREAM_RENDER_LINES,
@@ -4920,6 +5056,7 @@ fn handle_agent_run_complete(
         }
     }
     state.stream_buffer.clear();
+    state.stream_md_cache.clear();
     state.stream_muted = false;
     state.stream_needs_break = false;
     state.active_tools.clear();
@@ -4947,6 +5084,7 @@ fn handle_managed_app_run_complete(
         }
     }
     state.stream_buffer.clear();
+    state.stream_md_cache.clear();
     state.stream_muted = false;
     state.stream_needs_break = false;
     state.active_tools.clear();
@@ -5237,6 +5375,7 @@ fn process_stream_lane_event(app: &mut App, state: &mut TuiState, event: Event) 
             } else {
                 state.finish_processing_cycle("✔ completed in");
                 state.stream_buffer.clear();
+                state.stream_md_cache.clear();
                 state.stream_muted = false;
                 state.stream_needs_break = false;
                 state.active_tools.clear();
@@ -5685,6 +5824,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         abort_and_join_task(&mut active_agent_task).await;
                         state.finish_processing_cycle("⏹ interrupted after");
                         state.stream_buffer.clear();
+                        state.stream_md_cache.clear();
                         state.stream_muted = false;
                         state.stream_needs_break = false;
                         state.active_tools.clear();
@@ -5696,6 +5836,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         abort_and_join_task(&mut active_agent_task).await;
                         state.finish_processing_cycle("⏹ interrupted after");
                         state.stream_buffer.clear();
+                        state.stream_md_cache.clear();
                         state.stream_muted = false;
                         state.stream_needs_break = false;
                         state.active_tools.clear();
@@ -6544,6 +6685,60 @@ mod tests {
         let ok = serde_json::json!({});
         assert!(!tool_complete_looks_failed(&ok, "done"));
         assert!(tool_complete_looks_failed(&ok, "Error: boom"));
+    }
+
+    #[test]
+    fn test_find_stable_boundary_no_blank_line() {
+        assert_eq!(find_stable_boundary("partial line with no newline yet"), None);
+        assert_eq!(find_stable_boundary("line one\nline two\nline three"), None);
+        assert_eq!(find_stable_boundary(""), None);
+    }
+
+    #[test]
+    fn test_find_stable_boundary_after_paragraphs() {
+        let text = "first paragraph\n\nsecond paragraph\n\nthird";
+        let idx = find_stable_boundary(text).expect("boundary");
+        assert_eq!(&text[..idx], "first paragraph\n\nsecond paragraph\n\n");
+        assert_eq!(&text[idx..], "third");
+    }
+
+    #[test]
+    fn test_find_stable_boundary_inside_open_fence() {
+        let text = "```ts\nfn();\n\nmore code here";
+        assert_eq!(find_stable_boundary(text), None);
+    }
+
+    #[test]
+    fn test_find_stable_boundary_before_open_fence() {
+        let text = "intro paragraph\n\n```ts\nfn();\n\nmore code";
+        let idx = find_stable_boundary(text).expect("boundary");
+        assert_eq!(&text[..idx], "intro paragraph\n\n");
+        assert!(text[idx..].starts_with("```ts"));
+    }
+
+    #[test]
+    fn test_streaming_markdown_cache_reuses_stable_prefix() {
+        let theme = Theme::default_theme();
+        let colors = theme.colors.to_ratatui_colors();
+        let styles = theme.resolved_styles();
+        let mut cache = StreamMarkdownCache::default();
+
+        let text_a = "first paragraph\n\nsecond";
+        let lines_a = render_streaming_assistant_markdown_lines(
+            &mut cache, text_a, &styles, &colors, 80,
+        );
+        assert!(!lines_a.is_empty());
+        assert_eq!(cache.stable_prefix, "first paragraph\n\n");
+
+        let text_b = "first paragraph\n\nsecond paragraph\n\nthird";
+        let lines_b = render_streaming_assistant_markdown_lines(
+            &mut cache, text_b, &styles, &colors, 80,
+        );
+        assert!(lines_b.len() >= lines_a.len());
+        assert_eq!(
+            cache.stable_prefix,
+            "first paragraph\n\nsecond paragraph\n\n"
+        );
     }
 
     #[test]
