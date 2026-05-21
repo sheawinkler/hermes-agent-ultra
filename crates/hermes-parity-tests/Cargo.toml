@@ -10,6 +10,7 @@ description = "Python↔Rust parity fixtures and harness for Hermes Agent"
 hermes-core = { workspace = true }
 hermes-intelligence = { workspace = true }
 hermes-tools = { workspace = true }
+hermes-skills = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = "0.10"

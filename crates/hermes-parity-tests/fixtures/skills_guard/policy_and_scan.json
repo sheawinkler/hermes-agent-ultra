@@ -1,0 +1,222 @@
+{
+  "schema_version": 1,
+  "fixture_group": "skills_guard",
+  "python_module": "tools/skills_guard.py",
+  "cases": [
+    {
+      "id": "official_builtin",
+      "op": "resolve_trust_level",
+      "input": { "source": "official" },
+      "expected": "builtin"
+    },
+    {
+      "id": "openai_trusted",
+      "op": "resolve_trust_level",
+      "input": { "source": "openai/skills/some-skill" },
+      "expected": "trusted"
+    },
+    {
+      "id": "skills_sh_trusted",
+      "op": "resolve_trust_level",
+      "input": { "source": "skills-sh/anthropics/skills/frontend-design" },
+      "expected": "trusted"
+    },
+    {
+      "id": "community_default",
+      "op": "resolve_trust_level",
+      "input": { "source": "random-user/my-skill" },
+      "expected": "community"
+    },
+    {
+      "id": "verdict_safe",
+      "op": "determine_verdict",
+      "input": { "findings": [] },
+      "expected": "safe"
+    },
+    {
+      "id": "verdict_dangerous",
+      "op": "determine_verdict",
+      "input": {
+        "findings": [
+          {
+            "pattern_id": "x",
+            "severity": "critical",
+            "category": "exfil",
+            "file": "f.py",
+            "line": 1,
+            "match_text": "m",
+            "description": "d"
+          }
+        ]
+      },
+      "expected": "dangerous"
+    },
+    {
+      "id": "verdict_caution_high",
+      "op": "determine_verdict",
+      "input": {
+        "findings": [
+          {
+            "pattern_id": "x",
+            "severity": "high",
+            "category": "network",
+            "file": "f.py",
+            "line": 1,
+            "match_text": "m",
+            "description": "d"
+          }
+        ]
+      },
+      "expected": "caution"
+    },
+    {
+      "id": "community_safe_allowed",
+      "op": "should_allow_install",
+      "input": {
+        "force": false,
+        "result": {
+          "skill_name": "test",
+          "source": "test",
+          "trust_level": "community",
+          "verdict": "safe",
+          "findings": [],
+          "scanned_at": "",
+          "summary": ""
+        }
+      },
+      "expected": {
+        "allowed": true,
+        "reason": "Allowed (community source, safe verdict)"
+      }
+    },
+    {
+      "id": "community_caution_blocked",
+      "op": "should_allow_install",
+      "input": {
+        "force": false,
+        "result": {
+          "skill_name": "test",
+          "source": "test",
+          "trust_level": "community",
+          "verdict": "caution",
+          "findings": [
+            {
+              "pattern_id": "x",
+              "severity": "high",
+              "category": "c",
+              "file": "f",
+              "line": 1,
+              "match_text": "m",
+              "description": "d"
+            }
+          ],
+          "scanned_at": "",
+          "summary": ""
+        }
+      },
+      "expected": {
+        "allowed": false,
+        "reason": "Blocked (community source + caution verdict, 1 findings). Use --force to override."
+      }
+    },
+    {
+      "id": "trusted_caution_allowed",
+      "op": "should_allow_install",
+      "input": {
+        "force": false,
+        "result": {
+          "skill_name": "test",
+          "source": "test",
+          "trust_level": "trusted",
+          "verdict": "caution",
+          "findings": [
+            {
+              "pattern_id": "x",
+              "severity": "high",
+              "category": "c",
+              "file": "f",
+              "line": 1,
+              "match_text": "m",
+              "description": "d"
+            }
+          ],
+          "scanned_at": "",
+          "summary": ""
+        }
+      },
+      "expected": {
+        "allowed": true,
+        "reason": "Allowed (trusted source, caution verdict)"
+      }
+    },
+    {
+      "id": "community_force_caution",
+      "op": "should_allow_install",
+      "input": {
+        "force": true,
+        "result": {
+          "skill_name": "test",
+          "source": "test",
+          "trust_level": "community",
+          "verdict": "caution",
+          "findings": [
+            {
+              "pattern_id": "x",
+              "severity": "high",
+              "category": "c",
+              "file": "f",
+              "line": 1,
+              "match_text": "m",
+              "description": "d"
+            }
+          ],
+          "scanned_at": "",
+          "summary": ""
+        }
+      },
+      "expected": {
+        "allowed": true,
+        "reason": "Force-installed despite caution verdict (1 findings)"
+      }
+    },
+    {
+      "id": "agent_created_dangerous_ask",
+      "op": "should_allow_install",
+      "input": {
+        "force": false,
+        "result": {
+          "skill_name": "test",
+          "source": "test",
+          "trust_level": "agent-created",
+          "verdict": "dangerous",
+          "findings": [
+            {
+              "pattern_id": "x",
+              "severity": "critical",
+              "category": "c",
+              "file": "f",
+              "line": 1,
+              "match_text": "m",
+              "description": "d"
+            }
+          ],
+          "scanned_at": "",
+          "summary": ""
+        }
+      },
+      "expected": {
+        "allowed": null,
+        "reason": "Requires confirmation (agent-created source + dangerous verdict, 1 findings)"
+      }
+    },
+    {
+      "id": "scan_rm_rf_root",
+      "op": "scan_content_pattern_ids",
+      "input": {
+        "rel_path": "bad.sh",
+        "content": "rm -rf /\n"
+      },
+      "expected": ["destructive_root_rm"]
+    }
+  ]
+}

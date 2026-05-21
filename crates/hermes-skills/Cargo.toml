@@ -25,6 +25,7 @@ base64 = { workspace = true }
 ed25519-dalek = "2"
 regex = { workspace = true }
 directories = { workspace = true }
+walkdir = "2"
 
 [dev-dependencies]
 tempfile = "3"

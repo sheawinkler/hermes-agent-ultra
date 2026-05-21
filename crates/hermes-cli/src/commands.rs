@@ -1303,27 +1303,44 @@ fn record_skill_uninstall_in_hub_lock(
     Ok(removed)
 }
 
-fn skill_guard_scan_bundle(files: &[(String, Bytes)]) -> Result<(), AgentError> {
-    let guard = hermes_skills::SkillGuard::default();
-    for (rel_path, bytes) in files {
-        // Skip binary files to avoid false positives from compressed payloads.
-        let Ok(text) = std::str::from_utf8(bytes.as_ref()) else {
-            continue;
-        };
-        let probe = hermes_core::types::Skill {
-            name: rel_path.clone(),
-            content: text.to_string(),
-            category: Some("external".to_string()),
-            description: None,
-        };
-        guard.scan_security_only(&probe).map_err(|e| {
-            AgentError::Config(format!(
-                "Security scan failed for skill bundle file '{}': {}",
-                rel_path, e
-            ))
-        })?;
+fn skills_install_force(extra: Option<&str>) -> bool {
+    if extra
+        .map(|e| e.split_whitespace().any(|t| t == "--force"))
+        .unwrap_or(false)
+    {
+        return true;
     }
-    Ok(())
+    std::env::var("HERMES_SKILLS_INSTALL_FORCE")
+        .ok()
+        .map(|v| {
+            let v = v.trim();
+            v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes")
+        })
+        .unwrap_or(false)
+}
+
+fn skill_guard_enforce_bundle(
+    install_name: &str,
+    source: &str,
+    files: &[(String, Bytes)],
+    force: bool,
+) -> Result<(), AgentError> {
+    let file_vec: Vec<(String, Vec<u8>)> = files
+        .iter()
+        .map(|(p, b)| (p.clone(), b.to_vec()))
+        .collect();
+    let scan = hermes_skills::scan_bundle(install_name, source, &file_vec);
+    let (decision, reason) = hermes_skills::should_allow_install(&scan, force);
+    match decision {
+        hermes_skills::InstallDecision::Allowed => Ok(()),
+        hermes_skills::InstallDecision::NeedsConfirmation => Err(AgentError::Config(format!(
+            "{reason}. Re-run with --force to override."
+        ))),
+        hermes_skills::InstallDecision::Blocked => Err(AgentError::Config(format!(
+            "{reason}\n{}",
+            scan.summary
+        ))),
+    }
 }
 
 fn github_request(client: &reqwest::Client, url: &str, accept: &str) -> reqwest::RequestBuilder {
@@ -2335,8 +2352,10 @@ fn install_skill_files(
     skills_dir: &std::path::Path,
     install_name: &str,
     files: &[(String, Bytes)],
+    source: &str,
+    force: bool,
 ) -> Result<std::path::PathBuf, AgentError> {
-    skill_guard_scan_bundle(files)?;
+    skill_guard_enforce_bundle(install_name, source, files, force)?;
 
     std::fs::create_dir_all(skills_dir)
         .map_err(|e| AgentError::Io(format!("Failed to create skills dir: {}", e)))?;
@@ -19570,7 +19589,14 @@ pub async fn handle_cli_skills(
                     .filter(|_| looks_like_github_repo_slug(&skill_name))
                     .unwrap_or(install_seed.as_str()),
             );
-            let target = install_skill_files(&skills_dir, &install_name, &files)?;
+            let force = skills_install_force(extra.as_deref());
+            let target = install_skill_files(
+                &skills_dir,
+                &install_name,
+                &files,
+                &provenance.identifier,
+                force,
+            )?;
             record_skill_install_in_hub_lock(
                 &skills_dir,
                 &install_name,
@@ -19840,8 +19866,13 @@ pub async fn handle_cli_skills(
                     println!("\nApplying updates...");
                     for update in pending {
                         let install_name = sanitize_skill_install_name(&update.entry.name);
-                        let target =
-                            install_skill_files(&skills_dir, &install_name, &update.files)?;
+                        let target = install_skill_files(
+                            &skills_dir,
+                            &install_name,
+                            &update.files,
+                            &update.entry.identifier,
+                            false,
+                        )?;
                         let prov = SkillInstallProvenance {
                             source: update.entry.source.clone(),
                             identifier: update.entry.identifier.clone(),

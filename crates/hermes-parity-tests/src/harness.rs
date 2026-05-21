@@ -14,6 +14,10 @@ use hermes_intelligence::{
     estimate_tokens_rough, get_model_context_length, infer_provider_from_url, supports_tools,
     supports_vision, ErrorCategory, ErrorClassifier, RetryStrategy,
 };
+use hermes_skills::{
+    determine_verdict, resolve_trust_level, scan_content, should_allow_install, Finding,
+    InstallDecision, ScanResult,
+};
 use hermes_tools::approval::{check_approval, ApprovalDecision};
 use hermes_tools::v4a_patch::{parse_v4a_patch, OperationType};
 use serde::{Deserialize, Serialize};
@@ -408,6 +412,61 @@ pub fn dispatch_case(op: &str, input: &Value) -> Result<Value, String> {
             }))
         }
 
+        // -- skills_guard ops --
+        "resolve_trust_level" => {
+            let source = input
+                .get("source")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "missing input.source".to_string())?;
+            Ok(json!(resolve_trust_level(source)))
+        }
+        "determine_verdict" => {
+            let findings: Vec<Finding> = input
+                .get("findings")
+                .map(|v| serde_json::from_value(v.clone()))
+                .transpose()
+                .map_err(|e| e.to_string())?
+                .unwrap_or_default();
+            Ok(json!(determine_verdict(&findings)))
+        }
+        "should_allow_install" => {
+            let result: ScanResult = serde_json::from_value(
+                input
+                    .get("result")
+                    .cloned()
+                    .ok_or_else(|| "missing input.result".to_string())?,
+            )
+            .map_err(|e| e.to_string())?;
+            let force = input
+                .get("force")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let (decision, reason) = should_allow_install(&result, force);
+            let allowed = match decision {
+                InstallDecision::Allowed => Value::Bool(true),
+                InstallDecision::Blocked => Value::Bool(false),
+                InstallDecision::NeedsConfirmation => Value::Null,
+            };
+            Ok(json!({ "allowed": allowed, "reason": reason }))
+        }
+        "scan_content_pattern_ids" => {
+            let rel_path = input
+                .get("rel_path")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "missing input.rel_path".to_string())?;
+            let content = input
+                .get("content")
+                .and_then(|v| v.as_str())
+                .ok_or_else(|| "missing input.content".to_string())?;
+            let mut ids: Vec<String> = scan_content(rel_path, content)
+                .into_iter()
+                .map(|f| f.pattern_id)
+                .collect();
+            ids.sort();
+            ids.dedup();
+            Ok(json!(ids))
+        }
+
         _ => Err(format!("unknown op: {}", op)),
     }
 }
@@ -456,6 +515,11 @@ mod tests {
     fn parity_error_classifier_fixtures() {
         run_fixtures_in_dir(&fixtures_dir().join("error_classifier"))
             .expect("error_classifier fixtures");
+    }
+
+    #[test]
+    fn parity_skills_guard_fixtures() {
+        run_fixtures_in_dir(&fixtures_dir().join("skills_guard")).expect("skills_guard fixtures");
     }
 
     #[test]

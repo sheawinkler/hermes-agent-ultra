@@ -60,6 +60,13 @@
       "fixture_dirs": ["error_classifier"]
     },
     {
+      "id": "skills_guard",
+      "status": "active",
+      "python": "tools/skills_guard.py",
+      "rust": "hermes_skills::skills_guard",
+      "fixture_dirs": ["skills_guard"]
+    },
+    {
       "id": "run_conversation",
       "status": "active",
       "python": "run_agent.py::AIAgent.run_conversation",

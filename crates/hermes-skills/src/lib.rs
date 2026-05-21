@@ -7,10 +7,15 @@
 mod guard;
 mod hub;
 mod skill;
+mod skills_guard;
 mod store;
 mod version;
 
 pub use guard::{validate_skill, validate_skill_url, SkillGuard};
+pub use skills_guard::{
+    content_hash, determine_verdict, resolve_trust_level, scan_bundle, scan_content, scan_skill,
+    should_allow_install, Finding, InstallDecision, ScanResult, TRUSTED_REPOS,
+};
 pub use hub::{SkillUpdate, SkillsHubClient};
 pub use skill::{SkillError, SkillManager};
 pub use store::{FileSkillStore, SkillStore};
