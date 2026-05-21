@@ -19,7 +19,9 @@ use hermes_skills::{
     InstallDecision, ScanResult,
 };
 use hermes_tools::approval::{check_approval, ApprovalDecision};
+use hermes_tools::code_execution_env::scrub_child_env;
 use hermes_tools::v4a_patch::{parse_v4a_patch, OperationType};
+use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -449,6 +451,31 @@ pub fn dispatch_case(op: &str, input: &Value) -> Result<Value, String> {
             };
             Ok(json!({ "allowed": allowed, "reason": reason }))
         }
+        "scrub_child_env" => {
+            let env_obj = input
+                .get("env")
+                .and_then(|v| v.as_object())
+                .ok_or_else(|| "missing input.env object".to_string())?;
+            let mut source = BTreeMap::new();
+            for (k, v) in env_obj {
+                let val = v
+                    .as_str()
+                    .ok_or_else(|| format!("env.{k} must be string"))?
+                    .to_string();
+                source.insert(k.clone(), val);
+            }
+            let passthrough: Vec<String> = input
+                .get("passthrough")
+                .and_then(|v| serde_json::from_value(v.clone()).ok())
+                .unwrap_or_default();
+            let is_windows = input
+                .get("is_windows")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let out = scrub_child_env(&source, |k| passthrough.iter().any(|p| p == k), is_windows);
+            Ok(serde_json::to_value(out).map_err(|e| e.to_string())?)
+        }
+
         "scan_content_pattern_ids" => {
             let rel_path = input
                 .get("rel_path")
@@ -520,6 +547,12 @@ mod tests {
     #[test]
     fn parity_skills_guard_fixtures() {
         run_fixtures_in_dir(&fixtures_dir().join("skills_guard")).expect("skills_guard fixtures");
+    }
+
+    #[test]
+    fn parity_code_execution_env_fixtures() {
+        run_fixtures_in_dir(&fixtures_dir().join("code_execution_env"))
+            .expect("code_execution_env fixtures");
     }
 
     #[test]

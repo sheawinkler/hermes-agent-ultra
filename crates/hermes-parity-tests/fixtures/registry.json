@@ -67,6 +67,13 @@
       "fixture_dirs": ["skills_guard"]
     },
     {
+      "id": "code_execution_env",
+      "status": "active",
+      "python": "tools/code_execution_tool.py::_scrub_child_env",
+      "rust": "hermes_tools::code_execution_env",
+      "fixture_dirs": ["code_execution_env"]
+    },
+    {
       "id": "run_conversation",
       "status": "active",
       "python": "run_agent.py::AIAgent.run_conversation",

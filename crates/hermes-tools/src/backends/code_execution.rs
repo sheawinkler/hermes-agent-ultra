@@ -5,6 +5,9 @@ use serde_json::json;
 use std::process::Stdio;
 use tokio::process::Command as TokioCommand;
 
+use std::collections::BTreeMap;
+
+use crate::code_execution_env::scrub_child_env;
 use crate::tools::code_execution::CodeExecutionBackend;
 use hermes_core::ToolError;
 
@@ -65,6 +68,9 @@ async fn spawn_python(
         }
         cmd.arg("-c").arg(code);
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        let source_env: BTreeMap<String, String> = std::env::vars().collect();
+        let child_env = scrub_child_env(&source_env, |_| false, cfg!(windows));
+        cmd.env_clear().envs(child_env);
 
         let spawn_result = cmd.spawn();
         let child = match spawn_result {
@@ -202,10 +208,14 @@ mod tests {
 
     #[test]
     fn python_candidates_include_hermes_python_and_fallbacks() {
-        std::env::set_var("HERMES_PYTHON", "/custom/python");
+        unsafe {
+            std::env::set_var("HERMES_PYTHON", "/custom/python");
+        }
         let cands = python_interpreter_candidates();
         assert_eq!(cands[0], vec!["/custom/python".to_string()]);
         assert!(cands.iter().any(|c| c == &vec!["python3".to_string()]));
-        std::env::remove_var("HERMES_PYTHON");
+        unsafe {
+            std::env::remove_var("HERMES_PYTHON");
+        }
     }
 }

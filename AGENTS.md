@@ -19,7 +19,7 @@
 | 录 Python golden | `python3 scripts/record_fixtures.py` | 同上 |
 | 真实 agent 评测 rollout | `cargo build -p hermes-eval --features agent-loop` | 见文末「评测」 |
 
-**当前 active 模块**（与 registry 同步）：`anthropic_adapter`、`hermes_core_tool_format`、`checkpoint_manager`、`model_metadata`、`usage_pricing`、`approval`、`v4a_patch`、`error_classifier`、`skills_guard`。
+**当前 active 模块**（与 registry 同步）：`anthropic_adapter`、`hermes_core_tool_format`、`checkpoint_manager`、`model_metadata`、`usage_pricing`、`approval`、`v4a_patch`、`error_classifier`、`skills_guard`、`code_execution_env`。
 
 未出现在 registry 的模块（如 `send_message`、`process_registry`）**没有**已激活 SOP；按 `PARITY_PLAN.md` 对应 Week 推进，落地 fixture 后再在 `docs/sop/` 新增一页。
 

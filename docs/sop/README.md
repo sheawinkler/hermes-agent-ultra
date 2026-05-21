@@ -23,6 +23,7 @@
 | `v4a_patch` | [v4a_patch.md](v4a_patch.md) |
 | `error_classifier` | [error_classifier.md](error_classifier.md) |
 | `skills_guard` | [skills_guard.md](skills_guard.md) |
+| `code_execution_env` | [code_execution_env.md](code_execution_env.md) |
 | `run_conversation` | [run_conversation.md](run_conversation.md) |
 
 路线图与 Prompt 长文保留在 [`PARITY_PLAN.md`](../../PARITY_PLAN.md)；本目录只写**可执行**步骤与验证命令。

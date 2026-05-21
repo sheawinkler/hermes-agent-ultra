@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "fixture_group": "code_execution_env",
+  "python_module": "tools/code_execution_tool.py::_scrub_child_env",
+  "cases": [
+    {
+      "id": "blocks_api_key",
+      "op": "scrub_child_env",
+      "input": {
+        "env": {
+          "PATH": "/bin",
+          "OPENAI_API_KEY": "sk-secret"
+        },
+        "passthrough": [],
+        "is_windows": false
+      },
+      "expected": {
+        "PATH": "/bin"
+      }
+    },
+    {
+      "id": "passthrough_wins",
+      "op": "scrub_child_env",
+      "input": {
+        "env": {
+          "TENOR_API_KEY": "x",
+          "PATH": "/bin"
+        },
+        "passthrough": ["TENOR_API_KEY"],
+        "is_windows": false
+      },
+      "expected": {
+        "PATH": "/bin",
+        "TENOR_API_KEY": "x"
+      }
+    },
+    {
+      "id": "windows_systemroot",
+      "op": "scrub_child_env",
+      "input": {
+        "env": {
+          "SYSTEMROOT": "C:\\Windows",
+          "RANDOM_UNKNOWN_VAR": "nope"
+        },
+        "passthrough": [],
+        "is_windows": true
+      },
+      "expected": {
+        "SYSTEMROOT": "C:\\Windows"
+      }
+    }
+  ]
+}
