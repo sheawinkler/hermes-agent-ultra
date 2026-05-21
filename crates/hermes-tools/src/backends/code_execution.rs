@@ -1,25 +1,37 @@
-//! Real code execution backend: run scripts via tokio::process::Command.
+//! Code execution backend: PTC sandbox (Python) or direct interpreter fallback.
+
+use std::collections::BTreeMap;
+use std::process::Stdio;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use serde_json::json;
-use std::process::Stdio;
 use tokio::process::Command as TokioCommand;
 
-use std::collections::BTreeMap;
-
 use crate::code_execution_env::scrub_child_env;
+use crate::code_execution_ptc::{execute_python_ptc, ptc_enabled, PtcConfig};
 use crate::tools::code_execution::CodeExecutionBackend;
+use crate::ToolRegistry;
 use hermes_core::ToolError;
 
-/// Code execution backend using local interpreters.
+/// Code execution backend using local interpreters and optional PTC RPC sandbox.
 pub struct LocalCodeExecutionBackend {
     default_timeout_secs: u64,
+    tool_registry: Option<Arc<ToolRegistry>>,
 }
 
 impl LocalCodeExecutionBackend {
     pub fn new(default_timeout_secs: u64) -> Self {
         Self {
             default_timeout_secs,
+            tool_registry: None,
+        }
+    }
+
+    pub fn with_tool_registry(registry: Arc<ToolRegistry>) -> Self {
+        Self {
+            default_timeout_secs: 30,
+            tool_registry: Some(registry),
         }
     }
 }
@@ -126,6 +138,27 @@ impl CodeExecutionBackend for LocalCodeExecutionBackend {
         let timeout_secs = timeout.unwrap_or(self.default_timeout_secs);
 
         if matches!(lang, "python" | "python3") {
+            if ptc_enabled() {
+                if let Some(registry) = &self.tool_registry {
+                    match execute_python_ptc(
+                        code,
+                        registry.clone(),
+                        PtcConfig {
+                            timeout_secs,
+                            max_tool_calls: crate::code_execution_ptc::DEFAULT_MAX_TOOL_CALLS,
+                        },
+                    )
+                    .await
+                    {
+                        Ok(out) => return Ok(out),
+                        Err(e) => {
+                            tracing::warn!(
+                                "execute_code PTC failed ({e}); falling back to inline python -c"
+                            );
+                        }
+                    }
+                }
+            }
             let (exit_code, stdout, stderr, interpreter) =
                 spawn_python(code, timeout_secs).await?;
             let stdout_str = String::from_utf8_lossy(&stdout).to_string();

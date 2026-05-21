@@ -257,13 +257,15 @@ pub fn register_builtin_tools_with_vision(
         vec![],
     );
 
-    // -- Code execution ------------------------------------------------------
+    // -- Code execution (PTC sandbox needs registry for in-script tool RPC) --
     reg(
         registry,
         "code_execution",
-        Arc::new(crate::tools::code_execution::ExecuteCodeHandler::new(
-            Arc::new(crate::backends::code_execution::LocalCodeExecutionBackend::default()),
-        )),
+        Arc::new(crate::tools::code_execution::ExecuteCodeHandler::new(Arc::new(
+            crate::backends::code_execution::LocalCodeExecutionBackend::with_tool_registry(
+                Arc::new(registry.clone()),
+            ),
+        ))),
         "🖥️",
         vec![],
     );

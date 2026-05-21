@@ -11,6 +11,7 @@
 
 pub mod approval;
 pub mod code_execution_env;
+pub mod code_execution_ptc;
 pub mod code_execution_stubs;
 pub mod backends;
 pub mod dispatch;
