@@ -10,7 +10,7 @@
 //!
 //! Explicitly *not* ported:
 //!
-//! * Microsoft Edge TTS (Python CLI dependency; rejected in earlier sprints).
+//! * Microsoft Edge TTS — implemented in `backends::tts` via HTTP (no Python runtime).
 //! * NeuTTS (local Python inference process).
 //! * `sounddevice` / PortAudio playback — kept out of the core crate to avoid
 //!   pulling a platform-specific C library into every binary. The gateway or

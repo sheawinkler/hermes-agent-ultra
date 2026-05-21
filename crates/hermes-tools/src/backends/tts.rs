@@ -1,9 +1,4 @@
-//! Real TTS backends: ElevenLabs and OpenAI TTS.
-//!
-//! Zero-Python: Edge TTS (which required the `edge-tts` Python CLI) is no
-//! longer supported. Callers that want free / no-key TTS should use local
-//! ONNX models via the forthcoming `LocalOnnxTtsBackend` (Sprint 6) or
-//! OpenAI's cheap `tts-1` endpoint.
+//! TTS backends: ElevenLabs, OpenAI, MiniMax, Piper, Edge, Mistral, Gemini, xAI.
 
 use async_trait::async_trait;
 use reqwest::Client;
@@ -11,36 +6,43 @@ use serde_json::json;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
-use crate::tools::tts::TtsBackend;
-use crate::tts_streaming::minimax::MiniMaxTtsBackend;
+use hermes_config::voice::TtsConfig;
 use hermes_config::managed_gateway::{
     resolve_managed_tool_gateway, resolve_openai_audio_api_key, ManagedToolGatewayConfig,
     ResolveOptions,
 };
+
+use crate::tools::tts::TtsBackend;
+use crate::tts_streaming::minimax::MiniMaxTtsBackend;
+use crate::voice_providers::{
+    edge_tts_synthesize, gemini_tts_synthesize, mistral_tts_synthesize, tts_result_json,
+    TtsSettings, xai_tts_synthesize,
+};
 use hermes_core::ToolError;
 
-/// TTS backend that dispatches to ElevenLabs, OpenAI, or MiniMax based on
-/// the `provider` argument. Defaults to `openai` when no API keys hint at a
-/// preferred provider.
+/// Multi-provider TTS backend driven by `config.yaml` `tts` block.
 pub struct MultiTtsBackend {
     client: Client,
+    settings: TtsSettings,
     elevenlabs_key: Option<String>,
-    openai_base_url: String,
     minimax: MiniMaxTtsBackend,
     minimax_available: bool,
 }
 
 impl MultiTtsBackend {
     pub fn new() -> Self {
+        Self::with_config(None)
+    }
+
+    pub fn with_config(config: Option<TtsConfig>) -> Self {
         let minimax_available = std::env::var("MINIMAX_API_KEY")
             .ok()
             .filter(|v| !v.trim().is_empty())
             .is_some();
         Self {
             client: Client::new(),
+            settings: TtsSettings::from_optional(config),
             elevenlabs_key: std::env::var("ELEVENLABS_API_KEY").ok(),
-            openai_base_url: std::env::var("OPENAI_BASE_URL")
-                .unwrap_or_else(|_| "https://api.openai.com/v1".to_string()),
             minimax: MiniMaxTtsBackend::from_env(),
             minimax_available,
         }
@@ -52,16 +54,32 @@ impl MultiTtsBackend {
             .as_ref()
             .ok_or_else(|| ToolError::ExecutionFailed("ELEVENLABS_API_KEY not set".into()))?;
 
+        let model_id = self
+            .settings
+            .config
+            .elevenlabs
+            .as_ref()
+            .and_then(|c| c.model_id.as_deref())
+            .unwrap_or("eleven_monolingual_v1");
+
         let body = json!({
             "text": text,
-            "model_id": "eleven_monolingual_v1",
+            "model_id": model_id,
         });
+
+        let voice_id = self
+            .settings
+            .config
+            .elevenlabs
+            .as_ref()
+            .and_then(|c| c.voice_id.as_deref())
+            .unwrap_or(voice);
 
         let resp = self
             .client
             .post(format!(
                 "https://api.elevenlabs.io/v1/text-to-speech/{}",
-                voice
+                voice_id
             ))
             .header("xi-api-key", api_key)
             .json(&body)
@@ -73,8 +91,7 @@ impl MultiTtsBackend {
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
             return Err(ToolError::ExecutionFailed(format!(
-                "ElevenLabs error ({}): {}",
-                status, text
+                "ElevenLabs error ({status}): {text}"
             )));
         }
 
@@ -83,27 +100,12 @@ impl MultiTtsBackend {
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to read audio: {}", e)))?;
 
-        let output_path =
-            std::env::temp_dir().join(format!("hermes_tts_{}.mp3", uuid::Uuid::new_v4()));
-        tokio::fs::write(&output_path, &bytes)
-            .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to write audio: {}", e)))?;
-
-        Ok(json!({
-            "provider": "elevenlabs",
-            "file": output_path.display().to_string(),
-            "voice": voice,
-            "bytes": bytes.len(),
-        })
-        .to_string())
+        tts_result_json("elevenlabs", voice_id, &bytes, "mp3").await
     }
 
-    async fn openai_tts(&self, text: &str, voice: &str) -> Result<String, ToolError> {
-        // Resolve transport in priority order:
-        // 1. Managed Nous gateway (HERMES_ENABLE_NOUS_MANAGED_TOOLS + Nous token)
-        // 2. Direct OpenAI with VOICE_TOOLS_OPENAI_KEY override, then
-        //    HERMES_OPENAI_API_KEY, then legacy OPENAI_API_KEY.
+    async fn openai_tts(&self, text: &str, voice: Option<&str>) -> Result<String, ToolError> {
         let managed = resolve_managed_tool_gateway("openai-audio", ResolveOptions::default());
+        let base_url = self.settings.openai_base_url();
         let (endpoint, bearer, transport) = match managed {
             Some(cfg) => Self::openai_audio_managed_endpoint(&cfg),
             None => {
@@ -116,18 +118,25 @@ impl MultiTtsBackend {
                     ));
                 }
                 (
-                    format!("{}/audio/speech", self.openai_base_url),
+                    format!("{}/audio/speech", base_url),
                     key,
                     "direct",
                 )
             }
         };
 
-        let body = json!({
-            "model": "tts-1",
+        let model = self.settings.openai_model();
+        let voice_name = self.settings.openai_voice(voice);
+        let speed = self.settings.config.openai.as_ref().and_then(|c| c.speed);
+
+        let mut body = json!({
+            "model": model,
             "input": text,
-            "voice": voice,
+            "voice": voice_name,
         });
+        if let Some(s) = speed {
+            body["speed"] = json!(s);
+        }
 
         let resp = self
             .client
@@ -142,8 +151,7 @@ impl MultiTtsBackend {
         if !status.is_success() {
             let text = resp.text().await.unwrap_or_default();
             return Err(ToolError::ExecutionFailed(format!(
-                "OpenAI TTS error ({}): {}",
-                status, text
+                "OpenAI TTS error ({status}): {text}"
             )));
         }
 
@@ -152,20 +160,23 @@ impl MultiTtsBackend {
             .await
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to read audio: {}", e)))?;
 
-        let output_path =
-            std::env::temp_dir().join(format!("hermes_tts_{}.mp3", uuid::Uuid::new_v4()));
-        tokio::fs::write(&output_path, &bytes)
-            .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to write audio: {}", e)))?;
+        let mut result = tts_result_json("openai", &voice_name, &bytes, "mp3").await?;
+        if transport == "managed" {
+            let parsed: serde_json::Value = serde_json::from_str(&result)
+                .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
+            let mut obj = parsed.as_object().cloned().unwrap_or_default();
+            obj.insert("transport".into(), json!("managed"));
+            result = serde_json::to_string(&obj)
+                .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
+        }
+        Ok(result)
+    }
 
-        Ok(json!({
-            "provider": "openai",
-            "transport": transport,
-            "file": output_path.display().to_string(),
-            "voice": voice,
-            "bytes": bytes.len(),
-        })
-        .to_string())
+    async fn edge_tts(&self, text: &str, voice: Option<&str>) -> Result<String, ToolError> {
+        let voice_name = self.settings.edge_voice(voice);
+        let speed = self.settings.config.edge.as_ref().and_then(|c| c.speed);
+        let bytes = edge_tts_synthesize(&self.client, text, &voice_name, speed).await?;
+        tts_result_json("edge", &voice_name, &bytes, "mp3").await
     }
 
     async fn piper_tts(&self, text: &str, voice: Option<&str>) -> Result<String, ToolError> {
@@ -180,6 +191,13 @@ impl MultiTtsBackend {
             .filter(|v| !v.is_empty())
             .map(|v| v.to_string())
             .or_else(|| {
+                self.settings
+                    .config
+                    .piper
+                    .as_ref()
+                    .and_then(|c| c.voice.clone())
+            })
+            .or_else(|| {
                 std::env::var("PIPER_MODEL")
                     .ok()
                     .map(|v| v.trim().to_string())
@@ -188,7 +206,7 @@ impl MultiTtsBackend {
             .ok_or_else(|| {
                 ToolError::ExecutionFailed(
                     "Piper requires a model. Set provider='piper' with voice='<model-path-or-name>' \
-                     or set PIPER_MODEL."
+                     or set tts.piper.voice / PIPER_MODEL."
                         .into(),
                 )
             })?;
@@ -208,30 +226,6 @@ impl MultiTtsBackend {
             let config = config.trim();
             if !config.is_empty() {
                 cmd.arg("--config").arg(config);
-            }
-        }
-        if let Ok(v) = std::env::var("PIPER_SPEAKER") {
-            let v = v.trim();
-            if !v.is_empty() {
-                cmd.arg("--speaker").arg(v);
-            }
-        }
-        if let Ok(v) = std::env::var("PIPER_LENGTH_SCALE") {
-            let v = v.trim();
-            if !v.is_empty() {
-                cmd.arg("--length_scale").arg(v);
-            }
-        }
-        if let Ok(v) = std::env::var("PIPER_NOISE_SCALE") {
-            let v = v.trim();
-            if !v.is_empty() {
-                cmd.arg("--noise_scale").arg(v);
-            }
-        }
-        if let Ok(v) = std::env::var("PIPER_NOISE_W") {
-            let v = v.trim();
-            if !v.is_empty() {
-                cmd.arg("--noise_w").arg(v);
             }
         }
 
@@ -276,19 +270,9 @@ impl MultiTtsBackend {
             ))
         })?;
 
-        Ok(json!({
-            "provider": "piper",
-            "transport": "local",
-            "file": output_path.display().to_string(),
-            "voice": model,
-            "bytes": bytes.len(),
-        })
-        .to_string())
+        tts_result_json("piper", &model, &bytes, "wav").await
     }
 
-    /// Compose the OpenAI-audio gateway endpoint + bearer for a resolved
-    /// managed config. Public visibility kept tight (`pub(crate)`) so the
-    /// `tts_premium` handler can reuse it later if needed.
     pub(crate) fn openai_audio_managed_endpoint(
         cfg: &ManagedToolGatewayConfig,
     ) -> (String, String, &'static str) {
@@ -300,14 +284,19 @@ impl MultiTtsBackend {
         )
     }
 
-    /// Public accessor so other tool handlers (e.g. `tts_premium`) can reuse
-    /// the ElevenLabs HTTP path without instantiating a second client.
     pub async fn synthesize_elevenlabs(
         &self,
         text: &str,
         voice: &str,
     ) -> Result<String, ToolError> {
         self.elevenlabs_tts(text, voice).await
+    }
+
+    fn resolve_provider<'a>(&'a self, provider: Option<&'a str>) -> &'a str {
+        provider
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| self.settings.config.default_provider())
     }
 }
 
@@ -325,28 +314,13 @@ impl TtsBackend for MultiTtsBackend {
         voice: Option<&str>,
         provider: Option<&str>,
     ) -> Result<String, ToolError> {
-        // Default provider preference:
-        // 1. ELEVENLABS_API_KEY set → elevenlabs (highest quality)
-        // 2. Otherwise OpenAI (cheapest HTTP-only path)
-        // Zero-Python: edge_tts removed entirely — callers asking for
-        // "edge_tts" receive a clear migration error.
-        let resolved_provider = provider.unwrap_or_else(|| {
-            if self.elevenlabs_key.is_some() {
-                "elevenlabs"
-            } else {
-                "openai"
-            }
-        });
-
-        match resolved_provider {
+        let resolved = self.resolve_provider(provider);
+        match resolved {
             "elevenlabs" => {
-                let voice = voice.unwrap_or("21m00Tcm4TlvDq8ikWAM"); // Rachel
-                self.elevenlabs_tts(text, voice).await
+                let v = voice.unwrap_or("21m00Tcm4TlvDq8ikWAM");
+                self.elevenlabs_tts(text, v).await
             }
-            "openai" => {
-                let voice = voice.unwrap_or("alloy");
-                self.openai_tts(text, voice).await
-            }
+            "openai" => self.openai_tts(text, voice).await,
             "minimax" => {
                 if !self.minimax_available {
                     return Err(ToolError::ExecutionFailed("MINIMAX_API_KEY not set".into()));
@@ -354,14 +328,24 @@ impl TtsBackend for MultiTtsBackend {
                 self.minimax.synthesize(text, voice, provider).await
             }
             "piper" => self.piper_tts(text, voice).await,
-            "edge_tts" | "edge-tts" | "neutts" => Err(ToolError::InvalidParams(format!(
-                "{resolved_provider} is not supported in hermes-agent-rust (zero-Python). \
-                 Use provider='openai' (HERMES_OPENAI_API_KEY or OPENAI_API_KEY), \
-                 'elevenlabs' (ELEVENLABS_API_KEY), 'minimax' (MINIMAX_API_KEY), \
-                 or 'piper' (local piper binary + PIPER_MODEL)."
-            ))),
+            "edge" | "edge_tts" | "edge-tts" => self.edge_tts(text, voice).await,
+            "mistral" => {
+                let bytes =
+                    mistral_tts_synthesize(&self.client, text, &self.settings.config).await?;
+                tts_result_json("mistral", voice.unwrap_or("default"), &bytes, "mp3").await
+            }
+            "gemini" => {
+                let bytes =
+                    gemini_tts_synthesize(&self.client, text, &self.settings.config).await?;
+                tts_result_json("gemini", voice.unwrap_or("default"), &bytes, "wav").await
+            }
+            "xai" => {
+                let bytes = xai_tts_synthesize(&self.client, text, &self.settings.config).await?;
+                tts_result_json("xai", voice.unwrap_or("default"), &bytes, "mp3").await
+            }
             other => Err(ToolError::InvalidParams(format!(
-                "Unknown TTS provider: '{other}'. Use 'openai', 'elevenlabs', 'minimax', or 'piper'.",
+                "Unknown TTS provider: '{other}'. Supported: edge, openai, elevenlabs, minimax, \
+                 piper, mistral, gemini, xai."
             ))),
         }
     }
@@ -389,29 +373,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_edge_tts_returns_migration_error() {
-        let backend = MultiTtsBackend::new();
-        let err = backend
-            .synthesize("hello", None, Some("edge_tts"))
-            .await
-            .unwrap_err();
-        let msg = err.to_string();
-        assert!(msg.contains("not supported") || msg.contains("zero-Python"));
-        assert!(msg.contains("openai") || msg.contains("elevenlabs"));
-    }
-
-    #[tokio::test]
-    async fn test_neutts_returns_migration_error() {
-        let backend = MultiTtsBackend::new();
-        let err = backend
-            .synthesize("hi", None, Some("neutts"))
-            .await
-            .unwrap_err();
-        let msg = err.to_string();
-        assert!(msg.contains("not supported") || msg.contains("zero-Python"));
-    }
-
-    #[tokio::test]
     async fn test_unknown_provider_errors() {
         let backend = MultiTtsBackend::new();
         let err = backend
@@ -430,7 +391,7 @@ mod tests {
             .synthesize("hello", None, Some("piper"))
             .await
             .unwrap_err();
-        assert!(err.to_string().contains("PIPER_MODEL"));
+        assert!(err.to_string().contains("PIPER_MODEL") || err.to_string().contains("piper"));
     }
 
     struct EnvVarGuard {

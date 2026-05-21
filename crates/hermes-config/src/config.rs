@@ -9,6 +9,7 @@ use hermes_core::BudgetConfig;
 use crate::platform::PlatformConfig;
 use crate::session::SessionConfig;
 use crate::streaming::StreamingConfig;
+use crate::voice::{SttConfig, TtsConfig};
 
 // ---------------------------------------------------------------------------
 // GatewayConfig
@@ -108,6 +109,14 @@ pub struct GatewayConfig {
     /// Override for the hermes home directory.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home_dir: Option<String>,
+
+    /// Text-to-speech provider configuration (Python `tts` block).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tts: Option<TtsConfig>,
+
+    /// Speech-to-text provider configuration (Python `stt` block).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stt: Option<SttConfig>,
 }
 
 impl Default for GatewayConfig {
@@ -136,6 +145,8 @@ impl Default for GatewayConfig {
             profile: ProfileConfig::default(),
             agent: AgentLoopBehaviorConfig::default(),
             home_dir: None,
+            tts: None,
+            stt: None,
         }
     }
 }

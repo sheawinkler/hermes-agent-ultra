@@ -46,6 +46,10 @@ impl Default for VoiceConfig {
 pub enum SttProvider {
     Whisper,
     DeepgramNova,
+    Groq,
+    Mistral,
+    Xai,
+    LocalCommand,
     Custom(String),
 }
 
@@ -59,13 +63,19 @@ pub enum TtsProvider {
 /// Voice mode manager.
 pub struct VoiceManager {
     config: VoiceConfig,
+    stt_config: hermes_config::SttConfig,
     joined_channels: Mutex<HashMap<String, HashSet<String>>>,
 }
 
 impl VoiceManager {
     pub fn new(config: VoiceConfig) -> Self {
+        Self::with_stt_config(config, hermes_config::SttConfig::default())
+    }
+
+    pub fn with_stt_config(config: VoiceConfig, stt_config: hermes_config::SttConfig) -> Self {
         Self {
             config,
+            stt_config,
             joined_channels: Mutex::new(HashMap::new()),
         }
     }
@@ -85,11 +95,43 @@ impl VoiceManager {
 
     /// Transcribe an audio file to text (STT).
     pub async fn transcribe(&self, audio_data: &[u8], format: &str) -> Result<String, AgentError> {
+        if !self.stt_config.is_enabled() {
+            return Err(AgentError::Config("STT is disabled (stt.enabled=false)".into()));
+        }
         match &self.config.stt_provider {
             SttProvider::Whisper => self.transcribe_whisper(audio_data, format).await,
             SttProvider::DeepgramNova => self.transcribe_deepgram(audio_data, format).await,
+            SttProvider::Groq | SttProvider::Mistral | SttProvider::Xai | SttProvider::LocalCommand => {
+                self.transcribe_via_tools(audio_data, format).await
+            }
             SttProvider::Custom(url) => self.transcribe_custom(url, audio_data, format).await,
         }
+    }
+
+    /// Transcribe audio at a local file path (gateway inbound voice messages).
+    pub async fn transcribe_path(&self, path: &str) -> Result<String, AgentError> {
+        if !self.stt_config.is_enabled() {
+            return Err(AgentError::Config("STT is disabled (stt.enabled=false)".into()));
+        }
+        hermes_tools::transcribe_audio_file(Some(self.stt_config.clone()), path)
+            .await
+            .map_err(|e| AgentError::LlmApi(e.to_string()))
+    }
+
+    async fn transcribe_via_tools(
+        &self,
+        audio_data: &[u8],
+        format: &str,
+    ) -> Result<String, AgentError> {
+        let path = std::env::temp_dir().join(format!(
+            "hermes_voice_{}.{}",
+            uuid::Uuid::new_v4(),
+            format
+        ));
+        tokio::fs::write(&path, audio_data)
+            .await
+            .map_err(|e| AgentError::Io(e.to_string()))?;
+        self.transcribe_path(path.to_string_lossy().as_ref()).await
     }
 
     /// Synthesize text to speech (TTS).
@@ -305,15 +347,15 @@ impl VoiceManager {
         audio_data: &[u8],
         format: &str,
     ) -> Result<String, AgentError> {
-        let api_key = std::env::var("HERMES_OPENAI_API_KEY")
-            .ok()
-            .filter(|v| !v.trim().is_empty())
-            .or_else(|| std::env::var("OPENAI_API_KEY").ok())
-            .ok_or_else(|| {
-                AgentError::Config(
-                    "HERMES_OPENAI_API_KEY (or OPENAI_API_KEY) not set for Whisper STT".into(),
-                )
-            })?;
+        let api_key = hermes_config::resolve_openai_audio_api_key();
+        if api_key.trim().is_empty() {
+            return Err(AgentError::Config(
+                "VOICE_TOOLS_OPENAI_KEY / HERMES_OPENAI_API_KEY / OPENAI_API_KEY required for Whisper STT"
+                    .into(),
+            ));
+        }
+        let base_url = self.stt_config.openai_base_url();
+        let model = self.stt_config.openai_model().to_string();
 
         let client = reqwest::Client::new();
         let part = reqwest::multipart::Part::bytes(audio_data.to_vec())
@@ -323,7 +365,7 @@ impl VoiceManager {
 
         let form = reqwest::multipart::Form::new()
             .part("file", part)
-            .text("model", "whisper-1");
+            .text("model", model);
 
         let form = if let Some(ref lang) = self.config.language {
             form.text("language", lang.clone())
@@ -331,8 +373,9 @@ impl VoiceManager {
             form
         };
 
+        let endpoint = format!("{base_url}/audio/transcriptions");
         let resp = client
-            .post("https://api.openai.com/v1/audio/transcriptions")
+            .post(&endpoint)
             .header("Authorization", format!("Bearer {}", api_key))
             .multipart(form)
             .send()
@@ -472,15 +515,13 @@ impl VoiceManager {
     }
 
     async fn tts_openai(&self, text: &str) -> Result<Vec<u8>, AgentError> {
-        let api_key = std::env::var("HERMES_OPENAI_API_KEY")
-            .ok()
-            .filter(|v| !v.trim().is_empty())
-            .or_else(|| std::env::var("OPENAI_API_KEY").ok())
-            .ok_or_else(|| {
-                AgentError::Config(
-                    "HERMES_OPENAI_API_KEY (or OPENAI_API_KEY) not set for TTS".into(),
-                )
-            })?;
+        let api_key = hermes_config::resolve_openai_audio_api_key();
+        if api_key.trim().is_empty() {
+            return Err(AgentError::Config(
+                "VOICE_TOOLS_OPENAI_KEY / HERMES_OPENAI_API_KEY / OPENAI_API_KEY required for TTS"
+                    .into(),
+            ));
+        }
 
         let client = reqwest::Client::new();
         let body = serde_json::json!({
@@ -489,8 +530,14 @@ impl VoiceManager {
             "voice": "alloy",
         });
 
+        let base = std::env::var("OPENAI_BASE_URL")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+        let endpoint = format!("{}/audio/speech", base.trim_end_matches('/'));
+
         let resp = client
-            .post("https://api.openai.com/v1/audio/speech")
+            .post(&endpoint)
             .header("Authorization", format!("Bearer {}", api_key))
             .json(&body)
             .send()

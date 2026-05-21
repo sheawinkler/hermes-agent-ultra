@@ -7,6 +7,7 @@
 //! and sensible defaults.
 
 pub mod config;
+pub mod voice;
 pub mod loader;
 pub mod managed_gateway;
 pub mod merge;
@@ -24,6 +25,11 @@ pub use config::{
     LlmProviderConfig, McpServerEntry, ProfileConfig, ProxyConfig, SecurityConfig,
     SessionsMaintenanceConfig, SkillsSettings, SmartModelRoutingConfig, TerminalBackendType,
     TerminalConfig, ToolsSettings,
+};
+pub use voice::{
+    SttConfig, SttGroqConfig, SttLocalConfig, SttMistralConfig, SttOpenAiConfig, SttXaiConfig,
+    TtsConfig, TtsEdgeConfig, TtsElevenLabsConfig, TtsGeminiConfig, TtsMiniMaxConfig,
+    TtsMistralConfig, TtsOpenAiConfig, TtsPiperConfig, TtsProviderEntry, TtsXaiConfig,
 };
 pub use loader::{
     apply_user_config_patch, load_config, load_user_config_file, save_config_yaml,

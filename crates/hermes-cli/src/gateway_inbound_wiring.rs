@@ -1,15 +1,18 @@
-//! Wire auxiliary vision + inbound preparer into gateway and tool registry.
+//! Wire auxiliary vision + inbound preparer + voice/STT into gateway and tool registry.
 
 use std::sync::Arc;
 
 use hermes_agent::{
-    build_auxiliary_client, register_agent_builtin_tools, AgentInboundPreparer, AuxiliaryBuildParams,
+    build_auxiliary_client, register_agent_builtin_tools_with_voice, AgentInboundPreparer,
+    AuxiliaryBuildParams,
 };
 use hermes_config::GatewayConfig;
 use hermes_core::{SkillProvider, TerminalBackend};
+use hermes_gateway::voice::VoiceManager;
+use hermes_gateway::voice_config::voice_config_from_app;
 use hermes_gateway::Gateway;
 use hermes_intelligence::auxiliary::AuxiliaryConfig;
-use hermes_tools::ToolRegistry;
+use hermes_tools::{ToolRegistry, VoiceMediaToolConfig};
 
 /// Parse `provider:model` from config (e.g. `custom:flowy/DeepSeek-V4-Flash`).
 fn split_configured_model(model: &str) -> (Option<String>, Option<String>) {
@@ -24,7 +27,7 @@ fn split_configured_model(model: &str) -> (Option<String>, Option<String>) {
     (None, Some(trimmed.to_string()))
 }
 
-/// Build auxiliary client, vision tool backend, and gateway inbound preparer from config.
+/// Build auxiliary client, vision tool backend, gateway inbound preparer, and voice runtime from config.
 pub async fn wire_gateway_inbound_vision(
     gateway: &Arc<Gateway>,
     tool_registry: &Arc<ToolRegistry>,
@@ -47,13 +50,24 @@ pub async fn wire_gateway_inbound_vision(
     });
 
     let auxiliary = Arc::new(auxiliary);
-    register_agent_builtin_tools(
+    let voice_tools = VoiceMediaToolConfig {
+        tts: config.tts.clone(),
+        stt: config.stt.clone(),
+    };
+    register_agent_builtin_tools_with_voice(
         tool_registry,
         terminal_backend,
         skill_provider,
         Some(auxiliary.clone()),
+        Some(voice_tools),
     );
 
     let preparer = Arc::new(AgentInboundPreparer::new(auxiliary));
     gateway.set_inbound_preparer(preparer).await;
+
+    let (voice_cfg, stt_enabled) =
+        voice_config_from_app(config.tts.as_ref(), config.stt.as_ref());
+    let stt_config = config.stt.clone().unwrap_or_default();
+    let manager = Arc::new(VoiceManager::with_stt_config(voice_cfg, stt_config));
+    gateway.set_voice_runtime(manager, stt_enabled).await;
 }

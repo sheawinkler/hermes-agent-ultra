@@ -67,7 +67,10 @@ pub use auxiliary_builder::{
     AuxiliaryWiringSummary,
 };
 pub use inbound_prepare::AgentInboundPreparer;
-pub use tools_wiring::register_builtin_tools as register_agent_builtin_tools;
+pub use tools_wiring::{
+    register_builtin_tools as register_agent_builtin_tools,
+    register_builtin_tools_with_voice as register_agent_builtin_tools_with_voice,
+};
 pub use vision_adapter::AuxiliaryVisionAdapter;
 pub use provider::{AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider};
 pub use providers_extra::{

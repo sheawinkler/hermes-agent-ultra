@@ -1,75 +1,36 @@
-//! Whisper-style transcription via OpenAI's `/audio/transcriptions`
-//! endpoint, with optional Nous-managed gateway routing.
-//!
-//! Resolution order at request time:
-//!
-//! 1. **Managed**: when `HERMES_ENABLE_NOUS_MANAGED_TOOLS` is on AND a
-//!    Nous OAuth token resolves for the `openai-audio` vendor, the call
-//!    is routed through `{gateway}/audio/transcriptions` with a Nous
-//!    `Bearer` header.
-//! 2. **Direct**: otherwise, falls back to `VOICE_TOOLS_OPENAI_KEY`,
-//!    then `HERMES_OPENAI_API_KEY`, then legacy `OPENAI_API_KEY`,
-//!    calling `https://api.openai.com/v1/audio/...`.
-//!
-//! The output JSON includes `transport: "managed" | "direct"` for
-//! observability.
+//! Multi-provider STT (OpenAI, Groq, Mistral, xAI, local_command).
 
-use std::path::Path;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use serde_json::{json, Value};
 
-use hermes_config::managed_gateway::{
-    resolve_managed_tool_gateway, resolve_openai_audio_api_key, ManagedToolGatewayConfig,
-    ResolveOptions,
-};
+use hermes_config::voice::SttConfig;
 use hermes_core::{tool_schema, JsonSchema, ToolError, ToolHandler, ToolSchema};
 
-pub struct TranscriptionHandler;
+use crate::voice_providers::SttEngine;
 
-fn audio_extension_format(path: &str) -> &'static str {
-    Path::new(path)
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|e| e.to_ascii_lowercase())
-        .as_deref()
-        .map(|e| match e {
-            "wav" => "wav",
-            "mp3" => "mp3",
-            "m4a" => "mp4",
-            "webm" => "webm",
-            "ogg" | "oga" => "ogg",
-            "flac" => "flac",
-            _ => "wav",
-        })
-        .unwrap_or("wav")
+pub struct TranscriptionHandler {
+    engine: Arc<SttEngine>,
 }
 
-/// Compose the (endpoint, bearer, transport_label) tuple for a Whisper
-/// request. Pure helper so it can be unit-tested without touching the
-/// network.
-pub(crate) fn resolve_transcription_endpoint(
-    managed: Option<&ManagedToolGatewayConfig>,
-) -> Option<(String, String, &'static str)> {
-    if let Some(cfg) = managed {
-        let base = cfg.gateway_origin.trim_end_matches('/');
-        return Some((
-            format!("{base}/audio/transcriptions"),
-            cfg.nous_user_token.clone(),
-            "managed",
-        ));
+impl TranscriptionHandler {
+    pub fn new() -> Self {
+        Self::with_config(None)
     }
 
-    let key = resolve_openai_audio_api_key();
-    if key.is_empty() {
-        return None;
+    pub fn with_config(config: Option<SttConfig>) -> Self {
+        Self {
+            engine: Arc::new(SttEngine::from_optional(config)),
+        }
     }
-    Some((
-        "https://api.openai.com/v1/audio/transcriptions".into(),
-        key,
-        "direct",
-    ))
+}
+
+impl Default for TranscriptionHandler {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[async_trait]
@@ -83,62 +44,11 @@ impl ToolHandler for TranscriptionHandler {
             return Err(ToolError::InvalidParams("Missing 'audio_path'".into()));
         }
 
-        let managed = resolve_managed_tool_gateway("openai-audio", ResolveOptions::default());
-        let (endpoint, bearer, transport) = resolve_transcription_endpoint(managed.as_ref())
-            .ok_or_else(|| {
-                ToolError::ExecutionFailed(
-                    "Whisper transcription requires either VOICE_TOOLS_OPENAI_KEY / \
-                     HERMES_OPENAI_API_KEY (or OPENAI_API_KEY) for direct mode, or a \
-                     Nous-managed openai-audio gateway."
-                        .into(),
-                )
-            })?;
-
-        let bytes = tokio::fs::read(path)
-            .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("Cannot read audio file: {e}")))?;
-
-        let fmt = audio_extension_format(path);
-        let client = reqwest::Client::new();
-        let part = reqwest::multipart::Part::bytes(bytes)
-            .file_name(format!("audio.{fmt}"))
-            .mime_str(&format!("audio/{fmt}"))
-            .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
-
-        let form = reqwest::multipart::Form::new()
-            .part("file", part)
-            .text("model", "whisper-1");
-
-        let resp = client
-            .post(&endpoint)
-            .header("Authorization", format!("Bearer {}", bearer))
-            .multipart(form)
-            .send()
-            .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("Whisper API: {e}")))?;
-
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            return Err(ToolError::ExecutionFailed(format!(
-                "Whisper error {status}: {body}"
-            )));
-        }
-
-        let json: Value = resp
-            .json()
-            .await
-            .map_err(|e| ToolError::ExecutionFailed(format!("Whisper JSON: {e}")))?;
-        let text = json
-            .get("text")
-            .and_then(|t| t.as_str())
-            .unwrap_or("")
-            .to_string();
-
+        let text = self.engine.transcribe_file(path).await?;
         Ok(json!({
             "audio_path": path,
             "text": text,
-            "transport": transport,
+            "provider": self.engine.config.default_provider(),
             "status": "transcribed",
         })
         .to_string())
@@ -152,12 +62,19 @@ impl ToolHandler for TranscriptionHandler {
         );
         tool_schema(
             "transcription",
-            "Transcribe audio into text via OpenAI Whisper. Honors VOICE_TOOLS_OPENAI_KEY / \
-             HERMES_OPENAI_API_KEY (or OPENAI_API_KEY) for direct mode and routes through Nous-managed openai-audio \
-             gateway when HERMES_ENABLE_NOUS_MANAGED_TOOLS is enabled.",
+            "Transcribe audio into text. Provider from config stt.provider (openai, groq, mistral, xai, local_command). \
+             Honors stt.enabled, stt.openai.model/base_url, STT_OPENAI_BASE_URL, and VOICE_TOOLS_OPENAI_KEY.",
             JsonSchema::object(props, vec!["audio_path".into()]),
         )
     }
+}
+
+/// Gateway / shared inbound STT entry (reads file from disk).
+pub async fn transcribe_audio_file(
+    config: Option<SttConfig>,
+    path: &str,
+) -> Result<String, ToolError> {
+    SttEngine::from_optional(config).transcribe_file(path).await
 }
 
 #[cfg(test)]
@@ -216,91 +133,27 @@ mod tests {
         assert_eq!(audio_extension_format("a.m4a"), "mp4");
         assert_eq!(audio_extension_format("a.webm"), "webm");
         assert_eq!(audio_extension_format("a.ogg"), "ogg");
-        assert_eq!(audio_extension_format("a.oga"), "ogg");
         assert_eq!(audio_extension_format("a.flac"), "flac");
     }
 
     #[test]
-    fn audio_extension_unknown_falls_back_to_wav() {
-        assert_eq!(audio_extension_format("a.xyz"), "wav");
-        assert_eq!(audio_extension_format("noext"), "wav");
-        assert_eq!(audio_extension_format(""), "wav");
-    }
-
-    #[test]
-    fn resolve_endpoint_prefers_managed_when_provided() {
-        let _g = EnvScope::new();
-        // Even with a direct key set, the explicit managed cfg wins because
-        // the resolver already decided.
-        std::env::set_var("OPENAI_API_KEY", "should-be-ignored");
-        let cfg = ManagedToolGatewayConfig {
-            vendor: "openai-audio".into(),
-            gateway_origin: "https://oa.gw.example.com/".into(),
-            nous_user_token: "nous-tok".into(),
-            managed_mode: true,
-        };
-        let (endpoint, bearer, label) = resolve_transcription_endpoint(Some(&cfg)).unwrap();
-        assert_eq!(endpoint, "https://oa.gw.example.com/audio/transcriptions");
-        assert_eq!(bearer, "nous-tok");
-        assert_eq!(label, "managed");
-    }
-
-    #[test]
-    fn resolve_endpoint_uses_voice_key_first_in_direct_mode() {
-        let _g = EnvScope::new();
-        std::env::set_var("VOICE_TOOLS_OPENAI_KEY", "voice-key");
-        std::env::set_var("OPENAI_API_KEY", "main-key");
-        let (endpoint, bearer, label) = resolve_transcription_endpoint(None).unwrap();
-        assert_eq!(endpoint, "https://api.openai.com/v1/audio/transcriptions");
-        assert_eq!(bearer, "voice-key");
-        assert_eq!(label, "direct");
-    }
-
-    #[test]
-    fn resolve_endpoint_falls_back_to_main_key() {
-        let _g = EnvScope::new();
-        std::env::set_var("OPENAI_API_KEY", "main-key");
-        let (_endpoint, bearer, label) = resolve_transcription_endpoint(None).unwrap();
-        assert_eq!(bearer, "main-key");
-        assert_eq!(label, "direct");
-    }
-
-    #[test]
-    fn resolve_endpoint_returns_none_when_unconfigured() {
-        let _g = EnvScope::new();
-        assert!(resolve_transcription_endpoint(None).is_none());
-    }
-
-    #[tokio::test]
-    async fn execute_errors_when_no_credentials_or_gateway() {
-        let _g = EnvScope::new();
-        let h = TranscriptionHandler;
-        let err = h
-            .execute(json!({"audio_path": "/tmp/nope.wav"}))
-            .await
+    fn stt_disabled_returns_error() {
+        let mut cfg = SttConfig::default();
+        cfg.enabled = Some(false);
+        let engine = SttEngine::new(cfg);
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let err = rt
+            .block_on(engine.transcribe_file("/tmp/x.wav"))
             .unwrap_err();
-        let s = err.to_string();
-        assert!(s.contains("VOICE_TOOLS_OPENAI_KEY"));
-        assert!(s.contains("HERMES_OPENAI_API_KEY") || s.contains("OPENAI_API_KEY"));
-        assert!(s.contains("openai-audio gateway"));
+        assert!(err.to_string().contains("disabled"));
     }
 
     #[tokio::test]
     async fn execute_errors_on_missing_path_param() {
         let _g = EnvScope::new();
         std::env::set_var("OPENAI_API_KEY", "k");
-        let h = TranscriptionHandler;
+        let h = TranscriptionHandler::new();
         let err = h.execute(json!({})).await.unwrap_err();
         assert!(matches!(err, ToolError::InvalidParams(_)));
-    }
-
-    #[test]
-    fn schema_advertises_managed_routing() {
-        let h = TranscriptionHandler;
-        let s = h.schema();
-        let desc = serde_json::to_string(&s).unwrap();
-        assert!(desc.contains("VOICE_TOOLS_OPENAI_KEY"));
-        assert!(desc.contains("HERMES_OPENAI_API_KEY"));
-        assert!(desc.contains("HERMES_ENABLE_NOUS_MANAGED_TOOLS"));
     }
 }

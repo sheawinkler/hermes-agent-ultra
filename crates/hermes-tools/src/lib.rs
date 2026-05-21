@@ -25,6 +25,7 @@ pub mod toolset;
 pub mod toolset_distributions;
 pub mod tts_streaming;
 pub mod v4a_patch;
+pub mod voice_providers;
 
 pub use media_extract::extract_media;
 
@@ -116,7 +117,12 @@ pub use backends::web::{
 };
 
 // Re-export builtin registration helper
-pub use register_builtins::{register_builtin_tools, register_builtin_tools_with_vision};
+pub use register_builtins::{
+    register_builtin_tools, register_builtin_tools_with_vision,
+    register_builtin_tools_with_vision_and_voice, register_builtin_tools_with_voice,
+    VoiceMediaToolConfig,
+};
+pub use tools::transcription::transcribe_audio_file;
 
 // Re-export core types needed by consumers
 pub use hermes_core::{BudgetConfig, ToolCall, ToolError, ToolHandler, ToolResult, ToolSchema};

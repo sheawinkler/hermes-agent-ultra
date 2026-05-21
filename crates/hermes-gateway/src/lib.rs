@@ -36,6 +36,7 @@ pub mod sticker_cache;
 pub mod stream;
 pub mod tool_backends;
 pub mod voice;
+pub mod voice_config;
 
 // Re-export core types from hermes-core
 pub use hermes_core::errors::GatewayError;

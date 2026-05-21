@@ -48,6 +48,7 @@ use hermes_tools::extract_media;
 use hermes_tools::tools::messaging::MessagingSessionContext;
 use crate::session::SessionManager;
 use crate::stream::{StreamConfig, StreamManager};
+use crate::voice::VoiceManager;
 
 // ---------------------------------------------------------------------------
 // GatewayConfig
@@ -284,6 +285,10 @@ pub struct Gateway {
     platform_access_policies: RwLock<HashMap<String, PlatformAccessPolicy>>,
     /// Optional agent-layer inbound preparer (vision routing, transcription).
     inbound_preparer: RwLock<Option<Arc<dyn InboundMessagePreparer>>>,
+    /// Optional voice/STT manager for inbound audio and outbound TTS.
+    voice_manager: RwLock<Option<Arc<VoiceManager>>>,
+    /// When false, inbound audio is not transcribed (Python `stt_enabled`).
+    stt_enabled: RwLock<bool>,
     /// Current inbound channel for `send_message` session fallback.
     messaging_session: RwLock<Option<Arc<MessagingSessionContext>>>,
 }
@@ -365,6 +370,8 @@ impl Gateway {
             hook_registry: RwLock::new(None),
             platform_access_policies: RwLock::new(HashMap::new()),
             inbound_preparer: RwLock::new(None),
+            voice_manager: RwLock::new(None),
+            stt_enabled: RwLock::new(true),
             messaging_session: RwLock::new(None),
         }
     }
@@ -372,6 +379,12 @@ impl Gateway {
     /// Register the agent inbound preparer (vision enrich, native multimodal, etc.).
     pub async fn set_inbound_preparer(&self, preparer: Arc<dyn InboundMessagePreparer>) {
         *self.inbound_preparer.write().await = Some(preparer);
+    }
+
+    /// Wire voice manager + STT gate from app `config.yaml` (`tts` / `stt` blocks).
+    pub async fn set_voice_runtime(&self, manager: Arc<VoiceManager>, stt_enabled: bool) {
+        *self.voice_manager.write().await = Some(manager);
+        *self.stt_enabled.write().await = stt_enabled;
     }
 
     /// Share session context with `send_message` for automatic platform/recipient fallback.
@@ -2294,9 +2307,9 @@ impl Gateway {
             aux_vision_base_url: None,
         };
         let preparer = self.inbound_preparer.read().await.clone();
-        if let Some(preparer) = preparer {
+        let mut message = if let Some(preparer) = preparer {
             match preparer.prepare(&event, &ctx).await {
-                Ok(message) => return message,
+                Ok(message) => message,
                 Err(err) => {
                     warn!(
                         platform = %incoming.platform,
@@ -2304,10 +2317,72 @@ impl Gateway {
                         error = %err,
                         "Inbound preparer failed; using transport fallback"
                     );
+                    transport_fallback_message(&event)
+                }
+            }
+        } else {
+            transport_fallback_message(&event)
+        };
+
+        if let Some(enriched) = self.enrich_inbound_audio(&event, &message).await {
+            message = enriched;
+        }
+        message
+    }
+
+    /// Transcribe inbound audio attachments (Python `_enrich_message_with_transcription`).
+    async fn enrich_inbound_audio(&self, event: &InboundEvent, base: &Message) -> Option<Message> {
+        if !*self.stt_enabled.read().await {
+            return None;
+        }
+        let voice = self.voice_manager.read().await.clone()?;
+        let mut transcripts = Vec::new();
+        for (idx, url) in event.media_urls.iter().enumerate() {
+            let media_type = event
+                .media_types
+                .get(idx)
+                .map(String::as_str)
+                .unwrap_or("")
+                .to_ascii_lowercase();
+            if !media_type.starts_with("audio/") && media_type != "voice" && media_type != "audio" {
+                continue;
+            }
+            let path = url.trim();
+            if path.is_empty() {
+                continue;
+            }
+            match voice.transcribe_path(path).await {
+                Ok(text) if !text.trim().is_empty() => {
+                    transcripts.push(format!(
+                        "[The user sent a voice message~ Here's what they said: \"{}\"]",
+                        text.trim()
+                    ));
+                }
+                Ok(_) => {}
+                Err(err) => {
+                    warn!(
+                        path = path,
+                        error = %err,
+                        "Inbound audio transcription failed"
+                    );
+                    transcripts.push(
+                        "[The user sent a voice message but transcription failed.]".into(),
+                    );
                 }
             }
         }
-        transport_fallback_message(&event)
+        if transcripts.is_empty() {
+            return None;
+        }
+        let prefix = transcripts.join("\n");
+        let body = base
+            .content
+            .as_deref()
+            .map(|c| c.trim())
+            .filter(|c| !c.is_empty())
+            .map(|c| format!("{prefix}\n{c}"))
+            .unwrap_or(prefix);
+        Some(Message::user(body))
     }
 
     /// Build deterministic signature for config-change detection.

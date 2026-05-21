@@ -74,14 +74,15 @@ impl ToolHandler for TextToSpeechHandler {
             json!({
                 "type": "string",
                 "description": "TTS provider to use",
-                "enum": ["elevenlabs", "openai", "minimax", "piper"],
-                "default": "openai"
+                "enum": ["edge", "openai", "elevenlabs", "minimax", "piper", "mistral", "gemini", "xai"],
+                "default": "edge"
             }),
         );
 
         tool_schema(
             "text_to_speech",
-            "Convert text to speech audio using ElevenLabs, OpenAI, MiniMax, or local Piper. HTTP providers use direct API calls; Piper uses a local binary (no Python runtime required).",
+            "Convert text to speech. Providers: edge (free), openai, elevenlabs, minimax, piper, mistral, gemini, xai. \
+             Default provider from config tts.provider.",
             JsonSchema::object(props, vec!["text".into()]),
         )
     }

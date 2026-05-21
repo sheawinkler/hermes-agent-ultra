@@ -7,9 +7,17 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use hermes_config::voice::{SttConfig, TtsConfig};
 use hermes_core::{SkillProvider, TerminalBackend, ToolHandler};
 
 use crate::ToolRegistry;
+
+/// Voice/media config passed into built-in TTS/STT tools.
+#[derive(Debug, Clone, Default)]
+pub struct VoiceMediaToolConfig {
+    pub tts: Option<TtsConfig>,
+    pub stt: Option<SttConfig>,
+}
 
 /// Register built-in tools without an injected vision backend.
 pub fn register_builtin_tools(
@@ -17,7 +25,29 @@ pub fn register_builtin_tools(
     terminal_backend: Arc<dyn TerminalBackend>,
     skill_provider: Arc<dyn SkillProvider>,
 ) {
-    register_builtin_tools_with_vision(registry, terminal_backend, skill_provider, None);
+    register_builtin_tools_impl(
+        registry,
+        terminal_backend,
+        skill_provider,
+        None,
+        None,
+    );
+}
+
+/// Register built-in tools with optional voice (tts/stt) config from `GatewayConfig`.
+pub fn register_builtin_tools_with_voice(
+    registry: &ToolRegistry,
+    terminal_backend: Arc<dyn TerminalBackend>,
+    skill_provider: Arc<dyn SkillProvider>,
+    voice: Option<VoiceMediaToolConfig>,
+) {
+    register_builtin_tools_impl(
+        registry,
+        terminal_backend,
+        skill_provider,
+        None,
+        voice,
+    );
 }
 
 /// Register all built-in tool handlers into the given registry.
@@ -31,6 +61,40 @@ pub fn register_builtin_tools_with_vision(
     skill_provider: Arc<dyn SkillProvider>,
     vision_backend: Option<Arc<dyn crate::tools::vision::VisionBackend>>,
 ) {
+    register_builtin_tools_impl(
+        registry,
+        terminal_backend,
+        skill_provider,
+        vision_backend,
+        None,
+    );
+}
+
+pub fn register_builtin_tools_with_vision_and_voice(
+    registry: &ToolRegistry,
+    terminal_backend: Arc<dyn TerminalBackend>,
+    skill_provider: Arc<dyn SkillProvider>,
+    vision_backend: Option<Arc<dyn crate::tools::vision::VisionBackend>>,
+    voice: Option<VoiceMediaToolConfig>,
+) {
+    register_builtin_tools_impl(
+        registry,
+        terminal_backend,
+        skill_provider,
+        vision_backend,
+        voice,
+    );
+}
+
+fn register_builtin_tools_impl(
+    registry: &ToolRegistry,
+    terminal_backend: Arc<dyn TerminalBackend>,
+    skill_provider: Arc<dyn SkillProvider>,
+    vision_backend: Option<Arc<dyn crate::tools::vision::VisionBackend>>,
+    voice: Option<VoiceMediaToolConfig>,
+) {
+    let tts_cfg = voice.as_ref().and_then(|v| v.tts.clone());
+    let stt_cfg = voice.as_ref().and_then(|v| v.stt.clone());
     fn reg(
         registry: &ToolRegistry,
         toolset: &str,
@@ -362,12 +426,11 @@ pub fn register_builtin_tools_with_vision(
     }
 
     // -- TTS -----------------------------------------------------------------
+    let tts_backend = Arc::new(crate::backends::tts::MultiTtsBackend::with_config(tts_cfg));
     reg(
         registry,
         "tts",
-        Arc::new(crate::tools::tts::TextToSpeechHandler::new(Arc::new(
-            crate::backends::tts::MultiTtsBackend::new(),
-        ))),
+        Arc::new(crate::tools::tts::TextToSpeechHandler::new(tts_backend.clone())),
         "🔊",
         vec![],
     );
@@ -493,9 +556,16 @@ pub fn register_builtin_tools_with_vision(
     reg(
         registry,
         "voice",
-        Arc::new(crate::tools::transcription::TranscriptionHandler),
+        Arc::new(crate::tools::transcription::TranscriptionHandler::with_config(
+            stt_cfg,
+        )),
         "🎙️",
-        vec!["HERMES_OPENAI_API_KEY".into(), "OPENAI_API_KEY".into()],
+        vec![
+            "VOICE_TOOLS_OPENAI_KEY".into(),
+            "HERMES_OPENAI_API_KEY".into(),
+            "OPENAI_API_KEY".into(),
+            "STT_OPENAI_BASE_URL".into(),
+        ],
     );
 
     // -- Voice mode ----------------------------------------------------------
@@ -511,7 +581,7 @@ pub fn register_builtin_tools_with_vision(
     reg(
         registry,
         "tts",
-        Arc::new(crate::tools::tts_premium::TtsPremiumHandler::default()),
+        Arc::new(crate::tools::tts_premium::TtsPremiumHandler::new(tts_backend)),
         "🎵",
         vec!["ELEVENLABS_API_KEY".into()],
     );
