@@ -282,7 +282,7 @@ fn main() {
         }
     };
     runtime.block_on(async_main(cli));
-    runtime.shutdown_background();
+    runtime.shutdown_timeout(std::time::Duration::from_secs(2));
 }
 
 async fn async_main(cli: Cli) {
