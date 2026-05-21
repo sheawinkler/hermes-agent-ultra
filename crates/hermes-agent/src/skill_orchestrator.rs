@@ -105,7 +105,13 @@ fn slugify_skill_name(name: &str) -> String {
     deduped.trim_matches('-').to_string()
 }
 
-fn security_gate_skill_content(name: &str, body: &str) -> Result<(), String> {
+fn security_gate_skill_content(
+    skills_dir: &Path,
+    name: &str,
+    body: &str,
+    skill_dir: &Path,
+) -> Result<(), String> {
+    let source = hermes_skills::resolve_scan_source(skills_dir, name, Some(skill_dir));
     let probe = Skill {
         name: name.to_string(),
         content: body.to_string(),
@@ -113,7 +119,7 @@ fn security_gate_skill_content(name: &str, body: &str) -> Result<(), String> {
         description: None,
     };
     SkillGuard::default()
-        .scan_security_only(&probe)
+        .scan_security_with_policy(&probe, &source)
         .map_err(|e| e.to_string())
 }
 
@@ -329,15 +335,15 @@ impl SkillOrchestrator {
             tracing::debug!("Skipping skill '{}' due to enabled/disabled filters", name);
             return;
         }
-        if let Err(err) = security_gate_skill_content(&name, body) {
-            record_security_skip(security_skips, &name, &err);
-            return;
-        }
-
         let skill_dir = skill_md_path
             .parent()
             .unwrap_or(skill_md_path)
             .to_path_buf();
+
+        if let Err(err) = security_gate_skill_content(&self.skills_dir, &name, body, &skill_dir) {
+            record_security_skip(security_skips, &name, &err);
+            return;
+        }
 
         self.commands.insert(
             format!("/{cmd_name}"),
@@ -384,7 +390,9 @@ impl SkillOrchestrator {
         };
 
         let (_, body) = parse_frontmatter(&content);
-        if let Err(err) = security_gate_skill_content(&info.name, body) {
+        if let Err(err) =
+            security_gate_skill_content(&self.skills_dir, &info.name, body, &info.skill_dir)
+        {
             return Some(format!(
                 "[Blocked skill '{}' by security policy: {}]",
                 info.name, err
@@ -445,7 +453,12 @@ impl SkillOrchestrator {
                         }
                     };
                     let (_, body) = parse_frontmatter(&content);
-                    if let Err(err) = security_gate_skill_content(&info.name, body) {
+                    if let Err(err) = security_gate_skill_content(
+                        &self.skills_dir,
+                        &info.name,
+                        body,
+                        &info.skill_dir,
+                    ) {
                         tracing::warn!(
                             "Skipping preloaded skill '{}' due to security policy: {}",
                             info.name,

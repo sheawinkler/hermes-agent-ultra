@@ -11,6 +11,7 @@ use tracing::{debug, instrument};
 use hermes_core::types::{Skill, SkillMeta};
 
 use crate::guard::SkillGuard;
+use crate::hub_lock::resolve_scan_source;
 use crate::skill::SkillError;
 
 // ---------------------------------------------------------------------------
@@ -270,8 +271,8 @@ impl SkillStore for FileSkillStore {
                     category: fm.category,
                     description: fm.description,
                 };
-                // Mandatory pre-use security gate.
-                SkillGuard::default().scan_security_only(&skill)?;
+                let source = resolve_scan_source(&self.skills_dir, &skill.name, Some(&dir));
+                SkillGuard::default().scan_security_with_policy(&skill, &source)?;
 
                 return Ok(Some(skill));
             }

@@ -14,7 +14,7 @@ skills:
 ```
 
 - 审计 `~/.hermes/skills/` 下违规 skill：移除 `sudo`/`su`、硬编码 API key、`../` 路径遍历、外发 curl。
-- 放宽扫描（仅开发环境）：`HERMES_SKILL_GUARD_MODE=relaxed` 或 `off`。安装与运行时共用 `skills_guard` 120 条规则（`SkillGuard` 门面）。
+- 放宽扫描（仅开发环境）：`HERMES_SKILL_GUARD_MODE=relaxed` 或 `off`。安装与运行时共用 `skills_guard` 120 条规则（`SkillGuard` 门面）；strict 下已安装 skill 的 trust 来自 `skills/.hub/lock.json`。
 - 验证：`hermes skills audit`，重启 gateway，日志中不应再出现 `Skipped N skill(s) due to security policy`。
 
 ### 2. vision_analyze 401 / invalid_api_key
