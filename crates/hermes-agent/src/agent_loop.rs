@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
-use hermes_auth::{exchange_refresh_token, OAuth2Endpoints};
+use hermes_auth::{OAuth2Endpoints, exchange_refresh_token};
 use hermes_intelligence::get_model_context_length;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -25,22 +25,23 @@ use tokio::task::JoinSet;
 use tokio::time::sleep;
 
 use hermes_core::{
-    separate_text_and_calls, AgentError, AgentResult, BudgetConfig, LlmProvider, LlmResponse,
-    Message, MessageRole, StreamChunk, ToolCall, ToolError, ToolResult, ToolSchema, UsageStats,
+    AgentError, AgentResult, BudgetConfig, LlmProvider, LlmResponse, Message, MessageRole,
+    StreamChunk, ToolCall, ToolError, ToolResult, ToolSchema, UsageStats, separate_text_and_calls,
 };
 
 use crate::api_bridge::CodexProvider;
 use crate::budget;
 use crate::code_index::CodeIndex;
 use crate::context::{
-    load_builtin_memory_snapshot, load_soul_md, resolve_personality, ContextManager,
-    SystemPromptBuilder,
+    ContextManager, SystemPromptBuilder, load_builtin_memory_snapshot, load_soul_md,
+    resolve_personality,
 };
 use crate::context_files::{load_hermes_context_files, load_workspace_context};
 use crate::context_references::preprocess_context_references_async;
 use crate::credential_pool::CredentialPool;
+use crate::fallback::TurnFallbackState;
 use crate::interrupt::InterruptController;
-use crate::lsp_context::{build_lsp_context_note, LspContextConfig};
+use crate::lsp_context::{LspContextConfig, build_lsp_context_note};
 use crate::memory_manager::MemoryManager;
 use crate::plugins::{HookResult, HookType, PluginManager};
 use crate::provider::{AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider};
@@ -48,18 +49,17 @@ use crate::providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
 };
 use crate::python_alignment::{
-    budget_pressure_text, inject_budget_pressure_into_last_tool_result,
-    looks_like_codex_intermediate_ack, sanitize_surrogates, strip_budget_warnings_from_messages,
-    strip_think_blocks_for_ack, CODEX_CONTINUE_USER_MESSAGE,
+    CODEX_CONTINUE_USER_MESSAGE, budget_pressure_text,
+    inject_budget_pressure_into_last_tool_result, looks_like_codex_intermediate_ack,
+    sanitize_surrogates, strip_budget_warnings_from_messages, strip_think_blocks_for_ack,
 };
-use crate::fallback::TurnFallbackState;
-use crate::steer::PendingSteer;
 use crate::skill_orchestrator::SkillOrchestrator;
-use crate::smart_model_routing::{
-    detect_api_mode_for_url, resolve_turn_route, PrimaryRuntime, ResolveTurnOutcome,
-    ResolvedCheapRuntime, TurnRouteSignature,
-};
 pub use crate::smart_model_routing::{ApiMode, CheapModelRouteConfig, SmartModelRoutingConfig};
+use crate::smart_model_routing::{
+    PrimaryRuntime, ResolveTurnOutcome, ResolvedCheapRuntime, TurnRouteSignature,
+    detect_api_mode_for_url, resolve_turn_route,
+};
+use crate::steer::PendingSteer;
 
 // ---------------------------------------------------------------------------
 // ToolRegistry
@@ -241,13 +241,12 @@ const FINALIZER_ACTION_EXECUTION_MAX_RETRIES: u32 = 2;
 // Python `AIAgent._MEMORY_REVIEW_PROMPT` / `_SKILL_REVIEW_PROMPT` / `_COMBINED_REVIEW_PROMPT` (v2026.4.13)
 const MEMORY_REVIEW_PROMPT: &str = "Review the conversation above and consider saving to memory if appropriate.\n\n\
 Focus on:\n\
-1. Has the user revealed things about themselves ??? their persona, desires, preferences, or personal details worth remembering?\n\
+1. Has the user revealed things about themselves - their persona, desires, preferences, or personal details worth remembering?\n\
 2. Has the user expressed expectations about how you should behave, their work style, or ways they want you to operate?\n\n\
 If something stands out, save it using the memory tool. \
 If nothing is worth saving, just say 'Nothing to save.' and stop.";
 
-const SKILL_REVIEW_PROMPT: &str =
-    "Review the conversation above and consider saving or updating a skill if appropriate.\n\n\
+const SKILL_REVIEW_PROMPT: &str = "Review the conversation above and consider saving or updating a skill if appropriate.\n\n\
 Focus on: was a non-trivial approach used to complete a task that required trial \
 and error, or changing course due to experiential findings along the way, or did \
 the user expect or desire a different method or outcome?\n\n\
@@ -256,7 +255,7 @@ Otherwise, create a new skill if the approach is reusable.\n\
 If nothing is worth saving, just say 'Nothing to save.' and stop.";
 
 const COMBINED_REVIEW_PROMPT: &str = "Review the conversation above and consider two things:\n\n\
-**Memory**: Has the user revealed things about themselves ??? their persona, \
+**Memory**: Has the user revealed things about themselves - their persona, \
 desires, preferences, or personal details? Has the user expressed expectations \
 about how you should behave, their work style, or ways they want you to operate? \
 If so, save using the memory tool.\n\n\
@@ -343,7 +342,7 @@ fn should_inject_tool_enforcement_for_model(_model: &str) -> bool {
 /// Configuration for the agent loop.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
-    /// Maximum number of LLM ??? tool ??? LLM iterations.
+    /// Maximum number of LLM → tool → LLM iterations.
     #[serde(default = "default_max_turns")]
     pub max_turns: u32,
 
@@ -355,7 +354,7 @@ pub struct AgentConfig {
     #[serde(default = "default_model")]
     pub model: String,
 
-    /// API mode ??? selects the request format for the LLM provider.
+    /// API mode - selects the request format for the LLM provider.
     #[serde(default)]
     pub api_mode: ApiMode,
 
@@ -400,11 +399,11 @@ pub struct AgentConfig {
     #[serde(default = "default_memory_flush_interval")]
     pub memory_flush_interval: u32,
 
-    /// Session identifier ??? used for memory and persistence.
+    /// Session identifier - used for memory and persistence.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
 
-    /// HERMES_HOME path ??? used by memory plugins for config resolution.
+    /// HERMES_HOME path - used by memory plugins for config resolution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hermes_home: Option<String>,
 
@@ -513,11 +512,11 @@ pub struct AgentConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stored_system_prompt: Option<String>,
 
-    /// Progress ratio (0???1) at which Python emits a *caution* budget nudge (`_budget_caution_threshold`).
+    /// Progress ratio (0-1) at which Python emits a *caution* budget nudge (`_budget_caution_threshold`).
     #[serde(default = "default_budget_caution_threshold")]
     pub budget_caution_threshold: f64,
 
-    /// Progress ratio (0???1) at which Python emits an urgent budget warning (`_budget_warning_threshold`).
+    /// Progress ratio (0-1) at which Python emits an urgent budget warning (`_budget_warning_threshold`).
     #[serde(default = "default_budget_warning_threshold")]
     pub budget_warning_threshold: f64,
 
@@ -888,7 +887,7 @@ fn maybe_nous_401_diagnostic(
         .join("auth.json");
 
     Some(format!(
-        "Nous 401 ??? Portal authentication failed.\n\
+        "Nous 401 - Portal authentication failed.\n\
          Response: {response_snippet}\n\
          Most likely: Portal OAuth expired, account out of credits, or agent key revoked.\n\
          Troubleshooting:\n\
@@ -1233,11 +1232,7 @@ fn redact_sensitive_text(value: &str) -> Option<String> {
             redacted = next;
         }
     }
-    if changed {
-        Some(redacted)
-    } else {
-        None
-    }
+    if changed { Some(redacted) } else { None }
 }
 
 fn truncate_hook_preview(text: &str, max_chars: usize) -> String {
@@ -1687,8 +1682,7 @@ pub type AsyncToolDispatch = Arc<
             Value,
         ) -> std::pin::Pin<
             Box<dyn std::future::Future<Output = Result<String, hermes_core::ToolError>> + Send>,
-        >
-        + Send
+        > + Send
         + Sync,
 >;
 
@@ -1863,8 +1857,7 @@ impl AgentLoop {
             Ok(guard) => guard,
             Err(_) => return,
         };
-        let restored =
-            fallback.restore_primary_runtime(&self.stored_primary_runtime, &mut active);
+        let restored = fallback.restore_primary_runtime(&self.stored_primary_runtime, &mut active);
         if restored {
             drop(fallback);
             drop(active);
@@ -2028,7 +2021,10 @@ impl AgentLoop {
         self
     }
 
-    pub(crate) fn maybe_with_async_tool_dispatch(self, dispatch: Option<AsyncToolDispatch>) -> Self {
+    pub(crate) fn maybe_with_async_tool_dispatch(
+        self,
+        dispatch: Option<AsyncToolDispatch>,
+    ) -> Self {
         if let Some(dispatch) = dispatch {
             self.with_async_tool_dispatch(dispatch)
         } else {
@@ -2313,7 +2309,9 @@ impl AgentLoop {
     }
 
     fn hook_context_spill_dir(&self) -> PathBuf {
-        let hermes_home = self.config().hermes_home
+        let hermes_home = self
+            .config()
+            .hermes_home
             .as_deref()
             .map(PathBuf::from)
             .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
@@ -2607,11 +2605,7 @@ impl AgentLoop {
             .iter()
             .map(|m| {
                 m.content.as_deref().map(str::len).unwrap_or(0)
-                    + m
-                        .reasoning_content
-                        .as_deref()
-                        .map(str::len)
-                        .unwrap_or(0)
+                    + m.reasoning_content.as_deref().map(str::len).unwrap_or(0)
             })
             .sum();
         let approx_input_tokens = (request_char_count / 4).max(1);
@@ -2678,16 +2672,22 @@ impl AgentLoop {
     }
 
     fn platform_hint_text(&self) -> Option<&'static str> {
-        let platform_key = self.config().platform
+        let platform_key = self
+            .config()
+            .platform
             .as_deref()
             .map(|s| s.trim().to_lowercase())
             .unwrap_or_default();
         match platform_key.as_str() {
-            "cli" => Some("You are a CLI AI Agent. Prefer concise plain text output suitable for terminals."),
-            "telegram" | "discord" | "slack" => {
-                Some("You are responding on a chat platform. Keep responses concise and avoid heavy formatting.")
+            "cli" => Some(
+                "You are a CLI AI Agent. Prefer concise plain text output suitable for terminals.",
+            ),
+            "telegram" | "discord" | "slack" => Some(
+                "You are responding on a chat platform. Keep responses concise and avoid heavy formatting.",
+            ),
+            "email" => {
+                Some("You are responding over email. Use clear structure and complete sentences.")
             }
-            "email" => Some("You are responding over email. Use clear structure and complete sentences."),
             "sms" => Some("You are responding over SMS. Keep responses short and high-signal."),
             _ => None,
         }
@@ -2790,7 +2790,10 @@ impl AgentLoop {
             return None;
         }
         let mut orch = SkillOrchestrator::default_dir();
-        orch.set_enabled_disabled(&self.config().enabled_skills, &self.config().disabled_skills);
+        orch.set_enabled_disabled(
+            &self.config().enabled_skills,
+            &self.config().disabled_skills,
+        );
         let commands = orch.scan_skill_commands();
         if commands.is_empty() {
             return Some(
@@ -2855,7 +2858,9 @@ impl AgentLoop {
             sections.push(format!("## Workspace Context\n{}", workspace));
         }
 
-        let hermes_home = self.config().hermes_home
+        let hermes_home = self
+            .config()
+            .hermes_home
             .as_deref()
             .map(std::path::PathBuf::from)
             .or_else(|| {
@@ -2886,7 +2891,9 @@ impl AgentLoop {
                 return (p.to_string(), m);
             }
         }
-        let fallback_provider = self.config().provider
+        let fallback_provider = self
+            .config()
+            .provider
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
@@ -3134,18 +3141,22 @@ impl AgentLoop {
 
     fn oauth_refresh_config(&self, provider_key: &str) -> Option<(String, String)> {
         // Preferred source: unified provider config centre (runtime_providers).
-        let cfg_token_url = self.config().runtime_providers
+        let cfg_token_url = self
+            .config()
+            .runtime_providers
             .get(provider_key)
             .and_then(|c| c.oauth_token_url.as_deref())
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
-        let cfg_client_id = self.config().runtime_providers
+        let cfg_client_id = self
+            .config()
+            .runtime_providers
             .get(provider_key)
             .and_then(|c| c.oauth_client_id.as_deref())
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
 
-        // Env fallback ??? keeps previous behavior working when config centre is empty.
+        // Env fallback - keeps previous behavior working when config centre is empty.
         let (token_url_env, client_id_env) = match provider_key {
             "openai" => (
                 "HERMES_OPENAI_OAUTH_TOKEN_URL",
@@ -3263,7 +3274,9 @@ impl AgentLoop {
     }
 
     fn auth_tokens_path(&self) -> PathBuf {
-        let hermes_home = self.config().hermes_home
+        let hermes_home = self
+            .config()
+            .hermes_home
             .as_deref()
             .map(PathBuf::from)
             .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
@@ -3273,7 +3286,9 @@ impl AgentLoop {
     }
 
     fn objective_runtime_ledger_path(&self) -> PathBuf {
-        let hermes_home = self.config().hermes_home
+        let hermes_home = self
+            .config()
+            .hermes_home
             .as_deref()
             .map(PathBuf::from)
             .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
@@ -3285,7 +3300,9 @@ impl AgentLoop {
     }
 
     fn objective_eval_trend_path(&self) -> PathBuf {
-        let hermes_home = self.config().hermes_home
+        let hermes_home = self
+            .config()
+            .hermes_home
             .as_deref()
             .map(PathBuf::from)
             .or_else(|| std::env::var("HERMES_HOME").ok().map(PathBuf::from))
@@ -3417,12 +3434,16 @@ impl AgentLoop {
         &self,
         provider: Option<&str>,
     ) -> (Option<String>, Vec<String>) {
-        let mut command = self.config().acp_command
+        let mut command = self
+            .config()
+            .acp_command
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_string);
-        let mut args: Vec<String> = self.config().acp_args
+        let mut args: Vec<String> = self
+            .config()
+            .acp_args
             .iter()
             .map(|a| a.trim().to_string())
             .filter(|a| !a.is_empty())
@@ -3607,7 +3628,9 @@ impl AgentLoop {
         self.pending_steer
             .drain_pre_api_into_messages(ctx.get_messages_mut());
         let mut messages = ctx.get_messages().to_vec();
-        if let Some(ephemeral) = self.config().ephemeral_system_prompt
+        if let Some(ephemeral) = self
+            .config()
+            .ephemeral_system_prompt
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
@@ -3623,7 +3646,9 @@ impl AgentLoop {
         if messages.is_empty() {
             return;
         }
-        let provider = self.config().provider
+        let provider = self
+            .config()
+            .provider
             .as_deref()
             .unwrap_or("")
             .to_ascii_lowercase();
@@ -3788,7 +3813,7 @@ impl AgentLoop {
         builder.build().to_string()
     }
 
-    /// Returns `(prompt, restored_from_storage)` ??? restored prompts skip fresh `build_system_prompt`.
+    /// Returns `(prompt, restored_from_storage)` - restored prompts skip fresh `build_system_prompt`.
     fn resolve_initial_system_prompt(
         &self,
         task_hint: &str,
@@ -4085,7 +4110,9 @@ impl AgentLoop {
     }
 
     fn extra_body_for_api_mode(&self, api_mode: &ApiMode) -> Option<Value> {
-        let mut body = self.config().extra_body
+        let mut body = self
+            .config()
+            .extra_body
             .clone()
             .unwrap_or_else(|| serde_json::json!({}));
         if !body.is_object() {
@@ -4290,10 +4317,8 @@ impl AgentLoop {
                                             fallback_model_name
                                         );
                                         let fallback_with_tools = if let Some(rt) = route {
-                                            let mode = rt
-                                                .api_mode
-                                                .as_ref()
-                                                .unwrap_or(&default_api_mode);
+                                            let mode =
+                                                rt.api_mode.as_ref().unwrap_or(&default_api_mode);
                                             let extra_body_for_call =
                                                 self.extra_body_for_api_mode(mode);
                                             let pool = self.credential_pool_for_route(rt);
@@ -4372,8 +4397,7 @@ impl AgentLoop {
                                     "LLM rejected tool payload; retrying once without tools"
                                 );
                                 let no_tools_result = if let Some(rt) = route {
-                                    let mode =
-                                        rt.api_mode.as_ref().unwrap_or(&default_api_mode);
+                                    let mode = rt.api_mode.as_ref().unwrap_or(&default_api_mode);
                                     let extra_body_for_call = self.extra_body_for_api_mode(mode);
                                     let pool = self.credential_pool_for_route(rt);
                                     match self.build_runtime_provider(
@@ -4810,7 +4834,7 @@ impl AgentLoop {
         ))
     }
 
-    /// Expand `@file:` / `@diff` / ??? tokens in user messages before the LLM sees them.
+    /// Expand `@file:` / `@diff` / … tokens in user messages before the LLM sees them.
     ///
     /// Mirrors Python `agent.context_references.preprocess_context_references_async`
     /// (also invoked from gateway/CLI before `run_conversation` on some paths). Both
@@ -4820,9 +4844,7 @@ impl AgentLoop {
             .ok()
             .map(PathBuf::from)
             .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or_else(|| {
-                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-            })
+            .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
     }
 
     /// Per-turn message prelude (sanitize, budget strip, @file expansion, restore primary).
@@ -4851,13 +4873,9 @@ impl AgentLoop {
             let Some(content) = msg.content.clone() else {
                 continue;
             };
-            let result = preprocess_context_references_async(
-                &content,
-                &cwd,
-                context_length,
-                Some(&cwd),
-            )
-            .await;
+            let result =
+                preprocess_context_references_async(&content, &cwd, context_length, Some(&cwd))
+                    .await;
             if result.expanded && result.message != content {
                 msg.content = Some(result.message);
             }
@@ -4895,11 +4913,7 @@ impl AgentLoop {
     ) -> Result<AgentResult, AgentError> {
         let mut ctx = ContextManager::default_budget();
         let mut tool_errors: Vec<hermes_core::ToolErrorRecord> = Vec::new();
-        let session_id_owned = self
-            .config()
-            .session_id
-            .clone()
-            .unwrap_or_default();
+        let session_id_owned = self.config().session_id.clone().unwrap_or_default();
         let session_id = session_id_owned.as_str();
         if !skip_message_prelude {
             self.apply_turn_message_prelude(&mut messages).await;
@@ -5090,7 +5104,7 @@ impl AgentLoop {
             // Refresh oauth-backed runtime credentials before routing/provider selection.
             self.refresh_oauth_store_tokens_if_needed().await;
 
-            // Skill nudge counter ??? Python `run_agent.py`: increment at the start of each inner API iteration.
+            // Skill nudge counter — Python `run_agent.py`: increment at the start of each inner API iteration.
             if self.config().skill_creation_nudge_interval > 0
                 && self
                     .tool_registry
@@ -5259,8 +5273,9 @@ impl AgentLoop {
                     self.emit_status(
                         "lifecycle",
                         &format!(
-                            "Reasoning-only response ??? retrying ({}/{})",
-                            inner_thinking, self.config().thinking_prefill_max_retries
+                            "Reasoning-only response - retrying ({}/{})",
+                            inner_thinking,
+                            self.config().thinking_prefill_max_retries
                         ),
                     );
                     ctx.add_message(r.message.clone());
@@ -5278,15 +5293,16 @@ impl AgentLoop {
                 {
                     inner_empty += 1;
                     tracing::warn!(
-                        "empty assistant response ??? retrying ({}/{})",
+                        "empty assistant response - retrying ({}/{})",
                         inner_empty,
                         self.config().empty_content_max_retries
                     );
                     self.emit_status(
                         "lifecycle",
                         &format!(
-                            "Empty assistant response ??? retrying ({}/{})",
-                            inner_empty, self.config().empty_content_max_retries
+                            "Empty assistant response - retrying ({}/{})",
+                            inner_empty,
+                            self.config().empty_content_max_retries
                         ),
                     );
                     continue;
@@ -5426,8 +5442,9 @@ impl AgentLoop {
                 self.emit_status(
                     "lifecycle",
                     &format!(
-                        "Truncated tool arguments ??? retrying ({}/{})",
-                        truncated_tool_call_retries, self.config().truncated_tool_call_max_retries
+                        "Truncated tool arguments - retrying ({}/{})",
+                        truncated_tool_call_retries,
+                        self.config().truncated_tool_call_max_retries
                     ),
                 );
                 let _ = ctx.get_messages_mut().pop();
@@ -5574,12 +5591,12 @@ impl AgentLoop {
                 self.memory_sync(&u, &a, session_id);
                 self.spawn_background_review(total_turns, &ctx, review_memory_at_end);
                 self.session_end_hooks(
-                        ctx.get_messages(),
-                        true,
-                        false,
-                        total_turns,
-                        session_started_hooks_fired,
-                    );
+                    ctx.get_messages(),
+                    true,
+                    false,
+                    total_turns,
+                    session_started_hooks_fired,
+                );
                 replay.record(
                     "session_end",
                     serde_json::json!({
@@ -5639,8 +5656,9 @@ impl AgentLoop {
                 self.emit_status(
                     "lifecycle",
                     &format!(
-                        "Invalid tool call detected ??? retrying ({}/{})",
-                        invalid_tool_retries, self.config().invalid_tool_call_max_retries
+                        "Invalid tool call detected - retrying ({}/{})",
+                        invalid_tool_retries,
+                        self.config().invalid_tool_call_max_retries
                     ),
                 );
                 let available = self.tool_registry.names().join(", ");
@@ -5654,7 +5672,8 @@ impl AgentLoop {
                     );
                     ctx.add_message(Message::system(format!(
                         "Max invalid tool retries reached ({}). Last invalid tool: {}",
-                        self.config().invalid_tool_call_max_retries, invalid_tool_calls[0]
+                        self.config().invalid_tool_call_max_retries,
+                        invalid_tool_calls[0]
                     )));
                     self.session_end_hooks(
                         ctx.get_messages(),
@@ -5702,8 +5721,9 @@ impl AgentLoop {
                     self.emit_status(
                         "lifecycle",
                         &format!(
-                            "Invalid tool JSON arguments ??? retrying ({}/{})",
-                            invalid_json_retries, self.config().invalid_tool_json_max_retries
+                            "Invalid tool JSON arguments - retrying ({}/{})",
+                            invalid_json_retries,
+                            self.config().invalid_tool_json_max_retries
                         ),
                     );
                     let _ = ctx.get_messages_mut().pop();
@@ -5723,9 +5743,9 @@ impl AgentLoop {
                         .find(|(name, _)| name == &tc.function.name)
                     {
                         format!(
-                                "Error: Invalid JSON arguments. {}. For tools with no required parameters, use an empty object: {{}}. Please retry with valid JSON.",
-                                err
-                            )
+                            "Error: Invalid JSON arguments. {}. For tools with no required parameters, use an empty object: {{}}. Please retry with valid JSON.",
+                            err
+                        )
                     } else {
                         "Skipped: other tool call in this response had invalid JSON.".to_string()
                     };
@@ -5954,12 +5974,12 @@ impl AgentLoop {
                     ctx.add_message(summary);
                 }
                 self.session_end_hooks(
-                        ctx.get_messages(),
-                        false,
-                        false,
-                        total_turns,
-                        session_started_hooks_fired,
-                    );
+                    ctx.get_messages(),
+                    false,
+                    false,
+                    total_turns,
+                    session_started_hooks_fired,
+                );
                 return Ok(self.finalize_agent_result(AgentResult {
                     messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
                     finished_naturally: false,
@@ -6103,11 +6123,7 @@ impl AgentLoop {
 
         let mut ctx = ContextManager::default_budget();
         let mut tool_errors: Vec<hermes_core::ToolErrorRecord> = Vec::new();
-        let session_id_owned = self
-            .config()
-            .session_id
-            .clone()
-            .unwrap_or_default();
+        let session_id_owned = self.config().session_id.clone().unwrap_or_default();
         let session_id = session_id_owned.as_str();
         let mut messages = messages;
         if !skip_message_prelude {
@@ -6426,9 +6442,11 @@ impl AgentLoop {
                         Ok(StreamCollectOutcome::Interrupted(partial)) => {
                             if let Some(ref u) = partial.usage {
                                 accumulated_usage = Some(merge_usage(accumulated_usage.clone(), u));
-                                if let Some(cost) =
-                                    estimate_usage_cost_usd(u, partial.model.as_str(), &self.config())
-                                {
+                                if let Some(cost) = estimate_usage_cost_usd(
+                                    u,
+                                    partial.model.as_str(),
+                                    &self.config(),
+                                ) {
                                     session_cost_usd += cost;
                                 }
                             }
@@ -6513,8 +6531,9 @@ impl AgentLoop {
                     self.emit_status(
                         "lifecycle",
                         &format!(
-                            "Reasoning-only response ??? retrying ({}/{})",
-                            inner_thinking, self.config().thinking_prefill_max_retries
+                            "Reasoning-only response - retrying ({}/{})",
+                            inner_thinking,
+                            self.config().thinking_prefill_max_retries
                         ),
                     );
                     ctx.add_message(r.message.clone());
@@ -6532,15 +6551,16 @@ impl AgentLoop {
                 {
                     inner_empty += 1;
                     tracing::warn!(
-                        "empty assistant response (stream path) ??? retrying ({}/{})",
+                        "empty assistant response (stream path) - retrying ({}/{})",
                         inner_empty,
                         self.config().empty_content_max_retries
                     );
                     self.emit_status(
                         "lifecycle",
                         &format!(
-                            "Empty assistant response ??? retrying ({}/{})",
-                            inner_empty, self.config().empty_content_max_retries
+                            "Empty assistant response - retrying ({}/{})",
+                            inner_empty,
+                            self.config().empty_content_max_retries
                         ),
                     );
                     continue;
@@ -6686,8 +6706,9 @@ impl AgentLoop {
                 self.emit_status(
                     "lifecycle",
                     &format!(
-                        "Truncated tool arguments ??? retrying ({}/{})",
-                        truncated_tool_call_retries, self.config().truncated_tool_call_max_retries
+                        "Truncated tool arguments - retrying ({}/{})",
+                        truncated_tool_call_retries,
+                        self.config().truncated_tool_call_max_retries
                     ),
                 );
                 let _ = ctx.get_messages_mut().pop();
@@ -6833,12 +6854,12 @@ impl AgentLoop {
                 self.memory_sync(&u, &a, session_id);
                 self.spawn_background_review(total_turns, &ctx, review_memory_at_end);
                 self.session_end_hooks(
-                        ctx.get_messages(),
-                        true,
-                        false,
-                        total_turns,
-                        session_started_hooks_fired,
-                    );
+                    ctx.get_messages(),
+                    true,
+                    false,
+                    total_turns,
+                    session_started_hooks_fired,
+                );
                 replay.record(
                     "session_end",
                     serde_json::json!({
@@ -6935,8 +6956,9 @@ impl AgentLoop {
                 self.emit_status(
                     "lifecycle",
                     &format!(
-                        "Invalid tool call detected ??? retrying ({}/{})",
-                        invalid_tool_retries, self.config().invalid_tool_call_max_retries
+                        "Invalid tool call detected - retrying ({}/{})",
+                        invalid_tool_retries,
+                        self.config().invalid_tool_call_max_retries
                     ),
                 );
                 let available = self.tool_registry.names().join(", ");
@@ -6950,7 +6972,8 @@ impl AgentLoop {
                     );
                     ctx.add_message(Message::system(format!(
                         "Max invalid tool retries reached ({}). Last invalid tool: {}",
-                        self.config().invalid_tool_call_max_retries, invalid_tool_calls[0]
+                        self.config().invalid_tool_call_max_retries,
+                        invalid_tool_calls[0]
                     )));
                     self.session_end_hooks(
                         ctx.get_messages(),
@@ -6998,8 +7021,9 @@ impl AgentLoop {
                     self.emit_status(
                         "lifecycle",
                         &format!(
-                            "Invalid tool JSON arguments ??? retrying ({}/{})",
-                            invalid_json_retries, self.config().invalid_tool_json_max_retries
+                            "Invalid tool JSON arguments - retrying ({}/{})",
+                            invalid_json_retries,
+                            self.config().invalid_tool_json_max_retries
                         ),
                     );
                     let _ = ctx.get_messages_mut().pop();
@@ -7019,9 +7043,9 @@ impl AgentLoop {
                         .find(|(name, _)| name == &tc.function.name)
                     {
                         format!(
-                                "Error: Invalid JSON arguments. {}. For tools with no required parameters, use an empty object: {{}}. Please retry with valid JSON.",
-                                err
-                            )
+                            "Error: Invalid JSON arguments. {}. For tools with no required parameters, use an empty object: {{}}. Please retry with valid JSON.",
+                            err
+                        )
                     } else {
                         "Skipped: other tool call in this response had invalid JSON.".to_string()
                     };
@@ -7255,12 +7279,12 @@ impl AgentLoop {
                     });
                 }
                 self.session_end_hooks(
-                        ctx.get_messages(),
-                        false,
-                        false,
-                        total_turns,
-                        session_started_hooks_fired,
-                    );
+                    ctx.get_messages(),
+                    false,
+                    false,
+                    total_turns,
+                    session_started_hooks_fired,
+                );
                 return Ok(self.finalize_agent_result(AgentResult {
                     messages: self.messages_for_persisted_result(&ctx, persist_user_idx),
                     finished_naturally: false,
@@ -7354,7 +7378,7 @@ impl AgentLoop {
         let target = tc.function.name.to_lowercase();
 
         if let Some(name) = names.iter().find(|n| n.to_lowercase() == target) {
-            tracing::info!("Repaired tool call: '{}' ??? '{}'", tc.function.name, name);
+            tracing::info!("Repaired tool call: '{}' → '{}'", tc.function.name, name);
             tc.function.name = name.clone();
             return true;
         }
@@ -7364,7 +7388,7 @@ impl AgentLoop {
             .find(|n| n.to_lowercase().contains(&target) || target.contains(&n.to_lowercase()))
         {
             tracing::info!(
-                "Repaired tool call (fuzzy): '{}' ??? '{}'",
+                "Repaired tool call (fuzzy): '{}' → '{}'",
                 tc.function.name,
                 name
             );
@@ -7929,7 +7953,7 @@ impl AgentLoop {
         let async_tool_dispatch = self.async_tool_dispatch.clone();
 
         // Run orchestrated `delegate_task` calls sequentially in the caller's
-        // task ??? this keeps the inner AgentLoop future out of the Send-bound
+        // task - this keeps the inner AgentLoop future out of the Send-bound
         // JoinSet and preserves the requested concurrency cap which is already
         // applied upstream via `cap_delegates`.
         let mut orchestrated: Vec<ToolResult> = Vec::new();
@@ -8057,10 +8081,7 @@ impl AgentLoop {
                                 "child_depth".to_string(),
                                 Value::from(current_delegate_depth + 1),
                             );
-                            obj.insert(
-                                "max_depth".to_string(),
-                                Value::from(max_delegate_depth),
-                            );
+                            obj.insert("max_depth".to_string(), Value::from(max_delegate_depth));
                             if let Some(remaining) = parent_budget_remaining_usd {
                                 obj.insert(
                                     "parent_budget_remaining_usd".to_string(),
@@ -8363,9 +8384,8 @@ impl AgentLoop {
         let async_tool_dispatch = self.async_tool_dispatch();
         let review_cb = self.callbacks.background_review_callback.clone();
         tokio::spawn(async move {
-            let agent = AgentLoop::new(cfg, tools, provider).maybe_with_async_tool_dispatch(
-                async_tool_dispatch,
-            );
+            let agent = AgentLoop::new(cfg, tools, provider)
+                .maybe_with_async_tool_dispatch(async_tool_dispatch);
             match agent.run(hist, None).await {
                 Ok(result) => {
                     if let Some(cb) = review_cb.as_ref() {
@@ -9009,7 +9029,11 @@ fn apply_repo_review_tool_profile_narrowing(
     }
     Some(format!(
         "[SYSTEM] Repo-review tool profile narrowed this turn (mode={}): skipped {} low-signal call(s) (messaging={}, non-repo={}, focus={}) to keep focus on code evidence. `todo` remains enabled for task organization. If notifications are required, request telegram/discord/slack explicitly.",
-        mode.as_str(), filtered, filtered_messaging, filtered_non_repo, filtered_focus
+        mode.as_str(),
+        filtered,
+        filtered_messaging,
+        filtered_non_repo,
+        filtered_focus
     ))
 }
 
@@ -9659,7 +9683,9 @@ fn summarize_background_review_result(messages: &[Message]) -> Option<String> {
             deduped.push(action);
         }
     }
-    Some(format!("???? {}", deduped.join(" ? ")))
+    // Unicode 转义，最稳定，不依赖编辑器/终端编码
+    // 🧠 = \u{1F9E0}，分隔符用 " · " 或 " → "
+    Some(format!("\u{1F9E0} {}", deduped.join(" \u{00B7} ")))
 }
 
 fn default_model_cost_per_million(model: &str) -> Option<(f64, f64)> {
@@ -10046,7 +10072,7 @@ mod tests {
             Some("/tmp/hermes-home"),
         )
         .expect("nous 401 should produce diagnostics");
-        assert!(diag.contains("Nous 401 ??? Portal authentication failed."));
+        assert!(diag.contains("Nous 401 - Portal authentication failed."));
         assert!(diag.contains("hermes auth login nous"));
         assert!(diag.contains("portal.nousresearch.com"));
         assert!(diag.contains("/tmp/hermes-home/auth.json"));
@@ -10082,7 +10108,7 @@ mod tests {
             Message::tool_result("tc_skip", "{\"success\":false,\"message\":\"failed\"}"),
         ];
         let out = summarize_background_review_result(&msgs).expect("summary should exist");
-        assert!(out.starts_with("???? "));
+        assert!(out.starts_with("\u{1F9E0} "));
         assert!(out.contains("Skill 'prospect-scanner' created."));
         assert!(out.contains("Memory updated"));
     }
@@ -10302,9 +10328,11 @@ mod tests {
         agent.preflight_context_compress_with_status(&mut ctx);
 
         let rows = captured.lock().expect("captured lock");
-        assert!(rows
-            .iter()
-            .any(|(kind, msg)| { kind == "lifecycle" && msg.contains("no compression needed") }));
+        assert!(
+            rows.iter().any(|(kind, msg)| {
+                kind == "lifecycle" && msg.contains("no compression needed")
+            })
+        );
     }
 
     #[test]
@@ -10370,9 +10398,10 @@ mod tests {
         assert!(rows.iter().any(|(kind, msg)| {
             kind == "lifecycle" && msg.contains("compressing before first turn")
         }));
-        assert!(rows
-            .iter()
-            .any(|(kind, msg)| kind == "lifecycle" && msg.contains("compression complete")));
+        assert!(
+            rows.iter()
+                .any(|(kind, msg)| kind == "lifecycle" && msg.contains("compression complete"))
+        );
     }
 
     #[test]
@@ -10436,9 +10465,10 @@ mod tests {
         agent.auto_compress_if_over_threshold(&mut ctx);
 
         let rows = captured.lock().expect("captured lock");
-        assert!(rows
-            .iter()
-            .any(|(kind, msg)| kind == "lifecycle" && msg.contains("triggering compression")));
+        assert!(
+            rows.iter()
+                .any(|(kind, msg)| kind == "lifecycle" && msg.contains("triggering compression"))
+        );
     }
 
     #[tokio::test]
@@ -10951,7 +10981,7 @@ mod tests {
         assert!(result.is_ok());
         let rows = captured.lock().expect("captured lock");
         assert!(rows.iter().any(|(kind, msg)| {
-            kind == "lifecycle" && msg.contains("Empty assistant response ??? retrying")
+            kind == "lifecycle" && msg.contains("Empty assistant response - retrying")
         }));
     }
 
@@ -11024,7 +11054,7 @@ mod tests {
         assert_eq!(*provider.calls.lock().expect("calls lock"), 1);
         let rows = captured.lock().expect("captured lock");
         assert!(!rows.iter().any(|(kind, msg)| {
-            kind == "lifecycle" && msg.contains("Empty assistant response ??? retrying")
+            kind == "lifecycle" && msg.contains("Empty assistant response - retrying")
         }));
     }
 
@@ -11107,11 +11137,7 @@ mod tests {
         let mut registry = ToolRegistry::new();
         registry.register(
             "echo",
-            hermes_core::tool_schema(
-                "echo",
-                "Echo input",
-                hermes_core::JsonSchema::new("object"),
-            ),
+            hermes_core::tool_schema("echo", "Echo input", hermes_core::JsonSchema::new("object")),
             Arc::new(|_| Ok("{}".to_string())),
         );
         let cfg = AgentConfig {
@@ -11119,8 +11145,8 @@ mod tests {
             truncated_tool_call_max_retries: 1,
             ..AgentConfig::default()
         };
-        let agent = AgentLoop::new(cfg, Arc::new(registry), provider.clone())
-            .with_callbacks(callbacks);
+        let agent =
+            AgentLoop::new(cfg, Arc::new(registry), provider.clone()).with_callbacks(callbacks);
 
         let result = agent.run(vec![Message::user("hello")], None).await;
         assert!(result.is_ok());
@@ -11711,7 +11737,7 @@ mod tests {
             Arc::new(ToolRegistry::new()),
             Arc::new(DummyProvider),
         );
-        let messages = vec![Message::user("???????????????????????")];
+        let messages = vec![Message::user("帮我总结一下今天要做什么")];
         let selected = agent.resolve_smart_runtime_route(&messages);
         assert_eq!(
             selected.as_ref().map(|r| r.model.as_str()),
@@ -12173,7 +12199,7 @@ mod tests {
             Arc::new(ToolRegistry::new()),
             Arc::new(DummyProvider),
         );
-        let messages = vec![Message::user("?????????????????")];
+        let messages = vec![Message::user("总结一下这个需求")];
         let selected = agent.resolve_smart_runtime_route(&messages);
         assert_eq!(
             selected.as_ref().map(|r| r.model.as_str()),
@@ -12261,7 +12287,7 @@ mod tests {
             Arc::new(ToolRegistry::new()),
             Arc::new(DummyProvider),
         );
-        let selected = agent.resolve_smart_runtime_route(&[Message::user("??????????????????")]);
+        let selected = agent.resolve_smart_runtime_route(&[Message::user("给我一段简短总结")]);
         assert_eq!(
             selected.as_ref().and_then(|r| r.provider.as_deref()),
             Some("qwen-oauth")
@@ -12431,7 +12457,7 @@ mod tests {
             Arc::new(ToolRegistry::new()),
             Arc::new(DummyProvider),
         );
-        let selected = agent.resolve_smart_runtime_route(&[Message::user("?????????????")]);
+        let selected = agent.resolve_smart_runtime_route(&[Message::user("帮我总结这段话")]);
         assert_eq!(
             selected.as_ref().and_then(|r| r.provider.as_deref()),
             Some("openai-codex")
@@ -12831,7 +12857,7 @@ mod tests {
             Arc::new(ToolRegistry::new()),
             Arc::new(DummyProvider),
         );
-        let selected = agent.resolve_smart_runtime_route(&[Message::user("?????????????")]);
+        let selected = agent.resolve_smart_runtime_route(&[Message::user("帮我总结这段话")]);
         assert!(
             selected.is_none(),
             "missing ACP CLI should fail cheap-route and fall back"
@@ -12910,7 +12936,7 @@ mod tests {
             Arc::new(ToolRegistry::new()),
             Arc::new(DummyProvider),
         );
-        let selected = agent.resolve_smart_runtime_route(&[Message::user("?????????????")]);
+        let selected = agent.resolve_smart_runtime_route(&[Message::user("帮我总结这段话")]);
         assert_eq!(
             selected.as_ref().and_then(|r| r.provider.as_deref()),
             Some("copilot-acp")
@@ -12974,7 +13000,7 @@ mod tests {
             Arc::new(ToolRegistry::new()),
             Arc::new(DummyProvider),
         );
-        let messages = vec![Message::user("????? debug ??? traceback ???????")];
+        let messages = vec![Message::user("请帮我 debug 这段 traceback 并修复错误")];
         let selected = agent.resolve_smart_runtime_route(&messages);
         assert!(selected.is_none());
     }
@@ -13363,7 +13389,7 @@ mod tests {
             Arc::new(DummyProvider),
         );
 
-        // Set conflicting env values ??? config must win.
+        // Set conflicting env values - config must win.
         std::env::set_var("HERMES_QWEN_OAUTH_TOKEN_URL", "https://env.example.com/tok");
         std::env::set_var("HERMES_QWEN_OAUTH_CLIENT_ID", "env-client");
 
@@ -14190,8 +14216,7 @@ mod tests {
 
     #[test]
     fn test_finalizer_output_quality_retry_detects_duplicate_lines() {
-        let duplicated =
-            "- **Title:** Bayesian Learning for Dive State Prediction and Management\n\
+        let duplicated = "- **Title:** Bayesian Learning for Dive State Prediction and Management\n\
             - **Title:** Bayesian Learning for Dive State Prediction and Management\n\
             - **Title:** Bayesian Learning for Dive State Prediction and Management\n\
             - **Title:** Bayesian Learning for Dive State Prediction and Management";
