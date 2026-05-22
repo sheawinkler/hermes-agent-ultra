@@ -26,7 +26,7 @@ use crate::gateway::Gateway;
 
 /// Default wait for a user response to a `clarify` call. Overridable via
 /// `HERMES_CLARIFY_TIMEOUT_SECS`.
-const DEFAULT_CLARIFY_TIMEOUT_SECS: u64 = 120;
+const DEFAULT_CLARIFY_TIMEOUT_SECS: u64 = 30;
 
 const SKIP_CHOICE_LABEL: &str = "Skip / 跳过";
 
@@ -161,7 +161,15 @@ impl ClarifyBackend for ChannelClarifyBackend {
                 "answer": answer,
             })
             .to_string()),
-            Err(e) => Err(ToolError::ExecutionFailed(e)),
+            Err(_) => Ok(json!({
+                "type": "clarify_response",
+                "clarification_id": id,
+                "question": question,
+                "answer": null,
+                "timed_out": true,
+                "hint": "User did not respond within the timeout. Proceed with a reasonable default.",
+            })
+            .to_string()),
         }
     }
 }
@@ -290,8 +298,10 @@ mod tests {
         test_env::set_var("HERMES_CLARIFY_TIMEOUT_SECS", "1");
         test_env::remove_var("HERMES_CLARIFY_ASYNC");
 
-        let err = backend.ask("q?", None).await.unwrap_err();
-        assert!(err.to_string().contains("timed out"));
+        let out = backend.ask("q?", None).await.unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(parsed["timed_out"], true);
+        assert!(parsed["answer"].is_null());
     }
 
     #[tokio::test]

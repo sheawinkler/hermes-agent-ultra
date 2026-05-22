@@ -33,8 +33,8 @@ impl FallbackSearchBackend {
     pub fn new() -> Self {
         Self {
             client: Client::builder()
-                .timeout(std::time::Duration::from_secs(15))
-                .user_agent("hermes-agent/1.0")
+                .timeout(std::time::Duration::from_secs(5))
+                .user_agent("Mozilla/5.0 (compatible; hermes-agent/1.0)")
                 .build()
                 .unwrap_or_else(|_| Client::new()),
         }
@@ -63,70 +63,71 @@ impl WebSearchBackend for FallbackSearchBackend {
             "web_search fallback chain start"
         );
 
-        for source in ["ddg_lite", "instant", "vertical"] {
-            let attempt_start = Instant::now();
-            let result = match source {
-                "ddg_lite" => self.search_ddg_lite(query, limit).await,
-                "instant" => self.search_ddg_instant(query, limit).await,
-                "vertical" => self.search_vertical(query, limit).await,
-                _ => unreachable!(),
-            };
-            let elapsed_ms = attempt_start.elapsed().as_millis() as u64;
+        // Run all three backends in parallel; use the first non-empty result.
+        let start_all = Instant::now();
+        let (ddg_res, instant_res, vertical_res) = tokio::join!(
+            self.search_ddg_lite(query, limit),
+            self.search_ddg_instant(query, limit),
+            self.search_vertical(query, limit),
+        );
+        let elapsed_all = start_all.elapsed().as_millis() as u64;
 
+        let backends: &[(&str, Result<Vec<Value>, ToolError>)] = &[
+            ("ddg_lite", ddg_res),
+            ("instant", instant_res),
+            ("vertical", vertical_res),
+        ];
+
+        let mut selected: Option<(&str, &Vec<Value>)> = None;
+        for (source, result) in backends {
             match result {
                 Ok(rows) if !rows.is_empty() => {
-                    debug!(
-                        backend = source,
-                        elapsed_ms,
-                        count = rows.len(),
-                        "web_search fallback backend selected"
-                    );
                     attempts.push(json!({
                         "backend": source,
                         "status": "ok",
-                        "duration_ms": elapsed_ms,
+                        "duration_ms": elapsed_all,
                         "count": rows.len(),
                     }));
-                    return serde_json::to_string_pretty(&json!({
-                        "query": query,
-                        "results": rows,
-                        "count": rows.len(),
-                        "selected_backend": source,
-                        "_trace": { "attempts": attempts },
-                    }))
-                    .map_err(|e| {
-                        ToolError::ExecutionFailed(format!("Failed to serialize results: {}", e))
-                    });
+                    if selected.is_none() {
+                        selected = Some((source, rows));
+                    }
                 }
                 Ok(rows) => {
-                    debug!(
-                        backend = source,
-                        elapsed_ms,
-                        count = rows.len(),
-                        "web_search fallback backend returned empty"
-                    );
                     attempts.push(json!({
                         "backend": source,
                         "status": "empty",
-                        "duration_ms": elapsed_ms,
+                        "duration_ms": elapsed_all,
                         "count": rows.len(),
                     }));
                 }
                 Err(err) => {
-                    debug!(
-                        backend = source,
-                        elapsed_ms,
-                        error = %err,
-                        "web_search fallback backend failed"
-                    );
                     attempts.push(json!({
                         "backend": source,
                         "status": "error",
-                        "duration_ms": elapsed_ms,
+                        "duration_ms": elapsed_all,
                         "error": truncate_fallback_text(&err.to_string(), 250),
                     }));
                 }
             }
+        }
+
+        if let Some((source, rows)) = selected {
+            debug!(
+                backend = source,
+                elapsed_ms = elapsed_all,
+                count = rows.len(),
+                "web_search fallback backend selected"
+            );
+            return serde_json::to_string_pretty(&json!({
+                "query": query,
+                "results": rows,
+                "count": rows.len(),
+                "selected_backend": source,
+                "_trace": { "attempts": attempts },
+            }))
+            .map_err(|e| {
+                ToolError::ExecutionFailed(format!("Failed to serialize results: {}", e))
+            });
         }
 
         serde_json::to_string_pretty(&json!({
@@ -576,9 +577,18 @@ impl WebExtractBackend for SimpleExtractBackend {
 
         let status = resp.status();
         if !status.is_success() {
+            let hint = if status.as_u16() == 403 || status.as_u16() == 401 {
+                " This site blocks automated access. Try using the browser_navigate tool to access this URL instead."
+            } else if status.as_u16() == 404 {
+                " The page was not found. Verify the URL is correct."
+            } else if status.as_u16() == 429 {
+                " Rate limited. Wait a moment and retry, or use browser_navigate."
+            } else {
+                " If the error persists, try using the browser_navigate tool."
+            };
             return Err(ToolError::ExecutionFailed(format!(
-                "HTTP {} when fetching '{}'",
-                status, url
+                "HTTP {} when fetching '{}'.{}",
+                status, url, hint
             )));
         }
 

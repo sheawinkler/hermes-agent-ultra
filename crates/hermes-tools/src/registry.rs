@@ -310,6 +310,7 @@ impl ToolRegistry {
             raw_bypassed,
             rewrite_applied,
             rtk_filter,
+            required_fields,
         ) = {
             let mut inner = self.inner.lock().unwrap();
             let raw_bypassed = inner.rtk_raw_mode || inner.rtk_raw_once;
@@ -320,16 +321,20 @@ impl ToolRegistry {
                 inner.rtk_filter.rewrite_params(name, &params, raw_bypassed);
             let decision = inner.policy.evaluate(name, &params);
             match inner.tools.get(name) {
-                Some(e) => (
-                    Arc::clone(&e.handler),
-                    e.max_result_size_chars
-                        .unwrap_or(inner.global_max_result_size_chars),
-                    decision,
-                    effective_params,
-                    raw_bypassed,
-                    rewrite_applied,
-                    inner.rtk_filter.clone(),
-                ),
+                Some(e) => {
+                    let required = e.schema.parameters.required.clone().unwrap_or_default();
+                    (
+                        Arc::clone(&e.handler),
+                        e.max_result_size_chars
+                            .unwrap_or(inner.global_max_result_size_chars),
+                        decision,
+                        effective_params,
+                        raw_bypassed,
+                        rewrite_applied,
+                        inner.rtk_filter.clone(),
+                        required,
+                    )
+                }
                 None => return Self::tool_error(&format!("Tool not found: {}", name)),
             }
         };
@@ -338,6 +343,16 @@ impl ToolRegistry {
             return Self::tool_policy_error(name, &policy_decision);
         }
         maybe_log_audit(name, &policy_decision);
+
+        // Validate required parameters before invoking the handler.
+        for field in &required_fields {
+            if effective_params.get(field).map_or(true, |v| v.is_null()) {
+                return Self::tool_error(&format!(
+                    "Missing required parameter '{}' for tool '{}'.",
+                    field, name
+                ));
+            }
+        }
 
         let output = match handler.execute(effective_params.clone()).await {
             Ok(output) => {
