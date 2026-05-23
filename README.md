@@ -105,6 +105,27 @@ Gateway mode:
 hermes-ultra gateway --live
 ```
 
+## Skip API-key collection With Nous Portal
+
+Hermes Agent Ultra still supports direct provider and per-tool keys. If you prefer one managed subscription for model access plus hosted tool backends, [Nous Portal](https://portal.nousresearch.com) can cover:
+
+- 300+ models, selectable with `/model <name>`.
+- Tool Gateway routing for web search, image generation, text-to-speech, and cloud browser backends.
+
+Fresh install path:
+
+```bash
+hermes setup --portal
+```
+
+That starts Nous OAuth setup, sets Nous as the provider, and enables Tool Gateway routing. Inspect the current state with:
+
+```bash
+hermes portal status
+```
+
+You can still bring your own keys for individual tools; gateway routing is per backend, not all-or-nothing.
+
 Deep diagnostics bundle:
 
 ```bash

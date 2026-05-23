@@ -483,6 +483,18 @@
     "7f1b2b456953": {
       "disposition": "ported",
       "notes": "Rust terminal approval path denies confirmation-required commands without consent and now pins the same no-retry/no-rephrase/no-same-outcome 'Silence is not consent' contract in crates/hermes-tools/src/tools/terminal.rs."
+    },
+    "7245bc77eb3b": {
+      "disposition": "ported",
+      "notes": "Rust config loading now normalizes Python-style fallback_providers plus legacy fallback_model into a merged fallback_models chain, preserves fallback provider metadata in llm_providers, and forwards that chain into AgentConfig unless HERMES_FALLBACK_MODEL(S) overrides it."
+    },
+    "e97a4c8f3795": {
+      "disposition": "ported",
+      "notes": "README.md and local Chinese README now include the upstream Nous Portal setup/status section adapted to hermes-agent-ultra command names."
+    },
+    "cae7537359c0": {
+      "disposition": "mirrored",
+      "notes": "Mirrored upstream infographic/kanban-db-corruption-defense/infographic.png byte-for-byte for the kanban corruption-defense documentation asset."
     }
   },
   "subject_patterns": [

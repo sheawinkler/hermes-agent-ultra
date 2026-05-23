@@ -122,6 +122,8 @@ fn arb_gateway_config() -> impl Strategy<Value = GatewayConfig> {
                 streaming,
                 terminal: TerminalConfig::default(),
                 llm_providers: HashMap::new(),
+                fallback_model: None,
+                fallback_models: Vec::new(),
                 smart_model_routing: SmartModelRoutingConfig::default(),
                 proxy: None,
                 approval: ApprovalConfig::default(),

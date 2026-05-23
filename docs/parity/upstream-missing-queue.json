@@ -38,9 +38,138 @@
       "subject": "fix(approval): pin 'silence is not consent' contract on timeout/deny (#24912) (#30879)",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "classification_rule": "sha_override",
+      "disposition": "ported",
+      "files_sample": [
+        "cli.py",
+        "gateway/run.py",
+        "hermes_cli/fallback_cmd.py",
+        "hermes_cli/fallback_config.py",
+        "hermes_cli/oneshot.py",
+        "tests/cli/test_cli_init.py",
+        "tests/gateway/test_auth_fallback.py",
+        "tests/hermes_cli/test_fallback_cmd.py"
+      ],
+      "files_touched": 8,
+      "notes": "Rust config loading now normalizes Python-style fallback_providers plus legacy fallback_model into a merged fallback_models chain, preserves fallback provider metadata in llm_providers, and forwards that chain into AgentConfig unless HERMES_FALLBACK_MODEL(S) overrides it.",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "7245bc77eb3b92b311c622806821375709bbe4d2",
+      "subject": "fix(fallback): merge fallback_providers with legacy fallback_model configurations",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "classification_rule": "sha_override",
+      "disposition": "ported",
+      "files_sample": [
+        "README.md",
+        "README.zh-CN.md"
+      ],
+      "files_touched": 2,
+      "notes": "README.md and local Chinese README now include the upstream Nous Portal setup/status section adapted to hermes-agent-ultra command names.",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": false,
+        "superseded_by_guard": false
+      },
+      "sha": "e97a4c8f379530b556eee9cffb608b2016d87708",
+      "subject": "docs(readme): add Nous Portal section between Getting Started and CLI/Messaging reference (#30941)",
+      "target_ticket": 25,
+      "target_ticket_name": "GPAR-06 packaging/docs/install parity"
+    },
+    {
+      "classification_rule": "prior_state",
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/kanban_db.py",
+        "tests/hermes_cli/test_kanban_db.py"
+      ],
+      "files_touched": 2,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "39fe4ecee3d0876ca16a4a031349140733264302",
+      "subject": "fix(kanban): refuse corrupt db auto-init",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "classification_rule": "prior_state",
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "4f835f7e43f9c6c1b90a50951b6ed94b653efa60",
+      "subject": "chore(release): map NickLarcombe author email for #30707 salvage",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "classification_rule": "prior_state",
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/kanban_db.py"
+      ],
+      "files_touched": 1,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "c4b8f5efee8cdd3186e465d940bf0e8c98849346",
+      "subject": "fix(kanban): harden corrupt-db backup against CodeQL path-injection findings",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "classification_rule": "sha_override",
+      "disposition": "mirrored",
+      "files_sample": [
+        "infographic/kanban-db-corruption-defense/infographic.png"
+      ],
+      "files_touched": 1,
+      "notes": "Mirrored upstream infographic/kanban-db-corruption-defense/infographic.png byte-for-byte for the kanban corruption-defense documentation asset.",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": false,
+        "superseded_by_guard": false
+      },
+      "sha": "cae7537359c0ba8fceedc0a6423a4d9f30972100",
+      "subject": "infographic: kanban.db corruption defense (#30858 + #30862) (#30952)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
     }
   ],
-  "generated_at_utc": "2026-05-23T12:19:23.778052+00:00",
+  "generated_at_utc": "2026-05-23T13:52:22.956458+00:00",
   "refs": {
     "local_ref": "HEAD",
     "range": "HEAD..upstream/main",
@@ -48,13 +177,17 @@
   },
   "summary": {
     "by_disposition": {
-      "ported": 1
+      "mirrored": 1,
+      "ported": 3,
+      "superseded": 3
     },
     "by_target_ticket": {
-      "20": 1
+      "20": 3,
+      "25": 1,
+      "26": 3
     },
     "overrides_path": "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/parity/queue-overrides.json",
     "patch_equivalent_count": 0,
-    "total_commits": 1
+    "total_commits": 7
   }
 }

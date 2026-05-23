@@ -69,6 +69,14 @@ pub struct GatewayConfig {
     #[serde(default)]
     pub llm_providers: HashMap<String, LlmProviderConfig>,
 
+    /// Legacy single fallback model spec, e.g. `openrouter:anthropic/claude-sonnet-4.6`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_model: Option<String>,
+
+    /// Ordered fallback model specs tried after primary retries fail.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fallback_models: Vec<String>,
+
     /// Optional per-turn smart model routing (cheap-vs-strong).
     #[serde(default)]
     pub smart_model_routing: SmartModelRoutingConfig,
@@ -126,6 +134,8 @@ impl Default for GatewayConfig {
             streaming: StreamingConfig::default(),
             terminal: TerminalConfig::default(),
             llm_providers: HashMap::new(),
+            fallback_model: None,
+            fallback_models: Vec::new(),
             smart_model_routing: SmartModelRoutingConfig::default(),
             proxy: None,
             approval: ApprovalConfig::default(),

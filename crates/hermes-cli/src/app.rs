@@ -4209,6 +4209,7 @@ mod tests {
 
     #[test]
     fn test_build_agent_config_maps_failover_chain_from_env() {
+        let _guard = env_test_lock();
         std::env::set_var(
             "HERMES_FALLBACK_MODELS",
             "nous:moonshotai/kimi-k2.6,openai:gpt-4o-mini",
@@ -4232,6 +4233,7 @@ mod tests {
 
     #[test]
     fn test_build_agent_config_maps_single_failover_model_from_env() {
+        let _guard = env_test_lock();
         std::env::remove_var("HERMES_FALLBACK_MODELS");
         std::env::set_var("HERMES_FALLBACK_MODEL", "anthropic:claude-3-5-sonnet");
         let cfg = GatewayConfig::default();
@@ -4240,6 +4242,50 @@ mod tests {
             agent_cfg.retry.fallback_model.as_deref(),
             Some("anthropic:claude-3-5-sonnet")
         );
+        assert_eq!(
+            agent_cfg.retry.fallback_models,
+            vec!["anthropic:claude-3-5-sonnet".to_string()]
+        );
+        std::env::remove_var("HERMES_FALLBACK_MODEL");
+    }
+
+    #[test]
+    fn test_build_agent_config_maps_failover_chain_from_config() {
+        let _guard = env_test_lock();
+        std::env::remove_var("HERMES_FALLBACK_MODELS");
+        std::env::remove_var("HERMES_FALLBACK_MODEL");
+
+        let mut cfg = GatewayConfig::default();
+        cfg.fallback_models = vec![
+            "openrouter:anthropic/claude-sonnet-4.6".to_string(),
+            "nous:Hermes-4".to_string(),
+        ];
+        cfg.fallback_model = Some("OpenRouter:anthropic/claude-sonnet-4.6".to_string());
+
+        let agent_cfg = build_agent_config(&cfg, "nous:openai/gpt-5.5");
+        assert_eq!(
+            agent_cfg.retry.fallback_model.as_deref(),
+            Some("openrouter:anthropic/claude-sonnet-4.6")
+        );
+        assert_eq!(
+            agent_cfg.retry.fallback_models,
+            vec![
+                "openrouter:anthropic/claude-sonnet-4.6".to_string(),
+                "nous:Hermes-4".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_build_agent_config_env_failover_overrides_config() {
+        let _guard = env_test_lock();
+        std::env::remove_var("HERMES_FALLBACK_MODELS");
+        std::env::set_var("HERMES_FALLBACK_MODEL", "anthropic:claude-3-5-sonnet");
+
+        let mut cfg = GatewayConfig::default();
+        cfg.fallback_models = vec!["openrouter:backup".to_string()];
+
+        let agent_cfg = build_agent_config(&cfg, "nous:openai/gpt-5.5");
         assert_eq!(
             agent_cfg.retry.fallback_models,
             vec!["anthropic:claude-3-5-sonnet".to_string()]
@@ -5028,6 +5074,58 @@ mod tests {
 // Helper: build AgentConfig from GatewayConfig
 // ---------------------------------------------------------------------------
 
+fn build_retry_config(config: &GatewayConfig) -> hermes_agent::agent_loop::RetryConfig {
+    let mut retry_cfg = hermes_agent::agent_loop::RetryConfig::default();
+    let mut seen = std::collections::HashSet::new();
+
+    let mut push_candidate =
+        |candidate: &str, retry_cfg: &mut hermes_agent::agent_loop::RetryConfig| {
+            let trimmed = candidate.trim();
+            if trimmed.is_empty() {
+                return;
+            }
+            let identity = trimmed.to_ascii_lowercase();
+            if seen.insert(identity) {
+                retry_cfg.fallback_models.push(trimmed.to_string());
+            }
+        };
+
+    for model in &config.fallback_models {
+        push_candidate(model, &mut retry_cfg);
+    }
+    if let Some(model) = config.fallback_model.as_deref() {
+        push_candidate(model, &mut retry_cfg);
+    }
+
+    if !retry_cfg.fallback_models.is_empty() {
+        retry_cfg.fallback_model = retry_cfg.fallback_models.first().cloned();
+    }
+
+    if let Ok(raw) = std::env::var("HERMES_FALLBACK_MODELS") {
+        let parsed: Vec<String> = raw
+            .split(',')
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(ToString::to_string)
+            .collect();
+        if !parsed.is_empty() {
+            retry_cfg.fallback_models = parsed;
+            retry_cfg.fallback_model = retry_cfg.fallback_models.first().cloned();
+            return retry_cfg;
+        }
+    }
+
+    if let Ok(raw) = std::env::var("HERMES_FALLBACK_MODEL") {
+        let value = raw.trim();
+        if !value.is_empty() {
+            retry_cfg.fallback_model = Some(value.to_string());
+            retry_cfg.fallback_models = vec![value.to_string()];
+        }
+    }
+
+    retry_cfg
+}
+
 pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
     let (resolved_provider, _) = resolve_provider_and_model(config, model);
     let runtime_provider = normalize_runtime_provider_name(resolved_provider.as_str());
@@ -5063,30 +5161,7 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
     let skip_memory = skip_memory_env || hermes_home.join(".memory_disabled").exists();
     let skip_context_files = config.agent.skip_context_files || skip_context_files_env;
 
-    let mut retry_cfg = hermes_agent::agent_loop::RetryConfig::default();
-    if let Ok(raw) = std::env::var("HERMES_FALLBACK_MODELS") {
-        let parsed: Vec<String> = raw
-            .split(',')
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-            .map(ToString::to_string)
-            .collect();
-        if !parsed.is_empty() {
-            retry_cfg.fallback_models = parsed.clone();
-            retry_cfg.fallback_model = parsed.first().cloned();
-        }
-    }
-    if retry_cfg.fallback_model.is_none() {
-        if let Ok(raw) = std::env::var("HERMES_FALLBACK_MODEL") {
-            let value = raw.trim();
-            if !value.is_empty() {
-                retry_cfg.fallback_model = Some(value.to_string());
-                if retry_cfg.fallback_models.is_empty() {
-                    retry_cfg.fallback_models.push(value.to_string());
-                }
-            }
-        }
-    }
+    let retry_cfg = build_retry_config(config);
 
     AgentConfig {
         max_turns: config.max_turns,
