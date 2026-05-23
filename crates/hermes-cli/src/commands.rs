@@ -138,6 +138,11 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
         "Show/switch models, run capability diagnostics (`/model explain`, `why-not`, `harness`, `backend`), or configure failover (`/model failover`)",
     ),
     (
+        "/codex-runtime",
+        "Toggle Codex app-server runtime for OpenAI/Codex models (`auto|codex_app_server`)",
+    ),
+    ("/codex_runtime", "Alias for /codex-runtime"),
+    (
         "/auth",
         "Auth lifecycle controls (`status|verify|refresh`) for active provider credentials",
     ),
@@ -158,6 +163,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ),
     ("/skills", "List available skills"),
     ("/skill", "Alias for /skills"),
+    (
+        "/bundles",
+        "List skill bundles (aliases that load multiple skills)",
+    ),
     (
         "/curator",
         "Skill curator/control-plane compatibility surface",
@@ -299,6 +308,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     (
         "/platforms",
         "Show enabled gateway/messaging platform adapters",
+    ),
+    (
+        "/platform",
+        "Pause, resume, or list a failing gateway platform (`list|pause|resume`)",
     ),
     ("/gateway", "Alias for /platforms"),
     (
@@ -3337,6 +3350,7 @@ fn canonical_command(cmd: &str) -> &str {
         "/clear" => "/new",
         "/compact" => "/compress",
         "/skill" => "/skills",
+        "/codex_runtime" => "/codex-runtime",
         "/curator" => "/skills",
         "/agent" => "/status",
         "/tasks" => "/kanban",
@@ -3430,6 +3444,7 @@ pub async fn handle_slash_command(
         "/studio" => handle_studio_command(app, args).await,
         "/ask" => handle_interactive_question_command(app, args),
         "/model" => handle_model_command(app, args).await,
+        "/codex-runtime" => handle_codex_runtime_command(app, args),
         "/auth" => handle_auth_command(app, args).await,
         "/provider" => handle_provider_command(app).await,
         "/personality" => handle_personality_command(app, args),
@@ -3442,6 +3457,7 @@ pub async fn handle_slash_command(
         "/tools" => handle_tools_command(app, args),
         "/toolcards" => handle_toolcards_command(app, args),
         "/toolsets" => handle_toolsets_command(app),
+        "/bundles" => handle_bundles_command(app),
         "/plugins" => handle_plugins_command(app),
         "/mcp" => handle_mcp_command(app),
         "/reload" | "/reload-mcp" => handle_reload_command(app, canonical_command(cmd)),
@@ -3470,6 +3486,7 @@ pub async fn handle_slash_command(
         "/mission" => handle_mission_command(app, args).await,
         "/dashboard" => handle_dashboard_command(app, args).await,
         "/platforms" => handle_platforms_command(app),
+        "/platform" => handle_platform_command(app, args),
         "/integrations" => handle_integrations_command(app, args).await,
         "/commands" => handle_commands_catalog_command(app, args),
         "/boot" => handle_boot_command(app, args).await,
@@ -4817,6 +4834,212 @@ fn emit_command_output(app: &mut App, text: impl Into<String>) {
     } else {
         println!("{}", rendered);
     }
+}
+
+fn normalize_codex_runtime_value(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "auto" => Some("auto"),
+        "codex_app_server" | "codex-app-server" => Some("codex_app_server"),
+        _ => None,
+    }
+}
+
+fn parse_codex_runtime_args(args: &[&str]) -> Result<Option<&'static str>, String> {
+    let raw = args.join(" ");
+    let value = raw.trim().to_ascii_lowercase();
+    if value.is_empty() {
+        return Ok(None);
+    }
+    match value.as_str() {
+        "on" | "codex" | "enable" => Ok(Some("codex_app_server")),
+        "off" | "default" | "disable" | "hermes" => Ok(Some("auto")),
+        _ => normalize_codex_runtime_value(&value)
+            .map(Some)
+            .ok_or_else(|| {
+                format!(
+                    "Unknown runtime '{}'. Use one of: auto, codex_app_server, on, off",
+                    value
+                )
+            }),
+    }
+}
+
+fn yaml_key(name: &str) -> serde_yaml::Value {
+    serde_yaml::Value::String(name.to_string())
+}
+
+fn read_codex_runtime_config(path: &Path) -> Result<serde_yaml::Value, AgentError> {
+    if !path.exists() {
+        return Ok(serde_yaml::Value::Mapping(serde_yaml::Mapping::new()));
+    }
+    let raw = std::fs::read_to_string(path)
+        .map_err(|e| AgentError::Io(format!("read {}: {}", path.display(), e)))?;
+    serde_yaml::from_str::<serde_yaml::Value>(&raw)
+        .map_err(|e| AgentError::Config(format!("parse {}: {}", path.display(), e)))
+}
+
+fn codex_runtime_from_config(root: &serde_yaml::Value) -> &'static str {
+    root.as_mapping()
+        .and_then(|map| map.get(&yaml_key("model")))
+        .and_then(|model| model.as_mapping())
+        .and_then(|model| model.get(&yaml_key("openai_runtime")))
+        .and_then(|value| value.as_str())
+        .and_then(normalize_codex_runtime_value)
+        .unwrap_or("auto")
+}
+
+fn model_string_to_mapping(model: &str) -> serde_yaml::Mapping {
+    let mut mapping = serde_yaml::Mapping::new();
+    let model = model.trim();
+    if model.is_empty() {
+        return mapping;
+    }
+    if let Some((provider, default)) = model.split_once(':') {
+        if !provider.trim().is_empty() {
+            mapping.insert(
+                yaml_key("provider"),
+                serde_yaml::Value::String(provider.trim().to_string()),
+            );
+        }
+        if !default.trim().is_empty() {
+            mapping.insert(
+                yaml_key("default"),
+                serde_yaml::Value::String(default.trim().to_string()),
+            );
+        }
+    } else {
+        mapping.insert(
+            yaml_key("default"),
+            serde_yaml::Value::String(model.to_string()),
+        );
+    }
+    mapping
+}
+
+fn set_codex_runtime_config_value(root: &mut serde_yaml::Value, runtime: &str) {
+    if !matches!(root, serde_yaml::Value::Mapping(_)) {
+        *root = serde_yaml::Value::Mapping(serde_yaml::Mapping::new());
+    }
+    let root_map = root.as_mapping_mut().expect("root mapping");
+    let model_key = yaml_key("model");
+    let mut model_map = match root_map.remove(&model_key) {
+        Some(serde_yaml::Value::Mapping(map)) => map,
+        Some(serde_yaml::Value::String(model)) => model_string_to_mapping(&model),
+        Some(other) => {
+            let mut map = serde_yaml::Mapping::new();
+            map.insert(yaml_key("default"), other);
+            map
+        }
+        None => serde_yaml::Mapping::new(),
+    };
+    model_map.insert(
+        yaml_key("openai_runtime"),
+        serde_yaml::Value::String(runtime.to_string()),
+    );
+    root_map.insert(model_key, serde_yaml::Value::Mapping(model_map));
+}
+
+fn write_codex_runtime_config(path: &Path, root: &serde_yaml::Value) -> Result<(), AgentError> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| AgentError::Io(format!("create {}: {}", parent.display(), e)))?;
+    }
+    let yaml = serde_yaml::to_string(root)
+        .map_err(|e| AgentError::Config(format!("serialize {}: {}", path.display(), e)))?;
+    std::fs::write(path, yaml)
+        .map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))
+}
+
+fn check_codex_binary_status() -> (bool, String) {
+    let output = std::process::Command::new("codex")
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output();
+    match output {
+        Ok(output) if output.status.success() => {
+            let text = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let fallback = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            (true, if text.is_empty() { fallback } else { text })
+        }
+        Ok(output) => {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            let detail = if stderr.is_empty() {
+                format!("codex exited with {}", output.status)
+            } else {
+                stderr
+            };
+            (false, detail)
+        }
+        Err(e) => (false, e.to_string()),
+    }
+}
+
+fn handle_codex_runtime_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let config_path = app.state_root.join("config.yaml");
+    let mut root = read_codex_runtime_config(&config_path)?;
+    let current = codex_runtime_from_config(&root);
+    let new_value = match parse_codex_runtime_args(args) {
+        Ok(value) => value,
+        Err(message) => {
+            emit_command_output(app, format!("Codex runtime error: {}", message));
+            return Ok(CommandResult::Handled);
+        }
+    };
+
+    let Some(new_value) = new_value else {
+        let (ok, detail) = check_codex_binary_status();
+        let binary_status = if ok {
+            format!("OK {}", detail)
+        } else {
+            format!(
+                "not available - {}. Install with `npm i -g @openai/codex`",
+                detail
+            )
+        };
+        emit_command_output(
+            app,
+            format!(
+                "openai_runtime: {}\ncodex CLI: {}\nconfig: {}",
+                current,
+                binary_status,
+                config_path.display()
+            ),
+        );
+        return Ok(CommandResult::Handled);
+    };
+
+    if new_value == current {
+        emit_command_output(app, format!("openai_runtime already set to {}", current));
+        return Ok(CommandResult::Handled);
+    }
+
+    if new_value == "codex_app_server" {
+        let (ok, detail) = check_codex_binary_status();
+        if !ok {
+            emit_command_output(
+                app,
+                format!(
+                    "Cannot enable codex_app_server runtime: {}\nInstall with: npm i -g @openai/codex",
+                    detail
+                ),
+            );
+            return Ok(CommandResult::Handled);
+        }
+    }
+
+    set_codex_runtime_config_value(&mut root, new_value);
+    write_codex_runtime_config(&config_path, &root)?;
+    let mut msg = format!("openai_runtime: {} -> {}", current, new_value);
+    if new_value == "codex_app_server" {
+        msg.push_str("\nOpenAI/Codex turns will use the Codex app-server runtime.");
+    } else {
+        msg.push_str("\nOpenAI/Codex turns will use the default Hermes runtime.");
+    }
+    msg.push_str("\nEffective on next session.");
+    emit_command_output(app, msg);
+    Ok(CommandResult::Handled)
 }
 
 fn format_personality_catalog(
@@ -12097,6 +12320,141 @@ fn handle_toolsets_command(app: &mut App) -> Result<CommandResult, AgentError> {
     Ok(CommandResult::Handled)
 }
 
+#[derive(Debug, Deserialize)]
+struct SkillBundleManifest {
+    name: Option<String>,
+    description: Option<String>,
+    skills: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone)]
+struct SkillBundleSummary {
+    slug: String,
+    description: String,
+    skills: Vec<String>,
+}
+
+fn slugify_skill_bundle_name(name: &str) -> String {
+    let mut slug = String::new();
+    let mut last_was_dash = false;
+    for ch in name.trim().to_ascii_lowercase().chars() {
+        let normalized = if ch.is_ascii_alphanumeric() {
+            Some(ch)
+        } else if matches!(ch, '-' | '_' | ' ') {
+            Some('-')
+        } else {
+            None
+        };
+        if let Some(ch) = normalized {
+            if ch == '-' {
+                if !last_was_dash && !slug.is_empty() {
+                    slug.push('-');
+                    last_was_dash = true;
+                }
+            } else {
+                slug.push(ch);
+                last_was_dash = false;
+            }
+        }
+    }
+    slug.trim_matches('-').to_string()
+}
+
+fn list_skill_bundles(root: &Path) -> Vec<SkillBundleSummary> {
+    let dir = root.join("skill-bundles");
+    let Ok(entries) = std::fs::read_dir(&dir) else {
+        return Vec::new();
+    };
+    let mut bundles = Vec::new();
+    let mut seen = HashSet::new();
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        let Some(ext) = path.extension().and_then(|v| v.to_str()) else {
+            continue;
+        };
+        if !matches!(ext, "yaml" | "yml") {
+            continue;
+        }
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(manifest) = serde_yaml::from_str::<SkillBundleManifest>(&raw) else {
+            continue;
+        };
+        let name = manifest
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| {
+                path.file_stem()
+                    .and_then(|v| v.to_str())
+                    .unwrap_or("bundle")
+                    .to_string()
+            });
+        let slug = slugify_skill_bundle_name(&name);
+        if slug.is_empty() || !seen.insert(slug.clone()) {
+            continue;
+        }
+        let skills: Vec<String> = manifest
+            .skills
+            .unwrap_or_default()
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if skills.is_empty() {
+            continue;
+        }
+        let description = manifest
+            .description
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("Load {} skills as a bundle", skills.len()));
+        bundles.push(SkillBundleSummary {
+            slug,
+            description,
+            skills,
+        });
+    }
+    bundles.sort_by(|a, b| a.slug.cmp(&b.slug));
+    bundles
+}
+
+fn handle_bundles_command(app: &mut App) -> Result<CommandResult, AgentError> {
+    let bundles = list_skill_bundles(&app.state_root);
+    if bundles.is_empty() {
+        emit_command_output(
+            app,
+            format!(
+                "No skill bundles installed.\nCreate one with `hermes bundles create <name> --skill <s1> --skill <s2>`.\nDirectory: {}",
+                app.state_root.join("skill-bundles").display()
+            ),
+        );
+        return Ok(CommandResult::Handled);
+    }
+
+    let mut out = format!("Skill Bundles ({} installed):\n", bundles.len());
+    for bundle in bundles {
+        let _ = writeln!(
+            out,
+            "  - /{} -- {} ({} skills)",
+            bundle.slug,
+            bundle.description,
+            bundle.skills.len()
+        );
+        for skill in bundle.skills {
+            let _ = writeln!(out, "      - {}", skill);
+        }
+    }
+    out.push_str("\nInvoke a bundle with `/<slug>` to load all its skills.");
+    emit_command_output(app, out.trim_end());
+    Ok(CommandResult::Handled)
+}
+
 fn handle_plugins_command(app: &mut App) -> Result<CommandResult, AgentError> {
     let rows = discover_plugin_surface(true);
     if rows.is_empty() {
@@ -16805,6 +17163,75 @@ fn handle_platforms_command(app: &mut App) -> Result<CommandResult, AgentError> 
         let _ = writeln!(out, "  - {}", p);
     }
     emit_command_output(app, out.trim_end());
+    Ok(CommandResult::Handled)
+}
+
+fn render_platform_command_list(app: &App) -> String {
+    if app.config.platforms.is_empty() {
+        return "Gateway platforms\nConnected: local CLI\nConfigured adapters: (none)\nFailed/paused: unavailable in local CLI mode".to_string();
+    }
+
+    let mut entries: Vec<_> = app.config.platforms.iter().collect();
+    entries.sort_by(|a, b| a.0.cmp(b.0));
+    let mut out = String::from("Gateway platforms\nConnected: local CLI\nConfigured adapters:\n");
+    for (name, platform) in entries {
+        let token_state = if platform
+            .token
+            .as_ref()
+            .is_some_and(|v| !v.trim().is_empty())
+        {
+            "configured"
+        } else {
+            "missing"
+        };
+        let webhook_state = if platform
+            .webhook_url
+            .as_ref()
+            .is_some_and(|v| !v.trim().is_empty())
+        {
+            "configured"
+        } else {
+            "missing"
+        };
+        let _ = writeln!(
+            out,
+            "  - {}: enabled={} token={} webhook={}",
+            name, platform.enabled, token_state, webhook_state
+        );
+    }
+    out.push_str("Failed/paused: unavailable in local CLI mode; run /platform from the gateway chat to control retry queues.");
+    out
+}
+
+fn handle_platform_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let action = args.first().copied().unwrap_or("list").to_ascii_lowercase();
+    match action.as_str() {
+        "list" | "status" => {
+            let output = render_platform_command_list(app);
+            emit_command_output(app, output);
+        }
+        "pause" | "resume" => {
+            let Some(target) = args.get(1).copied().map(str::trim).filter(|v| !v.is_empty()) else {
+                emit_command_output(app, format!("Usage: /platform {} <name>", action));
+                return Ok(CommandResult::Handled);
+            };
+            if !app.config.platforms.contains_key(target) {
+                emit_command_output(app, format!("Unknown platform: {}", target));
+                return Ok(CommandResult::Handled);
+            }
+            emit_command_output(
+                app,
+                format!(
+                    "Platform {} for '{}' is handled by the running gateway process. Run `/platform {} {}` from a gateway chat, or restart the gateway after config changes.",
+                    action, target, action, target
+                ),
+            );
+        }
+        _ => emit_command_output(
+            app,
+            "Usage: /platform <list|pause|resume> [name]\n  /platform list - show platform status\n  /platform pause <name> - stop retrying a failing gateway platform\n  /platform resume <name> - re-queue a paused gateway platform",
+        ),
+    }
     Ok(CommandResult::Handled)
 }
 
@@ -24876,6 +25303,9 @@ mod tests {
             "/triage",
             "/subconscious",
             "/integrations",
+            "/bundles",
+            "/codex-runtime",
+            "/platform",
         ] {
             assert!(
                 SLASH_COMMANDS.iter().any(|(name, _)| *name == command),
@@ -24883,11 +25313,15 @@ mod tests {
             );
         }
         assert_eq!(canonical_command("/onboard"), "/walkthrough");
+        assert_eq!(canonical_command("/codex_runtime"), "/codex-runtime");
         assert!(autocomplete("/boo").contains(&"/boot"));
         assert!(autocomplete("/wal").contains(&"/walkthrough"));
         assert!(autocomplete("/tri").contains(&"/triage"));
         assert!(autocomplete("/subc").contains(&"/subconscious"));
         assert!(autocomplete("/inte").contains(&"/integrations"));
+        assert!(autocomplete("/bun").contains(&"/bundles"));
+        assert!(autocomplete("/codex").contains(&"/codex-runtime"));
+        assert!(autocomplete("/plat").contains(&"/platform"));
     }
 
     #[tokio::test]
@@ -24910,6 +25344,81 @@ mod tests {
         let integrations = latest_ui_assistant_text(&app);
         assert!(integrations.contains("Integration Control Plane"));
         assert!(integrations.contains("provider:"));
+    }
+
+    #[tokio::test]
+    async fn upstream_parity_bundles_command_lists_skill_bundles() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+        let bundle_dir = app.state_root.join("skill-bundles");
+        std::fs::create_dir_all(&bundle_dir).expect("create bundle dir");
+        std::fs::write(
+            bundle_dir.join("review-pack.yaml"),
+            "name: Review Pack\ndescription: Review plus Rust checks\nskills:\n  - code-review\n  - rust-code-quality\n",
+        )
+        .expect("write bundle");
+
+        handle_slash_command(&mut app, "/bundles", &[])
+            .await
+            .expect("bundles");
+        let output = latest_ui_assistant_text(&app);
+        assert!(output.contains("Skill Bundles (1 installed):"));
+        assert!(output.contains("/review-pack"));
+        assert!(output.contains("code-review"));
+    }
+
+    #[tokio::test]
+    async fn upstream_parity_codex_runtime_persists_auto_without_codex_binary() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+        std::fs::write(
+            app.state_root.join("config.yaml"),
+            "model:\n  provider: openai\n  default: gpt-4o\n  openai_runtime: codex_app_server\n",
+        )
+        .expect("write config");
+
+        handle_slash_command(&mut app, "/codex-runtime", &["auto"])
+            .await
+            .expect("codex runtime");
+        let output = latest_ui_assistant_text(&app);
+        assert!(output.contains("openai_runtime: codex_app_server -> auto"));
+        let updated = std::fs::read_to_string(app.state_root.join("config.yaml")).expect("config");
+        assert!(updated.contains("openai_runtime: auto"));
+    }
+
+    #[tokio::test]
+    async fn upstream_parity_platform_command_lists_cli_platform_state() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+        let mut config = GatewayConfig::default();
+        config.platforms.insert(
+            "telegram".to_string(),
+            hermes_config::PlatformConfig {
+                enabled: true,
+                token: Some("secret-token".to_string()),
+                ..Default::default()
+            },
+        );
+        app.config = std::sync::Arc::new(config);
+
+        handle_slash_command(&mut app, "/platform", &["list"])
+            .await
+            .expect("platform list");
+        let output = latest_ui_assistant_text(&app);
+        assert!(output.contains("Gateway platforms"));
+        assert!(output.contains("telegram: enabled=true token=configured"));
+        assert!(!output.contains("secret-token"));
+
+        handle_slash_command(&mut app, "/platform", &["pause", "telegram"])
+            .await
+            .expect("platform pause");
+        assert!(latest_ui_assistant_text(&app).contains("running gateway process"));
     }
 
     #[tokio::test]
