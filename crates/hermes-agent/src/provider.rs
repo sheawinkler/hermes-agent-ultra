@@ -270,6 +270,71 @@ impl GenericProvider {
         }
     }
 
+    fn apply_opencode_go_reasoning_controls(&self, body: &mut Value, effective_model: &str) {
+        if !self
+            .base_url
+            .to_ascii_lowercase()
+            .contains("opencode.ai/zen/go")
+        {
+            return;
+        }
+
+        let model = flat_model_name(effective_model);
+        let is_kimi_k2 = model.starts_with("kimi-k2");
+        let is_deepseek_thinking = (model.starts_with("deepseek-v")
+            && !model.starts_with("deepseek-v3"))
+            || model == "deepseek-reasoner";
+
+        let reasoning = body.get("reasoning").cloned();
+        let mut enabled = true;
+        let mut effort = body
+            .get("reasoning_effort")
+            .and_then(|value| value.as_str())
+            .map(|value| value.trim().to_ascii_lowercase());
+
+        if let Some(reasoning_obj) = reasoning.as_ref().and_then(|value| value.as_object()) {
+            enabled = reasoning_obj
+                .get("enabled")
+                .and_then(|value| value.as_bool())
+                .unwrap_or(true);
+            if effort.is_none() {
+                effort = reasoning_obj
+                    .get("effort")
+                    .and_then(|value| value.as_str())
+                    .map(|value| value.trim().to_ascii_lowercase());
+            }
+        }
+
+        if let Some(map) = body.as_object_mut() {
+            map.remove("reasoning");
+            map.remove("reasoning_effort");
+        }
+
+        if is_kimi_k2 {
+            if reasoning.is_none() && effort.is_none() {
+                return;
+            }
+            body["thinking"] =
+                serde_json::json!({ "type": if enabled { "enabled" } else { "disabled" } });
+            if enabled {
+                if let Some(mapped) = opencode_go_kimi_reasoning_effort(effort.as_deref()) {
+                    body["reasoning_effort"] = serde_json::json!(mapped);
+                }
+            }
+            return;
+        }
+
+        if is_deepseek_thinking {
+            body["thinking"] =
+                serde_json::json!({ "type": if enabled { "enabled" } else { "disabled" } });
+            if enabled {
+                if let Some(mapped) = opencode_go_deepseek_reasoning_effort(effort.as_deref()) {
+                    body["reasoning_effort"] = serde_json::json!(mapped);
+                }
+            }
+        }
+    }
+
     /// Force-close helper for future explicit TCP cleanup hooks.
     pub fn force_close_tcp_sockets(&self) {
         // reqwest handles connection pooling internally; dropping clones and relying
@@ -487,6 +552,49 @@ impl GenericProvider {
     }
 }
 
+fn flat_model_name(model: &str) -> String {
+    let normalized = model.trim().to_ascii_lowercase();
+    let parts = normalized
+        .split(['/', ':'])
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+
+    for part in parts.iter().rev() {
+        if part.starts_with("kimi-k2")
+            || part.starts_with("deepseek-v")
+            || *part == "deepseek-reasoner"
+        {
+            return (*part).to_string();
+        }
+    }
+
+    parts
+        .last()
+        .copied()
+        .unwrap_or(normalized.as_str())
+        .to_string()
+}
+
+fn opencode_go_kimi_reasoning_effort(effort: Option<&str>) -> Option<&'static str> {
+    match effort.unwrap_or("").trim().to_ascii_lowercase().as_str() {
+        "low" => Some("low"),
+        "medium" => Some("medium"),
+        "high" => Some("high"),
+        "xhigh" | "max" => Some("high"),
+        _ => None,
+    }
+}
+
+fn opencode_go_deepseek_reasoning_effort(effort: Option<&str>) -> Option<&'static str> {
+    match effort.unwrap_or("").trim().to_ascii_lowercase().as_str() {
+        "low" => Some("low"),
+        "medium" => Some("medium"),
+        "high" => Some("high"),
+        "xhigh" | "max" => Some("max"),
+        _ => None,
+    }
+}
+
 #[async_trait]
 impl LlmProvider for GenericProvider {
     async fn chat_completion(
@@ -521,6 +629,7 @@ impl LlmProvider for GenericProvider {
         }
         Self::merge_extra_body_fields(&mut body, extra_body);
         self.apply_runtime_hints(&mut body, messages, extra_body);
+        self.apply_opencode_go_reasoning_controls(&mut body, effective_model);
 
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
 
@@ -590,6 +699,7 @@ impl LlmProvider for GenericProvider {
             }
             GenericProvider::merge_extra_body_fields(&mut body, extra_body.as_ref());
             provider.apply_runtime_hints(&mut body, &messages, extra_body.as_ref());
+            provider.apply_opencode_go_reasoning_controls(&mut body, effective_model);
             // Request usage in the final streaming chunk
             body["stream_options"] = serde_json::json!({"include_usage": true});
 
@@ -2132,6 +2242,64 @@ mod tests {
         assert!(body.get("strict_tool_calls").is_none());
         assert!(body.get("provider_strict").is_none());
         assert_eq!(body["temperature"], 0.2);
+    }
+
+    #[test]
+    fn test_opencode_go_kimi_reasoning_uses_moonshot_shape() {
+        let provider =
+            GenericProvider::new("https://opencode.ai/zen/go/v1", "test-key", "kimi-k2.6");
+        let extra = serde_json::json!({"reasoning": {"effort": "xhigh"}});
+        let mut body = serde_json::json!({"model": "kimi-k2.6", "messages": []});
+
+        GenericProvider::merge_extra_body_fields(&mut body, Some(&extra));
+        provider.apply_opencode_go_reasoning_controls(&mut body, "moonshotai/kimi-k2.6");
+
+        assert_eq!(body["thinking"], serde_json::json!({"type": "enabled"}));
+        assert_eq!(body["reasoning_effort"], "high");
+        assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn test_opencode_go_deepseek_reasoning_uses_thinking_shape() {
+        let provider = GenericProvider::new(
+            "https://opencode.ai/zen/go/v1",
+            "test-key",
+            "deepseek-v4-pro",
+        );
+        let extra = serde_json::json!({"reasoning": {"effort": "max"}});
+        let mut body = serde_json::json!({"model": "deepseek-v4-pro", "messages": []});
+
+        GenericProvider::merge_extra_body_fields(&mut body, Some(&extra));
+        provider.apply_opencode_go_reasoning_controls(&mut body, "deepseek/deepseek-v4-pro");
+
+        assert_eq!(body["thinking"], serde_json::json!({"type": "enabled"}));
+        assert_eq!(body["reasoning_effort"], "max");
+        assert!(body.get("reasoning").is_none());
+    }
+
+    #[test]
+    fn test_opencode_go_non_target_model_drops_reasoning_controls() {
+        let provider = GenericProvider::new("https://opencode.ai/zen/go/v1", "test-key", "glm-5.1");
+        let extra = serde_json::json!({"reasoning": {"effort": "high"}});
+        let mut body = serde_json::json!({"model": "glm-5.1", "messages": []});
+
+        GenericProvider::merge_extra_body_fields(&mut body, Some(&extra));
+        provider.apply_opencode_go_reasoning_controls(&mut body, "glm-5.1");
+
+        assert!(body.get("thinking").is_none());
+        assert!(body.get("reasoning").is_none());
+        assert!(body.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn test_opencode_go_model_detection_handles_prefixes_and_variants() {
+        assert_eq!(flat_model_name("opencode-go:kimi-k2.6"), "kimi-k2.6");
+        assert_eq!(flat_model_name("opencode-go:kimi-k2.6:fast"), "kimi-k2.6");
+        assert_eq!(flat_model_name("moonshotai/kimi-k2.6:fast"), "kimi-k2.6");
+        assert_eq!(
+            flat_model_name("openrouter:deepseek/deepseek-reasoner:max"),
+            "deepseek-reasoner"
+        );
     }
 
     #[test]

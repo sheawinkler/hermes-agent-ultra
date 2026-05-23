@@ -218,6 +218,17 @@ pub enum CliCommand {
     /// Show running status (active sessions, model, uptime).
     Status,
 
+    /// Manage the local Kanban board without starting an interactive session.
+    Kanban {
+        /// Kanban action and arguments. Use `hermes kanban help`.
+        #[arg(
+            value_name = "ARGS",
+            trailing_var_arg = true,
+            allow_hyphen_values = true
+        )]
+        args: Vec<String>,
+    },
+
     /// Start the dashboard-compatible local HTTP UI/API helper.
     Dashboard {
         /// Host bind address (default: 127.0.0.1).
@@ -958,6 +969,39 @@ mod tests {
     fn cli_parse_status() {
         let cli = Cli::try_parse_from(vec!["hermes", "status"]).unwrap();
         assert!(matches!(cli.command, Some(CliCommand::Status)));
+    }
+
+    #[test]
+    fn cli_parse_kanban_passes_flags_as_args() {
+        let cli = Cli::try_parse_from(vec![
+            "hermes",
+            "kanban",
+            "add",
+            "Ship",
+            "feature",
+            "--lane",
+            "doing",
+            "--priority",
+            "2",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(CliCommand::Kanban { args }) => {
+                assert_eq!(
+                    args,
+                    vec![
+                        "add".to_string(),
+                        "Ship".to_string(),
+                        "feature".to_string(),
+                        "--lane".to_string(),
+                        "doing".to_string(),
+                        "--priority".to_string(),
+                        "2".to_string(),
+                    ]
+                );
+            }
+            _ => panic!("Expected Kanban command"),
+        }
     }
 
     #[test]

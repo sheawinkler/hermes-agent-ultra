@@ -521,6 +521,7 @@ async fn main() {
             json,
         } => run_incident_pack(cli, snapshot, output, json).await,
         CliCommand::Status => run_status(cli).await,
+        CliCommand::Kanban { args } => run_kanban(args),
         CliCommand::Dashboard {
             host,
             port,
@@ -1013,6 +1014,12 @@ async fn run_interactive(cli: Cli) -> Result<(), AgentError> {
     let _session_lock = InteractiveSessionLockGuard::acquire(&cli)?;
     let app = App::new(cli).await?;
     hermes_cli::tui::run(app).await
+}
+
+fn run_kanban(args: Vec<String>) -> Result<(), AgentError> {
+    let arg_refs = args.iter().map(String::as_str).collect::<Vec<_>>();
+    println!("{}", hermes_cli::commands::run_kanban_command(&arg_refs)?);
+    Ok(())
 }
 
 #[derive(Debug, Clone)]

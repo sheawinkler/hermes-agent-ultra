@@ -10762,7 +10762,11 @@ fn set_provider_reasoning_effort(cfg: &mut GatewayConfig, provider: &str, effort
                 .get("reasoning")
                 .and_then(|v| v.as_object().cloned())
                 .unwrap_or_default();
-            let mapped_reasoning = openai_reasoning_effort_for_level(level);
+            let mapped_reasoning = if provider_key.eq_ignore_ascii_case("opencode-go") {
+                level
+            } else {
+                openai_reasoning_effort_for_level(level)
+            };
             reasoning_obj.insert(
                 "effort".to_string(),
                 serde_json::Value::String(mapped_reasoning.to_string()),
@@ -12796,7 +12800,7 @@ fn parse_kanban_add(args: &[&str]) -> Result<NewKanbanTaskInput, AgentError> {
     })
 }
 
-fn handle_kanban_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+pub fn run_kanban_command(args: &[&str]) -> Result<String, AgentError> {
     let action = args
         .first()
         .copied()
@@ -12808,7 +12812,7 @@ fn handle_kanban_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
         "status" | "show" => {
             let requested = args.get(1).copied();
             let board = ensure_board(&mut store, requested);
-            emit_command_output(app, render_kanban_status(board));
+            Ok(render_kanban_status(board))
         }
         "boards" | "list" => {
             let mut out = String::from("Kanban boards:\n");
@@ -12825,15 +12829,14 @@ fn handle_kanban_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
                     marker, board.name, board.id, project
                 );
             }
-            emit_command_output(app, out.trim_end());
+            Ok(out.trim_end().to_string())
         }
         "init" => {
             let Some(name) = args.get(1).copied() else {
-                emit_command_output(
-                    app,
-                    "Usage: /kanban init <board-name> [project-path]\nExample: /kanban init alpha ~/Documents/Projects/hermes-agent-ultra",
+                return Ok(
+                    "Usage: kanban init <board-name> [project-path]\nExample: hermes kanban init alpha ~/Documents/Projects/hermes-agent-ultra"
+                        .to_string(),
                 );
-                return Ok(CommandResult::Handled);
             };
             let project_path = args.get(2).map(|s| s.to_string());
             let (board_name, board_id, board_snapshot) = {
@@ -12850,25 +12853,21 @@ fn handle_kanban_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
                     summary: format!("board={board_name} board_id={board_id}"),
                 },
             );
-            emit_command_output(
-                app,
-                format!(
-                    "Board selected: {} ({})\n{}",
-                    board_name, board_id, checkpoint.detail
-                ),
-            );
+            Ok(format!(
+                "Board selected: {} ({})\n{}",
+                board_name, board_id, checkpoint.detail
+            ))
         }
         "use" | "select" => {
             let Some(name_or_id) = args.get(1).copied() else {
-                emit_command_output(app, "Usage: /kanban use <board-id-or-name>");
-                return Ok(CommandResult::Handled);
+                return Ok("Usage: kanban use <board-id-or-name>".to_string());
             };
             let (board_name, board_id) = {
                 let board = ensure_board(&mut store, Some(name_or_id));
                 (board.name.clone(), board.id.clone())
             };
             save_store(&store)?;
-            emit_command_output(app, format!("Using board: {} ({})", board_name, board_id));
+            Ok(format!("Using board: {} ({})", board_name, board_id))
         }
         "add" => {
             let input = parse_kanban_add(args.get(1..).unwrap_or_default())?;
@@ -12893,39 +12892,32 @@ fn handle_kanban_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
                     summary: task_title.clone(),
                 },
             );
-            emit_command_output(
-                app,
-                format!(
-                    "Added task {} [{}] p{}: {}\n{}",
-                    task_id,
-                    task_lane.as_str(),
-                    task_priority,
-                    task_title,
-                    checkpoint.detail
-                ),
-            );
+            Ok(format!(
+                "Added task {} [{}] p{}: {}\n{}",
+                task_id,
+                task_lane.as_str(),
+                task_priority,
+                task_title,
+                checkpoint.detail
+            ))
         }
         "move" => {
             let Some(task_ref) = args.get(1).copied() else {
-                emit_command_output(
-                    app,
-                    "Usage: /kanban move <task-id|title> <todo|doing|blocked|done> [summary]",
+                return Ok(
+                    "Usage: kanban move <task-id|title> <todo|doing|blocked|done> [summary]"
+                        .to_string(),
                 );
-                return Ok(CommandResult::Handled);
             };
             let Some(raw_lane) = args.get(2).copied() else {
-                emit_command_output(
-                    app,
-                    "Usage: /kanban move <task-id|title> <todo|doing|blocked|done> [summary]",
+                return Ok(
+                    "Usage: kanban move <task-id|title> <todo|doing|blocked|done> [summary]"
+                        .to_string(),
                 );
-                return Ok(CommandResult::Handled);
             };
             let Some(lane) = KanbanLane::parse(raw_lane) else {
-                emit_command_output(
-                    app,
-                    format!("Invalid lane `{raw_lane}`. Use: todo|doing|blocked|done."),
-                );
-                return Ok(CommandResult::Handled);
+                return Ok(format!(
+                    "Invalid lane `{raw_lane}`. Use: todo|doing|blocked|done."
+                ));
             };
             let summary = args.get(3..).unwrap_or_default().join(" ");
             let maybe_update = {
@@ -12953,23 +12945,19 @@ fn handle_kanban_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
                         summary: format!("{title} {}", summary.trim()).trim().to_string(),
                     },
                 );
-                emit_command_output(
-                    app,
-                    format!(
-                        "Moved {} -> {}\n{}",
-                        task_id,
-                        lane.as_str(),
-                        checkpoint.detail
-                    ),
-                );
+                Ok(format!(
+                    "Moved {} -> {}\n{}",
+                    task_id,
+                    lane.as_str(),
+                    checkpoint.detail
+                ))
             } else {
-                emit_command_output(app, format!("Task not found: {task_ref}"));
+                Ok(format!("Task not found: {task_ref}"))
             }
         }
         "claim" => {
             let Some(task_ref) = args.get(1).copied() else {
-                emit_command_output(app, "Usage: /kanban claim <task-id|title> [assignee]");
-                return Ok(CommandResult::Handled);
+                return Ok("Usage: kanban claim <task-id|title> [assignee]".to_string());
             };
             let assignee = args.get(2).map(|s| s.to_string());
             let maybe_update = {
@@ -12996,18 +12984,17 @@ fn handle_kanban_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
                         ),
                     },
                 );
-                emit_command_output(
-                    app,
-                    format!("Claimed {} ({})\n{}", task_id, task_ref, checkpoint.detail),
-                );
+                Ok(format!(
+                    "Claimed {} ({})\n{}",
+                    task_id, task_ref, checkpoint.detail
+                ))
             } else {
-                emit_command_output(app, format!("Task not found: {task_ref}"));
+                Ok(format!("Task not found: {task_ref}"))
             }
         }
         "block" => {
             let Some(task_ref) = args.get(1).copied() else {
-                emit_command_output(app, "Usage: /kanban block <task-id|title> <reason>");
-                return Ok(CommandResult::Handled);
+                return Ok("Usage: kanban block <task-id|title> <reason>".to_string());
             };
             let reason = args
                 .get(2..)
@@ -13016,8 +13003,7 @@ fn handle_kanban_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
                 .trim()
                 .to_string();
             if reason.is_empty() {
-                emit_command_output(app, "Usage: /kanban block <task-id|title> <reason>");
-                return Ok(CommandResult::Handled);
+                return Ok("Usage: kanban block <task-id|title> <reason>".to_string());
             }
             let maybe_update = {
                 let board = ensure_board(&mut store, None);
@@ -13040,15 +13026,14 @@ fn handle_kanban_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
                         summary: reason,
                     },
                 );
-                emit_command_output(app, format!("Blocked {}\n{}", task_id, checkpoint.detail));
+                Ok(format!("Blocked {}\n{}", task_id, checkpoint.detail))
             } else {
-                emit_command_output(app, format!("Task not found: {task_ref}"));
+                Ok(format!("Task not found: {task_ref}"))
             }
         }
         "done" => {
             let Some(task_ref) = args.get(1).copied() else {
-                emit_command_output(app, "Usage: /kanban done <task-id|title> [summary]");
-                return Ok(CommandResult::Handled);
+                return Ok("Usage: kanban done <task-id|title> [summary]".to_string());
             };
             let summary = args.get(2..).unwrap_or_default().join(" ");
             let maybe_update = {
@@ -13076,12 +13061,9 @@ fn handle_kanban_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
                         summary,
                     },
                 );
-                emit_command_output(
-                    app,
-                    format!("Marked done: {}\n{}", task_id, checkpoint.detail),
-                );
+                Ok(format!("Marked done: {}\n{}", task_id, checkpoint.detail))
             } else {
-                emit_command_output(app, format!("Task not found: {task_ref}"));
+                Ok(format!("Task not found: {task_ref}"))
             }
         }
         "archive-done" | "archive" => {
@@ -13100,18 +13082,16 @@ fn handle_kanban_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
                     summary: format!("archived_count={archived}"),
                 },
             );
-            emit_command_output(
-                app,
-                format!("Archived {} done task(s).\n{}", archived, checkpoint.detail),
-            );
+            Ok(format!(
+                "Archived {} done task(s).\n{}",
+                archived, checkpoint.detail
+            ))
         }
         "dispatch" => {
             let Some(task_ref) = args.get(1).copied() else {
-                emit_command_output(
-                    app,
-                    "Usage: /kanban dispatch <task-id|title> [background-task-override]",
+                return Ok(
+                    "Usage: kanban dispatch <task-id|title> [background-task-override]".to_string(),
                 );
-                return Ok(CommandResult::Handled);
             };
             let override_msg = args.get(2..).unwrap_or_default().join(" ");
             let dispatch_result = {
@@ -13152,19 +13132,16 @@ fn handle_kanban_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
                         summary: format!("job_id={} task={}", job.id, task_message),
                     },
                 );
-                emit_command_output(
-                    app,
-                    format!(
-                        "Dispatched {} as background job {}\nStatus: {}\nLogs:   {}\n{}",
-                        task_id,
-                        job.id,
-                        job.status_path.display(),
-                        job.log_path.display(),
-                        checkpoint.detail
-                    ),
-                );
+                Ok(format!(
+                    "Dispatched {} as background job {}\nStatus: {}\nLogs:   {}\n{}",
+                    task_id,
+                    job.id,
+                    job.status_path.display(),
+                    job.log_path.display(),
+                    checkpoint.detail
+                ))
             } else {
-                emit_command_output(app, format!("Task not found: {task_ref}"));
+                Ok(format!("Task not found: {task_ref}"))
             }
         }
         "sync" => {
@@ -13185,18 +13162,20 @@ fn handle_kanban_command(app: &mut App, args: &[&str]) -> Result<CommandResult, 
                     ),
                 },
             );
-            emit_command_output(app, checkpoint.detail);
+            Ok(checkpoint.detail)
         }
-        "help" => {
-            emit_command_output(
-                app,
-                "Kanban commands:\n  /kanban status [board]\n  /kanban boards\n  /kanban init <name> [project-path]\n  /kanban use <name-or-id>\n  /kanban add <title> [--lane <todo|doing|blocked|done>] [--priority <1..5>] [--assignee <name>] [--depends K-0001,K-0002] [--desc <text>]\n  /kanban move <task-id|title> <todo|doing|blocked|done> [summary]\n  /kanban claim <task-id|title> [assignee]\n  /kanban block <task-id|title> <reason>\n  /kanban done <task-id|title> [summary]\n  /kanban archive-done\n  /kanban dispatch <task-id|title> [background-task-override]\n  /kanban sync",
-            );
-        }
-        _ => emit_command_output(app, "Unknown /kanban action. Use `/kanban help`."),
+        "help" => Ok(kanban_help_text().to_string()),
+        _ => Ok("Unknown kanban action. Use `hermes kanban help`.".to_string()),
     }
+}
 
+fn handle_kanban_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    emit_command_output(app, run_kanban_command(args)?);
     Ok(CommandResult::Handled)
+}
+
+fn kanban_help_text() -> &'static str {
+    "Kanban commands:\n  hermes kanban status [board]\n  hermes kanban boards\n  hermes kanban init <name> [project-path]\n  hermes kanban use <name-or-id>\n  hermes kanban add <title> [--lane <todo|doing|blocked|done>] [--priority <1..5>] [--assignee <name>] [--depends K-0001,K-0002] [--desc <text>]\n  hermes kanban move <task-id|title> <todo|doing|blocked|done> [summary]\n  hermes kanban claim <task-id|title> [assignee]\n  hermes kanban block <task-id|title> <reason>\n  hermes kanban done <task-id|title> [summary]\n  hermes kanban archive-done\n  hermes kanban dispatch <task-id|title> [background-task-override]\n  hermes kanban sync\n\nInteractive alias: /kanban <command>"
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26700,6 +26679,38 @@ install_command: "uv pip install -r requirements.txt"
                 .and_then(|value| value.get("effort"))
                 .and_then(|value| value.as_str()),
             Some("low")
+        );
+    }
+
+    #[test]
+    fn set_provider_reasoning_effort_preserves_opencode_go_levels_for_runtime_mapping() {
+        let mut cfg = GatewayConfig::default();
+        set_provider_reasoning_effort(&mut cfg, "opencode-go", Some("xhigh"));
+        let extra = cfg
+            .llm_providers
+            .get("opencode-go")
+            .and_then(|entry| entry.extra_body.as_ref())
+            .expect("extra body");
+        assert_eq!(
+            extra
+                .get("reasoning")
+                .and_then(|value| value.get("effort"))
+                .and_then(|value| value.as_str()),
+            Some("xhigh")
+        );
+
+        set_provider_reasoning_effort(&mut cfg, "opencode-go", Some("minimal"));
+        let extra = cfg
+            .llm_providers
+            .get("opencode-go")
+            .and_then(|entry| entry.extra_body.as_ref())
+            .expect("extra body");
+        assert_eq!(
+            extra
+                .get("reasoning")
+                .and_then(|value| value.get("effort"))
+                .and_then(|value| value.as_str()),
+            Some("minimal")
         );
     }
 

@@ -16,3 +16,6 @@ __pycache__/
 # Local quorum/model run captures can include private prompts, trading research,
 # and provider error details. Keep them off public main.
 artifacts/quorum/
+
+# Generated PR infographics live in PR bodies, not in-tree.
+infographic/

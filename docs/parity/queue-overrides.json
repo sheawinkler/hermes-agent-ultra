@@ -501,8 +501,24 @@
       "notes": "README.md and local Chinese README now include the upstream Nous Portal setup/status section adapted to hermes-agent-ultra command names."
     },
     "cae7537359c0": {
-      "disposition": "mirrored",
-      "notes": "Mirrored upstream infographic/kanban-db-corruption-defense/infographic.png byte-for-byte for the kanban corruption-defense documentation asset."
+      "disposition": "superseded",
+      "notes": "Upstream subsequently removed committed infographic assets; hermes-agent-ultra now follows that repo hygiene policy and keeps generated infographics out of tree."
+    },
+    "5772e638c9ba": {
+      "disposition": "ported",
+      "notes": "Removed the tracked infographic/ asset tree and added infographic/ to .gitignore so generated PR infographics stay in PR bodies rather than the repository."
+    },
+    "3589960e03d0": {
+      "disposition": "ported",
+      "notes": "Rust GenericProvider now maps OpenCode Go reasoning controls by model: Kimi K2 and DeepSeek thinking models receive provider-native thinking/reasoning_effort fields while non-target models drop unsupported controls."
+    },
+    "70aaa774be92": {
+      "disposition": "ported",
+      "notes": "Rust reasoning configuration now preserves raw opencode-go effort levels for runtime model-specific mapping, including Kimi xhigh/max to high and minimal omission."
+    },
+    "11e6dd3c606e": {
+      "disposition": "superseded",
+      "notes": "Upstream Python release AUTHOR_MAP maintenance is not part of the Rust release pipeline in hermes-agent-ultra."
     }
   },
   "subject_patterns": [
