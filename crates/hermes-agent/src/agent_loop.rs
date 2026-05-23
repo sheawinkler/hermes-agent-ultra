@@ -9001,6 +9001,12 @@ mod tests {
             .expect("env test lock poisoned")
     }
 
+    fn isolate_route_learning_home(config: &mut AgentConfig) -> tempfile::TempDir {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        config.hermes_home = Some(tmp.path().to_string_lossy().to_string());
+        tmp
+    }
+
     #[test]
     fn test_agent_config_default() {
         let config = AgentConfig::default();
@@ -10665,7 +10671,7 @@ mod tests {
             },
         );
 
-        let config = AgentConfig {
+        let mut config = AgentConfig {
             model: "openai:gpt-4o".to_string(),
             runtime_providers,
             smart_model_routing: SmartModelRoutingConfig {
@@ -10681,6 +10687,7 @@ mod tests {
             },
             ..AgentConfig::default()
         };
+        let _home = isolate_route_learning_home(&mut config);
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
@@ -10744,7 +10751,7 @@ mod tests {
                 oauth_client_id: None,
             },
         );
-        let config = AgentConfig {
+        let mut config = AgentConfig {
             model: "openai:gpt-4o".to_string(),
             runtime_providers,
             smart_model_routing: SmartModelRoutingConfig {
@@ -10760,6 +10767,7 @@ mod tests {
             },
             ..AgentConfig::default()
         };
+        let _home = isolate_route_learning_home(&mut config);
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
@@ -11127,7 +11135,7 @@ mod tests {
             },
         );
 
-        let config = AgentConfig {
+        let mut config = AgentConfig {
             model: "openai:gpt-4o".to_string(),
             runtime_providers,
             smart_model_routing: SmartModelRoutingConfig {
@@ -11143,6 +11151,7 @@ mod tests {
             },
             ..AgentConfig::default()
         };
+        let _home = isolate_route_learning_home(&mut config);
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
@@ -11215,7 +11224,7 @@ mod tests {
             },
         );
 
-        let config = AgentConfig {
+        let mut config = AgentConfig {
             model: "openai:gpt-4o".to_string(),
             runtime_providers,
             smart_model_routing: SmartModelRoutingConfig {
@@ -11231,6 +11240,7 @@ mod tests {
             },
             ..AgentConfig::default()
         };
+        let _home = isolate_route_learning_home(&mut config);
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
@@ -11785,7 +11795,7 @@ mod tests {
             },
         );
 
-        let config = AgentConfig {
+        let mut config = AgentConfig {
             model: "openai:gpt-4o".to_string(),
             runtime_providers,
             smart_model_routing: SmartModelRoutingConfig {
@@ -11801,6 +11811,7 @@ mod tests {
             },
             ..AgentConfig::default()
         };
+        let _home = isolate_route_learning_home(&mut config);
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
@@ -11864,7 +11875,7 @@ mod tests {
             },
         );
 
-        let config = AgentConfig {
+        let mut config = AgentConfig {
             model: "openai:gpt-4o".to_string(),
             runtime_providers,
             smart_model_routing: SmartModelRoutingConfig {
@@ -11880,6 +11891,7 @@ mod tests {
             },
             ..AgentConfig::default()
         };
+        let _home = isolate_route_learning_home(&mut config);
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
@@ -11929,7 +11941,7 @@ mod tests {
             }
         }
 
-        let config = AgentConfig {
+        let mut config = AgentConfig {
             model: "openai:gpt-4o".to_string(),
             smart_model_routing: SmartModelRoutingConfig {
                 enabled: true,
@@ -11944,6 +11956,7 @@ mod tests {
             },
             ..AgentConfig::default()
         };
+        let _home = isolate_route_learning_home(&mut config);
         let agent = AgentLoop::new(
             config,
             Arc::new(ToolRegistry::new()),
