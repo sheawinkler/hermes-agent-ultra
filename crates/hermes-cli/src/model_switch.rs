@@ -35,6 +35,17 @@ const CURATED_PROVIDER_MODELS: &[(&str, &[&str])] = &[
         ],
     ),
     (
+        "novita",
+        &[
+            "moonshotai/kimi-k2.5",
+            "minimax/minimax-m2.7",
+            "zai-org/glm-5",
+            "deepseek/deepseek-v3-0324",
+            "deepseek/deepseek-r1-0528",
+            "qwen/qwen3-235b-a22b-fp8",
+        ],
+    ),
+    (
         "nous",
         &[
             "openai/gpt-5.5-pro-20260423",

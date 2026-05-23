@@ -4475,6 +4475,7 @@ mod tests {
             ("APPLE_ANE_API_KEY", "apple-ane"),
             ("SGLANG_API_KEY", "sglang"),
             ("TGI_API_KEY", "tgi"),
+            ("NOVITA_API_KEY", "novita"),
             ("OPENCODE_GO_API_KEY", "opencode-go"),
             ("OPENCODE_ZEN_API_KEY", "opencode-zen"),
             ("XAI_API_KEY", "xai"),
@@ -4500,6 +4501,7 @@ mod tests {
             "google-gemini-cli"
         );
         assert_eq!(normalize_runtime_provider_name("moonshot"), "kimi");
+        assert_eq!(normalize_runtime_provider_name("novita-ai"), "novita");
         assert_eq!(
             normalize_runtime_provider_name("alibaba-coding-plan"),
             "qwen"
@@ -5259,6 +5261,7 @@ const AI_GATEWAY_BASE_URL: &str = "https://ai-gateway.vercel.sh/v1";
 const KIMI_CODING_BASE_URL: &str = "https://api.moonshot.ai/v1";
 const KIMI_CODING_CN_BASE_URL: &str = "https://api.moonshot.cn/v1";
 const MINIMAX_CN_BASE_URL: &str = "https://api.minimaxi.com/anthropic";
+const NOVITA_BASE_URL: &str = "https://api.novita.ai/openai/v1";
 const XAI_BASE_URL: &str = "https://api.x.ai/v1";
 const NVIDIA_BASE_URL: &str = "https://integrate.api.nvidia.com/v1";
 const OPENCODE_GO_BASE_URL: &str = "https://opencode.ai/zen/go/v1";
@@ -5289,6 +5292,7 @@ fn normalize_runtime_provider_name(provider: &str) -> String {
         "moonshot" | "kimi-coding" | "kimi-coding-cn" => "kimi".to_string(),
         "alibaba" | "alibaba-coding-plan" => "qwen".to_string(),
         "minimax-cn" => "minimax".to_string(),
+        "novita-ai" | "novitaai" => "novita".to_string(),
         "kilo" | "kilo-code" | "kilo-gateway" => "kilocode".to_string(),
         "opencode" | "opencode-zen" | "zen" => "opencode-zen".to_string(),
         "go" => "opencode-go".to_string(),
@@ -5314,6 +5318,7 @@ fn provider_default_base_url(provider: &str) -> Option<&'static str> {
         "kimi-coding" => Some(KIMI_CODING_BASE_URL),
         "kimi-coding-cn" | "moonshot" | "kimi" => Some(KIMI_CODING_CN_BASE_URL),
         "minimax-cn" => Some(MINIMAX_CN_BASE_URL),
+        "novita" | "novita-ai" | "novitaai" => Some(NOVITA_BASE_URL),
         "xai" => Some(XAI_BASE_URL),
         "nvidia" => Some(NVIDIA_BASE_URL),
         "opencode-go" => Some(OPENCODE_GO_BASE_URL),
@@ -5632,6 +5637,9 @@ pub fn provider_api_key_from_env(provider: &str) -> Option<String> {
             .ok()
             .filter(|s| !s.trim().is_empty())
             .or_else(|| std::env::var("STEPFUN_API_KEY").ok())
+            .filter(|s| !s.trim().is_empty()),
+        "novita" => std::env::var("NOVITA_API_KEY")
+            .ok()
             .filter(|s| !s.trim().is_empty()),
         "nous" => std::env::var("NOUS_API_KEY")
             .ok()

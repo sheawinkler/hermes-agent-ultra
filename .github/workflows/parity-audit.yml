@@ -28,6 +28,8 @@ jobs:
           python3 scripts/validate-intentional-divergence.py --check --allow-warnings
           python3 scripts/generate-upstream-patch-queue.py --local-ref origin/main --max-commits 0
           python3 scripts/generate-global-parity-proof.py --check-ci
+      - name: Upstream surface coverage gate
+        run: python3 scripts/run-upstream-surface-coverage-gate.py --repo-root . --upstream-ref upstream/main --local-ref origin/main
       - name: Golden parity harness
         env:
           GH_TOKEN: ${{ github.token }}

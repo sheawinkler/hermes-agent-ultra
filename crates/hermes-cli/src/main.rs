@@ -8879,6 +8879,7 @@ const SETUP_KIMI_CODING_ENV_KEYS: &[&str] = &["KIMI_API_KEY", "KIMI_CODING_API_K
 const SETUP_KIMI_CODING_CN_ENV_KEYS: &[&str] = &["KIMI_CN_API_KEY"];
 const SETUP_MINIMAX_ENV_KEYS: &[&str] = &["MINIMAX_API_KEY"];
 const SETUP_MINIMAX_CN_ENV_KEYS: &[&str] = &["MINIMAX_CN_API_KEY"];
+const SETUP_NOVITA_ENV_KEYS: &[&str] = &["NOVITA_API_KEY"];
 const SETUP_STEPFUN_ENV_KEYS: &[&str] = &["HERMES_STEPFUN_API_KEY", "STEPFUN_API_KEY"];
 const SETUP_COPILOT_ENV_KEYS: &[&str] = &["GITHUB_COPILOT_TOKEN"];
 const SETUP_AI_GATEWAY_ENV_KEYS: &[&str] = &["AI_GATEWAY_API_KEY"];
@@ -8989,6 +8990,11 @@ const SETUP_MODEL_OPTIONS: &[SetupModelOption] = &[
         provider: "kimi-coding-cn",
         model: "kimi-coding-cn:kimi-k2.6",
         label: "Kimi Coding China",
+    },
+    SetupModelOption {
+        provider: "novita",
+        model: "novita:deepseek/deepseek-v3-0324",
+        label: "NovitaAI",
     },
     SetupModelOption {
         provider: "stepfun",
@@ -9180,6 +9186,7 @@ fn setup_provider_display(provider: &str) -> &'static str {
         "kimi-coding-cn" => "Kimi Coding CN",
         "minimax" => "MiniMax",
         "minimax-cn" => "MiniMax CN",
+        "novita" => "NovitaAI",
         "stepfun" => "StepFun",
         "nous" => "Nous",
         "ai-gateway" => "Vercel AI Gateway",
@@ -9222,6 +9229,7 @@ fn setup_provider_env_keys(provider: &str) -> &'static [&'static str] {
         "kimi-coding-cn" => SETUP_KIMI_CODING_CN_ENV_KEYS,
         "minimax" => SETUP_MINIMAX_ENV_KEYS,
         "minimax-cn" => SETUP_MINIMAX_CN_ENV_KEYS,
+        "novita" => SETUP_NOVITA_ENV_KEYS,
         "stepfun" => SETUP_STEPFUN_ENV_KEYS,
         "nous" => SETUP_NOUS_ENV_KEYS,
         "ai-gateway" => SETUP_AI_GATEWAY_ENV_KEYS,
@@ -9259,6 +9267,7 @@ fn setup_provider_default_base_url(provider: &str) -> Option<&'static str> {
         "kimi-coding" => Some("https://api.moonshot.ai/v1"),
         "kimi-coding-cn" => Some("https://api.moonshot.cn/v1"),
         "minimax-cn" => Some("https://api.minimaxi.com/anthropic"),
+        "novita" => Some("https://api.novita.ai/openai/v1"),
         "stepfun" => Some("https://api.stepfun.ai/step_plan/v1"),
         "ai-gateway" => Some("https://ai-gateway.vercel.sh/v1"),
         "arcee" => Some("https://api.arcee.ai/api/v1"),
@@ -13974,6 +13983,12 @@ mod tests {
         assert_eq!(
             setup_provider_default_base_url("ai-gateway"),
             Some("https://ai-gateway.vercel.sh/v1")
+        );
+        assert_eq!(setup_provider_display("novita"), "NovitaAI");
+        assert_eq!(setup_provider_env_keys("novita"), &["NOVITA_API_KEY"]);
+        assert_eq!(
+            setup_provider_default_base_url("novita"),
+            Some("https://api.novita.ai/openai/v1")
         );
         assert!(
             SETUP_MODEL_OPTIONS.len() >= 20,
