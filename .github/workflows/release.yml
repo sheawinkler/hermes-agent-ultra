@@ -175,4 +175,4 @@ jobs:
             dist/*.zip.pem
             dist/security/release-sbom.cdx.json
             scripts/install.sh
-            Formula/hermes.rb
+            Formula/hermes-agent-ultra.rb
