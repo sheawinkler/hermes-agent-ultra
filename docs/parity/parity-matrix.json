@@ -1,25 +1,25 @@
 {
-  "generated_at_utc": "2026-05-23T12:15:36.649752+00:00",
+  "generated_at_utc": "2026-05-24T01:38:08.130269+00:00",
   "refs": {
     "local_ref": "HEAD",
-    "local_sha": "8300f1562a7bfec930ed597bd09ab8115d0ccfa3",
+    "local_sha": "6f87e0878bbe4c9bf087a41831d31f3797a01898",
     "upstream_ref": "upstream/main",
-    "upstream_sha": "7f1b2b4569532d63a7f50e172963da0d4f3082f7",
+    "upstream_sha": "72ff3e909c73b625ee244ab5ea3d0608ee85dcf3",
     "merge_base": null
   },
   "summary": {
-    "commits_behind": 1,
-    "commits_ahead": 738,
-    "upstream_patch_missing": 1,
+    "commits_behind": 34,
+    "commits_ahead": 749,
+    "upstream_patch_missing": 33,
     "upstream_patch_represented": 0,
-    "local_patch_unique": 635,
-    "files_only_upstream": 961,
-    "files_only_local": 531,
-    "files_shared_identical": 2112,
-    "files_shared_different": 556,
-    "tree_files_changed": 2049,
-    "tree_insertions": 548688,
-    "tree_deletions": 305020
+    "local_patch_unique": 645,
+    "files_only_upstream": 920,
+    "files_only_local": 532,
+    "files_shared_identical": 2140,
+    "files_shared_different": 581,
+    "tree_files_changed": 2034,
+    "tree_insertions": 540306,
+    "tree_deletions": 252550
   },
   "top_upstream_only": [
     {
@@ -28,7 +28,7 @@
     },
     {
       "path": "tests/hermes_cli",
-      "count": 41
+      "count": 42
     },
     {
       "path": "gateway/platforms",
@@ -40,7 +40,7 @@
     },
     {
       "path": "tests/agent",
-      "count": 34
+      "count": 35
     },
     {
       "path": "optional-skills/research",
@@ -48,19 +48,15 @@
     },
     {
       "path": "tests/gateway",
-      "count": 30
-    },
-    {
-      "path": "plugins/web",
-      "count": 25
+      "count": 31
     },
     {
       "path": "website/docs",
-      "count": 22
+      "count": 23
     },
     {
       "path": "tests/tools",
-      "count": 19
+      "count": 20
     },
     {
       "path": "tests/plugins",
@@ -71,11 +67,11 @@
       "count": 13
     },
     {
-      "path": "tools/environments",
-      "count": 12
+      "path": "ui-tui/src",
+      "count": 13
     },
     {
-      "path": "ui-tui/src",
+      "path": "tools/environments",
       "count": 12
     },
     {
@@ -95,16 +91,8 @@
       "count": 10
     },
     {
-      "path": "plugins/browser",
-      "count": 9
-    },
-    {
       "path": "hermes_cli/proxy",
       "count": 7
-    },
-    {
-      "path": "plugins/platforms",
-      "count": 6
     },
     {
       "path": "tests/cli",
@@ -127,10 +115,6 @@
       "count": 4
     },
     {
-      "path": "plugins/video_gen",
-      "count": 4
-    },
-    {
       "path": "website/i18n",
       "count": 4
     },
@@ -144,14 +128,6 @@
     },
     {
       "path": "optional-skills/blockchain",
-      "count": 2
-    },
-    {
-      "path": "plugins/image_gen",
-      "count": 2
-    },
-    {
-      "path": "plugins/model-providers",
       "count": 2
     },
     {
@@ -181,16 +157,40 @@
     {
       "path": ".env.example",
       "count": 1
+    },
+    {
+      "path": ".envrc",
+      "count": 1
+    },
+    {
+      "path": ".github/PULL_REQUEST_TEMPLATE.md",
+      "count": 1
+    },
+    {
+      "path": ".github/dependabot.yml",
+      "count": 1
+    },
+    {
+      "path": ".mailmap",
+      "count": 1
+    },
+    {
+      "path": ".plans/openai-api-server.md",
+      "count": 1
+    },
+    {
+      "path": ".plans/streaming-support.md",
+      "count": 1
     }
   ],
   "top_shared_different": [
     {
       "path": "tests/gateway",
-      "count": 95
+      "count": 96
     },
     {
       "path": "website/docs",
-      "count": 78
+      "count": 80
     },
     {
       "path": "tests/tools",
@@ -198,31 +198,39 @@
     },
     {
       "path": "tests/hermes_cli",
-      "count": 55
+      "count": 58
     },
     {
       "path": "ui-tui/src",
-      "count": 41
+      "count": 47
     },
     {
       "path": "tests/agent",
-      "count": 31
+      "count": 32
     },
     {
       "path": "tests/run_agent",
-      "count": 29
+      "count": 30
     },
     {
       "path": "ui-tui/packages",
-      "count": 15
+      "count": 17
     },
     {
       "path": "tests/cli",
-      "count": 12
+      "count": 13
+    },
+    {
+      "path": "plugins/google_meet",
+      "count": 9
     },
     {
       "path": "skills/creative",
       "count": 9
+    },
+    {
+      "path": "plugins/platforms",
+      "count": 8
     },
     {
       "path": "plugins/memory",
@@ -241,16 +249,8 @@
       "count": 7
     },
     {
-      "path": "plugins/google_meet",
-      "count": 6
-    },
-    {
-      "path": "plugins/platforms",
-      "count": 5
-    },
-    {
       "path": "tests/plugins",
-      "count": 5
+      "count": 6
     },
     {
       "path": "plugins/teams_pipeline",
@@ -321,6 +321,10 @@
       "count": 1
     },
     {
+      "path": "CONTRIBUTING.md",
+      "count": 1
+    },
+    {
       "path": "Dockerfile",
       "count": 1
     },
@@ -338,10 +342,6 @@
     },
     {
       "path": "docker/entrypoint.sh",
-      "count": 1
-    },
-    {
-      "path": "flake.nix",
       "count": 1
     }
   ],
@@ -514,7 +514,7 @@
     },
     {
       "path": "tests/hermes_cli",
-      "count": 41
+      "count": 42
     },
     {
       "path": "gateway/platforms",
@@ -526,7 +526,7 @@
     },
     {
       "path": "tests/agent",
-      "count": 34
+      "count": 35
     },
     {
       "path": "optional-skills/research",
@@ -534,19 +534,15 @@
     },
     {
       "path": "tests/gateway",
-      "count": 30
-    },
-    {
-      "path": "plugins/web",
-      "count": 25
+      "count": 31
     },
     {
       "path": "website/docs",
-      "count": 22
+      "count": 23
     },
     {
       "path": "tests/tools",
-      "count": 19
+      "count": 20
     },
     {
       "path": "tests/plugins",
@@ -557,11 +553,11 @@
       "count": 13
     },
     {
-      "path": "tools/environments",
-      "count": 12
+      "path": "ui-tui/src",
+      "count": 13
     },
     {
-      "path": "ui-tui/src",
+      "path": "tools/environments",
       "count": 12
     },
     {
@@ -581,16 +577,8 @@
       "count": 10
     },
     {
-      "path": "plugins/browser",
-      "count": 9
-    },
-    {
       "path": "hermes_cli/proxy",
       "count": 7
-    },
-    {
-      "path": "plugins/platforms",
-      "count": 6
     },
     {
       "path": "tests/cli",
@@ -613,10 +601,6 @@
       "count": 4
     },
     {
-      "path": "plugins/video_gen",
-      "count": 4
-    },
-    {
       "path": "website/i18n",
       "count": 4
     },
@@ -630,14 +614,6 @@
     },
     {
       "path": "optional-skills/blockchain",
-      "count": 2
-    },
-    {
-      "path": "plugins/image_gen",
-      "count": 2
-    },
-    {
-      "path": "plugins/model-providers",
       "count": 2
     },
     {
@@ -666,6 +642,30 @@
     },
     {
       "path": ".env.example",
+      "count": 1
+    },
+    {
+      "path": ".envrc",
+      "count": 1
+    },
+    {
+      "path": ".github/PULL_REQUEST_TEMPLATE.md",
+      "count": 1
+    },
+    {
+      "path": ".github/dependabot.yml",
+      "count": 1
+    },
+    {
+      "path": ".mailmap",
+      "count": 1
+    },
+    {
+      "path": ".plans/openai-api-server.md",
+      "count": 1
+    },
+    {
+      "path": ".plans/streaming-support.md",
       "count": 1
     }
   ],
@@ -836,8 +836,8 @@
       "workstream": "WS6",
       "issue": 10,
       "name": "Tests and CI parity",
-      "upstream_only": 185,
-      "shared_different": 331,
+      "upstream_only": 189,
+      "shared_different": 339,
       "local_only": 16,
       "risk": "high",
       "effort": "XL"
@@ -846,8 +846,8 @@
       "workstream": "WS8",
       "issue": 12,
       "name": "Compatibility and divergence policy",
-      "upstream_only": 342,
-      "shared_different": 11,
+      "upstream_only": 343,
+      "shared_different": 12,
       "local_only": 190,
       "risk": "medium",
       "effort": "L"
@@ -856,8 +856,8 @@
       "workstream": "WS5",
       "issue": 9,
       "name": "UX parity",
-      "upstream_only": 152,
-      "shared_different": 146,
+      "upstream_only": 153,
+      "shared_different": 156,
       "local_only": 67,
       "risk": "medium",
       "effort": "L"
@@ -866,9 +866,9 @@
       "workstream": "WS3",
       "issue": 7,
       "name": "Tools and adapters parity",
-      "upstream_only": 145,
-      "shared_different": 40,
-      "local_only": 96,
+      "upstream_only": 98,
+      "shared_different": 46,
+      "local_only": 97,
       "risk": "high",
       "effort": "L"
     },
@@ -904,12 +904,31 @@
     }
   ],
   "commit_mapping": {
-    "upstream_patch_missing": 1,
+    "upstream_patch_missing": 33,
     "upstream_patch_represented": 0,
-    "local_patch_unique": 635,
+    "local_patch_unique": 645,
     "local_patch_equivalent_to_upstream": 0,
     "upstream_patch_missing_sample": [
-      "7f1b2b4569532d63a7f50e172963da0d4f3082f7"
+      "c4b8f5efee8cdd3186e465d940bf0e8c98849346",
+      "cae7537359c0ba8fceedc0a6423a4d9f30972100",
+      "ad11327db0b570e72347eddca60b1d80abf0687b",
+      "026f64f8e07d8b5588f7e67b1b7fc3f60c5d99bc",
+      "e6ca730a2219c602284f9807d65497f8c697ce5e",
+      "874c2b1fe6ec185f9d1da17d31d2c7885d58c35c",
+      "4fea02cc16981dedb7878ce42e94c821d56d332f",
+      "cc61e3be49aa672d8d1ae75b8057a1b503251b7c",
+      "d1ad919a440948d73ad74a3b18d963a0763bb08e",
+      "521c870a05a928a6dcb8abde64859c5bc2a5e538",
+      "2a75bec6079be44212b91d0ec895e8c7e4e50161",
+      "0277194e3b31a72898962c528a5f75fde12cad72",
+      "35fdf111452933032d822ccab4d32166fc361a63",
+      "511b8e2325c621a30bc9a75f00762d820282e72f",
+      "b10f17bf1e9321c586cb3afb0d80ef5bd4ae34d6",
+      "6a8e131a0ab42e23fb8ad5e1e27ce2382f1d6a3b",
+      "3b096d6f6dbe8253aed46a2bc6b1304aaa9097d4",
+      "2c34a7da87d7c785f0f694bc2aceb1fd09d2516d",
+      "7de8cd4c5f67b5b17e64392fac5fdf1b3a986983",
+      "9451087aab30f5f28d3828ce867dd7e902d788a1"
     ],
     "upstream_patch_represented_sample": [],
     "local_patch_unique_sample": [
@@ -936,7 +955,7 @@
     ],
     "local_patch_equivalent_sample": [],
     "intentional_divergence_items": 5,
-    "intentional_divergence_covered_files": 428
+    "intentional_divergence_covered_files": 440
   },
   "intentional_divergence": [
     {
@@ -1010,7 +1029,7 @@
       "status": "approved",
       "workstream": "WS5",
       "summary": "Treat Rust CLI/TUI and gateway as primary UX surface; upstream web/ui-tui trees are tracked as intentional divergence unless explicitly ported.",
-      "matched_files": 302,
+      "matched_files": 314,
       "matched_sample": [
         "ui-tui/README.md",
         "ui-tui/babel.compiler.config.cjs",
@@ -1023,6 +1042,7 @@
         "ui-tui/packages/hermes-ink/src/ink/components/App.tsx",
         "ui-tui/packages/hermes-ink/src/ink/components/CursorAdvanceContext.ts",
         "ui-tui/packages/hermes-ink/src/ink/components/Link.tsx",
+        "ui-tui/packages/hermes-ink/src/ink/components/ScrollBox.tsx",
         "ui-tui/packages/hermes-ink/src/ink/hooks/use-cursor-advance.ts",
         "ui-tui/packages/hermes-ink/src/ink/hyperlinkHover.ts",
         "ui-tui/packages/hermes-ink/src/ink/ink-cursor-advance.test.ts",
@@ -1030,8 +1050,7 @@
         "ui-tui/packages/hermes-ink/src/ink/ink.tsx",
         "ui-tui/packages/hermes-ink/src/ink/log-update.test.ts",
         "ui-tui/packages/hermes-ink/src/ink/log-update.ts",
-        "ui-tui/packages/hermes-ink/src/ink/root.ts",
-        "ui-tui/packages/hermes-ink/src/ink/termio/dec.ts"
+        "ui-tui/packages/hermes-ink/src/ink/render-node-to-output.ts"
       ]
     }
   ]

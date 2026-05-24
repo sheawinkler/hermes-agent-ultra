@@ -519,6 +519,30 @@
     "11e6dd3c606e": {
       "disposition": "superseded",
       "notes": "Upstream Python release AUTHOR_MAP maintenance is not part of the Rust release pipeline in hermes-agent-ultra."
+    },
+    "7a4dc8e8d610": {
+      "disposition": "superseded",
+      "notes": "Upstream Python release AUTHOR_MAP maintenance is not part of the Rust release pipeline in hermes-agent-ultra."
+    },
+    "e42fcc562596": {
+      "disposition": "ported",
+      "notes": "Rust startup model resolution now pins provider selection to config-derived provider:model state and overwrites stale HERMES_INFERENCE_PROVIDER handoff env during runtime sync; CLI --provider remains the per-invocation override."
+    },
+    "b10f17bf1e93": {
+      "disposition": "ported",
+      "notes": "Imported ntfy as a platform plugin under plugins/platforms/ntfy with standalone send, env enablement, identity hardening, and local plugin regression tests."
+    },
+    "6a8e131a0ab4": {
+      "disposition": "ported",
+      "notes": "Hermes Ultra uses the upstream platform-plugin ntfy shape rather than a bundled core adapter; tests/gateway/test_ntfy_plugin.py covers plugin registration and standalone delivery."
+    },
+    "3b096d6f6dbe": {
+      "disposition": "ported",
+      "notes": "Ntfy robustness and docs are represented by plugins/platforms/ntfy, tests/gateway/test_ntfy_plugin.py, website ntfy messaging docs, sidebars, and environment-variable reference entries."
+    },
+    "7de8cd4c5f67": {
+      "disposition": "ported",
+      "notes": "TUI voice TTS state now flows through SlashHandlerContext into useMainApp status rendering, with createSlashHandler coverage for /voice tts state sync."
     }
   },
   "subject_patterns": [

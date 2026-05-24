@@ -4359,6 +4359,50 @@ mod tests {
     }
 
     #[test]
+    fn test_startup_model_env_sync_uses_config_provider_not_stale_env() {
+        let _guard = env_test_lock();
+        let keys = [
+            "HERMES_MODEL",
+            "HERMES_INFERENCE_MODEL",
+            "HERMES_INFERENCE_PROVIDER",
+        ];
+        let previous: Vec<(&str, Option<String>)> = keys
+            .iter()
+            .map(|key| (*key, std::env::var(key).ok()))
+            .collect();
+        for key in keys {
+            std::env::remove_var(key);
+        }
+        std::env::set_var("HERMES_INFERENCE_PROVIDER", "openrouter");
+
+        let mut cfg = GatewayConfig::default();
+        cfg.model = Some("anthropic:claude-sonnet-4-6".to_string());
+        cfg.llm_providers
+            .insert("anthropic".to_string(), LlmProviderConfig::default());
+
+        let configured_model = cfg.model.as_deref().expect("model should be set");
+        let startup = resolve_startup_model(&cfg, configured_model);
+        sync_runtime_model_env(&cfg, &startup);
+
+        assert_eq!(startup, "anthropic:claude-sonnet-4-6");
+        assert_eq!(
+            std::env::var("HERMES_INFERENCE_PROVIDER").ok().as_deref(),
+            Some("anthropic")
+        );
+        assert_eq!(
+            std::env::var("HERMES_INFERENCE_MODEL").ok().as_deref(),
+            Some("anthropic:claude-sonnet-4-6")
+        );
+
+        for (key, value) in previous {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+    }
+
+    #[test]
     fn test_provider_api_key_from_env_supports_stepfun() {
         let hermes_var = "HERMES_STEPFUN_API_KEY";
         let stepfun_var = "STEPFUN_API_KEY";

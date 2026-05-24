@@ -1,7 +1,7 @@
 # Workstream Status
 
-- Local HEAD: `8300f1562a7bfec930ed597bd09ab8115d0ccfa3`
-- Upstream: `upstream/main` (`7f1b2b4569532d63a7f50e172963da0d4f3082f7`)
+- Local HEAD: `6f87e0878bbe4c9bf087a41831d31f3797a01898`
+- Upstream: `upstream/main` (`72ff3e909c73b625ee244ab5ea3d0608ee85dcf3`)
 
 | Workstream | Title | State |
 | --- | --- | --- |
