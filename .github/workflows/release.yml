@@ -37,7 +37,9 @@ jobs:
       - name: Generate SBOM (CycloneDX)
         run: |
           cargo install cargo-cyclonedx --locked
-          cargo cyclonedx --workspace --format json --output-file release-sbom.cdx.json
+          cargo cyclonedx --manifest-path crates/hermes-cli/Cargo.toml --format json --override-filename release-sbom
+          cp crates/hermes-cli/release-sbom.json release-sbom.cdx.json
+          test -s release-sbom.cdx.json
       - name: Upload security gate artifacts
         uses: actions/upload-artifact@v4
         with:
