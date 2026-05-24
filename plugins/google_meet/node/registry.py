@@ -24,7 +24,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from hermes_constants import get_hermes_home
+from plugins.google_meet._hermes_home import get_hermes_home
 
 
 def _default_path() -> Path:

@@ -317,6 +317,7 @@ def test_server_handle_request_start_bot_dispatches(tmp_path, monkeypatch):
         "url": "https://meet.google.com/abc-defg-hij",
         "guest_name": "Bot",
         "duration": "30m",
+        "mode": "realtime",
     })
     resp = asyncio.run(s._handle_request(req))
     assert resp["type"] == "response"
@@ -324,6 +325,7 @@ def test_server_handle_request_start_bot_dispatches(tmp_path, monkeypatch):
     assert captured["url"] == "https://meet.google.com/abc-defg-hij"
     assert captured["guest_name"] == "Bot"
     assert captured["duration"] == "30m"
+    assert captured["mode"] == "realtime"
 
 
 def test_server_handle_request_start_bot_missing_url(tmp_path):
@@ -389,7 +391,12 @@ def test_server_handle_request_say_enqueues_when_active(tmp_path, monkeypatch):
     out = tmp_path / "meet-out"
     out.mkdir()
     monkeypatch.setattr(pm, "_read_active",
-                        lambda: {"pid": 1, "meeting_id": "m", "out_dir": str(out)})
+                        lambda: {
+                            "pid": 1,
+                            "meeting_id": "m",
+                            "mode": "realtime",
+                            "out_dir": str(out),
+                        })
 
     s = NodeServer(token_path=tmp_path / "t.json")
     tok = s.ensure_token()
@@ -403,7 +410,7 @@ def test_server_handle_request_say_enqueues_when_active(tmp_path, monkeypatch):
     assert json.loads(q[0])["text"] == "hello"
 
 
-def test_server_handle_request_say_without_active_still_ok(tmp_path, monkeypatch):
+def test_server_handle_request_say_without_active_returns_error(tmp_path, monkeypatch):
     from plugins.google_meet.node.server import NodeServer
     from plugins.google_meet.node import protocol
     from plugins.google_meet import process_manager as pm
@@ -415,8 +422,35 @@ def test_server_handle_request_say_without_active_still_ok(tmp_path, monkeypatch
     req = protocol.make_request("say", tok, {"text": "hi"})
     resp = asyncio.run(s._handle_request(req))
     assert resp["type"] == "response"
-    assert resp["payload"]["ok"] is True
+    assert resp["payload"]["ok"] is False
     assert resp["payload"]["enqueued"] is False
+    assert "no active meeting" in resp["payload"]["reason"]
+
+
+def test_server_handle_request_say_requires_realtime_mode(tmp_path, monkeypatch):
+    from plugins.google_meet.node.server import NodeServer
+    from plugins.google_meet.node import protocol
+    from plugins.google_meet import process_manager as pm
+
+    out = tmp_path / "meet-out"
+    out.mkdir()
+    monkeypatch.setattr(pm, "_read_active",
+                        lambda: {
+                            "pid": 1,
+                            "meeting_id": "m",
+                            "mode": "transcribe",
+                            "out_dir": str(out),
+                        })
+
+    s = NodeServer(token_path=tmp_path / "t.json")
+    tok = s.ensure_token()
+    req = protocol.make_request("say", tok, {"text": "hi"})
+    resp = asyncio.run(s._handle_request(req))
+    assert resp["type"] == "response"
+    assert resp["payload"]["ok"] is False
+    assert resp["payload"]["enqueued"] is False
+    assert "mode='realtime'" in resp["payload"]["reason"]
+    assert not (out / "say_queue.jsonl").exists()
 
 
 def test_server_handle_request_wraps_pm_exceptions(tmp_path, monkeypatch):
@@ -471,9 +505,26 @@ def _install_fake_ws(monkeypatch, reply_builder):
         fake_ws_holder["kwargs"] = kwargs
         return ws
 
-    # Patch the concrete import site inside client._rpc
-    import websockets.sync.client as wsc  # type: ignore
-    monkeypatch.setattr(wsc, "connect", _connect)
+    # Patch the concrete import site inside client._rpc without requiring the
+    # optional websockets dependency to be installed in the test environment.
+    try:
+        import websockets.sync.client as wsc  # type: ignore
+    except ImportError:
+        import sys
+        import types
+
+        ws_pkg = types.ModuleType("websockets")
+        sync_pkg = types.ModuleType("websockets.sync")
+        wsc = types.ModuleType("websockets.sync.client")
+        ws_pkg.__path__ = []  # type: ignore[attr-defined]
+        sync_pkg.__path__ = []  # type: ignore[attr-defined]
+        ws_pkg.sync = sync_pkg  # type: ignore[attr-defined]
+        sync_pkg.client = wsc  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "websockets", ws_pkg)
+        monkeypatch.setitem(sys.modules, "websockets.sync", sync_pkg)
+        monkeypatch.setitem(sys.modules, "websockets.sync.client", wsc)
+
+    monkeypatch.setattr(wsc, "connect", _connect, raising=False)
     return fake_ws_holder
 
 

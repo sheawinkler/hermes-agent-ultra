@@ -1365,19 +1365,37 @@ fn should_trip_tool_loop_guard(
     turn_tool_count: usize,
     turn_tool_error_count: u32,
 ) -> bool {
-    if !governor_tool_loop_guard_enabled() {
+    should_trip_tool_loop_guard_with_config(
+        consecutive_error_turns,
+        turn_tool_count,
+        turn_tool_error_count,
+        governor_tool_loop_guard_enabled(),
+        governor_tool_loop_guard_max_consecutive_error_turns(),
+        governor_tool_loop_guard_min_failed_calls(),
+    )
+}
+
+fn should_trip_tool_loop_guard_with_config(
+    consecutive_error_turns: u32,
+    turn_tool_count: usize,
+    turn_tool_error_count: u32,
+    enabled: bool,
+    max_consecutive_error_turns: u32,
+    min_failed_calls: u32,
+) -> bool {
+    if !enabled {
         return false;
     }
     if turn_tool_count == 0 {
         return false;
     }
-    if turn_tool_error_count < governor_tool_loop_guard_min_failed_calls() {
+    if turn_tool_error_count < min_failed_calls {
         return false;
     }
     if turn_tool_error_count != turn_tool_count as u32 {
         return false;
     }
-    consecutive_error_turns >= governor_tool_loop_guard_max_consecutive_error_turns()
+    consecutive_error_turns >= max_consecutive_error_turns
 }
 
 fn looks_like_tool_error_output(output: &str) -> bool {
@@ -12751,25 +12769,20 @@ mod tests {
 
     #[test]
     fn test_tool_loop_guard_trips_on_consecutive_full_failure_turns() {
-        std::env::set_var("HERMES_TOOL_LOOP_GUARD_ENABLED", "1");
-        std::env::set_var("HERMES_TOOL_LOOP_GUARD_MAX_CONSEC_ERROR_TURNS", "3");
-        std::env::set_var("HERMES_TOOL_LOOP_GUARD_MIN_FAILED_CALLS", "1");
-        assert!(!should_trip_tool_loop_guard(2, 2, 2));
-        assert!(should_trip_tool_loop_guard(3, 2, 2));
-        std::env::remove_var("HERMES_TOOL_LOOP_GUARD_ENABLED");
-        std::env::remove_var("HERMES_TOOL_LOOP_GUARD_MAX_CONSEC_ERROR_TURNS");
-        std::env::remove_var("HERMES_TOOL_LOOP_GUARD_MIN_FAILED_CALLS");
+        assert!(!should_trip_tool_loop_guard_with_config(
+            2, 2, 2, true, 3, 1
+        ));
+        assert!(should_trip_tool_loop_guard_with_config(3, 2, 2, true, 3, 1));
+        assert!(!should_trip_tool_loop_guard_with_config(
+            3, 2, 2, false, 3, 1
+        ));
     }
 
     #[test]
     fn test_tool_loop_guard_ignores_partial_success_turns() {
-        std::env::set_var("HERMES_TOOL_LOOP_GUARD_ENABLED", "1");
-        std::env::set_var("HERMES_TOOL_LOOP_GUARD_MAX_CONSEC_ERROR_TURNS", "2");
-        std::env::set_var("HERMES_TOOL_LOOP_GUARD_MIN_FAILED_CALLS", "1");
-        assert!(!should_trip_tool_loop_guard(4, 3, 2));
-        std::env::remove_var("HERMES_TOOL_LOOP_GUARD_ENABLED");
-        std::env::remove_var("HERMES_TOOL_LOOP_GUARD_MAX_CONSEC_ERROR_TURNS");
-        std::env::remove_var("HERMES_TOOL_LOOP_GUARD_MIN_FAILED_CALLS");
+        assert!(!should_trip_tool_loop_guard_with_config(
+            4, 3, 2, true, 2, 1
+        ));
     }
 
     #[test]

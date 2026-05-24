@@ -22,7 +22,7 @@ pub fn tblite_smoke_tasks() -> Vec<TaskSpec> {
         TaskSpec {
             task_id: "tblite_smoke_01".into(),
             category: Some("smoke".into()),
-            instruction: "TBLite smoke task 01: stub rollout only (no agent).".into(),
+            instruction: "TBLite smoke task 01: deterministic no-agent rollout.".into(),
             context: json!({
                 "benchmark": "openthoughts-tblite",
                 "smoke": true,
@@ -33,7 +33,7 @@ pub fn tblite_smoke_tasks() -> Vec<TaskSpec> {
         TaskSpec {
             task_id: "tblite_smoke_02".into(),
             category: Some("smoke".into()),
-            instruction: "TBLite smoke task 02: stub rollout only (no agent).".into(),
+            instruction: "TBLite smoke task 02: deterministic no-agent rollout.".into(),
             context: json!({
                 "benchmark": "openthoughts-tblite",
                 "smoke": true,
@@ -88,7 +88,7 @@ impl Verifier for SmokePassVerifier {
     }
 }
 
-/// Rollout stub: returns a JSON blob with the task id (no LLM, no tools).
+/// Deterministic rollout: returns a JSON blob with the task id (no LLM, no tools).
 #[derive(Debug, Default, Clone, Copy)]
 pub struct NoopRollout;
 

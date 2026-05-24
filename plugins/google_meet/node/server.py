@@ -30,7 +30,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from hermes_constants import get_hermes_home
+from plugins.google_meet._hermes_home import get_hermes_home
 from plugins.google_meet.node import protocol as _proto
 
 
@@ -125,7 +125,7 @@ class NodeServer:
                 kwargs = {
                     k: payload[k]
                     for k in ("url", "guest_name", "duration", "headed",
-                              "auth_state", "session_id", "out_dir")
+                              "auth_state", "session_id", "out_dir", "mode")
                     if k in payload
                 }
                 if "url" not in kwargs:
@@ -143,13 +143,40 @@ class NodeServer:
                 result = pm.transcript(last=last)
                 return _proto.make_response(req_id, result)
             if t == "say":
-                # v2 wiring: enqueue into say_queue.jsonl inside the
-                # active meeting's out_dir when present. The bot-side
-                # consumer is v3+ (for v1 this is a stub returning ok).
                 text = payload.get("text", "")
+                if not str(text).strip():
+                    return _proto.make_response(
+                        req_id,
+                        {
+                            "ok": False,
+                            "enqueued": False,
+                            "reason": "text is required",
+                        },
+                    )
                 active = pm._read_active()  # type: ignore[attr-defined]
+                if not active:
+                    return _proto.make_response(
+                        req_id,
+                        {
+                            "ok": False,
+                            "enqueued": False,
+                            "reason": "no active meeting",
+                        },
+                    )
+                if active.get("mode") != "realtime":
+                    return _proto.make_response(
+                        req_id,
+                        {
+                            "ok": False,
+                            "enqueued": False,
+                            "reason": (
+                                "active meeting is in transcribe mode; pass "
+                                "mode='realtime' to meet_join to enable speech"
+                            ),
+                        },
+                    )
                 enqueued = False
-                if active and active.get("out_dir"):
+                if active.get("out_dir"):
                     queue = Path(active["out_dir"]) / "say_queue.jsonl"
                     try:
                         queue.parent.mkdir(parents=True, exist_ok=True)
@@ -160,7 +187,12 @@ class NodeServer:
                         enqueued = False
                 return _proto.make_response(
                     req_id,
-                    {"ok": True, "enqueued": enqueued, "text": text},
+                    {
+                        "ok": enqueued,
+                        "enqueued": enqueued,
+                        "text": text,
+                        "reason": None if enqueued else "failed to write say queue",
+                    },
                 )
         except Exception as exc:  # noqa: BLE001 — surface any pm crash to client
             return _proto.make_error(req_id, f"{type(exc).__name__}: {exc}")

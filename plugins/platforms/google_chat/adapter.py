@@ -3139,10 +3139,25 @@ async def _standalone_send(
     resource-name character set before substitution into the REST URL so
     a tampered value cannot path-traverse or query-inject.
 
-    ``media_files`` and ``force_document`` are accepted for signature
-    parity but are not implemented for the standalone path; messages with
-    attachments send as text-only.  The live adapter handles attachments.
+    Standalone mode sends text-only messages. Attachment requests are rejected
+    explicitly so callers do not mistake a text-only fallback for successful
+    media delivery. The live adapter handles attachments.
     """
+    if media_files:
+        return {
+            "error": (
+                "Google Chat standalone send supports text only; run the live "
+                "gateway adapter for attachment delivery"
+            )
+        }
+    if force_document:
+        return {
+            "error": (
+                "Google Chat standalone send does not support force_document; "
+                "run the live gateway adapter for document delivery"
+            )
+        }
+
     if not chat_id:
         return {"error": "Google Chat standalone send: chat_id (space resource) is required"}
     if not _GCHAT_CHAT_ID_RE.match(chat_id):

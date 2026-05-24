@@ -296,6 +296,10 @@ Ultra uses controlled sync workflows, not blind merges.
 
 Note: this repository intentionally tracks parity via queue/gate workflows because upstream and ultra history can diverge materially.
 
+## Contributing
+
+Interested in helping? Start with [CONTRIBUTING.md](./CONTRIBUTING.md) for setup, PR expectations, parity rules, and the no-stub completeness gate.
+
 ## Official References and Attribution
 
 Canonical/official upstream references:

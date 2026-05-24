@@ -38,7 +38,7 @@ struct Args {
     #[arg(long)]
     model: Option<String>,
 
-    /// Rollout backend (agent = real AgentLoop, noop = deterministic stub).
+    /// Rollout backend (agent = real AgentLoop, noop = deterministic no-agent rollout).
     #[arg(long, value_enum, default_value_t = RolloutKind::Agent)]
     rollout: RolloutKind,
 

@@ -512,11 +512,25 @@ async def _standalone_send(
     env var.  ``chat_id`` is validated to match the documented Bot
     Framework ID character set so it cannot escape the URL path.
 
-    ``media_files`` and ``force_document`` are accepted for signature
-    parity but not implemented for the standalone path; messages with
-    attachments will send as text-only.  The live adapter handles
-    attachments via the SDK.
+    Standalone mode sends text-only activities. Attachment requests are
+    rejected explicitly so callers do not mistake a text-only fallback for
+    successful media delivery. The live adapter handles attachments via the SDK.
     """
+    if media_files:
+        return {
+            "error": (
+                "Teams standalone send supports text only; run the live "
+                "gateway adapter for attachment delivery"
+            )
+        }
+    if force_document:
+        return {
+            "error": (
+                "Teams standalone send does not support force_document; run "
+                "the live gateway adapter for document delivery"
+            )
+        }
+
     extra = getattr(pconfig, "extra", {}) or {}
     client_id = os.getenv("TEAMS_CLIENT_ID") or extra.get("client_id", "")
     client_secret = os.getenv("TEAMS_CLIENT_SECRET") or extra.get("client_secret", "")

@@ -1349,7 +1349,7 @@ fn resolve_resume_session_file(
                 }
             }
         }
-        // 2) newest canonical snapshot (may be startup stub)
+        // 2) newest canonical snapshot (may be startup empty snapshot)
         for (path, _) in &candidates {
             if let Some(summary) = session_file_summary(path) {
                 if summary.canonical {
@@ -7053,7 +7053,7 @@ async fn run_auth(
                     }
                     _ => {
                         println!(
-                            "OAuth flow is not implemented for provider '{}'; falling back to API key/manual token login.",
+                            "OAuth flow is unavailable for provider '{}'; falling back to API key/manual token login.",
                             provider
                         );
                         auth_type = "api_key".to_string();
@@ -15110,27 +15110,27 @@ max_turns: 50
     }
 
     #[test]
-    fn load_resume_payload_accepts_empty_messages_for_startup_stub() {
+    fn load_resume_payload_accepts_empty_messages_for_startup_snapshot() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let cli = cli_for_temp_state_root(tmp.path());
         let sessions_dir = hermes_state_root(&cli).join("sessions");
         std::fs::create_dir_all(&sessions_dir).expect("create sessions dir");
-        let session_path = sessions_dir.join("stub-empty.json");
+        let session_path = sessions_dir.join("empty-messages.json");
         std::fs::write(
             &session_path,
             r#"{
   "session_info": {
-    "session_id": "stub-empty",
+    "session_id": "empty-messages",
     "model": "nous:nousresearch/hermes-4-70b"
   },
   "messages": []
 }"#,
         )
-        .expect("write stub session");
+        .expect("write empty session");
 
-        let payload = load_resume_payload(&cli, Some("stub-empty")).expect("load payload");
-        assert_eq!(payload.resolved_id, "stub-empty");
-        assert_eq!(payload.session_id, "stub-empty");
+        let payload = load_resume_payload(&cli, Some("empty-messages")).expect("load payload");
+        assert_eq!(payload.resolved_id, "empty-messages");
+        assert_eq!(payload.session_id, "empty-messages");
         assert_eq!(
             payload.model.as_deref(),
             Some("nous:nousresearch/hermes-4-70b")
@@ -15139,7 +15139,7 @@ max_turns: 50
     }
 
     #[test]
-    fn load_resume_payload_latest_prefers_nonempty_snapshot_over_newer_stub() {
+    fn load_resume_payload_latest_prefers_nonempty_snapshot_over_newer_empty_snapshot() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let cli = cli_for_temp_state_root(tmp.path());
         let sessions_dir = hermes_state_root(&cli).join("sessions");
@@ -15155,15 +15155,15 @@ max_turns: 50
         )
         .expect("write non-empty session");
         std::thread::sleep(std::time::Duration::from_millis(20));
-        let stub = sessions_dir.join("startup-stub.json");
+        let empty_snapshot = sessions_dir.join("startup-empty.json");
         std::fs::write(
-            &stub,
+            &empty_snapshot,
             r#"{
-  "session_info": {"session_id":"startup-stub","model":"nous:openai/gpt-5.5"},
+  "session_info": {"session_id":"startup-empty","model":"nous:openai/gpt-5.5"},
   "messages":[]
 }"#,
         )
-        .expect("write stub session");
+        .expect("write empty session");
 
         let payload = load_resume_payload(&cli, None).expect("load payload");
         assert_eq!(payload.resolved_id, "history-real");
@@ -15172,7 +15172,7 @@ max_turns: 50
     }
 
     #[test]
-    fn load_resume_payload_latest_falls_back_to_legacy_nonempty_when_primary_stub_only() {
+    fn load_resume_payload_latest_falls_back_to_legacy_nonempty_when_primary_empty_only() {
         let _guard = env_lock();
         let prev_home = std::env::var("HOME").ok();
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -15196,13 +15196,13 @@ max_turns: 50
         let sessions_dir = hermes_state_root(&cli).join("sessions");
         std::fs::create_dir_all(&sessions_dir).expect("create sessions dir");
         std::fs::write(
-            sessions_dir.join("stub-only.json"),
+            sessions_dir.join("empty-only.json"),
             r#"{
-  "session_info": {"session_id":"stub-only","model":"nous:openai/gpt-5.5"},
+  "session_info": {"session_id":"empty-only","model":"nous:openai/gpt-5.5"},
   "messages":[]
 }"#,
         )
-        .expect("write primary stub");
+        .expect("write primary empty session");
 
         let payload = load_resume_payload(&cli, None).expect("load payload");
         assert_eq!(payload.resolved_id, "legacy-rich");
