@@ -46,6 +46,36 @@ SKIP_LINE_HINTS = (
     "1234567890:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
 )
 
+# Exact dummy values used by tests/docs to prove redaction and credential
+# validation behavior. Keep this list literal so real secrets in tests/docs
+# still fail the release gate.
+SAFE_FIXTURE_SUBSTRINGS = (
+    "tok_super_secret_123456",
+    "sk-ant-oat01-abcdef1234567890",
+    "sk-ant-api03-abcdef1234567890",
+    "sk-ant-oat01-expired-env-token",
+    "ghp_abc123def456ghi789jkl",
+    "7123456789:aahdqtcvch1vgwjxfseofsas0k5paldsaw",
+    "sk-ant-oat-expiredtoken00000",
+    "sk-ant-api03-regularpaypertokenkey",
+    "sk-ant-oat01-from-claude-setup",
+    "ghp_abcdefghijklmnop1234",
+    "gho_abcdefghijklmnop1234",
+    "ghu_abcdefghijklmnop1234",
+    "sk-ant-api-abcdef1234567890",
+    "sk-ant-api03-test1234567890",
+    "ghp_1234567890abcdef1234",
+    "xoxb-1234567890-abcdef",
+    "sk-abcdefghijklmnopqrstuvwxyz1234567890",
+    "7123456789:aah1bgcioijsuzi1niisinr5cci6ikp",
+    "sk-ant-api03-your-second-key",
+    "xoxb-your-bot-token-here",
+    "xoxb-workspace1-token",
+    "xoxb-workspace2-token",
+    "xoxb-workspace3-token",
+    "xoxb-workspace-token-here",
+)
+
 
 @dataclass
 class Finding:
@@ -80,7 +110,9 @@ def should_skip_file(rel_path: str) -> bool:
 
 def should_skip_line(line: str) -> bool:
     lower = line.lower()
-    return any(hint in lower for hint in SKIP_LINE_HINTS)
+    if any(hint in lower for hint in SKIP_LINE_HINTS):
+        return True
+    return any(fixture in lower for fixture in SAFE_FIXTURE_SUBSTRINGS)
 
 
 def is_text(path: pathlib.Path) -> bool:
