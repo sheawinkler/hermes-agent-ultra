@@ -147,6 +147,29 @@ pub enum CliCommand {
         strict: bool,
     },
 
+    /// Inspect SOTA agent OS surfaces: release gate, flight recorder, A2A, MCP, handoffs, capabilities.
+    Sota {
+        /// Action: status/eval/flight/a2a/mcp/capabilities/handoff.
+        action: Option<String>,
+        /// Optional action topic (e.g. flight sample, a2a card, mcp conformance).
+        topic: Option<String>,
+        /// Print machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+        /// Write the JSON report/card to this path.
+        #[arg(long)]
+        output: Option<String>,
+        /// Host for `sota a2a serve`.
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        /// Port for `sota a2a serve`.
+        #[arg(long, default_value_t = 9127)]
+        port: u16,
+        /// Serve one A2A HTTP request, then exit.
+        #[arg(long)]
+        once: bool,
+    },
+
     /// Verify signed provenance sidecar for an artifact.
     VerifyProvenance {
         /// Artifact path to verify (e.g. doctor snapshot or replay manifest).
@@ -1035,6 +1058,40 @@ mod tests {
                 assert!(strict);
             }
             _ => panic!("Expected EliteCheck command"),
+        }
+    }
+
+    #[test]
+    fn cli_parse_sota_mcp_conformance() {
+        let cli = Cli::try_parse_from(vec![
+            "hermes",
+            "sota",
+            "mcp",
+            "conformance",
+            "--json",
+            "--output",
+            "/tmp/mcp.json",
+        ])
+        .unwrap();
+        match cli.command {
+            Some(CliCommand::Sota {
+                action,
+                topic,
+                json,
+                output,
+                host,
+                port,
+                once,
+            }) => {
+                assert_eq!(action.as_deref(), Some("mcp"));
+                assert_eq!(topic.as_deref(), Some("conformance"));
+                assert!(json);
+                assert_eq!(output.as_deref(), Some("/tmp/mcp.json"));
+                assert_eq!(host, "127.0.0.1");
+                assert_eq!(port, 9127);
+                assert!(!once);
+            }
+            _ => panic!("Expected Sota command"),
         }
     }
 

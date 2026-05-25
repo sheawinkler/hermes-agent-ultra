@@ -93,3 +93,48 @@ fn e2e_cli_interactive_refuses_parallel_session_when_lock_pid_is_alive() {
     let _ = sleeper.kill();
     let _ = sleeper.wait();
 }
+
+#[test]
+fn e2e_cli_sota_status_and_reports_are_json() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    for args in [
+        vec!["sota", "status", "--json"],
+        vec!["sota", "eval", "--json"],
+        vec!["sota", "a2a", "card", "--json"],
+        vec!["sota", "mcp", "conformance", "--json"],
+        vec!["sota", "capabilities", "--json"],
+        vec!["sota", "handoff", "template", "--json"],
+    ] {
+        let mut cmd = Command::cargo_bin("hermes-agent-ultra").expect("binary exists");
+        cmd.env("HERMES_HOME", dir.path());
+        cmd.args(args);
+        let out = cmd.assert().success().get_output().stdout.clone();
+        let text = std::str::from_utf8(&out).expect("utf8");
+        let value: serde_json::Value = serde_json::from_str(text)
+            .unwrap_or_else(|err| panic!("json parse failed: {err}; {text}"));
+        assert!(
+            value.get("kind").is_some() || value.get("name").is_some(),
+            "expected report/card json, got {value}"
+        );
+    }
+}
+
+#[test]
+fn e2e_cli_sota_flight_sample_persists_event() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let mut sample = Command::cargo_bin("hermes-agent-ultra").expect("binary exists");
+    sample.env("HERMES_HOME", dir.path());
+    sample.args(["sota", "flight", "sample", "--json"]);
+    let out = sample.assert().success().get_output().stdout.clone();
+    let text = std::str::from_utf8(&out).expect("utf8");
+    let report: serde_json::Value = serde_json::from_str(text).expect("sample json");
+    assert_eq!(report.get("event_count").and_then(|v| v.as_u64()), Some(1));
+
+    let mut show = Command::cargo_bin("hermes-agent-ultra").expect("binary exists");
+    show.env("HERMES_HOME", dir.path());
+    show.args(["sota", "flight", "show", "--json"]);
+    let out = show.assert().success().get_output().stdout.clone();
+    let text = std::str::from_utf8(&out).expect("utf8");
+    let report: serde_json::Value = serde_json::from_str(text).expect("show json");
+    assert_eq!(report.get("event_count").and_then(|v| v.as_u64()), Some(1));
+}

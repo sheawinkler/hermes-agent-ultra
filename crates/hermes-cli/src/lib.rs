@@ -35,6 +35,7 @@ pub mod runtime_tool_wiring;
 pub mod setup;
 pub mod skills_config;
 pub mod skin_engine;
+pub mod sota;
 pub mod terminal_backend;
 pub mod theme;
 pub mod tool_preview;

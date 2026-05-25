@@ -500,6 +500,27 @@ async fn main() {
         } => run_doctor(cli, deep, self_heal, snapshot, snapshot_path, bundle).await,
         CliCommand::Update { check } => run_update(check).await,
         CliCommand::EliteCheck { json, strict } => run_elite_check(cli, json, strict).await,
+        CliCommand::Sota {
+            action,
+            topic,
+            json,
+            output,
+            host,
+            port,
+            once,
+        } => {
+            hermes_cli::sota::handle_cli_sota(
+                cli.config_dir.clone(),
+                action,
+                topic,
+                json,
+                output,
+                host,
+                port,
+                once,
+            )
+            .await
+        }
         CliCommand::VerifyProvenance {
             path,
             signature,

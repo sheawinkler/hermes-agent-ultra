@@ -1,4 +1,5 @@
 use std::collections::{BTreeMap, HashSet};
+use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
@@ -447,16 +448,76 @@ fn load_auth_store(path: &Path) -> Result<AuthStore, AgentError> {
         .map_err(|e| AgentError::Config(format!("parse {}: {}", path.display(), e)))
 }
 
-fn save_auth_store(path: &Path, store: &AuthStore) -> Result<(), AgentError> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| AgentError::Io(format!("mkdir {}: {}", parent.display(), e)))?;
+fn write_owner_only_atomic(path: &Path, raw: &str) -> Result<(), AgentError> {
+    let parent = path.parent().ok_or_else(|| {
+        AgentError::Io(format!(
+            "credential path {} has no parent directory",
+            path.display()
+        ))
+    })?;
+    std::fs::create_dir_all(parent)
+        .map_err(|e| AgentError::Io(format!("mkdir {}: {}", parent.display(), e)))?;
+
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("credentials.json");
+    let nonce = rand::thread_rng().next_u64();
+    let tmp_path = parent.join(format!(".{file_name}.tmp.{}.{}", std::process::id(), nonce));
+
+    let result = (|| -> Result<(), AgentError> {
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options
+            .open(&tmp_path)
+            .map_err(|e| AgentError::Io(format!("create {}: {}", tmp_path.display(), e)))?;
+        file.write_all(raw.as_bytes())
+            .map_err(|e| AgentError::Io(format!("write {}: {}", tmp_path.display(), e)))?;
+        file.sync_all()
+            .map_err(|e| AgentError::Io(format!("fsync {}: {}", tmp_path.display(), e)))?;
+        drop(file);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&tmp_path, std::fs::Permissions::from_mode(0o600)).map_err(
+                |e| AgentError::Io(format!("set permissions on {}: {}", tmp_path.display(), e)),
+            )?;
+        }
+        std::fs::rename(&tmp_path, path).map_err(|e| {
+            AgentError::Io(format!(
+                "rename {} -> {}: {}",
+                tmp_path.display(),
+                path.display(),
+                e
+            ))
+        })?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(
+                |e| AgentError::Io(format!("set permissions on {}: {}", path.display(), e)),
+            )?;
+        }
+        let _ = std::fs::File::open(parent).and_then(|dir| dir.sync_all());
+        Ok(())
+    })();
+
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp_path);
     }
+    result
+}
+
+fn save_auth_store(path: &Path, store: &AuthStore) -> Result<(), AgentError> {
     let mut raw = serde_json::to_string_pretty(store)
         .map_err(|e| AgentError::Config(format!("serialize auth store: {}", e)))?;
     raw.push('\n');
-    std::fs::write(path, raw)
-        .map_err(|e| AgentError::Io(format!("write {}: {}", path.display(), e)))
+    write_owner_only_atomic(path, &raw)
 }
 
 pub fn save_provider_auth_state(provider: &str, state: Value) -> Result<PathBuf, AgentError> {
@@ -1306,32 +1367,10 @@ fn read_qwen_cli_tokens() -> Result<QwenCliTokens, AgentError> {
 
 fn save_qwen_cli_tokens(tokens: &QwenCliTokens) -> Result<PathBuf, AgentError> {
     let auth_path = qwen_cli_auth_path();
-    if let Some(parent) = auth_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| AgentError::Io(format!("mkdir {}: {}", parent.display(), e)))?;
-    }
-    let tmp_path = auth_path.with_extension("tmp");
     let mut raw = serde_json::to_string_pretty(tokens)
         .map_err(|e| AgentError::Config(format!("serialize Qwen tokens: {}", e)))?;
     raw.push('\n');
-    std::fs::write(&tmp_path, raw)
-        .map_err(|e| AgentError::Io(format!("write {}: {}", tmp_path.display(), e)))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let perms = std::fs::Permissions::from_mode(0o600);
-        std::fs::set_permissions(&tmp_path, perms).map_err(|e| {
-            AgentError::Io(format!("set permissions on {}: {}", tmp_path.display(), e))
-        })?;
-    }
-    std::fs::rename(&tmp_path, &auth_path).map_err(|e| {
-        AgentError::Io(format!(
-            "rename {} -> {}: {}",
-            tmp_path.display(),
-            auth_path.display(),
-            e
-        ))
-    })?;
+    write_owner_only_atomic(&auth_path, &raw)?;
     Ok(auth_path)
 }
 
@@ -1659,32 +1698,10 @@ fn read_gemini_cli_state() -> Result<GeminiOAuthFileState, AgentError> {
 
 fn save_gemini_cli_state(state: &GeminiOAuthFileState) -> Result<PathBuf, AgentError> {
     let auth_path = gemini_cli_auth_path();
-    if let Some(parent) = auth_path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| AgentError::Io(format!("mkdir {}: {}", parent.display(), e)))?;
-    }
-    let tmp_path = auth_path.with_extension("tmp");
     let mut raw = serde_json::to_string_pretty(state)
         .map_err(|e| AgentError::Config(format!("serialize Google OAuth credentials: {}", e)))?;
     raw.push('\n');
-    std::fs::write(&tmp_path, raw)
-        .map_err(|e| AgentError::Io(format!("write {}: {}", tmp_path.display(), e)))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let perms = std::fs::Permissions::from_mode(0o600);
-        std::fs::set_permissions(&tmp_path, perms).map_err(|e| {
-            AgentError::Io(format!("set permissions on {}: {}", tmp_path.display(), e))
-        })?;
-    }
-    std::fs::rename(&tmp_path, &auth_path).map_err(|e| {
-        AgentError::Io(format!(
-            "rename {} -> {}: {}",
-            tmp_path.display(),
-            auth_path.display(),
-            e
-        ))
-    })?;
+    write_owner_only_atomic(&auth_path, &raw)?;
     Ok(auth_path)
 }
 
@@ -3354,6 +3371,52 @@ mod tests {
         match prev_home {
             Some(v) => std::env::set_var("HOME", v),
             None => std::env::remove_var("HOME"),
+        }
+    }
+
+    #[test]
+    fn auth_store_write_is_atomic_owner_only_and_cleans_tmp() {
+        let _guard = test_env_lock::lock();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let prev_hermes_home = std::env::var("HERMES_HOME").ok();
+        std::env::set_var("HERMES_HOME", tmp.path());
+
+        let path = save_provider_auth_state(
+            "openai",
+            serde_json::json!({
+                "access_token": "test-access-token",
+                "refresh_token": "test-refresh-token"
+            }),
+        )
+        .expect("save auth state");
+
+        let raw = std::fs::read_to_string(&path).expect("read auth store");
+        assert!(raw.contains("test-access-token"));
+        let leftovers: Vec<_> = std::fs::read_dir(tmp.path())
+            .expect("read temp home")
+            .filter_map(Result::ok)
+            .map(|entry| entry.file_name().to_string_lossy().to_string())
+            .filter(|name| name.contains(".tmp."))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "temporary auth files should be cleaned up: {leftovers:?}"
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path)
+                .expect("auth metadata")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600, "auth store should be owner-only");
+        }
+
+        match prev_hermes_home {
+            Some(v) => std::env::set_var("HERMES_HOME", v),
+            None => std::env::remove_var("HERMES_HOME"),
         }
     }
 
