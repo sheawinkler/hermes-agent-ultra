@@ -25,10 +25,10 @@
     },
     {
       "path": "Dockerfile",
-      "classification": "functional",
-      "rationale": "Container build/runtime path impacts deployment behavior and should be tracked for parity deltas.",
+      "classification": "intentional_divergence",
+      "rationale": "Hermes Agent Ultra intentionally ships a Rust multi-stage container with tini/gosu and /data state instead of upstream's Python uv+s6-overlay image; Rust-native container contracts cover the retained runtime behavior.",
       "owner": "sheawinkler",
-      "ticket": 25
+      "ticket": 305
     },
     {
       "path": "LICENSE",
@@ -39,24 +39,24 @@
     },
     {
       "path": "README.md",
-      "classification": "functional",
-      "rationale": "Installation and operational guidance influences real-world runtime setup outcomes.",
+      "classification": "intentional_divergence",
+      "rationale": "README.md intentionally describes Ultra's Rust-first runtime, release installer, and parity workflow rather than upstream's Python product positioning; install/readme contracts cover the actionable setup guidance.",
       "owner": "sheawinkler",
-      "ticket": 25
+      "ticket": 305
     },
     {
       "path": "docker-compose.yml",
-      "classification": "functional",
-      "rationale": "Container orchestration defaults affect gateway/runtime launch semantics and service wiring.",
+      "classification": "intentional_divergence",
+      "rationale": "Compose defaults intentionally target the Ultra Rust image, /data volume, and hermes-agent-ultra naming while preserving localhost dashboard and UID/GID runtime controls.",
       "owner": "sheawinkler",
-      "ticket": 25
+      "ticket": 305
     },
     {
       "path": "docker/entrypoint.sh",
-      "classification": "functional",
-      "rationale": "Container bootstrap and runtime environment export behavior affect parity at startup.",
+      "classification": "intentional_divergence",
+      "rationale": "The entrypoint intentionally implements the Rust image's direct tini/gosu startup path instead of upstream's s6 stage2 hook; entrypoint contracts cover home setup, UID/GID remap, and privilege drop.",
       "owner": "sheawinkler",
-      "ticket": 25
+      "ticket": 305
     },
     {
       "path": "flake.nix",
@@ -102,10 +102,10 @@
     },
     {
       "path": "scripts/install.sh",
-      "classification": "functional",
-      "rationale": "Installer behavior directly affects setup parity and bootstrap capabilities.",
+      "classification": "intentional_divergence",
+      "rationale": "Installer intentionally downloads or builds Hermes Agent Ultra Rust release binaries instead of cloning upstream's Python/uv environment; installer contracts cover release assets, symlinks, PATH guard, Termux pathing, and post-install probes.",
       "owner": "sheawinkler",
-      "ticket": 25
+      "ticket": 305
     },
     {
       "path": "tests",

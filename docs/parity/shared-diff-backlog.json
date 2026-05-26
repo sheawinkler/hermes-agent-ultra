@@ -76,17 +76,17 @@
       "workstream": "WS8"
     },
     {
-      "action": "Inspect upstream/local behavior; implement Rust-native parity only if local coverage is missing.",
-      "classification": "functional",
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
       "classification_path": "Dockerfile",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "d235ffc6c3cd7f6f2f83f02acdeab56c018b3527",
-      "necessity": "necessary_review",
+      "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "Dockerfile",
-      "rust_requirement": "needs_rust_relevance_review",
-      "status": "pending_review",
-      "ticket": 25,
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 305,
       "upstream_blob": "be4e8848bb5aad2a79bb69473dcef6548aa7b8b0",
       "workstream": "WS8"
     },
@@ -106,47 +106,47 @@
       "workstream": "WS8"
     },
     {
-      "action": "Inspect upstream/local behavior; implement Rust-native parity only if local coverage is missing.",
-      "classification": "functional",
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
       "classification_path": "README.md",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "b9b04b6f90c65d38f26372e845141dd7f43574cf",
-      "necessity": "necessary_review",
+      "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "README.md",
-      "rust_requirement": "needs_rust_relevance_review",
-      "status": "pending_review",
-      "ticket": 25,
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 305,
       "upstream_blob": "9b14816429447b48b6fc415566ee78ca7f7a15c2",
       "workstream": "WS8"
     },
     {
-      "action": "Inspect upstream/local behavior; implement Rust-native parity only if local coverage is missing.",
-      "classification": "functional",
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
       "classification_path": "docker-compose.yml",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "40ca57e0489a48e669d6d46997964c71de115c4a",
-      "necessity": "necessary_review",
+      "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "docker-compose.yml",
-      "rust_requirement": "needs_rust_relevance_review",
-      "status": "pending_review",
-      "ticket": 25,
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 305,
       "upstream_blob": "513cb8e18e8a1d382f8ffa206394a5c8c1909013",
       "workstream": "WS8"
     },
     {
-      "action": "Inspect upstream/local behavior; implement Rust-native parity only if local coverage is missing.",
-      "classification": "functional",
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
       "classification_path": "docker/entrypoint.sh",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "7fe71f70b8657255cb595b82b6b8d8cac930eb80",
-      "necessity": "necessary_review",
+      "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "docker/entrypoint.sh",
-      "rust_requirement": "needs_rust_relevance_review",
-      "status": "pending_review",
-      "ticket": 25,
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 305,
       "upstream_blob": "9e735fe561bd72e9e5d51bb70082f7bdd8567260",
       "workstream": "WS8"
     },
@@ -1051,17 +1051,17 @@
       "workstream": "WS3"
     },
     {
-      "action": "Inspect upstream/local behavior; implement Rust-native parity only if local coverage is missing.",
-      "classification": "functional",
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
       "classification_path": "scripts/install.sh",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "4017c58d19389e34d37988993e59594fc4c8e829",
-      "necessity": "necessary_review",
+      "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "scripts/install.sh",
-      "rust_requirement": "needs_rust_relevance_review",
-      "status": "pending_review",
-      "ticket": 25,
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 305,
       "upstream_blob": "71902f55866f5c50e17d4fc412b9fdf1d52903f2",
       "workstream": "WS8"
     },
@@ -11236,31 +11236,30 @@
       "workstream": "WS5"
     }
   ],
-  "generated_at_utc": "2026-05-26T19:14:59.311747+00:00",
+  "generated_at_utc": "2026-05-26T19:46:47.988306+00:00",
   "refs": {
     "local_ref": "HEAD",
-    "local_sha": "90a97f2772c3284e8f166a80bf86a2c783574750",
+    "local_sha": "d4e0bf7710ef5ce34c144870a532e3a8b2632719",
     "upstream_ref": "upstream/main",
     "upstream_sha": "2517917de34eeb6a40f5a17a2e59d9746803dfa5"
   },
   "summary": {
     "by_classification": {
       "branding_only": 1,
-      "functional": 511,
-      "intentional_divergence": 33,
+      "functional": 506,
+      "intentional_divergence": 38,
       "policy_only": 204
     },
     "by_rust_requirement": {
-      "needs_rust_relevance_review": 5,
-      "not_required_for_runtime": 238,
+      "not_required_for_runtime": 243,
       "rust_equivalent_or_contract_test_required": 385,
       "rust_native_runtime_parity_required_if_needed": 49,
       "rust_primary_ux_or_documented_divergence_required": 72
     },
     "by_status": {
-      "cleared_intentional_divergence": 33,
+      "cleared_intentional_divergence": 38,
       "cleared_non_runtime": 205,
-      "pending_review": 511
+      "pending_review": 506
     },
     "by_workstream": {
       "WS3": 49,
@@ -11269,10 +11268,10 @@
       "WS6": 386,
       "WS8": 12
     },
-    "cleared_intentional_divergence": 33,
+    "cleared_intentional_divergence": 38,
     "cleared_non_runtime": 205,
     "pending_classification": 0,
-    "pending_review": 511,
+    "pending_review": 506,
     "total_shared_different": 749
   }
 }

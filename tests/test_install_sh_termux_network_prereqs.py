@@ -1,4 +1,4 @@
-"""Regression tests for Termux network prerequisite handling in install.sh."""
+"""Termux contracts for the Rust release installer."""
 
 from pathlib import Path
 
@@ -7,16 +7,20 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 INSTALL_SH = REPO_ROOT / "scripts" / "install.sh"
 
 
-def test_termux_pkg_list_includes_network_basics() -> None:
+def test_termux_installs_into_prefix_bin() -> None:
     text = INSTALL_SH.read_text()
-    assert "local termux_pkgs=(clang rust make pkg-config libffi openssl ca-certificates curl)" in text
+
+    assert "is_termux()" in text
+    assert '[[ -n "${TERMUX_VERSION:-}" ]]' in text
+    assert '[[ "${PREFIX:-}" == *"com.termux/files/usr"* ]]' in text
+    assert 'INSTALL_DIR="${PREFIX}/bin"' in text
 
 
-def test_install_script_has_connectivity_probe_and_termux_guidance() -> None:
+def test_installer_requires_release_download_tools_only() -> None:
     text = INSTALL_SH.read_text()
-    assert "check_network_prerequisites()" in text
-    assert "https://pypi.org/simple/" in text
-    assert "https://duckduckgo.com/" in text
-    assert "termux-change-repo" in text
-    assert "pkg install -y ca-certificates curl && pkg update" in text
-    assert "check_network_prerequisites" in text
+
+    assert "need_cmd curl" in text
+    assert "need_cmd tar" in text
+    assert "need_cmd install" in text
+    assert "pkg install" not in text
+    assert "pip install" not in text
