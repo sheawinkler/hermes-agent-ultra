@@ -331,32 +331,32 @@
       "workstream": "WS3"
     },
     {
-      "action": "Inspect upstream/local behavior; implement Rust-native parity only if local coverage is missing.",
-      "classification": "functional",
-      "classification_path": "plugins/example-dashboard",
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "plugins/example-dashboard/dashboard/manifest.json",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "95fce2f100f4e7333dacd226cb1cb6bcc2cdc42e",
-      "necessity": "necessary_review",
+      "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "plugins/example-dashboard/dashboard/manifest.json",
-      "rust_requirement": "rust_native_runtime_parity_required_if_needed",
-      "status": "pending_review",
-      "ticket": 25,
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 304,
       "upstream_blob": "68a2e9b895c140c15384d53d01d024a4cccd5cde",
       "workstream": "WS3"
     },
     {
-      "action": "Inspect upstream/local behavior; implement Rust-native parity only if local coverage is missing.",
-      "classification": "functional",
-      "classification_path": "plugins/example-dashboard",
+      "action": "No runtime implementation; keep rationale current.",
+      "classification": "policy_only",
+      "classification_path": "plugins/example-dashboard/dashboard/plugin_api.py",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "20aed76e26feefc5cf05cda23170afbb359b6645",
-      "necessity": "necessary_review",
+      "necessity": "not_runtime_required",
       "owner": "sheawinkler",
       "path": "plugins/example-dashboard/dashboard/plugin_api.py",
-      "rust_requirement": "rust_native_runtime_parity_required_if_needed",
-      "status": "pending_review",
-      "ticket": 25,
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_non_runtime",
+      "ticket": 304,
       "upstream_blob": "3e850298a0941de07828af07afc46b191a5fe549",
       "workstream": "WS3"
     },
@@ -11206,30 +11206,30 @@
       "workstream": "WS5"
     }
   ],
-  "generated_at_utc": "2026-05-26T21:52:28.730255+00:00",
+  "generated_at_utc": "2026-05-26T22:32:03.267229+00:00",
   "refs": {
-    "local_ref": "cd06292c54397a43f7720ec08392fdb2ae716fa9",
-    "local_sha": "cd06292c54397a43f7720ec08392fdb2ae716fa9",
+    "local_ref": "84ff493c17917948eca679ea0d57b9f3c1d97182",
+    "local_sha": "84ff493c17917948eca679ea0d57b9f3c1d97182",
     "upstream_ref": "upstream/main",
     "upstream_sha": "2517917de34eeb6a40f5a17a2e59d9746803dfa5"
   },
   "summary": {
     "by_classification": {
       "branding_only": 1,
-      "functional": 492,
-      "intentional_divergence": 50,
-      "policy_only": 204
+      "functional": 490,
+      "intentional_divergence": 51,
+      "policy_only": 205
     },
     "by_rust_requirement": {
-      "not_required_for_runtime": 255,
+      "not_required_for_runtime": 257,
       "rust_equivalent_or_contract_test_required": 389,
-      "rust_native_runtime_parity_required_if_needed": 31,
+      "rust_native_runtime_parity_required_if_needed": 29,
       "rust_primary_ux_or_documented_divergence_required": 72
     },
     "by_status": {
-      "cleared_intentional_divergence": 50,
-      "cleared_non_runtime": 205,
-      "pending_review": 492
+      "cleared_intentional_divergence": 51,
+      "cleared_non_runtime": 206,
+      "pending_review": 490
     },
     "by_workstream": {
       "WS3": 43,
@@ -11238,10 +11238,10 @@
       "WS6": 390,
       "WS8": 12
     },
-    "cleared_intentional_divergence": 50,
-    "cleared_non_runtime": 205,
+    "cleared_intentional_divergence": 51,
+    "cleared_non_runtime": 206,
     "pending_classification": 0,
-    "pending_review": 492,
+    "pending_review": 490,
     "total_shared_different": 747
   }
 }
