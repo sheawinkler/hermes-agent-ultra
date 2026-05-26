@@ -1,28 +1,28 @@
 # Shared-Different Backlog
 
-Generated: `2026-05-26T20:19:30.280074+00:00`
+Generated: `2026-05-26T21:11:15.674243+00:00`
 
 ## Summary
 
-- Total shared-different paths: `752`
+- Total shared-different paths: `749`
 - Pending classification: `0`
-- Pending functional review: `501`
+- Pending functional review: `494`
 - Cleared non-runtime: `205`
-- Cleared intentional divergence: `46`
+- Cleared intentional divergence: `50`
 
 ## Status Counts
 
 | Status | Count |
 | --- | ---: |
-| `cleared_intentional_divergence` | 46 |
+| `cleared_intentional_divergence` | 50 |
 | `cleared_non_runtime` | 205 |
-| `pending_review` | 501 |
+| `pending_review` | 494 |
 
 ## Workstream Counts
 
 | Workstream | Count |
 | --- | ---: |
-| `WS3` | 48 |
+| `WS3` | 45 |
 | `WS4` | 30 |
 | `WS5` | 272 |
 | `WS6` | 390 |
@@ -49,7 +49,6 @@ Generated: `2026-05-26T20:19:30.280074+00:00`
 | `plugins/google_meet` | 9 |
 | `plugins/platforms` | 9 |
 | `plugins/memory` | 7 |
-| `plugins/model-providers` | 7 |
 | `tests/acp` | 7 |
 | `tests/plugins` | 7 |
 | `tests/cron` | 6 |

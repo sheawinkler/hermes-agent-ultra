@@ -248,6 +248,34 @@
       "ticket": 25
     },
     {
+      "path": "plugins/model-providers/azure-foundry/__init__.py",
+      "classification": "intentional_divergence",
+      "rationale": "Local Azure Foundry provider profile intentionally uses Azure AI Foundry naming while preserving the upstream OpenAI-compatible endpoint contract.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/model-providers/azure-foundry/plugin.yaml",
+      "classification": "intentional_divergence",
+      "rationale": "Local Azure Foundry manifest intentionally uses Azure AI Foundry naming while preserving provider registration metadata.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/model-providers/kimi-coding/__init__.py",
+      "classification": "intentional_divergence",
+      "rationale": "Local Kimi provider delta is a behavior-equivalent tuple membership guard covered by focused model-provider contracts.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/model-providers/nous/__init__.py",
+      "classification": "intentional_divergence",
+      "rationale": "Local Nous provider keeps a static Hermes product tag because the upstream agent.portal_tags helper is not present in this Rust checkout; focused contracts cover the emitted tag.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
       "path": "skills/productivity",
       "classification": "intentional_divergence",
       "rationale": "Skill catalog content is curated locally while loader and execution contracts carry runtime parity.",
