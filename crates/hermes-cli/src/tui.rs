@@ -15,7 +15,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chrono::Local;
-use crossterm::cursor::Show;
+use crossterm::cursor::{Hide, Show};
 use crossterm::event::{
     DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
     Event as CrosstermEvent, KeyEvent, MouseEvent,
@@ -26,7 +26,7 @@ use crossterm::terminal::{
 };
 use crossterm::ExecutableCommand;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Constraint, Direction, Layout, Position, Rect};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
@@ -354,6 +354,7 @@ impl Tui {
         let mut stdout = std::io::stdout();
         stdout.execute(EnableBracketedPaste)?;
         stdout.execute(EnterAlternateScreen)?;
+        stdout.execute(Hide)?;
         let backend = CrosstermBackend::new(stdout);
         let terminal = ratatui::Terminal::new(backend)?;
         let (event_sender, event_receiver) = mpsc::unbounded_channel();
@@ -590,6 +591,15 @@ async fn shutdown_signal_bridge(bridge: SignalBridge) {
 // TuiState — holds the mutable state of the TUI between frames
 // ---------------------------------------------------------------------------
 
+/// Snapshot of composer state used to skip redundant clears/cursor updates.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InputPaintSnapshot {
+    input: String,
+    cursor_position: usize,
+    mode: InputMode,
+    history_search_active: bool,
+}
+
 /// Mutable state for the TUI rendering loop.
 pub struct TuiState {
     /// Current input mode.
@@ -686,6 +696,8 @@ pub struct TuiState {
     degraded_notes: Vec<String>,
     /// Stream finished, waiting for `AgentRunComplete` to commit transcript.
     awaiting_run_complete: bool,
+    /// Last composer snapshot painted to the terminal.
+    last_input_paint: Option<InputPaintSnapshot>,
 }
 
 /// A section of tool output that can be folded/expanded.
@@ -780,11 +792,25 @@ impl Default for TuiState {
             processing_degraded: false,
             degraded_notes: Vec::new(),
             awaiting_run_complete: false,
+            last_input_paint: None,
         }
     }
 }
 
 impl TuiState {
+    fn input_paint_snapshot(&self) -> InputPaintSnapshot {
+        InputPaintSnapshot {
+            input: self.input.clone(),
+            cursor_position: self.cursor_position,
+            mode: self.mode,
+            history_search_active: self.history_search_active,
+        }
+    }
+
+    fn reset_input_paint_cache(&mut self) {
+        self.last_input_paint = None;
+    }
+
     fn scroll_history_up(&mut self, lines: u16) {
         self.scroll_offset = self.scroll_offset.saturating_add(usize::from(lines.max(1)));
         self.auto_follow_transcript = false;
@@ -1753,6 +1779,24 @@ fn transcript_wrap_width(viewport_width: u16) -> u16 {
     viewport_width.min(TRANSCRIPT_HARD_WRAP_COLS).max(1)
 }
 
+/// Throttle stream-driven full-frame redraws while the user is drafting.
+fn should_redraw_stream_while_composing(
+    composing: bool,
+    last_compose_stream_redraw: &mut Instant,
+) -> bool {
+    const COMPOSE_STREAM_REDRAW_INTERVAL: Duration = Duration::from_millis(120);
+
+    if !composing {
+        return true;
+    }
+    if last_compose_stream_redraw.elapsed() >= COMPOSE_STREAM_REDRAW_INTERVAL {
+        *last_compose_stream_redraw = Instant::now();
+        true
+    } else {
+        false
+    }
+}
+
 fn stream_lane_budget(processing: bool, chunk_count: usize) -> (usize, Duration) {
     let profile = std::env::var("HERMES_PERF_AUTOPILOT_PROFILE")
         .ok()
@@ -1895,9 +1939,7 @@ pub fn render(frame: &mut Frame, app: &App, state: &mut TuiState, theme: &Theme)
     }
 
     // --- Render input area ---
-    if let Some(pos) = render_input(frame, state, input_area, &colors) {
-        frame.set_cursor_position(pos);
-    }
+    render_input(frame, state, input_area, &colors);
 
     // --- Render completions as popup above composer ---
     if should_render_completions_popup(state) {
@@ -4161,10 +4203,12 @@ fn render_picker_modal(
 /// Render the input area (supports multi-line display with wrapping).
 fn render_input(
     frame: &mut Frame,
-    state: &TuiState,
+    state: &mut TuiState,
     area: Rect,
     colors: &crate::theme::RatatuiColors,
-) -> Option<Position> {
+) {
+    let paint_snapshot = state.input_paint_snapshot();
+    let input_changed = state.last_input_paint.as_ref() != Some(&paint_snapshot);
     let mode_label = match state.mode {
         InputMode::Normal => "NORMAL",
         InputMode::Insert => "INSERT",
@@ -4229,22 +4273,11 @@ fn render_input(
         textarea.set_placeholder_text("");
     }
 
-    frame.render_widget(Clear, area);
+    if input_changed {
+        frame.render_widget(Clear, area);
+    }
     frame.render_widget(&textarea, area);
-
-    if state.mode == InputMode::Normal {
-        return None;
-    }
-
-    let inner = block.inner(area);
-    if inner.width == 0 || inner.height == 0 {
-        return None;
-    }
-    let (row, col) = textarea.cursor();
-    Some(Position {
-        x: inner.x + (col as u16).min(inner.width.saturating_sub(1)),
-        y: inner.y + (row as u16).min(inner.height.saturating_sub(1)),
-    })
+    state.last_input_paint = Some(paint_snapshot);
 }
 
 /// Render the status bar at the bottom of the screen.
@@ -5450,6 +5483,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
         .checked_sub(Duration::from_secs(2))
         .unwrap_or_else(Instant::now);
     let mut last_pet_tick = Instant::now();
+    let mut last_compose_stream_redraw = Instant::now();
     app.set_stream_handle(Some(StreamHandle::from(tui.stream_sender())));
 
     // Crossterm blocking I/O runs on a dedicated OS thread (poll timeout 16ms).
@@ -5807,6 +5841,7 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                     Some(Event::Resize(_, _)) => {
                         let _ = tui.terminal.autoresize();
                         state.transcript_cache = TranscriptCache::default();
+                        state.reset_input_paint_cache();
                         if state.auto_follow_transcript {
                             state.scroll_offset = 0;
                         }
@@ -5915,7 +5950,12 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                         active_agent_task = None;
                     }
                     if redraw {
-                        needs_redraw = true;
+                        if should_redraw_stream_while_composing(
+                            !state.input.is_empty(),
+                            &mut last_compose_stream_redraw,
+                        ) {
+                            needs_redraw = true;
+                        }
                     }
                 }
             }
@@ -5928,7 +5968,11 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
                 if state.processing {
                     state.tick_spinner();
                     state.maybe_emit_progress_pulse();
-                    needs_redraw = true;
+                    // While the user is drafting in the composer, skip spinner-only
+                    // redraws so stream/spinner ticks don't flash the input box.
+                    if state.input.is_empty() {
+                        needs_redraw = true;
+                    }
                 }
                 if app.pet_settings().enabled
                     && last_pet_tick.elapsed()
@@ -6650,6 +6694,27 @@ mod tests {
         let (cap, budget) = stream_lane_budget_from("off", "throughput", true, 200);
         assert_eq!(cap, 96);
         assert_eq!(budget, Duration::from_millis(6));
+    }
+
+    #[test]
+    fn test_should_redraw_stream_while_composing_throttles() {
+        let mut idle = Instant::now();
+        assert!(should_redraw_stream_while_composing(false, &mut idle));
+
+        let mut last = Instant::now() - Duration::from_millis(200);
+        assert!(should_redraw_stream_while_composing(true, &mut last));
+        assert!(!should_redraw_stream_while_composing(true, &mut last));
+        std::thread::sleep(Duration::from_millis(130));
+        assert!(should_redraw_stream_while_composing(true, &mut last));
+    }
+
+    #[test]
+    fn test_input_paint_snapshot_detects_composer_changes() {
+        let mut state = TuiState::default();
+        let first = state.input_paint_snapshot();
+        state.input.push('a');
+        let second = state.input_paint_snapshot();
+        assert_ne!(first, second);
     }
 
     #[test]
