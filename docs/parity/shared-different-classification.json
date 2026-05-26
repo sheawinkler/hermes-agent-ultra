@@ -73,6 +73,13 @@
       "ticket": 25
     },
     {
+      "path": "optional-skills",
+      "classification": "intentional_divergence",
+      "rationale": "Optional skill catalog content is curated locally; Hermes Ultra tracks runtime parity through native skill-loader contracts instead of vendoring every upstream Python skill implementation.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "optional-skills/blockchain",
       "classification": "intentional_divergence",
       "rationale": "Upstream optional-skills blockchain tree is Python-skill-store content; Hermes Ultra keeps Rust-first runtime parity and supports external skill registries via native loader paths.",
@@ -90,6 +97,13 @@
       "path": "scripts/install.sh",
       "classification": "functional",
       "rationale": "Installer behavior directly affects setup parity and bootstrap capabilities.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests",
+      "classification": "functional",
+      "rationale": "Top-level test differences can encode behavior contracts and must be mapped to Rust-native or local contract-test coverage before being cleared.",
       "owner": "sheawinkler",
       "ticket": 25
     },
@@ -118,6 +132,13 @@
       "path": "tests/hermes_cli",
       "classification": "functional",
       "rationale": "CLI tests define user-facing command and setup behavior and must stay parity-reviewed.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "ui-tui",
+      "classification": "functional",
+      "rationale": "TUI package and documentation deltas can affect distributed interactive UX behavior and must be reviewed against Hermes Ultra's Rust-primary UX surface.",
       "owner": "sheawinkler",
       "ticket": 25
     },
@@ -157,9 +178,37 @@
       "ticket": 25
     },
     {
+      "path": "skills/autonomous-ai-agents",
+      "classification": "intentional_divergence",
+      "rationale": "Autonomous-agent skill catalog content is curated locally while runtime behavior is governed by Hermes Ultra's native skill loader and execution contracts.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "skills/creative",
       "classification": "intentional_divergence",
       "rationale": "Skill catalog content is curated locally while Rust runtime parity is tracked through native skill loader contracts.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "plugins/disk-cleanup",
+      "classification": "functional",
+      "rationale": "Disk cleanup plugin differences affect user-facing maintenance tooling and need runtime parity review before clearance.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "plugins/hermes-achievements",
+      "classification": "functional",
+      "rationale": "Achievements plugin dashboard differences affect bundled plugin UX and packaging behavior.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "plugins/video_gen",
+      "classification": "functional",
+      "rationale": "Video generation plugin differences affect media tool routing and provider packaging behavior.",
       "owner": "sheawinkler",
       "ticket": 25
     },
@@ -251,6 +300,13 @@
       "path": "plugins/observability",
       "classification": "functional",
       "rationale": "Observability plugin differences affect telemetry/runtime diagnostics.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "website",
+      "classification": "policy_only",
+      "rationale": "Website top-level package, sidebar, localization, and static API files support documentation publishing and are not Rust runtime behavior unless covered by more specific functional classifications.",
       "owner": "sheawinkler",
       "ticket": 25
     },

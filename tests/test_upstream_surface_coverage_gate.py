@@ -28,7 +28,7 @@ def test_build_report_flags_missing(monkeypatch):
     monkeypatch.setattr(gate, "list_files", lambda _root, _ref, p: upstream_map[p])
     monkeypatch.setattr(gate, "ref_has_path", lambda _root, _ref, path: path in present)
 
-    report = gate.build_report(repo_root, "HEAD", "ref", "upstream/main", prefixes)
+    report = gate.build_report(repo_root, "HEAD", "ref", "upstream/main", prefixes, [])
     assert report["ok"] is False
     assert report["summary"]["missing_total"] == 1
     assert report["missing_paths"] == ["skills/b.md"]
@@ -47,7 +47,7 @@ def test_build_report_passes_when_all_present(monkeypatch):
     )
     monkeypatch.setattr(gate, "ref_has_path", lambda _root, _ref, _path: True)
 
-    report = gate.build_report(repo_root, "HEAD", "ref", "upstream/main", prefixes)
+    report = gate.build_report(repo_root, "HEAD", "ref", "upstream/main", prefixes, [])
     assert report["ok"] is True
     assert report["summary"]["missing_total"] == 0
     assert report["summary"]["present_locally"] == 2

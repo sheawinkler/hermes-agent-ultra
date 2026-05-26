@@ -26,6 +26,7 @@ jobs:
           python3 scripts/generate-test-intent-mapping.py
           python3 scripts/generate-adapter-matrix.py
           python3 scripts/validate-intentional-divergence.py --check --allow-warnings
+          python3 scripts/generate-shared-diff-backlog.py --local-ref origin/main --no-fetch
           python3 scripts/generate-upstream-patch-queue.py --local-ref origin/main --max-commits 0
           python3 scripts/generate-global-parity-proof.py --check-ci
       - name: Upstream surface coverage gate
@@ -56,6 +57,8 @@ jobs:
             docs/parity/adapter-feature-matrix.json
             docs/parity/adapter-feature-matrix.md
             docs/parity/divergence-validation.json
+            docs/parity/shared-diff-backlog.json
+            docs/parity/shared-diff-backlog.md
             docs/parity/global-parity-proof.json
             docs/parity/global-parity-proof.md
             docs/parity/upstream-missing-queue.md
@@ -76,12 +79,21 @@ jobs:
           else:
               raw = json.loads(p.read_text(encoding="utf-8"))
               metrics = raw.get("metrics", {})
+              backlog_path = Path("docs/parity/shared-diff-backlog.json")
+              backlog_summary = {}
+              if backlog_path.exists():
+                  backlog_summary = json.loads(backlog_path.read_text(encoding="utf-8")).get("summary", {})
               print("Automated parity audit failed CI gate.")
               print("")
               print(f"- commits_behind: `{metrics.get('max_commits_behind')}`")
               print(f"- upstream_patch_missing: `{metrics.get('max_upstream_patch_missing')}`")
               print(f"- files_only_upstream: `{metrics.get('max_files_only_upstream')}`")
               print(f"- shared_different: `{metrics.get('max_shared_different')}`")
+              if backlog_summary:
+                  print(f"- shared_diff_pending_classification: `{backlog_summary.get('pending_classification')}`")
+                  print(f"- shared_diff_pending_review: `{backlog_summary.get('pending_review')}`")
+                  print(f"- shared_diff_cleared_non_runtime: `{backlog_summary.get('cleared_non_runtime')}`")
+                  print(f"- shared_diff_cleared_intentional_divergence: `{backlog_summary.get('cleared_intentional_divergence')}`")
               print(f"- test_intent_mapping_ratio: `{metrics.get('min_test_intent_mapping_ratio')}`")
           PY
           )
