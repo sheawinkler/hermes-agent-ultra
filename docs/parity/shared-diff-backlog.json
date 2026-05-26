@@ -513,36 +513,6 @@
     {
       "action": "Inspect upstream/local behavior; implement Rust-native parity only if local coverage is missing.",
       "classification": "functional",
-      "classification_path": "plugins/image_gen",
-      "existing_coverage": "claimed_by_shared_diff_classification",
-      "local_blob": "c1a719f910221fe9d7c327c3f1e762818417fef9",
-      "necessity": "necessary_review",
-      "owner": "sheawinkler",
-      "path": "plugins/image_gen/openai/__init__.py",
-      "rust_requirement": "rust_native_runtime_parity_required_if_needed",
-      "status": "pending_review",
-      "ticket": 25,
-      "upstream_blob": "448f5bc45af389fda842398c981cc4657de64699",
-      "workstream": "WS3"
-    },
-    {
-      "action": "Inspect upstream/local behavior; implement Rust-native parity only if local coverage is missing.",
-      "classification": "functional",
-      "classification_path": "plugins/image_gen",
-      "existing_coverage": "claimed_by_shared_diff_classification",
-      "local_blob": "ea8721075d0fad9e371f0e1e52cbcf6a6c799dc6",
-      "necessity": "necessary_review",
-      "owner": "sheawinkler",
-      "path": "plugins/image_gen/xai/__init__.py",
-      "rust_requirement": "rust_native_runtime_parity_required_if_needed",
-      "status": "pending_review",
-      "ticket": 25,
-      "upstream_blob": "a8982393f7e4f5ad6af4e3ef2ee1893254fb9cff",
-      "workstream": "WS3"
-    },
-    {
-      "action": "Inspect upstream/local behavior; implement Rust-native parity only if local coverage is missing.",
-      "classification": "functional",
       "classification_path": "plugins/kanban",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "783e98f7ae15d2d62bebd5735d464a73652a52d0",
@@ -11236,33 +11206,33 @@
       "workstream": "WS5"
     }
   ],
-  "generated_at_utc": "2026-05-26T21:11:15.674243+00:00",
+  "generated_at_utc": "2026-05-26T21:52:28.730255+00:00",
   "refs": {
-    "local_ref": "af1eb916b6f8e9bd0d045b49ce9c6220b07a2eb2",
-    "local_sha": "af1eb916b6f8e9bd0d045b49ce9c6220b07a2eb2",
+    "local_ref": "cd06292c54397a43f7720ec08392fdb2ae716fa9",
+    "local_sha": "cd06292c54397a43f7720ec08392fdb2ae716fa9",
     "upstream_ref": "upstream/main",
     "upstream_sha": "2517917de34eeb6a40f5a17a2e59d9746803dfa5"
   },
   "summary": {
     "by_classification": {
       "branding_only": 1,
-      "functional": 494,
+      "functional": 492,
       "intentional_divergence": 50,
       "policy_only": 204
     },
     "by_rust_requirement": {
       "not_required_for_runtime": 255,
       "rust_equivalent_or_contract_test_required": 389,
-      "rust_native_runtime_parity_required_if_needed": 33,
+      "rust_native_runtime_parity_required_if_needed": 31,
       "rust_primary_ux_or_documented_divergence_required": 72
     },
     "by_status": {
       "cleared_intentional_divergence": 50,
       "cleared_non_runtime": 205,
-      "pending_review": 494
+      "pending_review": 492
     },
     "by_workstream": {
-      "WS3": 45,
+      "WS3": 43,
       "WS4": 30,
       "WS5": 272,
       "WS6": 390,
@@ -11271,7 +11241,7 @@
     "cleared_intentional_divergence": 50,
     "cleared_non_runtime": 205,
     "pending_classification": 0,
-    "pending_review": 494,
-    "total_shared_different": 749
+    "pending_review": 492,
+    "total_shared_different": 747
   }
 }

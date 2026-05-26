@@ -1,12 +1,12 @@
 # Shared-Different Backlog
 
-Generated: `2026-05-26T21:11:15.674243+00:00`
+Generated: `2026-05-26T21:52:28.730255+00:00`
 
 ## Summary
 
-- Total shared-different paths: `749`
+- Total shared-different paths: `747`
 - Pending classification: `0`
-- Pending functional review: `494`
+- Pending functional review: `492`
 - Cleared non-runtime: `205`
 - Cleared intentional divergence: `50`
 
@@ -16,13 +16,13 @@ Generated: `2026-05-26T21:11:15.674243+00:00`
 | --- | ---: |
 | `cleared_intentional_divergence` | 50 |
 | `cleared_non_runtime` | 205 |
-| `pending_review` | 494 |
+| `pending_review` | 492 |
 
 ## Workstream Counts
 
 | Workstream | Count |
 | --- | ---: |
-| `WS3` | 45 |
+| `WS3` | 43 |
 | `WS4` | 30 |
 | `WS5` | 272 |
 | `WS6` | 390 |
@@ -56,7 +56,6 @@ Generated: `2026-05-26T21:11:15.674243+00:00`
 | `plugins/kanban` | 3 |
 | `ui-tui` | 3 |
 | `plugins/example-dashboard` | 2 |
-| `plugins/image_gen` | 2 |
 | `tests/honcho_plugin` | 2 |
 | `tests/skills` | 2 |
 | `tests/stress` | 2 |
