@@ -297,6 +297,69 @@
       "ticket": 25
     },
     {
+      "path": "plugins/google_meet/__init__.py",
+      "classification": "policy_only",
+      "rationale": "The shared diff is realtime-capable documentation wording plus behavior-equivalent tuple membership for the supported-platform gate.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/google_meet/cli.py",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra uses the plugin-local Hermes home helper so the Google Meet CLI remains importable in the Rust-first tree without vendoring upstream hermes_constants; other shared diffs are behavior-equivalent tuple membership.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/google_meet/meet_bot.py",
+      "classification": "policy_only",
+      "rationale": "The shared diff is behavior-equivalent tuple membership for headed-mode parsing and bot-speaker filtering.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/google_meet/node/cli.py",
+      "classification": "policy_only",
+      "rationale": "The shared diff is behavior-equivalent tuple membership for node status and ping command dispatch.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/google_meet/node/registry.py",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra uses the plugin-local Hermes home helper so node registry storage remains importable in the Rust-first tree without vendoring upstream hermes_constants.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/google_meet/node/server.py",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra keeps plugin-local Hermes home resolution plus remote realtime-mode passthrough and stricter meet_say validation for node-hosted meetings.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/google_meet/process_manager.py",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra uses the plugin-local Hermes home helper so local meeting state remains importable in the Rust-first tree without vendoring upstream hermes_constants.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/google_meet/realtime/openai_client.py",
+      "classification": "policy_only",
+      "rationale": "The shared diff is behavior-equivalent tuple membership for terminal OpenAI Realtime response frame handling.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/google_meet/tools.py",
+      "classification": "policy_only",
+      "rationale": "The shared diff is behavior-equivalent tuple membership for local platform and mode validation; tool behavior remains covered by Google Meet plugin tests.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
       "path": "plugins/image_gen",
       "classification": "functional",
       "rationale": "Image generation plugin differences affect media tool routing, packaging, and runtime connector behavior.",
