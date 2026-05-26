@@ -1,22 +1,22 @@
 # Shared-Different Backlog
 
-Generated: `2026-05-26T19:14:59.311747+00:00`
+Generated: `2026-05-26T19:46:47.988306+00:00`
 
 ## Summary
 
 - Total shared-different paths: `749`
 - Pending classification: `0`
-- Pending functional review: `511`
+- Pending functional review: `506`
 - Cleared non-runtime: `205`
-- Cleared intentional divergence: `33`
+- Cleared intentional divergence: `38`
 
 ## Status Counts
 
 | Status | Count |
 | --- | ---: |
-| `cleared_intentional_divergence` | 33 |
+| `cleared_intentional_divergence` | 38 |
 | `cleared_non_runtime` | 205 |
-| `pending_review` | 511 |
+| `pending_review` | 506 |
 
 ## Workstream Counts
 
@@ -63,11 +63,6 @@ Generated: `2026-05-26T19:14:59.311747+00:00`
 | `tests/honcho_plugin` | 2 |
 | `tests/skills` | 2 |
 | `tests/stress` | 2 |
-| `Dockerfile` | 1 |
-| `README.md` | 1 |
-| `docker-compose.yml` | 1 |
-| `docker/entrypoint.sh` | 1 |
 | `plugins/disk-cleanup` | 1 |
 | `plugins/hermes-achievements` | 1 |
 | `plugins/video_gen` | 1 |
-| `scripts/install.sh` | 1 |
