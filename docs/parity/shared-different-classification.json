@@ -60,13 +60,6 @@
     },
     {
       "path": "flake.nix",
-      "classification": "functional",
-      "rationale": "Nix packaging/install behavior affects reproducible environment parity.",
-      "owner": "sheawinkler",
-      "ticket": 25
-    },
-    {
-      "path": "flake.nix",
       "classification": "intentional_divergence",
       "rationale": "Nix packaging intentionally builds the Rust workspace with the Hermes Ultra release version rather than upstream's Python flake-parts packaging stack.",
       "owner": "sheawinkler",
