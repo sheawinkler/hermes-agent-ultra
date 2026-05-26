@@ -1,22 +1,22 @@
 # Shared-Different Backlog
 
-Generated: `2026-05-26T18:23:37.696620+00:00`
+Generated: `2026-05-26T19:14:59.311747+00:00`
 
 ## Summary
 
 - Total shared-different paths: `749`
 - Pending classification: `0`
-- Pending functional review: `513`
+- Pending functional review: `511`
 - Cleared non-runtime: `205`
-- Cleared intentional divergence: `31`
+- Cleared intentional divergence: `33`
 
 ## Status Counts
 
 | Status | Count |
 | --- | ---: |
-| `cleared_intentional_divergence` | 31 |
+| `cleared_intentional_divergence` | 33 |
 | `cleared_non_runtime` | 205 |
-| `pending_review` | 513 |
+| `pending_review` | 511 |
 
 ## Workstream Counts
 
@@ -67,8 +67,6 @@ Generated: `2026-05-26T18:23:37.696620+00:00`
 | `README.md` | 1 |
 | `docker-compose.yml` | 1 |
 | `docker/entrypoint.sh` | 1 |
-| `flake.nix` | 1 |
-| `packaging/homebrew` | 1 |
 | `plugins/disk-cleanup` | 1 |
 | `plugins/hermes-achievements` | 1 |
 | `plugins/video_gen` | 1 |

@@ -151,17 +151,17 @@
       "workstream": "WS8"
     },
     {
-      "action": "Inspect upstream/local behavior; implement Rust-native parity only if local coverage is missing.",
-      "classification": "functional",
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
       "classification_path": "flake.nix",
       "existing_coverage": "claimed_by_shared_diff_classification",
-      "local_blob": "c11ec82c548b768b38c34ef04a1935ca67d3da92",
-      "necessity": "necessary_review",
+      "local_blob": "b68760a0286865dd30f4867cc07e552d1f93b8f6",
+      "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "flake.nix",
-      "rust_requirement": "needs_rust_relevance_review",
-      "status": "pending_review",
-      "ticket": 25,
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 305,
       "upstream_blob": "1c1d0b78922b62fddbb92e7820bb694b575d414a",
       "workstream": "WS8"
     },
@@ -301,17 +301,17 @@
       "workstream": "WS4"
     },
     {
-      "action": "Inspect upstream/local behavior; implement Rust-native parity only if local coverage is missing.",
-      "classification": "functional",
-      "classification_path": "packaging/homebrew",
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "packaging/homebrew/hermes-agent.rb",
       "existing_coverage": "claimed_by_shared_diff_classification",
-      "local_blob": "533aad39f5f5dbf15f083924c7ba542b3ce4d1e9",
-      "necessity": "necessary_review",
+      "local_blob": "806b717239ca094b6e2f0ec76bc3c5aa34af10db",
+      "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "packaging/homebrew/hermes-agent.rb",
-      "rust_requirement": "needs_rust_relevance_review",
-      "status": "pending_review",
-      "ticket": 25,
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 305,
       "upstream_blob": "7c00fc6acf8f55d9b87108b61611f7164883e6c8",
       "workstream": "WS8"
     },
@@ -11236,31 +11236,31 @@
       "workstream": "WS5"
     }
   ],
-  "generated_at_utc": "2026-05-26T18:23:37.696620+00:00",
+  "generated_at_utc": "2026-05-26T19:14:59.311747+00:00",
   "refs": {
     "local_ref": "HEAD",
-    "local_sha": "4e95a8c754feb15aa2d067563db92932dc241312",
+    "local_sha": "90a97f2772c3284e8f166a80bf86a2c783574750",
     "upstream_ref": "upstream/main",
     "upstream_sha": "2517917de34eeb6a40f5a17a2e59d9746803dfa5"
   },
   "summary": {
     "by_classification": {
       "branding_only": 1,
-      "functional": 513,
-      "intentional_divergence": 31,
+      "functional": 511,
+      "intentional_divergence": 33,
       "policy_only": 204
     },
     "by_rust_requirement": {
-      "needs_rust_relevance_review": 7,
-      "not_required_for_runtime": 236,
+      "needs_rust_relevance_review": 5,
+      "not_required_for_runtime": 238,
       "rust_equivalent_or_contract_test_required": 385,
       "rust_native_runtime_parity_required_if_needed": 49,
       "rust_primary_ux_or_documented_divergence_required": 72
     },
     "by_status": {
-      "cleared_intentional_divergence": 31,
+      "cleared_intentional_divergence": 33,
       "cleared_non_runtime": 205,
-      "pending_review": 513
+      "pending_review": 511
     },
     "by_workstream": {
       "WS3": 49,
@@ -11269,10 +11269,10 @@
       "WS6": 386,
       "WS8": 12
     },
-    "cleared_intentional_divergence": 31,
+    "cleared_intentional_divergence": 33,
     "cleared_non_runtime": 205,
     "pending_classification": 0,
-    "pending_review": 513,
+    "pending_review": 511,
     "total_shared_different": 749
   }
 }
