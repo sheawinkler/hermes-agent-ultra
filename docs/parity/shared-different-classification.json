@@ -416,6 +416,20 @@
       "ticket": 25
     },
     {
+      "path": "plugins/example-dashboard/dashboard/manifest.json",
+      "classification": "intentional_divergence",
+      "rationale": "Local example dashboard intentionally advertises the sessions:top slot so the bundled SDK demo exercises page-scoped slot injection; contract tests verify the manifest and dist bundle stay aligned.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/example-dashboard/dashboard/plugin_api.py",
+      "classification": "policy_only",
+      "rationale": "The shared diff is module docstring wording only; the /hello route behavior remains unchanged and is covered by the example dashboard contract test.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
       "path": "skills/devops",
       "classification": "intentional_divergence",
       "rationale": "Skill catalog content is curated locally while runtime skill contracts remain tracked separately.",
