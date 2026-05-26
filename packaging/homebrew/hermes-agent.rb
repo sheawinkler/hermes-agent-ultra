@@ -1,42 +1,35 @@
 class HermesAgentUltra < Formula
-  desc "Hermes Agent Ultra: autonomous AI agent with memory, tools, and gateway adapters"
+  desc "Hermes Agent Ultra autonomous AI agent"
   homepage "https://github.com/sheawinkler/hermes-agent-ultra"
-  # Update URL and sha256 for each release
-  url "https://github.com/sheawinkler/hermes-agent-ultra/archive/refs/tags/v0.1.0.tar.gz"
-  sha256 "REPLACE_WITH_ACTUAL_SHA256"
+  version "0.14.2"
   license "MIT"
-  head "https://github.com/sheawinkler/hermes-agent-ultra.git", branch: "main"
 
-  depends_on "rust" => :build
-  depends_on "pkg-config" => :build
-  depends_on "openssl"
-  depends_on "sqlite"
+  on_macos do
+    if Hardware::CPU.arm?
+      url "https://github.com/sheawinkler/hermes-agent-ultra/releases/download/v0.14.2/hermes-macos-aarch64.tar.gz"
+      sha256 "71ab5172a0ba2672bd66ab4742c73b99649adaeba131df29a6a08987059953c8"
+    else
+      url "https://github.com/sheawinkler/hermes-agent-ultra/releases/download/v0.14.2/hermes-macos-x86_64.tar.gz"
+      sha256 "ae8472ad3a724de13897ed2a9ec808024a0b732353fcf28b45ecdf1ab821f4e8"
+    end
+  end
+
+  on_linux do
+    if Hardware::CPU.arm?
+      url "https://github.com/sheawinkler/hermes-agent-ultra/releases/download/v0.14.2/hermes-linux-aarch64.tar.gz"
+      sha256 "75a5b2751c38b131b3c244504ec69c37e2a7799259cee26bb6e13e695dcf0529"
+    else
+      url "https://github.com/sheawinkler/hermes-agent-ultra/releases/download/v0.14.2/hermes-linux-x86_64.tar.gz"
+      sha256 "f22d6fb401c0a1ef75a4cd873079063a5f9e2d83679716c4ac911c2db11fd30d"
+    end
+  end
 
   def install
-    system "cargo", "install", "--path", "crates/hermes-cli", "--locked", "--root", prefix, "--bins"
-  end
-
-  def post_install
-    (var/"hermes").mkpath
-  end
-
-  def caveats
-    <<~EOS
-      Hermes Agent Ultra has been installed.
-
-      Set your API key before running:
-        export HERMES_OPENAI_API_KEY="sk-..."
-
-      Data is stored in:
-        #{var}/hermes
-
-      Get started:
-        hermes-ultra --help
-        hermes-ultra
-    EOS
+    bin.install "hermes" => "hermes-agent-ultra"
+    bin.install_symlink "hermes-agent-ultra" => "hermes"
   end
 
   test do
-    assert_match "hermes-agent-ultra", shell_output("#{bin}/hermes-agent-ultra --version")
+    system "#{bin}/hermes-agent-ultra", "--version"
   end
 end

@@ -66,6 +66,20 @@
       "ticket": 25
     },
     {
+      "path": "flake.nix",
+      "classification": "intentional_divergence",
+      "rationale": "Nix packaging intentionally builds the Rust workspace with the Hermes Ultra release version rather than upstream's Python flake-parts packaging stack.",
+      "owner": "sheawinkler",
+      "ticket": 305
+    },
+    {
+      "path": "packaging/homebrew/hermes-agent.rb",
+      "classification": "intentional_divergence",
+      "rationale": "Homebrew packaging uses Hermes Ultra's checksummed Rust release artifacts instead of upstream's Python virtualenv formula.",
+      "owner": "sheawinkler",
+      "ticket": 305
+    },
+    {
       "path": "packaging/homebrew",
       "classification": "functional",
       "rationale": "Distribution packaging path impacts install parity for Homebrew users.",
