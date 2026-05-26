@@ -206,6 +206,13 @@
       "ticket": 25
     },
     {
+      "path": "plugins/disk-cleanup/__init__.py",
+      "classification": "intentional_divergence",
+      "rationale": "Local disk-cleanup delta is a behavior-equivalent tuple membership form covered by focused plugin contracts; no upstream runtime feature is missing.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
       "path": "plugins/hermes-achievements",
       "classification": "functional",
       "rationale": "Achievements plugin dashboard differences affect bundled plugin UX and packaging behavior.",
@@ -218,6 +225,13 @@
       "rationale": "Video generation plugin differences affect media tool routing and provider packaging behavior.",
       "owner": "sheawinkler",
       "ticket": 25
+    },
+    {
+      "path": "plugins/video_gen/xai/__init__.py",
+      "classification": "intentional_divergence",
+      "rationale": "Local xAI video generation wording intentionally refers to the SuperGrok subscription credential path while preserving shared xAI credential resolution behavior.",
+      "owner": "sheawinkler",
+      "ticket": 304
     },
     {
       "path": "plugins/memory",
@@ -283,6 +297,34 @@
       "ticket": 25
     },
     {
+      "path": "plugins/teams_pipeline/cli.py",
+      "classification": "intentional_divergence",
+      "rationale": "Local Teams CLI delta is a behavior-equivalent tuple membership guard covered by focused plugin contracts.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/teams_pipeline/meetings.py",
+      "classification": "intentional_divergence",
+      "rationale": "Local Teams meeting error handling delta is a behavior-equivalent tuple membership guard covered by focused plugin contracts.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/teams_pipeline/models.py",
+      "classification": "intentional_divergence",
+      "rationale": "Local Teams artifact model delta is a behavior-equivalent tuple membership guard covered by focused plugin contracts.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/teams_pipeline/runtime.py",
+      "classification": "intentional_divergence",
+      "rationale": "Local Teams runtime config delta is a behavior-equivalent tuple membership guard covered by focused plugin contracts.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
       "path": "tests/cron",
       "classification": "functional",
       "rationale": "Cron tests cover scheduling/runtime behavior.",
@@ -309,6 +351,20 @@
       "rationale": "Observability plugin differences affect telemetry/runtime diagnostics.",
       "owner": "sheawinkler",
       "ticket": 25
+    },
+    {
+      "path": "plugins/observability/langfuse/README.md",
+      "classification": "intentional_divergence",
+      "rationale": "Local Langfuse README intentionally documents the Hermes tools credential flow while preserving the manual enable path.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/observability/langfuse/plugin.yaml",
+      "classification": "intentional_divergence",
+      "rationale": "Local Langfuse manifest intentionally advertises the Hermes tools enablement path in addition to manual plugin enablement.",
+      "owner": "sheawinkler",
+      "ticket": 304
     },
     {
       "path": "website",
