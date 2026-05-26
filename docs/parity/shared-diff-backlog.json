@@ -16,6 +16,21 @@
       "workstream": "WS8"
     },
     {
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": ".github/workflows/uv-lockfile-check.yml",
+      "existing_coverage": "claimed_by_shared_diff_classification",
+      "local_blob": "fde055182021148bf34a5c992964989bde3f0f38",
+      "necessity": "approved_divergence",
+      "owner": "sheawinkler",
+      "path": ".github/workflows/uv-lockfile-check.yml",
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 305,
+      "upstream_blob": "37c31799bea6e44b517880c08d429018917d1306",
+      "workstream": "WS6"
+    },
+    {
       "action": "No runtime implementation; keep rationale current.",
       "classification": "branding_only",
       "classification_path": ".gitignore",
@@ -11221,10 +11236,10 @@
       "workstream": "WS5"
     }
   ],
-  "generated_at_utc": "2026-05-26T18:20:36.174058+00:00",
+  "generated_at_utc": "2026-05-26T18:23:37.696620+00:00",
   "refs": {
     "local_ref": "HEAD",
-    "local_sha": "b4cdd4580684cd9405e5820033170d5d97d333e4",
+    "local_sha": "4e95a8c754feb15aa2d067563db92932dc241312",
     "upstream_ref": "upstream/main",
     "upstream_sha": "2517917de34eeb6a40f5a17a2e59d9746803dfa5"
   },
@@ -11232,18 +11247,18 @@
     "by_classification": {
       "branding_only": 1,
       "functional": 513,
-      "intentional_divergence": 30,
+      "intentional_divergence": 31,
       "policy_only": 204
     },
     "by_rust_requirement": {
       "needs_rust_relevance_review": 7,
-      "not_required_for_runtime": 235,
+      "not_required_for_runtime": 236,
       "rust_equivalent_or_contract_test_required": 385,
       "rust_native_runtime_parity_required_if_needed": 49,
       "rust_primary_ux_or_documented_divergence_required": 72
     },
     "by_status": {
-      "cleared_intentional_divergence": 30,
+      "cleared_intentional_divergence": 31,
       "cleared_non_runtime": 205,
       "pending_review": 513
     },
@@ -11251,13 +11266,13 @@
       "WS3": 49,
       "WS4": 30,
       "WS5": 272,
-      "WS6": 385,
+      "WS6": 386,
       "WS8": 12
     },
-    "cleared_intentional_divergence": 30,
+    "cleared_intentional_divergence": 31,
     "cleared_non_runtime": 205,
     "pending_classification": 0,
     "pending_review": 513,
-    "total_shared_different": 748
+    "total_shared_different": 749
   }
 }
