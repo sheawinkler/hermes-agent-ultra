@@ -94,7 +94,7 @@ pub use tools::skill_commands;
 pub use tools::skill_utils;
 pub use tools::skills::{SkillManageHandler, SkillViewHandler, SkillsListHandler};
 pub use tools::terminal::{ProcessBackend, ProcessHandler, TerminalHandler};
-pub use tools::todo::{TodoBackend, TodoHandler};
+pub use tools::todo::{TodoBackend, TodoHandler, TodoItem};
 pub use tools::tool_result_storage::ToolResultStorageHandler;
 pub use tools::transcription::TranscriptionHandler;
 pub use tools::tts::{TextToSpeechHandler, TtsBackend};
