@@ -128,17 +128,7 @@ async fn register_outbound_adapters(config: &GatewayConfig, gateway: &Arc<Gatewa
     if let Some(platform_cfg) = config.platforms.get("discord") {
         if platform_cfg.enabled && !fatal_platforms.contains("discord") {
             if let Some(token) = platform_token_or_extra(platform_cfg) {
-                let discord_cfg = DiscordConfig {
-                    token,
-                    application_id: extra_string(platform_cfg, "application_id"),
-                    proxy: Default::default(),
-                    require_mention: platform_cfg.require_mention.unwrap_or(true),
-                    intents: platform_cfg
-                        .extra
-                        .get("intents")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(hermes_gateway::platforms::discord::default_intents()),
-                };
+                let discord_cfg = DiscordConfig::from_platform(platform_cfg, token);
                 match DiscordAdapter::new(discord_cfg) {
                     Ok(adapter) => {
                         if adapter.start().await.is_ok() {

@@ -1,5 +1,6 @@
-//! P0 inbound message filtering (pure functions).
+//! P0/P1 inbound message filtering (pure functions).
 
+use super::config::ChannelIdSet;
 use super::parse::RawDiscordMessage;
 
 /// Discord default message type.
@@ -12,6 +13,21 @@ pub const MESSAGE_TYPE_REPLY: u8 = 19;
 pub struct DiscordInboundConfig {
     pub require_mention: bool,
     pub bot_user_id: Option<String>,
+    pub free_response_channels: ChannelIdSet,
+    pub allowed_channels: ChannelIdSet,
+    pub ignored_channels: ChannelIdSet,
+}
+
+impl DiscordInboundConfig {
+    pub fn effective_require_mention(&self, channel_id: &str, is_guild: bool) -> bool {
+        if !is_guild {
+            return false;
+        }
+        if self.free_response_channels.contains(channel_id) {
+            return false;
+        }
+        self.require_mention
+    }
 }
 
 /// Whether a parsed MESSAGE_CREATE should be forwarded to the gateway.
@@ -35,7 +51,15 @@ pub fn should_accept_message(raw: &RawDiscordMessage, cfg: &DiscordInboundConfig
     }
 
     if raw.guild_id.is_some() {
-        if cfg.require_mention {
+        if cfg.ignored_channels.contains(&raw.channel_id) {
+            return false;
+        }
+        if cfg.allowed_channels.is_restrictive() && !cfg.allowed_channels.contains(&raw.channel_id)
+        {
+            return false;
+        }
+
+        if cfg.effective_require_mention(&raw.channel_id, true) {
             let bot_id = match cfg.bot_user_id.as_deref() {
                 Some(id) => id,
                 None => return false,
@@ -62,6 +86,7 @@ fn content_mentions_bot(content: &str, bot_id: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platforms::discord::config::ChannelIdSet;
 
     fn human_guild(content: &str, mentions: Vec<&str>) -> RawDiscordMessage {
         RawDiscordMessage {
@@ -81,6 +106,25 @@ mod tests {
         DiscordInboundConfig {
             require_mention: mention,
             bot_user_id: bot.map(String::from),
+            free_response_channels: ChannelIdSet::new(),
+            allowed_channels: ChannelIdSet::new(),
+            ignored_channels: ChannelIdSet::new(),
+        }
+    }
+
+    fn cfg_with_channels(
+        mention: bool,
+        bot: Option<&str>,
+        free: Option<&str>,
+        allowed: Option<&str>,
+        ignored: Option<&str>,
+    ) -> DiscordInboundConfig {
+        DiscordInboundConfig {
+            require_mention: mention,
+            bot_user_id: bot.map(String::from),
+            free_response_channels: ChannelIdSet::parse(free),
+            allowed_channels: ChannelIdSet::parse(allowed),
+            ignored_channels: ChannelIdSet::parse(ignored),
         }
     }
 
@@ -161,5 +205,56 @@ mod tests {
     fn f10_accept_guild_mention_in_content_without_mentions_array() {
         let raw = human_guild("hey <@!bot99> ping", vec![]);
         assert!(should_accept_message(&raw, &cfg(true, Some("bot99"))));
+    }
+
+    #[test]
+    fn f11_free_response_channel_skips_mention() {
+        let raw = RawDiscordMessage {
+            channel_id: "free-ch".into(),
+            ..human_guild("hello", vec![])
+        };
+        let filter = cfg_with_channels(true, Some("bot99"), Some("free-ch"), None, None);
+        assert!(should_accept_message(&raw, &filter));
+    }
+
+    #[test]
+    fn f12_ignored_channel_rejects_even_with_mention() {
+        let raw = RawDiscordMessage {
+            channel_id: "ignore-ch".into(),
+            ..human_guild("hello", vec!["bot99"])
+        };
+        let filter = cfg_with_channels(true, Some("bot99"), None, None, Some("ignore-ch"));
+        assert!(!should_accept_message(&raw, &filter));
+    }
+
+    #[test]
+    fn f13_allowed_channels_restricts_guild() {
+        let raw = RawDiscordMessage {
+            channel_id: "other-ch".into(),
+            ..human_guild("hello", vec![])
+        };
+        let filter = cfg_with_channels(false, Some("bot99"), None, Some("allowed-ch"), None);
+        assert!(!should_accept_message(&raw, &filter));
+    }
+
+    #[test]
+    fn f14_allowed_channels_permits_listed_channel() {
+        let raw = RawDiscordMessage {
+            channel_id: "allowed-ch".into(),
+            ..human_guild("hello", vec![])
+        };
+        let filter = cfg_with_channels(false, Some("bot99"), None, Some("allowed-ch"), None);
+        assert!(should_accept_message(&raw, &filter));
+    }
+
+    #[test]
+    fn f15_dm_bypasses_allowed_channels() {
+        let raw = RawDiscordMessage {
+            channel_id: "dm-ch".into(),
+            guild_id: None,
+            ..human_guild("hello", vec![])
+        };
+        let filter = cfg_with_channels(false, Some("bot99"), None, Some("allowed-ch"), None);
+        assert!(should_accept_message(&raw, &filter));
     }
 }

@@ -14,7 +14,10 @@ use hermes_core::errors::GatewayError;
 use super::config::{DiscordConfig, DISCORD_API_BASE};
 use super::dedup::MessageDedup;
 use super::filter::{DiscordInboundConfig, should_accept_message};
-use super::parse::{parse_message_create_raw, raw_to_incoming, ready_bot_user_id};
+use super::parse::{
+    interaction_to_incoming, parse_interaction_create, parse_message_create_raw, raw_to_incoming,
+    ready_bot_user_id,
+};
 use super::session::{
     GatewayAction, GatewayPayload, GatewaySession, IdentifyData, IdentifyProperties, ResumeData,
     opcodes,
@@ -108,10 +111,40 @@ pub async fn process_gateway_payload(
                     inbounds.extend(msgs);
                 }
             }
+            if name == "INTERACTION_CREATE" {
+                if let Some(msgs) = try_interaction_create_inbound(inner, data).await {
+                    inbounds.extend(msgs);
+                }
+            }
         }
     }
 
     (actions, inbounds)
+}
+
+async fn try_interaction_create_inbound(
+    inner: &DiscordInner,
+    data: &serde_json::Value,
+) -> Option<Vec<IncomingMessage>> {
+    let interaction = parse_interaction_create(data)?;
+    let incoming = interaction_to_incoming(&interaction)?;
+    if let Err(err) = inner
+        .defer_interaction(&interaction.id, &interaction.token)
+        .await
+    {
+        warn!(
+            interaction_id = %interaction.id,
+            "Discord defer_interaction failed: {err}"
+        );
+        return Some(vec![]);
+    }
+    info!(
+        command = ?interaction.command_name,
+        channel_id = ?interaction.channel_id,
+        user_id = ?interaction.user_id,
+        "Discord slash interaction accepted"
+    );
+    Some(vec![incoming])
 }
 
 async fn try_message_create_inbound(
@@ -123,6 +156,9 @@ async fn try_message_create_inbound(
     let filter_cfg = DiscordInboundConfig {
         require_mention: inner.config.require_mention,
         bot_user_id: bot_id,
+        free_response_channels: inner.config.free_response_channels.clone(),
+        allowed_channels: inner.config.allowed_channels.clone(),
+        ignored_channels: inner.config.ignored_channels.clone(),
     };
     if !should_accept_message(&raw, &filter_cfg) {
         debug!(
@@ -431,12 +467,10 @@ mod tests {
         let base = BasePlatformAdapter::new("test-token");
         let client = base.build_client().unwrap();
         DiscordInner {
-            config: DiscordConfig {
-                token: "test-token".into(),
-                application_id: None,
-                proxy: AdapterProxyConfig::default(),
-                require_mention,
-                intents: super::super::config::default_intents(),
+            config: {
+                let mut c = super::super::config::DiscordConfig::for_test("test-token");
+                c.require_mention = require_mention;
+                c
             },
             client,
             base,
@@ -554,5 +588,24 @@ mod tests {
         .to_string();
         let (_, inbounds) = process_gateway_frame(&mut session, &msg, &inner).await;
         assert_eq!(inbounds.len(), 1);
+    }
+
+    #[test]
+    fn g06_interaction_create_parses_slash_text() {
+        let data = serde_json::json!({
+            "id": "int-1",
+            "application_id": "app-1",
+            "type": 2,
+            "token": "tok-abc",
+            "channel_id": "ch-99",
+            "guild_id": "g-1",
+            "member": { "user": { "id": "user-42" } },
+            "data": { "name": "help" }
+        });
+        let interaction = parse_interaction_create(&data).expect("parse");
+        let incoming = interaction_to_incoming(&interaction).expect("incoming");
+        assert_eq!(incoming.text, "/help");
+        assert_eq!(incoming.interaction_id.as_deref(), Some("int-1"));
+        assert_eq!(incoming.interaction_token.as_deref(), Some("tok-abc"));
     }
 }

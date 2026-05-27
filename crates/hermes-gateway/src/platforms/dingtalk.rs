@@ -365,6 +365,8 @@ impl DingTalkAdapter {
                 Some(parsed.message_id.clone())
             },
             is_dm: !parsed.is_group,
+            interaction_id: None,
+            interaction_token: None,
         };
         if let Some(tx) = inner.inbound_tx.read().await.clone() {
             tokio::spawn(async move {

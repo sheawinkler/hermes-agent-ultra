@@ -77,7 +77,23 @@ pub trait PlatformAdapter: Send + Sync {
         chat_id: &str,
         text: &str,
         parse_mode: Option<ParseMode>,
-    ) -> Result<(), GatewayError>;
+    ) -> Result<(), GatewayError> {
+        let _ = self
+            .send_message_with_id(chat_id, text, parse_mode)
+            .await?;
+        Ok(())
+    }
+
+    /// Send a text message and return the platform message id when available.
+    async fn send_message_with_id(
+        &self,
+        chat_id: &str,
+        text: &str,
+        parse_mode: Option<ParseMode>,
+    ) -> Result<Option<String>, GatewayError> {
+        let _ = self.send_message(chat_id, text, parse_mode).await?;
+        Ok(None)
+    }
 
     /// Edit an existing message.
     async fn edit_message(
@@ -130,6 +146,26 @@ pub trait PlatformAdapter: Send + Sync {
         _chat_id: &str,
         _message_id: &str,
         _emoji: &str,
+    ) -> Result<(), GatewayError> {
+        Ok(())
+    }
+
+    /// Whether to add processing lifecycle reactions (👀/✅/❌) on inbound messages.
+    fn reactions_enabled(&self) -> bool {
+        true
+    }
+
+    /// Show a typing indicator in the chat (best-effort).
+    async fn trigger_typing(&self, _chat_id: &str) -> Result<(), GatewayError> {
+        Ok(())
+    }
+
+    /// Reply to a deferred slash/command interaction (Discord follow-up).
+    async fn respond_interaction(
+        &self,
+        _interaction_id: &str,
+        _interaction_token: &str,
+        _content: &str,
     ) -> Result<(), GatewayError> {
         Ok(())
     }

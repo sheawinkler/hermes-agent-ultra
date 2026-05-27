@@ -100,6 +100,8 @@ async fn i01_guild_allowlist_user_gets_reply() {
         media_types: vec![],
         message_id: Some("m1".into()),
         is_dm: false,
+        interaction_id: None,
+        interaction_token: None,
     };
     assert!(gw.route_message(&incoming).await.is_ok());
     let sent = adapter.sent.lock().unwrap();
@@ -136,6 +138,8 @@ async fn i02_guild_denied_user_no_transcript() {
         media_types: vec![],
         message_id: Some("m2".into()),
         is_dm: false,
+        interaction_id: None,
+        interaction_token: None,
     };
     assert!(gw.route_message(&incoming).await.is_ok());
     assert_eq!(
@@ -172,6 +176,8 @@ async fn i03_dm_authorized_user_gets_reply() {
         media_types: vec![],
         message_id: None,
         is_dm: true,
+        interaction_id: None,
+        interaction_token: None,
     };
     assert!(gw.route_message(&incoming).await.is_ok());
     assert!(!adapter.sent.lock().unwrap().is_empty());
@@ -198,6 +204,8 @@ async fn i04_dm_unauthorized_silent() {
         media_types: vec![],
         message_id: None,
         is_dm: true,
+        interaction_id: None,
+        interaction_token: None,
     };
     assert!(gw.route_message(&incoming).await.is_ok());
     assert!(adapter.sent.lock().unwrap().is_empty());

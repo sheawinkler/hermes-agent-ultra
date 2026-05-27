@@ -1356,6 +1356,8 @@ impl WeComAdapter {
             media_types,
             message_id: Some(msg_id),
             is_dm: !is_group,
+            interaction_id: None,
+            interaction_token: None,
         };
 
         let delay = text_batch_delay_secs();

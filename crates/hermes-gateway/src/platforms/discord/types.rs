@@ -35,6 +35,25 @@ fn default_command_type() -> u8 {
     1
 }
 
+/// P1 MVP slash commands aligned with Python gateway (`/status`, `/help`, …).
+pub fn basic_slash_commands() -> Vec<SlashCommand> {
+    [
+        ("status", "Show gateway and session status"),
+        ("help", "Show available commands"),
+        ("new", "Start a new session"),
+        ("reset", "Reset the current session"),
+        ("stop", "Stop the current agent run"),
+    ]
+    .into_iter()
+    .map(|(name, description)| SlashCommand {
+        name: name.into(),
+        description: description.into(),
+        options: None,
+        command_type: 1,
+    })
+    .collect()
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SlashCommandOption {
     pub name: String,
@@ -179,4 +198,16 @@ pub struct DiscordThread {
     pub thread_type: Option<u8>,
     pub guild_id: Option<String>,
     pub parent_id: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::basic_slash_commands;
+
+    #[test]
+    fn basic_slash_commands_lists_mvp_five() {
+        let cmds = basic_slash_commands();
+        let names: Vec<&str> = cmds.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["status", "help", "new", "reset", "stop"]);
+    }
 }

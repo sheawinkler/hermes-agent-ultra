@@ -680,13 +680,6 @@ async fn run(cli: Cli) {
             target,
             yes,
         } => hermes_cli::commands::handle_cli_memory(action, target, yes).await,
-        CliCommand::Meeting {
-            action,
-            audio,
-            title,
-            mode,
-            diarize,
-        } => hermes_cli::commands::handle_cli_meeting(action, audio, title, mode, diarize).await,
         CliCommand::Mcp {
             action,
             name,
@@ -4568,6 +4561,8 @@ async fn run_api_server_inbound_loop(
             media_types: vec![],
             message_id: Some(req.request_id.clone()),
             is_dm: true,
+            interaction_id: None,
+            interaction_token: None,
         };
         if let Err(err) = gateway.route_message(&incoming).await {
             tracing::warn!("Failed to route api_server message: {}", err);
@@ -4588,6 +4583,8 @@ async fn run_webhook_inbound_loop(gateway: Arc<Gateway>, mut rx: mpsc::Receiver<
             media_types: vec![],
             message_id: None,
             is_dm: true,
+            interaction_id: None,
+            interaction_token: None,
         };
         if let Err(err) = gateway.route_message(&incoming).await {
             tracing::warn!("Failed to route webhook message: {}", err);
@@ -4682,17 +4679,7 @@ async fn register_gateway_adapters(
     if let Some(platform_cfg) = config.platforms.get("discord") {
         if platform_cfg.enabled {
             if let Some(token) = platform_token_or_extra(platform_cfg) {
-                let discord_cfg = DiscordConfig {
-                    token,
-                    application_id: extra_string(platform_cfg, "application_id"),
-                    proxy: Default::default(),
-                    require_mention: platform_cfg.require_mention.unwrap_or(true),
-                    intents: platform_cfg
-                        .extra
-                        .get("intents")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(hermes_gateway::platforms::discord::default_intents()),
-                };
+                let discord_cfg = DiscordConfig::from_platform(platform_cfg, token);
                 match DiscordAdapter::new(discord_cfg) {
                     Ok(adapter) => {
                         let adapter = Arc::new(adapter);
@@ -5198,6 +5185,8 @@ async fn run_telegram_poll_loop(gateway: Arc<Gateway>, adapter: Arc<TelegramAdap
                         media_types: vec![],
                         message_id: Some(msg.message_id.to_string()),
                         is_dm: msg.chat_id > 0,
+                        interaction_id: None,
+                        interaction_token: None,
                     };
 
                     if let Err(err) = gateway.route_message(&incoming).await {

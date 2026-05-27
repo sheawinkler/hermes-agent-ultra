@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::{mpsc, RwLock};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
@@ -21,16 +21,20 @@ use hermes_core::traits::{ParseMode, PlatformAdapter};
 use crate::adapter::{describe_secret, BasePlatformAdapter};
 use crate::gateway::IncomingMessage;
 
-pub use config::{default_intents, DiscordConfig, DISCORD_API_BASE, MAX_MESSAGE_LENGTH};
+pub use config::{
+    default_intents, ChannelIdSet, DiscordConfig, DISCORD_API_BASE, MAX_MESSAGE_LENGTH,
+};
 pub use dedup::MessageDedup;
 pub use filter::DiscordInboundConfig;
 pub use parse::{
-    parse_dispatch, parse_interaction_create, parse_message_create, parse_message_create_raw,
-    parse_message_update, parse_reaction_event, parse_voice_state_update, raw_to_incoming,
-    DispatchEvent, IncomingDiscordMessage, InteractionData, InteractionOption, MessageUpdateEvent,
-    RawDiscordMessage, ReactionEvent, VoiceState,
+    interaction_to_incoming, parse_dispatch, parse_interaction_create, parse_message_create,
+    parse_message_create_raw, parse_message_update, parse_reaction_event, parse_voice_state_update,
+    raw_to_incoming, DispatchEvent, IncomingDiscordMessage, InteractionData, InteractionOption,
+    MessageUpdateEvent, RawDiscordMessage, ReactionEvent, VoiceState,
+    INTERACTION_TYPE_APPLICATION_COMMAND,
 };
 pub use rest::{encode_emoji, split_message};
+pub use types::basic_slash_commands;
 pub use session::{
     opcodes, GatewayAction, GatewayPayload, GatewaySession, IdentifyData, IdentifyProperties,
     ResumeData,
@@ -233,6 +237,24 @@ impl PlatformAdapter for DiscordAdapter {
             describe_secret(&self.inner.config.token)
         );
         self.inner.base.mark_running();
+        if self.inner.config.slash_commands_enabled
+            && self.inner.config.application_id.is_some()
+        {
+            let inner = self.inner.clone();
+            tokio::spawn(async move {
+                let commands = basic_slash_commands();
+                let result = if let Some(guild_id) = inner.config.slash_guild_id.as_deref() {
+                    inner
+                        .register_guild_slash_commands(guild_id, &commands)
+                        .await
+                } else {
+                    inner.register_slash_commands(&commands).await
+                };
+                if let Err(err) = result {
+                    warn!("Discord slash command registration failed: {err}");
+                }
+            });
+        }
         let inner = self.inner.clone();
         let handle = tokio::spawn(async move {
             gateway_loop(inner).await;
@@ -252,14 +274,14 @@ impl PlatformAdapter for DiscordAdapter {
         Ok(())
     }
 
-    async fn send_message(
+    async fn send_message_with_id(
         &self,
         chat_id: &str,
         text: &str,
         _parse_mode: Option<ParseMode>,
-    ) -> Result<(), GatewayError> {
-        self.send_text(chat_id, text).await?;
-        Ok(())
+    ) -> Result<Option<String>, GatewayError> {
+        let ids = self.send_text(chat_id, text).await?;
+        Ok(ids.into_iter().next())
     }
 
     async fn edit_message(
@@ -302,6 +324,57 @@ impl PlatformAdapter for DiscordAdapter {
     fn platform_name(&self) -> &str {
         "discord"
     }
+
+    fn reactions_enabled(&self) -> bool {
+        self.inner.config.reactions_enabled
+    }
+
+    async fn add_reaction(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        emoji: &str,
+    ) -> Result<(), GatewayError> {
+        self.inner
+            .add_reaction(chat_id, message_id, Self::map_reaction_emoji(emoji))
+            .await
+    }
+
+    async fn remove_reaction(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        emoji: &str,
+    ) -> Result<(), GatewayError> {
+        self.inner
+            .remove_reaction(chat_id, message_id, Self::map_reaction_emoji(emoji))
+            .await
+    }
+
+    async fn trigger_typing(&self, chat_id: &str) -> Result<(), GatewayError> {
+        self.inner.trigger_typing(chat_id).await
+    }
+
+    async fn respond_interaction(
+        &self,
+        interaction_id: &str,
+        interaction_token: &str,
+        content: &str,
+    ) -> Result<(), GatewayError> {
+        self.respond_to_interaction(interaction_id, interaction_token, content)
+            .await
+    }
+}
+
+impl DiscordAdapter {
+    fn map_reaction_emoji(emoji: &str) -> &str {
+        match emoji {
+            "eyes" => "👀",
+            "white_check_mark" => "✅",
+            "x" => "❌",
+            other => other,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -311,13 +384,7 @@ mod adapter_tests {
 
     #[test]
     fn gateway_payload_identify() {
-        let config = DiscordConfig {
-            token: "test-token".into(),
-            application_id: None,
-            proxy: AdapterProxyConfig::default(),
-            require_mention: true,
-            intents: default_intents(),
-        };
+        let config = DiscordConfig::for_test("test-token");
         let adapter = DiscordAdapter::new(config).unwrap();
         let payload = adapter.build_identify_payload();
         assert_eq!(payload.op, opcodes::IDENTIFY);
@@ -326,13 +393,7 @@ mod adapter_tests {
 
     #[tokio::test]
     async fn l01_start_marks_running() {
-        let config = DiscordConfig {
-            token: "test-token".into(),
-            application_id: None,
-            proxy: AdapterProxyConfig::default(),
-            require_mention: true,
-            intents: default_intents(),
-        };
+        let config = DiscordConfig::for_test("test-token");
         let adapter = DiscordAdapter::new(config).unwrap();
         adapter.start().await.unwrap();
         assert!(adapter.is_running());
@@ -341,13 +402,7 @@ mod adapter_tests {
 
     #[tokio::test]
     async fn l02_stop_clears_running() {
-        let config = DiscordConfig {
-            token: "test-token".into(),
-            application_id: None,
-            proxy: AdapterProxyConfig::default(),
-            require_mention: true,
-            intents: default_intents(),
-        };
+        let config = DiscordConfig::for_test("test-token");
         let adapter = DiscordAdapter::new(config).unwrap();
         adapter.start().await.unwrap();
         adapter.stop().await.unwrap();
@@ -356,13 +411,8 @@ mod adapter_tests {
 
     #[tokio::test]
     async fn l03_message_create_without_inbound_tx_no_panic() {
-        let config = DiscordConfig {
-            token: "test-token".into(),
-            application_id: None,
-            proxy: AdapterProxyConfig::default(),
-            require_mention: false,
-            intents: default_intents(),
-        };
+        let mut config = DiscordConfig::for_test("test-token");
+        config.require_mention = false;
         let adapter = DiscordAdapter::new(config).unwrap();
         let inner = Arc::clone(&adapter.inner);
         let mut session = GatewaySession::new();

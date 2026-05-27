@@ -281,6 +281,15 @@ impl StreamManager {
         }
     }
 
+    /// Get the platform message id associated with a stream, if any.
+    pub async fn get_message_id(&self, stream_id: &str) -> Option<String> {
+        self.streams
+            .read()
+            .await
+            .get(stream_id)
+            .and_then(|h| h.message_id.clone())
+    }
+
     /// Check if the content exceeds the maximum message length.
     pub fn should_split(&self, content: &str) -> bool {
         content.len() > self.config.max_message_length

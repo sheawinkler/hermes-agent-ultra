@@ -5,7 +5,7 @@
 > **用户文档（描述 Python 行为）**：[website/docs/user-guide/messaging/discord.md](../../website/docs/user-guide/messaging/discord.md)
 
 **最后更新**：2026-05-27  
-**状态说明**：**P0 对话闭环已在 Rust 落地**（Gateway WS 入站 → 过滤/去重 → `Gateway::route_message` → REST 出站；CLI `run_gateway_incoming_loop` 已接线）。P1+ 能力仍见下文 backlog。
+**状态说明**：**P0 对话闭环**与 **P1 MVP 子集**（反应、Typing、频道过滤、Slash 基础、流式占位 `edit_message`）已在 Rust 落地；附件 / Opus / Auto-thread 见 [§3.1 P1.2 backlog](#31-p12-backlogmvp-之后)。
 
 ---
 
@@ -92,6 +92,15 @@ sequenceDiagram
 | P1-10 | Auto-thread + `ThreadParticipationTracker` | 持久化线程参与集 |
 | P1-11 | `PlatformAdapter::add_reaction` | trait 实现接 REST |
 
+### 3.1 P1.2 backlog（MVP 之后）
+
+| ID | 功能 | 说明 |
+|----|------|------|
+| P1-1 | 入站附件（图/文/doc） | 下载并填入 `media_urls` / `media_types` |
+| P1-2 | Opus 语音消息 | 转码/缓存后送 STT 管线 |
+| P1-9 | `DISCORD_ALLOWED_ROLES` | 角色 OR 用户鉴权 |
+| P1-10 | Auto-thread + `ThreadParticipationTracker` | 持久化线程参与集 |
+
 ### P2 — 体验对齐
 
 | ID | 功能 |
@@ -164,12 +173,13 @@ sequenceDiagram
 | **P1：日常** |
 | 入站图片/文件 | ✅ | ❌ | P1 | |
 | 语音附件 Opus | ✅ | ❌ | P1 | |
-| Slash `/status` 等 | ✅ | ❌ | P1 | Rust 仅有 register/respond 原语 |
-| Slash defer + follow-up | ✅ | 🟡 | P1 | `defer_interaction` 有；无业务接线 |
-| 处理中反应 👀✅❌ | ✅ | 🟡 | P1 | REST 有；trait 默认 no-op |
-| Typing | ✅ | ❌ | P1 | |
-| Free-response 频道 | ✅ | ❌ | P1 | |
-| Allowed/ignored channels | ✅ | ❌ | P1 | |
+| Slash `/status` 等 | ✅ | ✅ | P1 MVP | 启动 `register_slash_commands` + `INTERACTION_CREATE` |
+| Slash defer + follow-up | ✅ | ✅ | P1 MVP | `defer_interaction` + `send_incoming_reply` |
+| 处理中反应 👀✅❌ | ✅ | ✅ | P1 MVP | `Gateway` 反应生命周期 + `PlatformAdapter::add_reaction` |
+| Typing | ✅ | ✅ | P1 MVP | `trigger_typing` + `route_message` spawn |
+| Free-response 频道 | ✅ | ✅ | P1 MVP | `DiscordConfig.free_response_channels` + `filter.rs` |
+| Allowed/ignored channels | ✅ | ✅ | P1 MVP | `allowed_channels` / `ignored_channels` |
+| 流式占位 `...` → 最终正文 | ✅ | ✅ | P1 MVP | `route_streaming` + `edit_message` |
 | Allowed roles | ✅ | ❌ | P1 | |
 | Auto-thread + 持久化 | ✅ | 🟡 | P1 | `create_thread` REST 有 |
 | 系统消息过滤（type≠0/19） | ✅ | ✅ | P0 | `filter.rs` F-08；P1 扩展更多 type |
@@ -208,7 +218,10 @@ P0 建议先支持：
 | `token` | `DISCORD_BOT_TOKEN` | ✅ |
 | `require_mention` | `DISCORD_REQUIRE_MENTION` | ✅ |
 | `allowed_users` | `DISCORD_ALLOWED_USERS` | ✅ |
-| `application_id` | — | ⬜ P1（slash） |
+| `application_id` | — | ✅ P1 MVP（slash） |
+| `free_response_channels` / `allowed_channels` / `ignored_channels` | `DISCORD_*` | ✅ P1 MVP |
+| `reactions` / `DISCORD_REACTIONS` | — | ✅ P1 MVP |
+| `slash_commands` / `guild_id` | `DISCORD_GUILD_ID` | ✅ P1 MVP |
 | `intents` | — | ✅ 至少 GUILDS \| GUILD_MESSAGES \| MESSAGE_CONTENT |
 | `group_sessions_per_user` | — | ✅ 推荐 |
 
@@ -245,7 +258,8 @@ P1+ 再接入：`free_response_channels`、`ignored_channels`、`allowed_channel
 | M1 P0 WS + 入站 | 2026-05-27 | ✅ `gateway_loop` + CLI mpsc |
 | M2 P0 鉴权 + mention | 2026-05-27 | ✅ filter + `platform_requirements` |
 | M3 P0 Rust 测试 + 手工 E2E | 2026-05-27 | ✅ 自动化测试；E2E 待人工 checklist |
-| M4 P1 附件 + slash 基础 | TBD | ⬜ |
+| M4 P1 MVP（反应 + Typing + 频道过滤 + Slash + 流式 edit） | 2026-05-27 | ✅ |
+| M5 P1.2 附件 + Opus + Auto-thread | TBD | ⬜ |
 
 ---
 
@@ -263,3 +277,4 @@ P1+ 再接入：`free_response_channels`、`ignored_channels`、`allowed_channel
 |------|------|
 | 2026-05-27 | 初版：P0=对话调通，功能对比表与 P1–P3 backlog |
 | 2026-05-27 | P0 实现完成：模块拆分、WS 闭环、测试套件、§5/§8 状态更新 |
+| 2026-05-27 | P1 MVP：Slash 入站/defer、频道过滤、反应/typing、流式 edit；§3.1 P1.2 backlog |

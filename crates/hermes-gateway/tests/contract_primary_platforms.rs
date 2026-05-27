@@ -97,6 +97,8 @@ fn incoming(platform: &str, user_id: &str, text: &str) -> IncomingMessage {
         media_types: vec![],
         message_id: None,
         is_dm: true,
+        interaction_id: None,
+        interaction_token: None,
     }
 }
 

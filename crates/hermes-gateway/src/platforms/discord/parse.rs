@@ -165,7 +165,32 @@ pub fn raw_to_incoming(raw: &RawDiscordMessage) -> IncomingMessage {
         media_types: vec![],
         message_id: Some(raw.message_id.clone()),
         is_dm: raw.guild_id.is_none(),
+        interaction_id: None,
+        interaction_token: None,
     }
+}
+
+pub fn interaction_to_incoming(interaction: &InteractionData) -> Option<IncomingMessage> {
+    if interaction.interaction_type != INTERACTION_TYPE_APPLICATION_COMMAND {
+        return None;
+    }
+    let command_name = interaction.command_name.as_ref()?;
+    let channel_id = interaction.channel_id.as_ref()?;
+    Some(IncomingMessage {
+        platform: "discord".into(),
+        chat_id: channel_id.clone(),
+        user_id: interaction
+            .user_id
+            .clone()
+            .unwrap_or_else(|| "unknown".into()),
+        text: format!("/{command_name}"),
+        media_urls: vec![],
+        media_types: vec![],
+        message_id: None,
+        is_dm: interaction.guild_id.is_none(),
+        interaction_id: Some(interaction.id.clone()),
+        interaction_token: Some(interaction.token.clone()),
+    })
 }
 
 pub fn parse_message_create(data: &serde_json::Value) -> Option<IncomingDiscordMessage> {
@@ -204,30 +229,22 @@ pub fn parse_message_update(data: &serde_json::Value) -> Option<MessageUpdateEve
     })
 }
 
+/// Discord application command interaction (`type` = 2).
+pub const INTERACTION_TYPE_APPLICATION_COMMAND: u8 = 2;
+
 pub fn parse_interaction_create(data: &serde_json::Value) -> Option<InteractionData> {
-    let id = data.get("id")?.as_str()?.to_string();
-    let application_id = data.get("application_id")?.as_str()?.to_string();
+    let id = json_snowflake(data.get("id")?)?;
+    let application_id = json_snowflake(data.get("application_id")?)?;
     let interaction_type = data.get("type")?.as_u64()? as u8;
     let token = data.get("token")?.as_str()?.to_string();
-    let channel_id = data
-        .get("channel_id")
-        .and_then(|v| v.as_str())
-        .map(String::from);
-    let guild_id = data
-        .get("guild_id")
-        .and_then(|v| v.as_str())
-        .map(String::from);
+    let channel_id = data.get("channel_id").and_then(json_snowflake);
+    let guild_id = data.get("guild_id").and_then(json_snowflake);
     let user_id = data
         .get("member")
         .and_then(|m| m.get("user"))
         .and_then(|u| u.get("id"))
-        .and_then(|v| v.as_str())
-        .or_else(|| {
-            data.get("user")
-                .and_then(|u| u.get("id"))
-                .and_then(|v| v.as_str())
-        })
-        .map(String::from);
+        .and_then(json_snowflake)
+        .or_else(|| data.get("user").and_then(|u| u.get("id")).and_then(json_snowflake));
     let cmd_data = data.get("data");
     let command_name = cmd_data
         .and_then(|d| d.get("name"))
@@ -423,5 +440,25 @@ mod tests {
         });
         let raw = parse_message_create_raw(&data).unwrap();
         assert_eq!(raw.message_type, 6);
+    }
+
+    #[test]
+    fn p07_interaction_create_maps_to_slash_incoming() {
+        let data = serde_json::json!({
+            "id": 9001,
+            "application_id": 42,
+            "type": 2,
+            "token": "secret-token",
+            "channel_id": 100,
+            "guild_id": 200,
+            "member": { "user": { "id": 7 } },
+            "data": { "name": "new" }
+        });
+        let interaction = parse_interaction_create(&data).unwrap();
+        let incoming = interaction_to_incoming(&interaction).unwrap();
+        assert_eq!(incoming.text, "/new");
+        assert_eq!(incoming.chat_id, "100");
+        assert_eq!(incoming.user_id, "7");
+        assert!(incoming.interaction_token.is_some());
     }
 }

@@ -181,14 +181,34 @@ impl DiscordInner {
         Ok(msg.id)
     }
 
+    pub async fn trigger_typing(&self, channel_id: &str) -> Result<(), GatewayError> {
+        let url = format!("{DISCORD_API_BASE}/channels/{channel_id}/typing");
+        let resp = self
+            .client
+            .post(&url)
+            .header("Authorization", self.auth_header())
+            .header("Content-Length", "0")
+            .send()
+            .await
+            .map_err(|e| GatewayError::SendFailed(format!("Discord typing failed: {e}")))?;
+        if !resp.status().is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GatewayError::SendFailed(format!(
+                "Discord typing API error: {text}"
+            )));
+        }
+        Ok(())
+    }
+
     pub async fn add_reaction(
         &self,
         channel_id: &str,
         message_id: &str,
         emoji: &str,
     ) -> Result<(), GatewayError> {
+        let encoded = encode_emoji(emoji);
         let url = format!(
-            "{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}/reactions/{emoji}/@me"
+            "{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}/reactions/{encoded}/@me"
         );
         let resp = self
             .client
@@ -213,8 +233,9 @@ impl DiscordInner {
         message_id: &str,
         emoji: &str,
     ) -> Result<(), GatewayError> {
+        let encoded = encode_emoji(emoji);
         let url = format!(
-            "{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}/reactions/{emoji}/@me"
+            "{DISCORD_API_BASE}/channels/{channel_id}/messages/{message_id}/reactions/{encoded}/@me"
         );
         let resp = self
             .client
