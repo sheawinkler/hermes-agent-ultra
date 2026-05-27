@@ -13,7 +13,7 @@
 
 use std::path::PathBuf;
 use std::sync::{OnceLock, RwLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use regex::Regex;
 use serde_json::{Map, Value};
@@ -40,6 +40,45 @@ const DISK_FALLBACK_REMAINING: Duration = Duration::from_secs(300);
 
 /// HTTP timeout for the network fetch. Python uses `timeout=15`.
 const HTTP_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Google models excluded from provider catalogs.
+///
+/// Verbatim port of `_GOOGLE_HIDDEN_MODELS` in `agent/models_dev.py`.
+/// Low-TPM Gemma models and stale/retired Gemini slugs that still surface
+/// through models.dev but either 404 on current Google endpoints or trip
+/// quota walls under agent traffic.
+const GOOGLE_HIDDEN_MODELS: &[&str] = &[
+    "gemma-4-31b-it",
+    "gemma-4-26b-it",
+    "gemma-4-26b-a4b-it",
+    "gemma-3-1b",
+    "gemma-3-1b-it",
+    "gemma-3-2b",
+    "gemma-3-2b-it",
+    "gemma-3-4b",
+    "gemma-3-4b-it",
+    "gemma-3-12b",
+    "gemma-3-12b-it",
+    "gemma-3-27b",
+    "gemma-3-27b-it",
+    "gemini-1.5-flash",
+    "gemini-1.5-pro",
+    "gemini-1.5-flash-8b",
+    "gemini-2.0-flash",
+    "gemini-2.0-flash-lite",
+];
+
+/// Returns true when a model should be excluded from provider catalogs.
+///
+/// Currently only applies to Google/Gemini (low-TPM Gemma variants and
+/// retired Gemini slugs). The provider argument must be the **Hermes**
+/// provider ID (e.g. `"gemini"` or `"google"`).
+fn should_hide(provider: &str, model_id: &str) -> bool {
+    matches!(provider, "gemini" | "google")
+        && GOOGLE_HIDDEN_MODELS
+            .iter()
+            .any(|h| h.eq_ignore_ascii_case(model_id))
+}
 
 /// Substring/regex patterns that indicate non-agentic / noise models —
 /// TTS, embedding, dated previews, image-only, etc. Verbatim port of
@@ -130,6 +169,16 @@ impl ModelsDevClient {
         Self::new(MODELS_DEV_URL, cache::default_cache_path())
     }
 
+    // ---------- disk mtime helper ----------
+
+    /// Return the age of the on-disk cache file, or `None` if missing /
+    /// unreadable / clock-skewed. Mirrors `_disk_cache_age_seconds` in Python.
+    fn disk_cache_age(&self) -> Option<Duration> {
+        let meta = std::fs::metadata(&self.cache_path).ok()?;
+        let modified = meta.modified().ok()?;
+        SystemTime::now().duration_since(modified).ok()
+    }
+
     // ---------- test-only seam ----------
 
     /// Replace the in-memory cache with a pre-built registry. Intended for
@@ -147,18 +196,42 @@ impl ModelsDevClient {
 
     /// Fetch the full registry. Resolution order:
     /// 1. Fresh in-memory cache (within [`CACHE_TTL`]).
-    /// 2. Network fetch (`base_url`); persist to disk on success.
-    /// 3. Disk cache (treated as expiring in [`DISK_FALLBACK_REMAINING`]).
-    /// 4. Empty object (caller decides how to handle).
+    /// 2. Fresh-by-mtime disk cache — skips the network on cold-start processes
+    ///    when a recent snapshot already exists on disk. Anchors the in-memory
+    ///    TTL to the remaining disk freshness so we don't extend an ageing cache
+    ///    by another full hour. Mirrors Python's Stage 2.
+    /// 3. Network fetch (`base_url`); persist to disk on success.
+    /// 4. Disk cache (treated as expiring in [`DISK_FALLBACK_REMAINING`]).
+    /// 5. Empty object (caller decides how to handle).
     pub async fn fetch(&self, force_refresh: bool) -> Value {
         if !force_refresh {
-            let state = self.state.read().expect("cache lock poisoned");
-            if state.is_fresh() && state.is_populated() {
-                return state.data.clone();
+            // Stage 1: hot in-memory cache.
+            {
+                let state = self.state.read().expect("cache lock poisoned");
+                if state.is_fresh() && state.is_populated() {
+                    return state.data.clone();
+                }
+            }
+
+            // Stage 2: fresh-by-mtime disk cache — avoids the network on
+            // cold-start processes.
+            if let Some(age) = self.disk_cache_age() {
+                if age < CACHE_TTL {
+                    if let Some(disk) = cache::load(&self.cache_path) {
+                        let mut state = self.state.write().expect("cache lock poisoned");
+                        state.data = disk.clone();
+                        let now = Instant::now();
+                        state.last_refresh = Some(now);
+                        state.expires_at = Some(now + CACHE_TTL.saturating_sub(age));
+                        drop(state);
+                        debug!("Loaded models.dev from fresh disk cache (age={age:.0?})");
+                        return disk;
+                    }
+                }
             }
         }
 
-        // Try network.
+        // Stage 3: network.
         match self.http.get(&self.base_url).send().await {
             Ok(resp) => {
                 if resp.status().is_success() {
@@ -228,9 +301,32 @@ impl ModelsDevClient {
     // ---------- look-ups (sync, off the in-memory snapshot) ----------
 
     /// Look up the context window for a Hermes `(provider, model)` pair.
+    ///
+    /// Resolution order (mirrors `lookup_models_dev_context` in Python):
+    /// 1. Exact match, then case-insensitive fallback.
+    /// 2. `:cloud` / `-cloud` suffix variants — some providers (e.g. ollama-cloud)
+    ///    store model IDs with these suffixes while the live API returns bare names.
     pub fn lookup_context(&self, provider: &str, model: &str) -> Option<u64> {
-        let entry = self.find_model_entry(provider, model)?;
-        parse::extract_context(&entry)
+        let models = self.provider_models_map(provider)?;
+
+        // Direct match (exact then case-insensitive).
+        if let Some((_, entry)) = find_entry_case_insensitive(&models, model) {
+            if let Some(ctx) = parse::extract_context(entry) {
+                return Some(ctx);
+            }
+        }
+
+        // Suffix fallback.
+        for suffix in [":cloud", "-cloud"] {
+            let suffixed = format!("{model}{suffix}");
+            if let Some((_, entry)) = find_entry_case_insensitive(&models, &suffixed) {
+                if let Some(ctx) = parse::extract_context(entry) {
+                    return Some(ctx);
+                }
+            }
+        }
+
+        None
     }
 
     /// Resolve the compact capability struct for a Hermes `(provider, model)` pair.
@@ -260,16 +356,23 @@ impl ModelsDevClient {
         Some(parse::parse_provider_info(&mdev_id, raw))
     }
 
-    /// All model IDs for a Hermes provider (any tool_call value, no filtering).
+    /// All model IDs for a Hermes provider (any tool_call value).
+    ///
+    /// Excludes noise models hidden from the catalog (e.g. low-TPM Gemma
+    /// variants and retired Gemini slugs for the Google/Gemini provider).
     pub fn list_provider_models(&self, provider: &str) -> Vec<String> {
-        match self.provider_models_map(provider) {
-            Some(m) => m.keys().cloned().collect(),
-            None => Vec::new(),
-        }
+        let Some(models) = self.provider_models_map(provider) else {
+            return Vec::new();
+        };
+        models
+            .keys()
+            .filter(|mid| !should_hide(provider, mid))
+            .cloned()
+            .collect()
     }
 
-    /// Model IDs suitable for agentic use: `tool_call=true` AND not matching
-    /// the noise patterns (see [`noise_re`]).
+    /// Model IDs suitable for agentic use: `tool_call=true`, not matching
+    /// the noise patterns (see [`noise_re`]), and not hidden from catalog.
     pub fn list_agentic_models(&self, provider: &str) -> Vec<String> {
         let Some(models) = self.provider_models_map(provider) else {
             return Vec::new();
@@ -277,10 +380,11 @@ impl ModelsDevClient {
         models
             .iter()
             .filter(|(mid, entry)| {
-                entry
-                    .as_object()
-                    .map(|o| o.get("tool_call").and_then(Value::as_bool).unwrap_or(false))
-                    .unwrap_or(false)
+                !should_hide(provider, mid)
+                    && entry
+                        .as_object()
+                        .map(|o| o.get("tool_call").and_then(Value::as_bool).unwrap_or(false))
+                        .unwrap_or(false)
                     && !noise_re().is_match(mid)
             })
             .map(|(mid, _)| mid.clone())
@@ -624,10 +728,10 @@ mod tests {
         // claude-3-tts excluded (matches `-tts\b` noise pattern).
         assert_eq!(models, vec!["claude-haiku-3-5", "claude-sonnet-4-5"]);
 
-        let mut g_models = c.list_agentic_models("gemini");
-        g_models.sort();
-        // embedding-001 excluded (tool_call=false), gemini-live-001 excluded (`live-`).
-        assert_eq!(g_models, vec!["gemini-2.0-flash"]);
+        let g_models = c.list_agentic_models("gemini");
+        // embedding-001 excluded (tool_call=false), gemini-live-001 excluded
+        // (`live-` noise pattern), gemini-2.0-flash excluded (GOOGLE_HIDDEN_MODELS).
+        assert!(g_models.is_empty());
     }
 
     #[test]
@@ -666,6 +770,77 @@ mod tests {
         let c = ModelsDevClient::new("http://invalid/", dir.path().join("c.json"));
         let hits = c.search("claude", None, 5);
         assert!(hits.is_empty());
+    }
+
+    #[test]
+    fn lookup_context_cloud_suffix_fallback() {
+        // Provider stores "kimi-k2.6:cloud" but caller passes "kimi-k2.6".
+        let dir = tempfile::tempdir().unwrap();
+        let c = ModelsDevClient::new("http://invalid/", dir.path().join("c.json"));
+        c.seed_cache(json!({
+            "kimi-for-coding": {
+                "models": {
+                    "kimi-k2.6:cloud": {"limit": {"context": 131072}},
+                    "kimi-k2.6-cloud": {"limit": {"context": 65536}}
+                }
+            }
+        }));
+        // mapping: "kimi-coding" → "kimi-for-coding"
+        assert_eq!(
+            c.lookup_context("kimi-coding", "kimi-k2.6"),
+            Some(131_072)
+        );
+    }
+
+    #[test]
+    fn lookup_context_dash_cloud_suffix_fallback() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = ModelsDevClient::new("http://invalid/", dir.path().join("c.json"));
+        c.seed_cache(json!({
+            "kimi-for-coding": {
+                "models": {
+                    "kimi-k2.6-cloud": {"limit": {"context": 65536}}
+                }
+            }
+        }));
+        assert_eq!(
+            c.lookup_context("kimi-coding", "kimi-k2.6"),
+            Some(65_536)
+        );
+    }
+
+    #[test]
+    fn google_hidden_models_excluded_from_list_provider_models() {
+        let c = client_with_fixture();
+        let models = c.list_provider_models("gemini");
+        assert!(!models.contains(&"gemini-2.0-flash".to_string()));
+        // Non-hidden models still present (even though embedding isn't agentic)
+        assert!(models.contains(&"embedding-001".to_string()));
+    }
+
+    #[test]
+    fn google_hidden_models_excluded_from_list_agentic_models() {
+        let c = client_with_fixture();
+        let models = c.list_agentic_models("gemini");
+        assert!(!models.contains(&"gemini-2.0-flash".to_string()));
+    }
+
+    #[test]
+    fn should_hide_is_case_insensitive() {
+        assert!(should_hide("google", "Gemini-2.0-Flash"));
+        assert!(should_hide("gemini", "GEMINI-1.5-PRO"));
+        assert!(!should_hide("anthropic", "gemini-2.0-flash"));
+    }
+
+    #[tokio::test]
+    async fn fetch_uses_disk_cache_when_fresh_by_mtime() {
+        let dir = tempfile::tempdir().unwrap();
+        let cache_path = dir.path().join("c.json");
+        cache::save(&cache_path, &fixture()).unwrap();
+        // Bogus URL — network will fail; should load from fresh disk cache.
+        let c = ModelsDevClient::new("http://127.0.0.1:1/api.json", cache_path);
+        let v = c.fetch(false).await;
+        assert!(v.get("anthropic").is_some());
     }
 
     #[tokio::test]
