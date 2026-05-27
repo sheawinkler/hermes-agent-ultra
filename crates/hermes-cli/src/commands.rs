@@ -101,6 +101,7 @@ fn mask_secret_value(secret: &str) -> String {
 
 /// All supported slash commands and their descriptions.
 pub const SLASH_COMMANDS: &[(&str, &str)] = &[
+    ("/start", "Acknowledge platform start pings without a reply"),
     ("/new", "Start a new session"),
     ("/reset", "Reset the current session (clear messages)"),
     (
@@ -3400,6 +3401,7 @@ pub async fn handle_slash_command(
     args: &[&str],
 ) -> Result<CommandResult, AgentError> {
     match canonical_command(cmd) {
+        "/start" => Ok(CommandResult::Handled),
         "/new" => {
             app.new_session();
             emit_command_output(app, format!("[New session started: {}]", app.session_id));
@@ -25036,6 +25038,13 @@ mod tests {
         let content = messages[0].content.as_deref().unwrap_or("");
         assert!(content.contains("done"));
         assert!(content.contains("Attached image"));
+    }
+
+    #[test]
+    fn test_start_command_is_registered_and_completable() {
+        assert!(SLASH_COMMANDS.iter().any(|(name, _)| *name == "/start"));
+        let results = autocomplete("/sta");
+        assert!(results.contains(&"/start"));
     }
 
     #[test]
