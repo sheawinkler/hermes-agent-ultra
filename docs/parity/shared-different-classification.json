@@ -220,6 +220,13 @@
       "ticket": 25
     },
     {
+      "path": "plugins/hermes-achievements/dashboard/dist/index.js",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra keeps the bundled achievements dashboard on its local static-English bearer-token bundle because this Rust-first tree does not vendor upstream's dashboard i18n/auth Python source stack; focused contracts cover the retained host-SDK and auth assumptions.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
       "path": "plugins/video_gen",
       "classification": "functional",
       "rationale": "Video generation plugin differences affect media tool routing and provider packaging behavior.",
@@ -540,6 +547,27 @@
       "rationale": "Kanban plugin differences affect plugin runtime behavior.",
       "owner": "sheawinkler",
       "ticket": 25
+    },
+    {
+      "path": "plugins/kanban/dashboard/dist/index.js",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra intentionally keeps the local kanban dashboard bundle as a legacy Python-dashboard shim while the Rust CLI owns kanban runtime behavior; upstream's expanded i18n, bulk drag/delete, and Python kanban_db API additions are not vendored into this Rust-first tree.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/kanban/dashboard/dist/style.css",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra intentionally preserves the local kanban dashboard layout and theme overrides instead of adopting upstream's newer multi-drag/trash CSS, because the corresponding Python dashboard interactions are not vendored in the Rust-first runtime.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/kanban/dashboard/plugin_api.py",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra retains the local kanban dashboard API shim against absent upstream hermes_cli Python sources; Rust kanban command behavior is tracked separately, so upstream's expanded Python dashboard endpoints are not copied wholesale.",
+      "owner": "sheawinkler",
+      "ticket": 304
     },
     {
       "path": "plugins/observability",

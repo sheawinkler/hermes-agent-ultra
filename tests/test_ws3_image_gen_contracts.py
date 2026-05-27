@@ -141,6 +141,189 @@ def test_openai_url_cache_failure_falls_back_to_original_url(monkeypatch):
     assert result["image"] == "https://example.com/signed.png"
 
 
+def test_openai_codex_builds_streaming_responses_payload(monkeypatch):
+    plugin = _load_plugin(
+        monkeypatch,
+        "openai_codex_payload",
+        "plugins/image_gen/openai-codex/__init__.py",
+    )
+
+    payload = plugin._build_responses_payload(
+        prompt="draw a red barn",
+        size="1536x1024",
+        quality="high",
+    )
+
+    assert payload["model"] == "gpt-5.4"
+    assert payload["stream"] is True
+    assert payload["input"] == [{
+        "type": "message",
+        "role": "user",
+        "content": [{"type": "input_text", "text": "draw a red barn"}],
+    }]
+    assert payload["tools"] == [{
+        "type": "image_generation",
+        "model": "gpt-image-2",
+        "size": "1536x1024",
+        "quality": "high",
+        "output_format": "png",
+        "background": "opaque",
+        "partial_images": 1,
+    }]
+    assert payload["tool_choice"] == {
+        "type": "allowed_tools",
+        "mode": "required",
+        "tools": [{"type": "image_generation"}],
+    }
+
+
+def test_openai_codex_sse_parser_extracts_latest_image(monkeypatch):
+    plugin = _load_plugin(
+        monkeypatch,
+        "openai_codex_sse",
+        "plugins/image_gen/openai-codex/__init__.py",
+    )
+
+    class FakeResponse:
+        def iter_lines(self):
+            return iter([
+                b"event: response.image_generation_call.partial_image",
+                b'data: {"partial_image_b64": "partial-image"}',
+                b"",
+                ": keep-alive",
+                "event: response.output_item.done",
+                'data: {"item": {"type": "image_generation_call", "result": "final-image"}}',
+                "",
+                "data: [DONE]",
+                "",
+            ])
+
+    events = list(plugin._iter_sse_json(FakeResponse()))
+
+    assert events[0]["type"] == "response.image_generation_call.partial_image"
+    assert plugin._extract_image_b64(events[0]) == "partial-image"
+    assert plugin._extract_image_b64(events[1]) == "final-image"
+    assert plugin._extract_image_b64({"output": events}) == "final-image"
+
+
+def test_openai_codex_collects_image_from_raw_httpx_sse(monkeypatch):
+    plugin = _load_plugin(
+        monkeypatch,
+        "openai_codex_collect",
+        "plugins/image_gen/openai-codex/__init__.py",
+    )
+
+    aux_mod = types.ModuleType("agent.auxiliary_client")
+    aux_mod._codex_cloudflare_headers = lambda token: {"X-Codex-Test": token}
+    monkeypatch.setitem(sys.modules, "agent.auxiliary_client", aux_mod)
+
+    captured: dict[str, object] = {}
+
+    class FakeTimeout:
+        def __init__(self, *args, **kwargs):
+            captured["timeout_args"] = args
+            captured["timeout_kwargs"] = kwargs
+
+    class FakeStream:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def raise_for_status(self):
+            return None
+
+        def iter_lines(self):
+            return iter([
+                b"event: response.image_generation_call.partial_image",
+                b'data: {"partial_image_b64": "partial-image"}',
+                b"",
+                b"event: response.output_item.done",
+                b'data: {"item": {"type": "image_generation_call", "result": "final-image"}}',
+                b"",
+            ])
+
+    class FakeClient:
+        def __init__(self, *, timeout, headers):
+            captured["timeout"] = timeout
+            captured["headers"] = headers
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def stream(self, method, url, *, json):
+            captured["method"] = method
+            captured["url"] = url
+            captured["json"] = json
+            return FakeStream()
+
+    fake_httpx = types.ModuleType("httpx")
+    fake_httpx.Timeout = FakeTimeout
+    fake_httpx.Client = FakeClient
+    fake_httpx.HTTPStatusError = RuntimeError
+    monkeypatch.setitem(sys.modules, "httpx", fake_httpx)
+
+    image = plugin._collect_image_b64(
+        "codex-token",
+        prompt="draw with codex auth",
+        size="1024x1024",
+        quality="medium",
+    )
+
+    assert image == "final-image"
+    assert captured["method"] == "POST"
+    assert captured["url"] == "https://chatgpt.com/backend-api/codex/responses"
+    assert captured["headers"] == {
+        "X-Codex-Test": "codex-token",
+        "Accept": "text/event-stream",
+        "Authorization": "Bearer codex-token",
+        "Content-Type": "application/json",
+    }
+    assert captured["json"]["stream"] is True
+    assert captured["json"]["tools"][0]["model"] == "gpt-image-2"
+    assert captured["timeout_args"] == (300.0,)
+    assert captured["timeout_kwargs"]["read"] == 300.0
+
+
+def test_openai_codex_generate_uses_httpx_dependency_not_openai_sdk(monkeypatch):
+    plugin = _load_plugin(
+        monkeypatch,
+        "openai_codex_generate",
+        "plugins/image_gen/openai-codex/__init__.py",
+    )
+
+    monkeypatch.setitem(sys.modules, "httpx", types.ModuleType("httpx"))
+    monkeypatch.setitem(sys.modules, "openai", None)
+    plugin._read_codex_access_token = lambda: "codex-token"
+
+    captured: dict[str, object] = {}
+
+    def collect_image(token, *, prompt, size, quality):
+        captured.update({"token": token, "prompt": prompt, "size": size, "quality": quality})
+        return "b64-image"
+
+    plugin._collect_image_b64 = collect_image
+    plugin.save_b64_image = lambda b64, *, prefix: f"/cache/{prefix}-{b64}.png"
+
+    result = plugin.OpenAICodexImageGenProvider().generate(
+        "draw via codex auth",
+        aspect_ratio="portrait",
+    )
+
+    assert result["success"] is True
+    assert result["image"] == "/cache/openai_codex_gpt-image-2-medium-b64-image.png"
+    assert captured == {
+        "token": "codex-token",
+        "prompt": "draw via codex auth",
+        "size": "1024x1536",
+        "quality": "medium",
+    }
+
+
 def test_xai_uses_shared_credentials_schema_model_and_url_cache(monkeypatch):
     plugin = _load_plugin(
         monkeypatch,
