@@ -1223,6 +1223,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c03c416ed1a30fbb027ef484ba6ab6f80e1eada675e1a2b92fd673c045a1f1d"
 
 [[package]]
+name = "ddgs"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42528f4b2fce4148da4699972a0aa2473834d834fa4413f974eee9b80d6fc0b0"
+dependencies = [
+ "clap",
+ "regex",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "url",
+]
+
+[[package]]
 name = "deadpool"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2439,6 +2455,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chrono",
+ "ddgs",
  "futures",
  "hermes-config",
  "hermes-core",

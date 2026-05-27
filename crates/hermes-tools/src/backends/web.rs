@@ -1069,11 +1069,12 @@ impl WebSearchBackend for SearxngSearchBackend {
 ///
 /// Priority:
 /// 1. Explicit `HERMES_WEB_SEARCH_BACKEND` override
-///    - `exa`, `tavily`, `searxng`, `fallback`/`duckduckgo`
+///    - `exa`, `tavily`, `searxng`, `ddgs`/`duckduckgo_ddgs`, `fallback`/`duckduckgo`
 /// 2. Exa (`EXA_API_KEY`)
 /// 3. Tavily (`TAVILY_API_KEY`, optional `TAVILY_BASE_URL`)
 /// 4. SearXNG (`SEARXNG_BASE_URL`)
-/// 5. Free fallback chain (DuckDuckGo Lite, DuckDuckGo Instant, vertical search)
+/// 5. DuckDuckGo via ddgs crate (default when no API keys configured)
+/// 6. Free fallback chain (DuckDuckGo Lite, DuckDuckGo Instant, vertical search)
 pub fn search_backend_from_env_or_fallback() -> Box<dyn WebSearchBackend> {
     let choice = search_backend_choice_from_env();
     debug!(backend = choice, "web_search backend resolved from environment");
@@ -1087,6 +1088,7 @@ pub fn search_backend_from_env_or_fallback() -> Box<dyn WebSearchBackend> {
         "searxng" => SearxngSearchBackend::from_env()
             .map(|b| Box::new(b) as Box<dyn WebSearchBackend>)
             .unwrap_or_else(|_| Box::new(FallbackSearchBackend::new())),
+        "ddgs" => Box::new(DdgsSearchBackend::new()) as Box<dyn WebSearchBackend>,
         _ => Box::new(FallbackSearchBackend::new()),
     }
 }
@@ -1097,6 +1099,7 @@ fn search_backend_choice_from_env() -> &'static str {
             "exa" => return "exa",
             "tavily" => return "tavily",
             "searxng" | "searx" => return "searxng",
+            "ddgs" | "duckduckgo_ddgs" => return "ddgs",
             "fallback" | "duckduckgo" | "ddg" | "free" | "none" | "off" | "disabled" => {
                 return "fallback";
             }
@@ -1111,7 +1114,7 @@ fn search_backend_choice_from_env() -> &'static str {
     } else if env_present_nonempty("SEARXNG_BASE_URL") {
         "searxng"
     } else {
-        "fallback"
+        "ddgs"
     }
 }
 
@@ -1541,5 +1544,98 @@ mod firecrawl_managed_tests {
         // No managed config either → expect Err.
         let err = FirecrawlExtractBackend::from_env_or_managed().unwrap_err();
         assert!(err.to_string().contains("FIRECRAWL_API_KEY"));
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DdgsSearchBackend — DuckDuckGo via the `ddgs` Rust crate (no API key needed)
+// Ported from Python: plugins/web/ddgs/provider.py
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// DuckDuckGo search backend powered by the `ddgs` Rust crate.
+/// No API key required. Mirrors Python plugin `plugins/web/ddgs/provider.py`.
+pub struct DdgsSearchBackend;
+
+impl DdgsSearchBackend {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for DdgsSearchBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl WebSearchBackend for DdgsSearchBackend {
+    async fn search(
+        &self,
+        query: &str,
+        num_results: usize,
+        _category: Option<&str>,
+    ) -> Result<String, ToolError> {
+        let client = ddgs::Ddgs::new()
+            .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
+        let opts = ddgs::TextOptions::default().max_results(num_results.max(1));
+        let hits = client
+            .text_with_options(query, opts)
+            .await
+            .map_err(|e| ToolError::ExecutionFailed(format!("DuckDuckGo search failed: {e}")))?;
+
+        let results: Vec<serde_json::Value> = hits
+            .into_iter()
+            .enumerate()
+            .map(|(i, h)| {
+                serde_json::json!({
+                    "title":       h.title,
+                    "url":         h.href,
+                    "description": h.body,
+                    "position":    i + 1,
+                })
+            })
+            .collect();
+
+        tracing::info!(
+            "DDGS search '{}': {} results (limit {})",
+            query,
+            results.len(),
+            num_results
+        );
+        Ok(serde_json::to_string(&serde_json::json!({
+            "success": true,
+            "data": { "web": results }
+        }))
+        .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?)
+    }
+}
+
+#[cfg(test)]
+mod ddgs_tests {
+    use super::*;
+
+    #[test]
+    fn test_ddgs_backend_new_does_not_panic() {
+        let _backend = DdgsSearchBackend::new();
+    }
+
+    #[test]
+    fn test_ddgs_backend_default() {
+        let _backend = DdgsSearchBackend::default();
+    }
+
+    /// Integration test: actually calls DuckDuckGo network.
+    /// Marked #[ignore] to prevent CI network access.
+    #[tokio::test]
+    #[ignore]
+    async fn test_ddgs_search_returns_results() {
+        let backend = DdgsSearchBackend::new();
+        let result = backend.search("Rust programming language", 3, None).await;
+        assert!(result.is_ok(), "search should succeed: {:?}", result);
+        let json_str = result.unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        assert_eq!(parsed["success"], true);
+        assert!(parsed["data"]["web"].is_array());
     }
 }

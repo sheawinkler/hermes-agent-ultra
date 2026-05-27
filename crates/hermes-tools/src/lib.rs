@@ -121,7 +121,7 @@ pub use backends::todo::FileTodoBackend;
 pub use backends::tts::MultiTtsBackend;
 pub use backends::video::VisionFrameSamplingVideoBackend;
 pub use backends::web::{
-    search_backend_from_env_or_fallback, ExaSearchBackend, FallbackSearchBackend,
+    search_backend_from_env_or_fallback, DdgsSearchBackend, ExaSearchBackend, FallbackSearchBackend,
     FirecrawlExtractBackend, SimpleExtractBackend, TavilySearchBackend,
 };
 

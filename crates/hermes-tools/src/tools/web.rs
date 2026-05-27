@@ -1,4 +1,4 @@
-//! Web tools: web_search (Exa/Tavily/SearXNG) and web_extract (Firecrawl)
+//! Web tools: web_search (Exa/Tavily/SearXNG/DuckDuckGo) and web_extract (Firecrawl)
 
 use async_trait::async_trait;
 use indexmap::IndexMap;
@@ -35,7 +35,7 @@ pub trait WebExtractBackend: Send + Sync {
 // WebSearchHandler
 // ---------------------------------------------------------------------------
 
-/// Web search tool using the configured backend (Exa/Tavily/SearXNG).
+/// Web search tool using the configured backend (Exa/Tavily/SearXNG/DuckDuckGo).
 pub struct WebSearchHandler {
     backend: Box<dyn WebSearchBackend>,
 }
@@ -102,7 +102,7 @@ impl ToolHandler for WebSearchHandler {
 
         tool_schema(
             "web_search",
-            "Search the web using the configured provider (Exa/Tavily/SearXNG). Returns relevant results with titles, URLs, and snippets.",
+            "Search the web using the configured provider (Exa/Tavily/SearXNG/DuckDuckGo). Returns relevant results with titles, URLs, and snippets. DuckDuckGo is used by default when no API key is configured.",
             JsonSchema::object(props, vec!["query".into()]),
         )
     }
