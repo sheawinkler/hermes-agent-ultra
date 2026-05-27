@@ -16,6 +16,8 @@ pub struct DiscordInboundConfig {
     pub free_response_channels: ChannelIdSet,
     pub allowed_channels: ChannelIdSet,
     pub ignored_channels: ChannelIdSet,
+    /// Thread channel IDs the bot has already joined (skip mention requirement).
+    pub thread_participation: ChannelIdSet,
 }
 
 impl DiscordInboundConfig {
@@ -32,7 +34,7 @@ impl DiscordInboundConfig {
 
 /// Whether a parsed MESSAGE_CREATE should be forwarded to the gateway.
 pub fn should_accept_message(raw: &RawDiscordMessage, cfg: &DiscordInboundConfig) -> bool {
-    if raw.content.trim().is_empty() {
+    if raw.content.trim().is_empty() && raw.attachments.is_empty() {
         return false;
     }
 
@@ -59,7 +61,8 @@ pub fn should_accept_message(raw: &RawDiscordMessage, cfg: &DiscordInboundConfig
             return false;
         }
 
-        if cfg.effective_require_mention(&raw.channel_id, true) {
+        let in_tracked_thread = cfg.thread_participation.contains(&raw.channel_id);
+        if cfg.effective_require_mention(&raw.channel_id, true) && !in_tracked_thread {
             let bot_id = match cfg.bot_user_id.as_deref() {
                 Some(id) => id,
                 None => return false,
@@ -79,7 +82,7 @@ fn is_allowed_message_type(t: u8) -> bool {
     t == MESSAGE_TYPE_DEFAULT || t == MESSAGE_TYPE_REPLY
 }
 
-fn content_mentions_bot(content: &str, bot_id: &str) -> bool {
+pub(crate) fn content_mentions_bot(content: &str, bot_id: &str) -> bool {
     content.contains(&format!("<@{bot_id}>")) || content.contains(&format!("<@!{bot_id}>"))
 }
 
@@ -99,6 +102,9 @@ mod tests {
             guild_id: Some("guild1".into()),
             mentions: mentions.into_iter().map(String::from).collect(),
             message_type: MESSAGE_TYPE_DEFAULT,
+            attachments: vec![],
+            role_ids: vec![],
+            parent_channel_id: None,
         }
     }
 
@@ -109,6 +115,7 @@ mod tests {
             free_response_channels: ChannelIdSet::new(),
             allowed_channels: ChannelIdSet::new(),
             ignored_channels: ChannelIdSet::new(),
+            thread_participation: ChannelIdSet::new(),
         }
     }
 
@@ -125,7 +132,25 @@ mod tests {
             free_response_channels: ChannelIdSet::parse(free),
             allowed_channels: ChannelIdSet::parse(allowed),
             ignored_channels: ChannelIdSet::parse(ignored),
+            thread_participation: ChannelIdSet::new(),
         }
+    }
+
+    #[test]
+    fn f16_accept_attachment_only_no_text() {
+        let raw = RawDiscordMessage {
+            content: String::new(),
+            attachments: vec![super::super::parse::DiscordAttachment {
+                id: "a1".into(),
+                filename: "pic.png".into(),
+                content_type: Some("image/png".into()),
+                url: "https://cdn.discordapp.com/x.png".into(),
+                size: 100,
+                waveform: None,
+            }],
+            ..human_guild("", vec![])
+        };
+        assert!(should_accept_message(&raw, &cfg(false, Some("bot99"))));
     }
 
     #[test]
@@ -181,9 +206,22 @@ mod tests {
     }
 
     #[test]
-    fn f07_reject_empty_content() {
+    fn f07_reject_empty_content_without_attachments() {
         let raw = human_guild("   ", vec![]);
         assert!(!should_accept_message(&raw, &cfg(false, Some("bot99"))));
+    }
+
+    #[test]
+    fn f17_tracked_thread_skips_mention_requirement() {
+        let raw = RawDiscordMessage {
+            channel_id: "thread-1".into(),
+            ..human_guild("hello", vec![])
+        };
+        let filter = DiscordInboundConfig {
+            thread_participation: ChannelIdSet::parse(Some("thread-1")),
+            ..cfg(true, Some("bot99"))
+        };
+        assert!(should_accept_message(&raw, &filter));
     }
 
     #[test]

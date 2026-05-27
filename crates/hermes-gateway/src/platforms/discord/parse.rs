@@ -2,6 +2,18 @@
 
 use crate::gateway::IncomingMessage;
 
+/// Parsed Discord attachment metadata from MESSAGE_CREATE.
+#[derive(Debug, Clone)]
+pub struct DiscordAttachment {
+    pub id: String,
+    pub filename: String,
+    pub content_type: Option<String>,
+    pub url: String,
+    pub size: u64,
+    /// Present on voice messages.
+    pub waveform: Option<Vec<u8>>,
+}
+
 /// Parsed MESSAGE_CREATE payload for inbound filtering.
 #[derive(Debug, Clone)]
 pub struct RawDiscordMessage {
@@ -14,6 +26,11 @@ pub struct RawDiscordMessage {
     pub guild_id: Option<String>,
     pub mentions: Vec<String>,
     pub message_type: u8,
+    pub attachments: Vec<DiscordAttachment>,
+    /// Member role snowflakes (guild messages).
+    pub role_ids: Vec<String>,
+    /// Parent channel when `channel_id` is a thread.
+    pub parent_channel_id: Option<String>,
 }
 
 /// Legacy parsed message (subset).
@@ -47,6 +64,7 @@ pub struct InteractionData {
     pub user_id: Option<String>,
     pub command_name: Option<String>,
     pub command_options: Vec<InteractionOption>,
+    pub role_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -119,10 +137,25 @@ pub fn parse_message_create_raw(data: &serde_json::Value) -> Option<RawDiscordMe
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let guild_id = data
-        .get("guild_id")
-        .and_then(|v| v.as_str())
-        .map(String::from);
+    let guild_id = data.get("guild_id").and_then(json_snowflake);
+
+    let role_ids = data
+        .get("member")
+        .and_then(|m| m.get("roles"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(json_snowflake)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    let attachments = parse_attachments(data.get("attachments"));
+
+    let parent_channel_id = data
+        .get("channel")
+        .and_then(|ch| ch.get("parent_id"))
+        .and_then(json_snowflake);
 
     let mentions = data
         .get("mentions")
@@ -149,10 +182,54 @@ pub fn parse_message_create_raw(data: &serde_json::Value) -> Option<RawDiscordMe
         guild_id,
         mentions,
         message_type,
+        attachments,
+        role_ids,
+        parent_channel_id,
     })
 }
 
-pub fn raw_to_incoming(raw: &RawDiscordMessage) -> IncomingMessage {
+pub fn parse_attachments(value: Option<&serde_json::Value>) -> Vec<DiscordAttachment> {
+    let Some(arr) = value.and_then(|v| v.as_array()) else {
+        return vec![];
+    };
+    arr.iter()
+        .filter_map(|att| {
+            let id = json_snowflake(att.get("id")?)?;
+            let url = att.get("url")?.as_str()?.to_string();
+            let filename = att
+                .get("filename")
+                .and_then(|v| v.as_str())
+                .unwrap_or("attachment")
+                .to_string();
+            let content_type = att
+                .get("content_type")
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            let size = att.get("size").and_then(|v| v.as_u64()).unwrap_or(0);
+            let waveform = att.get("waveform").and_then(|v| {
+                v.as_array().map(|arr| {
+                    arr.iter()
+                        .filter_map(|b| b.as_u64().map(|n| n as u8))
+                        .collect()
+                })
+            });
+            Some(DiscordAttachment {
+                id,
+                filename,
+                content_type,
+                url,
+                size,
+                waveform,
+            })
+        })
+        .collect()
+}
+
+pub fn raw_to_incoming(
+    raw: &RawDiscordMessage,
+    media_urls: Vec<String>,
+    media_types: Vec<String>,
+) -> IncomingMessage {
     IncomingMessage {
         platform: "discord".into(),
         chat_id: raw.channel_id.clone(),
@@ -161,12 +238,13 @@ pub fn raw_to_incoming(raw: &RawDiscordMessage) -> IncomingMessage {
             .clone()
             .unwrap_or_else(|| "unknown".into()),
         text: raw.content.clone(),
-        media_urls: vec![],
-        media_types: vec![],
+        media_urls,
+        media_types,
         message_id: Some(raw.message_id.clone()),
         is_dm: raw.guild_id.is_none(),
         interaction_id: None,
         interaction_token: None,
+        role_ids: raw.role_ids.clone(),
     }
 }
 
@@ -190,6 +268,7 @@ pub fn interaction_to_incoming(interaction: &InteractionData) -> Option<Incoming
         is_dm: interaction.guild_id.is_none(),
         interaction_id: Some(interaction.id.clone()),
         interaction_token: Some(interaction.token.clone()),
+        role_ids: interaction.role_ids.clone(),
     })
 }
 
@@ -245,6 +324,16 @@ pub fn parse_interaction_create(data: &serde_json::Value) -> Option<InteractionD
         .and_then(|u| u.get("id"))
         .and_then(json_snowflake)
         .or_else(|| data.get("user").and_then(|u| u.get("id")).and_then(json_snowflake));
+    let interaction_roles = data
+        .get("member")
+        .and_then(|m| m.get("roles"))
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(json_snowflake)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
     let cmd_data = data.get("data");
     let command_name = cmd_data
         .and_then(|d| d.get("name"))
@@ -273,6 +362,7 @@ pub fn parse_interaction_create(data: &serde_json::Value) -> Option<InteractionD
         user_id,
         command_name,
         command_options,
+        role_ids: interaction_roles,
     })
 }
 
@@ -394,7 +484,7 @@ mod tests {
         });
         let raw = parse_message_create_raw(&data).unwrap();
         assert!(raw.guild_id.is_none());
-        let inc = raw_to_incoming(&raw);
+        let inc = raw_to_incoming(&raw, vec![], vec![]);
         assert!(inc.is_dm);
     }
 
@@ -427,6 +517,27 @@ mod tests {
         });
         let raw = parse_message_create_raw(&data).unwrap();
         assert_eq!(raw.mentions.len(), 2);
+    }
+
+    #[test]
+    fn p08_parse_attachments_on_message() {
+        let data = serde_json::json!({
+            "id": "m1",
+            "channel_id": "c1",
+            "content": "",
+            "author": { "id": "u1" },
+            "attachments": [{
+                "id": "a1",
+                "filename": "voice.ogg",
+                "content_type": "audio/ogg",
+                "url": "https://cdn.discordapp.com/v.ogg",
+                "size": 200,
+                "waveform": [1, 2, 3]
+            }]
+        });
+        let raw = parse_message_create_raw(&data).unwrap();
+        assert_eq!(raw.attachments.len(), 1);
+        assert!(raw.attachments[0].waveform.is_some());
     }
 
     #[test]

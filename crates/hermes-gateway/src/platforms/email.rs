@@ -510,6 +510,7 @@ fn imap_fetch_unseen(
                 is_dm: true,
                 interaction_id: None,
                 interaction_token: None,
+                role_ids: vec![],
             });
         }
     }

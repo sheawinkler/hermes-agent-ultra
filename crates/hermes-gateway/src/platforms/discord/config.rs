@@ -118,6 +118,24 @@ pub struct DiscordConfig {
 
     /// When set, register slash commands at guild scope for faster iteration.
     pub slash_guild_id: Option<String>,
+
+    /// Max bytes per inbound attachment (0 = use default 25 MiB).
+    pub max_attachment_bytes: u64,
+
+    /// Allowed role snowflakes (OR with allowed_users at inbound auth).
+    pub allowed_roles: ChannelIdSet,
+
+    /// Allowed user snowflakes for Discord-layer auth (mirrors platform allowlist).
+    pub allowed_users: ChannelIdSet,
+
+    /// Guild id for DM role authorization when set.
+    pub dm_role_auth_guild: Option<String>,
+
+    /// Auto-create a thread on guild @mentions.
+    pub auto_thread: bool,
+
+    /// Channels where auto-thread is disabled.
+    pub no_thread_channels: ChannelIdSet,
 }
 
 impl DiscordConfig {
@@ -186,6 +204,23 @@ impl DiscordConfig {
             slash_commands_enabled: parse_slash_commands_enabled(platform_cfg),
             slash_guild_id: extra_string(platform_cfg, "guild_id")
                 .or_else(|| env_guild_id()),
+            max_attachment_bytes: parse_max_attachment_bytes(platform_cfg),
+            allowed_roles: Self::channel_set_from_sources(
+                &platform_cfg.extra,
+                "allowed_roles",
+                env_channel_list("DISCORD_ALLOWED_ROLES").as_deref(),
+                extra_string(platform_cfg, "allowed_roles").as_deref(),
+            ),
+            allowed_users: parse_allowed_users(platform_cfg),
+            dm_role_auth_guild: extra_string(platform_cfg, "dm_role_auth_guild")
+                .or_else(|| env_dm_role_auth_guild()),
+            auto_thread: parse_auto_thread(platform_cfg),
+            no_thread_channels: Self::channel_set_from_sources(
+                &platform_cfg.extra,
+                "no_thread_channels",
+                env_channel_list("DISCORD_NO_THREAD_CHANNELS").as_deref(),
+                extra_string(platform_cfg, "no_thread_channels").as_deref(),
+            ),
         }
     }
 
@@ -203,8 +238,73 @@ impl DiscordConfig {
             reactions_enabled: true,
             slash_commands_enabled: false,
             slash_guild_id: None,
+            max_attachment_bytes: super::media::DEFAULT_MAX_ATTACHMENT_BYTES,
+            allowed_roles: ChannelIdSet::new(),
+            allowed_users: ChannelIdSet::new(),
+            dm_role_auth_guild: None,
+            auto_thread: false,
+            no_thread_channels: ChannelIdSet::new(),
         }
     }
+}
+
+fn parse_max_attachment_bytes(platform_cfg: &PlatformConfig) -> u64 {
+    platform_cfg
+        .extra
+        .get("max_attachment_bytes")
+        .and_then(|v| v.as_u64())
+        .or_else(|| {
+            std::env::var("DISCORD_MAX_ATTACHMENT_BYTES")
+                .ok()
+                .and_then(|v| v.parse().ok())
+        })
+        .unwrap_or(super::media::DEFAULT_MAX_ATTACHMENT_BYTES)
+}
+
+fn parse_allowed_users(platform_cfg: &PlatformConfig) -> ChannelIdSet {
+    let mut set = ChannelIdSet::new();
+    for user in &platform_cfg.allowed_users {
+        set.extend_tokens(std::iter::once(user.as_str()));
+    }
+    for user in &platform_cfg.admin_users {
+        set.extend_tokens(std::iter::once(user.as_str()));
+    }
+    set.merge_json(platform_cfg.extra.get("allowed_users"));
+    if let Ok(env) = std::env::var("DISCORD_ALLOWED_USERS") {
+        set.extend_tokens(env.split(','));
+    }
+    set
+}
+
+fn parse_auto_thread(platform_cfg: &PlatformConfig) -> bool {
+    if let Some(v) = platform_cfg.extra.get("auto_thread") {
+        if let Some(b) = v.as_bool() {
+            return b;
+        }
+        if let Some(s) = v.as_str() {
+            return !matches!(s.trim().to_ascii_lowercase().as_str(), "0" | "false" | "no" | "off");
+        }
+    }
+    std::env::var("DISCORD_AUTO_THREAD")
+        .ok()
+        .map(|v| {
+            !matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "0" | "false" | "no" | "off"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn env_dm_role_auth_guild() -> Option<String> {
+    extra_string_from_env("DISCORD_DM_ROLE_AUTH_GUILD")
+}
+
+fn extra_string_from_env(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|s| !s.is_empty())
 }
 
 fn parse_slash_commands_enabled(platform_cfg: &PlatformConfig) -> bool {

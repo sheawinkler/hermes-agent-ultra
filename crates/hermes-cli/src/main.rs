@@ -813,6 +813,15 @@ async fn run(cli: Cli) {
         CliCommand::Completion { shell } => run_completion(shell),
         CliCommand::Uninstall { yes } => run_uninstall(yes).await,
         CliCommand::Lumio { action, model } => run_lumio(action, model).await,
+        CliCommand::Meeting {
+            action,
+            audio,
+            title,
+            mode,
+            diarize,
+        } => {
+            hermes_cli::commands::handle_cli_meeting(action, audio, title, mode, diarize).await
+        }
         CliCommand::PluginExternal(raw) => {
             hermes_cli::commands::handle_cli_external_plugin_subcommand(raw).await
         }
@@ -4471,7 +4480,38 @@ fn build_gateway_platform_access_policies(
         }
 
         let group_mode = parse_group_access_mode(platform_cfg);
-        let has_allowlist = !allowed_users.is_empty() || !admin_users.is_empty();
+        let mut allowed_roles = HashSet::new();
+        if platform.eq_ignore_ascii_case("discord") {
+            if let Ok(env_roles) = std::env::var("DISCORD_ALLOWED_ROLES") {
+                for role in env_roles.split(',') {
+                    let trimmed = role.trim();
+                    if !trimmed.is_empty() {
+                        allowed_roles.insert(trimmed.to_string());
+                    }
+                }
+            }
+            if let Some(roles_val) = platform_cfg.extra.get("allowed_roles") {
+                if let Some(arr) = roles_val.as_array() {
+                    for role in arr {
+                        if let Some(s) = role.as_str() {
+                            let trimmed = s.trim();
+                            if !trimmed.is_empty() {
+                                allowed_roles.insert(trimmed.to_string());
+                            }
+                        }
+                    }
+                } else if let Some(s) = roles_val.as_str() {
+                    for role in s.split(',') {
+                        let trimmed = role.trim();
+                        if !trimmed.is_empty() {
+                            allowed_roles.insert(trimmed.to_string());
+                        }
+                    }
+                }
+            }
+        }
+        let has_allowlist =
+            !allowed_users.is_empty() || !admin_users.is_empty() || !allowed_roles.is_empty();
         let slash_requires_allowlist = extra_bool_loose(platform_cfg, "slash_requires_allowlist")
             .or_else(|| extra_bool_loose(platform_cfg, "require_allowlist_for_slash"))
             .unwrap_or_else(|| platform.eq_ignore_ascii_case("discord") && has_allowlist);
@@ -4507,6 +4547,7 @@ fn build_gateway_platform_access_policies(
             PlatformAccessPolicy {
                 allowed_users,
                 admin_users,
+                allowed_roles,
                 group_mode,
                 slash_requires_allowlist,
                 dm_mode,
@@ -4563,6 +4604,7 @@ async fn run_api_server_inbound_loop(
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+            role_ids: vec![],
         };
         if let Err(err) = gateway.route_message(&incoming).await {
             tracing::warn!("Failed to route api_server message: {}", err);
@@ -4585,6 +4627,7 @@ async fn run_webhook_inbound_loop(gateway: Arc<Gateway>, mut rx: mpsc::Receiver<
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+            role_ids: vec![],
         };
         if let Err(err) = gateway.route_message(&incoming).await {
             tracing::warn!("Failed to route webhook message: {}", err);
@@ -5187,6 +5230,7 @@ async fn run_telegram_poll_loop(gateway: Arc<Gateway>, adapter: Arc<TelegramAdap
                         is_dm: msg.chat_id > 0,
                         interaction_id: None,
                         interaction_token: None,
+                        role_ids: vec![],
                     };
 
                     if let Err(err) = gateway.route_message(&incoming).await {

@@ -801,6 +801,7 @@ async fn handle_callback_request(
                         is_dm: !is_group,
                         interaction_id: None,
                         interaction_token: None,
+                        role_ids: vec![],
                     })
                     .await;
             }

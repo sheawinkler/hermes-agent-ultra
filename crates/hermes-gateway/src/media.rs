@@ -125,6 +125,47 @@ impl MediaCache {
         self.cache_file(url, "documents", file_name).await
     }
 
+    /// Write raw bytes into the cache (no HTTP fetch).
+    pub async fn store_bytes(
+        &self,
+        subdir: &str,
+        file_name: &str,
+        bytes: &[u8],
+    ) -> Result<PathBuf, GatewayError> {
+        if self.max_file_size > 0 && bytes.len() as u64 > self.max_file_size {
+            return Err(GatewayError::ConnectionFailed(format!(
+                "File too large: {} bytes exceeds max_file_size {}",
+                bytes.len(),
+                self.max_file_size
+            )));
+        }
+        let dest_dir = self.cache_dir.join(subdir);
+        fs::create_dir_all(&dest_dir).await.map_err(|e| {
+            GatewayError::ConnectionFailed(format!(
+                "Failed to create cache subdirectory {:?}: {}",
+                dest_dir, e
+            ))
+        })?;
+        let safe_name = sanitize_file_name(file_name)?;
+        let dest_path = dest_dir.join(&safe_name);
+        if !is_path_within(&dest_path, &dest_dir) {
+            return Err(GatewayError::ConnectionFailed(format!(
+                "Refusing to cache file outside cache directory: {}",
+                safe_name
+            )));
+        }
+        let mut file = fs::File::create(&dest_path).await.map_err(|e| {
+            GatewayError::ConnectionFailed(format!("Failed to create file {:?}: {}", dest_path, e))
+        })?;
+        file.write_all(bytes).await.map_err(|e| {
+            GatewayError::ConnectionFailed(format!("Failed to write file {:?}: {}", dest_path, e))
+        })?;
+        file.flush().await.map_err(|e| {
+            GatewayError::ConnectionFailed(format!("Failed to flush file {:?}: {}", dest_path, e))
+        })?;
+        Ok(dest_path)
+    }
+
     /// Generic file caching implementation.
     async fn cache_file(
         &self,

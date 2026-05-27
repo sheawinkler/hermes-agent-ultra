@@ -1358,6 +1358,7 @@ impl WeComAdapter {
             is_dm: !is_group,
             interaction_id: None,
             interaction_token: None,
+            role_ids: vec![],
         };
 
         let delay = text_batch_delay_secs();

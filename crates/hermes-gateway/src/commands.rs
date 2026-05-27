@@ -278,6 +278,11 @@ fn normalize_command_args(args: &str) -> String {
         .replace('\u{2013}', "-")
 }
 
+/// Returns true when the gateway can handle this slash command without the agent loop.
+pub fn is_known_gateway_command(input: &str) -> bool {
+    !matches!(handle_command(input), GatewayCommandResult::Unknown(_))
+}
+
 /// Parse and dispatch a gateway slash command.
 pub fn handle_command(input: &str) -> GatewayCommandResult {
     let trimmed = input.trim();
@@ -537,6 +542,13 @@ mod tests {
             }
             other => panic!("Expected SwitchModel for en dash input, got {:?}", other),
         }
+    }
+
+    #[test]
+    fn test_is_known_gateway_command() {
+        assert!(is_known_gateway_command("/new"));
+        assert!(is_known_gateway_command("/status"));
+        assert!(!is_known_gateway_command("/xyz123"));
     }
 
     #[test]

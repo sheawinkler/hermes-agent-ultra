@@ -8,6 +8,8 @@ use super::config::{DISCORD_API_BASE, MAX_MESSAGE_LENGTH};
 use super::gateway_loop::DiscordInner;
 use super::types::{DiscordEmbed, DiscordMessage, DiscordThread, SlashCommand};
 
+const INTERACTION_FLAG_EPHEMERAL: u64 = 1 << 6;
+
 pub fn auth_header(token: &str) -> String {
     format!("Bot {token}")
 }
@@ -344,18 +346,31 @@ impl DiscordInner {
         Ok(())
     }
 
-    pub async fn respond_to_interaction(
+    fn interaction_application_id(&self) -> Result<String, GatewayError> {
+        self.config.application_id.clone().ok_or_else(|| {
+            GatewayError::Platform("application_id required for interaction responses".into())
+        })
+    }
+
+    pub async fn respond_to_interaction_immediate(
         &self,
         interaction_id: &str,
         interaction_token: &str,
         content: &str,
+        ephemeral: bool,
     ) -> Result<(), GatewayError> {
         let url = format!(
             "{DISCORD_API_BASE}/interactions/{interaction_id}/{interaction_token}/callback"
         );
+        let mut data = serde_json::json!({
+            "content": &content[..content.len().min(MAX_MESSAGE_LENGTH)],
+        });
+        if ephemeral {
+            data["flags"] = serde_json::json!(INTERACTION_FLAG_EPHEMERAL);
+        }
         let body = serde_json::json!({
             "type": 4,
-            "data": { "content": content }
+            "data": data,
         });
         let resp = self
             .client
@@ -373,6 +388,92 @@ impl DiscordInner {
             return Err(GatewayError::SendFailed(format!(
                 "Discord interaction response API error: {text}"
             )));
+        }
+        Ok(())
+    }
+
+    async fn edit_deferred_interaction(
+        &self,
+        interaction_token: &str,
+        content: &str,
+    ) -> Result<(), GatewayError> {
+        let app_id = self.interaction_application_id()?;
+        let url = format!(
+            "{DISCORD_API_BASE}/webhooks/{app_id}/{interaction_token}/messages/@original"
+        );
+        let body = serde_json::json!({
+            "content": &content[..content.len().min(MAX_MESSAGE_LENGTH)],
+        });
+        let resp = self
+            .client
+            .patch(&url)
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| {
+                GatewayError::SendFailed(format!("Discord deferred interaction edit failed: {e}"))
+            })?;
+        if !resp.status().is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GatewayError::SendFailed(format!(
+                "Discord deferred interaction edit API error: {text}"
+            )));
+        }
+        Ok(())
+    }
+
+    async fn follow_up_interaction(
+        &self,
+        interaction_token: &str,
+        content: &str,
+    ) -> Result<(), GatewayError> {
+        let app_id = self.interaction_application_id()?;
+        let url = format!("{DISCORD_API_BASE}/webhooks/{app_id}/{interaction_token}");
+        let body = serde_json::json!({
+            "content": &content[..content.len().min(MAX_MESSAGE_LENGTH)],
+        });
+        let resp = self
+            .client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| {
+                GatewayError::SendFailed(format!("Discord interaction follow-up failed: {e}"))
+            })?;
+        if !resp.status().is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GatewayError::SendFailed(format!(
+                "Discord interaction follow-up API error: {text}"
+            )));
+        }
+        Ok(())
+    }
+
+    pub async fn respond_to_interaction(
+        &self,
+        interaction_id: &str,
+        interaction_token: &str,
+        content: &str,
+    ) -> Result<(), GatewayError> {
+        let chunks = split_message(content, MAX_MESSAGE_LENGTH);
+        let deferred = self.take_interaction_deferred(interaction_id).await;
+        if deferred {
+            self.edit_deferred_interaction(interaction_token, &chunks[0])
+                .await?;
+        } else {
+            self.respond_to_interaction_immediate(
+                interaction_id,
+                interaction_token,
+                &chunks[0],
+                false,
+            )
+            .await?;
+        }
+        for chunk in chunks.iter().skip(1) {
+            self.follow_up_interaction(interaction_token, chunk).await?;
         }
         Ok(())
     }

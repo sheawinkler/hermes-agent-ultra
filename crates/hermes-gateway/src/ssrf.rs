@@ -21,7 +21,11 @@ const METADATA_HOSTNAMES: [&str; 3] = [
 const TRUSTED_CDN_EXACT_HOSTS: [&str; 1] = ["multimedia.nt.qq.com.cn"];
 
 /// HTTPS hostname suffixes for platform media CDNs (`host == suffix` or `host.ends_with(suffix)`).
-const TRUSTED_CDN_SUFFIX_HOSTS: [&str; 1] = [".cdn.weixin.qq.com"];
+const TRUSTED_CDN_SUFFIX_HOSTS: [&str; 3] = [
+    ".cdn.weixin.qq.com",
+    ".discordapp.com",
+    ".discordapp.net",
+];
 
 /// Tencent COS buckets: `*.cos.<region>.myqcloud.com`.
 const TRUSTED_CDN_COS_SUFFIX: &str = ".myqcloud.com";

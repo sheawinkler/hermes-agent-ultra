@@ -104,6 +104,7 @@ async fn slash_status_replies_via_interaction_not_channel() {
         is_dm: false,
         interaction_id: Some("interaction-1".into()),
         interaction_token: Some("interaction-token".into()),
+        role_ids: vec![],
     };
 
     assert!(gw.route_message(&incoming).await.is_ok());

@@ -4419,19 +4419,36 @@ impl AgentLoop {
 
     /// Emit explicit preflight compression status before first LLM call.
     async fn preflight_context_compress_with_status(&self, ctx: &mut ContextManager) {
+        let model = self.active_model();
+        let model_tokens = get_model_context_length(model.as_str());
         let max_c = ctx.max_context_chars().max(1);
         let before = ctx.total_chars();
         let before_pct = (before * 100) / max_c;
+        let gateway_msgs = ctx
+            .get_messages()
+            .iter()
+            .filter(|m| m.role != MessageRole::System)
+            .count();
         if !self.context_compression_should_run(ctx).await {
             tracing::debug!(
-                "Preflight compression check: {}% context usage, no compression needed",
-                before_pct
+                model = %model,
+                model_context_tokens = model_tokens,
+                max_context_chars = max_c,
+                transcript_chars = before,
+                gateway_messages = gateway_msgs,
+                context_usage_pct = before_pct,
+                "Preflight compression check: no compression needed"
             );
             return;
         }
         tracing::info!(
-            "Preflight compression: {}% context usage, preparing session",
-            before_pct
+            model = %model,
+            model_context_tokens = model_tokens,
+            max_context_chars = max_c,
+            transcript_chars = before,
+            gateway_messages = gateway_msgs,
+            context_usage_pct = before_pct,
+            "Preflight compression: preparing session"
         );
         // Avoid auxiliary summarisation on multi-megabyte histories (very slow, often ineffective).
         if before_pct > 150 {
@@ -5533,7 +5550,7 @@ impl AgentLoop {
         tools: Option<Vec<ToolSchema>>,
         skip_message_prelude: bool,
     ) -> Result<AgentResult, AgentError> {
-        let mut ctx = ContextManager::default_budget();
+        let mut ctx = ContextManager::for_model(self.active_model().as_str());
         let mut tool_errors: Vec<hermes_core::ToolErrorRecord> = Vec::new();
         let session_id_owned = self.config().session_id.clone().unwrap_or_default();
         let session_id = session_id_owned.as_str();
@@ -6881,7 +6898,7 @@ impl AgentLoop {
                 });
             });
 
-        let mut ctx = ContextManager::default_budget();
+        let mut ctx = ContextManager::for_model(self.active_model().as_str());
         let mut tool_errors: Vec<hermes_core::ToolErrorRecord> = Vec::new();
         let session_id_owned = self.config().session_id.clone().unwrap_or_default();
         let session_id = session_id_owned.as_str();

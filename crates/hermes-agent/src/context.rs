@@ -43,6 +43,13 @@ impl ContextManager {
         Self::new(200_000)
     }
 
+    /// Character budget aligned with the active model's context window (~4 chars/token).
+    pub fn for_model(model: &str) -> Self {
+        let tokens = hermes_intelligence::get_model_context_length(model);
+        let max_chars = tokens.saturating_mul(4).min(usize::MAX as u64) as usize;
+        Self::new(max_chars.max(1024))
+    }
+
     /// Replace the full message list (e.g. after [`crate::compression::ContextCompressor`]).
     pub fn replace_messages(&mut self, messages: Vec<Message>) {
         self.messages = messages;

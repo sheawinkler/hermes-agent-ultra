@@ -566,6 +566,7 @@ async fn send_message(
         is_dm: false,
         interaction_id: None,
         interaction_token: None,
+    role_ids: vec![],
     };
 
     state
@@ -636,6 +637,7 @@ async fn exec_command(
         is_dm: false,
         interaction_id: None,
         interaction_token: None,
+    role_ids: vec![],
     };
 
     state

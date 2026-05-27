@@ -1,12 +1,15 @@
 //! Discord Bot API adapter (REST outbound + Gateway WebSocket inbound).
 
+mod auth;
 mod config;
 mod dedup;
 mod filter;
 mod gateway_loop;
+mod media;
 mod parse;
 mod rest;
 mod session;
+mod threads;
 mod types;
 
 use std::sync::Arc;
@@ -25,13 +28,13 @@ pub use config::{
     default_intents, ChannelIdSet, DiscordConfig, DISCORD_API_BASE, MAX_MESSAGE_LENGTH,
 };
 pub use dedup::MessageDedup;
-pub use filter::DiscordInboundConfig;
+pub use filter::{should_accept_message, DiscordInboundConfig};
 pub use parse::{
-    interaction_to_incoming, parse_dispatch, parse_interaction_create, parse_message_create,
-    parse_message_create_raw, parse_message_update, parse_reaction_event, parse_voice_state_update,
-    raw_to_incoming, DispatchEvent, IncomingDiscordMessage, InteractionData, InteractionOption,
-    MessageUpdateEvent, RawDiscordMessage, ReactionEvent, VoiceState,
-    INTERACTION_TYPE_APPLICATION_COMMAND,
+    interaction_to_incoming, parse_attachments, parse_dispatch, parse_interaction_create,
+    parse_message_create, parse_message_create_raw, parse_message_update, parse_reaction_event,
+    parse_voice_state_update, raw_to_incoming, DispatchEvent, DiscordAttachment,
+    IncomingDiscordMessage, InteractionData, InteractionOption, MessageUpdateEvent,
+    RawDiscordMessage, ReactionEvent, VoiceState, INTERACTION_TYPE_APPLICATION_COMMAND,
 };
 pub use rest::{encode_emoji, split_message};
 pub use types::basic_slash_commands;
@@ -69,7 +72,9 @@ impl DiscordAdapter {
             inbound_tx: RwLock::new(None),
             bot_user_id: RwLock::new(None),
             dedup: RwLock::new(MessageDedup::new()),
+            thread_tracker: Arc::new(threads::ThreadParticipationTracker::load()),
             stop: tokio::sync::Notify::new(),
+            deferred_interactions: RwLock::new(std::collections::HashSet::new()),
         });
         Ok(Self {
             inner,

@@ -130,6 +130,8 @@ pub struct IncomingMessage {
     pub interaction_id: Option<String>,
     /// Discord interaction token for deferred slash follow-up responses.
     pub interaction_token: Option<String>,
+    /// Discord member role snowflakes (guild messages / slash interactions).
+    pub role_ids: Vec<String>,
 }
 
 impl IncomingMessage {
@@ -151,6 +153,7 @@ impl IncomingMessage {
             is_dm,
             interaction_id: None,
             interaction_token: None,
+            role_ids: vec![],
         }
     }
 }
@@ -357,6 +360,7 @@ pub enum DmAccessMode {
 pub struct PlatformAccessPolicy {
     pub allowed_users: HashSet<String>,
     pub admin_users: HashSet<String>,
+    pub allowed_roles: HashSet<String>,
     pub group_mode: GroupAccessMode,
     pub slash_requires_allowlist: bool,
     pub dm_mode: DmAccessMode,
@@ -364,7 +368,9 @@ pub struct PlatformAccessPolicy {
 
 impl PlatformAccessPolicy {
     fn has_allowlist(&self) -> bool {
-        !self.allowed_users.is_empty() || !self.admin_users.is_empty()
+        !self.allowed_users.is_empty()
+            || !self.admin_users.is_empty()
+            || !self.allowed_roles.is_empty()
     }
 
     fn user_matches_any(user_id: &str, set: &HashSet<String>) -> bool {
@@ -386,9 +392,12 @@ impl PlatformAccessPolicy {
         })
     }
 
-    pub fn is_user_allowed(&self, user_id: &str) -> bool {
+    pub fn is_user_allowed(&self, user_id: &str, role_ids: &[String]) -> bool {
         Self::user_matches_any(user_id, &self.admin_users)
             || Self::user_matches_any(user_id, &self.allowed_users)
+            || role_ids
+                .iter()
+                .any(|role| Self::user_matches_any(role, &self.allowed_roles))
     }
 }
 
@@ -695,7 +704,7 @@ impl Gateway {
                         return Ok(());
                     }
                     GroupAccessMode::Allowlist => {
-                        if !policy.is_user_allowed(&incoming.user_id) {
+                        if !policy.is_user_allowed(&incoming.user_id, &incoming.role_ids) {
                             debug!(
                                 platform = incoming.platform,
                                 user_id = incoming.user_id,
@@ -710,7 +719,7 @@ impl Gateway {
             if is_slash_command
                 && policy.slash_requires_allowlist
                 && policy.has_allowlist()
-                && !policy.is_user_allowed(&incoming.user_id)
+                && !policy.is_user_allowed(&incoming.user_id, &incoming.role_ids)
             {
                 debug!(
                     platform = incoming.platform,
@@ -742,7 +751,7 @@ impl Gateway {
             if dm_mode == DmAccessMode::Allowlist {
                 let allowed = access_policy
                     .as_ref()
-                    .is_some_and(|p| p.is_user_allowed(&incoming.user_id));
+                    .is_some_and(|p| p.is_user_allowed(&incoming.user_id, &incoming.role_ids));
                 if !allowed {
                     debug!(
                         user_id = incoming.user_id,
@@ -886,6 +895,24 @@ impl Gateway {
 
         // 4. Get all session messages for the agent loop
         let messages = self.session_manager.get_messages(&session_key).await;
+        let session_transcript_chars: usize = messages
+            .iter()
+            .map(|m| m.content.as_deref().map(|c| c.chars().count()).unwrap_or(0))
+            .sum();
+        if incoming.platform.eq_ignore_ascii_case("discord") {
+            info!(
+                platform = %incoming.platform,
+                session_key = %session_key,
+                chat_id = %incoming.chat_id,
+                user_id = %incoming.user_id,
+                is_dm = incoming.is_dm,
+                message_count = messages.len(),
+                session_transcript_chars = session_transcript_chars,
+                inbound_text_chars = input_chars,
+                has_media = !incoming.media_urls.is_empty(),
+                "Discord session context snapshot before agent"
+            );
+        }
 
         // 5. Process through agent loop (streaming or non-streaming)
         let processing_result = if self.config.streaming_enabled {
@@ -3008,6 +3035,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
 
         // Should succeed (deny silently)
@@ -3051,6 +3079,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
 
         let result = gw.route_message(&incoming).await;
@@ -3079,6 +3108,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
 
         // Should fail because no message handler is set
@@ -3103,6 +3133,7 @@ mod tests {
             is_dm: false, // Group message, no DM check
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
 
         // Should fail because no handler, but DM check is skipped
@@ -3135,6 +3166,7 @@ mod tests {
             is_dm: false,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
 
         let result = gw.route_message(&incoming).await;
@@ -3178,6 +3210,7 @@ mod tests {
             is_dm: false,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&denied).await.is_ok());
         assert_eq!(
@@ -3197,6 +3230,7 @@ mod tests {
             is_dm: false,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&allowed).await.is_ok());
         let sent_msgs = sent.lock().unwrap();
@@ -3229,6 +3263,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
 
         let result = gw.route_message(&incoming).await;
@@ -3289,6 +3324,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
 
         assert!(gw.route_message(&incoming).await.is_ok());
@@ -3343,6 +3379,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
 
         assert!(gw.route_message(&incoming).await.is_ok());
@@ -3399,6 +3436,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&start).await.is_ok());
 
@@ -3429,6 +3467,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&status).await.is_ok());
 
@@ -3460,6 +3499,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&approve).await.is_ok());
 
@@ -3475,6 +3515,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&authorized_dm).await.is_err());
 
@@ -3489,6 +3530,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&deny).await.is_ok());
 
@@ -3504,6 +3546,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&denied_dm).await.is_ok());
     }
@@ -3532,6 +3575,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&provider).await.is_ok());
 
@@ -3546,6 +3590,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&profile).await.is_ok());
 
@@ -3560,6 +3605,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&reload).await.is_ok());
 
@@ -3574,6 +3620,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&status).await.is_ok());
 
@@ -3635,6 +3682,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&set_provider).await.is_ok());
 
@@ -3649,6 +3697,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&set_model).await.is_ok());
 
@@ -3663,6 +3712,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&set_profile).await.is_ok());
 
@@ -3677,6 +3727,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&set_branch).await.is_ok());
 
@@ -3691,6 +3742,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&normal).await.is_ok());
 
@@ -3744,6 +3796,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&yolo_chat1).await.is_ok());
 
@@ -3758,6 +3811,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&yolo_chat2).await.is_ok());
 
@@ -3778,6 +3832,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&reset_chat1).await.is_ok());
 
@@ -3825,6 +3880,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&yolo_chat1).await.is_ok());
         {
@@ -3843,6 +3899,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&switch).await.is_ok());
 
@@ -3880,6 +3937,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&incoming).await.is_ok());
 
@@ -3924,6 +3982,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&incoming).await.is_err());
 
@@ -3967,6 +4026,7 @@ mod tests {
             is_dm: false,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&incoming).await.is_ok());
         assert!(reactions.lock().unwrap().is_empty());
@@ -4024,6 +4084,7 @@ mod tests {
                 is_dm: true,
                 interaction_id: None,
                 interaction_token: None,
+            role_ids: vec![],
             };
             assert!(gw.route_message(&incoming).await.is_ok());
         }
@@ -4039,6 +4100,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&normal).await.is_ok());
 
@@ -4107,6 +4169,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&incoming).await.is_ok());
 
@@ -4168,6 +4231,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&incoming).await.is_ok());
 
@@ -4230,6 +4294,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&incoming).await.is_ok());
 
@@ -4283,6 +4348,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&incoming).await.is_ok());
 
@@ -4340,6 +4406,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&incoming).await.is_ok());
 
@@ -4426,6 +4493,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&incoming).await.is_ok());
 
@@ -4481,6 +4549,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&incoming).await.is_ok());
 
@@ -4527,6 +4596,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&normal).await.is_ok());
 
@@ -4541,6 +4611,7 @@ mod tests {
             is_dm: true,
             interaction_id: None,
             interaction_token: None,
+        role_ids: vec![],
         };
         assert!(gw.route_message(&reset).await.is_ok());
 

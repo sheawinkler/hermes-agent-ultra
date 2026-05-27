@@ -1,5 +1,6 @@
 //! Discord Gateway WebSocket driver.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -11,18 +12,22 @@ use tracing::{debug, info, warn};
 
 use hermes_core::errors::GatewayError;
 
-use super::config::{DiscordConfig, DISCORD_API_BASE};
+use super::auth::{DiscordAuthConfig, is_discord_user_authorized};
+use super::config::{ChannelIdSet, DiscordConfig, DISCORD_API_BASE};
 use super::dedup::MessageDedup;
 use super::filter::{DiscordInboundConfig, should_accept_message};
+use super::media::cache_message_attachments;
 use super::parse::{
     interaction_to_incoming, parse_interaction_create, parse_message_create_raw, raw_to_incoming,
     ready_bot_user_id,
 };
+use super::threads::{auto_thread_name, should_auto_thread, ThreadParticipationTracker};
 use super::session::{
     GatewayAction, GatewayPayload, GatewaySession, IdentifyData, IdentifyProperties, ResumeData,
     opcodes,
 };
 use crate::adapter::BasePlatformAdapter;
+use crate::commands::is_known_gateway_command;
 use crate::gateway::IncomingMessage;
 
 const RECONNECT_SECS: &[u64] = &[2, 5, 10, 30, 60];
@@ -34,7 +39,34 @@ pub struct DiscordInner {
     pub inbound_tx: RwLock<Option<mpsc::Sender<IncomingMessage>>>,
     pub bot_user_id: RwLock<Option<String>>,
     pub dedup: RwLock<MessageDedup>,
+    pub thread_tracker: Arc<ThreadParticipationTracker>,
     pub stop: tokio::sync::Notify,
+    /// Interaction IDs that received a successful defer (follow-up via webhook edit).
+    pub deferred_interactions: RwLock<HashSet<String>>,
+}
+
+impl DiscordInner {
+    pub async fn mark_interaction_deferred(&self, interaction_id: &str) {
+        self.deferred_interactions
+            .write()
+            .await
+            .insert(interaction_id.to_string());
+    }
+
+    pub async fn take_interaction_deferred(&self, interaction_id: &str) -> bool {
+        self.deferred_interactions
+            .write()
+            .await
+            .remove(interaction_id)
+    }
+}
+
+fn discord_auth_config(config: &DiscordConfig) -> DiscordAuthConfig {
+    DiscordAuthConfig {
+        allowed_users: config.allowed_users.clone(),
+        allowed_roles: config.allowed_roles.clone(),
+        dm_role_auth_guild: config.dm_role_auth_guild.clone(),
+    }
 }
 
 /// Fetch the Discord Gateway WebSocket URL.
@@ -127,21 +159,54 @@ async fn try_interaction_create_inbound(
     data: &serde_json::Value,
 ) -> Option<Vec<IncomingMessage>> {
     let interaction = parse_interaction_create(data)?;
-    let incoming = interaction_to_incoming(&interaction)?;
-    if let Err(err) = inner
-        .defer_interaction(&interaction.id, &interaction.token)
-        .await
+    let user_id = interaction
+        .user_id
+        .as_deref()
+        .unwrap_or("unknown");
+    let auth = discord_auth_config(&inner.config);
+    if auth.has_restrictions()
+        && !is_discord_user_authorized(
+            user_id,
+            &interaction.role_ids,
+            interaction.guild_id.as_deref(),
+            interaction.guild_id.is_none(),
+            &auth,
+        )
     {
-        warn!(
-            interaction_id = %interaction.id,
-            "Discord defer_interaction failed: {err}"
+        debug!(
+            user_id = %user_id,
+            "Discord INTERACTION_CREATE dropped: user not authorized"
         );
+        let _ = inner
+            .respond_to_interaction_immediate(
+                &interaction.id,
+                &interaction.token,
+                "🚫 You are not authorized to use this bot.",
+                true,
+            )
+            .await;
         return Some(vec![]);
+    }
+    let incoming = interaction_to_incoming(&interaction)?;
+    let fast_gateway_command = is_known_gateway_command(&incoming.text);
+    if !fast_gateway_command {
+        if let Err(err) = inner
+            .defer_interaction(&interaction.id, &interaction.token)
+            .await
+        {
+            warn!(
+                interaction_id = %interaction.id,
+                "Discord defer_interaction failed: {err}"
+            );
+        } else {
+            inner.mark_interaction_deferred(&interaction.id).await;
+        }
     }
     info!(
         command = ?interaction.command_name,
         channel_id = ?interaction.channel_id,
         user_id = ?interaction.user_id,
+        fast_gateway_command = fast_gateway_command,
         "Discord slash interaction accepted"
     );
     Some(vec![incoming])
@@ -152,36 +217,113 @@ async fn try_message_create_inbound(
     data: &serde_json::Value,
 ) -> Option<Vec<IncomingMessage>> {
     let raw = parse_message_create_raw(data)?;
+    let user_id = raw.user_id.as_deref().unwrap_or("unknown");
+    let is_dm = raw.guild_id.is_none();
+    let auth = discord_auth_config(&inner.config);
+    if auth.has_restrictions()
+        && !is_discord_user_authorized(
+            user_id,
+            &raw.role_ids,
+            raw.guild_id.as_deref(),
+            is_dm,
+            &auth,
+        )
+    {
+        debug!(
+            user_id = %user_id,
+            is_dm = is_dm,
+            "Discord MESSAGE_CREATE dropped: user not authorized"
+        );
+        return Some(vec![]);
+    }
+
     let bot_id = inner.bot_user_id.read().await.clone();
+    let mut thread_participation = ChannelIdSet::new();
+    if inner.thread_tracker.contains(&raw.channel_id).await {
+        thread_participation.extend_tokens(std::iter::once(raw.channel_id.as_str()));
+    }
     let filter_cfg = DiscordInboundConfig {
         require_mention: inner.config.require_mention,
-        bot_user_id: bot_id,
+        bot_user_id: bot_id.clone(),
         free_response_channels: inner.config.free_response_channels.clone(),
         allowed_channels: inner.config.allowed_channels.clone(),
         ignored_channels: inner.config.ignored_channels.clone(),
+        thread_participation,
     };
     if !should_accept_message(&raw, &filter_cfg) {
         debug!(
             channel_id = %raw.channel_id,
             user_id = ?raw.user_id,
-            is_dm = raw.guild_id.is_none(),
+            is_dm = is_dm,
             require_mention = filter_cfg.require_mention,
             "Discord MESSAGE_CREATE dropped by inbound filter"
         );
         return Some(vec![]);
     }
-    info!(
-        channel_id = %raw.channel_id,
-        user_id = ?raw.user_id,
-        is_dm = raw.guild_id.is_none(),
-        "Discord inbound message accepted"
-    );
     let mut dedup = inner.dedup.write().await;
     if dedup.is_duplicate(&raw.message_id) {
         return Some(vec![]);
     }
     drop(dedup);
-    Some(vec![raw_to_incoming(&raw)])
+
+    let (media_urls, media_types) =
+        cache_message_attachments(inner, &raw.attachments).await;
+    let has_voice = raw
+        .attachments
+        .iter()
+        .any(super::media::is_voice_attachment);
+    if has_voice && media_urls.is_empty() {
+        warn!(
+            message_id = %raw.message_id,
+            channel_id = %raw.channel_id,
+            "Discord voice attachment present but download/cache failed"
+        );
+    }
+
+    let mut chat_id = raw.channel_id.clone();
+    if should_auto_thread(
+        &raw,
+        inner.config.auto_thread,
+        &inner.config.no_thread_channels,
+        &inner.config.free_response_channels,
+        bot_id.as_deref(),
+    ) {
+        let name = auto_thread_name(&raw);
+        match inner
+            .create_thread(&raw.channel_id, &raw.message_id, &name, Some(1440))
+            .await
+        {
+            Ok(thread) => {
+                let thread_id = thread.id.clone();
+                inner.thread_tracker.mark(&thread_id).await;
+                chat_id = thread_id.clone();
+                info!(
+                    thread_id = %thread_id,
+                    parent_channel = %raw.channel_id,
+                    "Discord auto-thread created"
+                );
+            }
+            Err(err) => {
+                warn!(
+                    channel_id = %raw.channel_id,
+                    message_id = %raw.message_id,
+                    error = %err,
+                    "Discord auto-thread creation failed"
+                );
+            }
+        }
+    }
+
+    let mut incoming = raw_to_incoming(&raw, media_urls, media_types);
+    incoming.chat_id = chat_id;
+    info!(
+        channel_id = %incoming.chat_id,
+        user_id = ?raw.user_id,
+        is_dm = is_dm,
+        has_media = !incoming.media_urls.is_empty(),
+        "Discord inbound message accepted"
+    );
+    Some(vec![incoming])
 }
 
 fn normalize_bot_token(token: &str) -> String {
@@ -477,7 +619,9 @@ mod tests {
             inbound_tx: RwLock::new(None),
             bot_user_id: RwLock::new(bot_id.map(String::from)),
             dedup: RwLock::new(MessageDedup::new()),
+            thread_tracker: Arc::new(ThreadParticipationTracker::load()),
             stop: tokio::sync::Notify::new(),
+            deferred_interactions: RwLock::new(HashSet::new()),
         }
     }
 
