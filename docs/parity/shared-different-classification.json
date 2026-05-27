@@ -241,6 +241,48 @@
       "ticket": 25
     },
     {
+      "path": "plugins/memory/byterover/__init__.py",
+      "classification": "policy_only",
+      "rationale": "The shared diff is behavior-equivalent tuple membership for action and role guards; no ByteRover runtime behavior is missing.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/memory/hindsight/__init__.py",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra keeps stdlib asyncio/getpass fallbacks so Hindsight remains importable in the Rust-first tree without upstream-only agent.async_utils or hermes_cli.secret_prompt source modules.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/memory/honcho/__init__.py",
+      "classification": "policy_only",
+      "rationale": "The shared diff is behavior-equivalent tuple membership for cron/flush and recall-mode guards.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/memory/honcho/cli.py",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra keeps stdlib getpass for secret prompts so the Honcho CLI remains usable in the Rust-first tree without the upstream-only hermes_cli.secret_prompt source module; other diffs are behavior-equivalent membership guards.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/memory/honcho/client.py",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra resolves the default Honcho config path with Path.home() instead of importing upstream-only hermes_cli.profiles._get_default_hermes_home, preserving profile fallback behavior in the Rust-first tree.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/memory/supermemory/__init__.py",
+      "classification": "policy_only",
+      "rationale": "The shared diff is behavior-equivalent tuple membership for boolean parsing, context guards, and session-role filtering.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
       "path": "plugins/model-providers",
       "classification": "functional",
       "rationale": "Model-provider plugin differences affect runtime provider compatibility.",
