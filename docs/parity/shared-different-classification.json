@@ -416,6 +416,69 @@
       "ticket": 25
     },
     {
+      "path": "plugins/platforms/discord/adapter.py",
+      "classification": "policy_only",
+      "rationale": "The remaining shared diff is whitespace-only and does not change Discord adapter behavior; runtime message filtering remains covered by Discord gateway tests.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/platforms/google_chat/adapter.py",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra retains a Rust-first loop bridge that avoids the absent agent.async_utils module and rejects unsupported standalone attachments explicitly while preserving upstream proxy-env support.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/platforms/google_chat/oauth.py",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra implements the upstream private-token write contract locally with os.replace because the upstream utils.py helper is absent from the Rust-first tree.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/platforms/irc/adapter.py",
+      "classification": "policy_only",
+      "rationale": "The shared diff is behavior-equivalent tuple membership in IRC boolean and numeric-code guards; standalone send behavior remains covered by IRC adapter tests.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/platforms/line/adapter.py",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra retains stdlib getpass and the local create_source bridge for the Rust-first source tree while porting upstream proxy-env support for LINE HTTP calls.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/platforms/ntfy/adapter.py",
+      "classification": "policy_only",
+      "rationale": "The shared diff is documentation punctuation and the local ASCII platform emoji label; ntfy runtime behavior and auth/header contracts are unchanged.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/platforms/ntfy/plugin.yaml",
+      "classification": "policy_only",
+      "rationale": "The shared diff is ASCII punctuation in plugin metadata descriptions and does not change plugin loading or runtime behavior.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/platforms/simplex/adapter.py",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra uses stdlib getpass in setup because hermes_cli.secret_prompt.py is absent from the Rust-first source tree.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "plugins/platforms/teams/adapter.py",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra keeps explicit standalone attachment rejection and tuple membership contracts while porting upstream proxy-env support and resilient Teams port coercion.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
       "path": "tests/plugins",
       "classification": "functional",
       "rationale": "Plugin tests cover loader, hook, and runtime integration behavior.",

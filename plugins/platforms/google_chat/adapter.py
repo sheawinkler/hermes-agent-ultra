@@ -3253,7 +3253,10 @@ async def _standalone_send(
         return {"error": "Google Chat standalone send: aiohttp not installed"}
 
     try:
-        async with _aiohttp.ClientSession(timeout=_aiohttp.ClientTimeout(total=30.0)) as session:
+        async with _aiohttp.ClientSession(
+            timeout=_aiohttp.ClientTimeout(total=30.0),
+            trust_env=True,
+        ) as session:
             async with session.post(
                 url,
                 json=body,
