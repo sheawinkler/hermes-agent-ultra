@@ -1,0 +1,22 @@
+{
+  "summary": "Sprint planning session to define the next two-week scope. The meeting notes feature is the top priority, starting with offline transcription. Energy VAD will be used initially, with Silero migration planned for the following sprint.",
+  "key_decisions": [
+    "Offline transcription ships first before realtime",
+    "Energy VAD in sprint 1, Silero migration in sprint 2",
+    "Dual-track mixer approach for speaker attribution"
+  ],
+  "action_items": [
+    "Implement hermes-audio crate with dual-track mixer",
+    "Wire SttEngine to meeting notes tool",
+    "Test ONNX runtime compatibility on Windows in week one",
+    "Set up benchmark fixture structure",
+    "Write eval scripts for WER and notes recall"
+  ],
+  "risks": [
+    "ONNX runtime may not be compatible with Windows",
+    "AISHELL-4 audio not yet downloaded — WER test needs stub initially"
+  ],
+  "follow_ups": [
+    "WER target: below 8% for Mandarin; action item recall target: above 80%"
+  ]
+}

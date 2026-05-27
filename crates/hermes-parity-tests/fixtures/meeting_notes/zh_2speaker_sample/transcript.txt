@@ -1,0 +1,13 @@
+[Speaker A] 大家好，今天我们讨论一下Q3录音纪要功能的开发计划。
+[Speaker B] 好的，我觉得最重要的是先把离线文件转录做好，再考虑实时场景。
+[Speaker A] 同意。那我们第一阶段就定：接受WAV文件，输出中文纪要，写入记忆系统。预计两周完成。
+[Speaker B] 关于说话人分离，双轨录音方案比pyannote简单，我建议先走双轨。
+[Speaker A] 对，麦克风是说话人A，扬声器回环是说话人B，天然区分，不需要ML。
+[Speaker B] VAD这块现在的RMS+ZCR在会议场景不够用，需要换Silero。
+[Speaker A] 是的，Silero的F1能到0.98，比我们现在的好很多。这个放第二阶段做。
+[Speaker B] 关于benchmark，我们需要WER、DER两个核心指标，普通话目标WER低于8%。
+[Speaker A] 还要测纪要召回率，行动项提取要超过80%。
+[Speaker B] 好，那行动项就是：李明负责hermes-audio crate，王芳负责meeting_notes工具，赵强负责benchmark脚本。
+[Speaker A] 风险：Silero ONNX在Windows上的兼容性还没验证，需要测试。
+[Speaker B] 还有pyannote需要HuggingFace token，用户可能没有，要做好降级方案。
+[Speaker A] 没问题，我们把pyannote设为可选，默认走双轨方案。好，今天就到这里。

@@ -1,0 +1,10 @@
+[Speaker A] Let's kick off the sprint planning. We need to finalize what goes into the next two weeks.
+[Speaker B] I think the top priority is the meeting notes feature. The offline transcription should ship first.
+[Speaker A] Agreed. So action item one: implement the hermes-audio crate with the dual-track mixer.
+[Speaker B] And we need to wire up the SttEngine to the meeting notes tool. That's action item two.
+[Speaker A] The key decision here is that we go with the energy VAD first, then migrate to Silero in the next sprint.
+[Speaker B] There's a risk that the ONNX runtime won't play nicely on Windows. We should spike that early.
+[Speaker A] Good point. Let's get someone to test that in week one.
+[Speaker B] On benchmarks, we need WER below eight percent for Mandarin and action item recall above eighty percent.
+[Speaker A] Alright, I'll set up the fixture structure today. You handle the eval scripts.
+[Speaker B] Deal. Risk to flag: we don't have AISHELL-4 audio yet, so the WER test will need a stub initially.

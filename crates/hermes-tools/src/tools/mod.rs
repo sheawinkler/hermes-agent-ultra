@@ -15,6 +15,7 @@ pub mod file;
 pub mod homeassistant;
 pub mod image_gen;
 pub mod managed_tool_gateway;
+pub mod meeting_notes;
 pub mod memory;
 pub mod messaging;
 pub mod mixture_of_agents;

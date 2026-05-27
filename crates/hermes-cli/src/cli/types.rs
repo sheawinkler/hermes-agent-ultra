@@ -236,6 +236,22 @@ pub enum CliCommand {
         action: Option<String>,
         model: Option<String>,
     },
+    /// `hermes meeting <action> [options]`
+    ///
+    /// Actions:
+    /// - `record [--mode offline|realtime] [--title "..."]` — start live recording
+    /// - `notes --audio <path> [--title "..."]`             — process audio file
+    Meeting {
+        action: Option<String>,
+        /// Path to audio file (for `notes` action).
+        audio: Option<String>,
+        /// Meeting title (used in transcript filename and memory tags).
+        title: Option<String>,
+        /// Transcription mode override: `offline` or `realtime`.
+        mode: Option<String>,
+        /// Enable pyannote speaker diarization.
+        diarize: bool,
+    },
     PluginExternal(Vec<String>),
 }
 

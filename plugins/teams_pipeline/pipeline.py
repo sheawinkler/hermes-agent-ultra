@@ -509,25 +509,8 @@ class TeamsMeetingPipeline:
         transcript_text: str,
         artifacts: list[MeetingArtifact],
     ) -> TeamsMeetingSummaryPayload:
-        prompt = _build_summary_prompt(resolved_meeting, transcript_text, artifacts)
         try:
-            response = await async_call_llm(
-                task="call",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You summarize meeting transcripts. Return only valid JSON with keys: "
-                            "summary, key_decisions, action_items, risks, confidence, confidence_notes."
-                        ),
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-                temperature=0.2,
-                max_tokens=900,
-            )
-            content = extract_content_or_reasoning(response)
-            parsed = _parse_summary_json(content)
+            parsed = await _chunked_summary(resolved_meeting, transcript_text, artifacts)
         except Exception as exc:
             logger.info("Teams pipeline LLM summary unavailable, using heuristic summary: %s", exc)
             parsed = _heuristic_summary(transcript_text)
@@ -616,18 +599,101 @@ def _extract_meeting_id_from_resource(resource: str) -> str | None:
     return parts[-1]
 
 
-def _build_summary_prompt(
-    meeting_ref: TeamsMeetingRef,
+_CHUNK_SYSTEM_PROMPT = (
+    "你是一名专业会议纪要助手。请对会议片段进行结构化分析。"
+    "仅返回合法 JSON，字段：summary、key_decisions、action_items、risks、confidence、confidence_notes。"
+    "所有字段用中文。summary 限 300 字，每条列表项限 100 字。"
+)
+
+_MERGE_SYSTEM_PROMPT = (
+    "你是一名专业会议纪要助手。以下是同一次会议各片段的 JSON 摘要，请合并为完整纪要。"
+    "仅返回合法 JSON，字段：summary、key_decisions、action_items、risks、confidence、confidence_notes。"
+    "去除重复项，summary 限 400 字，每条列表项限 100 字。"
+)
+
+# Lines-per-chunk for rolling summary (approx 10-min segments at ~30 lines/min)
+_LINES_PER_CHUNK = 300
+
+
+async def _chunked_summary(
+    meeting_ref: "TeamsMeetingRef",
     transcript_text: str,
-    artifacts: list[MeetingArtifact],
+    artifacts: "list[MeetingArtifact]",
+) -> "dict[str, Any]":
+    """Split transcript into chunks, summarize each, then merge."""
+    lines = [l for l in transcript_text.splitlines() if l.strip()]
+
+    if not lines:
+        return _heuristic_summary(transcript_text)
+
+    chunks = [lines[i : i + _LINES_PER_CHUNK] for i in range(0, len(lines), _LINES_PER_CHUNK)]
+    artifact_header = _build_artifact_header(meeting_ref, artifacts)
+
+    chunk_summaries: list[str] = []
+    for idx, chunk in enumerate(chunks):
+        chunk_text = "\n".join(chunk)
+        user_content = f"{artifact_header}\n\n会议片段 {idx + 1}/{len(chunks)}：\n{chunk_text}"
+        try:
+            response = await async_call_llm(
+                task="call",
+                messages=[
+                    {"role": "system", "content": _CHUNK_SYSTEM_PROMPT},
+                    {"role": "user", "content": user_content},
+                ],
+                temperature=0.2,
+                max_tokens=900,
+            )
+            content = extract_content_or_reasoning(response)
+            chunk_summaries.append(content)
+        except Exception as exc:
+            logger.warning("Chunk %d/%d summary failed: %s", idx + 1, len(chunks), exc)
+
+    if not chunk_summaries:
+        return _heuristic_summary(transcript_text)
+
+    if len(chunk_summaries) == 1:
+        return _parse_summary_json(chunk_summaries[0])
+
+    # Merge all chunk summaries
+    merged_input = "\n\n---\n\n".join(chunk_summaries)
+    response = await async_call_llm(
+        task="call",
+        messages=[
+            {"role": "system", "content": _MERGE_SYSTEM_PROMPT},
+            {"role": "user", "content": f"各片段摘要：\n\n{merged_input}"},
+        ],
+        temperature=0.2,
+        max_tokens=900,
+    )
+    content = extract_content_or_reasoning(response)
+    return _parse_summary_json(content)
+
+
+def _build_artifact_header(
+    meeting_ref: "TeamsMeetingRef",
+    artifacts: "list[MeetingArtifact]",
 ) -> str:
-    artifact_lines = [f"- {artifact.artifact_type}:{artifact.artifact_id}:{artifact.display_name or ''}" for artifact in artifacts]
+    artifact_lines = [
+        f"- {a.artifact_type}:{a.artifact_id}:{a.display_name or ''}"
+        for a in artifacts
+    ]
     return (
         f"Meeting ID: {meeting_ref.meeting_id}\n"
         f"Title: {meeting_ref.metadata.get('subject') or 'Unknown'}\n"
-        f"Artifacts:\n{chr(10).join(artifact_lines) or '- none'}\n\n"
-        "Transcript:\n"
-        f"{transcript_text[:18000]}"
+        f"Artifacts:\n{chr(10).join(artifact_lines) or '- none'}"
+    )
+
+
+def _build_summary_prompt(
+    meeting_ref: "TeamsMeetingRef",
+    transcript_text: str,
+    artifacts: "list[MeetingArtifact]",
+) -> str:
+    """Legacy single-shot prompt (kept for backward compatibility)."""
+    return (
+        _build_artifact_header(meeting_ref, artifacts)
+        + "\n\nTranscript:\n"
+        + transcript_text[:18000]
     )
 
 
@@ -652,12 +718,20 @@ def _parse_summary_json(content: str) -> dict[str, Any]:
 
 def _heuristic_summary(transcript_text: str) -> dict[str, Any]:
     lines = [line.strip(" -*\t") for line in transcript_text.splitlines() if line.strip()]
-    summary = " ".join(lines[:3])[:1200] or "Transcript unavailable or too sparse for a confident summary."
+    summary = " ".join(lines[:3])[:1200] or "转录内容不足，无法生成摘要。"
+    # Match both Chinese and English action/risk/decision keywords
     action_items = [
-        line for line in lines if line.lower().startswith(("action:", "todo:", "next step:", "follow up:"))
+        line for line in lines
+        if line.lower().startswith(("action:", "todo:", "next step:", "follow up:", "行动:", "待办:", "跟进:"))
     ][:8]
-    risks = [line for line in lines if "risk" in line.lower() or "blocker" in line.lower()][:6]
-    decisions = [line for line in lines if "decide" in line.lower() or "decision" in line.lower()][:6]
+    risks = [
+        line for line in lines
+        if any(kw in line.lower() for kw in ("risk", "blocker", "风险", "阻塞", "问题"))
+    ][:6]
+    decisions = [
+        line for line in lines
+        if any(kw in line.lower() for kw in ("decide", "decision", "决定", "决策", "确认"))
+    ][:6]
     confidence = "low" if len(transcript_text.strip()) < 300 else "medium"
     return {
         "summary": summary,
@@ -665,7 +739,7 @@ def _heuristic_summary(transcript_text: str) -> dict[str, Any]:
         "action_items": action_items,
         "risks": risks,
         "confidence": confidence,
-        "confidence_notes": "Generated with heuristic fallback because no LLM summary response was available.",
+        "confidence_notes": "由于 LLM 摘要不可用，使用启发式回退生成。",
     }
 
 

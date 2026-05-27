@@ -86,6 +86,7 @@ fn parse_shallow_command(
         ShallowCommand::Skills { .. } => commands::parse_skills(args),
         ShallowCommand::Plugins { .. } => commands::parse_plugins(args),
         ShallowCommand::Memory { .. } => commands::parse_memory(args),
+        ShallowCommand::Meeting { .. } => commands::parse_meeting(args),
         ShallowCommand::Mcp { .. } => commands::parse_mcp(args),
         ShallowCommand::Sessions { .. } => commands::parse_sessions(args),
         ShallowCommand::Resume { .. } => commands::parse_resume(args),

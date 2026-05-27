@@ -1,0 +1,22 @@
+{
+  "summary": "产品团队讨论了Q3录音纪要功能的开发计划。确定三阶段推进：第一阶段离线文件转录，第二阶段实时录音，第三阶段日历自动触发。采用双轨录音方案进行说话人分离，Silero VAD替换现有RMS+ZCR方案。",
+  "key_decisions": [
+    "第一阶段优先实现离线文件转录（2周完成）",
+    "说话人分离采用双轨方案（麦克风=说话人A，扬声器=说话人B），不使用pyannote",
+    "第二阶段实现Silero VAD替换现有能量检测",
+    "pyannote设为可选降级方案"
+  ],
+  "action_items": [
+    "李明负责hermes-audio crate开发",
+    "王芳负责meeting_notes工具实现",
+    "赵强负责benchmark评测脚本",
+    "验证Silero ONNX在Windows上的兼容性"
+  ],
+  "risks": [
+    "Silero ONNX在Windows上的兼容性尚未验证",
+    "pyannote需要HuggingFace token，部分用户可能无法获取"
+  ],
+  "follow_ups": [
+    "制定WER和DER基准测试计划（目标：WER<8%，行动项召回F1>80%）"
+  ]
+}

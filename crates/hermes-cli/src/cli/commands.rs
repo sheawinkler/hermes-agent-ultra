@@ -693,6 +693,35 @@ pub fn parse_resume(args: &[OsString]) -> Result<CliCommand, clap::Error> {
 }
 
 #[derive(Parser, Debug, Clone)]
+#[command(name = "meeting", about = "Meeting recorder and notes generator")]
+struct MeetingArgs {
+    /// Action: `record` (live recording) or `notes` (process audio file).
+    action: Option<String>,
+    /// Path to audio file (required for `notes` action).
+    #[arg(long)]
+    audio: Option<String>,
+    /// Meeting title (used for transcript filename and memory tags).
+    #[arg(long)]
+    title: Option<String>,
+    /// Transcription mode: `offline` (default) or `realtime`.
+    #[arg(long)]
+    mode: Option<String>,
+    /// Enable pyannote speaker diarization.
+    #[arg(long)]
+    diarize: bool,
+}
+
+pub fn parse_meeting(args: &[OsString]) -> Result<CliCommand, clap::Error> {
+    parse_subcommand::<MeetingArgs, _>(args, |a| CliCommand::Meeting {
+        action: a.action,
+        audio: a.audio,
+        title: a.title,
+        mode: a.mode,
+        diarize: a.diarize,
+    })
+}
+
+#[derive(Parser, Debug, Clone)]
 #[command(name = "insights", about = "insights command")]
 struct InsightsArgs {
     #[arg(long, default_value = "30")]
@@ -904,6 +933,7 @@ pub fn all_subcommand_commands() -> Vec<clap::Command> {
         PluginsArgs,
         MemoryArgs,
         McpArgs,
+        MeetingArgs,
         SessionsArgs,
         ResumeArgs,
         InsightsArgs,

@@ -255,6 +255,89 @@ impl SttConfig {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Meeting recorder configuration
+// ---------------------------------------------------------------------------
+
+/// Transcription mode for the meeting recorder.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum MeetingTranscriptionMode {
+    /// Real-time streaming ASR (e.g. Deepgram WebSocket).  Lower latency,
+    /// shows live captions during the meeting.
+    Realtime,
+    /// Offline batch ASR (e.g. faster-whisper large-v3).  Higher accuracy,
+    /// processed after the meeting ends.
+    #[default]
+    Offline,
+}
+
+/// Optional diarization backend for single-file offline transcription.
+/// Not needed when dual-track (mic + loopback) capture is available.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DiarizationProvider {
+    /// Disable diarization (use channel labels from dual-track capture).
+    #[default]
+    None,
+    /// pyannote-audio via HTTP sidecar (requires `PYANNOTE_TOKEN`).
+    Pyannote,
+    /// Local command (path configured via `diarization_command`).
+    LocalCommand,
+}
+
+/// Configuration for the meeting recorder pipeline.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct MeetingConfig {
+    /// Transcription strategy: `realtime` or `offline` (default: `offline`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcription_mode: Option<MeetingTranscriptionMode>,
+
+    /// Speaker diarization backend (default: `none`, relies on dual-track).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diarization_provider: Option<DiarizationProvider>,
+
+    /// HTTP endpoint for pyannote sidecar (e.g. `http://localhost:8765`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pyannote_endpoint: Option<String>,
+
+    /// Shell command template for local diarization.
+    /// `{audio}` is replaced with the input WAV path.
+    /// `{output}` is replaced with the RTTM output path.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diarization_command: Option<String>,
+
+    /// Minutes of transcript per LLM chunk summary (default: 10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary_chunk_minutes: Option<u32>,
+
+    /// Write structured notes into `holographic` memory_store.db (default: true).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub memory_sink_enabled: Option<bool>,
+
+    /// Directory for storing raw transcript files (default: `$HERMES_HOME/meetings/`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcripts_dir: Option<String>,
+}
+
+impl MeetingConfig {
+    pub fn transcription_mode(&self) -> MeetingTranscriptionMode {
+        self.transcription_mode.clone().unwrap_or_default()
+    }
+
+    pub fn diarization_provider(&self) -> DiarizationProvider {
+        self.diarization_provider.clone().unwrap_or_default()
+    }
+
+    pub fn summary_chunk_minutes(&self) -> u32 {
+        self.summary_chunk_minutes.unwrap_or(10)
+    }
+
+    pub fn memory_sink_enabled(&self) -> bool {
+        self.memory_sink_enabled.unwrap_or(true)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -269,5 +352,14 @@ mod tests {
     fn tts_default_provider_edge() {
         let cfg = TtsConfig::default();
         assert_eq!(cfg.default_provider(), "edge");
+    }
+
+    #[test]
+    fn meeting_defaults() {
+        let cfg = MeetingConfig::default();
+        assert_eq!(cfg.transcription_mode(), MeetingTranscriptionMode::Offline);
+        assert_eq!(cfg.diarization_provider(), DiarizationProvider::None);
+        assert_eq!(cfg.summary_chunk_minutes(), 10);
+        assert!(cfg.memory_sink_enabled());
     }
 }

@@ -27,9 +27,10 @@ pub use config::{
     TerminalBackendType, TerminalConfig, ToolsSettings,
 };
 pub use voice::{
-    SttConfig, SttGroqConfig, SttLocalConfig, SttMistralConfig, SttOpenAiConfig, SttXaiConfig,
-    TtsConfig, TtsEdgeConfig, TtsElevenLabsConfig, TtsGeminiConfig, TtsMiniMaxConfig,
-    TtsMistralConfig, TtsOpenAiConfig, TtsPiperConfig, TtsProviderEntry, TtsXaiConfig,
+    DiarizationProvider, MeetingConfig, MeetingTranscriptionMode, SttConfig, SttGroqConfig,
+    SttLocalConfig, SttMistralConfig, SttOpenAiConfig, SttXaiConfig, TtsConfig, TtsEdgeConfig,
+    TtsElevenLabsConfig, TtsGeminiConfig, TtsMiniMaxConfig, TtsMistralConfig, TtsOpenAiConfig,
+    TtsPiperConfig, TtsProviderEntry, TtsXaiConfig,
 };
 pub use loader::{
     apply_user_config_patch, load_config, load_user_config_file, save_config_yaml,
