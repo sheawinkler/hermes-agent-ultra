@@ -119,13 +119,31 @@ pub fn evaluate_gateway_requirements(
 
     #[cfg(feature = "discord")]
     if let Some(p) = config.platforms.get("discord") {
-        if check(p.enabled, platform_token_or_extra(p).is_some()) {
-            push_fatal(
-                &mut issues,
-                "discord",
-                "missing_token",
-                "discord.enabled=true 但缺少 token",
-            );
+        if p.enabled {
+            if check(true, platform_token_or_extra(p).is_some()) {
+                push_fatal(
+                    &mut issues,
+                    "discord",
+                    "missing_token",
+                    "discord.enabled=true 但缺少 token",
+                );
+            }
+            let has_allowed = p
+                .allowed_users
+                .iter()
+                .any(|u| !u.trim().is_empty())
+                || p
+                    .admin_users
+                    .iter()
+                    .any(|u| !u.trim().is_empty());
+            if check(true, has_allowed) {
+                push_fatal(
+                    &mut issues,
+                    "discord",
+                    "missing_allowed_users",
+                    "discord.enabled=true 但缺少 allowed_users（或 admin_users）",
+                );
+            }
         }
     }
 
@@ -434,6 +452,38 @@ mod tests {
             cfg.token = Some(t.to_string());
         }
         cfg
+    }
+
+    #[test]
+    #[cfg(feature = "discord")]
+    fn discord_with_token_and_allowlist_has_no_fatal_issues() {
+        let mut config = GatewayConfig::default();
+        let mut d = make_platform(true, Some("discord-test-token"));
+        d.allowed_users = vec!["user-1".to_string()];
+        config.platforms.insert("discord".to_string(), d);
+
+        let issues: Vec<_> = evaluate_gateway_requirements(&config, RequirementScope::RuntimeStart)
+            .into_iter()
+            .filter(|i| i.platform == "discord")
+            .collect();
+        assert!(issues.is_empty(), "{issues:?}");
+    }
+
+    #[test]
+    #[cfg(feature = "discord")]
+    fn discord_missing_token_and_allowlist_surfaces_fatals() {
+        let mut config = GatewayConfig::default();
+        config
+            .platforms
+            .insert("discord".to_string(), make_platform(true, None));
+
+        let codes: Vec<_> = evaluate_gateway_requirements(&config, RequirementScope::RuntimeStart)
+            .into_iter()
+            .filter(|i| i.platform == "discord")
+            .map(|i| i.code)
+            .collect();
+        assert!(codes.contains(&"missing_token"));
+        assert!(codes.contains(&"missing_allowed_users"));
     }
 
     #[test]

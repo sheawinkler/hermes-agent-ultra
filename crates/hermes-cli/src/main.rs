@@ -3487,8 +3487,12 @@ fn gateway_session_manager_with_persistence(config: &GatewayConfig) -> SessionMa
     if let Err(err) = sp.ensure_db() {
         tracing::debug!("sessions db init skipped for gateway history hydration: {}", err);
     }
+    let group_sessions_per_user = config
+        .platforms
+        .values()
+        .any(|p| p.enabled && p.group_sessions_per_user);
     let sp_rotator = sp.clone();
-    SessionManager::new(config.session.clone())
+    SessionManager::with_group_isolation(config.session.clone(), group_sessions_per_user)
         .with_history_loader(move |session_key| {
             // Python parity: check rotated UUID index first, fallback to session_key.
             let session_id = match sp.get_indexed_session_id(session_key) {
@@ -4480,6 +4484,13 @@ fn build_gateway_platform_access_policies(
             .unwrap_or_else(|| platform.eq_ignore_ascii_case("discord") && has_allowlist);
 
         let mut dm_mode = parse_dm_access_mode(platform, platform_cfg);
+        if dm_mode == DmAccessMode::Pairing
+            && platform.eq_ignore_ascii_case("discord")
+            && extra_string(platform_cfg, "dm_policy").is_none()
+            && (!platform_cfg.allowed_users.is_empty() || !platform_cfg.admin_users.is_empty())
+        {
+            dm_mode = DmAccessMode::Allowlist;
+        }
         if dm_mode == DmAccessMode::Allowlist {
             let allow_from = platform_cfg
                 .extra
@@ -4675,15 +4686,26 @@ async fn register_gateway_adapters(
                     token,
                     application_id: extra_string(platform_cfg, "application_id"),
                     proxy: Default::default(),
-                    require_mention: platform_cfg.require_mention.unwrap_or(false),
+                    require_mention: platform_cfg.require_mention.unwrap_or(true),
                     intents: platform_cfg
                         .extra
                         .get("intents")
                         .and_then(|v| v.as_u64())
-                        .unwrap_or((1 << 0) | (1 << 9) | (1 << 15)),
+                        .unwrap_or(hermes_gateway::platforms::discord::default_intents()),
                 };
                 match DiscordAdapter::new(discord_cfg) {
-                    Ok(adapter) => gateway.register_adapter("discord", Arc::new(adapter)).await,
+                    Ok(adapter) => {
+                        let adapter = Arc::new(adapter);
+                        let (tx, rx) = mpsc::channel::<GatewayIncomingMessage>(512);
+                        adapter.set_inbound_sender(tx).await;
+                        gateway
+                            .register_adapter("discord", adapter.clone())
+                            .await;
+                        let gw_clone = gateway.clone();
+                        sidecar_tasks.push(tokio::spawn(async move {
+                            run_gateway_incoming_loop(gw_clone, rx, "discord").await;
+                        }));
+                    }
                     Err(e) => println!("Discord enabled but failed to initialize: {}", e),
                 }
             } else {

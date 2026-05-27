@@ -741,10 +741,12 @@ impl Gateway {
             }
         }
 
-        let session_key = self.session_manager.compose_session_key(
+        let is_dm = Some(incoming.is_dm);
+        let session_key = self.session_manager.compose_session_key_with_dm(
             &incoming.platform,
             &incoming.chat_id,
             &incoming.user_id,
+            is_dm,
         );
         let _session_serial = self.acquire_session_serial(&session_key).await;
 
@@ -752,7 +754,12 @@ impl Gateway {
         let existing_session = self.session_manager.get_session(&session_key).await;
         let session = self
             .session_manager
-            .get_or_create_session(&incoming.platform, &incoming.chat_id, &incoming.user_id)
+            .get_or_create_session_with_dm(
+                &incoming.platform,
+                &incoming.chat_id,
+                &incoming.user_id,
+                is_dm,
+            )
             .await;
         trace!(
             platform = %incoming.platform,
@@ -1733,8 +1740,27 @@ impl Gateway {
                     .await?;
             }
         } else if let Some(stream_id) = stream_id {
-            // Finish the legacy stream-manager session.
-            self.stream_manager.finish_stream(&stream_id).await;
+            // Finish the legacy stream-manager session and deliver the final reply.
+            // Visible text may not stream via on_chunk (e.g. reasoning-only deltas); the
+            // placeholder "..." must be replaced by the handler's final response.
+            let accumulated = self
+                .stream_manager
+                .finish_stream(&stream_id)
+                .await
+                .unwrap_or_default();
+            let trimmed_response = response.trim();
+            if !trimmed_response.is_empty() {
+                let acc = accumulated.trim();
+                if acc.is_empty() || acc == "..." || trimmed_response != acc {
+                    self.send_message(
+                        &incoming.platform,
+                        &incoming.chat_id,
+                        response.as_str(),
+                        None,
+                    )
+                    .await?;
+                }
+            }
         }
 
         // Add assistant response to session
@@ -4020,7 +4046,7 @@ mod tests {
 
     #[tokio::test]
     async fn gateway_native_streaming_sends_full_refresh_chunks() {
-        std::env::set_var("HERMES_WECOM_STREAM_FLUSH_INTERVAL_MS", "1");
+        unsafe { std::env::set_var("HERMES_WECOM_STREAM_FLUSH_INTERVAL_MS", "1") };
 
         let sent = Arc::new(Mutex::new(Vec::new()));
         let chunks = Arc::new(Mutex::new(Vec::new()));
@@ -4065,7 +4091,7 @@ mod tests {
         );
 
         let chunks = chunks.lock().unwrap().clone();
-        std::env::remove_var("HERMES_WECOM_STREAM_FLUSH_INTERVAL_MS");
+        unsafe { std::env::remove_var("HERMES_WECOM_STREAM_FLUSH_INTERVAL_MS") };
 
         assert!(!chunks.is_empty());
         assert_eq!(chunks.first().map(|c| c.0.as_str()), Some("思考中..."));

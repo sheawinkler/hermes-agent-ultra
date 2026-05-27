@@ -342,12 +342,26 @@ impl SessionManager {
 
     /// Compose the canonical session key for platform/chat/user.
     pub fn compose_session_key(&self, platform: &str, chat_id: &str, user_id: &str) -> String {
-        // Keep Slack shared channels per-user isolated to avoid command/runtime
-        // state bleed between users in the same channel.
+        self.compose_session_key_with_dm(platform, chat_id, user_id, None)
+    }
+
+    /// Like [`compose_session_key`] but uses explicit DM vs guild when known
+    /// (Discord guild channels use numeric snowflake ids that do not match [`infer_session_type`]).
+    pub fn compose_session_key_with_dm(
+        &self,
+        platform: &str,
+        chat_id: &str,
+        user_id: &str,
+        is_dm: Option<bool>,
+    ) -> String {
         if is_slack_shared_channel(platform, chat_id) && !user_id.trim().is_empty() {
             return format!("{}:{}:{}", platform, chat_id, user_id);
         }
-        let session_type = Self::infer_session_type(chat_id);
+        let session_type = match is_dm {
+            Some(true) => SessionType::Dm,
+            Some(false) => SessionType::Group,
+            None => Self::infer_session_type(chat_id),
+        };
         if self.group_sessions_per_user && session_type == SessionType::Group {
             format!("{}:{}:{}", platform, chat_id, user_id)
         } else {
@@ -366,10 +380,25 @@ impl SessionManager {
         chat_id: &str,
         user_id: &str,
     ) -> Session {
-        let session_type = Self::infer_session_type(chat_id);
+        self.get_or_create_session_with_dm(platform, chat_id, user_id, None)
+            .await
+    }
+
+    pub async fn get_or_create_session_with_dm(
+        &self,
+        platform: &str,
+        chat_id: &str,
+        user_id: &str,
+        is_dm: Option<bool>,
+    ) -> Session {
+        let session_type = match is_dm {
+            Some(true) => SessionType::Dm,
+            Some(false) => SessionType::Group,
+            None => Self::infer_session_type(chat_id),
+        };
         let reset_policy = self.effective_reset_policy(platform, session_type);
 
-        let session_key = self.compose_session_key(platform, chat_id, user_id);
+        let session_key = self.compose_session_key_with_dm(platform, chat_id, user_id, is_dm);
 
         let mut sessions = self.sessions.write().await;
 

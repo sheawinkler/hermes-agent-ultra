@@ -22,7 +22,8 @@ use hermes_gateway::platforms::wecom::{WeComAdapter, WeComConfig};
 use hermes_gateway::platforms::weixin::{WeChatAdapter, WeixinConfig};
 use hermes_gateway::platforms::whatsapp::{WhatsAppAdapter, WhatsAppConfig};
 use hermes_gateway::{
-    evaluate_gateway_requirements, DmManager, Gateway, RequirementScope, RequirementSeverity,
+    evaluate_gateway_requirements, DmManager, Gateway, PlatformAdapter, RequirementScope,
+    RequirementSeverity,
     SessionManager,
 };
 use hermes_tools::tools::messaging::SendMessageHandler;
@@ -131,17 +132,21 @@ async fn register_outbound_adapters(config: &GatewayConfig, gateway: &Arc<Gatewa
                     token,
                     application_id: extra_string(platform_cfg, "application_id"),
                     proxy: Default::default(),
-                    require_mention: platform_cfg.require_mention.unwrap_or(false),
+                    require_mention: platform_cfg.require_mention.unwrap_or(true),
                     intents: platform_cfg
                         .extra
                         .get("intents")
                         .and_then(|v| v.as_u64())
-                        .unwrap_or((1 << 0) | (1 << 9) | (1 << 15)),
+                        .unwrap_or(hermes_gateway::platforms::discord::default_intents()),
                 };
                 match DiscordAdapter::new(discord_cfg) {
                     Ok(adapter) => {
-                        gateway.register_adapter("discord", Arc::new(adapter)).await;
-                        registered.push("discord".to_string());
+                        if adapter.start().await.is_ok() {
+                            gateway.register_adapter("discord", Arc::new(adapter)).await;
+                            registered.push("discord".to_string());
+                        } else {
+                            tracing::warn!("discord adapter start failed");
+                        }
                     }
                     Err(e) => tracing::warn!("discord adapter init failed: {}", e),
                 }

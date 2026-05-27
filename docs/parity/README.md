@@ -48,6 +48,10 @@ By default this command fetches upstream directly from GitHub
 - `intentional-divergence.json`: tracked, approved ultra-only deltas used by the report
 - `.sync-reports/upstream-surface-coverage-gate-*.json`: required-surface coverage proof for upstream files under `skills`, `optional-skills`, `plugins`, `tests`, `website`, `ui-tui`, `docs`
 
+## Manual Planning Docs
+
+- [`discord-channel-parity.md`](./discord-channel-parity.md) — Discord 渠道功能对比与优先级（**P0 = 对话调通**）
+
 ## What The Matrix Includes
 
 - Tree-level path classification that works even when branch histories diverge:
