@@ -48,6 +48,7 @@ HERMES_HOME="${HERMES_HOME:-$HOME/.hermes}"
 CANONICAL_BIN_NAME="${CANONICAL_BIN_NAME:-hermes-agent-ultra}"
 PRIMARY_BIN_NAME="${PRIMARY_BIN_NAME:-hermes-ultra}"
 LEGACY_BIN_NAME="${LEGACY_BIN_NAME:-hermes}"
+INSTALL_LEGACY_ALIAS="${INSTALL_LEGACY_ALIAS:-false}"
 RELEASE_BIN_BASENAME="${RELEASE_BIN_BASENAME:-hermes}"
 RUN_SETUP_MODE="${RUN_SETUP_MODE:-auto}" # auto|always|never
 ROOT_FHS_LAYOUT=false
@@ -83,7 +84,8 @@ Environment variables:
   HERMES_HOME            Hermes config dir for SOUL.md bootstrap (default: $HOME/.hermes)
   CANONICAL_BIN_NAME     Installed binary name (default: hermes-agent-ultra)
   PRIMARY_BIN_NAME       Primary user-facing command symlink (default: hermes-ultra)
-  LEGACY_BIN_NAME        Compatibility alias symlink name (default: hermes)
+  INSTALL_LEGACY_ALIAS   Also install the legacy hermes alias (default: false)
+  LEGACY_BIN_NAME        Compatibility alias symlink name when enabled (default: hermes)
   RELEASE_BIN_BASENAME   Tarball executable basename (default: hermes)
   RUN_SETUP_MODE         auto|always|never for setup flow (default: auto)
 
@@ -235,6 +237,13 @@ prompt_yes_no() {
   esac
 }
 
+truthy_env() {
+  case "${1:-}" in
+    1|true|TRUE|True|yes|YES|Yes|on|ON|On) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
 run_post_install_flow() {
   local bin_path="$1"
   local -a clean_python_env=(
@@ -345,7 +354,7 @@ install -m 0755 "${SOURCE_BIN}" "${INSTALL_DIR}/${CANONICAL_BIN_NAME}"
 if [[ "${PRIMARY_BIN_NAME}" != "${CANONICAL_BIN_NAME}" ]]; then
   ln -sfn "${CANONICAL_BIN_NAME}" "${INSTALL_DIR}/${PRIMARY_BIN_NAME}"
 fi
-if [[ "${LEGACY_BIN_NAME}" != "${CANONICAL_BIN_NAME}" ]]; then
+if truthy_env "${INSTALL_LEGACY_ALIAS}" && [[ -n "${LEGACY_BIN_NAME}" ]] && [[ "${LEGACY_BIN_NAME}" != "${CANONICAL_BIN_NAME}" ]]; then
   ln -sfn "${CANONICAL_BIN_NAME}" "${INSTALL_DIR}/${LEGACY_BIN_NAME}"
 fi
 
@@ -374,7 +383,7 @@ if command -v "${CANONICAL_BIN_NAME}" >/dev/null 2>&1; then
   if command -v "${PRIMARY_BIN_NAME}" >/dev/null 2>&1; then
     echo "Primary command available: $(command -v "${PRIMARY_BIN_NAME}")"
   fi
-  if command -v "${LEGACY_BIN_NAME}" >/dev/null 2>&1; then
+  if truthy_env "${INSTALL_LEGACY_ALIAS}" && [[ -n "${LEGACY_BIN_NAME}" ]] && command -v "${LEGACY_BIN_NAME}" >/dev/null 2>&1; then
     echo "Legacy alias available: $(command -v "${LEGACY_BIN_NAME}")"
   fi
 else

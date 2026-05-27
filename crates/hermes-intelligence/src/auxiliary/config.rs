@@ -36,7 +36,7 @@ pub struct TaskOverride {
 ///
 /// Typically populated from the user's `config.yaml` `auxiliary` section but
 /// can also be assembled programmatically.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuxiliaryConfig {
     /// Per-task overrides keyed by [`AuxiliaryTask::as_key`].
     #[serde(default)]
@@ -44,6 +44,15 @@ pub struct AuxiliaryConfig {
     /// Whether to consult environment variables. Useful to disable in tests.
     #[serde(default = "default_true")]
     pub consult_env: bool,
+}
+
+impl Default for AuxiliaryConfig {
+    fn default() -> Self {
+        Self {
+            tasks: HashMap::new(),
+            consult_env: true,
+        }
+    }
 }
 
 fn default_true() -> bool {
@@ -241,6 +250,12 @@ mod tests {
         assert_eq!(r.provider, "auto");
         assert_eq!(r.model, None);
         assert_eq!(r.timeout, AuxiliaryTask::Title.default_timeout());
+    }
+
+    #[test]
+    fn default_config_consults_env() {
+        assert!(AuxiliaryConfig::default().consult_env);
+        assert!(AuxiliaryConfig::new().consult_env);
     }
 
     #[test]

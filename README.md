@@ -67,7 +67,7 @@ curl -fsSL https://raw.githubusercontent.com/sheawinkler/hermes-agent-ultra/main
 ### From source
 
 ```bash
-cargo install --git https://github.com/sheawinkler/hermes-agent-ultra hermes-cli --locked --bin hermes-agent-ultra --bin hermes-ultra --bin hermes
+cargo install --git https://github.com/sheawinkler/hermes-agent-ultra hermes-cli --locked --bin hermes-agent-ultra --bin hermes-ultra
 ```
 
 ## Quick Start
@@ -115,13 +115,13 @@ Hermes Agent Ultra still supports direct provider and per-tool keys. If you pref
 Fresh install path:
 
 ```bash
-hermes setup --portal
+hermes-ultra setup --portal
 ```
 
 That starts Nous OAuth setup, sets Nous as the provider, and enables Tool Gateway routing. Inspect the current state with:
 
 ```bash
-hermes portal status
+hermes-ultra portal status
 ```
 
 You can still bring your own keys for individual tools; gateway routing is per backend, not all-or-nothing.
