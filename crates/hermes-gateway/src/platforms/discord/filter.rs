@@ -1,6 +1,6 @@
 //! P0/P1 inbound message filtering (pure functions).
 
-use super::config::ChannelIdSet;
+use super::config::{AllowBotsMode, ChannelIdSet};
 use super::parse::RawDiscordMessage;
 
 /// Discord default message type.
@@ -18,6 +18,9 @@ pub struct DiscordInboundConfig {
     pub ignored_channels: ChannelIdSet,
     /// Thread channel IDs the bot has already joined (skip mention requirement).
     pub thread_participation: ChannelIdSet,
+
+    /// Policy for messages authored by other bots (P2-10).
+    pub allow_bots: AllowBotsMode,
 }
 
 impl DiscordInboundConfig {
@@ -48,7 +51,7 @@ pub fn should_accept_message(raw: &RawDiscordMessage, cfg: &DiscordInboundConfig
         }
     }
 
-    if raw.is_bot {
+    if raw.is_bot && !allow_other_bot_message(raw, cfg) {
         return false;
     }
 
@@ -86,6 +89,20 @@ pub(crate) fn content_mentions_bot(content: &str, bot_id: &str) -> bool {
     content.contains(&format!("<@{bot_id}>")) || content.contains(&format!("<@!{bot_id}>"))
 }
 
+fn allow_other_bot_message(raw: &RawDiscordMessage, cfg: &DiscordInboundConfig) -> bool {
+    match cfg.allow_bots {
+        AllowBotsMode::All => true,
+        AllowBotsMode::None => false,
+        AllowBotsMode::Mentions => {
+            let Some(bot_id) = cfg.bot_user_id.as_deref() else {
+                return false;
+            };
+            raw.mentions.iter().any(|m| m == bot_id)
+                || content_mentions_bot(&raw.content, bot_id)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,6 +133,7 @@ mod tests {
             allowed_channels: ChannelIdSet::new(),
             ignored_channels: ChannelIdSet::new(),
             thread_participation: ChannelIdSet::new(),
+            allow_bots: AllowBotsMode::None,
         }
     }
 
@@ -133,7 +151,51 @@ mod tests {
             allowed_channels: ChannelIdSet::parse(allowed),
             ignored_channels: ChannelIdSet::parse(ignored),
             thread_participation: ChannelIdSet::new(),
+            allow_bots: AllowBotsMode::None,
         }
+    }
+
+    fn cfg_allow_bots(mode: AllowBotsMode, bot: Option<&str>) -> DiscordInboundConfig {
+        DiscordInboundConfig {
+            allow_bots: mode,
+            ..cfg(false, bot)
+        }
+    }
+
+    #[test]
+    fn f20_allow_bots_all_accepts_other_bot() {
+        let raw = RawDiscordMessage {
+            is_bot: true,
+            user_id: Some("other-bot".into()),
+            ..human_guild("hi", vec![])
+        };
+        assert!(should_accept_message(
+            &raw,
+            &cfg_allow_bots(AllowBotsMode::All, Some("bot99"))
+        ));
+    }
+
+    #[test]
+    fn f21_allow_bots_mentions_requires_bot_mention() {
+        let raw = RawDiscordMessage {
+            is_bot: true,
+            user_id: Some("other-bot".into()),
+            ..human_guild("hi", vec![])
+        };
+        assert!(!should_accept_message(
+            &raw,
+            &cfg_allow_bots(AllowBotsMode::Mentions, Some("bot99"))
+        ));
+        let raw2 = human_guild("hi", vec!["bot99"]);
+        let raw2 = RawDiscordMessage {
+            is_bot: true,
+            user_id: Some("other-bot".into()),
+            ..raw2
+        };
+        assert!(should_accept_message(
+            &raw2,
+            &cfg_allow_bots(AllowBotsMode::Mentions, Some("bot99"))
+        ));
     }
 
     #[test]

@@ -132,7 +132,8 @@ async fn register_outbound_adapters(config: &GatewayConfig, gateway: &Arc<Gatewa
                 match DiscordAdapter::new(discord_cfg) {
                     Ok(adapter) => {
                         if adapter.start().await.is_ok() {
-                            gateway.register_adapter("discord", Arc::new(adapter)).await;
+                            let adapter = Arc::new(adapter);
+                            gateway.register_discord_adapter(adapter).await;
                             registered.push("discord".to_string());
                         } else {
                             tracing::warn!("discord adapter start failed");

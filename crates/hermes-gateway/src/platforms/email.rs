@@ -511,6 +511,7 @@ fn imap_fetch_unseen(
                 interaction_id: None,
                 interaction_token: None,
                 role_ids: vec![],
+                ..Default::default()
             });
         }
     }

@@ -2,6 +2,7 @@
 
 mod allowed_mentions;
 mod auth;
+mod channel_context;
 mod config;
 mod dedup;
 mod filter;
@@ -10,6 +11,7 @@ mod media;
 mod parse;
 mod rest;
 mod session;
+mod text_batch;
 mod threads;
 mod types;
 
@@ -25,9 +27,10 @@ use hermes_core::traits::{ParseMode, PlatformAdapter};
 use crate::adapter::{describe_secret, BasePlatformAdapter};
 use crate::gateway::IncomingMessage;
 
+pub use channel_context::{resolve_channel_prompt, resolve_channel_skills, ChannelSkillBinding};
 pub use config::{
-    default_intents, ChannelIdSet, DiscordConfig, ReplyToMode, DISCORD_API_BASE,
-    MAX_MESSAGE_LENGTH,
+    default_intents, AllowBotsMode, ChannelIdSet, CommandSyncPolicy, DiscordConfig, ReplyToMode,
+    DISCORD_API_BASE, MAX_MESSAGE_LENGTH,
 };
 pub use allowed_mentions::{parse_bool_like, DiscordAllowedMentions};
 pub use dedup::MessageDedup;
@@ -41,10 +44,12 @@ pub use parse::{
 };
 pub use rest::{encode_emoji, split_message};
 pub use types::basic_slash_commands;
+pub use gateway_loop::DiscordInner;
 pub use session::{
     opcodes, GatewayAction, GatewayPayload, GatewaySession, IdentifyData, IdentifyProperties,
     ResumeData,
 };
+pub use text_batch::deliver_inbounds;
 pub use types::{
     DiscordEmbed, DiscordMessage, DiscordThread, DiscordUser, EmbedAuthor, EmbedField,
     EmbedFooter, EmbedMedia, SlashCommand, SlashCommandChoice, SlashCommandOption,
@@ -79,6 +84,9 @@ impl DiscordAdapter {
             thread_tracker: Arc::new(threads::ThreadParticipationTracker::load()),
             stop: tokio::sync::Notify::new(),
             deferred_interactions: RwLock::new(std::collections::HashSet::new()),
+            inbound_text_pending: RwLock::new(std::collections::HashMap::new()),
+            inbound_text_tasks: RwLock::new(std::collections::HashMap::new()),
+            channel_topic_cache: RwLock::new(std::collections::HashMap::new()),
         });
         Ok(Self {
             inner,
@@ -89,6 +97,49 @@ impl DiscordAdapter {
 
     pub fn config(&self) -> &DiscordConfig {
         &self.inner.config
+    }
+
+    /// Shared inner state (tests, gateway registration).
+    pub fn inner(&self) -> &Arc<Inner> {
+        &self.inner
+    }
+
+    /// Backfill prior channel messages into an empty session (P2-8).
+    pub async fn backfill_session_if_empty(
+        &self,
+        session_manager: &crate::session::SessionManager,
+        session_key: &str,
+        channel_id: &str,
+    ) -> Result<(), GatewayError> {
+        let limit = self.inner.config.history_backfill_limit;
+        if limit == 0 {
+            return Ok(());
+        }
+        let existing = session_manager.get_messages(session_key).await;
+        if !existing.is_empty() {
+            return Ok(());
+        }
+        let rows = self
+            .inner
+            .fetch_channel_messages(channel_id, limit)
+            .await?;
+        for (_id, content) in rows {
+            session_manager
+                .add_message(session_key, hermes_core::types::Message::user(&content))
+                .await;
+        }
+        Ok(())
+    }
+
+    pub async fn send_multiple_image_embeds(
+        &self,
+        channel_id: &str,
+        image_urls: &[&str],
+        caption: Option<&str>,
+    ) -> Result<Vec<String>, GatewayError> {
+        self.inner
+            .send_multiple_image_embeds(channel_id, image_urls, caption)
+            .await
     }
 
     pub async fn set_inbound_sender(&self, tx: mpsc::Sender<IncomingMessage>) {
@@ -259,10 +310,14 @@ impl PlatformAdapter for DiscordAdapter {
         self.inner.base.mark_running();
         if self.inner.config.slash_commands_enabled
             && self.inner.config.application_id.is_some()
+            && !matches!(
+                self.inner.config.command_sync_policy,
+                config::CommandSyncPolicy::Off
+            )
         {
             let inner = self.inner.clone();
             tokio::spawn(async move {
-                let commands = basic_slash_commands();
+                let commands = types::extended_slash_commands();
                 let result = if let Some(guild_id) = inner.config.slash_guild_id.as_deref() {
                     inner
                         .register_guild_slash_commands(guild_id, &commands)

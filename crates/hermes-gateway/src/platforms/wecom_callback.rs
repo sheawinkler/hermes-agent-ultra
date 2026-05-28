@@ -802,6 +802,7 @@ async fn handle_callback_request(
                         interaction_id: None,
                         interaction_token: None,
                         role_ids: vec![],
+                        ..Default::default()
                     })
                     .await;
             }

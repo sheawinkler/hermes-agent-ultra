@@ -54,6 +54,26 @@ pub fn basic_slash_commands() -> Vec<SlashCommand> {
     .collect()
 }
 
+/// Extended slash set for P2-12 (registers alongside MVP commands).
+pub fn extended_slash_commands() -> Vec<SlashCommand> {
+    let mut commands = basic_slash_commands();
+    for (name, description) in [
+        ("model", "Switch or show the active model"),
+        ("personality", "Switch agent personality"),
+        ("steer", "Steer the current conversation"),
+        ("compress", "Compress conversation context"),
+        ("retry", "Retry the last agent response"),
+    ] {
+        commands.push(SlashCommand {
+            name: name.into(),
+            description: description.into(),
+            options: None,
+            command_type: 1,
+        });
+    }
+    commands
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SlashCommandOption {
     pub name: String,

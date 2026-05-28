@@ -995,6 +995,7 @@ impl WeChatAdapter {
             interaction_id: None,
             interaction_token: None,
             role_ids: vec![],
+            ..Default::default()
         };
         if let Some(tx) = inner.inbound_tx.read().await.clone() {
             tokio::spawn(async move {

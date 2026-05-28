@@ -5,7 +5,7 @@
 > **用户文档（描述 Python 行为）**：[website/docs/user-guide/messaging/discord.md](../../website/docs/user-guide/messaging/discord.md)
 
 **最后更新**：2026-05-28  
-**状态说明**：**P0/P1/P1.2** 与 **P2 核心**（reply_to_mode、allowed_mentions、出站 Markdown）已在 Rust 落地；下一主线为 **P2-4..P2-12 扩展** 或 **P3**；`DISCORD_PROXY` 仍见 P3。
+**状态说明**：**P0/P1/P1.2**、**P2 核心**（M7–M9）与 **P2 扩展**（M10–M16，见 §8）已在 Rust 落地；**Forum 发帖**、**command sync safe 状态文件**、**skill slash autocomplete** 仍为 🟡/待补；下一主线 **P3**；`DISCORD_PROXY` 仍见 P3。
 
 ---
 
@@ -187,15 +187,15 @@ sequenceDiagram
 | Reply-to 模式 | ✅ | ✅ | P2 | `ReplyToMode` + REST `message_reference` + Gateway `send_message_replying` |
 | allowed_mentions 安全默认 | ✅ | ✅ | P2 | `DiscordAllowedMentions` + 所有 POST/PATCH messages |
 | 出站 Markdown 格式化 | ✅ | ✅ | P2 | `to_discord_markdown` 接入 send/edit（`ParseMode::Plain` 跳过） |
-| 文本批处理 | ✅ | ❌ | P2 | |
-| channel_prompts / skills | ✅ | ❌ | P2 | |
-| 频道 topic 入 context | ✅ | ❌ | P2 | |
-| History backfill | ✅ | ❌ | P2 | |
-| Forum 发帖 | ✅ | ❌ | P2 | |
-| 多图/视频/动图/文档出站 | ✅ | 🟡 | P2 | 部分仅 file/embed |
-| `DISCORD_ALLOW_BOTS` | ✅ | ❌ | P2 | |
-| Command sync safe/bulk | ✅ | ❌ | P2 | |
-| Slash 全量 + skill 组 | ✅ | ❌ | P2 | |
+| 文本批处理（入站 debounce + 出站分片间隔） | ✅ | ✅ | P2 | `text_batch.rs` + `HERMES_DISCORD_TEXT_BATCH_*`；对照 `test_text_batching.py` |
+| channel_prompts / skills | ✅ | ✅ | P2 | `channel_context.rs` + Gateway `inject_discord_channel_context` |
+| 频道 topic 入 context | ✅ | ✅ | P2 | REST `GET /channels/{id}` + `channel_topic` 注入 |
+| History backfill | ✅ | ✅ | P2 | `DISCORD_HISTORY_BACKFILL` / `extra.history_backfill` + `register_discord_adapter` |
+| Forum 发帖 | ✅ | ❌ | P2 | 未实现；thread parent prompt 解析已有 |
+| 多图/视频/动图/文档出站 | ✅ | 🟡 | P2 | `send_multiple_image_embeds`；视频/Forum 仍缺 |
+| `DISCORD_ALLOW_BOTS` | ✅ | ✅ | P2 | `AllowBotsMode` + `filter.rs` F-20/F-21 |
+| Command sync safe/bulk | ✅ | 🟡 | P2 | `CommandSyncPolicy`（`off` 跳过注册）；safe 状态文件未移植 |
+| Slash 全量 + skill 组 | ✅ | 🟡 | P2 | `extended_slash_commands` 注册；autocomplete / skill 分组未移植 |
 | **P3：高级** |
 | Voice join/leave/TTS | ✅ | ❌ | P3 | `voice.rs` 通用，未接 Discord VC |
 | VoiceReceiver STT | ✅ | ❌ | P3 | |
@@ -227,7 +227,7 @@ P0 建议先支持：
 
 P2 已接入：`reply_to_mode` / `DISCORD_REPLY_TO_MODE`、`allow_mentions.*` / `DISCORD_ALLOW_MENTION_*`（见 [discord.md](../../website/docs/user-guide/messaging/discord.md)）。
 
-P2 扩展仍待排期：`HERMES_DISCORD_TEXT_BATCH_*`、`channel_prompts` / `channel_skills`、history backfill、Forum 多图出站、`DISCORD_ALLOW_BOTS`、command sync 全策略、Slash 全量等（§3 P2-4..P2-12）。
+P2 扩展已接入：`HERMES_DISCORD_TEXT_BATCH_*`、`channel_prompts` / `channel_skills`、`DISCORD_HISTORY_BACKFILL`、`DISCORD_ALLOW_BOTS`、`DISCORD_COMMAND_SYNC_POLICY`（`off`/`bulk`）、扩展 slash 名。仍待：`command_sync_policy=safe` 状态文件、Forum 发帖、skill autocomplete、完整多附件出站（§3 P3 前补全）。
 
 ---
 
@@ -237,21 +237,21 @@ P2 扩展仍待排期：`HERMES_DISCORD_TEXT_BATCH_*`、`channel_prompts` / `cha
 |------|------|
 | P0 | 模块单测（`filter` / `parse` / `dedup` / `session`）+ [`tests/discord_p0_gateway.rs`](../../crates/hermes-gateway/tests/discord_p0_gateway.rs) + wiremock [`discord_fetch_gateway_wiremock.rs`](../../crates/hermes-gateway/tests/discord_fetch_gateway_wiremock.rs)（R-01/R-02）；手工 E2E 见下 |
 | P1 回归 | 模块：`auth`（角色/DM guild 作用域）、`threads`（`discord_threads.json` 持久化）、`config`（reactions、ChannelIdSet JSON）、`media`（分类）；Gateway：`gateway_discord_reaction_lifecycle_*`、`gateway_discord_spawns_trigger_typing_on_route`；集成：[`discord_p1_slash.rs`](../../crates/hermes-gateway/tests/discord_p1_slash.rs)、[`discord_p1_attachments.rs`](../../crates/hermes-gateway/tests/discord_p1_attachments.rs)、[`discord_p1_media_wiremock.rs`](../../crates/hermes-gateway/tests/discord_p1_media_wiremock.rs) |
-| P2 回归 | [`discord_p2_reply_mode.rs`](../../crates/hermes-gateway/tests/discord_p2_reply_mode.rs)、[`discord_p2_allowed_mentions.rs`](../../crates/hermes-gateway/tests/discord_p2_allowed_mentions.rs)、[`discord_p2_markdown.rs`](../../crates/hermes-gateway/tests/discord_p2_markdown.rs) + `config`/`allowed_mentions` 模块单测 |
-| Python 对照 | P1/P2 行为仍保留 [tests/gateway/test_discord_*.py](../../tests/gateway/)（含 `test_discord_reply_mode.py`、`test_discord_allowed_mentions.py`）；P2-4..P2-12 / P3 用例待后续 Rust 移植 |
+| P2 回归 | [`discord_p2_reply_mode.rs`](../../crates/hermes-gateway/tests/discord_p2_reply_mode.rs)、[`discord_p2_allowed_mentions.rs`](../../crates/hermes-gateway/tests/discord_p2_allowed_mentions.rs)、[`discord_p2_markdown.rs`](../../crates/hermes-gateway/tests/discord_p2_markdown.rs)、[`discord_p2_text_batch.rs`](../../crates/hermes-gateway/tests/discord_p2_text_batch.rs) + `config`/`allowed_mentions`/`filter`/`channel_context` 模块单测 |
+| Python 对照 | P1/P2 行为仍保留 [tests/gateway/test_discord_*.py](../../tests/gateway/)（含 `test_text_batching.py`、`test_discord_bot_filter.py`、`test_discord_channel_prompts.py` 等）；Forum / safe sync / autocomplete 用例待 Rust 移植 |
 | 回归 | 见下方验收命令；禁止未测改 `expected` |
 
 **P1 Rust 验收命令**（避免无关 `hooks` / `tool_backends` 失败干扰）：
 
 ```bash
-cargo test -p hermes-gateway --features discord --test discord_p0_gateway --test discord_p1_slash --test discord_p1_attachments --test discord_p1_media_wiremock --test discord_fetch_gateway_wiremock --test discord_p2_reply_mode --test discord_p2_allowed_mentions --test discord_p2_markdown
+cargo test -p hermes-gateway --features discord --test discord_p0_gateway --test discord_p1_slash --test discord_p1_attachments --test discord_p1_media_wiremock --test discord_fetch_gateway_wiremock --test discord_p2_reply_mode --test discord_p2_allowed_mentions --test discord_p2_markdown --test discord_p2_text_batch
 cargo test -p hermes-gateway --features discord --lib discord
 ```
 
 **P2 Rust 验收命令**（与 CI `Discord gateway tests` 步骤一致）：
 
 ```bash
-cargo test -p hermes-gateway --features discord --test discord_p0_gateway --test discord_p1_slash --test discord_p1_attachments --test discord_p1_media_wiremock --test discord_fetch_gateway_wiremock --test discord_p2_reply_mode --test discord_p2_allowed_mentions --test discord_p2_markdown
+cargo test -p hermes-gateway --features discord --test discord_p0_gateway --test discord_p1_slash --test discord_p1_attachments --test discord_p1_media_wiremock --test discord_fetch_gateway_wiremock --test discord_p2_reply_mode --test discord_p2_allowed_mentions --test discord_p2_markdown --test discord_p2_text_batch
 cargo test -p hermes-gateway --features discord --lib discord
 ```
 
@@ -282,20 +282,29 @@ cargo test -p hermes-gateway --features discord --lib discord
 | M7 P2-1 reply_to_mode | 2026-05-28 | ✅ |
 | M8 P2-2 allowed_mentions | 2026-05-28 | ✅ |
 | M9 P2-3 出站 Markdown | 2026-05-28 | ✅ |
+| M10 P2-4 入站文本批处理 + 出站分片间隔 | 2026-05-28 | ✅ `text_batch.rs` + `discord_p2_text_batch` |
+| M11 P2-5 channel_prompts | 2026-05-28 | ✅ Gateway system 注入 |
+| M12 P2-6 channel_skills | 2026-05-28 | ✅ runtime hints |
+| M13 P2-7 频道 topic | 2026-05-28 | ✅ REST + cache |
+| M14 P2-8 history backfill | 2026-05-28 | ✅ 空 session 预填 |
+| M15 P2-9 多图 embed 出站 | 2026-05-28 | 🟡 Forum/视频未做 |
+| M16 P2-10 allow_bots | 2026-05-28 | ✅ |
+| M17 P2-11 command sync policy | 2026-05-28 | 🟡 `off`/`bulk`；safe 状态文件未做 |
+| M18 P2-12 扩展 slash | 2026-05-28 | 🟡 命令名注册；autocomplete 未做 |
 
 ### P2 扩展排期（P2-4..P2-12，独立 PR）
 
-| ID | 功能 | 建议顺序 | 复杂度 |
-|----|------|----------|--------|
-| P2-4 | `HERMES_DISCORD_TEXT_BATCH_*` 文本批处理 | 1 | 中 |
-| P2-5 | `channel_prompts` | 2 | 中高 |
-| P2-6 | `channel_skills` | 3 | 中高 |
-| P2-7 | 频道 topic → context | 4 | 中 |
-| P2-8 | `DISCORD_HISTORY_BACKFILL` | 5 | 高 |
-| P2-9 | Forum / 多图视频出站 | 6 | 高 |
-| P2-10 | `DISCORD_ALLOW_BOTS` | 7 | 中 |
-| P2-11 | Command sync safe/bulk | 8 | 中 |
-| P2-12 | Slash 全量 + skill autocomplete | 9 | 很高 |
+| ID | 功能 | 建议顺序 | 状态 |
+|----|------|----------|------|
+| P2-4 | `HERMES_DISCORD_TEXT_BATCH_*` 文本批处理 | 1 | ✅ M10 |
+| P2-5 | `channel_prompts` | 2 | ✅ M11 |
+| P2-6 | `channel_skills` | 3 | ✅ M12 |
+| P2-7 | 频道 topic → context | 4 | ✅ M13 |
+| P2-8 | `DISCORD_HISTORY_BACKFILL` | 5 | ✅ M14 |
+| P2-9 | Forum / 多图视频出站 | 6 | 🟡 M15 |
+| P2-10 | `DISCORD_ALLOW_BOTS` | 7 | ✅ M16 |
+| P2-11 | Command sync safe/bulk | 8 | 🟡 M17 |
+| P2-12 | Slash 全量 + skill autocomplete | 9 | 🟡 M18 |
 
 ---
 
@@ -318,3 +327,4 @@ cargo test -p hermes-gateway --features discord --lib discord
 | 2026-05-28 | P1 Rust 回归：Gateway 反应/typing、Slash 扩展、auth/threads/config、附件 wiremock；§7 更新 |
 | 2026-05-28 | P0 手工 E2E checklist 人工验收通过；§8 M3、文首状态说明更新 |
 | 2026-05-28 | P2 核心三连：reply_to_mode、allowed_mentions、出站 Markdown；§5/§7/§8 M7–M9；P2-4..12 排期表 |
+| 2026-05-28 | P2 扩展：text batch、channel prompts/skills、topic、backfill、allow_bots、扩展 slash；§5/§7/§8 M10–M18 |

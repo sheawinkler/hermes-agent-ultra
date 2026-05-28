@@ -92,6 +92,7 @@ async fn e2e_gateway_routes_message_and_replies() {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         })
         .await
         .expect("route should succeed");

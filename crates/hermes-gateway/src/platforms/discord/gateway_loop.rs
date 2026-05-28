@@ -1,6 +1,6 @@
 //! Discord Gateway WebSocket driver.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -13,6 +13,7 @@ use tracing::{debug, info, warn};
 use hermes_core::errors::GatewayError;
 
 use super::auth::{DiscordAuthConfig, is_discord_user_authorized};
+use super::channel_context::{resolve_channel_prompt, resolve_channel_skills};
 use super::config::{ChannelIdSet, DiscordConfig, DISCORD_API_BASE};
 use super::dedup::MessageDedup;
 use super::filter::{DiscordInboundConfig, should_accept_message};
@@ -44,6 +45,11 @@ pub struct DiscordInner {
     pub stop: tokio::sync::Notify,
     /// Interaction IDs that received a successful defer (follow-up via webhook edit).
     pub deferred_interactions: RwLock<HashSet<String>>,
+    /// Inbound text batch buffers (P2-4).
+    pub inbound_text_pending: RwLock<HashMap<String, super::text_batch::PendingInboundText>>,
+    pub inbound_text_tasks: RwLock<HashMap<String, tokio::task::JoinHandle<()>>>,
+    /// Cached channel topics (P2-7).
+    pub channel_topic_cache: RwLock<HashMap<String, String>>,
 }
 
 impl DiscordInner {
@@ -250,6 +256,7 @@ async fn try_message_create_inbound(
         allowed_channels: inner.config.allowed_channels.clone(),
         ignored_channels: inner.config.ignored_channels.clone(),
         thread_participation,
+        allow_bots: inner.config.allow_bots,
     };
     if !should_accept_message(&raw, &filter_cfg) {
         debug!(
@@ -317,6 +324,19 @@ async fn try_message_create_inbound(
 
     let mut incoming = raw_to_incoming(&raw, media_urls, media_types);
     incoming.chat_id = chat_id;
+    incoming.parent_channel_id = raw.parent_channel_id.clone();
+    let parent = raw.parent_channel_id.as_deref();
+    incoming.channel_prompt =
+        resolve_channel_prompt(&inner.config.channel_prompts, &incoming.chat_id, parent);
+    incoming.channel_skills = resolve_channel_skills(
+        &inner.config.channel_skill_bindings,
+        &incoming.chat_id,
+        parent,
+    )
+    .unwrap_or_default();
+    if let Some(topic) = inner.channel_topic_cached(&raw.channel_id).await {
+        incoming.channel_topic = Some(topic);
+    }
     info!(
         channel_id = %incoming.chat_id,
         user_id = ?raw.user_id,
@@ -459,13 +479,7 @@ async fn apply_gateway_actions(
     }
 
     if !inbounds.is_empty() {
-        if let Some(tx) = inner.inbound_tx.read().await.clone() {
-            for msg in inbounds {
-                let _ = tx.send(msg).await;
-            }
-        } else {
-            debug!("discord inbound dropped: no inbound_tx configured");
-        }
+        super::text_batch::deliver_inbounds(inner, inbounds).await;
     }
 
     Ok(reconnect)
@@ -625,6 +639,9 @@ mod tests {
             thread_tracker: Arc::new(ThreadParticipationTracker::load()),
             stop: tokio::sync::Notify::new(),
             deferred_interactions: RwLock::new(HashSet::new()),
+            inbound_text_pending: RwLock::new(HashMap::new()),
+            inbound_text_tasks: RwLock::new(HashMap::new()),
+            channel_topic_cache: RwLock::new(HashMap::new()),
         }
     }
 

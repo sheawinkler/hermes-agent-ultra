@@ -100,6 +100,7 @@ fn incoming(platform: &str, user_id: &str, text: &str) -> IncomingMessage {
         interaction_id: None,
         interaction_token: None,
     role_ids: vec![],
+        ..Default::default()
     }
 }
 

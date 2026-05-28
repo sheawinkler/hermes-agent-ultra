@@ -15,7 +15,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{mpsc, Mutex as TokioMutex, RwLock};
 use tokio::time::MissedTickBehavior;
 use tracing::{debug, error, info, trace, warn};
 
@@ -125,7 +125,7 @@ fn role_label(role: MessageRole) -> &'static str {
 // ---------------------------------------------------------------------------
 
 /// A platform-agnostic incoming message for gateway routing.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct IncomingMessage {
     /// Platform name (e.g., "telegram", "discord").
     pub platform: String,
@@ -149,6 +149,14 @@ pub struct IncomingMessage {
     pub interaction_token: Option<String>,
     /// Discord member role snowflakes (guild messages / slash interactions).
     pub role_ids: Vec<String>,
+    /// Parent channel when `chat_id` is a thread (Discord).
+    pub parent_channel_id: Option<String>,
+    /// Per-channel ephemeral system prompt (Discord P2-5).
+    pub channel_prompt: Option<String>,
+    /// Channel-bound skills (Discord P2-6).
+    pub channel_skills: Vec<String>,
+    /// Channel topic string when known (Discord P2-7).
+    pub channel_topic: Option<String>,
 }
 
 impl IncomingMessage {
@@ -171,6 +179,10 @@ impl IncomingMessage {
             interaction_id: None,
             interaction_token: None,
             role_ids: vec![],
+            parent_channel_id: None,
+            channel_prompt: None,
+            channel_skills: Vec::new(),
+            channel_topic: None,
         }
     }
 }
@@ -344,6 +356,9 @@ pub struct Gateway {
     messaging_session: RwLock<Option<Arc<MessagingSessionContext>>>,
     /// Per-session mutex so concurrent inbound messages for one chat queue (Python `_running_agents` guard).
     session_serial: RwLock<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Concrete Discord adapter for history backfill (P2-8).
+    #[cfg(feature = "discord")]
+    discord_adapter: RwLock<Option<Arc<crate::platforms::discord::DiscordAdapter>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -475,7 +490,16 @@ impl Gateway {
             stt_enabled: RwLock::new(true),
             messaging_session: RwLock::new(None),
             session_serial: RwLock::new(HashMap::new()),
+            #[cfg(feature = "discord")]
+            discord_adapter: RwLock::new(None),
         }
+    }
+
+    /// Register Discord adapter and retain a handle for channel backfill (P2-8).
+    #[cfg(feature = "discord")]
+    pub async fn register_discord_adapter(&self, adapter: Arc<crate::platforms::discord::DiscordAdapter>) {
+        *self.discord_adapter.write().await = Some(adapter.clone());
+        self.register_adapter("discord", adapter).await;
     }
 
     /// Hold the per-session lock for the full `route_message` pipeline (agent + session writes).
@@ -855,6 +879,18 @@ impl Gateway {
             session_started = existing_session.is_none(),
             "gateway session resolved"
         );
+        #[cfg(feature = "discord")]
+        if incoming.platform == "discord" {
+            if let Some(adapter) = self.discord_adapter.read().await.clone() {
+                let _ = adapter
+                    .backfill_session_if_empty(
+                        &self.session_manager,
+                        &session_key,
+                        &incoming.chat_id,
+                    )
+                    .await;
+            }
+        }
         let session_started = existing_session.is_none();
         let session_auto_reset = existing_session
             .as_ref()
@@ -1593,6 +1629,7 @@ impl Gateway {
             message_count = messages.len(),
             "gateway non-streaming agent start"
         );
+        let messages = Self::inject_discord_channel_context(incoming, messages);
         let response_result = if let Some(handler) = context_handler {
             handler(messages, runtime_context).await
         } else {
@@ -1695,9 +1732,9 @@ impl Gateway {
         runtime_context.deferred_post_delivery_messages = Some(deferred_messages.clone());
         runtime_context.deferred_post_delivery_released = Some(deferred_release.clone());
         let context_handler = self.streaming_handler_with_context.read().await.clone();
-        let legacy_messages = self
-            .inject_runtime_hints(session_key, messages.clone())
-            .await;
+        let messages = Self::inject_discord_channel_context(incoming, messages);
+        let message_count = messages.len();
+        let legacy_messages = self.inject_runtime_hints(session_key, messages).await;
 
         let adapter_for_platform = self.adapters.read().await.get(&incoming.platform).cloned();
         let native_streaming = adapter_for_platform
@@ -1706,6 +1743,8 @@ impl Gateway {
             .unwrap_or(false);
 
         let mut stream_id: Option<String> = None;
+        let mut stream_edit_lock: Option<Arc<TokioMutex<()>>> = None;
+        let mut stream_finalized: Option<Arc<AtomicBool>> = None;
         let mut native_worker: Option<tokio::task::JoinHandle<()>> = None;
         let native_started = Arc::new(AtomicBool::new(false));
         let native_failed = Arc::new(AtomicBool::new(false));
@@ -1847,6 +1886,12 @@ impl Gateway {
             let chat_id = incoming.chat_id.clone();
             let gateway_adapters = self.adapters.read().await.clone();
             let sid = stream_id.clone().unwrap_or_default();
+            // Serialize progressive edits; block chunk flushes after finalize so a
+            // late in-flight edit cannot overwrite the final message (Discord race).
+            let edit_lock = Arc::new(TokioMutex::new(()));
+            let finalized_flag = Arc::new(AtomicBool::new(false));
+            stream_edit_lock = Some(edit_lock.clone());
+            stream_finalized = Some(finalized_flag.clone());
             let visible_emitted = first_visible_emitted.clone();
             let visible_ms = first_visible_chunk_ms.clone();
             let visible_start = stream_visible_start;
@@ -1863,30 +1908,49 @@ impl Gateway {
                 let platform = platform.clone();
                 let chat_id = chat_id.clone();
                 let adapters = gateway_adapters.clone();
+                let edit_lock = edit_lock.clone();
+                let finalized = finalized_flag.clone();
 
                 tokio::spawn(async move {
-                    if let Some(should_flush) = sm.update_stream(&sid, &chunk).await {
-                        if should_flush {
-                            if let Some(content) = sm.get_stream_content(&sid).await {
-                                if let Some(adapter) = adapters.get(&platform) {
-                                    if let Some(message_id) =
-                                        sm.get_message_id(&sid).await
-                                    {
-                                        let _ = adapter
-                                            .edit_message(
-                                                &chat_id,
-                                                &message_id,
-                                                &content,
-                                            )
-                                            .await;
-                                    } else {
-                                        let _ = adapter
-                                            .send_message(&chat_id, &content, None)
-                                            .await;
-                                    }
-                                }
-                            }
+                    let Some(should_flush) = sm.update_stream(&sid, &chunk).await else {
+                        return;
+                    };
+                    if !should_flush {
+                        return;
+                    }
+                    let _guard = edit_lock.lock().await;
+                    if finalized.load(Ordering::Acquire) {
+                        return;
+                    }
+                    let Some(content) = sm.get_stream_content(&sid).await else {
+                        return;
+                    };
+                    if finalized.load(Ordering::Acquire) {
+                        return;
+                    }
+                    let Some(adapter) = adapters.get(&platform) else {
+                        return;
+                    };
+                    if let Some(message_id) = sm.get_message_id(&sid).await {
+                        if let Err(err) = adapter
+                            .edit_message(&chat_id, &message_id, &content)
+                            .await
+                        {
+                            warn!(
+                                platform = %platform,
+                                chat_id = %chat_id,
+                                error = %err,
+                                "streaming progressive edit failed"
+                            );
                         }
+                    } else if let Err(err) = adapter.send_message(&chat_id, &content, None).await
+                    {
+                        warn!(
+                            platform = %platform,
+                            chat_id = %chat_id,
+                            error = %err,
+                            "streaming progressive send failed"
+                        );
                     }
                 });
             })
@@ -1928,11 +1992,11 @@ impl Gateway {
             platform = %incoming.platform,
             chat_id = %incoming.chat_id,
             session_key = %session_key,
-            message_count = messages.len(),
+            message_count = message_count,
             "gateway streaming agent start"
         );
         let response_result = if let Some(handler) = context_handler {
-            handler(messages, runtime_context, on_chunk).await
+            handler(legacy_messages, runtime_context, on_chunk).await
         } else {
             let handler = self.streaming_handler.read().await;
             let handler = handler
@@ -1987,29 +2051,57 @@ impl Gateway {
                     .await?;
             }
         } else if let Some(stream_id) = stream_id {
+            if let (Some(edit_lock), Some(finalized)) =
+                (stream_edit_lock.as_ref(), stream_finalized.as_ref())
+            {
+                finalized.store(true, Ordering::Release);
+                let _guard = edit_lock.lock().await;
+            }
             let anchor_message_id = self.stream_manager.get_message_id(&stream_id).await;
             let accumulated = self
                 .stream_manager
                 .finish_stream(&stream_id)
                 .await
                 .unwrap_or_default();
-            let acc = accumulated.trim();
             let trimmed_response = response.trim();
-            let final_text = if !acc.is_empty() && acc != "..." && acc.len() >= trimmed_response.len() {
+            let final_text = if trimmed_response.is_empty() {
                 accumulated
             } else {
-                response.clone()
+                let acc = accumulated.trim();
+                if acc.is_empty() || acc == "..." {
+                    response.clone()
+                } else if trimmed_response.chars().count() >= acc.chars().count() {
+                    response.clone()
+                } else {
+                    accumulated
+                }
             };
             if !final_text.trim().is_empty() {
                 if let Some(message_id) = anchor_message_id {
                     if let Some(adapter) = self.get_adapter(&incoming.platform).await {
-                        let _ = adapter
+                        if let Err(err) = adapter
                             .edit_message(
                                 &incoming.chat_id,
                                 &message_id,
                                 final_text.trim(),
                             )
-                            .await;
+                            .await
+                        {
+                            warn!(
+                                platform = %incoming.platform,
+                                chat_id = %incoming.chat_id,
+                                message_id = %message_id,
+                                error = %err,
+                                "streaming final edit failed; sending full reply"
+                            );
+                            self.send_message(
+                                &incoming.platform,
+                                &incoming.chat_id,
+                                final_text.trim(),
+                                None,
+                            )
+                            .await?;
+                        }
                     }
                 } else {
                     self.send_message(
@@ -2051,6 +2143,37 @@ impl Gateway {
         .await;
 
         Ok(())
+    }
+
+    fn inject_discord_channel_context(
+        incoming: &IncomingMessage,
+        messages: Vec<Message>,
+    ) -> Vec<Message> {
+        if incoming.platform != "discord" {
+            return messages;
+        }
+        let mut hints = Vec::new();
+        if let Some(prompt) = incoming.channel_prompt.as_deref().filter(|s| !s.is_empty()) {
+            hints.push(format!("[channel_prompt]\n{prompt}"));
+        }
+        if let Some(topic) = incoming.channel_topic.as_deref().filter(|s| !s.is_empty()) {
+            hints.push(format!("[channel_topic]\n{topic}"));
+        }
+        if !incoming.channel_skills.is_empty() {
+            hints.push(format!(
+                "[channel_skills]\n{}",
+                incoming.channel_skills.join(", ")
+            ));
+        }
+        if hints.is_empty() {
+            return messages;
+        }
+        let mut out = Vec::with_capacity(messages.len() + hints.len());
+        for hint in hints {
+            out.push(Message::system(hint));
+        }
+        out.extend(messages);
+        out
     }
 
     async fn inject_runtime_hints(
@@ -3199,6 +3322,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
 
         // Should succeed (deny silently)
@@ -3243,6 +3367,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
 
         let result = gw.route_message(&incoming).await;
@@ -3272,6 +3397,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
 
         // Should fail because no message handler is set
@@ -3297,6 +3423,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
 
         // Should fail because no handler, but DM check is skipped
@@ -3330,6 +3457,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
 
         let result = gw.route_message(&incoming).await;
@@ -3374,6 +3502,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&denied).await.is_ok());
         assert_eq!(
@@ -3394,6 +3523,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&allowed).await.is_ok());
         let sent_msgs = sent.lock().unwrap();
@@ -3427,6 +3557,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
 
         let result = gw.route_message(&incoming).await;
@@ -3488,6 +3619,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
 
         assert!(gw.route_message(&incoming).await.is_ok());
@@ -3543,6 +3675,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
 
         assert!(gw.route_message(&incoming).await.is_ok());
@@ -3600,6 +3733,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&start).await.is_ok());
 
@@ -3631,6 +3765,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&status).await.is_ok());
 
@@ -3663,6 +3798,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&approve).await.is_ok());
 
@@ -3679,6 +3815,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&authorized_dm).await.is_err());
 
@@ -3694,6 +3831,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&deny).await.is_ok());
 
@@ -3710,6 +3848,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&denied_dm).await.is_ok());
     }
@@ -3739,6 +3878,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&provider).await.is_ok());
 
@@ -3754,6 +3894,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&profile).await.is_ok());
 
@@ -3769,6 +3910,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&reload).await.is_ok());
 
@@ -3784,6 +3926,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&status).await.is_ok());
 
@@ -3846,6 +3989,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&set_provider).await.is_ok());
 
@@ -3861,6 +4005,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&set_model).await.is_ok());
 
@@ -3876,6 +4021,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&set_profile).await.is_ok());
 
@@ -3891,6 +4037,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&set_branch).await.is_ok());
 
@@ -3906,6 +4053,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&normal).await.is_ok());
 
@@ -3960,6 +4108,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&yolo_chat1).await.is_ok());
 
@@ -3975,6 +4124,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&yolo_chat2).await.is_ok());
 
@@ -3996,6 +4146,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&reset_chat1).await.is_ok());
 
@@ -4044,6 +4195,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&yolo_chat1).await.is_ok());
         {
@@ -4063,6 +4215,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&switch).await.is_ok());
 
@@ -4103,6 +4256,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&incoming).await.is_ok());
 
@@ -4150,6 +4304,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&incoming).await.is_err());
 
@@ -4196,6 +4351,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&incoming).await.is_ok());
         assert!(reactions.lock().unwrap().is_empty());
@@ -4235,6 +4391,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
             role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&incoming).await.is_ok());
 
@@ -4282,6 +4439,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
             role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&incoming).await.is_err());
 
@@ -4328,6 +4486,7 @@ mod tests {
             interaction_id: Some("ix-1".into()),
             interaction_token: Some("tok".into()),
             role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&slash).await.is_ok());
         assert!(reactions.lock().unwrap().is_empty());
@@ -4346,6 +4505,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
             role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&guild_plain).await.is_ok());
         assert!(reactions.lock().unwrap().is_empty());
@@ -4383,6 +4543,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
             role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&incoming).await.is_ok());
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
@@ -4442,6 +4603,7 @@ mod tests {
                 interaction_id: None,
                 interaction_token: None,
             role_ids: vec![],
+            ..Default::default()
             };
             assert!(gw.route_message(&incoming).await.is_ok());
         }
@@ -4458,6 +4620,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&normal).await.is_ok());
 
@@ -4527,6 +4690,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&incoming).await.is_ok());
 
@@ -4589,6 +4753,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&incoming).await.is_ok());
 
@@ -4652,6 +4817,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&incoming).await.is_ok());
 
@@ -4706,6 +4872,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&incoming).await.is_ok());
 
@@ -4764,6 +4931,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&incoming).await.is_ok());
 
@@ -4851,6 +5019,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&incoming).await.is_ok());
 
@@ -4907,6 +5076,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&incoming).await.is_ok());
 
@@ -4954,6 +5124,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&normal).await.is_ok());
 
@@ -4969,6 +5140,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
         role_ids: vec![],
+            ..Default::default()
         };
         assert!(gw.route_message(&reset).await.is_ok());
 

@@ -4430,6 +4430,7 @@ async fn run_api_server_inbound_loop(
             interaction_id: None,
             interaction_token: None,
             role_ids: vec![],
+            ..Default::default()
         };
         if let Err(err) = gateway.route_message(&incoming).await {
             tracing::warn!("Failed to route api_server message: {}", err);
@@ -4453,6 +4454,7 @@ async fn run_webhook_inbound_loop(gateway: Arc<Gateway>, mut rx: mpsc::Receiver<
             interaction_id: None,
             interaction_token: None,
             role_ids: vec![],
+            ..Default::default()
         };
         if let Err(err) = gateway.route_message(&incoming).await {
             tracing::warn!("Failed to route webhook message: {}", err);
@@ -4553,9 +4555,7 @@ async fn register_gateway_adapters(
                         let adapter = Arc::new(adapter);
                         let (tx, rx) = mpsc::channel::<GatewayIncomingMessage>(512);
                         adapter.set_inbound_sender(tx).await;
-                        gateway
-                            .register_adapter("discord", adapter.clone())
-                            .await;
+                        gateway.register_discord_adapter(adapter.clone()).await;
                         let gw_clone = gateway.clone();
                         sidecar_tasks.push(tokio::spawn(async move {
                             run_gateway_incoming_loop(gw_clone, rx, "discord").await;
@@ -5056,6 +5056,7 @@ async fn run_telegram_poll_loop(gateway: Arc<Gateway>, adapter: Arc<TelegramAdap
                         interaction_id: None,
                         interaction_token: None,
                         role_ids: vec![],
+                        ..Default::default()
                     };
 
                     if let Err(err) = gateway.route_message(&incoming).await {

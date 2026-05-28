@@ -211,6 +211,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
             role_ids: vec![],
+            ..Default::default()
         };
         let s = agent_start(&incoming, "sk", true);
         assert_eq!(
@@ -296,6 +297,7 @@ mod tests {
             interaction_id: None,
             interaction_token: None,
             role_ids: vec![],
+            ..Default::default()
         };
         let v = command_context(&incoming, "sk", "status", "/status");
         assert_eq!(

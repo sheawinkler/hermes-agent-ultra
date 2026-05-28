@@ -245,6 +245,10 @@ pub fn raw_to_incoming(
         interaction_id: None,
         interaction_token: None,
         role_ids: raw.role_ids.clone(),
+        parent_channel_id: raw.parent_channel_id.clone(),
+        channel_prompt: None,
+        channel_skills: Vec::new(),
+        channel_topic: None,
     }
 }
 
@@ -269,6 +273,10 @@ pub fn interaction_to_incoming(interaction: &InteractionData) -> Option<Incoming
         interaction_id: Some(interaction.id.clone()),
         interaction_token: Some(interaction.token.clone()),
         role_ids: interaction.role_ids.clone(),
+        parent_channel_id: None,
+        channel_prompt: None,
+        channel_skills: Vec::new(),
+        channel_topic: None,
     })
 }
 

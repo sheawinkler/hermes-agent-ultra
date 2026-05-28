@@ -105,6 +105,7 @@ async fn slash_status_replies_via_interaction_not_channel() {
         interaction_id: Some("interaction-1".into()),
         interaction_token: Some("interaction-token".into()),
         role_ids: vec![],
+        ..Default::default()
     };
 
     assert!(gw.route_message(&incoming).await.is_ok());
@@ -152,6 +153,7 @@ fn slash_incoming(text: &str) -> IncomingMessage {
         interaction_id: Some("interaction-1".into()),
         interaction_token: Some("interaction-token".into()),
         role_ids: vec![],
+        ..Default::default()
     }
 }
 
@@ -209,6 +211,7 @@ async fn slash_new_resets_session_via_interaction() {
         interaction_id: None,
         interaction_token: None,
         role_ids: vec![],
+        ..Default::default()
     };
     assert!(gw.route_message(&chat).await.is_ok());
     assert!(
@@ -249,6 +252,7 @@ async fn slash_reset_resets_session_via_interaction() {
         interaction_id: None,
         interaction_token: None,
         role_ids: vec![],
+        ..Default::default()
     };
     assert!(gw.route_message(&chat).await.is_ok());
 

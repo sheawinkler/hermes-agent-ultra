@@ -103,6 +103,7 @@ async fn i01_guild_allowlist_user_gets_reply() {
         interaction_id: None,
         interaction_token: None,
     role_ids: vec![],
+        ..Default::default()
     };
     assert!(gw.route_message(&incoming).await.is_ok());
     let sent = adapter.sent.lock().unwrap();
@@ -142,6 +143,7 @@ async fn i02_guild_denied_user_no_transcript() {
         interaction_id: None,
         interaction_token: None,
     role_ids: vec![],
+        ..Default::default()
     };
     assert!(gw.route_message(&incoming).await.is_ok());
     assert_eq!(
@@ -181,6 +183,7 @@ async fn i03_dm_authorized_user_gets_reply() {
         interaction_id: None,
         interaction_token: None,
     role_ids: vec![],
+        ..Default::default()
     };
     assert!(gw.route_message(&incoming).await.is_ok());
     assert!(!adapter.sent.lock().unwrap().is_empty());
@@ -210,6 +213,7 @@ async fn i04_dm_unauthorized_silent() {
         interaction_id: None,
         interaction_token: None,
     role_ids: vec![],
+        ..Default::default()
     };
     assert!(gw.route_message(&incoming).await.is_ok());
     assert!(adapter.sent.lock().unwrap().is_empty());

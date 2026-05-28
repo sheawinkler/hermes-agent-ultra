@@ -3,8 +3,8 @@
 #![cfg(feature = "discord")]
 
 use hermes_gateway::platforms::discord::{
-    parse_attachments, parse_message_create_raw, should_accept_message, ChannelIdSet,
-    DiscordInboundConfig,
+    parse_attachments, parse_message_create_raw, should_accept_message, AllowBotsMode,
+    ChannelIdSet, DiscordInboundConfig,
 };
 
 #[test]
@@ -67,6 +67,7 @@ fn a03_attachment_only_passes_filter_without_text() {
         allowed_channels: ChannelIdSet::new(),
         ignored_channels: ChannelIdSet::new(),
         thread_participation: ChannelIdSet::new(),
+        allow_bots: AllowBotsMode::None,
     };
     assert!(should_accept_message(&raw, &cfg));
 }

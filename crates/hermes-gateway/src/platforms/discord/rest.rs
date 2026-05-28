@@ -1,12 +1,14 @@
 //! Discord REST API outbound operations.
 
+use std::time::Duration;
+
 use tracing::info;
 
 use hermes_core::errors::GatewayError;
 
 use super::config::MAX_MESSAGE_LENGTH;
 use super::gateway_loop::DiscordInner;
-use super::types::{DiscordEmbed, DiscordMessage, DiscordThread, SlashCommand};
+use super::types::{DiscordEmbed, DiscordMessage, DiscordThread, EmbedMedia, SlashCommand};
 
 const INTERACTION_FLAG_EPHEMERAL: u64 = 1 << 6;
 
@@ -110,7 +112,11 @@ impl DiscordInner {
         let chunks = split_message(content, MAX_MESSAGE_LENGTH);
         let mode = self.config.reply_to_mode;
         let mut message_ids = Vec::new();
+        let split_delay = Duration::from_secs_f64(self.config.text_batch_split_delay_seconds);
         for (index, chunk) in chunks.iter().enumerate() {
+            if index > 0 && split_delay > Duration::ZERO {
+                tokio::time::sleep(split_delay).await;
+            }
             let ref_id = mode.reference_for_index(index, reply_to_message_id);
             let id = self.post_message(channel_id, chunk, ref_id).await?;
             message_ids.push(id);
@@ -551,6 +557,116 @@ impl DiscordInner {
             )));
         }
         Ok(())
+    }
+
+    pub async fn channel_topic_cached(&self, channel_id: &str) -> Option<String> {
+        if let Some(t) = self.channel_topic_cache.read().await.get(channel_id) {
+            return Some(t.clone());
+        }
+        let topic = self.fetch_channel_topic(channel_id).await.ok().flatten()?;
+        self.channel_topic_cache
+            .write()
+            .await
+            .insert(channel_id.to_string(), topic.clone());
+        Some(topic)
+    }
+
+    async fn fetch_channel_topic(&self, channel_id: &str) -> Result<Option<String>, GatewayError> {
+        let url = format!("{}/channels/{channel_id}", self.rest_api());
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .map_err(|e| GatewayError::ConnectionFailed(format!("Discord GET channel: {e}")))?;
+        if !resp.status().is_success() {
+            return Ok(None);
+        }
+        let body: serde_json::Value = resp.json().await.map_err(|e| {
+            GatewayError::ConnectionFailed(format!("Discord GET channel json: {e}"))
+        })?;
+        Ok(body
+            .get("topic")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(String::from))
+    }
+
+    pub async fn fetch_channel_messages(
+        &self,
+        channel_id: &str,
+        limit: u32,
+    ) -> Result<Vec<(String, String)>, GatewayError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let url = format!(
+            "{}/channels/{channel_id}/messages?limit={}",
+            self.rest_api(),
+            limit.min(100)
+        );
+        let resp = self
+            .client
+            .get(&url)
+            .header("Authorization", self.auth_header())
+            .send()
+            .await
+            .map_err(|e| GatewayError::ConnectionFailed(format!("Discord GET messages: {e}")))?;
+        if !resp.status().is_success() {
+            let text = resp.text().await.unwrap_or_default();
+            return Err(GatewayError::ConnectionFailed(format!(
+                "Discord GET messages HTTP error: {text}"
+            )));
+        }
+        let body: Vec<serde_json::Value> = resp.json().await.map_err(|e| {
+            GatewayError::ConnectionFailed(format!("Discord GET messages json: {e}"))
+        })?;
+        let mut rows = Vec::new();
+        for msg in body.into_iter().rev() {
+            let id = msg.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let content = msg
+                .get("content")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+            if !content.trim().is_empty() {
+                rows.push((id, content));
+            }
+        }
+        Ok(rows)
+    }
+
+    pub async fn send_multiple_image_embeds(
+        &self,
+        channel_id: &str,
+        image_urls: &[&str],
+        caption: Option<&str>,
+    ) -> Result<Vec<String>, GatewayError> {
+        let mut ids = Vec::new();
+        if image_urls.is_empty() {
+            return Ok(ids);
+        }
+        let embeds: Vec<DiscordEmbed> = image_urls
+            .iter()
+            .map(|url| {
+                let mut e = DiscordEmbed::new();
+                e.image = Some(EmbedMedia {
+                    url: (*url).to_string(),
+                });
+                e
+            })
+            .collect();
+        let first_id = self
+            .send_embed(channel_id, caption, std::slice::from_ref(&embeds[0]))
+            .await?;
+        ids.push(first_id);
+        for embed in embeds.into_iter().skip(1) {
+            let id = self.send_embed(channel_id, None, &[embed]).await?;
+            ids.push(id);
+        }
+        Ok(ids)
     }
 }
 

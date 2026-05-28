@@ -1,12 +1,13 @@
 //! Discord adapter configuration.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use hermes_config::PlatformConfig;
 
 use crate::adapter::AdapterProxyConfig;
 
 use super::allowed_mentions::DiscordAllowedMentions;
+use super::channel_context::{parse_channel_prompts, parse_channel_skill_bindings, parse_history_backfill_limit, ChannelSkillBinding};
 
 /// How outbound messages reference the triggering user message (P2-1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -36,6 +37,46 @@ impl ReplyToMode {
             ReplyToMode::First if index == 0 => Some(id),
             ReplyToMode::All => Some(id),
             _ => None,
+        }
+    }
+}
+
+/// Other-bot message policy (P2-10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AllowBotsMode {
+    #[default]
+    None,
+    Mentions,
+    All,
+}
+
+impl AllowBotsMode {
+    pub fn parse(raw: Option<&str>) -> Self {
+        match raw.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+            Some("all") => Self::All,
+            Some("mentions") => Self::Mentions,
+            Some("none") | Some("") | None => Self::None,
+            Some(_) => Self::None,
+        }
+    }
+}
+
+/// Slash command registration policy (P2-11).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CommandSyncPolicy {
+    #[default]
+    Safe,
+    Bulk,
+    Off,
+}
+
+impl CommandSyncPolicy {
+    pub fn parse(raw: Option<&str>) -> Self {
+        match raw.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+            Some("bulk") => Self::Bulk,
+            Some("off") => Self::Off,
+            Some("safe") | Some("") | None => Self::Safe,
+            Some(_) => Self::Safe,
         }
     }
 }
@@ -179,6 +220,27 @@ pub struct DiscordConfig {
 
     /// REST API base URL (`https://discord.com/api/v10` in production).
     pub rest_api_base: String,
+
+    /// Inbound text batch grace window seconds (P2-4).
+    pub text_batch_delay_seconds: f64,
+
+    /// Delay between long inbound/outbound split chunks (P2-4).
+    pub text_batch_split_delay_seconds: f64,
+
+    /// How to treat messages from other bots (P2-10).
+    pub allow_bots: AllowBotsMode,
+
+    /// Per-channel ephemeral prompts (P2-5).
+    pub channel_prompts: HashMap<String, String>,
+
+    /// Per-channel skill bindings (P2-6).
+    pub channel_skill_bindings: Vec<ChannelSkillBinding>,
+
+    /// Max prior messages to backfill on first route (0 = off, P2-8).
+    pub history_backfill_limit: u32,
+
+    /// Slash registration at startup (P2-11).
+    pub command_sync_policy: CommandSyncPolicy,
 }
 
 impl DiscordConfig {
@@ -217,6 +279,8 @@ impl DiscordConfig {
         let reactions_enabled = parse_reactions_enabled(platform_cfg);
         let reply_to_mode = parse_reply_to_mode(platform_cfg);
         let allowed_mentions = DiscordAllowedMentions::from_platform(platform_cfg);
+        let (text_batch_delay_seconds, text_batch_split_delay_seconds) =
+            parse_text_batch_seconds(platform_cfg);
         Self {
             token,
             application_id: extra_string(platform_cfg, "application_id"),
@@ -269,6 +333,13 @@ impl DiscordConfig {
             reply_to_mode,
             allowed_mentions,
             rest_api_base: DISCORD_API_BASE.to_string(),
+            text_batch_delay_seconds,
+            text_batch_split_delay_seconds,
+            allow_bots: parse_allow_bots(platform_cfg),
+            channel_prompts: parse_channel_prompts(platform_cfg),
+            channel_skill_bindings: parse_channel_skill_bindings(platform_cfg),
+            history_backfill_limit: parse_history_backfill_limit(platform_cfg),
+            command_sync_policy: parse_command_sync_policy(platform_cfg),
         }
     }
 
@@ -295,8 +366,61 @@ impl DiscordConfig {
             reply_to_mode: ReplyToMode::First,
             allowed_mentions: DiscordAllowedMentions::default(),
             rest_api_base: DISCORD_API_BASE.to_string(),
+            text_batch_delay_seconds: 0.0,
+            text_batch_split_delay_seconds: 0.0,
+            allow_bots: AllowBotsMode::None,
+            channel_prompts: HashMap::new(),
+            channel_skill_bindings: Vec::new(),
+            history_backfill_limit: 0,
+            command_sync_policy: CommandSyncPolicy::Off,
         }
     }
+}
+
+fn parse_text_batch_seconds(platform_cfg: &PlatformConfig) -> (f64, f64) {
+    let delay = platform_cfg
+        .extra
+        .get("text_batch_delay_seconds")
+        .and_then(|v| v.as_f64())
+        .or_else(|| {
+            std::env::var("HERMES_DISCORD_TEXT_BATCH_DELAY_SECONDS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+        })
+        .unwrap_or(0.6);
+    let split = platform_cfg
+        .extra
+        .get("text_batch_split_delay_seconds")
+        .and_then(|v| v.as_f64())
+        .or_else(|| {
+            std::env::var("HERMES_DISCORD_TEXT_BATCH_SPLIT_DELAY_SECONDS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+        })
+        .unwrap_or(2.0);
+    (delay.max(0.0), split.max(0.0))
+}
+
+fn parse_allow_bots(platform_cfg: &PlatformConfig) -> AllowBotsMode {
+    if let Some(text) = extra_string(platform_cfg, "allow_bots") {
+        return AllowBotsMode::parse(Some(&text));
+    }
+    AllowBotsMode::parse(
+        std::env::var("DISCORD_ALLOW_BOTS")
+            .ok()
+            .as_deref(),
+    )
+}
+
+fn parse_command_sync_policy(platform_cfg: &PlatformConfig) -> CommandSyncPolicy {
+    if let Some(text) = extra_string(platform_cfg, "command_sync_policy") {
+        return CommandSyncPolicy::parse(Some(&text));
+    }
+    CommandSyncPolicy::parse(
+        std::env::var("DISCORD_COMMAND_SYNC_POLICY")
+            .ok()
+            .as_deref(),
+    )
 }
 
 fn parse_reply_to_mode(platform_cfg: &PlatformConfig) -> ReplyToMode {
