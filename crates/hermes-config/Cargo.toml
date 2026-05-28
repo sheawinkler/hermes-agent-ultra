@@ -16,6 +16,7 @@ directories = { workspace = true }
 url = { workspace = true }
 indexmap = { workspace = true }
 chrono = { workspace = true }
+which = { workspace = true }
 
 [features]
 default = []

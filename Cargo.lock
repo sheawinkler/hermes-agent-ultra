@@ -2186,6 +2186,7 @@ dependencies = [
  "unicode-width",
  "urlencoding",
  "uuid",
+ "which",
  "windows-sys 0.59.0",
  "wiremock",
  "zip",
@@ -2206,6 +2207,7 @@ dependencies = [
  "tempfile",
  "tracing",
  "url",
+ "which",
 ]
 
 [[package]]

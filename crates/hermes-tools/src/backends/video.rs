@@ -61,6 +61,19 @@ impl VisionFrameSamplingVideoBackend {
         frames_dir: &Path,
         max_frames: usize,
     ) -> Result<Vec<PathBuf>, ToolError> {
+        // Pre-check ffmpeg availability for a user-friendly error.
+        if !hermes_config::dep_check::is_available(hermes_config::RuntimeDep::Ffmpeg) {
+            return Err(ToolError::ExecutionFailed(
+                if cfg!(windows) {
+                    "ffmpeg is not installed or not on PATH. Install with: scoop install ffmpeg"
+                        .to_string()
+                } else {
+                    "ffmpeg is not installed or not on PATH. Install ffmpeg and ensure it is available."
+                        .to_string()
+                },
+            ));
+        }
+
         let pattern = frames_dir.join("frame-%03d.jpg");
         let status = Command::new("ffmpeg")
             .arg("-hide_banner")

@@ -7,6 +7,7 @@
 //! and sensible defaults.
 
 pub mod config;
+pub mod dep_check;
 pub mod voice;
 pub mod loader;
 pub mod managed_gateway;
@@ -26,6 +27,7 @@ pub use config::{
     SecurityConfig, SessionsMaintenanceConfig, SkillsSettings, SmartModelRoutingConfig,
     TerminalBackendType, TerminalConfig, ToolsSettings,
 };
+pub use dep_check::{RuntimeDep, is_available as dep_is_available};
 pub use voice::{
     DiarizationProvider, MeetingConfig, MeetingTranscriptionMode, SttConfig, SttGroqConfig,
     SttLocalConfig, SttMistralConfig, SttOpenAiConfig, SttXaiConfig, TtsConfig, TtsEdgeConfig,

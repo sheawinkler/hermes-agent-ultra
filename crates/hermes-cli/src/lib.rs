@@ -22,6 +22,7 @@ pub mod config_env;
 pub mod cron_delivery;
 pub mod copilot_auth;
 pub mod doctor;
+pub mod dep_ensure;
 pub mod env_loader;
 pub mod env_vars;
 pub mod gateway_cmd;
