@@ -787,7 +787,7 @@ Write only the summary body. Do not include any preamble or prefix."
         for i in 0..compress_start {
             let mut msg = messages[i].clone();
             if i == 0 && msg.role == MessageRole::System && self.compression_count == 0 {
-                let extra = "\n\n[Note: Some earlier conversation turns have been compacted into a handoff summary to preserve context space. The current session state may still reflect earlier work, so build on that summary and state rather than re-doing work.]";
+                let extra = "\n\n[Note: Some earlier conversation turns have been compacted into a handoff summary to preserve context space. The current session state may still reflect earlier work, so build on that summary and state rather than re-doing work. Your persistent memory (MEMORY.md, USER.md) remains fully authoritative regardless of compaction.]";
                 let new_content = msg.content.unwrap_or_default() + extra;
                 msg.content = Some(new_content);
             }
