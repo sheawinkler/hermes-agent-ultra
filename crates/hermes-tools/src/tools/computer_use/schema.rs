@@ -7,7 +7,7 @@ pub fn computer_use_schema() -> ToolSchema {
     let mut props = IndexMap::new();
     props.insert(
         "action".into(),
-        json!({"type":"string","enum":["capture","click","double_click","right_click","middle_click","drag","scroll","type","key","set_value","wait","list_apps","focus_app"]}),
+        json!({"type":"string","enum":["capture","capture_to_file","click","double_click","right_click","middle_click","drag","scroll","type","key","set_value","wait","list_apps","focus_app"]}),
     );
     props.insert(
         "mode".into(),
@@ -40,7 +40,7 @@ pub fn computer_use_schema() -> ToolSchema {
     props.insert("capture_after".into(), json!({"type":"boolean"}));
     tool_schema(
         "computer_use",
-        "Drive desktop in background. Preferred workflow: capture(mode='som') then click by element index. macOS uses cua-driver; Windows/Linux fallback supports capture.",
+        "Drive desktop in background. Preferred workflow: capture(mode='som') then click by element index. Use capture_to_file when you need to send screenshots as files via messaging tools.",
         JsonSchema::object(props, vec!["action".into()]),
     )
 }

@@ -1832,9 +1832,12 @@ async fn run_tools(
                 platform.as_deref().unwrap_or("cli")
             );
         }
+        Some("setup") => {
+            run_tools_setup_wizard(&cli).await?;
+        }
         Some(other) => {
             println!(
-                "Unknown tools action: {}. Use 'list', 'enable', or 'disable'.",
+                "Unknown tools action: {}. Use 'list', 'enable', 'disable', or 'setup'.",
                 other
             );
         }

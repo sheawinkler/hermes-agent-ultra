@@ -175,6 +175,18 @@ impl ToolHandler for ComputerUseHandler {
                     .await?;
                 capture_to_output(&capture)?
             }
+            "capture_to_file" => {
+                let mode = params
+                    .get("mode")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("som")
+                    .to_ascii_lowercase();
+                let capture = self
+                    .backend
+                    .capture(&mode, params.get("app").and_then(|v| v.as_str()))
+                    .await?;
+                capture_to_file_output(&capture).await?
+            }
             "wait" => action_to_json(
                 &self
                     .backend
@@ -485,6 +497,35 @@ fn capture_to_output(capture: &CaptureResult) -> Result<String, ToolError> {
     Ok(
         json!({"mode": capture.mode, "app": capture.app, "window_title": capture.window_title, "elements": elements, "summary": summary})
             .to_string(),
+    )
+}
+
+async fn capture_to_file_output(capture: &CaptureResult) -> Result<String, ToolError> {
+    let b64 = capture.image_b64.as_deref().ok_or_else(|| {
+        ToolError::ExecutionFailed("capture_to_file requires image-capable capture mode".to_string())
+    })?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .map_err(|e| ToolError::ExecutionFailed(format!("decode capture image: {e}")))?;
+    let (ext, mime) = match capture.image_mime.as_deref().unwrap_or("image/png") {
+        "image/jpeg" => ("jpg", "image/jpeg"),
+        "image/webp" => ("webp", "image/webp"),
+        _ => ("png", "image/png"),
+    };
+    let path = std::env::temp_dir().join(format!("hermes-capture-{}.{}", Uuid::new_v4(), ext));
+    fs::write(&path, bytes)
+        .await
+        .map_err(|e| ToolError::ExecutionFailed(format!("write capture file: {e}")))?;
+    Ok(
+        json!({
+            "ok": true,
+            "action": "capture_to_file",
+            "file_path": path.to_string_lossy().to_string(),
+            "mime": mime,
+            "mode": capture.mode,
+            "summary": "capture saved to local file; use send_message(file=...) to deliver it"
+        })
+        .to_string(),
     )
 }
 
