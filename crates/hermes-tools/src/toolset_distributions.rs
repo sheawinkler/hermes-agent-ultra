@@ -85,6 +85,7 @@ fn base_weights() -> HashMap<String, f64> {
     w.insert("homeassistant".into(), 0.1);
     w.insert("tts".into(), 0.1);
     w.insert("voice_mode".into(), 0.1);
+    w.insert("computer_use".into(), 0.1);
     w
 }
 

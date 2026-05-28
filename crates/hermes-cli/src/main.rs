@@ -1963,6 +1963,9 @@ async fn run_tools_setup_wizard(cli: &Cli) -> Result<(), AgentError> {
     disk.tools_config.disabled.dedup();
 
     save_config_yaml(&cfg_path, &disk).map_err(|e| AgentError::Config(e.to_string()))?;
+    if enabled_known_set.contains("computer_use") {
+        ensure_computer_use_runtime_ready().await?;
+    }
     println!(
         "Updated tools setup: {} enabled, {} disabled (config: {}).",
         enabled_known.len(),
@@ -1970,6 +1973,109 @@ async fn run_tools_setup_wizard(cli: &Cli) -> Result<(), AgentError> {
         cfg_path.display()
     );
     Ok(())
+}
+
+async fn ensure_computer_use_runtime_ready() -> Result<(), AgentError> {
+    println!("\nComputer Use runtime check:");
+    let mut driver_present = which::which("cua-driver").is_ok();
+    if !driver_present {
+        println!("  - cua-driver not found on PATH.");
+        let do_install = prompt_yes_no("Install cua-driver-rs now?", true).await?;
+        if do_install {
+            let installed = install_cua_driver_rs_windows().await;
+            if installed {
+                driver_present = which::which("cua-driver").is_ok();
+            }
+        } else {
+            println!("  - skipped installation.");
+        }
+    }
+    if !driver_present {
+        println!("  - computer_use will run in fallback capture-only mode.");
+        println!("  - to enable full actions, install cua-driver-rs and reopen setup.");
+        return Ok(());
+    }
+
+    let list_tools_ok = run_cua_driver_health_command(&["list-tools"]).await;
+    let list_windows_ok = run_cua_driver_health_command(&["list_windows"]).await;
+    if list_tools_ok && list_windows_ok {
+        println!("  - cua-driver health check passed (list-tools + list_windows).");
+    } else {
+        println!("  - cua-driver health check has warnings.");
+        println!("  - if list_windows is empty/fails over SSH, run:");
+        println!("      cua-driver autostart enable");
+        println!("      cua-driver autostart kick");
+    }
+    Ok(())
+}
+
+async fn install_cua_driver_rs_windows() -> bool {
+    if !cfg!(windows) {
+        println!("  - auto-install currently implemented for Windows only.");
+        return false;
+    }
+    let ps = which::which("powershell")
+        .or_else(|_| which::which("pwsh"))
+        .ok();
+    let Some(ps_bin) = ps else {
+        println!("  - PowerShell not found; cannot auto-install cua-driver-rs.");
+        return false;
+    };
+
+    println!("  - installing cua-driver-rs via official installer...");
+    let script =
+        "irm https://raw.githubusercontent.com/trycua/cua/main/libs/cua-driver/scripts/install.ps1 | iex";
+    let output = tokio::process::Command::new(ps_bin)
+        .arg("-NoProfile")
+        .arg("-ExecutionPolicy")
+        .arg("Bypass")
+        .arg("-Command")
+        .arg(script)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .await;
+    match output {
+        Ok(out) if out.status.success() => {
+            println!("  - cua-driver-rs install command succeeded.");
+            true
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let snippet = stderr.lines().take(3).collect::<Vec<_>>().join(" | ");
+            println!("  - install failed: {}", snippet);
+            false
+        }
+        Err(err) => {
+            println!("  - install command error: {}", err);
+            false
+        }
+    }
+}
+
+async fn run_cua_driver_health_command(args: &[&str]) -> bool {
+    let output = tokio::process::Command::new("cua-driver")
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .await;
+    match output {
+        Ok(out) if out.status.success() => {
+            println!("  - cua-driver {}: ok", args.join(" "));
+            true
+        }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            let snippet = stderr.lines().take(2).collect::<Vec<_>>().join(" | ");
+            println!("  - cua-driver {}: failed ({})", args.join(" "), snippet);
+            false
+        }
+        Err(err) => {
+            println!("  - cua-driver {}: error ({})", args.join(" "), err);
+            false
+        }
+    }
 }
 
 async fn run_optional_setup_sections(

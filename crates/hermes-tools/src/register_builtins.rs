@@ -25,13 +25,7 @@ pub fn register_builtin_tools(
     terminal_backend: Arc<dyn TerminalBackend>,
     skill_provider: Arc<dyn SkillProvider>,
 ) {
-    register_builtin_tools_impl(
-        registry,
-        terminal_backend,
-        skill_provider,
-        None,
-        None,
-    );
+    register_builtin_tools_impl(registry, terminal_backend, skill_provider, None, None);
 }
 
 /// Register built-in tools with optional voice (tts/stt) config from `GatewayConfig`.
@@ -41,13 +35,7 @@ pub fn register_builtin_tools_with_voice(
     skill_provider: Arc<dyn SkillProvider>,
     voice: Option<VoiceMediaToolConfig>,
 ) {
-    register_builtin_tools_impl(
-        registry,
-        terminal_backend,
-        skill_provider,
-        None,
-        voice,
-    );
+    register_builtin_tools_impl(registry, terminal_backend, skill_provider, None, voice);
 }
 
 /// Register all built-in tool handlers into the given registry.
@@ -325,11 +313,13 @@ fn register_builtin_tools_impl(
     reg(
         registry,
         "code_execution",
-        Arc::new(crate::tools::code_execution::ExecuteCodeHandler::new(Arc::new(
-            crate::backends::code_execution::LocalCodeExecutionBackend::with_tool_registry(
-                Arc::new(registry.clone()),
+        Arc::new(crate::tools::code_execution::ExecuteCodeHandler::new(
+            Arc::new(
+                crate::backends::code_execution::LocalCodeExecutionBackend::with_tool_registry(
+                    Arc::new(registry.clone()),
+                ),
             ),
-        ))),
+        )),
         "🖥️",
         vec![],
     );
@@ -430,7 +420,9 @@ fn register_builtin_tools_impl(
     reg(
         registry,
         "tts",
-        Arc::new(crate::tools::tts::TextToSpeechHandler::new(tts_backend.clone())),
+        Arc::new(crate::tools::tts::TextToSpeechHandler::new(
+            tts_backend.clone(),
+        )),
         "🔊",
         vec![],
     );
@@ -531,14 +523,37 @@ fn register_builtin_tools_impl(
         );
     }
 
+    // -- Computer use (macOS + cua-driver) ----------------------------------
+    {
+        let handler =
+            Arc::new(crate::tools::computer_use::ComputerUseHandler::with_default_backend());
+        let schema = handler.schema();
+        let name = schema.name.clone();
+        let desc = schema.description.clone();
+        registry.register(
+            name,
+            "computer_use",
+            schema,
+            handler,
+            Arc::new(crate::tools::computer_use::check_computer_use_requirements),
+            vec![],
+            true,
+            desc,
+            "🖱️",
+            None,
+        );
+    }
+
     // -- Mixture of Agents ---------------------------------------------------
     reg(
         registry,
         "mixture_of_agents",
-        Arc::new(crate::tools::mixture_of_agents::MixtureOfAgentsHandler::new(
-            Arc::new(crate::tools::mixture_of_agents::StubMoaBackend),
-            crate::tools::mixture_of_agents::MoaConfig::default(),
-        )),
+        Arc::new(
+            crate::tools::mixture_of_agents::MixtureOfAgentsHandler::new(
+                Arc::new(crate::tools::mixture_of_agents::StubMoaBackend),
+                crate::tools::mixture_of_agents::MoaConfig::default(),
+            ),
+        ),
         "🤖",
         vec![],
     );
@@ -556,9 +571,7 @@ fn register_builtin_tools_impl(
     reg(
         registry,
         "voice",
-        Arc::new(crate::tools::transcription::TranscriptionHandler::with_config(
-            stt_cfg,
-        )),
+        Arc::new(crate::tools::transcription::TranscriptionHandler::with_config(stt_cfg)),
         "🎙️",
         vec![
             "VOICE_TOOLS_OPENAI_KEY".into(),
@@ -581,7 +594,9 @@ fn register_builtin_tools_impl(
     reg(
         registry,
         "tts",
-        Arc::new(crate::tools::tts_premium::TtsPremiumHandler::new(tts_backend)),
+        Arc::new(crate::tools::tts_premium::TtsPremiumHandler::new(
+            tts_backend,
+        )),
         "🎵",
         vec!["ELEVENLABS_API_KEY".into()],
     );

@@ -10,18 +10,18 @@
 //! - **Approval system**: Dangerous command pattern detection for terminal safety
 
 pub mod approval;
-pub mod media_extract;
+pub mod backends;
+pub mod checkpoint_manager;
 pub mod code_execution_env;
 pub mod code_execution_ptc;
 pub mod code_execution_stubs;
-pub mod backends;
 pub mod dispatch;
-pub mod tool_dispatch_helpers;
-pub mod checkpoint_manager;
 pub mod kanban;
+pub mod media_extract;
 pub mod register_builtins;
 pub mod registry;
 pub mod rtk_filter;
+pub mod tool_dispatch_helpers;
 pub mod tool_policy;
 pub mod tools;
 pub mod toolset;
@@ -36,26 +36,26 @@ pub use media_extract::extract_media;
 pub use registry::{ToolEntry, ToolEntryInfo, ToolRegistry};
 pub use rtk_filter::RawModeState;
 pub use tool_policy::{
-    default_tool_policy_counters_path, load_tool_policy_counters, persist_tool_policy_counters,
     ToolPolicyCounters, ToolPolicyDecision, ToolPolicyEngine, ToolPolicyMode,
+    default_tool_policy_counters_path, load_tool_policy_counters, persist_tool_policy_counters,
 };
 
 // Re-export toolset types
 pub use toolset::{Toolset, ToolsetError, ToolsetManager};
 
 // Re-export dispatch
-pub use dispatch::{dispatch_single, dispatch_tools, DispatchedResult};
-pub use checkpoint_manager::{checkpoint_shadow_dir_id, CheckpointManager};
-pub use kanban::{kanban_block_reason, kanban_task_from_env, KANBAN_TASK_ENV};
+pub use checkpoint_manager::{CheckpointManager, checkpoint_shadow_dir_id};
+pub use dispatch::{DispatchedResult, dispatch_single, dispatch_tools};
+pub use kanban::{KANBAN_TASK_ENV, kanban_block_reason, kanban_task_from_env};
 pub use tool_dispatch_helpers::{
-    extract_parallel_scope_path, is_destructive_command, paths_overlap,
-    should_parallelize_tool_batch, NEVER_PARALLEL_TOOLS,
+    NEVER_PARALLEL_TOOLS, extract_parallel_scope_path, is_destructive_command, paths_overlap,
+    should_parallelize_tool_batch,
 };
 
 // Re-export approval types
-pub use approval::{check_approval, ApprovalDecision, ApprovalManager};
-pub use code_execution_env::{scrub_child_env, SANDBOX_ALLOWED_TOOLS};
-pub use code_execution_stubs::{generate_hermes_tools_module, RpcTransport};
+pub use approval::{ApprovalDecision, ApprovalManager, check_approval};
+pub use code_execution_env::{SANDBOX_ALLOWED_TOOLS, scrub_child_env};
+pub use code_execution_stubs::{RpcTransport, generate_hermes_tools_module};
 
 // Re-export credential guard
 pub mod credential_guard;
@@ -69,6 +69,7 @@ pub use tools::browser::{
 };
 pub use tools::clarify::{ClarifyBackend, ClarifyHandler};
 pub use tools::code_execution::{CodeExecutionBackend, ExecuteCodeHandler};
+pub use tools::computer_use::{ComputerUseHandler, check_computer_use_requirements};
 pub use tools::credential_files::CredentialFilesHandler;
 pub use tools::cronjob::{CronjobBackend, CronjobHandler};
 pub use tools::dashboard_control::DashboardControlHandler;
@@ -121,15 +122,14 @@ pub use backends::todo::FileTodoBackend;
 pub use backends::tts::MultiTtsBackend;
 pub use backends::video::VisionFrameSamplingVideoBackend;
 pub use backends::web::{
-    search_backend_from_env_or_fallback, DdgsSearchBackend, ExaSearchBackend, FallbackSearchBackend,
-    FirecrawlExtractBackend, SimpleExtractBackend, TavilySearchBackend,
+    DdgsSearchBackend, ExaSearchBackend, FallbackSearchBackend, FirecrawlExtractBackend,
+    SimpleExtractBackend, TavilySearchBackend, search_backend_from_env_or_fallback,
 };
 
 // Re-export builtin registration helper
 pub use register_builtins::{
-    register_builtin_tools, register_builtin_tools_with_vision,
+    VoiceMediaToolConfig, register_builtin_tools, register_builtin_tools_with_vision,
     register_builtin_tools_with_vision_and_voice, register_builtin_tools_with_voice,
-    VoiceMediaToolConfig,
 };
 pub use tools::transcription::transcribe_audio_file;
 

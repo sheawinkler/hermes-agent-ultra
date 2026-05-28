@@ -73,6 +73,8 @@ pub const TOOLSET_SECURITY: &[&str] = &["osv_check", "url_safety"];
 pub const TOOLSET_SYSTEM: &[&str] = &["env_passthrough", "credential_files", "tool_result_storage"];
 /// Mixture-of-agents workflow.
 pub const TOOLSET_MIXTURE_OF_AGENTS: &[&str] = &["mixture_of_agents"];
+/// Background desktop automation (macOS).
+pub const TOOLSET_COMPUTER_USE: &[&str] = &["computer_use"];
 
 // ---------------------------------------------------------------------------
 // Toolset
@@ -239,6 +241,10 @@ impl ToolsetManager {
                 .map(|s| s.to_string())
                 .collect(),
         ));
+        self.register(Toolset::new(
+            "computer_use",
+            TOOLSET_COMPUTER_USE.iter().map(|s| s.to_string()).collect(),
+        ));
 
         // Platform composite toolsets
         self.register(Toolset::with_includes(
@@ -261,6 +267,7 @@ impl ToolsetManager {
                 "messaging",
                 "homeassistant",
                 "tts",
+                "computer_use",
             ]
             .into_iter()
             .map(String::from)
