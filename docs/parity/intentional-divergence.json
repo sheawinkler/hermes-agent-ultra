@@ -79,6 +79,22 @@
       ]
     },
     {
+      "id": "upstream-python-plugin-backend-drift-20260527",
+      "status": "temporary",
+      "workstream": "WS3",
+      "summary": "Track newly added upstream Python plugin/backend trees separately from surgical Rust issue-triage fixes.",
+      "owner": "sheawinkler",
+      "ticket": 319,
+      "last_reviewed": "2026-05-27",
+      "review_date": "2026-06-10",
+      "rationale": "dashboard_auth/nous, image_gen/krea, and security-guidance were added upstream after this PR branch started. Importing or porting those Python plugin trees is unrelated to the focused #292/#293/#317 fixes and should be handled in a dedicated plugin parity slice.",
+      "path_prefixes": [
+        "plugins/dashboard_auth/nous/",
+        "plugins/image_gen/krea/",
+        "plugins/security-guidance/"
+      ]
+    },
+    {
       "id": "upstream-s6-plan-doc-archive",
       "status": "approved",
       "workstream": "WS7",

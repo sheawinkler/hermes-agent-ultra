@@ -95,7 +95,7 @@ use rand::RngCore;
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::fs::OpenOptions;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{IsTerminal, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -800,6 +800,20 @@ fn init_tracing(verbose: bool, interactive_tui: bool) {
 const INTERACTIVE_SESSION_LOCK_FILE: &str = "interactive.session.lock";
 const INTERACTIVE_SESSION_LOCK_BYPASS_ENV: &str = "HERMES_ALLOW_PARALLEL_INTERACTIVE";
 
+fn interactive_tty_error_message() -> &'static str {
+    "interactive Hermes requires a terminal (TTY). Run `hermes-ultra setup` first, \
+     use `hermes-ultra chat --query \"...\"` for non-interactive prompts, or run \
+     `hermes-ultra doctor --deep --snapshot --bundle` for diagnostics."
+}
+
+fn require_interactive_tty() -> Result<(), AgentError> {
+    if std::io::stdin().is_terminal() && std::io::stdout().is_terminal() {
+        Ok(())
+    } else {
+        Err(AgentError::Config(interactive_tty_error_message().into()))
+    }
+}
+
 fn interactive_lock_path_for_cli(cli: &Cli) -> PathBuf {
     hermes_state_root(cli).join(INTERACTIVE_SESSION_LOCK_FILE)
 }
@@ -1032,6 +1046,7 @@ impl Drop for InteractiveSessionLockGuard {
 
 /// Run the interactive REPL (default command).
 async fn run_interactive(cli: Cli) -> Result<(), AgentError> {
+    require_interactive_tty()?;
     let _session_lock = InteractiveSessionLockGuard::acquire(&cli)?;
     let app = App::new(cli).await?;
     hermes_cli::tui::run(app).await
@@ -1054,6 +1069,7 @@ struct ResumeSessionPayload {
 }
 
 async fn run_resume(cli: Cli, requested_session_id: Option<String>) -> Result<(), AgentError> {
+    require_interactive_tty()?;
     let _session_lock = InteractiveSessionLockGuard::acquire(&cli)?;
     let requested = requested_session_id.as_deref();
     let payload = match load_resume_payload(&cli, requested) {
@@ -6766,7 +6782,7 @@ async fn run_portal(cli: Cli, action: Option<String>) -> Result<(), AgentError> 
             .await
         }
         other => Err(AgentError::Config(format!(
-            "Unknown portal action '{}'. Use `hermes portal status` or `hermes portal setup`.",
+            "Unknown portal action '{}'. Use `hermes-ultra portal status` or `hermes-ultra portal setup`.",
             other
         ))),
     }
@@ -9371,7 +9387,9 @@ fn merge_missing_env_keys(src: &Path, dst: &Path, label: &str) -> Result<usize, 
     if !out.is_empty() && !out.ends_with('\n') {
         out.push('\n');
     }
-    out.push_str(&format!("# Imported by `hermes setup` from {label}\n"));
+    out.push_str(&format!(
+        "# Imported by `hermes-ultra setup` from {label}\n"
+    ));
     for line in &to_import {
         out.push_str(line);
         out.push('\n');
@@ -10059,10 +10077,10 @@ async fn run_setup(cli: Cli) -> Result<(), AgentError> {
     }
 
     println!(
-        "\nSetup complete! Run `hermes-ultra` (or `hermes-agent-ultra`/`hermes`) to start an interactive session."
+        "\nSetup complete! Run `hermes-ultra` (or `hermes-agent-ultra`) to start an interactive session."
     );
     println!(
-        "Run `hermes-ultra doctor` (or `hermes-agent-ultra doctor`/`hermes doctor`) to check system requirements."
+        "Run `hermes-ultra doctor` (or `hermes-agent-ultra doctor`) to check system requirements."
     );
     Ok(())
 }
@@ -10186,7 +10204,7 @@ async fn run_doctor(
     if config_dir_ok {
         println!("✓");
     } else {
-        println!("✗ (run `hermes setup`)");
+        println!("✗ (run `hermes-ultra setup`)");
     }
     checks.push(serde_json::json!({
         "name": "config_dir",
@@ -10200,7 +10218,7 @@ async fn run_doctor(
     if config_yaml_ok {
         println!("✓");
     } else {
-        println!("✗ (run `hermes setup`)");
+        println!("✗ (run `hermes-ultra setup`)");
     }
     checks.push(serde_json::json!({
         "name": "config_yaml",
@@ -10220,7 +10238,7 @@ async fn run_doctor(
     } else if let Some(ref p) = project_env {
         println!("✓ (using fallback {})", p.display());
     } else {
-        println!("✗ (run `hermes setup`)");
+        println!("✗ (run `hermes-ultra setup`)");
     }
     checks.push(serde_json::json!({
         "name": "env_file",
@@ -10235,7 +10253,7 @@ async fn run_doctor(
     if soul_ok {
         println!("✓");
     } else {
-        println!("✗ (will be created by `hermes setup` or installer)");
+        println!("✗ (will be created by `hermes-ultra setup` or installer)");
     }
     checks.push(serde_json::json!({
         "name": "soul_md",
@@ -13120,7 +13138,7 @@ async fn run_profile(
         }
         "list" => {
             if !profiles_dir.exists() {
-                println!("No profiles directory found. Run `hermes setup` first.");
+                println!("No profiles directory found. Run `hermes-ultra setup` first.");
                 return Ok(());
             }
             let active = read_active_profile_name(&profiles_dir);
@@ -14522,6 +14540,15 @@ max_turns: 50
         assert!(query_is_local_slash_command("/model list"));
         assert!(query_is_local_slash_command("   /graph status"));
         assert!(!query_is_local_slash_command("hello world"));
+    }
+
+    #[test]
+    fn interactive_tty_error_is_actionable() {
+        let msg = interactive_tty_error_message();
+        assert!(msg.contains("requires a terminal"));
+        assert!(msg.contains("hermes-ultra setup"));
+        assert!(msg.contains("chat --query"));
+        assert!(msg.contains("doctor --deep --snapshot --bundle"));
     }
 
     #[test]

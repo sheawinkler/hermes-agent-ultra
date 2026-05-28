@@ -46,7 +46,7 @@ class HermesAgentUltra < Formula
 
   def install
     bin.install "hermes" => "hermes-agent-ultra"
-    bin.install_symlink "hermes-agent-ultra" => "hermes"
+    bin.install_symlink "hermes-agent-ultra" => "hermes-ultra"
   end
 
   test do

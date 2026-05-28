@@ -1,6 +1,6 @@
 {
   "divergence_file": "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/parity/intentional-divergence.json",
-  "generated_at_utc": "2026-05-27T08:06:30.743577+00:00",
+  "generated_at_utc": "2026-05-27T19:46:07.710068+00:00",
   "items": [
     {
       "errors": [],
@@ -107,6 +107,30 @@
     },
     {
       "errors": [],
+      "id": "upstream-python-plugin-backend-drift-20260527",
+      "last_reviewed": "2026-05-27",
+      "matched_files": 10,
+      "matched_sample": [
+        "plugins/dashboard_auth/nous/__init__.py",
+        "plugins/dashboard_auth/nous/plugin.yaml",
+        "plugins/image_gen/krea/__init__.py",
+        "plugins/image_gen/krea/plugin.yaml",
+        "plugins/security-guidance/LICENSE",
+        "plugins/security-guidance/NOTICE",
+        "plugins/security-guidance/README.md",
+        "plugins/security-guidance/__init__.py",
+        "plugins/security-guidance/patterns.py",
+        "plugins/security-guidance/plugin.yaml"
+      ],
+      "overdue": false,
+      "owner": "sheawinkler",
+      "review_date": "2026-06-10",
+      "status": "temporary",
+      "ticket": 319,
+      "warnings": []
+    },
+    {
+      "errors": [],
       "id": "upstream-s6-plan-doc-archive",
       "last_reviewed": "2026-05-26",
       "matched_files": 1,
@@ -124,7 +148,7 @@
       "errors": [],
       "id": "rust-cli-tui-primary-ux-surface",
       "last_reviewed": "2026-04-21",
-      "matched_files": 1181,
+      "matched_files": 1182,
       "matched_sample": [
         "ui-tui/.gitignore",
         "ui-tui/.prettierrc",
@@ -157,11 +181,11 @@
   ],
   "summary": {
     "errors": 0,
-    "items": 7,
-    "local_paths": 3275,
+    "items": 8,
+    "local_paths": 3276,
     "review_overdue": 0,
     "unowned": 0,
-    "upstream_paths": 4095,
+    "upstream_paths": 4138,
     "warnings": 0
   }
 }

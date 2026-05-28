@@ -34,3 +34,13 @@ def test_homebrew_formula_has_platform_specific_checksummed_assets():
 
     shas = re.findall(r'sha256 "([0-9a-f]{64})"', formula)
     assert len(shas) == 4
+
+
+def test_homebrew_formula_does_not_clobber_upstream_hermes_command():
+    formula = (REPO_ROOT / "packaging/homebrew/hermes-agent.rb").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'bin.install "hermes" => "hermes-agent-ultra"' in formula
+    assert 'bin.install_symlink "hermes-agent-ultra" => "hermes-ultra"' in formula
+    assert '=> "hermes"' not in formula

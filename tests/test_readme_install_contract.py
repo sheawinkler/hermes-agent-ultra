@@ -17,6 +17,8 @@ def test_readme_points_to_ultra_installer() -> None:
         in text
     )
     assert "cargo install --git https://github.com/sheawinkler/hermes-agent-ultra" in text
+    assert "--bin hermes-agent-ultra --bin hermes-ultra" in text
+    assert "--bin hermes\n" not in text
 
 
 def test_readme_documents_rust_primary_runtime() -> None:

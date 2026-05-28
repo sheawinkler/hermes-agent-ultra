@@ -98,8 +98,14 @@ fn normalize_model_block(map: &mut Mapping) {
                 .and_then(as_str)
                 .map(str::trim)
                 .filter(|s| !s.is_empty());
-            let base_url = m
-                .get(&key("base_url"))
+            let base_url = m.get(&key("base_url")).and_then(normalized_base_url);
+            let api_key = m
+                .get(&key("api_key"))
+                .and_then(as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            let api_key_env = m
+                .get(&key("api_key_env"))
                 .and_then(as_str)
                 .map(str::trim)
                 .filter(|s| !s.is_empty());
@@ -115,7 +121,9 @@ fn normalize_model_block(map: &mut Mapping) {
             };
             map.insert(model_key, Value::String(model_str));
 
-            if let (Some(p), Some(bu)) = (provider, base_url) {
+            if let Some(p) = provider
+                .filter(|_| base_url.is_some() || api_key.is_some() || api_key_env.is_some())
+            {
                 let llm_key = key("llm_providers");
                 let mut llm = match map.get(&llm_key).cloned() {
                     Some(Value::Mapping(x)) => x,
@@ -125,7 +133,15 @@ fn normalize_model_block(map: &mut Mapping) {
                     .entry(Value::String(p.to_string()))
                     .or_insert_with(|| Value::Mapping(Mapping::new()));
                 if let Value::Mapping(ref mut em) = prov_entry {
-                    em.insert(key("base_url"), Value::String(bu.to_string()));
+                    if let Some(bu) = base_url {
+                        em.insert(key("base_url"), Value::String(bu));
+                    }
+                    if let Some(key_value) = api_key {
+                        em.insert(key("api_key"), Value::String(key_value.to_string()));
+                    }
+                    if let Some(env_name) = api_key_env {
+                        em.insert(key("api_key_env"), Value::String(env_name.to_string()));
+                    }
                 }
                 map.insert(llm_key, Value::Mapping(llm));
             }
@@ -480,6 +496,33 @@ max_turns: 99
         assert_eq!(cfg.max_turns, 99);
         let or = cfg.llm_providers.get("openrouter").expect("openrouter");
         assert_eq!(or.base_url.as_deref(), Some("https://openrouter.ai/api/v1"));
+    }
+
+    #[test]
+    fn python_model_block_lifts_provider_credentials() {
+        let raw = r#"
+model:
+  default: deepseek-chat
+  provider: deepseek
+  base_url: https://api.deepseek.com/
+  api_key: sk-local
+  api_key_env: DEEPSEEK_API_KEY
+"#;
+        let mut root: Value = serde_yaml::from_str(raw).unwrap();
+        let Value::Mapping(ref mut m) = root else {
+            panic!();
+        };
+        normalize_config_yaml_root(m);
+        let cfg: crate::config::GatewayConfig = serde_yaml::from_value(root).unwrap();
+
+        assert_eq!(cfg.model.as_deref(), Some("deepseek:deepseek-chat"));
+        let provider = cfg.llm_providers.get("deepseek").expect("deepseek");
+        assert_eq!(
+            provider.base_url.as_deref(),
+            Some("https://api.deepseek.com")
+        );
+        assert_eq!(provider.api_key.as_deref(), Some("sk-local"));
+        assert_eq!(provider.api_key_env.as_deref(), Some("DEEPSEEK_API_KEY"));
     }
 
     #[test]
