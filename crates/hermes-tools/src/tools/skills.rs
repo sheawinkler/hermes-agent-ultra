@@ -413,14 +413,174 @@ fn normalize_relative_path(path: &Path) -> String {
 // SkillManageHandler
 // ---------------------------------------------------------------------------
 
+const MAX_NAME_LEN: usize = 64;
+const MAX_CONTENT_CHARS: usize = 100_000;
+const MAX_FILE_BYTES: usize = 1_048_576;
+const ALLOWED_SUBDIRS: &[&str] = &["references", "templates", "scripts", "assets"];
+
+fn valid_name_char(c: char) -> bool {
+    c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-')
+}
+
+fn validate_skill_name(name: &str) -> Option<String> {
+    if name.is_empty() {
+        return Some("Skill name is required.".into());
+    }
+    if name.len() > MAX_NAME_LEN {
+        return Some(format!("Skill name exceeds {MAX_NAME_LEN} characters."));
+    }
+    let mut chars = name.chars();
+    let first = chars.next().unwrap();
+    if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
+        return Some(format!(
+            "Invalid skill name '{name}'. Must start with a lowercase letter or digit."
+        ));
+    }
+    if !chars.all(valid_name_char) {
+        return Some(format!(
+            "Invalid skill name '{name}'. Use lowercase letters, numbers, hyphens, dots, and underscores."
+        ));
+    }
+    None
+}
+
+fn validate_skill_category(category: &str) -> Option<String> {
+    if category.is_empty() {
+        return None;
+    }
+    if category.len() > MAX_NAME_LEN {
+        return Some(format!("Category exceeds {MAX_NAME_LEN} characters."));
+    }
+    if category.contains('/') || category.contains('\\') {
+        return Some(format!(
+            "Invalid category '{category}'. Categories must be a single directory name."
+        ));
+    }
+    let mut chars = category.chars();
+    let first = chars.next().unwrap();
+    if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
+        return Some(format!(
+            "Invalid category '{category}'. Must start with a lowercase letter or digit."
+        ));
+    }
+    if !chars.all(valid_name_char) {
+        return Some(format!(
+            "Invalid category '{category}'. Use lowercase letters, numbers, hyphens, dots, and underscores."
+        ));
+    }
+    None
+}
+
+/// Validate that `content` is a well-formed SKILL.md (frontmatter + non-empty body).
+/// Returns an error message or None if valid.
+fn validate_frontmatter(content: &str) -> Option<String> {
+    if content.trim().is_empty() {
+        return Some("Content cannot be empty.".into());
+    }
+    if !content.starts_with("---") {
+        return Some(
+            "SKILL.md must start with YAML frontmatter (---). See existing skills for format."
+                .into(),
+        );
+    }
+    let rest = &content[3..];
+    let Some(end) = rest.find("\n---") else {
+        return Some(
+            "SKILL.md frontmatter is not closed. Ensure you have a closing '---' line.".into(),
+        );
+    };
+    let yaml_str = &rest[..end];
+    let parsed: serde_yaml::Value = match serde_yaml::from_str(yaml_str) {
+        Ok(v) => v,
+        Err(e) => return Some(format!("YAML frontmatter parse error: {e}")),
+    };
+    let map = match parsed.as_mapping() {
+        Some(m) => m,
+        None => return Some("Frontmatter must be a YAML mapping (key: value pairs).".into()),
+    };
+    if !map.contains_key("name") {
+        return Some("Frontmatter must include 'name' field.".into());
+    }
+    if !map.contains_key("description") {
+        return Some("Frontmatter must include 'description' field.".into());
+    }
+    let body_start = end + 4; // skip "\n---"
+    let body = rest[body_start..].trim();
+    if body.is_empty() {
+        return Some(
+            "SKILL.md must have content after the frontmatter (instructions, procedures, etc.)."
+                .into(),
+        );
+    }
+    None
+}
+
+fn validate_content_size(content: &str, label: &str) -> Option<String> {
+    if content.len() > MAX_CONTENT_CHARS {
+        return Some(format!(
+            "{label} content is {} characters (limit: {MAX_CONTENT_CHARS}). \
+             Consider splitting into a smaller SKILL.md with supporting files.",
+            content.len()
+        ));
+    }
+    None
+}
+
+fn validate_file_path(file_path: &str) -> Option<String> {
+    if file_path.is_empty() {
+        return Some("file_path is required.".into());
+    }
+    if has_traversal_component(file_path) {
+        return Some("Path traversal ('..') is not allowed.".into());
+    }
+    let p = Path::new(file_path);
+    let first = p.components().next();
+    let top = match first {
+        Some(Component::Normal(s)) => s.to_string_lossy().into_owned(),
+        _ => return Some(format!("Invalid file_path: '{file_path}'")),
+    };
+    if !ALLOWED_SUBDIRS.contains(&top.as_str()) {
+        let allowed = ALLOWED_SUBDIRS.join(", ");
+        return Some(format!(
+            "File must be under one of: {allowed}. Got: '{file_path}'"
+        ));
+    }
+    if p.components().count() < 2 {
+        return Some(format!(
+            "Provide a file path, not just a directory. Example: '{top}/myfile.md'"
+        ));
+    }
+    None
+}
+
+fn err_json(msg: impl Into<String>) -> String {
+    serde_json::to_string(&json!({"success": false, "error": msg.into()}))
+        .unwrap_or_else(|_| r#"{"success":false,"error":"serialization error"}"#.to_string())
+}
+
 /// Tool for creating, updating, and deleting skills.
 pub struct SkillManageHandler {
     provider: Arc<dyn SkillProvider>,
+    skill_roots: Vec<PathBuf>,
 }
 
 impl SkillManageHandler {
     pub fn new(provider: Arc<dyn SkillProvider>) -> Self {
-        Self { provider }
+        Self::with_skill_roots(provider, default_skill_roots())
+    }
+
+    pub fn with_skill_roots(provider: Arc<dyn SkillProvider>, skill_roots: Vec<PathBuf>) -> Self {
+        Self {
+            provider,
+            skill_roots,
+        }
+    }
+
+    fn user_skills_dir(&self) -> PathBuf {
+        self.skill_roots
+            .first()
+            .cloned()
+            .unwrap_or_else(|| PathBuf::from(".hermes/skills"))
     }
 }
 
@@ -431,168 +591,389 @@ impl ToolHandler for SkillManageHandler {
             .get("action")
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'action' parameter".into()))?;
+        let name = params
+            .get("name")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidParams("Missing 'name' parameter".into()))?;
 
         match action {
             "create" => {
-                let name = params.get("name")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidParams("Missing 'name' parameter".into()))?;
-                let content = params.get("content")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidParams("Missing 'content' parameter".into()))?;
+                let content = match params.get("content").and_then(|v| v.as_str()) {
+                    Some(c) => c,
+                    None => return Ok(err_json("content is required for 'create'.")),
+                };
                 let category = params.get("category").and_then(|v| v.as_str());
 
-                self.provider.create_skill(name, content, category)
-                    .await
-                    .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
-                Ok(format!("Skill '{}' created successfully", name))
-            }
-            "update" => {
-                let name = params.get("name")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidParams("Missing 'name' parameter".into()))?;
-                let content = params.get("content")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidParams("Missing 'content' parameter".into()))?;
-
-                self.provider.update_skill(name, content)
-                    .await
-                    .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
-                Ok(format!("Skill '{}' updated successfully", name))
-            }
-            "delete" => {
-                let name = params.get("name")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidParams("Missing 'name' parameter".into()))?;
-
-                self.provider.delete_skill(name)
-                    .await
-                    .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
-                Ok(format!("Skill '{}' deleted successfully", name))
-            }
-            "auto_create" => {
-                let name = params.get("name")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidParams("Missing 'name' parameter".into()))?;
-                let summary = params.get("summary")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Auto-generated from completed task.");
-                let steps = params.get("steps")
-                    .and_then(|v| v.as_array())
-                    .map(|arr| {
-                        arr.iter()
-                            .filter_map(|v| v.as_str())
-                            .collect::<Vec<_>>()
-                    })
-                    .unwrap_or_default();
-                let mut content = format!("# {}\n\n## Summary\n{}\n\n## Steps\n", name, summary);
-                for (idx, s) in steps.iter().enumerate() {
-                    content.push_str(&format!("{}. {}\n", idx + 1, s));
+                if let Some(e) = validate_skill_name(name) {
+                    return Ok(err_json(e));
                 }
-                self.provider.create_skill(name, &content, Some("auto-generated"))
-                    .await
-                    .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
-                Ok(format!("Skill '{}' auto-created", name))
-            }
-            "self_improve" => {
-                let name = params.get("name")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ToolError::InvalidParams("Missing 'name' parameter".into()))?;
-                let feedback = params.get("feedback")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("No feedback provided.");
-                let existing = self.provider.get_skill(name)
-                    .await
-                    .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?
-                    .ok_or_else(|| ToolError::NotFound(format!("Skill '{}' not found", name)))?;
-                let improved = format!("{}\n\n## Improvement Feedback\n{}\n", existing.content, feedback);
-                self.provider.update_skill(name, &improved)
-                    .await
-                    .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
-                Ok(format!("Skill '{}' improved", name))
-            }
-            "sync" => Ok("Skill sync request accepted (provider-specific hub sync path).".to_string()),
-            "install_builtins" => {
-                let builtins = [
-                    "planning","debugging","refactoring","testing","docs","git","review","web-research",
-                    "terminal","file-edit","security","performance","api-design","db-migrations",
-                    "incident-response","release","prompting","agent-orchestration","mcp","gateway",
-                    "voice-mode","cron","memory","session-search","tool-authoring","skill-authoring"
-                ];
-                let mut created = 0usize;
-                for name in builtins {
-                    let exists = self.provider.get_skill(name)
-                        .await
-                        .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?
-                        .is_some();
-                    if !exists {
-                        let content = format!("# {}\n\n1. Understand\n2. Execute\n3. Verify\n", name);
-                        self.provider.create_skill(name, &content, Some("builtin"))
-                            .await
-                            .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
-                        created += 1;
+                if let Some(cat) = category {
+                    if let Some(e) = validate_skill_category(cat) {
+                        return Ok(err_json(e));
                     }
                 }
-                Ok(format!("Installed {} built-in skills", created))
+                if let Some(e) = validate_frontmatter(content) {
+                    return Ok(err_json(e));
+                }
+                if let Some(e) = validate_content_size(content, "SKILL.md") {
+                    return Ok(err_json(e));
+                }
+
+                // Check collision across all roots
+                if resolve_skill_dir(name, &self.skill_roots).is_some() {
+                    return Ok(err_json(format!(
+                        "A skill named '{name}' already exists. Use action='edit' to update it."
+                    )));
+                }
+
+                let skill_dir = match category {
+                    Some(cat) => self.user_skills_dir().join(cat).join(name),
+                    None => self.user_skills_dir().join(name),
+                };
+                if let Err(e) = std::fs::create_dir_all(&skill_dir) {
+                    return Ok(err_json(format!("Failed to create skill directory: {e}")));
+                }
+                if let Err(e) = std::fs::write(skill_dir.join("SKILL.md"), content) {
+                    return Ok(err_json(format!("Failed to write SKILL.md: {e}")));
+                }
+
+                let mut result = json!({
+                    "success": true,
+                    "message": format!("Skill '{name}' created."),
+                    "skill_md": skill_dir.join("SKILL.md").to_string_lossy(),
+                });
+                if let Some(cat) = category {
+                    result["category"] = json!(cat);
+                }
+                result["hint"] = json!(format!(
+                    "To add reference files, use skill_manage(action='write_file', name='{name}', file_path='references/example.md', file_content='...')"
+                ));
+                Ok(serde_json::to_string(&result).unwrap_or_else(|_| err_json("serialization error")))
             }
-            other => Err(ToolError::InvalidParams(format!("Unknown action: '{}'. Use create/update/delete/auto_create/self_improve/sync/install_builtins.", other))),
+
+            "edit" => {
+                let content = match params.get("content").and_then(|v| v.as_str()) {
+                    Some(c) => c,
+                    None => return Ok(err_json("content is required for 'edit'.")),
+                };
+                if let Some(e) = validate_frontmatter(content) {
+                    return Ok(err_json(e));
+                }
+                if let Some(e) = validate_content_size(content, "SKILL.md") {
+                    return Ok(err_json(e));
+                }
+
+                let Some(skill_dir) = resolve_skill_dir(name, &self.skill_roots) else {
+                    return Ok(err_json(format!(
+                        "Skill '{name}' not found. Use skills_list() to see available skills."
+                    )));
+                };
+                if let Err(e) = std::fs::write(skill_dir.join("SKILL.md"), content) {
+                    return Ok(err_json(format!("Failed to write SKILL.md: {e}")));
+                }
+
+                Ok(serde_json::to_string(&json!({
+                    "success": true,
+                    "message": format!("Skill '{name}' updated."),
+                    "path": skill_dir.to_string_lossy(),
+                }))
+                .unwrap_or_else(|_| err_json("serialization error")))
+            }
+
+            "patch" => {
+                let old_string = match params.get("old_string").and_then(|v| v.as_str()) {
+                    Some(s) if !s.is_empty() => s,
+                    _ => return Ok(err_json("old_string is required for 'patch'.")),
+                };
+                let new_string = match params.get("new_string").and_then(|v| v.as_str()) {
+                    Some(s) => s,
+                    None => return Ok(err_json("new_string is required for 'patch'. Use empty string to delete matched text.")),
+                };
+                let replace_all = params
+                    .get("replace_all")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let file_path = params.get("file_path").and_then(|v| v.as_str());
+
+                let Some(skill_dir) = resolve_skill_dir(name, &self.skill_roots) else {
+                    return Ok(err_json(format!("Skill '{name}' not found.")));
+                };
+
+                let target = if let Some(fp) = file_path {
+                    if let Some(e) = validate_file_path(fp) {
+                        return Ok(err_json(e));
+                    }
+                    let t = skill_dir.join(fp);
+                    if let Err(e) = validate_within_skill_dir(&t, &skill_dir) {
+                        return Ok(err_json(e));
+                    }
+                    t
+                } else {
+                    skill_dir.join("SKILL.md")
+                };
+
+                if !target.exists() {
+                    let label = file_path.unwrap_or("SKILL.md");
+                    return Ok(err_json(format!("File not found: {label}")));
+                }
+
+                let content = match std::fs::read_to_string(&target) {
+                    Ok(c) => c,
+                    Err(e) => return Ok(err_json(format!("Failed to read file: {e}"))),
+                };
+
+                let count = content.matches(old_string).count();
+                if count == 0 {
+                    let preview = &content[..content.len().min(500)];
+                    return Ok(serde_json::to_string(&json!({
+                        "success": false,
+                        "error": "old_string not found in file.",
+                        "file_preview": preview,
+                    }))
+                    .unwrap_or_else(|_| err_json("serialization error")));
+                }
+                if count > 1 && !replace_all {
+                    return Ok(err_json(format!(
+                        "old_string matches {count} occurrences. Use replace_all=true or provide more context to make it unique."
+                    )));
+                }
+
+                let new_content = if replace_all {
+                    content.replace(old_string, new_string)
+                } else {
+                    content.replacen(old_string, new_string, 1)
+                };
+
+                let label = file_path.unwrap_or("SKILL.md");
+                if let Some(e) = validate_content_size(&new_content, label) {
+                    return Ok(err_json(e));
+                }
+                if file_path.is_none() {
+                    if let Some(e) = validate_frontmatter(&new_content) {
+                        return Ok(err_json(format!(
+                            "Patch would break SKILL.md structure: {e}"
+                        )));
+                    }
+                }
+
+                if let Err(e) = std::fs::write(&target, &new_content) {
+                    return Ok(err_json(format!("Failed to write file: {e}")));
+                }
+
+                let replacements = if replace_all { count } else { 1 };
+                Ok(serde_json::to_string(&json!({
+                    "success": true,
+                    "message": format!(
+                        "Patched {label} in skill '{name}' ({replacements} replacement{}).",
+                        if replacements == 1 { "" } else { "s" }
+                    ),
+                }))
+                .unwrap_or_else(|_| err_json("serialization error")))
+            }
+
+            "delete" => {
+                let absorbed_into = params.get("absorbed_into").and_then(|v| v.as_str());
+
+                if resolve_skill_dir(name, &self.skill_roots).is_none() {
+                    return Ok(err_json(format!("Skill '{name}' not found.")));
+                }
+
+                self.provider
+                    .delete_skill(name)
+                    .await
+                    .map_err(|e| ToolError::ExecutionFailed(e.to_string()))?;
+
+                let mut message = format!("Skill '{name}' deleted.");
+                if let Some(target) = absorbed_into {
+                    if !target.is_empty() {
+                        message.push_str(&format!(" Content absorbed into '{target}'."));
+                    }
+                }
+                Ok(serde_json::to_string(&json!({"success": true, "message": message}))
+                    .unwrap_or_else(|_| err_json("serialization error")))
+            }
+
+            "write_file" => {
+                let file_path = match params.get("file_path").and_then(|v| v.as_str()) {
+                    Some(fp) => fp,
+                    None => return Ok(err_json("file_path is required for 'write_file'. Example: 'references/api-guide.md'")),
+                };
+                let file_content = match params.get("file_content").and_then(|v| v.as_str()) {
+                    Some(c) => c,
+                    None => return Ok(err_json("file_content is required for 'write_file'.")),
+                };
+
+                if let Some(e) = validate_file_path(file_path) {
+                    return Ok(err_json(e));
+                }
+                if file_content.len() > MAX_FILE_BYTES {
+                    return Ok(err_json(format!(
+                        "File content is {} bytes (limit: {MAX_FILE_BYTES} bytes / 1 MiB).",
+                        file_content.len()
+                    )));
+                }
+                if let Some(e) = validate_content_size(file_content, file_path) {
+                    return Ok(err_json(e));
+                }
+
+                let Some(skill_dir) = resolve_skill_dir(name, &self.skill_roots) else {
+                    return Ok(err_json(format!(
+                        "Skill '{name}' not found. Create it first with action='create'."
+                    )));
+                };
+
+                let target = skill_dir.join(file_path);
+                if let Err(e) = validate_within_skill_dir(&target, &skill_dir) {
+                    return Ok(err_json(e));
+                }
+                if let Some(parent) = target.parent() {
+                    if let Err(e) = std::fs::create_dir_all(parent) {
+                        return Ok(err_json(format!("Failed to create directory: {e}")));
+                    }
+                }
+                if let Err(e) = std::fs::write(&target, file_content) {
+                    return Ok(err_json(format!("Failed to write file: {e}")));
+                }
+
+                Ok(serde_json::to_string(&json!({
+                    "success": true,
+                    "message": format!("File '{file_path}' written to skill '{name}'."),
+                    "path": target.to_string_lossy(),
+                }))
+                .unwrap_or_else(|_| err_json("serialization error")))
+            }
+
+            "remove_file" => {
+                let file_path = match params.get("file_path").and_then(|v| v.as_str()) {
+                    Some(fp) => fp,
+                    None => return Ok(err_json("file_path is required for 'remove_file'.")),
+                };
+
+                if let Some(e) = validate_file_path(file_path) {
+                    return Ok(err_json(e));
+                }
+
+                let Some(skill_dir) = resolve_skill_dir(name, &self.skill_roots) else {
+                    return Ok(err_json(format!("Skill '{name}' not found.")));
+                };
+
+                let target = skill_dir.join(file_path);
+                if let Err(e) = validate_within_skill_dir(&target, &skill_dir) {
+                    return Ok(err_json(e));
+                }
+                if !target.exists() {
+                    let available = collect_available_skill_files(&skill_dir);
+                    return Ok(serde_json::to_string(&json!({
+                        "success": false,
+                        "error": format!("File '{file_path}' not found in skill '{name}'."),
+                        "available_files": available,
+                    }))
+                    .unwrap_or_else(|_| err_json("serialization error")));
+                }
+
+                if let Err(e) = std::fs::remove_file(&target) {
+                    return Ok(err_json(format!("Failed to remove file: {e}")));
+                }
+
+                // Clean up empty subdirectory
+                if let Some(parent) = target.parent() {
+                    if parent != skill_dir && parent.exists() {
+                        let _ = std::fs::remove_dir(parent);
+                    }
+                }
+
+                Ok(serde_json::to_string(&json!({
+                    "success": true,
+                    "message": format!("File '{file_path}' removed from skill '{name}'."),
+                }))
+                .unwrap_or_else(|_| err_json("serialization error")))
+            }
+
+            other => Ok(err_json(format!(
+                "Unknown action '{other}'. Use: create, edit, patch, delete, write_file, remove_file"
+            ))),
         }
     }
 
     fn schema(&self) -> ToolSchema {
         let mut props = IndexMap::new();
-        props.insert("action".into(), json!({
-            "type": "string",
-            "description": "Action to perform",
-            "enum": ["create", "update", "delete", "auto_create", "self_improve", "sync", "install_builtins"]
-        }));
+        props.insert(
+            "action".into(),
+            json!({
+                "type": "string",
+                "enum": ["create", "edit", "patch", "delete", "write_file", "remove_file"],
+                "description": "The action to perform."
+            }),
+        );
         props.insert(
             "name".into(),
             json!({
                 "type": "string",
-                "description": "Name of the skill"
+                "description": "Skill name (lowercase, hyphens/underscores, max 64 chars). Must match an existing skill for patch/edit/delete/write_file/remove_file."
             }),
         );
         props.insert(
             "content".into(),
             json!({
                 "type": "string",
-                "description": "Skill content (for create/update)"
+                "description": "Full SKILL.md content (YAML frontmatter + markdown body). Required for 'create' and 'edit'."
+            }),
+        );
+        props.insert(
+            "old_string".into(),
+            json!({
+                "type": "string",
+                "description": "Text to find in the file (required for 'patch'). Must be unique unless replace_all=true."
+            }),
+        );
+        props.insert(
+            "new_string".into(),
+            json!({
+                "type": "string",
+                "description": "Replacement text (required for 'patch'). Can be empty string to delete the matched text."
+            }),
+        );
+        props.insert(
+            "replace_all".into(),
+            json!({
+                "type": "boolean",
+                "description": "For 'patch': replace all occurrences instead of requiring a unique match (default: false)."
             }),
         );
         props.insert(
             "category".into(),
             json!({
                 "type": "string",
-                "description": "Skill category (for create)"
+                "description": "Optional category for organizing the skill (e.g., 'devops'). Only used with 'create'."
             }),
         );
         props.insert(
-            "summary".into(),
+            "file_path".into(),
             json!({
                 "type": "string",
-                "description": "Task summary used by auto_create"
+                "description": "Path to a supporting file within the skill directory. For 'write_file'/'remove_file': required, must be under references/, templates/, scripts/, or assets/. For 'patch': optional, defaults to SKILL.md if omitted."
             }),
         );
         props.insert(
-            "steps".into(),
-            json!({
-                "type": "array",
-                "items": {"type": "string"},
-                "description": "Step list for auto_create"
-            }),
-        );
-        props.insert(
-            "feedback".into(),
+            "file_content".into(),
             json!({
                 "type": "string",
-                "description": "Feedback used by self_improve"
+                "description": "Content for the file. Required for 'write_file'."
+            }),
+        );
+        props.insert(
+            "absorbed_into".into(),
+            json!({
+                "type": "string",
+                "description": "For 'delete' only: pass the umbrella skill name when this skill's content was merged into another, or empty string when pruning with no forwarding target."
             }),
         );
 
         tool_schema(
             "skill_manage",
-            "Create, update, or delete skills.",
+            "Manage skills (create, edit, patch, delete, write_file, remove_file). \
+             Skills are procedural memory — reusable approaches for recurring task types. \
+             New skills are created in ~/.hermes/skills/; existing skills can be modified wherever they live.",
             JsonSchema::object(props, vec!["action".into(), "name".into()]),
         )
     }
@@ -735,12 +1116,163 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_skill_manage_create() {
+    async fn test_skill_manage_create_invalid_no_frontmatter() {
         let handler = SkillManageHandler::new(Arc::new(MockSkillProvider));
         let result = handler
-            .execute(json!({"action": "create", "name": "new_skill", "content": "hello"}))
+            .execute(json!({"action": "create", "name": "new-skill", "content": "no frontmatter here"}))
             .await
             .unwrap();
-        assert!(result.contains("created"));
+        let v: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["success"], Value::Bool(false));
+        assert!(v["error"].as_str().unwrap().contains("frontmatter"));
+    }
+
+    #[tokio::test]
+    async fn test_skill_manage_create_invalid_name() {
+        let handler = SkillManageHandler::new(Arc::new(MockSkillProvider));
+        let result = handler
+            .execute(json!({"action": "create", "name": "Bad Name!", "content": "---\nname: x\ndescription: y\n---\nbody"}))
+            .await
+            .unwrap();
+        let v: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["success"], Value::Bool(false));
+        assert!(v["error"].as_str().unwrap().to_ascii_lowercase().contains("invalid skill name"));
+    }
+
+    #[tokio::test]
+    async fn test_skill_manage_unknown_action() {
+        let handler = SkillManageHandler::new(Arc::new(MockSkillProvider));
+        let result = handler
+            .execute(json!({"action": "auto_create", "name": "foo"}))
+            .await
+            .unwrap();
+        let v: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["success"], Value::Bool(false));
+        assert!(v["error"].as_str().unwrap().contains("Unknown action"));
+    }
+
+    #[tokio::test]
+    async fn test_skill_manage_patch_not_found() {
+        let handler = SkillManageHandler::new(Arc::new(MockSkillProvider));
+        let result = handler
+            .execute(json!({
+                "action": "patch",
+                "name": "nonexistent-skill",
+                "old_string": "foo",
+                "new_string": "bar"
+            }))
+            .await
+            .unwrap();
+        let v: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["success"], Value::Bool(false));
+    }
+
+    #[tokio::test]
+    async fn test_skill_manage_create_and_patch() {
+        let tmp = tempdir().unwrap();
+        let skills_root = tmp.path().join("skills");
+        fs::create_dir_all(&skills_root).unwrap();
+
+        let handler = SkillManageHandler::with_skill_roots(
+            Arc::new(MockSkillProvider),
+            vec![skills_root.clone()],
+        );
+
+        let content = "---\nname: test-skill\ndescription: A test skill\n---\n\nDo the thing.\n";
+        let result = handler
+            .execute(json!({"action": "create", "name": "test-skill", "content": content}))
+            .await
+            .unwrap();
+        let v: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["success"], Value::Bool(true), "create failed: {result}");
+
+        // patch it
+        let result = handler
+            .execute(json!({
+                "action": "patch",
+                "name": "test-skill",
+                "old_string": "Do the thing.",
+                "new_string": "Do the other thing."
+            }))
+            .await
+            .unwrap();
+        let v: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["success"], Value::Bool(true), "patch failed: {result}");
+
+        let patched = fs::read_to_string(skills_root.join("test-skill/SKILL.md")).unwrap();
+        assert!(patched.contains("Do the other thing."));
+    }
+
+    #[tokio::test]
+    async fn test_skill_manage_write_and_remove_file() {
+        let tmp = tempdir().unwrap();
+        let skills_root = tmp.path().join("skills");
+        let skill_dir = skills_root.join("my-skill");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: my-skill\ndescription: test\n---\n\nbody\n",
+        )
+        .unwrap();
+
+        let handler = SkillManageHandler::with_skill_roots(
+            Arc::new(MockSkillProvider),
+            vec![skills_root.clone()],
+        );
+
+        let result = handler
+            .execute(json!({
+                "action": "write_file",
+                "name": "my-skill",
+                "file_path": "references/api.md",
+                "file_content": "# API docs"
+            }))
+            .await
+            .unwrap();
+        let v: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["success"], Value::Bool(true), "write_file failed: {result}");
+        assert!(skill_dir.join("references/api.md").exists());
+
+        let result = handler
+            .execute(json!({
+                "action": "remove_file",
+                "name": "my-skill",
+                "file_path": "references/api.md"
+            }))
+            .await
+            .unwrap();
+        let v: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["success"], Value::Bool(true), "remove_file failed: {result}");
+        assert!(!skill_dir.join("references/api.md").exists());
+    }
+
+    #[tokio::test]
+    async fn test_skill_manage_write_file_traversal_blocked() {
+        let tmp = tempdir().unwrap();
+        let skills_root = tmp.path().join("skills");
+        let skill_dir = skills_root.join("my-skill");
+        fs::create_dir_all(&skill_dir).unwrap();
+        fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: my-skill\ndescription: test\n---\n\nbody\n",
+        )
+        .unwrap();
+
+        let handler = SkillManageHandler::with_skill_roots(
+            Arc::new(MockSkillProvider),
+            vec![skills_root],
+        );
+        let result = handler
+            .execute(json!({
+                "action": "write_file",
+                "name": "my-skill",
+                "file_path": "../../evil.sh",
+                "file_content": "rm -rf /"
+            }))
+            .await
+            .unwrap();
+        let v: Value = serde_json::from_str(&result).unwrap();
+        assert_eq!(v["success"], Value::Bool(false));
+        assert!(v["error"].as_str().unwrap().to_ascii_lowercase().contains("traversal") || v["error"].as_str().unwrap().contains("allowed"));
     }
 }
