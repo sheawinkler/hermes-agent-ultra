@@ -289,6 +289,14 @@ fn text_batch_delay_secs() -> f64 {
         .unwrap_or(0.6)
 }
 
+fn text_batch_bypass_chars() -> usize {
+    std::env::var("HERMES_WECOM_TEXT_BATCH_BYPASS_CHARS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .filter(|&n| n > 0)
+        .unwrap_or(24)
+}
+
 fn text_batch_split_delay_secs() -> f64 {
     std::env::var("HERMES_WECOM_TEXT_BATCH_SPLIT_DELAY_SECONDS")
         .ok()
@@ -1373,9 +1381,19 @@ impl WeComAdapter {
             elapsed_ms = started.elapsed().as_millis() as u64,
             "WeCom incoming message normalized"
         );
-        if delay > 0.0 && incoming.media_urls.is_empty() {
+        let bypass_chars = text_batch_bypass_chars();
+        let should_batch = delay > 0.0
+            && incoming.media_urls.is_empty()
+            && incoming.text.chars().count() > bypass_chars;
+        if should_batch {
             Self::enqueue_text_event(inner, incoming, delay).await;
         } else if let Some(tx) = inner.inbound_tx.read().await.clone() {
+            debug!(
+                chat_id = %incoming.chat_id,
+                text_chars = incoming.text.chars().count(),
+                bypass_chars = bypass_chars,
+                "WeCom text batch bypassed"
+            );
             let _ = tx.send(incoming).await;
         }
     }
