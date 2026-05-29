@@ -469,11 +469,15 @@ impl SearchBackend for LocalSearchBackend {
                 path.display()
             )));
         }
+        let file_glob_re = match file_glob {
+            Some(glob) => Some(Self::compile_glob_regex(glob)?),
+            None => None,
+        };
 
         Self::search_dir_content(
             &re,
             path,
-            file_glob,
+            file_glob_re.as_ref(),
             context,
             fetch_limit,
             &mut matches,
@@ -534,7 +538,8 @@ impl SearchBackend for LocalSearchBackend {
             )));
         }
 
-        Self::search_dir_names(pattern, base, &mut results).await;
+        let glob_re = Self::compile_glob_regex(pattern)?;
+        Self::search_dir_names(&glob_re, base, &mut results).await;
 
         let max = max_results.unwrap_or(50);
         let offset = offset.unwrap_or(0);
@@ -557,7 +562,7 @@ impl LocalSearchBackend {
     async fn search_dir_content(
         re: &Regex,
         dir: &std::path::Path,
-        file_glob: Option<&str>,
+        file_glob_re: Option<&Regex>,
         context: usize,
         fetch_limit: usize,
         matches: &mut Vec<Value>,
@@ -568,7 +573,7 @@ impl LocalSearchBackend {
         Self::search_dir_content_depth(
             re,
             dir,
-            file_glob,
+            file_glob_re,
             context,
             fetch_limit,
             matches,
@@ -583,7 +588,7 @@ impl LocalSearchBackend {
     async fn search_dir_content_depth(
         re: &Regex,
         dir: &std::path::Path,
-        file_glob: Option<&str>,
+        file_glob_re: Option<&Regex>,
         context: usize,
         fetch_limit: usize,
         matches: &mut Vec<Value>,
@@ -622,7 +627,7 @@ impl LocalSearchBackend {
                 Box::pin(Self::search_dir_content_depth(
                     re,
                     &path,
-                    file_glob,
+                    file_glob_re,
                     context,
                     fetch_limit,
                     matches,
@@ -634,8 +639,8 @@ impl LocalSearchBackend {
                 .await;
             } else if path.is_file() {
                 // Check glob filter
-                if let Some(glob) = file_glob {
-                    if !Self::matches_glob(name, glob) {
+                if let Some(glob_re) = file_glob_re {
+                    if !glob_re.is_match(name) {
                         continue;
                     }
                 }
@@ -690,12 +695,12 @@ impl LocalSearchBackend {
         }
     }
 
-    async fn search_dir_names(pattern: &str, dir: &std::path::Path, results: &mut Vec<Value>) {
-        Self::search_dir_names_depth(pattern, dir, results, 0).await;
+    async fn search_dir_names(glob_re: &Regex, dir: &std::path::Path, results: &mut Vec<Value>) {
+        Self::search_dir_names_depth(glob_re, dir, results, 0).await;
     }
 
     async fn search_dir_names_depth(
-        pattern: &str,
+        glob_re: &Regex,
         dir: &std::path::Path,
         results: &mut Vec<Value>,
         depth: u32,
@@ -718,7 +723,7 @@ impl LocalSearchBackend {
                 continue;
             }
 
-            if Self::matches_glob(name, pattern) {
+            if glob_re.is_match(name) {
                 results.push(json!({
                     "path": path.display().to_string(),
                     "name": name,
@@ -728,7 +733,7 @@ impl LocalSearchBackend {
 
             if path.is_dir() {
                 Box::pin(Self::search_dir_names_depth(
-                    pattern,
+                    glob_re,
                     &path,
                     results,
                     depth + 1,
@@ -738,15 +743,15 @@ impl LocalSearchBackend {
         }
     }
 
-    fn matches_glob(name: &str, pattern: &str) -> bool {
+    fn compile_glob_regex(pattern: &str) -> Result<Regex, ToolError> {
         // Simple glob matching: * matches any sequence, ? matches single char
         let re_pattern = pattern
             .replace('.', "\\.")
             .replace('*', ".*")
             .replace('?', ".");
-        Regex::new(&format!("^{}$", re_pattern))
-            .map(|re| re.is_match(name))
-            .unwrap_or(false)
+        Regex::new(&format!("^{}$", re_pattern)).map_err(|e| {
+            ToolError::ExecutionFailed(format!("Invalid glob pattern '{}': {}", pattern, e))
+        })
     }
 }
 
