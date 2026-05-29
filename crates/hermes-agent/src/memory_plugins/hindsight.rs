@@ -23,6 +23,7 @@ use crate::memory_manager::MemoryProviderPlugin;
 
 const DEFAULT_API_URL: &str = "https://api.hindsight.vectorize.io";
 const DEFAULT_LOCAL_URL: &str = "http://localhost:8888";
+const DEFAULT_RECALL_TYPE: &str = "observation";
 const VALID_BUDGETS: &[&str] = &["low", "mid", "high"];
 
 // ---------------------------------------------------------------------------
@@ -92,6 +93,7 @@ struct HindsightConfig {
     retain_context: String,
     recall_max_tokens: usize,
     recall_max_input_chars: usize,
+    recall_types: Vec<String>,
     recall_prompt_preamble: String,
     bank_mission: String,
     retain_async: bool,
@@ -115,6 +117,7 @@ impl HindsightConfig {
             retain_context: "conversation between Hermes Agent and the User".into(),
             recall_max_tokens: 4096,
             recall_max_input_chars: 800,
+            recall_types: default_recall_types(),
             recall_prompt_preamble: String::new(),
             bank_mission: String::new(),
             retain_async: true,
@@ -204,6 +207,9 @@ impl HindsightConfig {
                 }
                 if let Some(mic) = raw.get("recall_max_input_chars").and_then(|v| v.as_u64()) {
                     config.recall_max_input_chars = mic as usize;
+                }
+                if let Some(types) = raw.get("recall_types").and_then(parse_recall_types_value) {
+                    config.recall_types = types;
                 }
                 if let Some(p) = raw.get("recall_prompt_preamble").and_then(|v| v.as_str()) {
                     config.recall_prompt_preamble = p.to_string();
@@ -436,6 +442,7 @@ impl MemoryProviderPlugin for HindsightPlugin {
                     &q,
                     &cfg.budget,
                     cfg.recall_max_tokens,
+                    &cfg.recall_types,
                 ) {
                     Ok(t) => t,
                     Err(e) => {
@@ -579,6 +586,7 @@ impl MemoryProviderPlugin for HindsightPlugin {
                     query,
                     &cfg.budget,
                     cfg.recall_max_tokens,
+                    &cfg.recall_types,
                 ) {
                     Ok(text) if !text.is_empty() => json!({"result": text}).to_string(),
                     Ok(_) => json!({"result": "No relevant memories found."}).to_string(),
@@ -621,6 +629,7 @@ impl MemoryProviderPlugin for HindsightPlugin {
             {"key": "bank_id_template", "description": "Optional dynamic bank template with placeholders: {profile}, {workspace}, {platform}, {user}, {session}", "default": ""},
             {"key": "hindsight_timeout", "description": "HTTP timeout in seconds", "default": 90},
             {"key": "recall_budget", "description": "Recall thoroughness", "default": "mid", "choices": ["low", "mid", "high"]},
+            {"key": "recall_types", "description": "Fact types returned by recall", "default": DEFAULT_RECALL_TYPE},
             {"key": "memory_mode", "description": "Memory integration mode", "default": "hybrid", "choices": ["hybrid", "context", "tools"]}
         ]))
     }
@@ -689,6 +698,57 @@ fn resolve_bank_id_template(
     }
 }
 
+fn default_recall_types() -> Vec<String> {
+    vec![DEFAULT_RECALL_TYPE.to_string()]
+}
+
+fn parse_recall_types_str(value: &str) -> Option<Vec<String>> {
+    let types: Vec<String> = value
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(ToString::to_string)
+        .collect();
+    if types.is_empty() {
+        None
+    } else {
+        Some(types)
+    }
+}
+
+fn parse_recall_types_value(value: &Value) -> Option<Vec<String>> {
+    if let Some(text) = value.as_str() {
+        return parse_recall_types_str(text);
+    }
+    let items = value.as_array()?;
+    let types: Vec<String> = items
+        .iter()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(ToString::to_string)
+        .collect();
+    if types.is_empty() {
+        None
+    } else {
+        Some(types)
+    }
+}
+
+fn hindsight_recall_body(
+    query: &str,
+    budget: &str,
+    max_tokens: usize,
+    recall_types: &[String],
+) -> Value {
+    json!({
+        "query": query,
+        "budget": budget,
+        "max_tokens": max_tokens,
+        "types": recall_types,
+    })
+}
+
 fn hindsight_recall(
     client: &Client,
     base: &str,
@@ -697,13 +757,10 @@ fn hindsight_recall(
     query: &str,
     budget: &str,
     max_tokens: usize,
+    recall_types: &[String],
 ) -> Result<String, String> {
     let url = format!("{}/v1/default/banks/{}/memories/recall", base, bank);
-    let body = json!({
-        "query": query,
-        "budget": budget,
-        "max_tokens": max_tokens,
-    });
+    let body = hindsight_recall_body(query, budget, max_tokens, recall_types);
     let mut req = client.post(&url).json(&body);
     if !api_key.is_empty() {
         req = req.bearer_auth(api_key);
@@ -841,6 +898,7 @@ mod tests {
             retain_context: String::new(),
             recall_max_tokens: 4096,
             recall_max_input_chars: 800,
+            recall_types: default_recall_types(),
             recall_prompt_preamble: String::new(),
             bank_mission: String::new(),
             retain_async: true,
@@ -867,6 +925,7 @@ mod tests {
             retain_context: String::new(),
             recall_max_tokens: 4096,
             recall_max_input_chars: 800,
+            recall_types: default_recall_types(),
             recall_prompt_preamble: String::new(),
             bank_mission: String::new(),
             retain_async: true,
@@ -888,6 +947,32 @@ mod tests {
         let plugin = HindsightPlugin::new();
         let result = plugin.handle_tool_call("hindsight_recall", &json!({}));
         assert!(result.contains("error"));
+    }
+
+    #[test]
+    fn test_hindsight_recall_body_defaults_to_observations() {
+        let body = hindsight_recall_body("dark mode", "mid", 4096, &default_recall_types());
+        assert_eq!(body["query"], "dark mode");
+        assert_eq!(body["budget"], "mid");
+        assert_eq!(body["max_tokens"], 4096);
+        assert_eq!(body["types"], json!(["observation"]));
+    }
+
+    #[test]
+    fn test_parse_recall_types_accepts_string_or_list() {
+        assert_eq!(
+            parse_recall_types_value(&json!("observation,world, experience")),
+            Some(vec![
+                "observation".to_string(),
+                "world".to_string(),
+                "experience".to_string()
+            ])
+        );
+        assert_eq!(
+            parse_recall_types_value(&json!(["world", " experience ", "", 7])),
+            Some(vec!["world".to_string(), "experience".to_string()])
+        );
+        assert_eq!(parse_recall_types_value(&json!(" , ")), None);
     }
 
     #[test]

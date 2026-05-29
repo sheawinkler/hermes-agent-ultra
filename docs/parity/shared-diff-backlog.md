@@ -1,12 +1,12 @@
 # Shared-Different Backlog
 
-Generated: `2026-05-29T19:55:35.356167+00:00`
+Generated: `2026-05-29T20:05:39.916289+00:00`
 
 ## Summary
 
-- Total shared-different paths: `1017`
+- Total shared-different paths: `1016`
 - Pending classification: `0`
-- Pending functional review: `771`
+- Pending functional review: `770`
 - Cleared non-runtime: `170`
 - Cleared intentional divergence: `76`
 
@@ -16,13 +16,13 @@ Generated: `2026-05-29T19:55:35.356167+00:00`
 | --- | ---: |
 | `cleared_intentional_divergence` | 76 |
 | `cleared_non_runtime` | 170 |
-| `pending_review` | 771 |
+| `pending_review` | 770 |
 
 ## Workstream Counts
 
 | Workstream | Count |
 | --- | ---: |
-| `WS3` | 54 |
+| `WS3` | 53 |
 | `WS4` | 39 |
 | `WS5` | 230 |
 | `WS6` | 681 |
@@ -55,9 +55,9 @@ Generated: `2026-05-29T19:55:35.356167+00:00`
 | `plugins/web` | 4 |
 | `tests/providers` | 4 |
 | `tests/tui_gateway` | 4 |
-| `plugins/memory` | 3 |
 | `tests/integration` | 3 |
 | `ui-tui` | 3 |
+| `plugins/memory` | 2 |
 | `tests/e2e` | 2 |
 | `plugins/browser/browserbase/provider.py` | 1 |
 | `plugins/model-providers` | 1 |
