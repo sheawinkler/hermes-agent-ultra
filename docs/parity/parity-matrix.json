@@ -1,25 +1,25 @@
 {
-  "generated_at_utc": "2026-05-29T19:29:53.611571+00:00",
+  "generated_at_utc": "2026-05-29T19:36:59.784846+00:00",
   "refs": {
     "local_ref": "main",
-    "local_sha": "40e78faa2c96c42af90a5e2fabae0bdd85fba0d7",
+    "local_sha": "10e30f6dc30a97b18aaf633c2d75a6d451ee7c50",
     "upstream_ref": "upstream/main",
     "upstream_sha": "1cb850b674796a53d6b3b669967b04a07e89a237",
     "merge_base": null
   },
   "summary": {
     "commits_behind": 4376,
-    "commits_ahead": 771,
+    "commits_ahead": 772,
     "upstream_patch_missing": 4258,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 666,
+    "local_patch_unique": 667,
     "files_only_upstream": 1470,
     "files_only_local": 559,
-    "files_shared_identical": 1697,
-    "files_shared_different": 1022,
-    "tree_files_changed": 3051,
-    "tree_insertions": 738230,
-    "tree_deletions": 369888
+    "files_shared_identical": 1700,
+    "files_shared_different": 1019,
+    "tree_files_changed": 3048,
+    "tree_insertions": 738203,
+    "tree_deletions": 370551
   },
   "top_upstream_only": [
     {
@@ -189,11 +189,11 @@
       "count": 171
     },
     {
-      "path": "website/docs",
-      "count": 139
+      "path": "tests/tools",
+      "count": 138
     },
     {
-      "path": "tests/tools",
+      "path": "website/docs",
       "count": 138
     },
     {
@@ -297,10 +297,6 @@
       "count": 3
     },
     {
-      "path": "skills/research",
-      "count": 3
-    },
-    {
       "path": "tests/integration",
       "count": 3
     },
@@ -314,10 +310,6 @@
     },
     {
       "path": "optional-skills/health",
-      "count": 2
-    },
-    {
-      "path": "optional-skills/migration",
       "count": 2
     },
     {
@@ -341,8 +333,16 @@
       "count": 2
     },
     {
+      "path": "skills/research",
+      "count": 2
+    },
+    {
       "path": "tests/e2e",
       "count": 2
+    },
+    {
+      "path": ".gitattributes",
+      "count": 1
     }
   ],
   "top_local_only": [
@@ -847,7 +847,7 @@
       "issue": 9,
       "name": "UX parity",
       "upstream_only": 493,
-      "shared_different": 232,
+      "shared_different": 231,
       "local_only": 72,
       "risk": "high",
       "effort": "XL"
@@ -877,7 +877,7 @@
       "issue": 8,
       "name": "Skills parity",
       "upstream_only": 93,
-      "shared_different": 41,
+      "shared_different": 39,
       "local_only": 14,
       "risk": "medium",
       "effort": "L"
@@ -906,7 +906,7 @@
   "commit_mapping": {
     "upstream_patch_missing": 4258,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 666,
+    "local_patch_unique": 667,
     "local_patch_equivalent_to_upstream": 1,
     "upstream_patch_missing_sample": [
       "99af222ecf56c0eed0d3eb82903a6bf33b6ff7d5",
@@ -960,7 +960,7 @@
       "6b69de4772eac5f982c097553dc6bcfeb60350e6"
     ],
     "intentional_divergence_items": 8,
-    "intentional_divergence_covered_files": 901
+    "intentional_divergence_covered_files": 898
   },
   "intentional_divergence": [
     {
@@ -1005,7 +1005,7 @@
       "status": "approved",
       "workstream": "WS4",
       "summary": "Track upstream skills and optional-skills catalogs via parity audits while keeping Rust runtime skill loading externalized (no direct Python skill-tree vendoring).",
-      "matched_files": 148,
+      "matched_files": 146,
       "matched_sample": [
         "optional-skills/autonomous-ai-agents/antigravity-cli/SKILL.md",
         "optional-skills/autonomous-ai-agents/antigravity-cli/references/cli-docs.md",
@@ -1075,7 +1075,7 @@
       "status": "approved",
       "workstream": "WS5",
       "summary": "Treat Rust CLI/TUI and gateway as primary UX surface; upstream web/ui-tui trees are tracked as intentional divergence unless explicitly ported.",
-      "matched_files": 729,
+      "matched_files": 728,
       "matched_sample": [
         "ui-tui/README.md",
         "ui-tui/babel.compiler.config.cjs",
