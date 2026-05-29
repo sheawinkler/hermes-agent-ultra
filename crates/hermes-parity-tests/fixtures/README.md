@@ -27,4 +27,4 @@ Recursive run over all non-`pending` JSON: `hermes_parity_tests::run_all_active_
 python3 scripts/record_fixtures.py
 ```
 
-Works without a Python checkout for **`checkpoint_shadow_dir_id`**; with sibling `research/hermes-agent`, also emits Anthropic adapter goldens.
+Works without a Python checkout for checkpoint-manager pure helpers; with sibling `research/hermes-agent`, also emits Anthropic adapter goldens.

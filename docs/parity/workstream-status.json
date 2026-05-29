@@ -1,11 +1,11 @@
 {
-  "generated_at_utc": "2026-05-23T19:07:51-06:00",
-  "head_sha": "6f87e0878bbe4c9bf087a41831d31f3797a01898",
+  "generated_at_utc": "2026-05-27T18:31:00-06:00",
+  "head_sha": "a8c29a9e9a69088c5a9c90c5a4fc3c8b2996b54d",
   "states": {
     "complete": 7
   },
   "upstream_ref": "upstream/main",
-  "upstream_sha": "72ff3e909c73b625ee244ab5ea3d0608ee85dcf3",
+  "upstream_sha": "7379f175567bd0f1d833eec3a3599d0665b2a491",
   "workstreams": [
     {
       "evidence": [
@@ -40,7 +40,7 @@
       "metrics": {
         "divergence_documented": true,
         "local_skill_files": 796,
-        "upstream_skill_files": 855
+        "upstream_skill_files": 874
       },
       "state": "complete",
       "title": "Skills parity",
@@ -53,7 +53,7 @@
       ],
       "metrics": {
         "divergence_documented": true,
-        "e2e_cli_tests": 6
+        "e2e_cli_tests": 8
       },
       "state": "complete",
       "title": "UX parity",
@@ -90,7 +90,7 @@
         "Intentional divergences are codified in docs/parity/intentional-divergence.json."
       ],
       "metrics": {
-        "divergence_items": 5,
+        "divergence_items": 8,
         "policy_exists": true
       },
       "state": "complete",

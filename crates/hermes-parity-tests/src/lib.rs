@@ -12,6 +12,7 @@ pub mod harness;
 pub mod recorder;
 
 pub use harness::{
-    checkpoint_shadow_dir_id, dispatch_case, load_fixture_file, run_all_active_fixtures,
-    run_fixture_file, run_fixtures_in_dir, ParityCase, ParityError, ParityFixtureFile,
+    checkpoint_parse_shortstat, checkpoint_shadow_dir_id, checkpoint_validate_commit_hash,
+    dispatch_case, load_fixture_file, run_all_active_fixtures, run_fixture_file,
+    run_fixtures_in_dir, CheckpointShortstat, ParityCase, ParityError, ParityFixtureFile,
 };

@@ -4,9 +4,14 @@
 //! remote `TerminalBackend`, with optional watch-and-sync capability.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use hermes_core::{AgentError, TerminalBackend};
+use tokio::io::AsyncWriteExt;
+
+static ATOMIC_WRITE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Bidirectional file synchronization between local and remote environments.
 pub struct FileSync {
@@ -79,13 +84,7 @@ impl FileSync {
                 })?;
             }
 
-            tokio::fs::write(&local_path, &content).await.map_err(|e| {
-                AgentError::Io(format!(
-                    "Failed to write local file '{}': {}",
-                    local_path.display(),
-                    e
-                ))
-            })?;
+            atomic_write_text(&local_path, &content).await?;
 
             tracing::debug!("Synced from remote: {}", remote_path);
         }
@@ -165,5 +164,173 @@ impl FileSync {
         }
 
         Ok(result)
+    }
+}
+
+fn atomic_temp_path(path: &Path) -> Result<PathBuf, AgentError> {
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| AgentError::Io(format!("Missing filename for '{}'", path.display())))?
+        .to_string_lossy();
+    let parent = path
+        .parent()
+        .ok_or_else(|| AgentError::Io(format!("Missing parent for '{}'", path.display())))?;
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let seq = ATOMIC_WRITE_COUNTER.fetch_add(1, Ordering::Relaxed);
+    Ok(parent.join(format!(
+        ".{}.hermes-sync-{}-{}-{}.tmp",
+        file_name,
+        std::process::id(),
+        nanos,
+        seq
+    )))
+}
+
+async fn atomic_write_text(path: &Path, content: &str) -> Result<(), AgentError> {
+    let tmp_path = atomic_temp_path(path)?;
+    let result = async {
+        let mut file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)
+            .await
+            .map_err(|e| {
+                AgentError::Io(format!(
+                    "Failed to create temporary sync file '{}': {}",
+                    tmp_path.display(),
+                    e
+                ))
+            })?;
+
+        file.write_all(content.as_bytes()).await.map_err(|e| {
+            AgentError::Io(format!(
+                "Failed to write temporary sync file '{}': {}",
+                tmp_path.display(),
+                e
+            ))
+        })?;
+        file.sync_all().await.map_err(|e| {
+            AgentError::Io(format!(
+                "Failed to sync temporary sync file '{}': {}",
+                tmp_path.display(),
+                e
+            ))
+        })?;
+        drop(file);
+
+        tokio::fs::rename(&tmp_path, path).await.map_err(|e| {
+            AgentError::Io(format!(
+                "Failed to replace local file '{}' from '{}': {}",
+                path.display(),
+                tmp_path.display(),
+                e
+            ))
+        })?;
+        Ok(())
+    }
+    .await;
+
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(&tmp_path).await;
+    }
+
+    result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use hermes_core::CommandOutput;
+    use std::collections::HashMap;
+
+    struct MockBackend {
+        files: HashMap<String, String>,
+    }
+
+    #[async_trait]
+    impl TerminalBackend for MockBackend {
+        async fn execute_command(
+            &self,
+            _command: &str,
+            _timeout: Option<u64>,
+            _workdir: Option<&str>,
+            _background: bool,
+            _pty: bool,
+        ) -> Result<CommandOutput, AgentError> {
+            Ok(CommandOutput {
+                exit_code: 0,
+                stdout: String::new(),
+                stderr: String::new(),
+            })
+        }
+
+        async fn read_file(
+            &self,
+            path: &str,
+            _offset: Option<u64>,
+            _limit: Option<u64>,
+        ) -> Result<String, AgentError> {
+            self.files
+                .get(path)
+                .cloned()
+                .ok_or_else(|| AgentError::Io(format!("missing mock file: {path}")))
+        }
+
+        async fn write_file(&self, _path: &str, _content: &str) -> Result<(), AgentError> {
+            Ok(())
+        }
+
+        async fn file_exists(&self, path: &str) -> Result<bool, AgentError> {
+            Ok(self.files.contains_key(path))
+        }
+    }
+
+    #[tokio::test]
+    async fn atomic_write_text_replaces_existing_file_and_cleans_temp() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("nested").join("example.txt");
+        tokio::fs::create_dir_all(target.parent().unwrap())
+            .await
+            .expect("mkdir");
+        tokio::fs::write(&target, "old").await.expect("seed");
+
+        atomic_write_text(&target, "new contents")
+            .await
+            .expect("atomic write");
+
+        let actual = tokio::fs::read_to_string(&target).await.expect("read");
+        assert_eq!(actual, "new contents");
+
+        let mut entries = tokio::fs::read_dir(target.parent().unwrap())
+            .await
+            .expect("read dir");
+        while let Some(entry) = entries.next_entry().await.expect("entry") {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            assert!(
+                !name.contains(".hermes-sync-"),
+                "temporary sync file was not cleaned up: {name}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn sync_from_remote_uses_atomic_local_write() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut files = HashMap::new();
+        files.insert("subdir/file.txt".to_string(), "remote contents".to_string());
+        let sync = FileSync::new(dir.path().to_path_buf(), Arc::new(MockBackend { files }));
+
+        sync.sync_from_remote(&[PathBuf::from("subdir/file.txt")])
+            .await
+            .expect("sync");
+
+        let actual = tokio::fs::read_to_string(dir.path().join("subdir/file.txt"))
+            .await
+            .expect("read synced file");
+        assert_eq!(actual, "remote contents");
     }
 }

@@ -101,6 +101,27 @@
       "ticket": 25
     },
     {
+      "path": "optional-skills/research",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream optional-skills research content is curated catalog material; Hermes Ultra tracks it through skill catalog governance while keeping runtime execution Rust-first.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "optional-skills/finance",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream optional-skills finance content is curated catalog material; Hermes Ultra tracks it through skill catalog governance while keeping runtime execution Rust-first.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "optional-skills/health",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream optional-skills health content is curated catalog material; Hermes Ultra tracks it through skill catalog governance while keeping runtime execution Rust-first.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "scripts/install.sh",
       "classification": "intentional_divergence",
       "rationale": "Installer intentionally downloads or builds Hermes Agent Ultra Rust release binaries instead of cloning upstream's Python/uv environment; installer contracts cover release assets, symlinks, PATH guard, Termux pathing, and post-install probes.",
@@ -181,6 +202,27 @@
       "path": "tests/cli",
       "classification": "functional",
       "rationale": "CLI test deltas cover command contracts and user-visible runtime behavior.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tui_gateway",
+      "classification": "functional",
+      "rationale": "TUI gateway tests cover interactive gateway behavior and must stay parity-reviewed against Rust-native UX/runtime contracts.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/integration",
+      "classification": "functional",
+      "rationale": "Integration tests cover cross-component runtime behavior and must stay parity-reviewed before clearance.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/e2e",
+      "classification": "functional",
+      "rationale": "End-to-end tests cover user-visible runtime workflows and must stay parity-reviewed before clearance.",
       "owner": "sheawinkler",
       "ticket": 25
     },
@@ -419,6 +461,13 @@
       "path": "plugins/platforms",
       "classification": "functional",
       "rationale": "Platform plugin differences affect adapter surface parity.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "plugins/web",
+      "classification": "functional",
+      "rationale": "Web-search plugin differences affect provider routing, credential handling, and tool result behavior.",
       "owner": "sheawinkler",
       "ticket": 25
     },

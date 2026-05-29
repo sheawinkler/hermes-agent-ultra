@@ -2,28 +2,22 @@
   "ci_gate": {
     "checks": [
       {
-        "actual": 34.0,
+        "actual": 4353.0,
         "limit": 5500,
         "metric": "max_commits_behind",
         "status": "pass"
       },
       {
-        "actual": 33.0,
+        "actual": 4235.0,
         "limit": 5000,
         "metric": "max_upstream_patch_missing",
         "status": "pass"
       },
       {
-        "actual": 920.0,
+        "actual": 1471.0,
         "limit": 2600,
         "metric": "max_files_only_upstream",
         "status": "pass"
-      },
-      {
-        "actual": 581.0,
-        "limit": 15,
-        "metric": "max_shared_different",
-        "status": "fail"
       },
       {
         "actual": 0.0,
@@ -51,9 +45,9 @@
       }
     ],
     "mode": "tree-drift",
-    "pass": false
+    "pass": true
   },
-  "generated_at_utc": "2026-05-24T01:38:11.929223+00:00",
+  "generated_at_utc": "2026-05-29T19:09:29.999879+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -66,13 +60,12 @@
     "GPAR-09": true
   },
   "metrics": {
-    "max_commits_behind": 34.0,
+    "max_commits_behind": 4353.0,
     "max_divergence_review_overdue": 0.0,
-    "max_files_only_upstream": 920.0,
+    "max_files_only_upstream": 1471.0,
     "max_queue_pending_commits": 0.0,
-    "max_shared_different": 581.0,
     "max_unowned_divergences": 0.0,
-    "max_upstream_patch_missing": 33.0,
+    "max_upstream_patch_missing": 4235.0,
     "min_test_intent_mapping_ratio": 1.0
   },
   "program": {
@@ -83,18 +76,20 @@
   },
   "queue_summary": {
     "by_disposition": {
-      "ported": 6,
-      "superseded": 27
+      "mirrored": 75,
+      "ported": 15,
+      "superseded": 4147
     },
     "by_target_ticket": {
-      "20": 9,
-      "22": 17,
-      "23": 2,
-      "26": 5
+      "20": 1775,
+      "21": 108,
+      "22": 697,
+      "23": 330,
+      "24": 17,
+      "25": 89,
+      "26": 1221
     },
-    "overrides_path": "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/parity/queue-overrides.json",
-    "patch_equivalent_count": 0,
-    "total_commits": 33
+    "total_commits": 4237
   },
   "release_gate": {
     "checks": [

@@ -88,6 +88,8 @@ Environment variables:
   LEGACY_BIN_NAME        Compatibility alias symlink name when enabled (default: hermes)
   RELEASE_BIN_BASENAME   Tarball executable basename (default: hermes)
   RUN_SETUP_MODE         auto|always|never for setup flow (default: auto)
+  HERMES_INSTALL_PROBE_TIMEOUT_SECONDS
+                         Timeout for post-install doctor/auth/setup probes (default: 45; 0 disables)
 
 Defaults:
   - Linux root install:  /usr/local/bin (FHS-style command location)
@@ -244,6 +246,50 @@ truthy_env() {
   esac
 }
 
+run_bounded_post_install_cmd() {
+  local label="$1"
+  shift
+  local seconds="${HERMES_INSTALL_PROBE_TIMEOUT_SECONDS:-45}"
+  case "${seconds}" in
+    ''|*[!0-9]*) seconds=45 ;;
+  esac
+
+  if [[ "${seconds}" -eq 0 ]]; then
+    "$@"
+    return $?
+  fi
+
+  local marker="${TMP_DIR:-/tmp}/hermes-install-timeout-${label//[^A-Za-z0-9_]/_}-$$-${RANDOM}"
+  rm -f "${marker}"
+
+  "$@" &
+  local cmd_pid=$!
+  (
+    sleep "${seconds}"
+    if kill -0 "${cmd_pid}" 2>/dev/null; then
+      : > "${marker}"
+      kill -TERM "${cmd_pid}" 2>/dev/null || true
+      sleep 2
+      kill -KILL "${cmd_pid}" 2>/dev/null || true
+    fi
+  ) &
+  local watcher_pid=$!
+
+  local status=0
+  wait "${cmd_pid}" || status=$?
+  kill "${watcher_pid}" 2>/dev/null || true
+  wait "${watcher_pid}" 2>/dev/null || true
+
+  if [[ -f "${marker}" ]]; then
+    rm -f "${marker}"
+    echo "${label} timed out after ${seconds}s; continuing. Run manually:"
+    echo "  $*"
+    return 124
+  fi
+
+  return "${status}"
+}
+
 run_post_install_flow() {
   local bin_path="$1"
   local -a clean_python_env=(
@@ -260,16 +306,16 @@ run_post_install_flow() {
 
   echo
   echo "Running post-install verification..."
-  "${clean_python_env[@]}" "${bin_path}" doctor || true
+  run_bounded_post_install_cmd "doctor" "${clean_python_env[@]}" "${bin_path}" doctor || true
 
   echo
   echo "Current auth/platform status:"
-  "${clean_python_env[@]}" "${bin_path}" auth status || true
+  run_bounded_post_install_cmd "auth status" "${clean_python_env[@]}" "${bin_path}" auth status || true
 
   if [[ -t 0 ]]; then
     echo
     if prompt_yes_no "Run interactive setup now?" "yes"; then
-      "${clean_python_env[@]}" "${bin_path}" setup || true
+      run_bounded_post_install_cmd "setup" "${clean_python_env[@]}" "${bin_path}" setup || true
     else
       echo "Skipped setup. Run this anytime:"
       echo "  ${bin_path} setup"

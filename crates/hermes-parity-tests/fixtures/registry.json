@@ -20,9 +20,9 @@
       "id": "checkpoint_manager",
       "status": "active",
       "python": "tools/checkpoint_manager.py",
-      "rust": "hermes_parity_tests::harness::checkpoint_shadow_dir_id",
+      "rust": "hermes_parity_tests::harness::{checkpoint_shadow_dir_id,checkpoint_validate_commit_hash,checkpoint_parse_shortstat}",
       "fixture_dirs": ["checkpoint_manager"],
-      "note": "Full snapshot/rollback parity requires Rust checkpoint backend + git2 tests."
+      "note": "Active pure-helper parity covers shadow dir IDs, commit hash validation, and shortstat parsing. Full snapshot/rollback parity still requires Rust checkpoint backend + git tests."
     }
   ]
 }

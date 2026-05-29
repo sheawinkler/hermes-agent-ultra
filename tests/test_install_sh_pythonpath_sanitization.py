@@ -29,6 +29,25 @@ def test_post_install_flow_clears_python_environment_for_binary_probes() -> None
         assert f"-u {var}" in text
 
 
+def test_post_install_flow_wraps_binary_probes_with_timeout() -> None:
+    text = INSTALL_SH.read_text()
+
+    assert "HERMES_INSTALL_PROBE_TIMEOUT_SECONDS" in text
+    assert "run_bounded_post_install_cmd()" in text
+    assert (
+        'run_bounded_post_install_cmd "doctor" "${clean_python_env[@]}" "${bin_path}" doctor || true'
+        in text
+    )
+    assert (
+        'run_bounded_post_install_cmd "auth status" "${clean_python_env[@]}" "${bin_path}" auth status || true'
+        in text
+    )
+    assert (
+        'run_bounded_post_install_cmd "setup" "${clean_python_env[@]}" "${bin_path}" setup || true'
+        in text
+    )
+
+
 def test_installer_uses_binary_symlinks_not_python_launcher_wrapper() -> None:
     text = INSTALL_SH.read_text()
 

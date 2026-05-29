@@ -1,119 +1,119 @@
 # Parity Matrix
 
-Generated: `2026-05-24T01:38:08.130269+00:00`
+Generated: `2026-05-29T18:59:03.120275+00:00`
 
 ## Scope
 
-- Local ref: `HEAD` (`6f87e0878bbe4c9bf087a41831d31f3797a01898`)
-- Upstream ref: `upstream/main` (`72ff3e909c73b625ee244ab5ea3d0608ee85dcf3`)
+- Local ref: `main` (`a8c29a9e9a69088c5a9c90c5a4fc3c8b2996b54d`)
+- Upstream ref: `upstream/main` (`7379f175567bd0f1d833eec3a3599d0665b2a491`)
 - Merge base: `none (history divergence)`
 
 ## Summary
 
 | Metric | Value |
 | --- | ---: |
-| Commits behind local (`upstream` ancestry only) | 34 |
-| Commits ahead local (`local` ancestry only) | 749 |
-| Upstream commits missing by patch-id (`git cherry local upstream`, `+`) | 33 |
-| Upstream commits represented by patch-id (`git cherry local upstream`, `-`) | 0 |
-| Local commits unique by patch-id (`git cherry upstream local`, `+`) | 645 |
-| Files only in upstream tree | 920 |
-| Files only in local tree | 532 |
-| Shared files identical content | 2140 |
-| Shared files different content | 581 |
-| Total files changed (`local` vs `upstream`) | 2034 |
-| Insertions (`local` vs `upstream`) | 540306 |
-| Deletions (`local` vs `upstream`) | 252550 |
+| Commits behind local (`upstream` ancestry only) | 4353 |
+| Commits ahead local (`local` ancestry only) | 770 |
+| Upstream commits missing by patch-id (`git cherry local upstream`, `+`) | 4235 |
+| Upstream commits represented by patch-id (`git cherry local upstream`, `-`) | 2 |
+| Local commits unique by patch-id (`git cherry upstream local`, `+`) | 665 |
+| Files only in upstream tree | 1471 |
+| Files only in local tree | 558 |
+| Shared files identical content | 1704 |
+| Shared files different content | 1014 |
+| Total files changed (`local` vs `upstream`) | 3043 |
+| Insertions (`local` vs `upstream`) | 737632 |
+| Deletions (`local` vs `upstream`) | 272976 |
 
 ## Top 40 upstream-only buckets
 
 | Bucket | Files |
 | --- | ---: |
-| `web/src` | 87 |
-| `tests/hermes_cli` | 42 |
-| `gateway/platforms` | 40 |
+| `website/i18n` | 332 |
+| `tests/hermes_cli` | 85 |
+| `web/src` | 77 |
+| `tests/agent` | 53 |
+| `tests/gateway` | 40 |
+| `gateway/platforms` | 39 |
 | `skills/creative` | 36 |
-| `tests/agent` | 35 |
+| `tests/tools` | 34 |
+| `website/docs` | 34 |
 | `optional-skills/research` | 33 |
-| `tests/gateway` | 31 |
-| `website/docs` | 23 |
-| `tests/tools` | 20 |
-| `tests/plugins` | 14 |
-| `.github/workflows` | 13 |
-| `ui-tui/src` | 13 |
-| `tools/environments` | 12 |
+| `tests/plugins` | 21 |
+| `tests/run_agent` | 19 |
+| `ui-tui/src` | 19 |
+| `.github/workflows` | 15 |
+| `tests/cli` | 15 |
+| `tests/docker` | 12 |
 | `agent/lsp` | 11 |
 | `agent/transports` | 11 |
+| `hermes_cli/dashboard_auth` | 11 |
+| `tools/environments` | 11 |
 | `web/public` | 11 |
-| `tests/run_agent` | 10 |
+| `docker/s6-rc.d` | 9 |
+| `optional-skills/security` | 9 |
+| `ui-tui/packages` | 8 |
 | `hermes_cli/proxy` | 7 |
-| `tests/cli` | 6 |
+| `plugins/security-guidance` | 6 |
 | `tools/computer_use` | 6 |
-| `ui-tui/packages` | 6 |
+| `optional-skills/software-development` | 5 |
 | `scripts/whatsapp-bridge` | 5 |
 | `.github/ISSUE_TEMPLATE` | 4 |
-| `website/i18n` | 4 |
+| `optional-skills/autonomous-ai-agents` | 4 |
+| `plugins/platforms` | 3 |
 | `.github/actions` | 2 |
 | `agent/secret_sources` | 2 |
+| `docker/cont-init.d` | 2 |
 | `optional-skills/blockchain` | 2 |
+| `plugins/dashboard_auth` | 2 |
+| `plugins/image_gen` | 2 |
 | `skills/autonomous-ai-agents` | 2 |
 | `tests/acp` | 2 |
-| `tests/hermes_state` | 2 |
-| `tests/skills` | 2 |
-| `tools/neutts_samples` | 2 |
-| `.dockerignore` | 1 |
-| `.env.example` | 1 |
-| `.envrc` | 1 |
-| `.github/PULL_REQUEST_TEMPLATE.md` | 1 |
-| `.github/dependabot.yml` | 1 |
-| `.mailmap` | 1 |
-| `.plans/openai-api-server.md` | 1 |
-| `.plans/streaming-support.md` | 1 |
 
 ## Top 40 shared-different buckets
 
 | Bucket | Files |
 | --- | ---: |
-| `tests/gateway` | 96 |
-| `website/docs` | 80 |
-| `tests/tools` | 67 |
-| `tests/hermes_cli` | 58 |
-| `ui-tui/src` | 47 |
-| `tests/agent` | 32 |
-| `tests/run_agent` | 30 |
-| `ui-tui/packages` | 17 |
-| `tests/cli` | 13 |
+| `tests/gateway` | 171 |
+| `tests/tools` | 138 |
+| `website/docs` | 135 |
+| `tests/hermes_cli` | 126 |
+| `ui-tui/src` | 58 |
+| `tests/agent` | 57 |
+| `tests/run_agent` | 56 |
+| `tests/cli` | 29 |
+| `ui-tui/packages` | 18 |
+| `tests/plugins` | 15 |
+| `skills/creative` | 11 |
+| `tests/cron` | 11 |
 | `plugins/google_meet` | 9 |
-| `skills/creative` | 9 |
-| `plugins/platforms` | 8 |
-| `plugins/memory` | 7 |
-| `plugins/model-providers` | 7 |
+| `plugins/memory` | 9 |
+| `plugins/platforms` | 9 |
+| `tests/acp` | 8 |
 | `skills/productivity` | 7 |
-| `tests/acp` | 7 |
-| `tests/plugins` | 6 |
-| `plugins/teams_pipeline` | 4 |
-| `tests/cron` | 4 |
+| `plugins/model-providers` | 6 |
+| `tests/skills` | 6 |
+| `plugins/teams_pipeline` | 5 |
+| `tests/honcho_plugin` | 5 |
+| `tests/stress` | 5 |
+| `plugins/web` | 4 |
 | `tests/providers` | 4 |
+| `tests/tui_gateway` | 4 |
+| `website/scripts` | 4 |
+| `optional-skills/research` | 3 |
 | `plugins/kanban` | 3 |
-| `plugins/observability` | 3 |
-| `website/scripts` | 3 |
+| `tests/integration` | 3 |
+| `website/src` | 3 |
+| `optional-skills/finance` | 2 |
+| `optional-skills/health` | 2 |
+| `optional-skills/mlops` | 2 |
 | `plugins/example-dashboard` | 2 |
+| `plugins/observability` | 2 |
+| `plugins/video_gen` | 2 |
 | `skills/devops` | 2 |
 | `skills/research` | 2 |
-| `tests/honcho_plugin` | 2 |
-| `tests/skills` | 2 |
-| `tests/stress` | 2 |
-| `website/src` | 2 |
+| `tests/e2e` | 2 |
 | `.gitattributes` | 1 |
-| `.github/workflows` | 1 |
-| `.gitignore` | 1 |
-| `AGENTS.md` | 1 |
-| `CONTRIBUTING.md` | 1 |
-| `Dockerfile` | 1 |
-| `LICENSE` | 1 |
-| `README.md` | 1 |
-| `docker-compose.yml` | 1 |
-| `docker/entrypoint.sh` | 1 |
 
 ## Top 40 local-only buckets
 
@@ -122,9 +122,9 @@ Generated: `2026-05-24T01:38:08.130269+00:00`
 | `crates/hermes-tools` | 74 |
 | `crates/hermes-agent` | 47 |
 | `crates/hermes-gateway` | 45 |
-| `crates/hermes-cli` | 43 |
+| `crates/hermes-cli` | 44 |
 | `crates/hermes-intelligence` | 37 |
-| `docs/parity` | 35 |
+| `docs/parity` | 37 |
 | `crates/hermes-config` | 18 |
 | `crates/hermes-eval` | 15 |
 | `crates/hermes-parity-tests` | 15 |
@@ -138,46 +138,46 @@ Generated: `2026-05-24T01:38:08.130269+00:00`
 | `crates/hermes-skills` | 7 |
 | `optional-skills/creative` | 6 |
 | `crates/hermes-http` | 5 |
+| `docs/releases` | 5 |
 | `tests/run_agent` | 5 |
+| `website/docs` | 5 |
 | `optional-skills/mlops` | 4 |
 | `plugins/strike-freedom-cockpit` | 4 |
-| `website/docs` | 4 |
+| `tests/plugins` | 4 |
+| `tests/tools` | 4 |
 | `.github/workflows` | 3 |
 | `crates/hermes-auth` | 3 |
 | `crates/hermes-telemetry` | 3 |
-| `docs/releases` | 3 |
-| `tests/tools` | 3 |
 | `crates/hermes-rl` | 2 |
 | `docs/alpha` | 2 |
 | `optional-skills/blockchain` | 2 |
 | `optional-skills/finance` | 2 |
+| `plugins/model-providers` | 2 |
+| `tests/hermes_cli` | 2 |
 | `.ci/clippy-allowlist.txt` | 1 |
 | `Cargo.lock` | 1 |
 | `Cargo.toml` | 1 |
 | `NOTICE` | 1 |
 | `PARITY_PLAN.md` | 1 |
-| `README_JA.md` | 1 |
-| `README_KO.md` | 1 |
-| `README_QUICKSTART.md` | 1 |
 
 ## Workstream Routing
 
 | Workstream | Issue | Name | Upstream-only | Shared-different | Risk | Effort |
 | --- | ---: | --- | ---: | ---: | --- | --- |
-| `WS6` | #10 | Tests and CI parity | 189 | 339 | high | XL |
-| `WS8` | #12 | Compatibility and divergence policy | 343 | 12 | medium | L |
-| `WS5` | #9 | UX parity | 153 | 156 | medium | L |
-| `WS3` | #7 | Tools and adapters parity | 98 | 46 | high | L |
-| `WS4` | #8 | Skills parity | 74 | 28 | medium | L |
-| `WS2` | #6 | Core runtime parity | 63 | 0 | critical | M |
+| `WS6` | #10 | Tests and CI parity | 317 | 681 | high | XL |
+| `WS5` | #9 | UX parity | 494 | 227 | high | XL |
+| `WS8` | #12 | Compatibility and divergence policy | 391 | 12 | high | XL |
+| `WS3` | #7 | Tools and adapters parity | 114 | 55 | high | L |
+| `WS4` | #8 | Skills parity | 93 | 39 | medium | L |
+| `WS2` | #6 | Core runtime parity | 62 | 0 | critical | M |
 | `WS7` | #11 | Security/secrets/store/webhook parity | 0 | 0 | critical | S |
 
 ## Commit Mapping
 
-- Upstream missing by patch-id: `33`
-- Upstream represented by patch-id: `0`
-- Local unique by patch-id: `645`
-- Intentional divergence tracked items: `5` (covered files: `440`)
+- Upstream missing by patch-id: `4235`
+- Upstream represented by patch-id: `2`
+- Local unique by patch-id: `665`
+- Intentional divergence tracked items: `8` (covered files: `895`)
 - Merge base is absent; patch-id mapping is used as primary commit equivalence signal.
 
 ## Intentional Divergence Registry
@@ -187,8 +187,11 @@ Generated: `2026-05-24T01:38:08.130269+00:00`
 | `ultra-contextlattice-memory-plugin` | approved | WS3 | 2 | Keep ContextLattice native memory plugin and provider discovery in the Rust agent runtime. |
 | `ultra-webhook-queue-backends` | approved | WS7 | 4 | Preserve webhook-driven sync queue worker architecture with sqlite, SQS, and Kafka support. |
 | `ultra-launchd-webhook-lifecycle` | approved | WS7 | 4 | Preserve launchd-based interactive dev lifecycle management for webhook listener and worker. |
-| `rust-skills-catalog-governance` | approved | WS4 | 116 | Track upstream skills and optional-skills catalogs via parity audits while keeping Rust runtime skill loading externalized (no direct Python skill-tree vendoring). |
-| `rust-cli-tui-primary-ux-surface` | approved | WS5 | 314 | Treat Rust CLI/TUI and gateway as primary UX surface; upstream web/ui-tui trees are tracked as intentional divergence unless explicitly ported. |
+| `rust-skills-catalog-governance` | approved | WS4 | 146 | Track upstream skills and optional-skills catalogs via parity audits while keeping Rust runtime skill loading externalized (no direct Python skill-tree vendoring). |
+| `rust-gateway-platform-plugin-parity` | approved | WS3 | 3 | Keep platform adapter parity in the Rust gateway instead of vendoring upstream Python platform-plugin trees. |
+| `upstream-python-plugin-backend-drift-20260527` | temporary | WS3 | 10 | Track newly added upstream Python plugin/backend trees separately from surgical Rust issue-triage fixes. |
+| `upstream-s6-plan-doc-archive` | approved | WS7 | 1 | Do not import upstream implementation-plan archive documents unless they change local runtime or release behavior. |
+| `rust-cli-tui-primary-ux-surface` | approved | WS5 | 725 | Treat Rust CLI/TUI and gateway as primary UX surface; upstream web/ui-tui trees are tracked as intentional divergence unless explicitly ported. |
 
 
 ## Notes

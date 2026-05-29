@@ -1,7 +1,7 @@
 # Workstream Status
 
-- Local HEAD: `6f87e0878bbe4c9bf087a41831d31f3797a01898`
-- Upstream: `upstream/main` (`72ff3e909c73b625ee244ab5ea3d0608ee85dcf3`)
+- Local HEAD: `a8c29a9e9a69088c5a9c90c5a4fc3c8b2996b54d`
+- Upstream: `upstream/main` (`7379f175567bd0f1d833eec3a3599d0665b2a491`)
 
 | Workstream | Title | State |
 | --- | --- | --- |
@@ -33,14 +33,14 @@
 - State: **complete**
 - Upstream skills catalogs audited against local tree.
 - Intentional divergence documented for skills and optional-skills vendoring.
-- Metrics: `{"divergence_documented": true, "local_skill_files": 796, "upstream_skill_files": 855}`
+- Metrics: `{"divergence_documented": true, "local_skill_files": 796, "upstream_skill_files": 874}`
 
 ## WS5 — UX parity
 
 - State: **complete**
 - Rust CLI/TUI runtime validated through e2e_cli and gateway e2e smoke tests.
 - Web/UI upstream trees classified as intentional divergence in Rust-first mode.
-- Metrics: `{"divergence_documented": true, "e2e_cli_tests": 6}`
+- Metrics: `{"divergence_documented": true, "e2e_cli_tests": 8}`
 
 ## WS6 — Tests and CI parity
 
@@ -61,5 +61,5 @@
 - State: **complete**
 - Compatibility policy defines rust-native default, bounded FFI fallback, and divergence governance.
 - Intentional divergences are codified in docs/parity/intentional-divergence.json.
-- Metrics: `{"divergence_items": 5, "policy_exists": true}`
+- Metrics: `{"divergence_items": 8, "policy_exists": true}`
 
