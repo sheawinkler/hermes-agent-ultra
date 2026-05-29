@@ -116,6 +116,9 @@ pub use platforms::sms::SmsAdapter;
 #[cfg(feature = "homeassistant")]
 pub use platforms::homeassistant::HomeAssistantAdapter;
 
+#[cfg(feature = "ntfy")]
+pub use platforms::ntfy::NtfyAdapter;
+
 #[cfg(feature = "api-server")]
 pub use platforms::api_server::ApiServerAdapter;
 

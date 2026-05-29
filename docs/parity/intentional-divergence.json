@@ -73,9 +73,10 @@
       "ticket": 7,
       "last_reviewed": "2026-05-26",
       "review_date": "2026-08-26",
-      "rationale": "Mattermost platform behavior is represented by the Rust-native gateway adapter and adapter matrix; upstream Python plugin files are not vendored into the Rust runtime tree.",
+      "rationale": "Mattermost and ntfy platform behavior are represented by Rust-native gateway adapters and adapter contracts; upstream Python plugin files are not vendored into the Rust runtime path.",
       "path_prefixes": [
-        "plugins/platforms/mattermost/"
+        "plugins/platforms/mattermost/",
+        "plugins/platforms/ntfy/"
       ]
     },
     {

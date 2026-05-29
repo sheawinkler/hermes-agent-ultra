@@ -87,10 +87,55 @@ fn apply_dingtalk_env(config: &mut GatewayConfig) {
     }
 }
 
-/// 应用与 Python 文档一致的 `WEIXIN_*` / `DINGTALK_*` 环境变量到 `platforms`。
+fn apply_ntfy_env(config: &mut GatewayConfig) {
+    let Some(topic) = env_nonempty("NTFY_TOPIC") else {
+        return;
+    };
+    let ntfy = config
+        .platforms
+        .entry("ntfy".into())
+        .or_insert_with(PlatformConfig::default);
+    let enabled_was_explicit = ntfy
+        .extra
+        .remove("_enabled_explicit")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if !ntfy.enabled && !enabled_was_explicit {
+        ntfy.enabled = true;
+    }
+    set_extra(ntfy, "topic", json!(topic));
+    if let Some(v) = env_nonempty("NTFY_SERVER_URL") {
+        set_extra(ntfy, "server", json!(v));
+    }
+    if let Some(v) = env_nonempty("NTFY_PUBLISH_TOPIC") {
+        set_extra(ntfy, "publish_topic", json!(v));
+    }
+    if let Some(v) = env_nonempty("NTFY_TOKEN") {
+        ntfy.token = Some(v);
+    }
+    if let Some(v) = env_nonempty("NTFY_MARKDOWN") {
+        set_extra(
+            ntfy,
+            "markdown",
+            json!(matches!(
+                v.to_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )),
+        );
+    }
+    if let Some(v) = env_nonempty("NTFY_HOME_CHANNEL") {
+        ntfy.home_channel = Some(v);
+    }
+    if let Some(v) = env_nonempty("NTFY_HOME_CHANNEL_NAME") {
+        set_extra(ntfy, "home_channel_name", json!(v));
+    }
+}
+
+/// 应用与 Python 文档一致的平台环境变量到 `platforms`。
 pub fn apply_python_named_platform_env(config: &mut GatewayConfig) {
     apply_weixin_env(config);
     apply_dingtalk_env(config);
+    apply_ntfy_env(config);
 }
 
 #[cfg(test)]
@@ -159,6 +204,45 @@ mod tests {
             std::env::remove_var("DINGTALK_CLIENT_ID");
             std::env::remove_var("DINGTALK_CLIENT_SECRET");
             std::env::remove_var("DINGTALK_OPENAPI_ENDPOINT");
+        }
+    }
+
+    #[test]
+    fn ntfy_env_sets_topic_and_auto_enables() {
+        unsafe {
+            std::env::set_var("NTFY_TOPIC", "hermes-in");
+            std::env::set_var("NTFY_SERVER_URL", "https://ntfy.example.com");
+            std::env::set_var("NTFY_PUBLISH_TOPIC", "hermes-out");
+            std::env::set_var("NTFY_TOKEN", "token");
+            std::env::set_var("NTFY_MARKDOWN", "true");
+        }
+        let mut cfg = GatewayConfig::default();
+        apply_python_named_platform_env(&mut cfg);
+        let ntfy = cfg.platforms.get("ntfy").expect("ntfy block");
+        assert!(ntfy.enabled);
+        assert_eq!(ntfy.token.as_deref(), Some("token"));
+        assert_eq!(
+            ntfy.extra.get("topic").and_then(|v| v.as_str()),
+            Some("hermes-in")
+        );
+        assert_eq!(
+            ntfy.extra.get("server").and_then(|v| v.as_str()),
+            Some("https://ntfy.example.com")
+        );
+        assert_eq!(
+            ntfy.extra.get("publish_topic").and_then(|v| v.as_str()),
+            Some("hermes-out")
+        );
+        assert_eq!(
+            ntfy.extra.get("markdown").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        unsafe {
+            std::env::remove_var("NTFY_TOPIC");
+            std::env::remove_var("NTFY_SERVER_URL");
+            std::env::remove_var("NTFY_PUBLISH_TOPIC");
+            std::env::remove_var("NTFY_TOKEN");
+            std::env::remove_var("NTFY_MARKDOWN");
         }
     }
 }

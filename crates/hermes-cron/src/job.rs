@@ -90,6 +90,8 @@ pub enum DeliverTarget {
     Sms,
     /// Deliver via Home Assistant.
     HomeAssistant,
+    /// Deliver via ntfy push notifications.
+    Ntfy,
 }
 
 /// Delivery configuration for a cron job's results.

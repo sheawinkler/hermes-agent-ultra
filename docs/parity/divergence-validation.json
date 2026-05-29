@@ -1,6 +1,6 @@
 {
   "divergence_file": "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/parity/intentional-divergence.json",
-  "generated_at_utc": "2026-05-29T20:05:45.566631+00:00",
+  "generated_at_utc": "2026-05-29T20:36:38.958736+00:00",
   "items": [
     {
       "errors": [],
@@ -92,11 +92,14 @@
       "errors": [],
       "id": "rust-gateway-platform-plugin-parity",
       "last_reviewed": "2026-05-26",
-      "matched_files": 3,
+      "matched_files": 6,
       "matched_sample": [
         "plugins/platforms/mattermost/__init__.py",
         "plugins/platforms/mattermost/adapter.py",
-        "plugins/platforms/mattermost/plugin.yaml"
+        "plugins/platforms/mattermost/plugin.yaml",
+        "plugins/platforms/ntfy/__init__.py",
+        "plugins/platforms/ntfy/adapter.py",
+        "plugins/platforms/ntfy/plugin.yaml"
       ],
       "overdue": false,
       "owner": "sheawinkler",
@@ -182,7 +185,7 @@
   "summary": {
     "errors": 0,
     "items": 8,
-    "local_paths": 3279,
+    "local_paths": 3280,
     "review_overdue": 0,
     "unowned": 0,
     "upstream_paths": 4189,

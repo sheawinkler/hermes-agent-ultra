@@ -25,6 +25,7 @@ bluebubbles = []
 email = []
 sms = []
 homeassistant = []
+ntfy = []
 api-server = []
 webhook = []
 

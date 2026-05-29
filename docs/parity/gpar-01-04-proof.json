@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-05-29T20:05:44.565854+00:00",
+  "generated_at_utc": "2026-05-29T20:36:33.902963+00:00",
   "scope": {
     "labels": {
       "20": "GPAR-01 tests+CI parity",
@@ -17,23 +17,25 @@
   "summary": {
     "by_disposition": {
       "mirrored": 68,
-      "ported": 11,
-      "superseded": 2859
+      "pending": 1,
+      "ported": 12,
+      "superseded": 2867
     },
-    "pass": true,
-    "total_commits": 2938,
-    "total_pending": 0
+    "pass": false,
+    "total_commits": 2948,
+    "total_pending": 1
   },
   "ticket_breakdown": {
     "20": {
       "by_disposition": {
         "mirrored": 14,
-        "ported": 2,
-        "superseded": 1766
+        "pending": 1,
+        "ported": 3,
+        "superseded": 1772
       },
       "label": "GPAR-01 tests+CI parity",
-      "pending": 0,
-      "total": 1782
+      "pending": 1,
+      "total": 1790
     },
     "21": {
       "by_disposition": {
@@ -59,11 +61,11 @@
       "by_disposition": {
         "mirrored": 3,
         "ported": 1,
-        "superseded": 327
+        "superseded": 329
       },
       "label": "GPAR-04 gateway/plugin-memory parity",
       "pending": 0,
-      "total": 331
+      "total": 333
     }
   }
 }

@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-05-29T20:05:44.514368+00:00",
+  "generated_at_utc": "2026-05-29T20:36:30.746412+00:00",
   "items": [
     {
       "category": "memory_plugin",
@@ -111,6 +111,12 @@
     },
     {
       "category": "platform_adapter",
+      "feature": "ntfy",
+      "name": "ntfy",
+      "status": "rust-native"
+    },
+    {
+      "category": "platform_adapter",
       "feature": "qqbot",
       "name": "qqbot",
       "status": "rust-native"
@@ -174,6 +180,6 @@
     "memory_plugins": 9,
     "non_rust_native": 0,
     "placeholder_status_entries": 0,
-    "platform_adapters": 19
+    "platform_adapters": 20
   }
 }

@@ -1,6 +1,6 @@
 # Adapter Feature Matrix
 
-Generated: `2026-05-29T20:05:44.514368+00:00`
+Generated: `2026-05-29T20:36:30.746412+00:00`
 
 | Category | Name | Feature Flag | Status |
 | --- | --- | --- | --- |
@@ -22,6 +22,7 @@ Generated: `2026-05-29T20:05:44.514368+00:00`
 | platform_adapter | `homeassistant` | `homeassistant` | rust-native |
 | platform_adapter | `matrix` | `matrix` | rust-native |
 | platform_adapter | `mattermost` | `mattermost` | rust-native |
+| platform_adapter | `ntfy` | `ntfy` | rust-native |
 | platform_adapter | `qqbot` | `qqbot` | rust-native |
 | platform_adapter | `signal` | `signal` | rust-native |
 | platform_adapter | `slack` | `slack` | rust-native |
@@ -33,4 +34,4 @@ Generated: `2026-05-29T20:05:44.514368+00:00`
 | platform_adapter | `weixin` | `weixin` | rust-native |
 | platform_adapter | `whatsapp` | `whatsapp` | rust-native |
 
-- Platform adapters: `19`, memory plugins: `9`.
+- Platform adapters: `20`, memory plugins: `9`.

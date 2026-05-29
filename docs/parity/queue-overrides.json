@@ -540,6 +540,18 @@
       "disposition": "ported",
       "notes": "Ntfy robustness and docs are represented by plugins/platforms/ntfy, tests/gateway/test_ntfy_plugin.py, website ntfy messaging docs, sidebars, and environment-variable reference entries."
     },
+    "9405cdc8dd03": {
+      "disposition": "ported",
+      "notes": "Rust ntfy gateway adapter now tags outgoing messages with X-Tags: hermes-agent and skips incoming events carrying that tag to prevent self-echo loops."
+    },
+    "8055d0f09246": {
+      "disposition": "ported",
+      "notes": "Rust ntfy gateway tests cover echo-tag outbound headers, inbound echo filtering, genuine tagged messages, and env-driven platform enablement; Python release AUTHOR_MAP updates are not part of the Rust release pipeline."
+    },
+    "d473e7c9385e": {
+      "disposition": "superseded",
+      "notes": "Upstream Python disk-cleanup auto-tracking is outside the Rust-only runtime path; Rust cron jobs.json is owned by hermes-cron FileJobPersistence and covered by the hermes-cron persistence tests, not by a Python cleanup hook."
+    },
     "7de8cd4c5f67": {
       "disposition": "ported",
       "notes": "TUI voice TTS state now flows through SlashHandlerContext into useMainApp status rendering, with createSlashHandler coverage for /voice tts state sync."

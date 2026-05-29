@@ -1,9 +1,9 @@
 {
-  "generated_at_utc": "2026-05-29T20:05:44.465489+00:00",
+  "generated_at_utc": "2026-05-29T20:36:27.637841+00:00",
   "intent_unit": "domain_intent",
   "intents": [
     {
-      "evidence_count": 23,
+      "evidence_count": 24,
       "evidence_sample": [
         "crates/hermes-cli/tests/e2e_gateway_cron_webhook.rs",
         "crates/hermes-cli/tests/e2e_gateway_process.rs",
@@ -18,6 +18,7 @@
         "crates/hermes-gateway/src/platforms/matrix.rs",
         "crates/hermes-gateway/src/platforms/mattermost.rs",
         "crates/hermes-gateway/src/platforms/mod.rs",
+        "crates/hermes-gateway/src/platforms/ntfy.rs",
         "crates/hermes-gateway/src/platforms/qqbot.rs",
         "crates/hermes-gateway/src/platforms/signal.rs",
         "crates/hermes-gateway/src/platforms/slack.rs",

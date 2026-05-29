@@ -54,6 +54,9 @@ pub mod sms;
 #[cfg(feature = "homeassistant")]
 pub mod homeassistant;
 
+#[cfg(feature = "ntfy")]
+pub mod ntfy;
+
 #[cfg(feature = "api-server")]
 pub mod api_server;
 

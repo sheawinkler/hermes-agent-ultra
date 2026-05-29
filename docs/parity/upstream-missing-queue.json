@@ -93774,9 +93774,314 @@
       "subject": "test(gateway): update system-unit cwd assertion to HERMES_HOME anchor",
       "target_ticket": 20,
       "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "classification_rule": "prior_state",
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/run.py",
+        "tests/gateway/test_media_extraction.py"
+      ],
+      "files_touched": 2,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "08c0b22417a80874032cae4a6d9e43d77d55f89a",
+      "subject": "fix(gateway): scope tool-result MEDIA scan to current turn",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "classification_rule": "sha_override",
+      "disposition": "ported",
+      "files_sample": [
+        "plugins/platforms/ntfy/adapter.py"
+      ],
+      "files_touched": 1,
+      "notes": "Rust ntfy gateway adapter now tags outgoing messages with X-Tags: hermes-agent and skips incoming events carrying that tag to prevent self-echo loops.",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": false,
+        "superseded_by_guard": false
+      },
+      "sha": "9405cdc8dd0347fee65b554e3aba0d2eab7a7b7f",
+      "subject": "fix(ntfy): prevent echo loop by tagging outgoing messages",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "classification_rule": "sha_override",
+      "disposition": "ported",
+      "files_sample": [
+        "plugins/platforms/ntfy/adapter.py",
+        "scripts/release.py",
+        "tests/gateway/test_ntfy_plugin.py"
+      ],
+      "files_touched": 3,
+      "notes": "Rust ntfy gateway tests cover echo-tag outbound headers, inbound echo filtering, genuine tagged messages, and env-driven platform enablement; Python release AUTHOR_MAP updates are not part of the Rust release pipeline.",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": false,
+        "superseded_by_guard": false
+      },
+      "sha": "8055d0f09246555d9a7d9b95295def612e500c70",
+      "subject": "test(ntfy): cover echo-tag filter; tag standalone send path",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "classification_rule": "prior_state",
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/feishu.py",
+        "tests/gateway/test_feishu.py"
+      ],
+      "files_touched": 2,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "91b174038c7e2bf6cde056da05f8f90673e8c87a",
+      "subject": "fix(feishu): bound _chat_locks with LRU eviction (#34836)",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "classification_rule": "sha_override",
+      "disposition": "superseded",
+      "files_sample": [
+        "plugins/disk-cleanup/disk_cleanup.py",
+        "tests/plugins/test_disk_cleanup_plugin.py"
+      ],
+      "files_touched": 2,
+      "notes": "Upstream Python disk-cleanup auto-tracking is outside the Rust-only runtime path; Rust cron jobs.json is owned by hermes-cron FileJobPersistence and covered by the hermes-cron persistence tests, not by a Python cleanup hook.",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": false,
+        "superseded_by_guard": false
+      },
+      "sha": "d473e7c9385e04c975b32d2d2cde3a02ba7d4f47",
+      "subject": "fix(cron): exclude jobs.json registry from disk-cleanup pattern",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "classification_rule": "prior_state",
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/backup.py",
+        "hermes_cli/main.py",
+        "tests/hermes_cli/test_backup.py"
+      ],
+      "files_touched": 3,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "3845d86b9330d8952fc1e9534d438f62ad1d53e5",
+      "subject": "fix(cron): restore jobs.json emptied by config migration on update",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "classification_rule": "prior_state",
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "0dc0c5ea6be051f33d287a02f274b913cbc7cb00",
+      "subject": "chore: add AUTHOR_MAP entry for sweetcornna",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "classification_rule": "prior_state",
+      "disposition": "superseded",
+      "files_sample": [
+        "gateway/platforms/base.py",
+        "gateway/run.py",
+        "gateway/stream_consumer.py",
+        "scripts/release.py",
+        "tests/gateway/test_platform_base.py"
+      ],
+      "files_touched": 5,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "781604ce4c826ec06b69a0bde703ab935308893d",
+      "subject": "fix(gateway): unify MEDIA: extraction extension set + close the unknown-ext black hole (#34517) (#34844)",
+      "target_ticket": 23,
+      "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "classification_rule": "prior_state",
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/security_advisories.py",
+        "hermes_cli/tools_config.py",
+        "hermes_cli/web_server.py",
+        "pyproject.toml",
+        "tests/test_project_metadata.py",
+        "tests/tools/test_transcription_dotenv_fallback.py",
+        "tests/tools/test_transcription_tools.py",
+        "tests/tools/test_tts_mistral.py",
+        "tools/lazy_deps.py",
+        "tools/transcription_tools.py",
+        "tools/tts_tool.py",
+        "uv.lock"
+      ],
+      "files_touched": 12,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "3a2c03061ce912ff7421286c8197f844b63bbefb",
+      "subject": "fix(stt,tts): restore mistralai \u2014 2.4.8 is clean, ban lifted (#34841)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "classification_rule": "prior_state",
+      "disposition": "superseded",
+      "files_sample": [
+        "cli.py",
+        "tests/cli/test_cli_resume_command.py"
+      ],
+      "files_touched": 2,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "edfdc776649cd50637d8aa3a35b584c4458416ef",
+      "subject": "fix(cli): resume the selected chat when a bare number follows /resume",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "classification_rule": "prior_state",
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/test_tui_gateway_server.py"
+      ],
+      "files_touched": 1,
+      "notes": "rust-only parity guard: upstream Python test-only commit not ported",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": true,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": true
+      },
+      "sha": "4fd8521e44e920fbf545b408ea8727423436cad4",
+      "subject": "test(tui-gateway): isolate completion_queue in poller requeue test",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "classification_rule": "prior_state",
+      "disposition": "superseded",
+      "files_sample": [
+        "tools/mcp_tool.py"
+      ],
+      "files_touched": 1,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "9f5afc7636246320dc3e8fd4f9d5aef50fbadcfb",
+      "subject": "fix(mcp): widen isinstance check to BaseException for CancelledError",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "classification_rule": "prior_state",
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "bb5082571671739afe336c1e7998ceeb55df3627",
+      "subject": "chore(release): map annguyenNous to AUTHOR_MAP",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "classification_rule": "prior_state",
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/banner.py",
+        "tests/hermes_cli/test_pip_install_detection.py",
+        "tests/hermes_cli/test_update_check.py"
+      ],
+      "files_touched": 3,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "689ef5e233980f5d5a32080e959f44c8991dd03a",
+      "subject": "feat(cli): warn on unsupported pip installs + fix stale update-check cache (#34491) (#34846)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-05-29T20:05:34.683184+00:00",
+  "generated_at_utc": "2026-05-29T20:37:52.077525+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -93785,20 +94090,20 @@
   "summary": {
     "by_disposition": {
       "mirrored": 75,
-      "ported": 19,
-      "superseded": 4175
+      "ported": 21,
+      "superseded": 4187
     },
     "by_target_ticket": {
-      "20": 1782,
+      "20": 1790,
       "21": 109,
       "22": 716,
-      "23": 331,
+      "23": 333,
       "24": 18,
       "25": 89,
-      "26": 1224
+      "26": 1228
     },
     "overrides_path": "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/parity/queue-overrides.json",
     "patch_equivalent_count": 2,
-    "total_commits": 4269
+    "total_commits": 4283
   }
 }

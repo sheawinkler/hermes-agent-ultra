@@ -18,8 +18,12 @@ use std::time::Duration;
 
 use reqwest::Method;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 use crate::memory_manager::MemoryProviderPlugin;
+
+const HOST: &str = "hermes";
+const PEER_ID_HASH_ESCALATION_LENGTHS: &[usize] = &[8, 12, 16, 24, 32, 64];
 
 // ---------------------------------------------------------------------------
 // Tool schemas
@@ -94,6 +98,9 @@ struct HonchoConfig {
     workspace_id: String,
     peer_name: Option<String>,
     ai_peer: String,
+    pin_user_peer: bool,
+    user_peer_aliases: HashMap<String, String>,
+    runtime_peer_prefix: String,
     timeout_secs: f64,
     endpoints: HashMap<String, String>,
 }
@@ -132,6 +139,9 @@ impl HonchoConfig {
             workspace_id: "hermes".to_string(),
             peer_name: None,
             ai_peer: "hermes".to_string(),
+            pin_user_peer: false,
+            user_peer_aliases: HashMap::new(),
+            runtime_peer_prefix: String::new(),
             timeout_secs,
             endpoints,
         }
@@ -139,63 +149,15 @@ impl HonchoConfig {
 
     fn from_config_file(hermes_home: &str) -> Self {
         let mut config = Self::from_env();
+        let host = active_host();
+        config.workspace_id = host.clone();
+        config.ai_peer = host.clone();
         let config_path = std::path::Path::new(hermes_home).join("honcho.json");
         if let Ok(content) = std::fs::read_to_string(&config_path) {
             if let Ok(raw) = serde_json::from_str::<Value>(&content) {
-                if let Some(key) = raw.get("apiKey").and_then(|v| v.as_str()) {
-                    if !key.is_empty() {
-                        config.api_key = key.to_string();
-                    }
-                }
-                if let Some(url) = raw
-                    .get("baseUrl")
-                    .or_else(|| raw.get("base_url"))
-                    .and_then(|v| v.as_str())
-                {
-                    if !url.is_empty() {
-                        config.base_url = url.to_string();
-                    }
-                }
-                if let Some(mode) = raw.get("recallMode").and_then(|v| v.as_str()) {
-                    config.recall_mode = match mode {
-                        "context" | "tools" | "hybrid" => mode.to_string(),
-                        "auto" => "hybrid".to_string(),
-                        _ => "hybrid".to_string(),
-                    };
-                }
-                if let Some(tokens) = raw.get("contextTokens").and_then(|v| v.as_u64()) {
-                    config.context_tokens = Some(tokens.clamp(32, 4000) as usize);
-                }
-                if let Some(ws) = raw.get("workspace").and_then(|v| v.as_str()) {
-                    config.workspace_id = ws.to_string();
-                }
-                if let Some(peer) = raw.get("peerName").and_then(|v| v.as_str()) {
-                    config.peer_name = Some(peer.to_string());
-                }
-                if let Some(ai) = raw.get("aiPeer").and_then(|v| v.as_str()) {
-                    config.ai_peer = ai.to_string();
-                }
-                if let Some(timeout) = raw
-                    .get("timeout")
-                    .or_else(|| raw.get("requestTimeout"))
-                    .and_then(|v| v.as_f64())
-                {
-                    config.timeout_secs = timeout.clamp(1.0, 60.0);
-                }
-                if let Some(enabled) = raw.get("enabled").and_then(|v| v.as_bool()) {
-                    config.enabled = enabled;
-                } else {
-                    config.enabled =
-                        !config.api_key.is_empty() || !config.base_url.trim().is_empty();
-                }
-                if let Some(map) = raw.get("endpoints").and_then(|v| v.as_object()) {
-                    for (k, v) in map {
-                        if let Some(path) = v.as_str() {
-                            if !path.trim().is_empty() {
-                                config.endpoints.insert(k.to_string(), path.to_string());
-                            }
-                        }
-                    }
+                Self::apply_config_value(&mut config, &raw);
+                if let Some(host_block) = raw.get("hosts").and_then(|v| v.get(&host)) {
+                    Self::apply_config_value(&mut config, host_block);
                 }
             }
         }
@@ -208,6 +170,104 @@ impl HonchoConfig {
             .get(key)
             .cloned()
             .unwrap_or_else(|| default.to_string())
+    }
+
+    fn apply_config_value(config: &mut Self, raw: &Value) {
+        if let Some(key) = raw.get("apiKey").and_then(|v| v.as_str()) {
+            if !key.is_empty() {
+                config.api_key = key.to_string();
+            }
+        }
+        if let Some(url) = raw
+            .get("baseUrl")
+            .or_else(|| raw.get("base_url"))
+            .and_then(|v| v.as_str())
+        {
+            if !url.is_empty() {
+                config.base_url = url.to_string();
+            }
+        }
+        if let Some(mode) = raw.get("recallMode").and_then(|v| v.as_str()) {
+            config.recall_mode = match mode {
+                "context" | "tools" | "hybrid" => mode.to_string(),
+                "auto" => "hybrid".to_string(),
+                _ => "hybrid".to_string(),
+            };
+        }
+        if let Some(tokens) = raw.get("contextTokens").and_then(|v| v.as_u64()) {
+            config.context_tokens = Some(tokens.clamp(32, 4000) as usize);
+        }
+        if let Some(ws) = raw.get("workspace").and_then(|v| v.as_str()) {
+            config.workspace_id = ws.to_string();
+        }
+        if let Some(peer) = raw.get("peerName").and_then(|v| v.as_str()) {
+            config.peer_name = Some(peer.to_string());
+        }
+        if let Some(ai) = raw.get("aiPeer").and_then(|v| v.as_str()) {
+            config.ai_peer = ai.to_string();
+        }
+        if let Some(pin) = raw
+            .get("pinUserPeer")
+            .or_else(|| raw.get("pinPeerName"))
+            .and_then(|v| v.as_bool())
+        {
+            config.pin_user_peer = pin;
+        }
+        if let Some(map) = raw.get("userPeerAliases").and_then(|v| v.as_object()) {
+            config.user_peer_aliases = map
+                .iter()
+                .filter_map(|(key, value)| {
+                    let alias = value.as_str()?.trim();
+                    if key.trim().is_empty() || alias.is_empty() {
+                        None
+                    } else {
+                        Some((key.trim().to_string(), alias.to_string()))
+                    }
+                })
+                .collect();
+        }
+        if let Some(prefix) = raw.get("runtimePeerPrefix").and_then(|v| v.as_str()) {
+            config.runtime_peer_prefix = prefix.trim().to_string();
+        }
+        if let Some(timeout) = raw
+            .get("timeout")
+            .or_else(|| raw.get("requestTimeout"))
+            .and_then(|v| v.as_f64())
+        {
+            config.timeout_secs = timeout.clamp(1.0, 60.0);
+        }
+        if let Some(enabled) = raw.get("enabled").and_then(|v| v.as_bool()) {
+            config.enabled = enabled;
+        } else {
+            config.enabled = !config.api_key.is_empty() || !config.base_url.trim().is_empty();
+        }
+        if let Some(map) = raw.get("endpoints").and_then(|v| v.as_object()) {
+            for (key, value) in map {
+                if let Some(path) = value.as_str() {
+                    if !path.trim().is_empty() {
+                        config.endpoints.insert(key.to_string(), path.to_string());
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn active_host() -> String {
+    if let Ok(explicit) = std::env::var("HERMES_HONCHO_HOST") {
+        let explicit = explicit.trim();
+        if !explicit.is_empty() {
+            return explicit.to_string();
+        }
+    }
+    let profile = std::env::var("HERMES_PROFILE").unwrap_or_default();
+    let profile = profile.trim();
+    if profile.is_empty() || matches!(profile, "default" | "custom") {
+        HOST.to_string()
+    } else if profile == HOST || profile.starts_with("hermes.") {
+        profile.to_string()
+    } else {
+        format!("{HOST}.{profile}")
     }
 }
 
@@ -260,12 +320,56 @@ impl HonchoMemoryPlugin {
     fn extract_peer(config: &HonchoConfig, args: &Value) -> String {
         match args.get("peer").and_then(|v| v.as_str()).unwrap_or("user") {
             "ai" => config.ai_peer.clone(),
-            "user" => config
-                .peer_name
-                .clone()
-                .unwrap_or_else(|| "user".to_string()),
-            other => other.to_string(),
+            "user" => {
+                let runtime_ids = runtime_user_ids_from_args(args)
+                    .into_iter()
+                    .chain(runtime_user_ids_from_env())
+                    .collect::<Vec<_>>();
+                Self::resolve_user_peer_id(config, "", &runtime_ids)
+            }
+            other => sanitize_id(other),
         }
+    }
+
+    fn resolve_user_peer_id(
+        config: &HonchoConfig,
+        session_key: &str,
+        runtime_ids: &[String],
+    ) -> String {
+        if config.pin_user_peer {
+            if let Some(peer) = config.peer_name.as_deref() {
+                if !peer.trim().is_empty() {
+                    return sanitize_id(peer.trim());
+                }
+            }
+        }
+
+        for runtime_id in unique_nonempty(runtime_ids) {
+            if let Some(alias) = config.user_peer_aliases.get(&runtime_id) {
+                if !alias.trim().is_empty() {
+                    return sanitize_id(alias.trim());
+                }
+            }
+        }
+
+        if let Some(primary_runtime_id) = unique_nonempty(runtime_ids).into_iter().next() {
+            if !config.runtime_peer_prefix.is_empty() {
+                return generated_runtime_peer_id(
+                    config,
+                    &config.runtime_peer_prefix,
+                    &primary_runtime_id,
+                );
+            }
+            return sanitize_id(&primary_runtime_id);
+        }
+
+        if let Some(peer) = config.peer_name.as_deref() {
+            if !peer.trim().is_empty() {
+                return sanitize_id(peer.trim());
+            }
+        }
+
+        session_key_fallback_peer_id(session_key)
     }
 
     fn client(config: &HonchoConfig) -> Result<reqwest::blocking::Client, String> {
@@ -455,8 +559,9 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
         let out = Arc::clone(&self.prefetch_result);
         let query = trimmed.to_string();
         let max_tokens = config.context_tokens.unwrap_or(800).min(2000).max(64);
+        let peer = Self::resolve_user_peer_id(&config, &session_id, &runtime_user_ids_from_env());
         std::thread::spawn(move || {
-            match Self::context_query(&config, &session_id, &query, max_tokens, "user") {
+            match Self::context_query(&config, &session_id, &query, max_tokens, &peer) {
                 Ok(v) => {
                     if let Some(text) = Self::extract_text_result(&v) {
                         if !text.trim().is_empty() {
@@ -693,11 +798,12 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
             Err(_) => return,
         };
         let session_id = self.session_key.lock().unwrap().clone();
+        let peer = Self::resolve_user_peer_id(&config, &session_id, &runtime_user_ids_from_env());
         let template = config.endpoint("conclude", "/v1/conclusions");
         let body = json!({
             "workspace_id": config.workspace_id,
             "session_id": session_id,
-            "peer": "user",
+            "peer": peer,
             "conclusion": content.trim(),
             "source": "memory_write_hook"
         });
@@ -717,6 +823,9 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
             {"key": "api_key", "description": "Honcho API key", "secret": true, "env_var": "HONCHO_API_KEY", "url": "https://app.honcho.dev"},
             {"key": "baseUrl", "description": "Honcho base URL (for self-hosted)"},
             {"key": "timeout", "description": "HTTP timeout seconds", "default": 12},
+            {"key": "pinUserPeer", "description": "Pin gateway runtime users to peerName", "default": false},
+            {"key": "userPeerAliases", "description": "Runtime user ID to Honcho peer ID map"},
+            {"key": "runtimePeerPrefix", "description": "Prefix for unknown gateway runtime user peers", "default": ""},
             {"key": "endpoints", "description": "Optional endpoint path overrides"}
         ]))
     }
@@ -727,6 +836,99 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
         }
         Ok(())
     }
+}
+
+fn sanitize_id(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
+                ch
+            } else {
+                '-'
+            }
+        })
+        .collect()
+}
+
+fn unique_nonempty(values: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for value in values {
+        let candidate = value.trim();
+        if !candidate.is_empty() && !out.iter().any(|existing| existing == candidate) {
+            out.push(candidate.to_string());
+        }
+    }
+    out
+}
+
+fn runtime_user_ids_from_args(args: &Value) -> Vec<String> {
+    [
+        "runtime_user_id",
+        "runtimeUserId",
+        "runtime_id",
+        "runtimeId",
+        "user_id",
+        "userId",
+        "runtime_user_id_alt",
+        "runtimeUserIdAlt",
+        "username",
+    ]
+    .into_iter()
+    .filter_map(|key| args.get(key).and_then(Value::as_str))
+    .map(ToString::to_string)
+    .collect()
+}
+
+fn runtime_user_ids_from_env() -> Vec<String> {
+    [
+        "HERMES_RUNTIME_USER_ID",
+        "HERMES_GATEWAY_USER_ID",
+        "HERMES_SESSION_USER_ID",
+        "HERMES_USER_ID",
+        "HERMES_USER",
+    ]
+    .into_iter()
+    .filter_map(|key| std::env::var(key).ok())
+    .collect()
+}
+
+fn session_key_fallback_peer_id(key: &str) -> String {
+    let (channel, chat_id) = key.split_once(':').unwrap_or(("default", key));
+    sanitize_id(&format!("user-{channel}-{chat_id}"))
+}
+
+fn explicit_user_peer_ids(config: &HonchoConfig) -> Vec<String> {
+    let mut explicit = Vec::new();
+    if let Some(peer) = config.peer_name.as_deref() {
+        if !peer.trim().is_empty() {
+            explicit.push(sanitize_id(peer.trim()));
+        }
+    }
+    for alias in config.user_peer_aliases.values() {
+        if !alias.trim().is_empty() {
+            explicit.push(sanitize_id(alias.trim()));
+        }
+    }
+    unique_nonempty(&explicit)
+}
+
+fn generated_runtime_peer_id(config: &HonchoConfig, prefix: &str, runtime_id: &str) -> String {
+    let raw_peer_id = format!("{prefix}{runtime_id}");
+    let sanitized_peer_id = sanitize_id(&raw_peer_id);
+    let explicit_ids = explicit_user_peer_ids(config);
+    if sanitized_peer_id != raw_peer_id || explicit_ids.contains(&sanitized_peer_id) {
+        let digest = Sha256::digest(raw_peer_id.as_bytes());
+        let hex = format!("{digest:x}");
+        for len in PEER_ID_HASH_ESCALATION_LENGTHS {
+            let candidate = format!("{sanitized_peer_id}-{}", &hex[..*len]);
+            if !explicit_ids.contains(&candidate) {
+                return candidate;
+            }
+        }
+        return format!("{sanitized_peer_id}-{hex}");
+    }
+    sanitized_peer_id
 }
 
 #[cfg(test)]
@@ -781,5 +983,122 @@ mod tests {
         let path =
             HonchoMemoryPlugin::apply_template("/v1/sessions/{session}/peers/{peer}", "user", "s1");
         assert_eq!(path, "/v1/sessions/s1/peers/user");
+    }
+
+    fn test_config() -> HonchoConfig {
+        HonchoConfig {
+            api_key: String::new(),
+            base_url: "https://api.honcho.dev".to_string(),
+            enabled: true,
+            recall_mode: "hybrid".to_string(),
+            context_tokens: Some(800),
+            workspace_id: "hermes".to_string(),
+            peer_name: Some("eri".to_string()),
+            ai_peer: "hermes".to_string(),
+            pin_user_peer: false,
+            user_peer_aliases: HashMap::new(),
+            runtime_peer_prefix: String::new(),
+            timeout_secs: 12.0,
+            endpoints: HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_honcho_pin_user_peer_wins_over_runtime_identity() {
+        let mut config = test_config();
+        config.pin_user_peer = true;
+        assert_eq!(
+            HonchoMemoryPlugin::resolve_user_peer_id(
+                &config,
+                "telegram:chat-1",
+                &["86701400".to_string()],
+            ),
+            "eri"
+        );
+    }
+
+    #[test]
+    fn test_honcho_runtime_aliases_check_primary_and_alt_ids() {
+        let mut config = test_config();
+        config
+            .user_peer_aliases
+            .insert("@eri".to_string(), "eri/main".to_string());
+        assert_eq!(
+            HonchoMemoryPlugin::resolve_user_peer_id(
+                &config,
+                "telegram:chat-1",
+                &["86701400".to_string(), "@eri".to_string()],
+            ),
+            "eri-main"
+        );
+    }
+
+    #[test]
+    fn test_honcho_runtime_prefix_hashes_colliding_explicit_peer() {
+        let mut config = test_config();
+        config.peer_name = Some("telegram_86701400".to_string());
+        config.runtime_peer_prefix = "telegram_".to_string();
+        let peer = HonchoMemoryPlugin::resolve_user_peer_id(
+            &config,
+            "telegram:chat-1",
+            &["86701400".to_string()],
+        );
+        assert!(peer.starts_with("telegram_86701400-"));
+        assert!(peer.len() > "telegram_86701400-".len());
+    }
+
+    #[test]
+    fn test_honcho_user_peer_falls_back_to_sanitized_session_key() {
+        let mut config = test_config();
+        config.peer_name = None;
+        assert_eq!(
+            HonchoMemoryPlugin::resolve_user_peer_id(&config, "telegram:chat/1", &[]),
+            "user-telegram-chat-1"
+        );
+    }
+
+    #[test]
+    fn test_honcho_extract_peer_uses_runtime_mapping_and_sanitizes_explicit_peer() {
+        let mut config = test_config();
+        config
+            .user_peer_aliases
+            .insert("42".to_string(), "eri".to_string());
+        assert_eq!(
+            HonchoMemoryPlugin::extract_peer(&config, &json!({"runtime_user_id": "42"})),
+            "eri"
+        );
+        assert_eq!(
+            HonchoMemoryPlugin::extract_peer(&config, &json!({"peer": "team/user"})),
+            "team-user"
+        );
+        assert_eq!(
+            HonchoMemoryPlugin::extract_peer(&config, &json!({"peer": "ai"})),
+            "hermes"
+        );
+    }
+
+    #[test]
+    fn test_honcho_identity_mapping_config_replaces_root_map_at_host_level() {
+        let mut config = test_config();
+        let root = json!({
+            "pinUserPeer": true,
+            "userPeerAliases": {"root-id": "root-peer"},
+            "runtimePeerPrefix": "root_"
+        });
+        let host = json!({
+            "pinPeerName": false,
+            "userPeerAliases": {"host-id": "host-peer"},
+            "runtimePeerPrefix": ""
+        });
+        HonchoConfig::apply_config_value(&mut config, &root);
+        HonchoConfig::apply_config_value(&mut config, &host);
+
+        assert!(!config.pin_user_peer);
+        assert_eq!(config.user_peer_aliases.len(), 1);
+        assert_eq!(
+            config.user_peer_aliases.get("host-id").map(String::as_str),
+            Some("host-peer")
+        );
+        assert_eq!(config.runtime_peer_prefix, "");
     }
 }

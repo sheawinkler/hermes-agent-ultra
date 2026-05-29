@@ -325,6 +325,13 @@
       "ticket": 304
     },
     {
+      "path": "plugins/memory/honcho/session.py",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra supersedes the upstream Python Honcho gateway identity resolver with the Rust Honcho memory provider resolver in crates/hermes-agent/src/memory_plugins/honcho.rs, including pinUserPeer, userPeerAliases, runtimePeerPrefix, and hash-escalated collision handling.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "plugins/memory/supermemory/__init__.py",
       "classification": "policy_only",
       "rationale": "The shared diff is behavior-equivalent tuple membership for boolean parsing, context guards, and session-role filtering.",
@@ -508,8 +515,8 @@
     },
     {
       "path": "plugins/platforms/ntfy/adapter.py",
-      "classification": "policy_only",
-      "rationale": "The shared diff is documentation punctuation and the local ASCII platform emoji label; ntfy runtime behavior and auth/header contracts are unchanged.",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra supersedes the upstream Python ntfy adapter with the Rust-native gateway adapter in crates/hermes-gateway/src/platforms/ntfy.rs, including X-Tags echo-loop prevention, auth/header handling, inbound event filtering, env enablement, and cron delivery target parsing.",
       "owner": "sheawinkler",
       "ticket": 304
     },

@@ -262,6 +262,7 @@ pub fn load_from_yaml(path: &Path) -> Result<GatewayConfig, ConfigError> {
         crate::python_yaml_compat::normalize_config_yaml_root(m);
     }
     mark_platform_enabled_explicit(&mut root, "slack");
+    mark_platform_enabled_explicit(&mut root, "ntfy");
     let config: GatewayConfig = serde_yaml::from_value(root).map_err(yaml_to_config_error)?;
     Ok(config)
 }

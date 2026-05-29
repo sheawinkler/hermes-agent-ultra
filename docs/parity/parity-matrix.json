@@ -1,25 +1,25 @@
 {
-  "generated_at_utc": "2026-05-29T20:05:30.461016+00:00",
+  "generated_at_utc": "2026-05-29T20:36:13.168736+00:00",
   "refs": {
     "local_ref": "HEAD",
-    "local_sha": "f519f22525748870912b4cbde064db52e2368b09",
+    "local_sha": "e233c98cca45e8481853be3f8d0bfa881253e1a4",
     "upstream_ref": "upstream/main",
-    "upstream_sha": "38c4f8c3717518e81bc64765ab80f3192f6a113a",
+    "upstream_sha": "689ef5e233980f5d5a32080e959f44c8991dd03a",
     "merge_base": null
   },
   "summary": {
-    "commits_behind": 4385,
-    "commits_ahead": 776,
-    "upstream_patch_missing": 4267,
+    "commits_behind": 4399,
+    "commits_ahead": 777,
+    "upstream_patch_missing": 4281,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 671,
+    "local_patch_unique": 672,
     "files_only_upstream": 1470,
-    "files_only_local": 560,
-    "files_shared_identical": 1703,
-    "files_shared_different": 1016,
-    "tree_files_changed": 3046,
-    "tree_insertions": 738620,
-    "tree_deletions": 370857
+    "files_only_local": 561,
+    "files_shared_identical": 1702,
+    "files_shared_different": 1017,
+    "tree_files_changed": 3048,
+    "tree_insertions": 739593,
+    "tree_deletions": 372007
   },
   "top_upstream_only": [
     {
@@ -186,15 +186,15 @@
   "top_shared_different": [
     {
       "path": "tests/gateway",
-      "count": 171
-    },
-    {
-      "path": "tests/tools",
-      "count": 138
+      "count": 172
     },
     {
       "path": "website/docs",
       "count": 138
+    },
+    {
+      "path": "tests/tools",
+      "count": 137
     },
     {
       "path": "tests/hermes_cli",
@@ -222,7 +222,7 @@
     },
     {
       "path": "tests/plugins",
-      "count": 15
+      "count": 16
     },
     {
       "path": "skills/creative",
@@ -241,12 +241,12 @@
       "count": 9
     },
     {
-      "path": "plugins/memory",
+      "path": "tests/acp",
       "count": 8
     },
     {
-      "path": "tests/acp",
-      "count": 8
+      "path": "plugins/memory",
+      "count": 7
     },
     {
       "path": "skills/productivity",
@@ -317,6 +317,10 @@
       "count": 2
     },
     {
+      "path": "plugins/disk-cleanup",
+      "count": 2
+    },
+    {
       "path": "plugins/example-dashboard",
       "count": 2
     },
@@ -339,10 +343,6 @@
     {
       "path": "tests/e2e",
       "count": 2
-    },
-    {
-      "path": ".gitattributes",
-      "count": 1
     }
   ],
   "top_local_only": [
@@ -356,7 +356,7 @@
     },
     {
       "path": "crates/hermes-gateway",
-      "count": 45
+      "count": 46
     },
     {
       "path": "crates/hermes-cli",
@@ -680,7 +680,7 @@
     },
     {
       "path": "crates/hermes-gateway",
-      "count": 45
+      "count": 46
     },
     {
       "path": "crates/hermes-cli",
@@ -837,7 +837,7 @@
       "issue": 10,
       "name": "Tests and CI parity",
       "upstream_only": 317,
-      "shared_different": 681,
+      "shared_different": 682,
       "local_only": 34,
       "risk": "high",
       "effort": "XL"
@@ -888,7 +888,7 @@
       "name": "Core runtime parity",
       "upstream_only": 62,
       "shared_different": 0,
-      "local_only": 144,
+      "local_only": 145,
       "risk": "critical",
       "effort": "M"
     },
@@ -904,9 +904,9 @@
     }
   ],
   "commit_mapping": {
-    "upstream_patch_missing": 4267,
+    "upstream_patch_missing": 4281,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 671,
+    "local_patch_unique": 672,
     "local_patch_equivalent_to_upstream": 1,
     "upstream_patch_missing_sample": [
       "99af222ecf56c0eed0d3eb82903a6bf33b6ff7d5",
@@ -960,7 +960,7 @@
       "6b69de4772eac5f982c097553dc6bcfeb60350e6"
     ],
     "intentional_divergence_items": 8,
-    "intentional_divergence_covered_files": 898
+    "intentional_divergence_covered_files": 900
   },
   "intentional_divergence": [
     {
@@ -1034,11 +1034,13 @@
       "status": "approved",
       "workstream": "WS3",
       "summary": "Keep platform adapter parity in the Rust gateway instead of vendoring upstream Python platform-plugin trees.",
-      "matched_files": 3,
+      "matched_files": 5,
       "matched_sample": [
         "plugins/platforms/mattermost/__init__.py",
         "plugins/platforms/mattermost/adapter.py",
-        "plugins/platforms/mattermost/plugin.yaml"
+        "plugins/platforms/mattermost/plugin.yaml",
+        "plugins/platforms/ntfy/adapter.py",
+        "plugins/platforms/ntfy/plugin.yaml"
       ]
     },
     {

@@ -73,6 +73,7 @@ use hermes_gateway::platforms::feishu::{FeishuAdapter, FeishuConfig};
 use hermes_gateway::platforms::homeassistant::{HomeAssistantAdapter, HomeAssistantConfig};
 use hermes_gateway::platforms::matrix::{MatrixAdapter, MatrixConfig};
 use hermes_gateway::platforms::mattermost::{MattermostAdapter, MattermostConfig};
+use hermes_gateway::platforms::ntfy::{NtfyAdapter, NtfyConfig};
 use hermes_gateway::platforms::qqbot::{QqBotAdapter, QqBotConfig};
 use hermes_gateway::platforms::signal::{SignalAdapter, SignalConfig};
 use hermes_gateway::platforms::slack::{SlackAdapter, SlackConfig};
@@ -3587,6 +3588,18 @@ async fn configure_platform_basic_prompts(
             let webhook_id = prompt_line("HomeAssistant webhook_id (optional): ").await?;
             set_extra_string_if_nonempty(p, "webhook_id", &webhook_id);
         }
+        "ntfy" => {
+            let topic = prompt_line("ntfy subscribe topic: ").await?;
+            set_extra_string_if_nonempty(p, "topic", &topic);
+            let server = prompt_line("ntfy server URL (default https://ntfy.sh): ").await?;
+            set_extra_string_if_nonempty(p, "server", &server);
+            let publish_topic = prompt_line("ntfy publish topic (optional): ").await?;
+            set_extra_string_if_nonempty(p, "publish_topic", &publish_topic);
+            let token = prompt_line("ntfy auth token (optional): ").await?;
+            if !token.trim().is_empty() {
+                p.token = Some(token.trim().to_string());
+            }
+        }
         "webhook" => {
             let secret = prompt_line("Webhook secret: ").await?;
             set_extra_string_if_nonempty(p, "secret", &secret);
@@ -3639,6 +3652,7 @@ async fn run_gateway_setup(cli: &Cli) -> Result<(), AgentError> {
         ("email", "Email"),
         ("sms", "SMS"),
         ("homeassistant", "HomeAssistant"),
+        ("ntfy", "ntfy"),
         ("webhook", "Webhook"),
         ("api_server", "API Server"),
     ];
@@ -4127,6 +4141,12 @@ fn gateway_requirement_issues(config: &hermes_config::GatewayConfig) -> Vec<Stri
     if let Some(p) = config.platforms.get("slack") {
         if check(p.enabled, platform_token_or_extra(p).is_some()) {
             issues.push("slack.enabled=true 但缺少 token".to_string());
+        }
+    }
+    if let Some(p) = config.platforms.get("ntfy") {
+        let topic = extra_string(p, "topic").is_some() || std::env::var("NTFY_TOPIC").is_ok();
+        if check(p.enabled, topic) {
+            issues.push("ntfy.enabled=true but topic is missing".to_string());
         }
     }
     if let Some(p) = config
@@ -4727,6 +4747,25 @@ async fn register_gateway_adapters(
         }
     }
 
+    if let Some(platform_cfg) = config.platforms.get("ntfy") {
+        if platform_cfg.enabled {
+            let ntfy_cfg = NtfyConfig::from_platform_config(platform_cfg);
+            match NtfyAdapter::new(ntfy_cfg) {
+                Ok(adapter) => {
+                    let adapter = Arc::new(adapter);
+                    let (tx, rx) = mpsc::channel::<GatewayIncomingMessage>(512);
+                    adapter.set_inbound_sender(tx).await;
+                    gateway.register_adapter("ntfy", adapter).await;
+                    let gw_clone = gateway.clone();
+                    sidecar_tasks.push(tokio::spawn(async move {
+                        run_gateway_incoming_loop(gw_clone, rx, "ntfy").await;
+                    }));
+                }
+                Err(e) => println!("ntfy enabled but failed to initialize: {}", e),
+            }
+        }
+    }
+
     if let Some(platform_cfg) = config.platforms.get("webhook") {
         if platform_cfg.enabled {
             let secret = platform_token_or_extra(platform_cfg)
@@ -4913,6 +4952,7 @@ fn gateway_platform_provider_key(provider: &str) -> Option<&'static str> {
         "email" => Some("email"),
         "sms" => Some("sms"),
         "homeassistant" => Some("homeassistant"),
+        "ntfy" => Some("ntfy"),
         "webhook" => Some("webhook"),
         "api_server" => Some("api_server"),
         _ => None,
@@ -8075,6 +8115,7 @@ fn parse_deliver_config(raw: &str) -> Option<hermes_cron::DeliverConfig> {
         "bluebubbles" | "imessage" => hermes_cron::DeliverTarget::BlueBubbles,
         "sms" => hermes_cron::DeliverTarget::Sms,
         "homeassistant" | "ha" => hermes_cron::DeliverTarget::HomeAssistant,
+        "ntfy" => hermes_cron::DeliverTarget::Ntfy,
         _ => return None,
     };
     Some(hermes_cron::DeliverConfig {

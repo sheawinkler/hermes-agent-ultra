@@ -391,7 +391,8 @@ impl CronRunner {
             | DeliverTarget::Weixin
             | DeliverTarget::BlueBubbles
             | DeliverTarget::Sms
-            | DeliverTarget::HomeAssistant => {
+            | DeliverTarget::HomeAssistant
+            | DeliverTarget::Ntfy => {
                 // Platform delivery requires a platform adapter, which is not
                 // directly available in the runner. This would be wired up
                 // through the gateway crate. For now, log the intended delivery.
@@ -435,7 +436,8 @@ impl CronRunner {
             | DeliverTarget::Weixin
             | DeliverTarget::BlueBubbles
             | DeliverTarget::Sms
-            | DeliverTarget::HomeAssistant => {
+            | DeliverTarget::HomeAssistant
+            | DeliverTarget::Ntfy => {
                 tracing::warn!(
                     "Cron job error delivery to {:?} (platform: {:?}):\n{}",
                     deliver.target,
