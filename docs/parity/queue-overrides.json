@@ -549,8 +549,8 @@
       "notes": "Rust ntfy gateway tests cover echo-tag outbound headers, inbound echo filtering, genuine tagged messages, and env-driven platform enablement; Python release AUTHOR_MAP updates are not part of the Rust release pipeline."
     },
     "d473e7c9385e": {
-      "disposition": "superseded",
-      "notes": "Upstream Python disk-cleanup auto-tracking is outside the Rust-only runtime path; Rust cron jobs.json is owned by hermes-cron FileJobPersistence and covered by the hermes-cron persistence tests, not by a Python cleanup hook."
+      "disposition": "ported",
+      "notes": "Rust disk-cleanup auto categorization only marks cron/cronjobs output subtrees as cron-output and explicitly leaves cron/jobs.json plus .tick.lock as control-plane state; covered by hermes-tools disk_cleanup tests."
     },
     "7de8cd4c5f67": {
       "disposition": "ported",

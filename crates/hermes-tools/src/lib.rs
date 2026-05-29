@@ -55,6 +55,7 @@ pub use tools::credential_files::CredentialFilesHandler;
 pub use tools::cronjob::{CronjobBackend, CronjobHandler};
 pub use tools::dashboard_control::DashboardControlHandler;
 pub use tools::delegation::{DelegateTaskHandler, DelegationBackend};
+pub use tools::disk_cleanup::{DiskCleanup, DiskCleanupAutoTracker, DiskCleanupHandler};
 pub use tools::env_passthrough::EnvPassthroughHandler;
 pub use tools::file::{
     PatchBackend, PatchHandler, ReadFileHandler, SearchBackend, SearchFilesHandler,

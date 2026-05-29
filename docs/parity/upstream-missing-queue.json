@@ -93861,13 +93861,13 @@
     },
     {
       "classification_rule": "sha_override",
-      "disposition": "superseded",
+      "disposition": "ported",
       "files_sample": [
         "plugins/disk-cleanup/disk_cleanup.py",
         "tests/plugins/test_disk_cleanup_plugin.py"
       ],
       "files_touched": 2,
-      "notes": "Upstream Python disk-cleanup auto-tracking is outside the Rust-only runtime path; Rust cron jobs.json is owned by hermes-cron FileJobPersistence and covered by the hermes-cron persistence tests, not by a Python cleanup hook.",
+      "notes": "Rust disk-cleanup auto categorization only marks cron/cronjobs output subtrees as cron-output and explicitly leaves cron/jobs.json plus .tick.lock as control-plane state; covered by hermes-tools disk_cleanup tests.",
       "owner": "",
       "rust_only_guard": {
         "allow_python_test_surfaces": false,
@@ -94081,17 +94081,17 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-05-29T20:37:52.077525+00:00",
+  "generated_at_utc": "2026-05-29T21:09:59.821243+00:00",
   "refs": {
-    "local_ref": "main",
-    "range": "main..upstream/main",
+    "local_ref": "HEAD",
+    "range": "HEAD..upstream/main",
     "upstream_ref": "upstream/main"
   },
   "summary": {
     "by_disposition": {
       "mirrored": 75,
-      "ported": 21,
-      "superseded": 4187
+      "ported": 22,
+      "superseded": 4186
     },
     "by_target_ticket": {
       "20": 1790,

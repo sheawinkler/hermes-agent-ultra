@@ -242,8 +242,8 @@
     },
     {
       "path": "plugins/disk-cleanup",
-      "classification": "functional",
-      "rationale": "Disk cleanup plugin differences affect user-facing maintenance tooling and need runtime parity review before clearance.",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra supersedes the upstream Python disk-cleanup plugin with Rust-native cleanup in crates/hermes-tools/src/tools/disk_cleanup.rs, including safe path scope, cron/output-only cleanup categorization, tracked.json persistence, quick/dry-run/status handling, registry post-tool auto-tracking, TUI session-end quick cleanup, and the /disk-cleanup command.",
       "owner": "sheawinkler",
       "ticket": 25
     },

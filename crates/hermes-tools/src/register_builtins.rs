@@ -556,6 +556,15 @@ pub fn register_builtin_tools(
         vec![],
     );
 
+    // -- Disk cleanup --------------------------------------------------------
+    reg(
+        registry,
+        "system",
+        Arc::new(crate::tools::disk_cleanup::DiskCleanupHandler::default()),
+        "🧹",
+        vec![],
+    );
+
     tracing::info!("Registered {} built-in tools", registry.list_tools().len());
 }
 

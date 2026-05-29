@@ -10,6 +10,7 @@ pub mod credential_files;
 pub mod cronjob;
 pub mod dashboard_control;
 pub mod delegation;
+pub mod disk_cleanup;
 pub mod env_passthrough;
 pub mod file;
 pub mod homeassistant;

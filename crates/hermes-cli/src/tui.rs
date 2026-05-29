@@ -5591,6 +5591,15 @@ pub async fn run(mut app: App) -> Result<(), AgentError> {
 
     app.interrupt_controller.interrupt(None);
     abort_and_join_task(&mut active_agent_task).await;
+    if let Some(summary) = app.tool_registry.disk_cleanup_session_end() {
+        tracing::debug!(
+            deleted = summary.deleted,
+            empty_dirs = summary.empty_dirs,
+            freed = summary.freed,
+            errors = summary.errors.len(),
+            "Rust disk-cleanup session-end quick pass completed"
+        );
+    }
     event_task.abort();
     signal_task.abort();
     let _ = event_task.await;

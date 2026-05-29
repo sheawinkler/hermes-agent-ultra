@@ -1,22 +1,22 @@
 # Shared-Different Backlog
 
-Generated: `2026-05-29T20:36:20.591466+00:00`
+Generated: `2026-05-29T21:09:58.846557+00:00`
 
 ## Summary
 
 - Total shared-different paths: `1017`
 - Pending classification: `0`
-- Pending functional review: `770`
+- Pending functional review: `769`
 - Cleared non-runtime: `169`
-- Cleared intentional divergence: `78`
+- Cleared intentional divergence: `79`
 
 ## Status Counts
 
 | Status | Count |
 | --- | ---: |
-| `cleared_intentional_divergence` | 78 |
+| `cleared_intentional_divergence` | 79 |
 | `cleared_non_runtime` | 169 |
-| `pending_review` | 770 |
+| `pending_review` | 769 |
 
 ## Workstream Counts
 
@@ -59,7 +59,6 @@ Generated: `2026-05-29T20:36:20.591466+00:00`
 | `ui-tui` | 3 |
 | `tests/e2e` | 2 |
 | `plugins/browser/browserbase/provider.py` | 1 |
-| `plugins/disk-cleanup` | 1 |
 | `plugins/model-providers` | 1 |
 | `plugins/spotify/tools.py` | 1 |
 | `plugins/teams_pipeline` | 1 |

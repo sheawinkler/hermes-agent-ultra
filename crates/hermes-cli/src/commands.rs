@@ -179,6 +179,10 @@ pub const SLASH_COMMANDS: &[(&str, &str)] = &[
     ),
     ("/toolsets", "Show configured toolsets by platform"),
     ("/plugins", "List plugin bundles and status"),
+    (
+        "/disk-cleanup",
+        "Rust-native ephemeral file cleanup (`status|dry-run|quick|deep|track|forget`)",
+    ),
     ("/mcp", "List configured MCP servers"),
     ("/reload", "Reload runtime env/config values"),
     ("/reload-skills", "Refresh installed skill index/registry"),
@@ -3461,6 +3465,7 @@ pub async fn handle_slash_command(
         "/toolsets" => handle_toolsets_command(app),
         "/bundles" => handle_bundles_command(app),
         "/plugins" => handle_plugins_command(app),
+        "/disk-cleanup" => handle_disk_cleanup_command(app, args),
         "/mcp" => handle_mcp_command(app),
         "/reload" | "/reload-mcp" => handle_reload_command(app, canonical_command(cmd)),
         "/cron" => handle_cron_command(app),
@@ -12482,6 +12487,13 @@ fn handle_plugins_command(app: &mut App) -> Result<CommandResult, AgentError> {
             ),
         );
     }
+    Ok(CommandResult::Handled)
+}
+
+fn handle_disk_cleanup_command(app: &mut App, args: &[&str]) -> Result<CommandResult, AgentError> {
+    let cleaner = hermes_tools::tools::disk_cleanup::DiskCleanup::new(app.state_root.clone());
+    let output = hermes_tools::tools::disk_cleanup::handle_slash_args(&cleaner, args);
+    emit_command_output(app, output);
     Ok(CommandResult::Handled)
 }
 
@@ -25280,6 +25292,15 @@ mod tests {
         assert!(SLASH_COMMANDS.iter().any(|(name, _)| *name == "/browser"));
         let results = autocomplete("/bro");
         assert!(results.contains(&"/browser"));
+    }
+
+    #[test]
+    fn test_disk_cleanup_command_is_registered_and_completable() {
+        assert!(SLASH_COMMANDS
+            .iter()
+            .any(|(name, _)| *name == "/disk-cleanup"));
+        let results = autocomplete("/disk");
+        assert!(results.contains(&"/disk-cleanup"));
     }
 
     #[test]

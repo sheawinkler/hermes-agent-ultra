@@ -19,6 +19,7 @@ use crate::tool_policy::{
     annotate_policy_audit, annotate_policy_simulation, default_tool_policy_counters_path,
     persist_tool_policy_counters, ToolPolicyCounters, ToolPolicyDecision, ToolPolicyEngine,
 };
+use crate::tools::disk_cleanup::{CleanupSummary, DiskCleanupAutoTracker};
 
 // ---------------------------------------------------------------------------
 // ToolEntry
@@ -74,6 +75,7 @@ pub struct ToolRegistryInner {
 #[derive(Clone)]
 pub struct ToolRegistry {
     inner: Arc<Mutex<ToolRegistryInner>>,
+    disk_cleanup_auto: DiskCleanupAutoTracker,
 }
 
 impl ToolRegistry {
@@ -89,6 +91,7 @@ impl ToolRegistry {
                 rtk_raw_mode: false,
                 rtk_raw_once: false,
             })),
+            disk_cleanup_auto: DiskCleanupAutoTracker::default(),
         }
     }
 
@@ -104,7 +107,14 @@ impl ToolRegistry {
                 rtk_raw_mode: false,
                 rtk_raw_once: false,
             })),
+            disk_cleanup_auto: DiskCleanupAutoTracker::default(),
         }
+    }
+
+    /// Run Rust-native disk cleanup session-end behavior if this session
+    /// auto-tracked any test files through write/terminal/patch tools.
+    pub fn disk_cleanup_session_end(&self) -> Option<CleanupSummary> {
+        self.disk_cleanup_auto.on_session_end()
     }
 
     /// Override active tool policy engine (used by tests/runtime tuning).
@@ -266,6 +276,8 @@ impl ToolRegistry {
 
         let output = match result {
             Ok(output) => {
+                self.disk_cleanup_auto
+                    .post_tool_call_success(name, &effective_params, &output);
                 let filtered = rtk_filter.filter_and_log(
                     name,
                     &effective_params,
@@ -331,6 +343,8 @@ impl ToolRegistry {
 
         let output = match handler.execute(effective_params.clone()).await {
             Ok(output) => {
+                self.disk_cleanup_auto
+                    .post_tool_call_success(name, &effective_params, &output);
                 let filtered = rtk_filter.filter_and_log(
                     name,
                     &effective_params,
