@@ -5,7 +5,7 @@
 //! slash commands, and session management.
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime};
 
 use futures::StreamExt;
@@ -3798,6 +3798,30 @@ mod tests {
     }
 
     #[test]
+    fn test_provider_cache_key_changes_with_base_url() {
+        let a = provider_cache_key("openai", "gpt-4o", Some("https://a.example/v1"), "k");
+        let b = provider_cache_key("openai", "gpt-4o", Some("https://b.example/v1"), "k");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn test_build_provider_reuses_cached_provider_instance() {
+        let mut cfg = GatewayConfig::default();
+        cfg.model = Some("openai:gpt-4o".to_string());
+        cfg.llm_providers.insert(
+            "openai".to_string(),
+            LlmProviderConfig {
+                api_key: Some("test-key".to_string()),
+                ..Default::default()
+            },
+        );
+        provider_cache().lock().unwrap().clear();
+        let p1 = build_provider(&cfg, "openai:gpt-4o");
+        let p2 = build_provider(&cfg, "openai:gpt-4o");
+        assert!(Arc::ptr_eq(&p1, &p2));
+    }
+
+    #[test]
     fn test_extract_last_assistant_output_prefers_non_empty_assistant_text() {
         let messages = vec![
             hermes_core::Message::user("hello"),
@@ -5789,78 +5813,156 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
         }
     };
 
-    match runtime_provider.as_str() {
+    let cache_key = provider_cache_key(
+        runtime_provider.as_str(),
+        model_name.as_str(),
+        base_url.as_deref(),
+        &api_key,
+    );
+    {
+        let mut guard = provider_cache().lock().unwrap();
+        if let Some(entry) = guard.get_mut(&cache_key) {
+            entry.last_used = Instant::now();
+            return entry.provider.clone();
+        }
+    }
+
+    let built: Arc<dyn LlmProvider> = match runtime_provider.as_str() {
         "openai" => {
             let mut p = OpenAiProvider::new(&api_key).with_model(model_name.as_str());
-            if let Some(url) = base_url {
+            if let Some(url) = base_url.clone() {
                 p = p.with_base_url(url);
             }
-            Arc::new(p)
+            Arc::new(p) as Arc<dyn LlmProvider>
         }
         "openai-codex" | "codex" => {
             let mut p = OpenAiProvider::new(&api_key).with_model(model_name.as_str());
-            p = p.with_base_url(base_url.unwrap_or_else(|| OPENAI_CODEX_BASE_URL.to_string()));
-            Arc::new(p)
+            p = p.with_base_url(base_url.clone().unwrap_or_else(|| OPENAI_CODEX_BASE_URL.to_string()));
+            Arc::new(p) as Arc<dyn LlmProvider>
         }
         "anthropic" => {
             let mut p = AnthropicProvider::new(&api_key).with_model(model_name.as_str());
-            if let Some(url) = base_url {
+            if let Some(url) = base_url.clone() {
                 p = p.with_base_url(url);
             }
-            Arc::new(p)
+            Arc::new(p) as Arc<dyn LlmProvider>
         }
         "openrouter" => {
             let p = OpenRouterProvider::new(&api_key).with_model(model_name.as_str());
-            Arc::new(p)
+            Arc::new(p) as Arc<dyn LlmProvider>
         }
         "qwen" | "qwen-oauth" => {
             let mut p = QwenProvider::new(&api_key).with_model(model_name.as_str());
-            if let Some(url) = base_url {
+            if let Some(url) = base_url.clone() {
                 p = p.with_base_url(url);
             }
-            Arc::new(p)
+            Arc::new(p) as Arc<dyn LlmProvider>
         }
         "kimi" | "moonshot" => {
             let mut p = KimiProvider::new(&api_key).with_model(model_name.as_str());
-            if let Some(url) = base_url {
+            if let Some(url) = base_url.clone() {
                 p = p.with_base_url(url);
             }
-            Arc::new(p)
+            Arc::new(p) as Arc<dyn LlmProvider>
         }
         "minimax" => {
             let mut p = MiniMaxProvider::new(&api_key).with_model(model_name.as_str());
-            if let Some(url) = base_url {
+            if let Some(url) = base_url.clone() {
                 p = p.with_base_url(url);
             }
-            Arc::new(p)
+            Arc::new(p) as Arc<dyn LlmProvider>
         }
         "stepfun" => {
-            let url = base_url.unwrap_or_else(|| STEPFUN_BASE_URL.to_string());
-            Arc::new(GenericProvider::new(url, &api_key, model_name.as_str()))
+            let url = base_url.clone().unwrap_or_else(|| STEPFUN_BASE_URL.to_string());
+            Arc::new(GenericProvider::new(url, &api_key, model_name.as_str())) as Arc<dyn LlmProvider>
         }
         "nous" => {
             let mut p = NousProvider::new(&api_key).with_model(model_name.as_str());
-            if let Some(url) = base_url {
+            if let Some(url) = base_url.clone() {
                 p = p.with_base_url(url);
             }
-            Arc::new(p)
+            Arc::new(p) as Arc<dyn LlmProvider>
         }
         "copilot" => {
             let p = CopilotProvider::new(
-                base_url.unwrap_or_else(|| "https://api.github.com/copilot".to_string()),
+                base_url
+                    .clone()
+                    .unwrap_or_else(|| "https://api.github.com/copilot".to_string()),
                 &api_key,
             )
             .with_model(model_name.as_str());
-            Arc::new(p)
+            Arc::new(p) as Arc<dyn LlmProvider>
         }
         "ollama-local" | "llama-cpp" | "vllm" | "mlx" | "apple-ane" | "sglang" | "tgi" => {
-            let url = base_url.unwrap_or_else(|| "http://127.0.0.1:11434/v1".to_string());
-            Arc::new(GenericProvider::new(url, &api_key, model_name.as_str()))
+            let url = base_url
+                .clone()
+                .unwrap_or_else(|| "http://127.0.0.1:11434/v1".to_string());
+            Arc::new(GenericProvider::new(url, &api_key, model_name.as_str())) as Arc<dyn LlmProvider>
         }
         _ => {
-            let url = base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-            Arc::new(GenericProvider::new(url, &api_key, model_name.as_str()))
+            let url = base_url
+                .clone()
+                .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
+            Arc::new(GenericProvider::new(url, &api_key, model_name.as_str())) as Arc<dyn LlmProvider>
         }
+    };
+    {
+        let mut guard = provider_cache().lock().unwrap();
+        guard.insert(
+            cache_key,
+            ProviderCacheEntry {
+                provider: built.clone(),
+                last_used: Instant::now(),
+            },
+        );
+        prune_provider_cache(&mut guard);
+    }
+    built
+}
+
+const PROVIDER_CACHE_MAX_SIZE: usize = 128;
+const PROVIDER_CACHE_IDLE_TTL: Duration = Duration::from_secs(3600);
+
+struct ProviderCacheEntry {
+    provider: Arc<dyn LlmProvider>,
+    last_used: Instant,
+}
+
+fn provider_cache() -> &'static StdMutex<std::collections::HashMap<String, ProviderCacheEntry>> {
+    static CACHE: OnceLock<StdMutex<std::collections::HashMap<String, ProviderCacheEntry>>> =
+        OnceLock::new();
+    CACHE.get_or_init(|| StdMutex::new(std::collections::HashMap::new()))
+}
+
+fn provider_cache_key(
+    runtime_provider: &str,
+    model_name: &str,
+    base_url: Option<&str>,
+    api_key: &str,
+) -> String {
+    format!(
+        "{}|{}|{}|{}",
+        runtime_provider,
+        model_name,
+        base_url.unwrap_or(""),
+        api_key
+    )
+}
+
+fn prune_provider_cache(cache: &mut std::collections::HashMap<String, ProviderCacheEntry>) {
+    let now = Instant::now();
+    cache.retain(|_, entry| now.duration_since(entry.last_used) <= PROVIDER_CACHE_IDLE_TTL);
+    if cache.len() <= PROVIDER_CACHE_MAX_SIZE {
+        return;
+    }
+    let mut entries: Vec<(String, Instant)> = cache
+        .iter()
+        .map(|(k, v)| (k.clone(), v.last_used))
+        .collect();
+    entries.sort_by_key(|(_, used)| *used);
+    let overflow = cache.len().saturating_sub(PROVIDER_CACHE_MAX_SIZE);
+    for (key, _) in entries.into_iter().take(overflow) {
+        cache.remove(&key);
     }
 }
 
