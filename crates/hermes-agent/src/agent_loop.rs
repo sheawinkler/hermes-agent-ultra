@@ -43,6 +43,7 @@ use crate::user_interest::{
     ingest_user_message, is_poi_synthetic_user_text, load_interest_snapshot,
     spawn_session_end_ingest, InterestStore,
 };
+use hermes_intelligence::auxiliary::AuxiliaryClient;
 use crate::context_files::{load_hermes_context_files, load_workspace_context};
 use crate::context_references::preprocess_context_references_async;
 use crate::credential_pool::CredentialPool;
@@ -2023,8 +2024,10 @@ struct TurnRuntimeRoute {
     signature: TurnRouteSignature,
 }
 
-fn build_context_compressor_for_config(config: &AgentConfig) -> Arc<tokio::sync::Mutex<ContextCompressor>> {
-    let llm_providers: HashMap<String, hermes_config::config::LlmProviderConfig> = config
+fn runtime_llm_providers_map(
+    config: &AgentConfig,
+) -> HashMap<String, hermes_config::config::LlmProviderConfig> {
+    config
         .runtime_providers
         .iter()
         .map(|(name, rp)| {
@@ -2040,13 +2043,20 @@ fn build_context_compressor_for_config(config: &AgentConfig) -> Arc<tokio::sync:
                 },
             )
         })
-        .collect();
+        .collect()
+}
+
+fn build_auxiliary_arc_for_config(config: &AgentConfig) -> Arc<AuxiliaryClient> {
     let (auxiliary, _) = build_auxiliary_client(AuxiliaryBuildParams {
         config: AuxiliaryConfig::default(),
         primary_provider: config.provider.clone(),
         primary_model: Some(config.model.clone()),
-        llm_providers,
+        llm_providers: runtime_llm_providers_map(config),
     });
+    Arc::new(auxiliary)
+}
+
+fn build_context_compressor_for_config(config: &AgentConfig) -> Arc<tokio::sync::Mutex<ContextCompressor>> {
     let compressor_config = CompressorConfig {
         context_length: get_model_context_length(&config.model),
         quiet_mode: config.quiet_mode,
@@ -2054,7 +2064,7 @@ fn build_context_compressor_for_config(config: &AgentConfig) -> Arc<tokio::sync:
     };
     Arc::new(tokio::sync::Mutex::new(ContextCompressor::new(
         compressor_config,
-        Arc::new(auxiliary),
+        build_auxiliary_arc_for_config(config),
     )))
 }
 
@@ -2824,10 +2834,20 @@ impl AgentLoop {
             .iter()
             .filter_map(|m| serde_json::to_value(m).ok())
             .collect();
+        let interest_cfg = self.config().interest.clone();
+        let auxiliary = if interest_cfg.session_end_llm_enabled() {
+            tracing::warn!(
+                "interest: session-end LLM extraction is enabled; user-only messages may be sent to the auxiliary LLM provider"
+            );
+            Some(build_auxiliary_arc_for_config(&self.config()))
+        } else {
+            None
+        };
         spawn_session_end_ingest(
             Arc::clone(store),
-            self.config().interest.clone(),
+            interest_cfg,
             as_values,
+            auxiliary,
         );
     }
 

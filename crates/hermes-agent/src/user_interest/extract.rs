@@ -277,7 +277,7 @@ pub fn extract_signals_from_messages(messages: &[Value]) -> Vec<InterestSignal> 
         if !role.eq_ignore_ascii_case("user") {
             continue;
         }
-        let content = message_text(msg);
+        let content = message_text_from_value(msg);
         if content.is_empty() {
             continue;
         }
@@ -287,18 +287,17 @@ pub fn extract_signals_from_messages(messages: &[Value]) -> Vec<InterestSignal> 
     dedupe_signals(extract_signals_from_text(&combined_user, 1.0))
 }
 
-fn message_text(msg: &Value) -> String {
+/// Extract plain text from a serialized chat message `content` field.
+pub fn message_text_from_value(msg: &Value) -> String {
     if let Some(s) = msg.get("content").and_then(|v| v.as_str()) {
         return s.to_string();
     }
     if let Some(parts) = msg.get("content").and_then(|v| v.as_array()) {
-        let mut text = String::new();
-        for part in parts {
-            if let Some(t) = part.get("text").and_then(|v| v.as_str()) {
-                text.push_str(t);
-            }
-        }
-        return text;
+        return parts
+            .iter()
+            .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
+            .collect::<Vec<_>>()
+            .join("");
     }
     String::new()
 }

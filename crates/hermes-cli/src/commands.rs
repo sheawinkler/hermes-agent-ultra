@@ -22069,6 +22069,15 @@ pub async fn handle_cli_interest(action: Option<String>) -> Result<(), hermes_co
                 println!("User interest (POI): disabled in config (interest.enabled = false)");
                 return Ok(());
             }
+            println!("  Extract mode: {}", config.interest.extract_mode);
+            println!(
+                "  Session-end LLM: {}",
+                if config.interest.session_end_llm_enabled() {
+                    "on"
+                } else {
+                    "off"
+                }
+            );
             if !db_path.exists() {
                 println!("User interest (POI): no topics yet");
                 println!("  Database: {}", db_path.display());
@@ -22082,7 +22091,15 @@ pub async fn handle_cli_interest(action: Option<String>) -> Result<(), hermes_co
                 .map_err(|e| hermes_core::AgentError::Io(e))?;
             println!("User interest (POI): {} topic(s)", topics.len());
             println!("  Database: {}", db_path.display());
-            println!("  Mode: {}", config.interest.extract_mode);
+            println!("  Extract mode: {}", config.interest.extract_mode);
+            println!(
+                "  Session-end LLM: {}",
+                if config.interest.session_end_llm_enabled() {
+                    "on (user messages may be sent to auxiliary LLM; set interest.llm_on_session_end or HERMES_INTEREST_LLM=1)"
+                } else {
+                    "off (local rules only; enable via config interest.llm_on_session_end or extract_mode llm/hybrid + opt-in)"
+                }
+            );
             for (idx, topic) in topics.iter().enumerate() {
                 println!(
                     "  {:>2}. [{:.2}] {} — {}",

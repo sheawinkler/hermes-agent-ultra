@@ -67,7 +67,7 @@ fn default_interest_char_budget_prefetch() -> usize {
 }
 
 fn default_interest_extract_mode() -> String {
-    "hybrid".to_string()
+    "rules".to_string()
 }
 
 fn default_interest_decay_half_life_days() -> f64 {
@@ -75,7 +75,7 @@ fn default_interest_decay_half_life_days() -> f64 {
 }
 
 fn default_interest_llm_on_session_end() -> bool {
-    true
+    false
 }
 
 impl Default for InterestConfig {
@@ -107,5 +107,39 @@ impl InterestConfig {
             self.extract_mode.trim().to_ascii_lowercase().as_str(),
             "rules" | "hybrid"
         )
+    }
+
+    /// Whether session-end cloud LLM extraction is allowed.
+    ///
+    /// Requires `extract_mode` of `llm` or `hybrid`, plus either
+    /// `llm_on_session_end: true` in config or `HERMES_INTEREST_LLM=1`.
+    pub fn session_end_llm_enabled(&self) -> bool {
+        if !self.enabled || !self.uses_llm() {
+            return false;
+        }
+        self.llm_on_session_end || crate::managed_gateway::env_var_enabled("HERMES_INTEREST_LLM")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_are_local_only() {
+        let cfg = InterestConfig::default();
+        assert!(cfg.enabled);
+        assert_eq!(cfg.extract_mode, "rules");
+        assert!(!cfg.llm_on_session_end);
+        assert!(!cfg.session_end_llm_enabled());
+    }
+
+    #[test]
+    fn session_end_llm_requires_mode_and_opt_in() {
+        let mut cfg = InterestConfig::default();
+        cfg.extract_mode = "hybrid".to_string();
+        assert!(!cfg.session_end_llm_enabled());
+        cfg.llm_on_session_end = true;
+        assert!(cfg.session_end_llm_enabled());
     }
 }
