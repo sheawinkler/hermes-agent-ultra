@@ -816,8 +816,8 @@
     },
     {
       "path": "plugins/spotify/tools.py",
-      "classification": "functional",
-      "rationale": "Spotify tool differences live on a runtime tool adapter surface even when the current diff is type-import hygiene.",
+      "classification": "intentional_divergence",
+      "rationale": "Spotify tool behavior is now covered by Rust-native spotify_* built-ins and SpotifyWebApiBackend, including playback, devices, queue, search, playlists, albums, library normalization, auth-store/env token resolution, and friendly API errors; the Python plugin remains reference-only compatibility material.",
       "owner": "sheawinkler",
       "ticket": 25
     },

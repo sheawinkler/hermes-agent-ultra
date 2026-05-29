@@ -43,6 +43,13 @@ pub fn tool_emoji(tool_name: &str) -> &'static str {
         "vision_analyze" => "👁️",
         "video_analyze" => "🎬",
         "video_generate" => "🎞️",
+        "spotify_playback" => "🎵",
+        "spotify_devices" => "🔈",
+        "spotify_queue" => "📻",
+        "spotify_search" => "🔎",
+        "spotify_playlists" => "📚",
+        "spotify_albums" => "💿",
+        "spotify_library" => "❤️",
         "mixture_of_agents" => "🧠",
         "todo" => "📋",
         "send_message" => "📨",
@@ -172,6 +179,10 @@ pub fn build_tool_preview_from_value(
         "vision_analyze" => Some("question"),
         "video_analyze" => Some("question"),
         "video_generate" => Some("prompt"),
+        "spotify_search" => Some("query"),
+        "spotify_playlists" => Some("name"),
+        "spotify_queue" => Some("uri"),
+        "spotify_albums" => Some("album_id"),
         "mixture_of_agents" => Some("user_prompt"),
         "skill_view" => Some("name"),
         "skills_list" => Some("category"),
@@ -267,6 +278,7 @@ mod tests {
         assert_eq!(tool_emoji("process"), "⚙️");
         assert_eq!(tool_emoji("todo"), "📋");
         assert_eq!(tool_emoji("video_generate"), "🎞️");
+        assert_eq!(tool_emoji("spotify_playback"), "🎵");
         assert_eq!(tool_emoji("unknown"), "⚙️");
     }
 }

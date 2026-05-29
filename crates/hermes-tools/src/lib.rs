@@ -76,6 +76,9 @@ pub use tools::session_search::{SessionSearchBackend, SessionSearchHandler};
 pub use tools::skill_commands;
 pub use tools::skill_utils;
 pub use tools::skills::{SkillManageHandler, SkillViewHandler, SkillsListHandler};
+pub use tools::spotify::{
+    SpotifyApiRequest, SpotifyBackend, SpotifyHandler, SpotifyHttpMethod, SpotifyTool,
+};
 pub use tools::terminal::{ProcessBackend, ProcessHandler, TerminalHandler};
 pub use tools::todo::{TodoBackend, TodoHandler};
 pub use tools::tool_result_storage::ToolResultStorageHandler;
@@ -109,6 +112,7 @@ pub use backends::image_gen::FalImageGenBackend;
 pub use backends::memory::FileMemoryBackend;
 pub use backends::messaging::SignalMessagingBackend;
 pub use backends::session_search::SqliteSessionSearchBackend;
+pub use backends::spotify::{SpotifyRuntimeCredentials, SpotifyWebApiBackend};
 pub use backends::todo::FileTodoBackend;
 pub use backends::tts::MultiTtsBackend;
 pub use backends::video::VisionFrameSamplingVideoBackend;

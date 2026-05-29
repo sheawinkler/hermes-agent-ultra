@@ -15,6 +15,7 @@ pub mod image_gen;
 pub mod memory;
 pub mod messaging;
 pub mod session_search;
+pub mod spotify;
 pub mod todo;
 pub mod tts;
 pub mod video;

@@ -25,6 +25,7 @@ pub mod session_search;
 pub mod skill_commands;
 pub mod skill_utils;
 pub mod skills;
+pub mod spotify;
 pub mod terminal;
 pub mod todo;
 pub mod tool_result_storage;

@@ -196,6 +196,40 @@ pub fn register_builtin_tools(
         );
     }
 
+    // -- Spotify -------------------------------------------------------------
+    {
+        let backend: Arc<dyn crate::tools::spotify::SpotifyBackend> =
+            match crate::backends::spotify::SpotifyWebApiBackend::from_env_or_auth_store() {
+                Ok(backend) => Arc::new(backend),
+                Err(_) => Arc::new(crate::backends::spotify::SpotifyWebApiBackend::unconfigured()),
+            };
+        let deps = vec![
+            "HERMES_SPOTIFY_ACCESS_TOKEN".into(),
+            "SPOTIFY_ACCESS_TOKEN".into(),
+            "HERMES_AUTH_FILE".into(),
+        ];
+        for (tool, emoji) in [
+            (crate::tools::spotify::SpotifyTool::Playback, "🎵"),
+            (crate::tools::spotify::SpotifyTool::Devices, "🔈"),
+            (crate::tools::spotify::SpotifyTool::Queue, "📻"),
+            (crate::tools::spotify::SpotifyTool::Search, "🔎"),
+            (crate::tools::spotify::SpotifyTool::Playlists, "📚"),
+            (crate::tools::spotify::SpotifyTool::Albums, "💿"),
+            (crate::tools::spotify::SpotifyTool::Library, "❤️"),
+        ] {
+            reg(
+                registry,
+                "spotify",
+                Arc::new(crate::tools::spotify::SpotifyHandler::new(
+                    tool,
+                    backend.clone(),
+                )),
+                emoji,
+                deps.clone(),
+            );
+        }
+    }
+
     // -- Skills (3 tools) ----------------------------------------------------
     reg(
         registry,

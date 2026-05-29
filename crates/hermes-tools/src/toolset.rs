@@ -38,6 +38,18 @@ pub const TOOLSET_BROWSER: &[&str] = &[
 pub const TOOLSET_VISION: &[&str] = &["vision_analyze", "video_analyze"];
 /// Image generation tools.
 pub const TOOLSET_IMAGE_GEN: &[&str] = &["image_generate"];
+/// Video generation tools.
+pub const TOOLSET_VIDEO_GEN: &[&str] = &["video_generate"];
+/// Spotify Web API tools.
+pub const TOOLSET_SPOTIFY: &[&str] = &[
+    "spotify_playback",
+    "spotify_devices",
+    "spotify_queue",
+    "spotify_search",
+    "spotify_playlists",
+    "spotify_albums",
+    "spotify_library",
+];
 /// Skills management tools.
 pub const TOOLSET_SKILLS: &[&str] = &["skills_list", "skill_view", "skill_manage"];
 /// Persistent memory tools.
@@ -168,6 +180,14 @@ impl ToolsetManager {
             TOOLSET_IMAGE_GEN.iter().map(|s| s.to_string()).collect(),
         ));
         self.register(Toolset::new(
+            "video_gen",
+            TOOLSET_VIDEO_GEN.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "spotify",
+            TOOLSET_SPOTIFY.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
             "skills",
             TOOLSET_SKILLS.iter().map(|s| s.to_string()).collect(),
         ));
@@ -250,6 +270,8 @@ impl ToolsetManager {
                 "browser",
                 "vision",
                 "image_gen",
+                "video_gen",
+                "spotify",
                 "skills",
                 "memory",
                 "session_search",
@@ -536,6 +558,8 @@ mod tests {
         assert!(tools.contains(&"read_file".to_string()));
         // Python parity core for CLI.
         assert!(tools.contains(&"image_generate".to_string()));
+        assert!(tools.contains(&"video_generate".to_string()));
+        assert!(tools.contains(&"spotify_playback".to_string()));
         assert!(tools.contains(&"session_search".to_string()));
         assert!(tools.contains(&"text_to_speech".to_string()));
         assert!(tools.contains(&"send_message".to_string()));
@@ -564,6 +588,14 @@ mod tests {
             assert!(
                 tools.contains(&"image_generate".to_string()),
                 "preset {preset} should include image_generate"
+            );
+            assert!(
+                tools.contains(&"video_generate".to_string()),
+                "preset {preset} should include video_generate"
+            );
+            assert!(
+                tools.contains(&"spotify_search".to_string()),
+                "preset {preset} should include spotify tools"
             );
             assert!(
                 tools.contains(&"cronjob".to_string()),
