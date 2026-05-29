@@ -36,6 +36,27 @@ PORTED = {
         "(commit 7a34ee5e1): stop signaling now interrupts pending API waits "
         "without handler hang."
     ),
+    "ae9dfa510e": (
+        "ported in this tranche: typo/trust wording synced in "
+        "`skills/research/research-paper-writing/templates/acl/acl_lualatex.tex`, "
+        "`website/docs/developer-guide/creating-skills.md`, and "
+        "`website/docs/user-guide/features/skills.md`."
+    ),
+    "03bdeaa876": (
+        "ported in this tranche: Browserbase timeout unit is documented as "
+        "seconds in `plugins/browser/browserbase/provider.py` and "
+        "`website/docs/user-guide/features/browser.md`."
+    ),
+    "3625dbb844": (
+        "ported in this tranche: secret-redaction guidance updated in "
+        "`skills/autonomous-ai-agents/hermes-agent/SKILL.md` and the generated "
+        "bundled skill docs."
+    ),
+    "119390a2a1": (
+        "ported in this tranche: working-directory docs now prefer "
+        "`terminal.cwd` and mark `MESSAGING_CWD`/`TERMINAL_CWD` as legacy "
+        "fallbacks across website and migration-skill docs."
+    ),
 }
 
 NOTE_TESTS_CI = (

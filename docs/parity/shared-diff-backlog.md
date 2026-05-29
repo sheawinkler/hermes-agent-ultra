@@ -1,43 +1,37 @@
 # Shared-Different Backlog
 
-Generated: `2026-05-29T18:59:15.482116+00:00`
+Generated: `2026-05-29T19:30:06.746844+00:00`
 
 ## Summary
 
-- Total shared-different paths: `1014`
-- Pending classification: `5`
-- Pending functional review: `770`
-- Cleared non-runtime: `166`
-- Cleared intentional divergence: `73`
+- Total shared-different paths: `1022`
+- Pending classification: `0`
+- Pending functional review: `773`
+- Cleared non-runtime: `171`
+- Cleared intentional divergence: `78`
 
 ## Status Counts
 
 | Status | Count |
 | --- | ---: |
-| `cleared_intentional_divergence` | 73 |
-| `cleared_non_runtime` | 166 |
-| `pending_classification` | 5 |
-| `pending_review` | 770 |
+| `cleared_intentional_divergence` | 78 |
+| `cleared_non_runtime` | 171 |
+| `pending_review` | 773 |
 
 ## Workstream Counts
 
 | Workstream | Count |
 | --- | ---: |
-| `WS3` | 55 |
-| `WS4` | 39 |
-| `WS5` | 227 |
+| `WS3` | 56 |
+| `WS4` | 41 |
+| `WS5` | 231 |
 | `WS6` | 681 |
-| `WS8` | 12 |
+| `WS8` | 13 |
 
 ## Pending Classification
 
 | Path | Workstream | Action |
 | --- | --- | --- |
-| `plugins/context_engine/__init__.py` | `WS3` | Add classification, owner, issue, and surgical plan before implementation. |
-| `plugins/spotify/tools.py` | `WS3` | Add classification, owner, issue, and surgical plan before implementation. |
-| `skills/apple/apple-reminders/SKILL.md` | `WS4` | Add classification, owner, issue, and surgical plan before implementation. |
-| `skills/email/himalaya/SKILL.md` | `WS4` | Add classification, owner, issue, and surgical plan before implementation. |
-| `skills/social-media/xurl/SKILL.md` | `WS4` | Add classification, owner, issue, and surgical plan before implementation. |
 
 ## Pending Functional Review By Prefix
 
@@ -66,5 +60,8 @@ Generated: `2026-05-29T18:59:15.482116+00:00`
 | `ui-tui` | 3 |
 | `plugins/model-providers` | 2 |
 | `tests/e2e` | 2 |
+| `plugins/browser/browserbase/provider.py` | 1 |
+| `plugins/context_engine/__init__.py` | 1 |
+| `plugins/spotify/tools.py` | 1 |
 | `plugins/teams_pipeline` | 1 |
 | `plugins/video_gen` | 1 |

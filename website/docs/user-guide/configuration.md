@@ -1557,7 +1557,7 @@ Pre-execution security scanning and secret redaction:
 
 ```yaml
 security:
-  redact_secrets: false          # Redact API key patterns in tool output and logs (off by default)
+  redact_secrets: true           # Redact API key patterns in tool output and logs (on by default)
   tirith_enabled: true           # Enable Tirith security scanning for terminal commands
   tirith_path: "tirith"          # Path to tirith binary (default: "tirith" in $PATH)
   tirith_timeout: 5              # Seconds to wait for tirith scan before timing out
@@ -1568,7 +1568,7 @@ security:
     shared_files: []
 ```
 
-- `redact_secrets` — when `true`, automatically detects and redacts patterns that look like API keys, tokens, and passwords in tool output before it enters the conversation context and logs. **Off by default** — enable if you commonly work with real credentials in tool output and want a safety net. Set to `true` explicitly to turn on.
+- `redact_secrets` — when `true`, automatically detects and redacts patterns that look like API keys, tokens, and passwords in tool output before it enters the conversation context and logs. **On by default** for normal use. Set to `false` only when you deliberately need raw credential-like strings for debugging or redactor development.
 - `tirith_enabled` — when `true`, terminal commands are scanned by [Tirith](https://github.com/StackGuardian/tirith) before execution to detect potentially dangerous operations.
 - `tirith_path` — path to the tirith binary. Set this if tirith is installed in a non-standard location.
 - `tirith_timeout` — maximum seconds to wait for a tirith scan. Commands proceed if the scan times out.
@@ -1696,12 +1696,14 @@ See also:
 | Context | Default |
 |---------|---------|
 | **CLI (`hermes`)** | Current directory where you run the command |
-| **Messaging gateway** | Home directory `~` (override with `MESSAGING_CWD`) |
+| **Messaging gateway** | `terminal.cwd` from `~/.hermes/config.yaml`; if unset, home directory `~` |
 | **Docker / Singularity / Modal / SSH** | User's home directory inside the container or remote machine |
 
 Override the working directory:
-```bash
-# In ~/.hermes/.env or ~/.hermes/config.yaml:
-MESSAGING_CWD=/home/myuser/projects    # Gateway sessions
-TERMINAL_CWD=/workspace                # All terminal sessions
+```yaml
+# In ~/.hermes/config.yaml:
+terminal:
+  cwd: /home/myuser/projects
 ```
+
+`MESSAGING_CWD` and direct `TERMINAL_CWD` entries in `~/.hermes/.env` are legacy compatibility fallbacks. New configurations should use `terminal.cwd`.

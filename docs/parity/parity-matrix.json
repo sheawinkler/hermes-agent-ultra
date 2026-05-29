@@ -1,25 +1,25 @@
 {
-  "generated_at_utc": "2026-05-29T18:59:03.120275+00:00",
+  "generated_at_utc": "2026-05-29T19:29:53.611571+00:00",
   "refs": {
     "local_ref": "main",
-    "local_sha": "a8c29a9e9a69088c5a9c90c5a4fc3c8b2996b54d",
+    "local_sha": "40e78faa2c96c42af90a5e2fabae0bdd85fba0d7",
     "upstream_ref": "upstream/main",
-    "upstream_sha": "7379f175567bd0f1d833eec3a3599d0665b2a491",
+    "upstream_sha": "1cb850b674796a53d6b3b669967b04a07e89a237",
     "merge_base": null
   },
   "summary": {
-    "commits_behind": 4353,
-    "commits_ahead": 770,
-    "upstream_patch_missing": 4235,
+    "commits_behind": 4376,
+    "commits_ahead": 771,
+    "upstream_patch_missing": 4258,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 665,
-    "files_only_upstream": 1471,
-    "files_only_local": 558,
-    "files_shared_identical": 1704,
-    "files_shared_different": 1014,
-    "tree_files_changed": 3043,
-    "tree_insertions": 737632,
-    "tree_deletions": 272976
+    "local_patch_unique": 666,
+    "files_only_upstream": 1470,
+    "files_only_local": 559,
+    "files_shared_identical": 1697,
+    "files_shared_different": 1022,
+    "tree_files_changed": 3051,
+    "tree_insertions": 738230,
+    "tree_deletions": 369888
   },
   "top_upstream_only": [
     {
@@ -189,12 +189,12 @@
       "count": 171
     },
     {
-      "path": "tests/tools",
-      "count": 138
+      "path": "website/docs",
+      "count": 139
     },
     {
-      "path": "website/docs",
-      "count": 135
+      "path": "tests/tools",
+      "count": 138
     },
     {
       "path": "tests/hermes_cli",
@@ -297,6 +297,10 @@
       "count": 3
     },
     {
+      "path": "skills/research",
+      "count": 3
+    },
+    {
       "path": "tests/integration",
       "count": 3
     },
@@ -310,6 +314,10 @@
     },
     {
       "path": "optional-skills/health",
+      "count": 2
+    },
+    {
+      "path": "optional-skills/migration",
       "count": 2
     },
     {
@@ -333,16 +341,8 @@
       "count": 2
     },
     {
-      "path": "skills/research",
-      "count": 2
-    },
-    {
       "path": "tests/e2e",
       "count": 2
-    },
-    {
-      "path": ".gitattributes",
-      "count": 1
     }
   ],
   "top_local_only": [
@@ -846,8 +846,8 @@
       "workstream": "WS5",
       "issue": 9,
       "name": "UX parity",
-      "upstream_only": 494,
-      "shared_different": 227,
+      "upstream_only": 493,
+      "shared_different": 232,
       "local_only": 72,
       "risk": "high",
       "effort": "XL"
@@ -858,7 +858,7 @@
       "name": "Compatibility and divergence policy",
       "upstream_only": 391,
       "shared_different": 12,
-      "local_only": 191,
+      "local_only": 192,
       "risk": "high",
       "effort": "XL"
     },
@@ -867,7 +867,7 @@
       "issue": 7,
       "name": "Tools and adapters parity",
       "upstream_only": 114,
-      "shared_different": 55,
+      "shared_different": 56,
       "local_only": 99,
       "risk": "high",
       "effort": "L"
@@ -877,7 +877,7 @@
       "issue": 8,
       "name": "Skills parity",
       "upstream_only": 93,
-      "shared_different": 39,
+      "shared_different": 41,
       "local_only": 14,
       "risk": "medium",
       "effort": "L"
@@ -904,9 +904,9 @@
     }
   ],
   "commit_mapping": {
-    "upstream_patch_missing": 4235,
+    "upstream_patch_missing": 4258,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 665,
+    "local_patch_unique": 666,
     "local_patch_equivalent_to_upstream": 1,
     "upstream_patch_missing_sample": [
       "99af222ecf56c0eed0d3eb82903a6bf33b6ff7d5",
@@ -960,7 +960,7 @@
       "6b69de4772eac5f982c097553dc6bcfeb60350e6"
     ],
     "intentional_divergence_items": 8,
-    "intentional_divergence_covered_files": 895
+    "intentional_divergence_covered_files": 901
   },
   "intentional_divergence": [
     {
@@ -1005,7 +1005,7 @@
       "status": "approved",
       "workstream": "WS4",
       "summary": "Track upstream skills and optional-skills catalogs via parity audits while keeping Rust runtime skill loading externalized (no direct Python skill-tree vendoring).",
-      "matched_files": 146,
+      "matched_files": 148,
       "matched_sample": [
         "optional-skills/autonomous-ai-agents/antigravity-cli/SKILL.md",
         "optional-skills/autonomous-ai-agents/antigravity-cli/references/cli-docs.md",
@@ -1075,7 +1075,7 @@
       "status": "approved",
       "workstream": "WS5",
       "summary": "Treat Rust CLI/TUI and gateway as primary UX surface; upstream web/ui-tui trees are tracked as intentional divergence unless explicitly ported.",
-      "matched_files": 725,
+      "matched_files": 729,
       "matched_sample": [
         "ui-tui/README.md",
         "ui-tui/babel.compiler.config.cjs",

@@ -576,7 +576,6 @@ def main() -> int:
             break
     if pending_count == 0:
         md.append("| _(none)_ | - | - |")
-    md.append("")
 
     out_md.write_text("\n".join(md) + "\n", encoding="utf-8")
     print(f"Wrote {out_json}")

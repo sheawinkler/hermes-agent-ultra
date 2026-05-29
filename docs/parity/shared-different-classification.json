@@ -736,6 +736,62 @@
       "rationale": "CI workflow differences affect release and parity gate enforcement.",
       "owner": "sheawinkler",
       "ticket": 25
+    },
+    {
+      "path": "docs/security/network-egress-isolation.md",
+      "classification": "policy_only",
+      "rationale": "The network-egress guide is deployment hardening documentation adapted to Hermes Agent Ultra Docker/OrbStack usage and does not change runtime behavior.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "optional-skills/migration",
+      "classification": "intentional_divergence",
+      "rationale": "Optional migration skill content is curated locally for Hermes Agent Ultra migration workflows while runtime skill loading remains governed by native skill-loader contracts.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "plugins/browser/browserbase/provider.py",
+      "classification": "functional",
+      "rationale": "Browserbase provider differences affect the Python browser compatibility adapter; this batch aligns the timeout contract with the current seconds-based upstream setting.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "plugins/context_engine/__init__.py",
+      "classification": "functional",
+      "rationale": "Context engine loader differences affect plugin registration behavior and need runtime parity review against the Rust-first plugin command surface.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "plugins/spotify/tools.py",
+      "classification": "functional",
+      "rationale": "Spotify tool differences live on a runtime tool adapter surface even when the current diff is type-import hygiene.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "skills/apple/apple-reminders/SKILL.md",
+      "classification": "intentional_divergence",
+      "rationale": "Apple Reminders skill documentation is curated locally; skill catalog drift is tracked separately from the Rust runtime skill-loader contract.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "skills/email/himalaya/SKILL.md",
+      "classification": "intentional_divergence",
+      "rationale": "Himalaya skill documentation is curated locally while the runtime skill execution contract remains tracked by skill catalog governance.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "skills/social-media/xurl/SKILL.md",
+      "classification": "intentional_divergence",
+      "rationale": "xurl skill documentation is curated locally for Hermes Agent Ultra safety guidance while skill loading and execution are governed separately.",
+      "owner": "sheawinkler",
+      "ticket": 25
     }
   ]
 }

@@ -26,7 +26,7 @@ Optional feature knobs::
     BROWSERBASE_PROXIES=true      # default true
     BROWSERBASE_ADVANCED_STEALTH=false
     BROWSERBASE_KEEP_ALIVE=true   # default true
-    BROWSERBASE_SESSION_TIMEOUT=... (ms, integer)
+    BROWSERBASE_SESSION_TIMEOUT=... (seconds, integer, max 21600 = 6h)
 """
 
 from __future__ import annotations
@@ -102,7 +102,7 @@ class BrowserbaseBrowserProvider(BrowserProvider):
         enable_keep_alive = (
             os.environ.get("BROWSERBASE_KEEP_ALIVE", "true").lower() != "false"
         )
-        custom_timeout_ms = os.environ.get("BROWSERBASE_SESSION_TIMEOUT")
+        custom_timeout_seconds = os.environ.get("BROWSERBASE_SESSION_TIMEOUT")
 
         features_enabled = {
             "basic_stealth": True,
@@ -117,14 +117,15 @@ class BrowserbaseBrowserProvider(BrowserProvider):
         if enable_keep_alive:
             session_config["keepAlive"] = True
 
-        if custom_timeout_ms:
+        if custom_timeout_seconds:
             try:
-                timeout_val = int(custom_timeout_ms)
+                timeout_val = int(custom_timeout_seconds)
                 if timeout_val > 0:
                     session_config["timeout"] = timeout_val
             except ValueError:
                 logger.warning(
-                    "Invalid BROWSERBASE_SESSION_TIMEOUT value: %s", custom_timeout_ms
+                    "Invalid BROWSERBASE_SESSION_TIMEOUT value: %s",
+                    custom_timeout_seconds,
                 )
 
         if enable_proxies:
@@ -199,7 +200,7 @@ class BrowserbaseBrowserProvider(BrowserProvider):
             features_enabled["advanced_stealth"] = True
         if enable_keep_alive and not keepalive_fallback:
             features_enabled["keep_alive"] = True
-        if custom_timeout_ms and "timeout" in session_config:
+        if custom_timeout_seconds and "timeout" in session_config:
             features_enabled["custom_timeout"] = True
 
         feature_str = ", ".join(k for k, v in features_enabled.items() if v)

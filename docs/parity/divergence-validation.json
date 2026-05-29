@@ -1,6 +1,6 @@
 {
   "divergence_file": "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/parity/intentional-divergence.json",
-  "generated_at_utc": "2026-05-29T18:56:33.195379+00:00",
+  "generated_at_utc": "2026-05-29T19:30:07.599590+00:00",
   "items": [
     {
       "errors": [],
@@ -182,7 +182,7 @@
   "summary": {
     "errors": 0,
     "items": 8,
-    "local_paths": 3276,
+    "local_paths": 3278,
     "review_overdue": 0,
     "unowned": 0,
     "upstream_paths": 4189,
