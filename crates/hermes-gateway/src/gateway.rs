@@ -1715,7 +1715,28 @@ impl Gateway {
                 let mut ticker = tokio::time::interval(flush_interval);
                 ticker.set_missed_tick_behavior(MissedTickBehavior::Delay);
 
-                let mut native_stream_id: Option<String> = None;
+                let native_stream_id: Option<String> = match adapter
+                    .start_native_stream(
+                        &chat_id,
+                        reply_to.as_deref(),
+                        Some(WECOM_NATIVE_STREAM_THINKING),
+                    )
+                    .await
+                {
+                    Ok(Some(sid)) => {
+                        started.store(true, Ordering::Release);
+                        Some(sid)
+                    }
+                    Ok(None) => {
+                        failed.store(true, Ordering::Release);
+                        return;
+                    }
+                    Err(err) => {
+                        warn!(error = %err, "native streaming start failed");
+                        failed.store(true, Ordering::Release);
+                        return;
+                    }
+                };
                 let mut accumulated = String::new();
                 let mut last_flushed = String::new();
 
@@ -1726,30 +1747,6 @@ impl Gateway {
                                 None => break,
                                 Some(chunk) if chunk.trim().is_empty() => {}
                                 Some(chunk) => {
-                                    if native_stream_id.is_none() {
-                                        match adapter
-                                            .start_native_stream(
-                                                &chat_id,
-                                                reply_to.as_deref(),
-                                                Some(WECOM_NATIVE_STREAM_THINKING),
-                                            )
-                                            .await
-                                        {
-                                            Ok(Some(sid)) => {
-                                                native_stream_id = Some(sid);
-                                                started.store(true, Ordering::Release);
-                                            }
-                                            Ok(None) => {
-                                                failed.store(true, Ordering::Release);
-                                                return;
-                                            }
-                                            Err(err) => {
-                                                warn!(error = %err, "native streaming start failed");
-                                                failed.store(true, Ordering::Release);
-                                                return;
-                                            }
-                                        }
-                                    }
                                     accumulated.push_str(&chunk);
                                 }
                             }
