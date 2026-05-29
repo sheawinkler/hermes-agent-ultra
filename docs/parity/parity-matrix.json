@@ -1,25 +1,25 @@
 {
-  "generated_at_utc": "2026-05-29T19:36:59.784846+00:00",
+  "generated_at_utc": "2026-05-29T19:41:07.849824+00:00",
   "refs": {
     "local_ref": "main",
-    "local_sha": "10e30f6dc30a97b18aaf633c2d75a6d451ee7c50",
+    "local_sha": "2b018308b4821ee1e39c3273309136d8c2aa52ff",
     "upstream_ref": "upstream/main",
-    "upstream_sha": "1cb850b674796a53d6b3b669967b04a07e89a237",
+    "upstream_sha": "38c4f8c3717518e81bc64765ab80f3192f6a113a",
     "merge_base": null
   },
   "summary": {
-    "commits_behind": 4376,
-    "commits_ahead": 772,
-    "upstream_patch_missing": 4258,
+    "commits_behind": 4385,
+    "commits_ahead": 773,
+    "upstream_patch_missing": 4267,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 667,
+    "local_patch_unique": 668,
     "files_only_upstream": 1470,
-    "files_only_local": 559,
-    "files_shared_identical": 1700,
-    "files_shared_different": 1019,
+    "files_only_local": 560,
+    "files_shared_identical": 1701,
+    "files_shared_different": 1018,
     "tree_files_changed": 3048,
-    "tree_insertions": 738203,
-    "tree_deletions": 370551
+    "tree_insertions": 738631,
+    "tree_deletions": 370590
   },
   "top_upstream_only": [
     {
@@ -427,6 +427,10 @@
       "count": 5
     },
     {
+      "path": "tests/plugins",
+      "count": 5
+    },
+    {
       "path": "tests/run_agent",
       "count": 5
     },
@@ -440,10 +444,6 @@
     },
     {
       "path": "plugins/strike-freedom-cockpit",
-      "count": 4
-    },
-    {
-      "path": "tests/plugins",
       "count": 4
     },
     {
@@ -751,6 +751,10 @@
       "count": 5
     },
     {
+      "path": "tests/plugins",
+      "count": 5
+    },
+    {
       "path": "tests/run_agent",
       "count": 5
     },
@@ -764,10 +768,6 @@
     },
     {
       "path": "plugins/strike-freedom-cockpit",
-      "count": 4
-    },
-    {
-      "path": "tests/plugins",
       "count": 4
     },
     {
@@ -838,7 +838,7 @@
       "name": "Tests and CI parity",
       "upstream_only": 317,
       "shared_different": 681,
-      "local_only": 33,
+      "local_only": 34,
       "risk": "high",
       "effort": "XL"
     },
@@ -867,7 +867,7 @@
       "issue": 7,
       "name": "Tools and adapters parity",
       "upstream_only": 114,
-      "shared_different": 56,
+      "shared_different": 55,
       "local_only": 99,
       "risk": "high",
       "effort": "L"
@@ -904,9 +904,9 @@
     }
   ],
   "commit_mapping": {
-    "upstream_patch_missing": 4258,
+    "upstream_patch_missing": 4267,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 667,
+    "local_patch_unique": 668,
     "local_patch_equivalent_to_upstream": 1,
     "upstream_patch_missing_sample": [
       "99af222ecf56c0eed0d3eb82903a6bf33b6ff7d5",

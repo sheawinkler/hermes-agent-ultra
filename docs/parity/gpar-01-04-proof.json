@@ -1,5 +1,5 @@
 {
-  "generated_at_utc": "2026-05-29T19:37:08.554027+00:00",
+  "generated_at_utc": "2026-05-29T19:41:27.081734+00:00",
   "scope": {
     "labels": {
       "20": "GPAR-01 tests+CI parity",
@@ -18,10 +18,10 @@
     "by_disposition": {
       "mirrored": 68,
       "ported": 11,
-      "superseded": 2852
+      "superseded": 2859
     },
     "pass": true,
-    "total_commits": 2931,
+    "total_commits": 2938,
     "total_pending": 0
   },
   "ticket_breakdown": {
@@ -29,11 +29,11 @@
       "by_disposition": {
         "mirrored": 14,
         "ported": 2,
-        "superseded": 1759
+        "superseded": 1766
       },
       "label": "GPAR-01 tests+CI parity",
       "pending": 0,
-      "total": 1775
+      "total": 1782
     },
     "21": {
       "by_disposition": {

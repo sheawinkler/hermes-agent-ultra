@@ -93585,9 +93585,198 @@
       "subject": "fix(api_server): emit per-turn transcript on run.completed (#34703) (#34804)",
       "target_ticket": 23,
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
+    },
+    {
+      "classification_rule": "rust_primary_surface_guard",
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/mcp_config.py",
+        "tests/hermes_cli/test_mcp_config.py",
+        "website/docs/user-guide/features/mcp.md"
+      ],
+      "files_touched": 3,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "27a2c4f36ff323e5edc300496d001e28a0c35678",
+      "subject": "fix(mcp): stop reporting false OAuth success when no token was obtained (#34807)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "classification_rule": "rust_primary_surface_guard",
+      "disposition": "superseded",
+      "files_sample": [
+        "cli.py"
+      ],
+      "files_touched": 1,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "2fc2280e63964ad96419f1d532a308eb034d42db",
+      "subject": "fix(cli): clarify panel clips choices off-screen on short terminals (#34808)",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "classification_rule": "rust_primary_surface_guard",
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/model_switch.py",
+        "tests/hermes_cli/test_model_switch_custom_providers.py",
+        "tests/hermes_cli/test_runtime_provider_resolution.py"
+      ],
+      "files_touched": 3,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "aa283d1e4f45731087653bbf7c057761c517cf28",
+      "subject": "fix(model): isolate custom provider picker credentials",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "classification_rule": "rust_primary_surface_guard",
+      "disposition": "superseded",
+      "files_sample": [
+        "scripts/release.py"
+      ],
+      "files_touched": 1,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "30a0d5bc9e0cb43e9230704c4c650b545e6a548a",
+      "subject": "chore(release): map zapabob author email",
+      "target_ticket": 26,
+      "target_ticket_name": "GPAR-07 upstream queue backfill"
+    },
+    {
+      "classification_rule": "rust_primary_surface_guard",
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/profiles.py",
+        "tests/hermes_cli/test_profiles.py"
+      ],
+      "files_touched": 2,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "6312dd8c3a3d2da2c5276c652ea4a21df29ddf47",
+      "subject": "fix(cli): create .bat wrapper on Windows instead of POSIX shell script",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "classification_rule": "rust_primary_surface_guard",
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/main.py",
+        "hermes_cli/profiles.py",
+        "tests/hermes_cli/test_profiles.py"
+      ],
+      "files_touched": 3,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "8836b3a113f8b8781a1935217f008fe67ae8e09f",
+      "subject": "fix(cli): widen Windows .bat wrapper fix to custom-name alias path",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "classification_rule": "rust_primary_surface_guard",
+      "disposition": "superseded",
+      "files_sample": [
+        "pyproject.toml",
+        "tests/test_packaging_metadata.py"
+      ],
+      "files_touched": 2,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "45b00bb49aa3c27a8838cdaa8673133f0a89db82",
+      "subject": "fix(packaging): ship hermes_cli subpackages in wheel (#34811)",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "classification_rule": "rust_primary_surface_guard",
+      "disposition": "superseded",
+      "files_sample": [
+        "hermes_cli/gateway.py",
+        "tests/hermes_cli/test_gateway_service.py"
+      ],
+      "files_touched": 2,
+      "notes": "rust-primary parity policy: upstream Python runtime surface commit is covered by Rust-native architecture and tracked via Rust gates",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": false,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": false
+      },
+      "sha": "a1cb5fa2c7cd5239a4909261888453d97086986d",
+      "subject": "fix(gateway): anchor service WorkingDirectory at HERMES_HOME, not the source checkout",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
+    },
+    {
+      "classification_rule": "rust_only_python_test_guard",
+      "disposition": "superseded",
+      "files_sample": [
+        "tests/hermes_cli/test_gateway_service.py"
+      ],
+      "files_touched": 1,
+      "notes": "rust-only parity guard: upstream Python test-only commit not ported",
+      "owner": "",
+      "rust_only_guard": {
+        "allow_python_test_surfaces": false,
+        "python_test_only_commit": true,
+        "rust_primary_surface_only_commit": true,
+        "superseded_by_guard": true
+      },
+      "sha": "38c4f8c3717518e81bc64765ab80f3192f6a113a",
+      "subject": "test(gateway): update system-unit cwd assertion to HERMES_HOME anchor",
+      "target_ticket": 20,
+      "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-05-29T19:36:58.464636+00:00",
+  "generated_at_utc": "2026-05-29T19:41:06.566939+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
@@ -93597,19 +93786,19 @@
     "by_disposition": {
       "mirrored": 75,
       "ported": 19,
-      "superseded": 4166
+      "superseded": 4175
     },
     "by_target_ticket": {
-      "20": 1775,
+      "20": 1782,
       "21": 109,
       "22": 716,
       "23": 331,
       "24": 18,
       "25": 89,
-      "26": 1222
+      "26": 1224
     },
     "overrides_path": "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/parity/queue-overrides.json",
     "patch_equivalent_count": 2,
-    "total_commits": 4260
+    "total_commits": 4269
   }
 }

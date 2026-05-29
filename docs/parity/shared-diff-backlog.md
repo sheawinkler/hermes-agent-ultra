@@ -1,12 +1,12 @@
 # Shared-Different Backlog
 
-Generated: `2026-05-29T19:37:08.628072+00:00`
+Generated: `2026-05-29T19:41:27.157091+00:00`
 
 ## Summary
 
-- Total shared-different paths: `1019`
+- Total shared-different paths: `1018`
 - Pending classification: `0`
-- Pending functional review: `773`
+- Pending functional review: `772`
 - Cleared non-runtime: `170`
 - Cleared intentional divergence: `76`
 
@@ -16,13 +16,13 @@ Generated: `2026-05-29T19:37:08.628072+00:00`
 | --- | ---: |
 | `cleared_intentional_divergence` | 76 |
 | `cleared_non_runtime` | 170 |
-| `pending_review` | 773 |
+| `pending_review` | 772 |
 
 ## Workstream Counts
 
 | Workstream | Count |
 | --- | ---: |
-| `WS3` | 56 |
+| `WS3` | 55 |
 | `WS4` | 39 |
 | `WS5` | 230 |
 | `WS6` | 681 |
@@ -61,7 +61,6 @@ Generated: `2026-05-29T19:37:08.628072+00:00`
 | `plugins/model-providers` | 2 |
 | `tests/e2e` | 2 |
 | `plugins/browser/browserbase/provider.py` | 1 |
-| `plugins/context_engine/__init__.py` | 1 |
 | `plugins/spotify/tools.py` | 1 |
 | `plugins/teams_pipeline` | 1 |
 | `plugins/video_gen` | 1 |

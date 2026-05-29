@@ -4,10 +4,10 @@ _Generated from source artifacts: `2026-05-29T19:37:18.081095+00:00`_
 
 ## Snapshot
 
-- Upstream target: `upstream/main` @ `1cb850b674796a53d6b3b669967b04a07e89a237`
-- Workstream snapshot generated: `2026-05-29T13:36:44-06:00`
-- Parity matrix generated: `2026-05-29T19:36:59.784846+00:00`
-- Queue snapshot generated: `2026-05-29T19:36:58.464636+00:00`
+- Upstream target: `upstream/main` @ `38c4f8c3717518e81bc64765ab80f3192f6a113a`
+- Workstream snapshot generated: `2026-05-29T13:39:28-06:00`
+- Parity matrix generated: `2026-05-29T19:41:07.849824+00:00`
+- Queue snapshot generated: `2026-05-29T19:41:06.566939+00:00`
 - Proof snapshot generated: `2026-05-29T19:37:18.081095+00:00`
 
 ## Gate Status
@@ -21,24 +21,24 @@ _Generated from source artifacts: `2026-05-29T19:37:18.081095+00:00`_
 
 | Metric | Value |
 | --- | ---: |
-| Total commits in queue | 4260 |
+| Total commits in queue | 4269 |
 | Pending | 0 |
 | Ported | 19 |
-| Superseded | 4166 |
+| Superseded | 4175 |
 
 ## Tree/Patch Drift
 
 | Metric | Value |
 | --- | ---: |
-| commits_behind | 4376 |
-| commits_ahead | 772 |
-| upstream_patch_missing | 4258 |
+| commits_behind | 4385 |
+| commits_ahead | 773 |
+| upstream_patch_missing | 4267 |
 | upstream_patch_represented | 2 |
-| local_patch_unique | 667 |
+| local_patch_unique | 668 |
 | files_only_upstream | 1470 |
-| files_only_local | 559 |
-| files_shared_identical | 1700 |
-| files_shared_different | 1019 |
+| files_only_local | 560 |
+| files_shared_identical | 1701 |
+| files_shared_different | 1018 |
 
 ## Workstream States
 

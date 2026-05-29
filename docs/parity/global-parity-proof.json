@@ -2,13 +2,13 @@
   "ci_gate": {
     "checks": [
       {
-        "actual": 4376.0,
+        "actual": 4385.0,
         "limit": 5500,
         "metric": "max_commits_behind",
         "status": "pass"
       },
       {
-        "actual": 4258.0,
+        "actual": 4267.0,
         "limit": 5000,
         "metric": "max_upstream_patch_missing",
         "status": "pass"
@@ -47,7 +47,7 @@
     "mode": "tree-drift",
     "pass": true
   },
-  "generated_at_utc": "2026-05-29T19:37:18.081095+00:00",
+  "generated_at_utc": "2026-05-29T19:41:35.803960+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -60,12 +60,12 @@
     "GPAR-09": true
   },
   "metrics": {
-    "max_commits_behind": 4376.0,
+    "max_commits_behind": 4385.0,
     "max_divergence_review_overdue": 0.0,
     "max_files_only_upstream": 1470.0,
     "max_queue_pending_commits": 0.0,
     "max_unowned_divergences": 0.0,
-    "max_upstream_patch_missing": 4258.0,
+    "max_upstream_patch_missing": 4267.0,
     "min_test_intent_mapping_ratio": 1.0
   },
   "program": {
@@ -78,20 +78,20 @@
     "by_disposition": {
       "mirrored": 75,
       "ported": 19,
-      "superseded": 4166
+      "superseded": 4175
     },
     "by_target_ticket": {
-      "20": 1775,
+      "20": 1782,
       "21": 109,
       "22": 716,
       "23": 331,
       "24": 18,
       "25": 89,
-      "26": 1222
+      "26": 1224
     },
     "overrides_path": "/Users/sheawinkler/Documents/Projects/hermes-agent-ultra/docs/parity/queue-overrides.json",
     "patch_equivalent_count": 2,
-    "total_commits": 4260
+    "total_commits": 4269
   },
   "release_gate": {
     "checks": [
