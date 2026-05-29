@@ -93587,7 +93587,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     }
   ],
-  "generated_at_utc": "2026-05-29T19:29:50.488097+00:00",
+  "generated_at_utc": "2026-05-29T19:36:58.464636+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
