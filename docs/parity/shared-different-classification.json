@@ -486,6 +486,20 @@
       "ticket": 25
     },
     {
+      "path": "plugins/web/tavily/__init__.py",
+      "classification": "intentional_divergence",
+      "rationale": "Tavily search, extract, and crawl are covered by Rust-native web backends and the built-in web_crawl tool; this legacy upstream Python package is reference-only and is not used by the Rust-only runtime.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "plugins/web/tavily/provider.py",
+      "classification": "intentional_divergence",
+      "rationale": "Tavily search, extract, and crawl are covered by Rust-native web backends, including /crawl Bearer auth plus body api_key and standard document/error normalization; this legacy upstream Python provider is reference-only and is not used by the Rust-only runtime.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "plugins/web/xai/provider.py",
       "classification": "intentional_divergence",
       "rationale": "Rust-native xAI web search now routes through the Responses API server-side web_search tool with deterministic result normalization; the Python plugin remains reference/compatibility code.",

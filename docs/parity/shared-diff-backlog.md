@@ -1,22 +1,22 @@
 # Shared-Different Backlog
 
-Generated: `2026-05-29T21:47:08.622038+00:00`
+Generated: `2026-05-29T22:07:59.279032+00:00`
 
 ## Summary
 
 - Total shared-different paths: `1017`
 - Pending classification: `0`
-- Pending functional review: `766`
+- Pending functional review: `764`
 - Cleared non-runtime: `169`
-- Cleared intentional divergence: `82`
+- Cleared intentional divergence: `84`
 
 ## Status Counts
 
 | Status | Count |
 | --- | ---: |
-| `cleared_intentional_divergence` | 82 |
+| `cleared_intentional_divergence` | 84 |
 | `cleared_non_runtime` | 169 |
-| `pending_review` | 766 |
+| `pending_review` | 764 |
 
 ## Workstream Counts
 
@@ -56,7 +56,6 @@ Generated: `2026-05-29T21:47:08.622038+00:00`
 | `tests/tui_gateway` | 4 |
 | `tests/integration` | 3 |
 | `ui-tui` | 3 |
-| `plugins/web` | 2 |
 | `tests/e2e` | 2 |
 | `plugins/model-providers` | 1 |
 | `plugins/spotify/tools.py` | 1 |

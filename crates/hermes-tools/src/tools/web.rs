@@ -1,4 +1,4 @@
-//! Web tools: web_search (Exa/Tavily/SearXNG) and web_extract (Firecrawl)
+//! Web tools: web_search, web_extract, and web_crawl.
 
 use async_trait::async_trait;
 use indexmap::IndexMap;
@@ -27,6 +27,19 @@ pub trait WebSearchBackend: Send + Sync {
 pub trait WebExtractBackend: Send + Sync {
     /// Extract content from a URL and return results as a string.
     async fn extract(&self, url: &str, include_links: bool) -> Result<String, ToolError>;
+}
+
+/// Backend for web crawl operations.
+#[async_trait]
+pub trait WebCrawlBackend: Send + Sync {
+    /// Crawl a seed URL and return results as a JSON string.
+    async fn crawl(
+        &self,
+        url: &str,
+        instructions: Option<&str>,
+        depth: &str,
+        limit: usize,
+    ) -> Result<String, ToolError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -89,6 +102,81 @@ impl ToolHandler for WebSearchHandler {
             "web_search",
             "Search the web using the configured provider (Exa/Tavily/SearXNG). Returns relevant results with titles, URLs, and snippets.",
             JsonSchema::object(props, vec!["query".into()]),
+        )
+    }
+}
+
+// ---------------------------------------------------------------------------
+// WebCrawlHandler
+// ---------------------------------------------------------------------------
+
+/// Web crawl tool using the configured backend.
+pub struct WebCrawlHandler {
+    backend: Box<dyn WebCrawlBackend>,
+}
+
+impl WebCrawlHandler {
+    pub fn new(backend: Box<dyn WebCrawlBackend>) -> Self {
+        Self { backend }
+    }
+}
+
+#[async_trait]
+impl ToolHandler for WebCrawlHandler {
+    async fn execute(&self, params: Value) -> Result<String, ToolError> {
+        let url = params
+            .get("url")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| ToolError::InvalidParams("Missing 'url' parameter".into()))?;
+
+        let instructions = params.get("instructions").and_then(|v| v.as_str());
+        let depth = params
+            .get("depth")
+            .and_then(|v| v.as_str())
+            .unwrap_or("basic");
+        let limit = params.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as usize;
+
+        self.backend.crawl(url, instructions, depth, limit).await
+    }
+
+    fn schema(&self) -> ToolSchema {
+        let mut props = IndexMap::new();
+        props.insert(
+            "url".into(),
+            json!({
+                "type": "string",
+                "description": "The seed URL to crawl"
+            }),
+        );
+        props.insert(
+            "instructions".into(),
+            json!({
+                "type": "string",
+                "description": "Optional natural-language crawl guidance"
+            }),
+        );
+        props.insert(
+            "depth".into(),
+            json!({
+                "type": "string",
+                "description": "Extraction depth for providers that support it",
+                "enum": ["basic", "advanced"],
+                "default": "basic"
+            }),
+        );
+        props.insert(
+            "limit".into(),
+            json!({
+                "type": "integer",
+                "description": "Maximum number of pages to crawl (default: 20)",
+                "default": 20
+            }),
+        );
+
+        tool_schema(
+            "web_crawl",
+            "Crawl a seed URL using the configured provider. Returns normalized page documents and per-page errors.",
+            JsonSchema::object(props, vec!["url".into()]),
         )
     }
 }
@@ -175,6 +263,26 @@ mod tests {
         }
     }
 
+    struct MockCrawlBackend;
+    #[async_trait]
+    impl WebCrawlBackend for MockCrawlBackend {
+        async fn crawl(
+            &self,
+            url: &str,
+            instructions: Option<&str>,
+            depth: &str,
+            limit: usize,
+        ) -> Result<String, ToolError> {
+            Ok(format!(
+                "Crawl {} depth={} limit={} instructions={}",
+                url,
+                depth,
+                limit,
+                instructions.unwrap_or("")
+            ))
+        }
+    }
+
     #[tokio::test]
     async fn test_web_search_schema() {
         let handler = WebSearchHandler::new(Box::new(MockSearchBackend));
@@ -208,6 +316,37 @@ mod tests {
             .await
             .unwrap();
         assert!(result.contains("example.com"));
+    }
+
+    #[tokio::test]
+    async fn test_web_crawl_schema() {
+        let handler = WebCrawlHandler::new(Box::new(MockCrawlBackend));
+        let schema = handler.schema();
+        assert_eq!(schema.name, "web_crawl");
+    }
+
+    #[tokio::test]
+    async fn test_web_crawl_execute() {
+        let handler = WebCrawlHandler::new(Box::new(MockCrawlBackend));
+        let result = handler
+            .execute(json!({
+                "url": "https://example.com",
+                "instructions": "docs only",
+                "depth": "advanced",
+                "limit": 7
+            }))
+            .await
+            .unwrap();
+        assert!(result.contains("https://example.com"));
+        assert!(result.contains("depth=advanced"));
+        assert!(result.contains("limit=7"));
+    }
+
+    #[tokio::test]
+    async fn test_web_crawl_missing_params() {
+        let handler = WebCrawlHandler::new(Box::new(MockCrawlBackend));
+        let result = handler.execute(json!({})).await;
+        assert!(result.is_err());
     }
 
     #[tokio::test]

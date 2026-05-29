@@ -86,7 +86,10 @@ pub use tools::url_safety::UrlSafetyHandler;
 pub use tools::video::{VideoAnalyzeHandler, VideoBackend};
 pub use tools::vision::{VisionAnalyzeHandler, VisionBackend};
 pub use tools::voice_mode::VoiceModeHandler;
-pub use tools::web::{WebExtractBackend, WebExtractHandler, WebSearchBackend, WebSearchHandler};
+pub use tools::web::{
+    WebCrawlBackend, WebCrawlHandler, WebExtractBackend, WebExtractHandler, WebSearchBackend,
+    WebSearchHandler,
+};
 
 // Re-export real backend implementations
 pub use backends::browser::{
@@ -108,9 +111,10 @@ pub use backends::tts::MultiTtsBackend;
 pub use backends::video::VisionFrameSamplingVideoBackend;
 pub use backends::vision::OpenAiVisionBackend;
 pub use backends::web::{
-    extract_backend_from_env_or_fallback, search_backend_from_env_or_fallback, ExaSearchBackend,
+    crawl_backend_from_env_or_fallback, extract_backend_from_env_or_fallback,
+    search_backend_from_env_or_fallback, ExaSearchBackend, FallbackCrawlBackend,
     FallbackSearchBackend, FirecrawlExtractBackend, FirecrawlSearchBackend, SimpleExtractBackend,
-    TavilyExtractBackend, TavilySearchBackend, XaiWebSearchBackend,
+    TavilyCrawlBackend, TavilyExtractBackend, TavilySearchBackend, XaiWebSearchBackend,
 };
 
 // Re-export builtin registration helper

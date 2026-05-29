@@ -67,6 +67,15 @@ pub fn register_builtin_tools(
         "📄",
         vec![],
     );
+    reg(
+        registry,
+        "web",
+        Arc::new(crate::tools::web::WebCrawlHandler::new(
+            crate::backends::web::crawl_backend_from_env_or_fallback(),
+        )),
+        "🕸️",
+        vec![],
+    );
 
     // -- Terminal ------------------------------------------------------------
     reg(

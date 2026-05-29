@@ -1,11 +1,11 @@
 //! Real web tool backends: Exa/Tavily/Firecrawl/xAI/SearXNG search,
-//! Firecrawl/Tavily extract, and local fallbacks.
+//! Firecrawl/Tavily extract, Tavily crawl, and local fallbacks.
 
 use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::{json, Value};
 
-use crate::tools::web::{WebExtractBackend, WebSearchBackend};
+use crate::tools::web::{WebCrawlBackend, WebExtractBackend, WebSearchBackend};
 use hermes_config::managed_gateway::{
     resolve_managed_tool_gateway, ManagedToolGatewayConfig, ResolveOptions,
 };
@@ -52,6 +52,45 @@ impl WebSearchBackend for FallbackSearchBackend {
             ),
             "query": query,
         }).to_string())
+    }
+}
+
+/// A crawl backend that returns a helpful message when no crawl provider is configured.
+pub struct FallbackCrawlBackend;
+
+impl FallbackCrawlBackend {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for FallbackCrawlBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl WebCrawlBackend for FallbackCrawlBackend {
+    async fn crawl(
+        &self,
+        url: &str,
+        _instructions: Option<&str>,
+        _depth: &str,
+        _limit: usize,
+    ) -> Result<String, ToolError> {
+        Ok(json!({
+            "success": false,
+            "error": "no_api_key",
+            "message": "Web crawl is not configured. To enable Tavily crawl, set TAVILY_API_KEY.",
+            "results": [{
+                "url": url,
+                "title": "",
+                "content": "",
+                "error": "TAVILY_API_KEY environment variable not set"
+            }]
+        })
+        .to_string())
     }
 }
 
@@ -369,16 +408,7 @@ impl WebSearchBackend for TavilySearchBackend {
             "news" => "news",
             _ => "general",
         };
-        let body = json!({
-            "api_key": self.api_key,
-            "query": query,
-            "max_results": num_results,
-            "topic": topic,
-            "search_depth": "basic",
-            "include_answer": false,
-            "include_images": false,
-            "include_raw_content": false,
-        });
+        let body = tavily_search_payload(&self.api_key, query, num_results, topic);
 
         let endpoint = format!("{}/search", self.base_url);
         let resp = self
@@ -429,6 +459,19 @@ impl WebSearchBackend for TavilySearchBackend {
         serde_json::to_string_pretty(&json!({ "results": formatted }))
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {}", e)))
     }
+}
+
+fn tavily_search_payload(api_key: &str, query: &str, num_results: usize, topic: &str) -> Value {
+    json!({
+        "api_key": api_key,
+        "query": query,
+        "max_results": num_results.min(20),
+        "topic": topic,
+        "search_depth": "basic",
+        "include_answer": false,
+        "include_images": false,
+        "include_raw_content": false,
+    })
 }
 
 /// Real Tavily API extract backend using `/extract`.
@@ -525,6 +568,115 @@ impl WebExtractBackend for TavilyExtractBackend {
     }
 }
 
+/// Real Tavily API crawl backend using `/crawl`.
+pub struct TavilyCrawlBackend {
+    client: Client,
+    api_key: String,
+    base_url: String,
+}
+
+impl TavilyCrawlBackend {
+    pub fn new(api_key: String, base_url: String) -> Self {
+        let normalized_base = base_url.trim().trim_end_matches('/').to_string();
+        let base_url = if normalized_base.is_empty() {
+            TAVILY_BASE_URL_DEFAULT.to_string()
+        } else {
+            normalized_base
+        };
+        Self {
+            client: Client::new(),
+            api_key,
+            base_url,
+        }
+    }
+
+    pub fn from_env() -> Result<Self, ToolError> {
+        let api_key = std::env::var("TAVILY_API_KEY").map_err(|_| {
+            ToolError::ExecutionFailed("TAVILY_API_KEY environment variable not set".into())
+        })?;
+        let api_key = api_key.trim();
+        if api_key.is_empty() {
+            return Err(ToolError::ExecutionFailed(
+                "TAVILY_API_KEY environment variable is empty".into(),
+            ));
+        }
+        let base_url = std::env::var("TAVILY_BASE_URL")
+            .unwrap_or_else(|_| TAVILY_BASE_URL_DEFAULT.to_string());
+        Ok(Self::new(api_key.to_string(), base_url))
+    }
+
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+}
+
+#[async_trait]
+impl WebCrawlBackend for TavilyCrawlBackend {
+    async fn crawl(
+        &self,
+        url: &str,
+        instructions: Option<&str>,
+        depth: &str,
+        limit: usize,
+    ) -> Result<String, ToolError> {
+        let body = tavily_crawl_payload(&self.api_key, url, instructions, depth, limit);
+        let resp = self
+            .client
+            .post(format!("{}/crawl", self.base_url))
+            .bearer_auth(&self.api_key)
+            .header("Content-Type", "application/json")
+            .timeout(std::time::Duration::from_secs(60))
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| {
+                ToolError::ExecutionFailed(format!("Tavily crawl request failed: {}", e))
+            })?;
+
+        let status = resp.status();
+        let text = resp.text().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to read Tavily crawl response: {}", e))
+        })?;
+
+        if !status.is_success() {
+            return Err(ToolError::ExecutionFailed(format!(
+                "Tavily crawl API error ({}): {}",
+                status, text
+            )));
+        }
+
+        let data: Value = serde_json::from_str(&text).map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to parse Tavily crawl response: {}", e))
+        })?;
+        let result = json!({
+            "url": url,
+            "results": normalize_tavily_documents(&data, url),
+            "provider": "tavily",
+        });
+        serde_json::to_string_pretty(&result)
+            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize result: {}", e)))
+    }
+}
+
+fn tavily_crawl_payload(
+    api_key: &str,
+    url: &str,
+    instructions: Option<&str>,
+    depth: &str,
+    limit: usize,
+) -> Value {
+    let mut payload = json!({
+        "api_key": api_key,
+        "url": url,
+        "limit": limit,
+        "extract_depth": if depth.trim().is_empty() { "basic" } else { depth.trim() },
+    });
+    if let Some(instructions) = instructions.map(str::trim).filter(|v| !v.is_empty()) {
+        payload["instructions"] = json!(instructions);
+    }
+    payload
+}
+
 fn normalize_tavily_documents(response: &Value, fallback_url: &str) -> Vec<Value> {
     let mut documents = Vec::new();
     if let Some(results) = response.get("results").and_then(|v| v.as_array()) {
@@ -570,9 +722,12 @@ fn normalize_tavily_documents(response: &Value, fallback_url: &str) -> Vec<Value
     }
     if let Some(failed_urls) = response.get("failed_urls").and_then(|v| v.as_array()) {
         for failure in failed_urls {
-            let url = failure.as_str().unwrap_or(fallback_url);
+            let url = failure
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| failure.to_string());
             documents.push(json!({
-                "url": url,
+                "url": &url,
                 "title": "",
                 "content": "",
                 "raw_content": "",
@@ -779,6 +934,37 @@ fn extract_backend_choice_from_env() -> &'static str {
         "tavily"
     } else {
         "simple"
+    }
+}
+
+/// Resolve preferred web-crawl backend from environment.
+///
+/// Priority:
+/// 1. Explicit `HERMES_WEB_CRAWL_BACKEND` override: `tavily`, `fallback`
+/// 2. Tavily when configured
+/// 3. Fallback helpful message backend
+pub fn crawl_backend_from_env_or_fallback() -> Box<dyn WebCrawlBackend> {
+    match crawl_backend_choice_from_env() {
+        "tavily" => TavilyCrawlBackend::from_env()
+            .map(|b| Box::new(b) as Box<dyn WebCrawlBackend>)
+            .unwrap_or_else(|_| Box::new(FallbackCrawlBackend::new())),
+        _ => Box::new(FallbackCrawlBackend::new()),
+    }
+}
+
+fn crawl_backend_choice_from_env() -> &'static str {
+    if let Ok(choice) = std::env::var("HERMES_WEB_CRAWL_BACKEND") {
+        match choice.trim().to_ascii_lowercase().as_str() {
+            "tavily" => return "tavily",
+            "fallback" | "none" | "off" | "disabled" => return "fallback",
+            _ => {}
+        }
+    }
+
+    if env_present_nonempty("TAVILY_API_KEY") {
+        "tavily"
+    } else {
+        "fallback"
     }
 }
 
@@ -1506,6 +1692,7 @@ mod web_search_env_tests {
                 "XAI_BASE_URL",
                 "HERMES_WEB_SEARCH_BACKEND",
                 "HERMES_WEB_EXTRACT_BACKEND",
+                "HERMES_WEB_CRAWL_BACKEND",
                 "HERMES_WEB_XAI_MODEL",
                 "HERMES_WEB_XAI_ALLOWED_DOMAINS",
                 "HERMES_WEB_XAI_EXCLUDED_DOMAINS",
@@ -1545,6 +1732,23 @@ mod web_search_env_tests {
         std::env::set_var("TAVILY_BASE_URL", "https://proxy.example.com/tavily/");
         let backend = TavilySearchBackend::from_env().expect("tavily backend from env");
         assert_eq!(backend.base_url(), "https://proxy.example.com/tavily");
+    }
+
+    #[test]
+    fn tavily_search_payload_caps_max_results_at_provider_limit() {
+        assert_eq!(
+            tavily_search_payload("key", "rust", 50, "general"),
+            json!({
+                "api_key": "key",
+                "query": "rust",
+                "max_results": 20,
+                "topic": "general",
+                "search_depth": "basic",
+                "include_answer": false,
+                "include_images": false,
+                "include_raw_content": false,
+            })
+        );
     }
 
     #[test]
@@ -1623,19 +1827,50 @@ mod web_search_env_tests {
     }
 
     #[test]
+    fn crawl_backend_choice_uses_tavily_when_configured() {
+        let _scope = EnvScope::new();
+        assert_eq!(crawl_backend_choice_from_env(), "fallback");
+        std::env::set_var("TAVILY_API_KEY", "tavily-key");
+        assert_eq!(crawl_backend_choice_from_env(), "tavily");
+        std::env::set_var("HERMES_WEB_CRAWL_BACKEND", "fallback");
+        assert_eq!(crawl_backend_choice_from_env(), "fallback");
+    }
+
+    #[test]
+    fn tavily_crawl_payload_includes_body_auth_and_options() {
+        assert_eq!(
+            tavily_crawl_payload(
+                "key",
+                "https://seed.example",
+                Some(" docs only "),
+                "advanced",
+                12
+            ),
+            json!({
+                "api_key": "key",
+                "url": "https://seed.example",
+                "limit": 12,
+                "extract_depth": "advanced",
+                "instructions": "docs only",
+            })
+        );
+    }
+
+    #[test]
     fn normalize_tavily_documents_maps_results_and_failures() {
         let docs = normalize_tavily_documents(
             &json!({
                 "results": [{"url": "https://ok.example", "title": "OK", "raw_content": "body"}],
                 "failed_results": [{"url": "https://bad.example", "error": "blocked"}],
-                "failed_urls": ["https://missing.example"]
+                "failed_urls": ["https://missing.example", 42]
             }),
             "https://fallback.example",
         );
-        assert_eq!(docs.len(), 3);
+        assert_eq!(docs.len(), 4);
         assert_eq!(docs[0]["content"], "body");
         assert_eq!(docs[1]["error"], "blocked");
         assert_eq!(docs[2]["url"], "https://missing.example");
+        assert_eq!(docs[3]["url"], "42");
     }
 
     #[test]
