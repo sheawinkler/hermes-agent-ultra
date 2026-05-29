@@ -20951,7 +20951,6 @@ pub async fn handle_cli_skills(
 enum PluginSurfaceSource {
     User,
     Project,
-    Entrypoint,
 }
 
 impl PluginSurfaceSource {
@@ -20959,7 +20958,6 @@ impl PluginSurfaceSource {
         match self {
             PluginSurfaceSource::User => "user",
             PluginSurfaceSource::Project => "project",
-            PluginSurfaceSource::Entrypoint => "entrypoint",
         }
     }
 }
@@ -20973,35 +20971,6 @@ struct PluginSurfaceEntry {
     source: PluginSurfaceSource,
     path: Option<PathBuf>,
     enabled: bool,
-    entrypoint_value: Option<String>,
-    entrypoint_dist: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PythonEntrypointPayload {
-    #[serde(default)]
-    entries: Vec<PythonEntrypointItem>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PythonEntrypointItem {
-    name: String,
-    value: String,
-    #[serde(default)]
-    dist: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct PythonPluginCommandPayload {
-    #[serde(default)]
-    commands: Vec<PythonPluginCommandItem>,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-struct PythonPluginCommandItem {
-    name: String,
-    #[serde(default)]
-    help: String,
 }
 
 fn coerce_memory_provider_kind(path: &Path, kind: Option<String>) -> Option<String> {
@@ -21063,80 +21032,12 @@ fn scan_plugin_manifest_root(root: &Path, source: PluginSurfaceSource) -> Vec<Pl
             source,
             path: Some(path),
             enabled: !disabled_marker.exists(),
-            entrypoint_value: None,
-            entrypoint_dist: None,
         });
     }
     out
 }
 
-fn discover_python_entrypoint_plugins() -> Vec<PluginSurfaceEntry> {
-    let script = r#"
-import json
-from importlib import metadata
-
-def _entry_points():
-    eps = metadata.entry_points()
-    if hasattr(eps, "select"):
-        return list(eps.select(group="hermes_agent.plugins"))
-    if isinstance(eps, dict):
-        return list(eps.get("hermes_agent.plugins", []))
-    return [ep for ep in eps if getattr(ep, "group", "") == "hermes_agent.plugins"]
-
-rows = []
-try:
-    for ep in _entry_points():
-        dist = None
-        try:
-            if getattr(ep, "dist", None):
-                dist = ep.dist.name
-        except Exception:
-            dist = None
-        rows.append({
-            "name": str(getattr(ep, "name", "") or ""),
-            "value": str(getattr(ep, "value", "") or ""),
-            "dist": dist,
-        })
-except Exception:
-    rows = []
-print(json.dumps({"entries": rows}))
-"#;
-
-    let output = std::process::Command::new("python3")
-        .args(["-c", script])
-        .output();
-    let Ok(output) = output else {
-        return Vec::new();
-    };
-    if !output.status.success() {
-        return Vec::new();
-    }
-    let payload: PythonEntrypointPayload = match serde_json::from_slice(&output.stdout) {
-        Ok(payload) => payload,
-        Err(_) => return Vec::new(),
-    };
-    let mut out = Vec::new();
-    for item in payload.entries {
-        let name = item.name.trim().to_string();
-        if name.is_empty() {
-            continue;
-        }
-        out.push(PluginSurfaceEntry {
-            name,
-            version: "entrypoint".to_string(),
-            description: String::new(),
-            kind: None,
-            source: PluginSurfaceSource::Entrypoint,
-            path: None,
-            enabled: true,
-            entrypoint_value: Some(item.value),
-            entrypoint_dist: item.dist,
-        });
-    }
-    out
-}
-
-fn discover_plugin_surface(include_entrypoints: bool) -> Vec<PluginSurfaceEntry> {
+fn discover_plugin_surface(_include_entrypoints: bool) -> Vec<PluginSurfaceEntry> {
     let mut rows = Vec::new();
     let user_root = hermes_config::hermes_home().join("plugins");
     rows.extend(scan_plugin_manifest_root(
@@ -21152,10 +21053,6 @@ fn discover_plugin_surface(include_entrypoints: bool) -> Vec<PluginSurfaceEntry>
                 PluginSurfaceSource::Project,
             ));
         }
-    }
-
-    if include_entrypoints {
-        rows.extend(discover_python_entrypoint_plugins());
     }
 
     rows.sort_by(|a, b| {
@@ -21191,20 +21088,6 @@ fn render_plugin_surface_table(rows: &[PluginSurfaceEntry]) -> String {
         let mut meta_parts = vec![format!("source={}", row.source.label())];
         if let Some(kind) = row.kind.as_deref().filter(|k| !k.trim().is_empty()) {
             meta_parts.push(format!("kind={}", kind));
-        }
-        if let Some(dist) = row
-            .entrypoint_dist
-            .as_deref()
-            .filter(|d| !d.trim().is_empty())
-        {
-            meta_parts.push(format!("dist={}", dist));
-        }
-        if let Some(value) = row
-            .entrypoint_value
-            .as_deref()
-            .filter(|v| !v.trim().is_empty())
-        {
-            meta_parts.push(format!("entry={}", value));
         }
         let path = row
             .path
@@ -21385,41 +21268,6 @@ fn run_plugins_interactive_toggle() -> Result<(), AgentError> {
     Ok(())
 }
 
-fn discover_python_plugin_cli_commands() -> Vec<PythonPluginCommandItem> {
-    let script = r#"
-import json
-rows = []
-try:
-    from plugins.memory import discover_plugin_cli_commands
-    for cmd in (discover_plugin_cli_commands() or []):
-        name = str(cmd.get("name", "") or "").strip()
-        if not name:
-            continue
-        help_text = str(cmd.get("help") or cmd.get("description") or "")
-        rows.append({"name": name, "help": help_text})
-except Exception:
-    rows = []
-print(json.dumps({"commands": rows}))
-"#;
-    let output = std::process::Command::new("python3")
-        .args(["-c", script])
-        .output();
-    let Ok(output) = output else {
-        return Vec::new();
-    };
-    if !output.status.success() {
-        return Vec::new();
-    }
-    let payload: PythonPluginCommandPayload = match serde_json::from_slice(&output.stdout) {
-        Ok(payload) => payload,
-        Err(_) => return Vec::new(),
-    };
-    let mut rows = payload.commands;
-    rows.sort_by(|a, b| a.name.cmp(&b.name));
-    rows.dedup_by(|a, b| a.name == b.name);
-    rows
-}
-
 pub async fn handle_cli_external_plugin_subcommand(raw: Vec<String>) -> Result<(), AgentError> {
     if raw.is_empty() {
         return Err(AgentError::Config(
@@ -21427,85 +21275,10 @@ pub async fn handle_cli_external_plugin_subcommand(raw: Vec<String>) -> Result<(
         ));
     }
     let command_name = raw[0].trim().to_string();
-    let command_args: Vec<String> = raw[1..].to_vec();
-    let available = discover_python_plugin_cli_commands();
-    if !available.iter().any(|row| row.name == command_name) {
-        let catalog = if available.is_empty() {
-            "none discovered".to_string()
-        } else {
-            available
-                .iter()
-                .map(|row| {
-                    if row.help.trim().is_empty() {
-                        format!("  - {}", row.name)
-                    } else {
-                        format!("  - {}: {}", row.name, row.help.trim())
-                    }
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        };
-        return Err(AgentError::Config(format!(
-            "Unknown command '{}'. Run `hermes --help` for core commands.\nDiscovered plugin commands:\n{}",
-            command_name, catalog
-        )));
-    }
-
-    let args_json = serde_json::to_string(&command_args)
-        .map_err(|e| AgentError::Config(format!("Failed to serialize plugin CLI args: {}", e)))?;
-    let script = r#"
-import argparse
-import json
-import sys
-
-try:
-    from plugins.memory import discover_plugin_cli_commands
-except Exception as exc:
-    print(f"Plugin CLI bridge unavailable: {exc}", file=sys.stderr)
-    sys.exit(2)
-
-name = sys.argv[1]
-argv = json.loads(sys.argv[2])
-
-for item in (discover_plugin_cli_commands() or []):
-    if str(item.get("name", "")).strip() != name:
-        continue
-    setup = item.get("setup_fn")
-    if not callable(setup):
-        print(f"Plugin command '{name}' is missing setup_fn", file=sys.stderr)
-        sys.exit(2)
-    parser = argparse.ArgumentParser(prog=name)
-    setup(parser)
-    ns = parser.parse_args(argv)
-    handler = item.get("handler_fn")
-    if callable(handler):
-        handler(ns)
-        sys.exit(0)
-    if hasattr(ns, "func") and callable(getattr(ns, "func")):
-        ns.func(ns)
-        sys.exit(0)
-    parser.print_help()
-    sys.exit(0)
-
-print(f"Unknown plugin command: {name}", file=sys.stderr)
-sys.exit(3)
-"#;
-
-    let output = tokio::process::Command::new("python3")
-        .args(["-c", script, &command_name, &args_json])
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .status()
-        .await
-        .map_err(|e| AgentError::Io(format!("Failed to execute plugin command: {}", e)))?;
-    if !output.success() {
-        return Err(AgentError::Config(format!(
-            "Plugin command '{}' failed with exit code {:?}.",
-            command_name,
-            output.code()
-        )));
-    }
-    Ok(())
+    Err(AgentError::Config(format!(
+        "Unknown command '{}'. Run `hermes --help` for Rust-native commands. Python plugin command dispatch is disabled in Hermes Agent Ultra's Rust-only runtime.",
+        command_name
+    )))
 }
 
 // ---------------------------------------------------------------------------
@@ -22225,20 +21998,6 @@ pub async fn handle_cli_plugins(
                 }
                 if let Some(path) = row.path.as_deref() {
                     println!("Path: {}", path.display());
-                }
-                if let Some(value) = row
-                    .entrypoint_value
-                    .as_deref()
-                    .filter(|v| !v.trim().is_empty())
-                {
-                    println!("Entrypoint: {}", value);
-                }
-                if let Some(dist) = row
-                    .entrypoint_dist
-                    .as_deref()
-                    .filter(|d| !d.trim().is_empty())
-                {
-                    println!("Distribution: {}", dist);
                 }
                 if !row.description.trim().is_empty() {
                     println!("Description: {}", row.description.trim());
@@ -24673,6 +24432,16 @@ mod tests {
             .find(|row| row.message.role == hermes_core::MessageRole::Assistant)
             .and_then(|row| row.message.content.clone())
             .unwrap_or_default()
+    }
+
+    #[tokio::test]
+    async fn external_plugin_command_rejects_python_dispatch() {
+        let err = handle_cli_external_plugin_subcommand(vec!["honcho".to_string()])
+            .await
+            .expect_err("external plugin commands should be rejected");
+        assert!(err
+            .to_string()
+            .contains("Python plugin command dispatch is disabled"));
     }
 
     #[test]

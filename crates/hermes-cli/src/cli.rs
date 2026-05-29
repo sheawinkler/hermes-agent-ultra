@@ -667,10 +667,10 @@ pub enum CliCommand {
         model: Option<String>,
     },
 
-    /// Plugin-provided external command surface (dynamic dispatch).
+    /// Reserved external command surface.
     ///
-    /// Used to mirror upstream behavior where active plugins can contribute
-    /// top-level CLI commands (for example, memory-provider command shims).
+    /// Hermes Agent Ultra is Rust-only at runtime, so external Python plugin
+    /// command bridges are rejected instead of being executed dynamically.
     #[command(external_subcommand)]
     PluginExternal(Vec<String>),
 }
