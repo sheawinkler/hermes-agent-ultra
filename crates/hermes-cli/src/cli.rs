@@ -480,6 +480,68 @@ pub enum CliCommand {
         payload: Option<String>,
     },
 
+    /// Microsoft Teams meeting summary pipeline.
+    TeamsPipeline {
+        /// Action: list/show/run/fetch/subscriptions/subscribe/renew-subscription/delete-subscription/maintain-subscriptions/token-health/validate.
+        action: Option<String>,
+        /// Job id or subscription id, depending on action.
+        id: Option<String>,
+        /// List limit.
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
+        /// Filter jobs by status.
+        #[arg(long)]
+        status: Option<String>,
+        /// Override teams pipeline JSON store path.
+        #[arg(long)]
+        store_path: Option<String>,
+        /// Meeting id for fetch.
+        #[arg(long)]
+        meeting_id: Option<String>,
+        /// Join URL for fetch.
+        #[arg(long)]
+        join_web_url: Option<String>,
+        /// Tenant id for fetch/job creation.
+        #[arg(long)]
+        tenant_id: Option<String>,
+        /// Optional call record id for fetch.
+        #[arg(long)]
+        call_record_id: Option<String>,
+        /// Graph subscription resource for subscribe.
+        #[arg(long)]
+        resource: Option<String>,
+        /// Graph notification URL for subscribe.
+        #[arg(long)]
+        notification_url: Option<String>,
+        /// Graph change type for subscribe.
+        #[arg(long)]
+        change_type: Option<String>,
+        /// Graph subscription expiration timestamp.
+        #[arg(long)]
+        expiration: Option<String>,
+        /// Graph subscription clientState.
+        #[arg(long)]
+        client_state: Option<String>,
+        /// Graph lifecycle notification URL.
+        #[arg(long)]
+        lifecycle_notification_url: Option<String>,
+        /// Latest supported TLS version for Graph subscriptions.
+        #[arg(long, default_value = "v1_2")]
+        latest_supported_tls_version: String,
+        /// Force a fresh token for token-health.
+        #[arg(long)]
+        force_refresh: bool,
+        /// Renewal threshold for maintain-subscriptions.
+        #[arg(long, default_value_t = 24)]
+        renew_within_hours: u32,
+        /// Renewal extension for maintain-subscriptions.
+        #[arg(long, default_value_t = 24)]
+        extend_hours: u32,
+        /// Dry-run maintain-subscriptions.
+        #[arg(long)]
+        dry_run: bool,
+    },
+
     /// Start an interactive chat session.
     Chat {
         /// Single-shot query (non-interactive).

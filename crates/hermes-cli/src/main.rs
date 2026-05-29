@@ -759,6 +759,55 @@ async fn main() {
             )
             .await
         }
+        CliCommand::TeamsPipeline {
+            action,
+            id,
+            limit,
+            status,
+            store_path,
+            meeting_id,
+            join_web_url,
+            tenant_id,
+            call_record_id,
+            resource,
+            notification_url,
+            change_type,
+            expiration,
+            client_state,
+            lifecycle_notification_url,
+            latest_supported_tls_version,
+            force_refresh,
+            renew_within_hours,
+            extend_hours,
+            dry_run,
+        } => {
+            hermes_cli::teams_pipeline_cli::handle_cli_teams_pipeline(
+                hermes_cli::teams_pipeline_cli::TeamsPipelineCliOptions {
+                    config_dir: cli.config_dir.clone(),
+                    action,
+                    id,
+                    limit,
+                    status,
+                    store_path,
+                    meeting_id,
+                    join_web_url,
+                    tenant_id,
+                    call_record_id,
+                    resource,
+                    notification_url,
+                    change_type,
+                    expiration,
+                    client_state,
+                    lifecycle_notification_url,
+                    latest_supported_tls_version,
+                    force_refresh,
+                    renew_within_hours,
+                    extend_hours,
+                    dry_run,
+                },
+            )
+            .await
+        }
         CliCommand::Dump { session, output } => run_dump(cli, session, output).await,
         CliCommand::Completion { shell } => run_completion(shell),
         CliCommand::Uninstall { yes } => run_uninstall(yes).await,

@@ -1,25 +1,25 @@
 {
-  "generated_at_utc": "2026-05-29T23:10:12.599877+00:00",
+  "generated_at_utc": "2026-05-29T23:51:53.084285+00:00",
   "refs": {
     "local_ref": "HEAD",
-    "local_sha": "a3c95880eb2f9acb6c6757ab82e5a536c614a835",
+    "local_sha": "5d65c13120fb246128eb356e2e83b496c4f36232",
     "upstream_ref": "upstream/main",
     "upstream_sha": "689ef5e233980f5d5a32080e959f44c8991dd03a",
     "merge_base": null
   },
   "summary": {
     "commits_behind": 4399,
-    "commits_ahead": 791,
+    "commits_ahead": 793,
     "upstream_patch_missing": 4281,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 679,
+    "local_patch_unique": 680,
     "files_only_upstream": 1470,
-    "files_only_local": 563,
+    "files_only_local": 565,
     "files_shared_identical": 1702,
     "files_shared_different": 1017,
-    "tree_files_changed": 3050,
+    "tree_files_changed": 3052,
     "tree_insertions": 739593,
-    "tree_deletions": 376104
+    "tree_deletions": 377910
   },
   "top_upstream_only": [
     {
@@ -348,7 +348,7 @@
   "top_local_only": [
     {
       "path": "crates/hermes-tools",
-      "count": 76
+      "count": 78
     },
     {
       "path": "crates/hermes-agent",
@@ -672,7 +672,7 @@
   "top_unique_to_local": [
     {
       "path": "crates/hermes-tools",
-      "count": 76
+      "count": 78
     },
     {
       "path": "crates/hermes-agent",
@@ -868,7 +868,7 @@
       "name": "Tools and adapters parity",
       "upstream_only": 114,
       "shared_different": 53,
-      "local_only": 101,
+      "local_only": 103,
       "risk": "high",
       "effort": "L"
     },
@@ -906,7 +906,7 @@
   "commit_mapping": {
     "upstream_patch_missing": 4281,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 679,
+    "local_patch_unique": 680,
     "local_patch_equivalent_to_upstream": 1,
     "upstream_patch_missing_sample": [
       "99af222ecf56c0eed0d3eb82903a6bf33b6ff7d5",

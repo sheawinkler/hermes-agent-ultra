@@ -585,8 +585,8 @@
     },
     {
       "path": "plugins/teams_pipeline",
-      "classification": "functional",
-      "rationale": "Teams pipeline plugin differences affect platform integration behavior.",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra uses the Rust-native Teams pipeline runtime and CLI in crates/hermes-tools/src/teams_pipeline.rs and crates/hermes-cli/src/teams_pipeline_cli.rs; the Python plugin package is retained as upstream reference material only.",
       "owner": "sheawinkler",
       "ticket": 25
     },

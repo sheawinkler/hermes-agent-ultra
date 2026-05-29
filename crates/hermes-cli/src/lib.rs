@@ -36,6 +36,7 @@ pub mod setup;
 pub mod skills_config;
 pub mod skin_engine;
 pub mod systems;
+pub mod teams_pipeline_cli;
 pub mod terminal_backend;
 pub mod theme;
 pub mod tool_preview;

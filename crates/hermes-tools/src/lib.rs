@@ -15,6 +15,7 @@ pub mod dispatch;
 pub mod register_builtins;
 pub mod registry;
 pub mod rtk_filter;
+pub mod teams_pipeline;
 pub mod tool_policy;
 pub mod tools;
 pub mod toolset;
@@ -123,6 +124,19 @@ pub use backends::web::{
     search_backend_from_env_or_fallback, ExaSearchBackend, FallbackCrawlBackend,
     FallbackSearchBackend, FirecrawlExtractBackend, FirecrawlSearchBackend, SimpleExtractBackend,
     TavilyCrawlBackend, TavilyExtractBackend, TavilySearchBackend, XaiWebSearchBackend,
+};
+
+pub use teams_pipeline::{
+    build_summary_prompt, collect_call_metrics, collect_participants,
+    default_change_type_for_resource, expected_client_state, extract_meeting_id_from_resource,
+    heuristic_summary, maintain_graph_subscriptions, parse_summary_json, render_summary_markdown,
+    resolve_teams_pipeline_store_path, select_preferred_transcript, sync_graph_subscription_record,
+    GraphSubscription, HeuristicTeamsSummarizer, MeetingArtifact, MicrosoftGraphClient,
+    MicrosoftGraphTeamsBackend, MicrosoftGraphTokenProvider, SummaryParts, TeamsGraphBackend,
+    TeamsMeetingPipeline, TeamsMeetingPipelineJob, TeamsMeetingRef, TeamsMeetingSummaryPayload,
+    TeamsPipelineConfig, TeamsPipelineError, TeamsPipelineResult, TeamsPipelineStore,
+    TeamsSinkKind, TeamsSinkWriter, TeamsSummarizer, TeamsTranscriber,
+    TranscriptionToolTeamsTranscriber, DEFAULT_TEAMS_PIPELINE_STORE_FILENAME,
 };
 
 // Re-export builtin registration helper
