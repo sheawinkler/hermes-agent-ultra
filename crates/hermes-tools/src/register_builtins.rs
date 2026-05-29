@@ -373,7 +373,7 @@ pub fn register_builtin_tools(
     // -- Browser (10 tools) --------------------------------------------------
     {
         let browser_backend: Arc<dyn crate::tools::browser::BrowserBackend> =
-            Arc::new(crate::backends::browser::CdpBrowserBackend::from_env());
+            crate::backends::browser::browser_backend_from_env();
         reg(
             registry,
             "browser",

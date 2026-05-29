@@ -774,8 +774,8 @@
     },
     {
       "path": "plugins/browser/browserbase/provider.py",
-      "classification": "functional",
-      "rationale": "Browserbase provider differences affect the Python browser compatibility adapter; this batch aligns the timeout contract with the current seconds-based upstream setting.",
+      "classification": "intentional_divergence",
+      "rationale": "Browserbase runtime behavior is now covered by the Rust-native browser backend, including direct env config, seconds timeout, keepAlive/proxies/advanced-stealth feature knobs, 402 fallbacks, and session release; the Python plugin remains reference-only compatibility material.",
       "owner": "sheawinkler",
       "ticket": 25
     },
