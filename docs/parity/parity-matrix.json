@@ -1,25 +1,25 @@
 {
-  "generated_at_utc": "2026-05-29T19:41:07.849824+00:00",
+  "generated_at_utc": "2026-05-29T19:55:29.103698+00:00",
   "refs": {
-    "local_ref": "main",
-    "local_sha": "2b018308b4821ee1e39c3273309136d8c2aa52ff",
+    "local_ref": "HEAD",
+    "local_sha": "d48f4bab48a69f776ba0062b610904de89a8b15b",
     "upstream_ref": "upstream/main",
     "upstream_sha": "38c4f8c3717518e81bc64765ab80f3192f6a113a",
     "merge_base": null
   },
   "summary": {
     "commits_behind": 4385,
-    "commits_ahead": 773,
+    "commits_ahead": 775,
     "upstream_patch_missing": 4267,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 668,
+    "local_patch_unique": 670,
     "files_only_upstream": 1470,
     "files_only_local": 560,
-    "files_shared_identical": 1701,
-    "files_shared_different": 1018,
-    "tree_files_changed": 3048,
-    "tree_insertions": 738631,
-    "tree_deletions": 370590
+    "files_shared_identical": 1702,
+    "files_shared_different": 1017,
+    "tree_files_changed": 3047,
+    "tree_insertions": 738629,
+    "tree_deletions": 370787
   },
   "top_upstream_only": [
     {
@@ -253,12 +253,12 @@
       "count": 7
     },
     {
-      "path": "plugins/model-providers",
+      "path": "tests/skills",
       "count": 6
     },
     {
-      "path": "tests/skills",
-      "count": 6
+      "path": "plugins/model-providers",
+      "count": 5
     },
     {
       "path": "plugins/teams_pipeline",
@@ -867,7 +867,7 @@
       "issue": 7,
       "name": "Tools and adapters parity",
       "upstream_only": 114,
-      "shared_different": 55,
+      "shared_different": 54,
       "local_only": 99,
       "risk": "high",
       "effort": "L"
@@ -906,7 +906,7 @@
   "commit_mapping": {
     "upstream_patch_missing": 4267,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 668,
+    "local_patch_unique": 670,
     "local_patch_equivalent_to_upstream": 1,
     "upstream_patch_missing_sample": [
       "99af222ecf56c0eed0d3eb82903a6bf33b6ff7d5",

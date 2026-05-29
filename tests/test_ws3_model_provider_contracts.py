@@ -120,6 +120,30 @@ def test_xiaomi_disables_dedicated_health_check() -> None:
     assert profile.supports_health_check is False
 
 
+def test_openrouter_session_id_sticky_routing_matches_upstream_contract() -> None:
+    _module, registered = _load_provider(
+        "plugins/model-providers/openrouter/__init__.py",
+        "_ws3_openrouter_provider",
+    )
+    (profile,) = registered
+
+    body = profile.build_extra_body(session_id="sess-abc123")
+    assert body == {"session_id": "sess-abc123"}
+
+    body = profile.build_extra_body(
+        session_id="sess-abc123",
+        provider_preferences={"allow": ["anthropic"]},
+    )
+    assert body["session_id"] == "sess-abc123"
+    assert body["provider"] == {"allow": ["anthropic"]}
+
+    _extra_body, top_level = profile.build_api_kwargs_extras(
+        model="x-ai/grok-4",
+        session_id="sess-abc123",
+    )
+    assert top_level["extra_headers"]["x-grok-conv-id"] == "sess-abc123"
+
+
 def test_local_model_provider_deltas_remain_exact_and_documented() -> None:
     azure_profile = _read("plugins/model-providers/azure-foundry/__init__.py")
     azure_manifest = _read("plugins/model-providers/azure-foundry/plugin.yaml")

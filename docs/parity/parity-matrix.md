@@ -1,10 +1,10 @@
 # Parity Matrix
 
-Generated: `2026-05-29T19:41:07.849824+00:00`
+Generated: `2026-05-29T19:55:29.103698+00:00`
 
 ## Scope
 
-- Local ref: `main` (`2b018308b4821ee1e39c3273309136d8c2aa52ff`)
+- Local ref: `HEAD` (`d48f4bab48a69f776ba0062b610904de89a8b15b`)
 - Upstream ref: `upstream/main` (`38c4f8c3717518e81bc64765ab80f3192f6a113a`)
 - Merge base: `none (history divergence)`
 
@@ -13,17 +13,17 @@ Generated: `2026-05-29T19:41:07.849824+00:00`
 | Metric | Value |
 | --- | ---: |
 | Commits behind local (`upstream` ancestry only) | 4385 |
-| Commits ahead local (`local` ancestry only) | 773 |
+| Commits ahead local (`local` ancestry only) | 775 |
 | Upstream commits missing by patch-id (`git cherry local upstream`, `+`) | 4267 |
 | Upstream commits represented by patch-id (`git cherry local upstream`, `-`) | 2 |
-| Local commits unique by patch-id (`git cherry upstream local`, `+`) | 668 |
+| Local commits unique by patch-id (`git cherry upstream local`, `+`) | 670 |
 | Files only in upstream tree | 1470 |
 | Files only in local tree | 560 |
-| Shared files identical content | 1701 |
-| Shared files different content | 1018 |
-| Total files changed (`local` vs `upstream`) | 3048 |
-| Insertions (`local` vs `upstream`) | 738631 |
-| Deletions (`local` vs `upstream`) | 370590 |
+| Shared files identical content | 1702 |
+| Shared files different content | 1017 |
+| Total files changed (`local` vs `upstream`) | 3047 |
+| Insertions (`local` vs `upstream`) | 738629 |
+| Deletions (`local` vs `upstream`) | 370787 |
 
 ## Top 40 upstream-only buckets
 
@@ -91,8 +91,8 @@ Generated: `2026-05-29T19:41:07.849824+00:00`
 | `plugins/platforms` | 9 |
 | `tests/acp` | 8 |
 | `skills/productivity` | 7 |
-| `plugins/model-providers` | 6 |
 | `tests/skills` | 6 |
+| `plugins/model-providers` | 5 |
 | `plugins/teams_pipeline` | 5 |
 | `tests/honcho_plugin` | 5 |
 | `tests/stress` | 5 |
@@ -167,7 +167,7 @@ Generated: `2026-05-29T19:41:07.849824+00:00`
 | `WS6` | #10 | Tests and CI parity | 317 | 681 | high | XL |
 | `WS5` | #9 | UX parity | 493 | 231 | high | XL |
 | `WS8` | #12 | Compatibility and divergence policy | 391 | 12 | high | XL |
-| `WS3` | #7 | Tools and adapters parity | 114 | 55 | high | L |
+| `WS3` | #7 | Tools and adapters parity | 114 | 54 | high | L |
 | `WS4` | #8 | Skills parity | 93 | 39 | medium | L |
 | `WS2` | #6 | Core runtime parity | 62 | 0 | critical | M |
 | `WS7` | #11 | Security/secrets/store/webhook parity | 0 | 0 | critical | S |
@@ -176,7 +176,7 @@ Generated: `2026-05-29T19:41:07.849824+00:00`
 
 - Upstream missing by patch-id: `4267`
 - Upstream represented by patch-id: `2`
-- Local unique by patch-id: `668`
+- Local unique by patch-id: `670`
 - Intentional divergence tracked items: `8` (covered files: `898`)
 - Merge base is absent; patch-id mapping is used as primary commit equivalence signal.
 

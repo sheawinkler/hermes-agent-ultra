@@ -93587,7 +93587,7 @@
       "target_ticket_name": "GPAR-04 gateway/plugin-memory parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/mcp_config.py",
@@ -93609,7 +93609,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "cli.py"
@@ -93629,7 +93629,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/model_switch.py",
@@ -93651,7 +93651,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "scripts/release.py"
@@ -93671,7 +93671,7 @@
       "target_ticket_name": "GPAR-07 upstream queue backfill"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/profiles.py",
@@ -93692,7 +93692,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/main.py",
@@ -93714,7 +93714,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "pyproject.toml",
@@ -93735,7 +93735,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_primary_surface_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "hermes_cli/gateway.py",
@@ -93756,7 +93756,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     },
     {
-      "classification_rule": "rust_only_python_test_guard",
+      "classification_rule": "prior_state",
       "disposition": "superseded",
       "files_sample": [
         "tests/hermes_cli/test_gateway_service.py"
@@ -93776,7 +93776,7 @@
       "target_ticket_name": "GPAR-01 tests+CI parity"
     }
   ],
-  "generated_at_utc": "2026-05-29T19:41:06.566939+00:00",
+  "generated_at_utc": "2026-05-29T19:52:06.892187+00:00",
   "refs": {
     "local_ref": "main",
     "range": "main..upstream/main",
