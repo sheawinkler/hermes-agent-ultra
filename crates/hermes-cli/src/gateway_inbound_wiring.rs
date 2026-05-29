@@ -104,6 +104,9 @@ pub fn gateway_status_message_visible(event_type: &str, message: &str) -> bool {
     if message.trim().is_empty() {
         return false;
     }
+    if event_type == "tool_progress" {
+        return true;
+    }
     if event_type != "lifecycle" {
         return true;
     }
@@ -223,6 +226,14 @@ pub fn make_gateway_on_thinking_callback(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gateway_status_shows_tool_progress() {
+        assert!(gateway_status_message_visible(
+            "tool_progress",
+            "处理中：正在检索网络数据（第 1 步，工具 web_search）…"
+        ));
+    }
 
     #[test]
     fn gateway_status_hides_compression_lifecycle() {

@@ -1,4 +1,4 @@
-//! Python-parity schedule parsing and next-run computation (`cron/jobs.py`).
+//! schedule parsing and next-run computation (`cron/jobs.py`).
 
 use chrono::{DateTime, Duration, FixedOffset, Offset, Utc};
 use cron::Schedule;
@@ -21,6 +21,54 @@ static DURATION_RE: LazyLock<Regex> = LazyLock::new(|| {
 
 static CRON_FIELD_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"^[\d\*\-,/]+$").expect("valid regex")
+});
+
+static ZH_ONCE_MINUTES_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(\d+)\s*分钟(?:后|之内)?$").expect("valid regex")
+});
+
+static ZH_ONCE_HOURS_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(\d+)\s*小时(?:后)?$").expect("valid regex")
+});
+
+static ZH_ONCE_DAYS_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^(\d+)\s*天(?:后)?$").expect("valid regex")
+});
+
+static ZH_EVERY_MINUTES_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^每\s*(\d+)\s*分钟$").expect("valid regex")
+});
+
+static ZH_EVERY_HOURS_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^每\s*(\d+)\s*小时$").expect("valid regex")
+});
+
+static EN_IN_DURATION_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)^in\s+(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)(?:\s+from\s+now)?\s*$",
+    )
+    .expect("valid regex")
+});
+
+static EN_FROM_NOW_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)^(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)\s+from\s+now\s*$",
+    )
+    .expect("valid regex")
+});
+
+static EN_LATER_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)^(?:after\s+)?(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)\s+later\s*$",
+    )
+    .expect("valid regex")
+});
+
+static EN_AFTER_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"(?i)^after\s+(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)\s*$",
+    )
+    .expect("valid regex")
 });
 
 /// Parsed schedule (Python `parse_schedule` output).
@@ -76,9 +124,62 @@ pub fn parse_duration(s: &str) -> Result<u32, ScheduleParseError> {
     Ok(value.saturating_mul(mult))
 }
 
+/// Normalize natural-language / loose schedule strings into parser DSL.
+///
+/// Examples: `2 minutes from now` → `2m`, `2分钟后` → `2m`, `每30分钟` → `every 30m`.
+pub fn normalize_schedule_input(schedule: &str) -> String {
+    let trimmed = schedule.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+
+    if let Some(caps) = ZH_EVERY_MINUTES_RE.captures(trimmed) {
+        return format!("every {}m", &caps[1]);
+    }
+    if let Some(caps) = ZH_EVERY_HOURS_RE.captures(trimmed) {
+        return format!("every {}h", &caps[1]);
+    }
+    if let Some(caps) = ZH_ONCE_MINUTES_RE.captures(trimmed) {
+        return format!("{}m", &caps[1]);
+    }
+    if let Some(caps) = ZH_ONCE_HOURS_RE.captures(trimmed) {
+        return format!("{}h", &caps[1]);
+    }
+    if let Some(caps) = ZH_ONCE_DAYS_RE.captures(trimmed) {
+        return format!("{}d", &caps[1]);
+    }
+
+    for re in [
+        &*EN_FROM_NOW_RE,
+        &*EN_IN_DURATION_RE,
+        &*EN_LATER_RE,
+        &*EN_AFTER_RE,
+    ] {
+        if let Some(caps) = re.captures(trimmed) {
+            return compact_duration_token(&caps[1], &caps[2]);
+        }
+    }
+
+    trimmed.to_string()
+}
+
+fn compact_duration_token(value: &str, unit: &str) -> String {
+    let u = unit.chars().next().unwrap_or('m').to_ascii_lowercase();
+    match u {
+        'h' => format!("{value}h"),
+        'd' => format!("{value}d"),
+        _ => format!("{value}m"),
+    }
+}
+
 /// Parse schedule string (Python `parse_schedule`).
 pub fn parse_schedule(schedule: &str) -> Result<ScheduleSpec, ScheduleParseError> {
     let original = schedule.trim();
+    if original.is_empty() {
+        return Err(ScheduleParseError("Schedule cannot be empty".into()));
+    }
+    let normalized_input = normalize_schedule_input(original);
+    let original = normalized_input.trim();
     if original.is_empty() {
         return Err(ScheduleParseError("Schedule cannot be empty".into()));
     }
@@ -115,7 +216,7 @@ pub fn parse_schedule(schedule: &str) -> Result<ScheduleSpec, ScheduleParseError
     }
 
     Err(ScheduleParseError(format!(
-        "Invalid schedule '{original}'. Use duration (30m), interval (every 2h), cron (0 9 * * *), or ISO timestamp"
+        "Invalid schedule '{original}'. Use one-shot duration (2m, 30m), recurring interval (every 30m), cron (0 9 * * *), or ISO timestamp. For 'in N minutes' reminders use compact form like 2m, not '2 minutes from now'."
     )))
 }
 
@@ -390,6 +491,45 @@ mod tests {
         let last = Utc::now() - Duration::hours(1);
         let next = compute_next_run(&spec, Some(last)).unwrap();
         assert!(next >= last);
+    }
+
+    #[test]
+    fn normalize_english_relative_once() {
+        assert_eq!(normalize_schedule_input("2 minutes from now"), "2m");
+        assert_eq!(normalize_schedule_input("in 2 minutes"), "2m");
+        assert_eq!(normalize_schedule_input("in 1 hour from now"), "1h");
+        assert_eq!(normalize_schedule_input("after 30 minutes"), "30m");
+        assert_eq!(normalize_schedule_input("5 minutes later"), "5m");
+    }
+
+    #[test]
+    fn normalize_chinese_relative_once() {
+        assert_eq!(normalize_schedule_input("2分钟后"), "2m");
+        assert_eq!(normalize_schedule_input("30分钟"), "30m");
+        assert_eq!(normalize_schedule_input("1小时后"), "1h");
+        assert_eq!(normalize_schedule_input("每30分钟"), "every 30m");
+    }
+
+    #[test]
+    fn parse_relative_natural_language_once() {
+        let spec = parse_schedule("2 minutes from now").unwrap();
+        match spec {
+            ScheduleSpec::Once { run_at } => {
+                assert!(run_at > Utc::now());
+            }
+            _ => panic!("expected once"),
+        }
+    }
+
+    #[test]
+    fn parse_chinese_relative_once() {
+        let spec = parse_schedule("2分钟后").unwrap();
+        match spec {
+            ScheduleSpec::Once { run_at } => {
+                assert!(run_at > Utc::now());
+            }
+            _ => panic!("expected once"),
+        }
     }
 
     #[test]

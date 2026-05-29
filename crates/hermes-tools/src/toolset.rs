@@ -274,6 +274,10 @@ impl ToolsetManager {
             .collect(),
         ));
         self.register(Toolset::with_includes(
+            "hermes-cron",
+            vec!["hermes-cli"].into_iter().map(String::from).collect(),
+        ));
+        self.register(Toolset::with_includes(
             "hermes-telegram",
             vec!["hermes-cli"].into_iter().map(String::from).collect(),
         ));

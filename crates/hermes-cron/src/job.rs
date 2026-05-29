@@ -4,7 +4,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::python_job::JobOrigin;
-use crate::schedule::{compute_next_run, fast_forward_if_stale, parse_schedule, ScheduleSpec};
+use crate::schedule::{
+    compute_next_run, fast_forward_if_stale, normalize_schedule_input, parse_schedule, ScheduleSpec,
+};
 
 // ---------------------------------------------------------------------------
 // JobStatus
@@ -41,6 +43,8 @@ pub struct ModelConfig {
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_url: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -279,6 +283,12 @@ pub struct CronJob {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_from: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled_toolsets: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workdir: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_output: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
@@ -296,7 +306,7 @@ fn is_false(v: &bool) -> bool {
 
 impl CronJob {
     pub fn new(schedule: impl Into<String>, prompt: impl Into<String>) -> Self {
-        let schedule_str = schedule.into();
+        let schedule_str = normalize_schedule_input(&schedule.into());
         let spec = parse_schedule(&schedule_str).ok();
         let display = spec
             .as_ref()
@@ -329,6 +339,9 @@ impl CronJob {
             script_timeout_seconds: None,
             script_shell: None,
             context_from: None,
+            enabled_toolsets: None,
+            workdir: None,
+            profile: None,
             last_output: None,
             last_error: None,
             last_delivery_error: None,

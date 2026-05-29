@@ -14,8 +14,9 @@ use hermes_core::ToolError;
 use hermes_tools::tools::cronjob::CronjobBackend;
 use hermes_tools::tools::messaging::MessagingSessionContext;
 
-use crate::job::{CronJob, JobStatus};
-use crate::python_job::JobOrigin;
+use crate::job::{CronJob, JobStatus, ModelConfig};
+use crate::python_job::{parse_deliver_string, JobOrigin};
+use crate::schedule::{normalize_schedule_input, ScheduleSpec};
 use crate::scheduler::{CronError, CronScheduler};
 
 /// A [`CronjobBackend`] that delegates to a running [`CronScheduler`].
@@ -113,6 +114,31 @@ fn parse_context_from_update(
     }
 }
 
+fn parse_string_list(raw: Option<&Value>, field: &str) -> Result<Option<Vec<String>>, ToolError> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    if raw.is_null() {
+        return Ok(None);
+    }
+    if let Some(arr) = raw.as_array() {
+        let mut out = Vec::new();
+        for item in arr {
+            let s = item.as_str().ok_or_else(|| {
+                ToolError::InvalidParams(format!("{field} array values must be strings"))
+            })?;
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                out.push(trimmed.to_string());
+            }
+        }
+        return Ok(Some(out));
+    }
+    Err(ToolError::InvalidParams(format!(
+        "{field} must be an array of strings or null"
+    )))
+}
+
 fn cron_err_to_tool(e: CronError) -> ToolError {
     match e {
         CronError::JobNotFound(id) => {
@@ -128,25 +154,91 @@ fn cron_err_to_tool(e: CronError) -> ToolError {
     }
 }
 
+fn apply_skills_update(job: &mut CronJob, raw: Option<&Value>) -> Result<(), ToolError> {
+    let Some(raw) = raw else {
+        return Ok(());
+    };
+    if raw.is_null() {
+        job.skills = None;
+        return Ok(());
+    }
+    if let Some(s) = raw.as_str() {
+        let trimmed = s.trim();
+        job.skills = if trimmed.is_empty() {
+            None
+        } else {
+            Some(vec![trimmed.to_string()])
+        };
+        return Ok(());
+    }
+    if let Some(arr) = raw.as_array() {
+        let mut skills = Vec::new();
+        for item in arr {
+            let s = item.as_str().ok_or_else(|| {
+                ToolError::InvalidParams("skills array values must be strings".into())
+            })?;
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                skills.push(trimmed.to_string());
+            }
+        }
+        job.skills = if skills.is_empty() { None } else { Some(skills) };
+        return Ok(());
+    }
+    Err(ToolError::InvalidParams(
+        "skills must be a string, array of strings, or null".into(),
+    ))
+}
+
+fn apply_repeat_for_oneshot(job: &mut CronJob) {
+    if job.repeat.is_some() {
+        return;
+    }
+    if matches!(
+        job.schedule_spec.as_ref(),
+        Some(ScheduleSpec::Once { .. })
+    ) {
+        job.repeat = Some(1);
+    }
+}
+
 #[async_trait]
 impl CronjobBackend for ScheduledCronjobBackend {
     async fn create(
         &self,
-        name: &str,
+        name: Option<&str>,
         schedule: &str,
         task: &str,
-        toolset: Option<&str>,
+        skills: Option<&[String]>,
+        model: Option<&str>,
+        provider: Option<&str>,
+        base_url: Option<&str>,
         context_from: Option<&Value>,
+        enabled_toolsets: Option<&[String]>,
+        workdir: Option<&str>,
+        profile: Option<&str>,
         script: Option<&str>,
         no_agent: Option<bool>,
+        deliver: Option<&str>,
+        repeat: Option<u32>,
     ) -> Result<String, ToolError> {
         let mut job = CronJob::new(schedule, task);
-        if !name.trim().is_empty() {
+        if let Some(name) = name.filter(|s| !s.trim().is_empty()) {
             job.name = Some(name.to_string());
+        } else if !task.trim().is_empty() {
+            job.name = Some(task.chars().take(50).collect());
+        } else if let Some(first) = skills.and_then(|s| s.first()) {
+            job.name = Some(first.chars().take(50).collect());
         }
-        if let Some(ts) = toolset.filter(|s| !s.trim().is_empty()) {
-            // Toolset arrives as a simple name; store it as a single-skill hint.
-            job.skills = Some(vec![ts.to_string()]);
+        if let Some(skills) = skills.filter(|s| !s.is_empty()) {
+            job.skills = Some(skills.to_vec());
+        }
+        if model.is_some() || provider.is_some() || base_url.is_some() {
+            job.model = Some(ModelConfig {
+                model: model.map(|s| s.to_string()),
+                provider: provider.map(|s| s.to_string()),
+                base_url: base_url.map(|s| s.to_string()),
+            });
         }
         if let Some(script) = script {
             let trimmed = script.trim();
@@ -154,9 +246,26 @@ impl CronjobBackend for ScheduledCronjobBackend {
                 job.script = Some(trimmed.to_string());
             }
         }
+        if let Some(toolsets) = enabled_toolsets.filter(|s| !s.is_empty()) {
+            job.enabled_toolsets = Some(toolsets.to_vec());
+        }
+        if let Some(workdir) = workdir.map(str::trim).filter(|s| !s.is_empty()) {
+            job.workdir = Some(workdir.to_string());
+        }
+        if let Some(profile) = profile.map(str::trim).filter(|s| !s.is_empty()) {
+            job.profile = Some(profile.to_string());
+        }
         if let Some(no_agent) = no_agent {
             job.no_agent = no_agent;
         }
+        if let Some(deliver) = deliver.filter(|s| !s.trim().is_empty()) {
+            job.deliver = parse_deliver_string(deliver);
+        }
+        if let Some(repeat) = repeat {
+            job.repeat = Some(repeat);
+        }
+        apply_repeat_for_oneshot(&mut job);
+
         let context_from = parse_context_from_create(context_from)?;
         if let Some(ref refs) = context_from {
             self.validate_context_refs_exist(refs).await?;
@@ -174,6 +283,10 @@ impl CronjobBackend for ScheduledCronjobBackend {
             }
         }
 
+        let response_name = job.name.clone();
+        let response_skills = job.skills.clone();
+        let response_repeat = job.repeat;
+
         let id = self
             .scheduler
             .create_job(job)
@@ -183,21 +296,30 @@ impl CronjobBackend for ScheduledCronjobBackend {
         Ok(json!({
             "action": "created",
             "id": id,
-            "name": name,
+            "name": response_name,
             "schedule": schedule,
             "task": task,
-            "toolset": toolset,
+            "skills": response_skills,
+            "model": model,
+            "provider": provider,
+            "base_url": base_url,
             "script": script,
             "no_agent": no_agent.unwrap_or(false),
+            "deliver": deliver,
+            "repeat": response_repeat,
             "context_from": context_from,
+            "enabled_toolsets": enabled_toolsets,
+            "workdir": workdir,
+            "profile": profile,
         })
         .to_string())
     }
 
-    async fn list(&self) -> Result<String, ToolError> {
+    async fn list(&self, include_disabled: bool) -> Result<String, ToolError> {
         let jobs = self.scheduler.list_jobs().await;
         let rendered: Vec<_> = jobs
             .iter()
+            .filter(|j| include_disabled || matches!(j.status, JobStatus::Active))
             .map(|j| {
                 json!({
                     "id": j.id,
@@ -209,6 +331,9 @@ impl CronjobBackend for ScheduledCronjobBackend {
                     "last_run": j.last_run,
                     "run_count": j.run_count,
                     "context_from": j.context_from,
+                    "enabled_toolsets": j.enabled_toolsets,
+                    "workdir": j.workdir,
+                    "profile": j.profile,
                 })
             })
             .collect();
@@ -227,8 +352,17 @@ impl CronjobBackend for ScheduledCronjobBackend {
         task: Option<&str>,
         enabled: Option<bool>,
         context_from: Option<&Value>,
+        enabled_toolsets: Option<&Value>,
         script: Option<&str>,
         no_agent: Option<bool>,
+        skills: Option<&Value>,
+        model: Option<&str>,
+        provider: Option<&str>,
+        base_url: Option<&str>,
+        workdir: Option<&str>,
+        profile: Option<&str>,
+        deliver: Option<&str>,
+        repeat: Option<u32>,
     ) -> Result<String, ToolError> {
         let mut job = self
             .scheduler
@@ -237,8 +371,11 @@ impl CronjobBackend for ScheduledCronjobBackend {
             .ok_or_else(|| ToolError::ExecutionFailed(format!("cron job not found: {}", id)))?;
 
         if let Some(s) = schedule {
-            job.schedule = s.to_string();
+            job.schedule = normalize_schedule_input(s);
+            job.schedule_spec = None;
+            job.schedule_display = None;
             job.next_run = None;
+            job.normalize_schedule();
         }
         if let Some(t) = task {
             job.prompt = t.to_string();
@@ -253,6 +390,39 @@ impl CronjobBackend for ScheduledCronjobBackend {
         }
         if let Some(no_agent) = no_agent {
             job.no_agent = no_agent;
+        }
+        apply_skills_update(&mut job, skills)?;
+        if model.is_some() || provider.is_some() || base_url.is_some() {
+            job.model = Some(ModelConfig {
+                model: model.map(|s| s.to_string()),
+                provider: provider.map(|s| s.to_string()),
+                base_url: base_url.map(|s| s.to_string()),
+            });
+        }
+        if let Some(deliver) = deliver.filter(|s| !s.trim().is_empty()) {
+            job.deliver = parse_deliver_string(deliver);
+        }
+        if let Some(repeat) = repeat {
+            job.repeat = Some(repeat);
+        }
+        if let Some(toolsets) = parse_string_list(enabled_toolsets, "enabled_toolsets")? {
+            job.enabled_toolsets = if toolsets.is_empty() { None } else { Some(toolsets) };
+        }
+        if let Some(workdir) = workdir {
+            let trimmed = workdir.trim();
+            job.workdir = if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            };
+        }
+        if let Some(profile) = profile {
+            let trimmed = profile.trim();
+            job.profile = if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            };
         }
         if let Some(context_update) = parse_context_from_update(context_from)? {
             if let Some(ref refs) = context_update {
@@ -383,11 +553,19 @@ mod tests {
 
         let created = backend
             .create(
-                "consumer",
+                Some("consumer"),
                 "0 * * * *",
                 "consume context",
                 None,
+                None,
+                None,
+                None,
                 Some(&json!(source_id.clone())),
+                None,
+                None,
+                None,
+                None,
+                None,
                 None,
                 None,
             )
@@ -408,6 +586,15 @@ mod tests {
                 Some(&json!([source_id.clone()])),
                 None,
                 None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
             )
             .await
             .expect("update set");
@@ -418,7 +605,24 @@ mod tests {
         assert_eq!(loaded.context_from, Some(vec![source_id.clone()]));
 
         backend
-            .update(consumer_id, None, None, None, Some(&json!([])), None, None)
+            .update(
+                consumer_id,
+                None,
+                None,
+                None,
+                Some(&json!([])),
+                None,
+                None,
+                None,
+                Some(&json!([])),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
             .await
             .expect("update clear");
         let loaded = scheduler

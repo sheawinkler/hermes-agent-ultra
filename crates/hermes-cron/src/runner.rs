@@ -10,12 +10,21 @@
 use std::sync::Arc;
 use std::sync::LazyLock;
 use std::time::Duration as StdDuration;
+use std::{collections::HashSet, path::PathBuf};
 
-use hermes_agent::agent_loop::ToolRegistry;
+use hermes_agent::agent_loop::{RuntimeProviderConfig, ToolRegistry};
 use hermes_agent::{AgentConfig, AgentLoop};
 use hermes_core::tool_call_parser::separate_text_and_calls;
 use hermes_core::{AgentResult, LlmProvider, Message, ToolSchema};
+use hermes_tools::toolset::{
+    TOOLSET_BROWSER, TOOLSET_CLARIFY, TOOLSET_CODE_EXECUTION, TOOLSET_COMPUTER_USE,
+    TOOLSET_CRONJOB, TOOLSET_DELEGATION, TOOLSET_FILE, TOOLSET_HOMEASSISTANT, TOOLSET_IMAGE_GEN,
+    TOOLSET_MEMORY, TOOLSET_MESSAGING, TOOLSET_MIXTURE_OF_AGENTS, TOOLSET_SECURITY,
+    TOOLSET_SESSION_SEARCH, TOOLSET_SKILLS, TOOLSET_SYSTEM, TOOLSET_TERMINAL, TOOLSET_TODO,
+    TOOLSET_TTS, TOOLSET_VISION, TOOLSET_VOICE, TOOLSET_WEB,
+};
 use regex::Regex;
+use serde_yaml::Value as YamlValue;
 use tokio::process::Command;
 use tokio::time::timeout;
 
@@ -55,11 +64,45 @@ static CRON_PROMPT_BLOCK_PATTERNS: LazyLock<Vec<(&'static str, Regex)>> = LazyLo
 
 const DEFAULT_SCRIPT_TIMEOUT_SECS: u64 = 120;
 const MAX_SCRIPT_OUTPUT_CHARS: usize = 64_000;
+static PROFILE_ID_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[a-z0-9][a-z0-9_-]{0,63}$").expect("valid regex"));
+const CRON_HARD_DISABLED_TOOLSETS: &[&str] = &["cronjob", "messaging", "clarify"];
+const CRON_DEFAULT_OFF_TOOLSETS: &[&str] = &[
+    "moa",
+    "homeassistant",
+    "spotify",
+    "discord",
+    "discord_admin",
+    "video",
+    "video_gen",
+    "x_search",
+];
+const CRON_PLATFORM_DEFAULT_TOOLSET: &str = "hermes-cron";
 
 #[derive(Debug, Clone)]
 struct ScriptControl {
     wake_agent: Option<bool>,
     stripped_output: String,
+}
+
+struct RuntimeScopeGuard {
+    prior_terminal_cwd: Option<String>,
+    prior_hermes_home: Option<String>,
+}
+
+impl Drop for RuntimeScopeGuard {
+    fn drop(&mut self) {
+        unsafe {
+            match self.prior_terminal_cwd.as_ref() {
+                Some(v) => std::env::set_var("TERMINAL_CWD", v),
+                None => std::env::remove_var("TERMINAL_CWD"),
+            }
+            match self.prior_hermes_home.as_ref() {
+                Some(v) => std::env::set_var("HERMES_HOME", v),
+                None => std::env::remove_var("HERMES_HOME"),
+            }
+        }
+    }
 }
 
 fn trim_script_output(text: &str) -> String {
@@ -195,6 +238,303 @@ fn command_for_shell_script(shell: &str, script_path: &std::path::Path) -> Comma
     }
 }
 
+fn normalize_profile_name(raw: &str) -> Option<String> {
+    let normalized = raw.trim().to_ascii_lowercase();
+    if normalized.is_empty() {
+        return None;
+    }
+    if PROFILE_ID_RE.is_match(&normalized) {
+        Some(normalized)
+    } else {
+        None
+    }
+}
+
+fn default_hermes_home() -> PathBuf {
+    std::env::var("HERMES_HOME")
+        .ok()
+        .map(PathBuf::from)
+        .or_else(|| {
+            std::env::var("HOME")
+                .ok()
+                .map(|h| PathBuf::from(h).join(".hermes"))
+        })
+        .or_else(|| {
+            std::env::var("USERPROFILE")
+                .ok()
+                .map(|h| PathBuf::from(h).join(".hermes"))
+        })
+        .unwrap_or_else(|| PathBuf::from(".hermes"))
+}
+
+fn yaml_get<'a>(value: &'a YamlValue, key: &str) -> Option<&'a YamlValue> {
+    value.as_mapping()?.get(YamlValue::String(key.to_string()))
+}
+
+#[derive(Default)]
+struct CronToolPolicy {
+    platform_toolsets: Option<Vec<String>>,
+    disabled_toolsets: Vec<String>,
+    known_plugin_toolsets: Vec<String>,
+    enabled_mcp_servers: Vec<String>,
+}
+
+fn parse_yaml_string_list(raw: Option<&YamlValue>) -> Option<Vec<String>> {
+    let items = raw?.as_sequence()?;
+    let mut out = Vec::new();
+    for item in items {
+        if let Some(s) = item.as_str() {
+            let trimmed = s.trim();
+            if !trimmed.is_empty() {
+                out.push(trimmed.to_string());
+            }
+        }
+    }
+    Some(out)
+}
+
+fn parse_yaml_bool_like(raw: Option<&YamlValue>, default: bool) -> bool {
+    let Some(value) = raw else {
+        return default;
+    };
+    if let Some(b) = value.as_bool() {
+        return b;
+    }
+    if let Some(i) = value.as_i64() {
+        return i != 0;
+    }
+    if let Some(s) = value.as_str() {
+        let lowered = s.trim().to_ascii_lowercase();
+        if matches!(lowered.as_str(), "true" | "1" | "yes" | "on") {
+            return true;
+        }
+        if matches!(lowered.as_str(), "false" | "0" | "no" | "off") {
+            return false;
+        }
+    }
+    default
+}
+
+fn load_cron_tool_policy() -> CronToolPolicy {
+    let mut policy = CronToolPolicy::default();
+    let cfg_path = default_hermes_home().join("config.yaml");
+    let Ok(raw) = std::fs::read_to_string(&cfg_path) else {
+        return policy;
+    };
+    let Ok(doc) = serde_yaml::from_str::<YamlValue>(&raw) else {
+        return policy;
+    };
+    policy.platform_toolsets = yaml_get(&doc, "platform_toolsets")
+        .and_then(|pt| yaml_get(pt, "cron"))
+        .and_then(|v| parse_yaml_string_list(Some(v)))
+        .filter(|v| !v.is_empty());
+    policy.disabled_toolsets = yaml_get(&doc, "agent")
+        .and_then(|a| yaml_get(a, "disabled_toolsets"))
+        .and_then(|v| parse_yaml_string_list(Some(v)))
+        .unwrap_or_default();
+    policy.known_plugin_toolsets = yaml_get(&doc, "known_plugin_toolsets")
+        .and_then(|kpt| yaml_get(kpt, "cron"))
+        .and_then(|v| parse_yaml_string_list(Some(v)))
+        .unwrap_or_default();
+    if let Some(mcp_servers) = yaml_get(&doc, "mcp_servers").and_then(|v| v.as_mapping()) {
+        let mut out = Vec::new();
+        for (name, cfg) in mcp_servers {
+            let Some(server_name) = name.as_str().map(str::trim).filter(|s| !s.is_empty()) else {
+                continue;
+            };
+            let enabled = parse_yaml_bool_like(
+                cfg.as_mapping()
+                    .and_then(|m| m.get(YamlValue::String("enabled".to_string()))),
+                true,
+            );
+            if enabled {
+                out.push(server_name.to_string());
+            }
+        }
+        policy.enabled_mcp_servers = out;
+    }
+    policy
+}
+
+fn is_configurable_toolset(name: &str) -> bool {
+    matches!(
+        name,
+        "web"
+            | "terminal"
+            | "file"
+            | "browser"
+            | "vision"
+            | "image_gen"
+            | "skills"
+            | "memory"
+            | "session_search"
+            | "todo"
+            | "clarify"
+            | "code_execution"
+            | "delegation"
+            | "cronjob"
+            | "messaging"
+            | "homeassistant"
+            | "tts"
+            | "voice"
+            | "security"
+            | "system"
+            | "moa"
+            | "computer_use"
+    )
+}
+
+fn is_platform_default_toolset(name: &str) -> bool {
+    matches!(
+        name,
+        "hermes-cli"
+            | "hermes-cron"
+            | "hermes-telegram"
+            | "hermes-discord"
+            | "hermes-whatsapp"
+            | "hermes-slack"
+    )
+}
+
+fn resolve_profile_home(profile: Option<&str>) -> Result<Option<PathBuf>, CronError> {
+    let Some(raw) = profile else {
+        return Ok(None);
+    };
+    let Some(normalized) = normalize_profile_name(raw) else {
+        return Err(CronError::InvalidJob(format!(
+            "invalid profile name '{}': must match [a-z0-9][a-z0-9_-]{{0,63}}",
+            raw
+        )));
+    };
+    let default_home = default_hermes_home();
+    if normalized == "default" {
+        return Ok(Some(default_home));
+    }
+    let profile_home = default_home.join("profiles").join(&normalized);
+    if !profile_home.is_dir() {
+        return Err(CronError::InvalidJob(format!(
+            "profile '{}' does not exist at {}",
+            normalized,
+            profile_home.display()
+        )));
+    }
+    Ok(Some(profile_home))
+}
+
+fn expand_toolset_token(token: &str, base_names: &HashSet<String>) -> Option<Vec<String>> {
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        return Some(Vec::new());
+    }
+    if trimmed.eq_ignore_ascii_case("all") || trimmed == "*" {
+        return Some(base_names.iter().cloned().collect());
+    }
+    if matches!(
+        trimmed,
+        "hermes-cli"
+            | "hermes-cron"
+            | "hermes-telegram"
+            | "hermes-discord"
+            | "hermes-whatsapp"
+            | "hermes-slack"
+    ) {
+        let mut out = HashSet::new();
+        for ts in [
+            "web",
+            "terminal",
+            "file",
+            "browser",
+            "vision",
+            "image_gen",
+            "skills",
+            "memory",
+            "session_search",
+            "todo",
+            "clarify",
+            "code_execution",
+            "delegation",
+            "cronjob",
+            "messaging",
+            "homeassistant",
+            "tts",
+            "computer_use",
+        ] {
+            if let Some(names) = tool_names_for_toolset(ts) {
+                for name in names {
+                    if base_names.contains(*name) {
+                        out.insert((*name).to_string());
+                    }
+                }
+            }
+        }
+        return Some(out.into_iter().collect());
+    }
+    if let Some(names) = tool_names_for_toolset(trimmed) {
+        return Some(
+            names
+                .iter()
+                .filter_map(|n| base_names.contains(*n).then(|| (*n).to_string()))
+                .collect(),
+        );
+    }
+    if base_names.contains(trimmed) {
+        return Some(vec![trimmed.to_string()]);
+    }
+    None
+}
+
+fn expand_toolset_token_with_dynamic(
+    token: &str,
+    base_names: &HashSet<String>,
+) -> Option<Vec<String>> {
+    if let Some(expanded) = expand_toolset_token(token, base_names) {
+        return Some(expanded);
+    }
+    let trimmed = token.trim();
+    if trimmed.is_empty() {
+        return Some(Vec::new());
+    }
+    let prefix = format!("{trimmed}__");
+    let dynamic: Vec<String> = base_names
+        .iter()
+        .filter(|name| name.starts_with(&prefix))
+        .cloned()
+        .collect();
+    if dynamic.is_empty() {
+        None
+    } else {
+        Some(dynamic)
+    }
+}
+
+fn tool_names_for_toolset(name: &str) -> Option<&'static [&'static str]> {
+    match name {
+        "web" => Some(TOOLSET_WEB),
+        "terminal" => Some(TOOLSET_TERMINAL),
+        "file" => Some(TOOLSET_FILE),
+        "browser" => Some(TOOLSET_BROWSER),
+        "vision" => Some(TOOLSET_VISION),
+        "image_gen" => Some(TOOLSET_IMAGE_GEN),
+        "skills" => Some(TOOLSET_SKILLS),
+        "memory" => Some(TOOLSET_MEMORY),
+        "session_search" => Some(TOOLSET_SESSION_SEARCH),
+        "todo" => Some(TOOLSET_TODO),
+        "clarify" => Some(TOOLSET_CLARIFY),
+        "code_execution" => Some(TOOLSET_CODE_EXECUTION),
+        "delegation" => Some(TOOLSET_DELEGATION),
+        "cronjob" => Some(TOOLSET_CRONJOB),
+        "messaging" => Some(TOOLSET_MESSAGING),
+        "homeassistant" => Some(TOOLSET_HOMEASSISTANT),
+        "tts" => Some(TOOLSET_TTS),
+        "voice" => Some(TOOLSET_VOICE),
+        "security" => Some(TOOLSET_SECURITY),
+        "system" => Some(TOOLSET_SYSTEM),
+        "moa" => Some(TOOLSET_MIXTURE_OF_AGENTS),
+        "computer_use" => Some(TOOLSET_COMPUTER_USE),
+        _ => None,
+    }
+}
+
 // ---------------------------------------------------------------------------
 // CronRunner
 // ---------------------------------------------------------------------------
@@ -248,6 +588,9 @@ impl CronRunner {
                 )));
             }
         }
+        let profile_home = resolve_profile_home(job.profile.as_deref())?;
+        let _scope = self.apply_runtime_scope(job, profile_home.as_deref())?;
+
         if job.no_agent {
             let result = self.run_script_only_job(job).await?;
             let delivery_error = self.delivery_error_for_result(job, &result).await;
@@ -259,12 +602,31 @@ impl CronRunner {
 
         // Build agent config from job settings
         let mut config = AgentConfig::default();
-        // Scheduled/background runs should avoid user/workspace context injection
-        // so job trajectories stay deterministic and non-user-specific.
-        config.skip_context_files = true;
+        let has_workdir = job
+            .workdir
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .is_some();
+        config.skip_context_files = !has_workdir;
+        config.quiet_mode = true;
+        config.skip_memory = true;
+        config.platform = Some("cron".to_string());
+        config.session_id = Some(format!("cron:{}", job.id));
+        if let Some(profile_home) = profile_home.as_ref() {
+            config.hermes_home = Some(profile_home.to_string_lossy().into_owned());
+        }
         if let Some(ref model_cfg) = job.model {
             if let Some(ref model) = model_cfg.model {
                 config.model = model.clone();
+            }
+            if let Some(ref provider) = model_cfg.provider {
+                config.provider = Some(provider.clone());
+                if let Some(ref base_url) = model_cfg.base_url {
+                    let mut rp = RuntimeProviderConfig::default();
+                    rp.base_url = Some(base_url.clone());
+                    config.runtime_providers.insert(provider.clone(), rp);
+                }
             }
         }
         // System prompt includes safety notice that cron tools are unavailable
@@ -276,7 +638,7 @@ impl CronRunner {
         ));
 
         // Build tool list, excluding the cronjob tool to prevent recursive scheduling
-        let tools = self.filtered_tool_schemas();
+        let tools = self.filtered_tool_schemas(job);
 
         // Create a fresh agent loop
         let agent_loop = hermes_agent::attach_agent_runtime(AgentLoop::new(
@@ -391,6 +753,12 @@ impl CronRunner {
             let shell = shell_for_inline_script(job);
             command = command_for_inline_script(&shell, script);
         }
+        if let Some(workdir) = job.workdir.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            let path = std::path::Path::new(workdir);
+            if path.is_dir() {
+                command.current_dir(path);
+            }
+        }
 
         let timeout_secs = script_timeout_secs(job);
         let output = timeout(StdDuration::from_secs(timeout_secs), command.output())
@@ -461,13 +829,189 @@ impl CronRunner {
         messages
     }
 
+    fn apply_runtime_scope(
+        &self,
+        job: &CronJob,
+        profile_home: Option<&std::path::Path>,
+    ) -> Result<RuntimeScopeGuard, CronError> {
+        let prior_terminal_cwd = std::env::var("TERMINAL_CWD").ok();
+        let prior_hermes_home = std::env::var("HERMES_HOME").ok();
+
+        if let Some(workdir) = job.workdir.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            let path = std::path::Path::new(workdir);
+            if !path.is_dir() {
+                return Err(CronError::InvalidJob(format!(
+                    "configured workdir does not exist: {}",
+                    workdir
+                )));
+            }
+            unsafe {
+                std::env::set_var("TERMINAL_CWD", workdir);
+            }
+        }
+        if let Some(profile_home) = profile_home {
+            unsafe {
+                std::env::set_var("HERMES_HOME", profile_home);
+            }
+        }
+
+        Ok(RuntimeScopeGuard {
+            prior_terminal_cwd,
+            prior_hermes_home,
+        })
+    }
+
     /// Filter out the `cronjob` tool from the registry to prevent recursive scheduling.
-    fn filtered_tool_schemas(&self) -> Vec<ToolSchema> {
-        self.tool_registry
+    fn filtered_tool_schemas(&self, job: &CronJob) -> Vec<ToolSchema> {
+        let base: Vec<ToolSchema> = self
+            .tool_registry
             .schemas()
             .into_iter()
             .filter(|schema| schema.name != "cronjob")
-            .collect()
+            .collect();
+        let base_names: HashSet<String> = base.iter().map(|s| s.name.clone()).collect();
+        let policy = load_cron_tool_policy();
+        let requested_toolsets = job
+            .enabled_toolsets
+            .as_ref()
+            .filter(|v| !v.is_empty())
+            .cloned()
+            .or(policy.platform_toolsets.clone())
+            .unwrap_or_else(|| vec![CRON_PLATFORM_DEFAULT_TOOLSET.to_string()]);
+        let has_explicit_config = requested_toolsets
+            .iter()
+            .any(|ts| is_configurable_toolset(ts.trim()));
+
+        let mut allow: HashSet<String> = {
+            let mut out = HashSet::new();
+            let mut unknown = Vec::new();
+            for token in &requested_toolsets {
+                if let Some(expanded) = expand_toolset_token_with_dynamic(&token, &base_names) {
+                    for name in expanded {
+                        out.insert(name);
+                    }
+                } else {
+                    unknown.push(token);
+                }
+            }
+            if !unknown.is_empty() {
+                tracing::warn!(
+                    "Cron job '{}' has unknown toolset/token entries {:?}; ignoring them",
+                    job.id,
+                    unknown
+                );
+            }
+            if out.is_empty() {
+                base_names.clone()
+            } else {
+                out
+            }
+        };
+
+        // Python parity: only apply default-off suppression when platform is not
+        // explicitly configured with concrete configurable toolset keys.
+        if !has_explicit_config {
+            for ts in CRON_DEFAULT_OFF_TOOLSETS {
+                if let Some(expanded) = expand_toolset_token_with_dynamic(ts, &base_names) {
+                    for name in expanded {
+                        allow.remove(&name);
+                    }
+                }
+            }
+        }
+
+        let requested_set: HashSet<String> = requested_toolsets.iter().cloned().collect();
+        let known_plugin_set: HashSet<String> =
+            policy.known_plugin_toolsets.iter().cloned().collect();
+        let enabled_mcp_servers: HashSet<String> =
+            policy.enabled_mcp_servers.iter().cloned().collect();
+        let dynamic_prefix_toolsets: HashSet<String> = base_names
+            .iter()
+            .filter_map(|name| name.split_once("__").map(|(prefix, _)| prefix.to_string()))
+            .collect();
+        let plugin_toolsets: Vec<String> = dynamic_prefix_toolsets
+            .iter()
+            .filter(|key| {
+                let key = key.as_str();
+                !is_configurable_toolset(key)
+                    && !is_platform_default_toolset(key)
+                    && !enabled_mcp_servers.contains(key)
+            })
+            .cloned()
+            .collect();
+        let plugin_toolset_set: HashSet<String> = plugin_toolsets.iter().cloned().collect();
+        for pts in &plugin_toolsets {
+            let should_enable = if requested_set.contains(pts) {
+                true
+            } else if CRON_DEFAULT_OFF_TOOLSETS.contains(&pts.as_str()) {
+                false
+            } else {
+                !known_plugin_set.contains(pts.as_str())
+            };
+            if should_enable {
+                if let Some(expanded) = expand_toolset_token_with_dynamic(&pts, &base_names) {
+                    allow.extend(expanded);
+                }
+            }
+        }
+
+        let explicit_passthrough: HashSet<String> = requested_set
+            .iter()
+            .filter(|ts| {
+                let key = ts.as_str();
+                !is_configurable_toolset(key)
+                    && !plugin_toolset_set.contains(key)
+                    && !is_platform_default_toolset(key)
+            })
+            .cloned()
+            .collect();
+        let no_mcp = requested_set.contains("no_mcp");
+        let explicit_mcp_servers: HashSet<String> = if no_mcp {
+            HashSet::new()
+        } else {
+            explicit_passthrough
+                .intersection(&enabled_mcp_servers)
+                .cloned()
+                .collect()
+        };
+        for token in explicit_passthrough.difference(&enabled_mcp_servers) {
+            if token == "no_mcp" {
+                continue;
+            }
+            if let Some(expanded) = expand_toolset_token_with_dynamic(token, &base_names) {
+                allow.extend(expanded);
+            }
+        }
+        let selected_mcp_servers: HashSet<String> = if !explicit_mcp_servers.is_empty() || no_mcp {
+            explicit_mcp_servers
+        } else {
+            enabled_mcp_servers
+        };
+        for server in selected_mcp_servers {
+            if let Some(expanded) = expand_toolset_token_with_dynamic(&server, &base_names) {
+                allow.extend(expanded);
+            }
+        }
+
+        let mut disabled_tokens: Vec<String> = CRON_HARD_DISABLED_TOOLSETS
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        disabled_tokens.extend(policy.disabled_toolsets);
+        for token in disabled_tokens {
+            if let Some(expanded) = expand_toolset_token_with_dynamic(&token, &base_names) {
+                for name in expanded {
+                    allow.remove(&name);
+                }
+            } else if base_names.contains(&token) {
+                allow.remove(&token);
+            }
+        }
+
+        if allow.is_empty() {
+            return base;
+        }
+        base.into_iter().filter(|schema| allow.contains(&schema.name)).collect()
     }
 
     /// Deliver an explicit error payload to the configured target.
@@ -490,6 +1034,78 @@ mod tests {
     use super::*;
     use crate::job::CronJob;
     use hermes_core::ToolError;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    fn with_temp_hermes_home_config<T>(yaml: &str, f: impl FnOnce() -> T) -> T {
+        let _guard = ENV_LOCK.lock().expect("lock env");
+        let prior = std::env::var("HERMES_HOME").ok();
+        let unique = format!(
+            "hermes-cron-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("time")
+                .as_nanos()
+        );
+        let temp_home = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&temp_home).expect("mkdir temp home");
+        std::fs::write(temp_home.join("config.yaml"), yaml).expect("write config");
+        unsafe {
+            std::env::set_var("HERMES_HOME", &temp_home);
+        }
+        let out = f();
+        unsafe {
+            match prior {
+                Some(v) => std::env::set_var("HERMES_HOME", v),
+                None => std::env::remove_var("HERMES_HOME"),
+            }
+        }
+        let _ = std::fs::remove_dir_all(&temp_home);
+        out
+    }
+
+    fn registry_with_dynamic_toolsets() -> Arc<ToolRegistry> {
+        let mut registry = ToolRegistry::new();
+        registry.register(
+            "cronjob",
+            hermes_core::tool_schema(
+                "cronjob",
+                "Manage cron jobs",
+                hermes_core::JsonSchema::new("object"),
+            ),
+            Arc::new(|_params: serde_json::Value| -> Result<String, ToolError> { Ok("ok".to_string()) }),
+        );
+        registry.register(
+            "terminal",
+            hermes_core::tool_schema(
+                "terminal",
+                "Run commands",
+                hermes_core::JsonSchema::new("object"),
+            ),
+            Arc::new(|_params: serde_json::Value| -> Result<String, ToolError> { Ok("ok".to_string()) }),
+        );
+        registry.register(
+            "my_plugin__tool",
+            hermes_core::tool_schema(
+                "my_plugin__tool",
+                "Plugin tool",
+                hermes_core::JsonSchema::new("object"),
+            ),
+            Arc::new(|_params: serde_json::Value| -> Result<String, ToolError> { Ok("ok".to_string()) }),
+        );
+        registry.register(
+            "github__mcp_tool",
+            hermes_core::tool_schema(
+                "github__mcp_tool",
+                "MCP tool",
+                hermes_core::JsonSchema::new("object"),
+            ),
+            Arc::new(|_params: serde_json::Value| -> Result<String, ToolError> { Ok("ok".to_string()) }),
+        );
+        Arc::new(registry)
+    }
 
     #[test]
     fn test_filtered_tool_schemas_excludes_cronjob() {
@@ -520,10 +1136,73 @@ mod tests {
 
         let runner = CronRunner::new(Arc::new(MockLlmProvider), Arc::new(registry));
 
-        let schemas = runner.filtered_tool_schemas();
+        let job = CronJob::new("0 9 * * *", "noop");
+        let schemas = runner.filtered_tool_schemas(&job);
         let names: Vec<&str> = schemas.iter().map(|s| s.name.as_str()).collect();
         assert!(!names.contains(&"cronjob"));
         assert!(names.contains(&"terminal"));
+    }
+
+    #[test]
+    fn test_filtered_tool_schemas_enables_unknown_plugin_by_default() {
+        let runner = CronRunner::new(Arc::new(MockLlmProvider), registry_with_dynamic_toolsets());
+        let job = CronJob::new("0 9 * * *", "noop");
+        with_temp_hermes_home_config(
+            r#"
+platform_toolsets:
+  cron:
+    - hermes-cron
+"#,
+            || {
+                let schemas = runner.filtered_tool_schemas(&job);
+                let names: Vec<&str> = schemas.iter().map(|s| s.name.as_str()).collect();
+                assert!(names.contains(&"my_plugin__tool"));
+            },
+        );
+    }
+
+    #[test]
+    fn test_filtered_tool_schemas_known_plugin_absent_is_disabled() {
+        let runner = CronRunner::new(Arc::new(MockLlmProvider), registry_with_dynamic_toolsets());
+        let job = CronJob::new("0 9 * * *", "noop");
+        with_temp_hermes_home_config(
+            r#"
+platform_toolsets:
+  cron:
+    - hermes-cron
+known_plugin_toolsets:
+  cron:
+    - my_plugin
+"#,
+            || {
+                let schemas = runner.filtered_tool_schemas(&job);
+                let names: Vec<&str> = schemas.iter().map(|s| s.name.as_str()).collect();
+                assert!(!names.contains(&"my_plugin__tool"));
+            },
+        );
+    }
+
+    #[test]
+    fn test_filtered_tool_schemas_no_mcp_sentinel_disables_mcp_servers() {
+        let runner = CronRunner::new(Arc::new(MockLlmProvider), registry_with_dynamic_toolsets());
+        let job = CronJob::new("0 9 * * *", "noop");
+        with_temp_hermes_home_config(
+            r#"
+platform_toolsets:
+  cron:
+    - hermes-cron
+    - no_mcp
+mcp_servers:
+  github:
+    command: npx -y @modelcontextprotocol/server-github
+    enabled: true
+"#,
+            || {
+                let schemas = runner.filtered_tool_schemas(&job);
+                let names: Vec<&str> = schemas.iter().map(|s| s.name.as_str()).collect();
+                assert!(!names.contains(&"github__mcp_tool"));
+            },
+        );
     }
 
     #[test]

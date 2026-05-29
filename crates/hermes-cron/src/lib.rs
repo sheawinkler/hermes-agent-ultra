@@ -26,5 +26,5 @@ pub use job::{CronJob, DeliverConfig, DeliverTarget, JobStatus, ModelConfig};
 pub use python_job::JobOrigin;
 pub use persistence::{FileJobPersistence, JobPersistence, SqliteJobPersistence};
 pub use runner::{CronRunOutcome, CronRunner};
-pub use schedule::{parse_schedule, ScheduleParseError, ScheduleSpec};
+pub use schedule::{normalize_schedule_input, parse_schedule, ScheduleParseError, ScheduleSpec};
 pub use scheduler::{CronError, CronScheduler};

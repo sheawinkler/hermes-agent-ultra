@@ -86,10 +86,12 @@ pub fn cron_job_from_python_value(raw: &Value) -> Result<CronJob, String> {
     let model = {
         let m = raw.get("model").and_then(|v| v.as_str());
         let p = raw.get("provider").and_then(|v| v.as_str());
-        if m.is_some() || p.is_some() {
+        let b = raw.get("base_url").and_then(|v| v.as_str());
+        if m.is_some() || p.is_some() || b.is_some() {
             Some(ModelConfig {
                 model: m.map(|s| s.to_string()),
                 provider: p.map(|s| s.to_string()),
+                base_url: b.map(|s| s.to_string()),
             })
         } else {
             None
@@ -123,8 +125,36 @@ pub fn cron_job_from_python_value(raw: &Value) -> Result<CronJob, String> {
         no_agent: raw.get("no_agent").and_then(|v| v.as_bool()).unwrap_or(false),
         script_timeout_seconds: None,
         script_shell: None,
-        context_from: None,
-        last_output: None,
+        context_from: raw
+            .get("context_from")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect::<Vec<_>>()
+            })
+            .filter(|v| !v.is_empty()),
+        enabled_toolsets: raw
+            .get("enabled_toolsets")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                    .collect::<Vec<_>>()
+            })
+            .filter(|v| !v.is_empty()),
+        workdir: raw
+            .get("workdir")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        profile: raw
+            .get("profile")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        last_output: raw
+            .get("last_output")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
         last_error: raw
             .get("last_error")
             .and_then(|v| v.as_str())
@@ -166,7 +196,7 @@ fn parse_time_field(v: Option<&Value>) -> Option<DateTime<Utc>> {
         })
 }
 
-fn parse_deliver_string(raw: &str) -> Option<DeliverConfig> {
+pub fn parse_deliver_string(raw: &str) -> Option<DeliverConfig> {
     let value = raw.trim().to_ascii_lowercase();
     let (target, platform) = if let Some((platform, rest)) = value.split_once(':') {
         let chat = rest.split(':').next().unwrap_or(rest).trim();

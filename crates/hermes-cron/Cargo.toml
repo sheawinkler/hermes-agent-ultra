@@ -23,6 +23,7 @@ futures = { workspace = true }
 directories = { workspace = true }
 rusqlite = { workspace = true }
 regex = { workspace = true }
+serde_yaml = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

@@ -1712,6 +1712,120 @@ fn is_budgeted_web_tool(name: &str) -> bool {
     matches!(name, "web_search" | "web_extract")
 }
 
+fn tool_progress_enabled() -> bool {
+    std::env::var("HERMES_TOOL_PROGRESS_ENABLED")
+        .map(|v| {
+            !matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "0" | "false" | "off"
+            )
+        })
+        .unwrap_or(true)
+}
+
+fn tool_progress_initial_delay_ms() -> u64 {
+    std::env::var("HERMES_TOOL_PROGRESS_INITIAL_DELAY_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(12_000)
+}
+
+fn tool_progress_interval_ms() -> u64 {
+    std::env::var("HERMES_TOOL_PROGRESS_INTERVAL_MS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(20_000)
+}
+
+fn format_tool_progress_message(turn: u32, tool_names: &[String], pulse: u32) -> String {
+    let joined = tool_names.join(", ");
+    let webish = tool_names
+        .iter()
+        .any(|name| matches!(name.as_str(), "web_search" | "web_extract"));
+    let base = if webish {
+        format!("处理中：正在检索网络数据（第 {turn} 步，工具 {joined}）")
+    } else if tool_names.len() > 1 {
+        format!(
+            "处理中：正在执行工具（第 {turn} 步，{} 个调用：{joined}）",
+            tool_names.len()
+        )
+    } else if let Some(name) = tool_names.first() {
+        format!("处理中：正在执行 {name}（第 {turn} 步）")
+    } else {
+        format!("处理中，请稍候（第 {turn} 步）")
+    };
+    if pulse > 1 {
+        format!("{base}…（仍在进行）")
+    } else {
+        format!("{base}…")
+    }
+}
+
+struct ToolProgressWatchdog {
+    handle: Option<tokio::task::JoinHandle<()>>,
+    stop: Arc<AtomicBool>,
+}
+
+impl ToolProgressWatchdog {
+    fn start(
+        status_callback: Option<Arc<dyn Fn(&str, &str) + Send + Sync>>,
+        turn: u32,
+        tool_names: Vec<String>,
+    ) -> Self {
+        if !tool_progress_enabled()
+            || status_callback.is_none()
+            || tool_names.is_empty()
+        {
+            return Self {
+                handle: None,
+                stop: Arc::new(AtomicBool::new(true)),
+            };
+        }
+        let cb = status_callback.expect("checked above");
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_worker = stop.clone();
+        let handle = tokio::spawn(async move {
+            let initial = Duration::from_millis(tool_progress_initial_delay_ms());
+            let interval = Duration::from_millis(tool_progress_interval_ms());
+            tokio::time::sleep(initial).await;
+            if stop_worker.load(Ordering::Acquire) {
+                return;
+            }
+            let mut pulse = 0u32;
+            loop {
+                if stop_worker.load(Ordering::Acquire) {
+                    break;
+                }
+                pulse = pulse.saturating_add(1);
+                let msg = format_tool_progress_message(turn, &tool_names, pulse);
+                cb("tool_progress", &msg);
+                tracing::info!(
+                    turn = turn,
+                    pulse = pulse,
+                    tools = %tool_names.join(","),
+                    "agent tool progress notice"
+                );
+                tokio::time::sleep(interval).await;
+            }
+        });
+        Self {
+            handle: Some(handle),
+            stop,
+        }
+    }
+}
+
+impl Drop for ToolProgressWatchdog {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            handle.abort();
+        }
+    }
+}
+
 fn apply_web_tool_budget(
     tool_calls: &mut Vec<ToolCall>,
     web_tool_calls_used: u32,
@@ -6840,6 +6954,15 @@ impl AgentLoop {
                     crate::tool_guardrails::GuardrailDecision::Allow => {}
                 }
             }
+            let tool_progress_names: Vec<String> = tool_calls
+                .iter()
+                .map(|tc| tc.function.name.clone())
+                .collect();
+            let _tool_progress = ToolProgressWatchdog::start(
+                self.callbacks.status_callback.clone(),
+                total_turns,
+                tool_progress_names,
+            );
             let mut results = self
                 .execute_tool_calls(
                     &tool_calls,
@@ -8303,6 +8426,15 @@ impl AgentLoop {
                 }
             }
             let tool_start = Instant::now();
+            let tool_progress_names: Vec<String> = tool_calls
+                .iter()
+                .map(|tc| tc.function.name.clone())
+                .collect();
+            let _tool_progress = ToolProgressWatchdog::start(
+                self.callbacks.status_callback.clone(),
+                total_turns,
+                tool_progress_names,
+            );
             let mut results = self
                 .execute_tool_calls(
                     &tool_calls,
@@ -15688,5 +15820,15 @@ mod tests {
             vec!["/tmp/a.rs".to_string(), "/tmp/b.rs".to_string()]
         );
         assert_eq!(cmds, vec!["rg".to_string(), "cargo".to_string()]);
+    }
+
+    #[test]
+    fn test_format_tool_progress_message_web_and_repeat() {
+        let web = vec!["web_search".to_string()];
+        assert!(format_tool_progress_message(3, &web, 1).contains("检索网络数据"));
+        assert!(format_tool_progress_message(3, &web, 2).contains("仍在进行"));
+
+        let local = vec!["todo".to_string()];
+        assert!(format_tool_progress_message(1, &local, 1).contains("todo"));
     }
 }
