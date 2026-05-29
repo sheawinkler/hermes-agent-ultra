@@ -1,4 +1,5 @@
-//! Real web tool backends: Exa/Tavily/SearXNG search, Firecrawl extract, and local fallbacks.
+//! Real web tool backends: Exa/Tavily/Firecrawl/xAI/SearXNG search,
+//! Firecrawl/Tavily extract, and local fallbacks.
 
 use async_trait::async_trait;
 use reqwest::Client;
@@ -43,6 +44,8 @@ impl WebSearchBackend for FallbackSearchBackend {
                 "Web search is not configured. To enable, set one of the following environment variables:\n\
                  - EXA_API_KEY (https://exa.ai)\n\
                  - TAVILY_API_KEY (https://tavily.com)\n\
+                 - FIRECRAWL_API_KEY or FIRECRAWL_API_URL (https://firecrawl.dev)\n\
+                 - XAI_API_KEY with HERMES_WEB_SEARCH_BACKEND=xai (https://x.ai)\n\
                  - SERPER_API_KEY (https://serper.dev)\n\
                  - SEARXNG_BASE_URL (https://docs.searxng.org/dev/search_api.html)\n\n\
                  Query was: {}", query
@@ -59,6 +62,10 @@ impl WebSearchBackend for FallbackSearchBackend {
 const MAX_EXTRACT_BYTES: usize = 512_000; // 500 KB
 const TAVILY_BASE_URL_DEFAULT: &str = "https://api.tavily.com";
 const SEARXNG_SEARCH_PATH: &str = "/search";
+const FIRECRAWL_BASE_URL_DEFAULT: &str = "https://api.firecrawl.dev";
+const XAI_BASE_URL_DEFAULT: &str = "https://api.x.ai/v1";
+const XAI_WEB_MODEL_DEFAULT: &str = "grok-4.3";
+const XAI_WEB_TIMEOUT_SECS_DEFAULT: u64 = 90;
 
 /// A web extraction backend that fetches HTML via reqwest with no external API dependency.
 pub struct SimpleExtractBackend {
@@ -424,6 +431,159 @@ impl WebSearchBackend for TavilySearchBackend {
     }
 }
 
+/// Real Tavily API extract backend using `/extract`.
+pub struct TavilyExtractBackend {
+    client: Client,
+    api_key: String,
+    base_url: String,
+}
+
+impl TavilyExtractBackend {
+    pub fn new(api_key: String, base_url: String) -> Self {
+        let normalized_base = base_url.trim().trim_end_matches('/').to_string();
+        let base_url = if normalized_base.is_empty() {
+            TAVILY_BASE_URL_DEFAULT.to_string()
+        } else {
+            normalized_base
+        };
+        Self {
+            client: Client::new(),
+            api_key,
+            base_url,
+        }
+    }
+
+    pub fn from_env() -> Result<Self, ToolError> {
+        let api_key = std::env::var("TAVILY_API_KEY").map_err(|_| {
+            ToolError::ExecutionFailed("TAVILY_API_KEY environment variable not set".into())
+        })?;
+        let api_key = api_key.trim();
+        if api_key.is_empty() {
+            return Err(ToolError::ExecutionFailed(
+                "TAVILY_API_KEY environment variable is empty".into(),
+            ));
+        }
+        let base_url = std::env::var("TAVILY_BASE_URL")
+            .unwrap_or_else(|_| TAVILY_BASE_URL_DEFAULT.to_string());
+        Ok(Self::new(api_key.to_string(), base_url))
+    }
+
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+}
+
+#[async_trait]
+impl WebExtractBackend for TavilyExtractBackend {
+    async fn extract(&self, url: &str, _include_links: bool) -> Result<String, ToolError> {
+        let body = json!({
+            "api_key": self.api_key,
+            "urls": [url],
+            "include_images": false,
+        });
+
+        let resp = self
+            .client
+            .post(format!("{}/extract", self.base_url))
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| {
+                ToolError::ExecutionFailed(format!("Tavily extract request failed: {}", e))
+            })?;
+
+        let status = resp.status();
+        let text = resp.text().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to read Tavily extract response: {}", e))
+        })?;
+
+        if !status.is_success() {
+            return Err(ToolError::ExecutionFailed(format!(
+                "Tavily extract API error ({}): {}",
+                status, text
+            )));
+        }
+
+        let data: Value = serde_json::from_str(&text).map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to parse Tavily extract response: {}", e))
+        })?;
+        let documents = normalize_tavily_documents(&data, url);
+        let first_content = documents
+            .first()
+            .and_then(|d| d.get("content"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let result = json!({
+            "url": url,
+            "content": first_content,
+            "results": documents,
+            "provider": "tavily",
+        });
+        serde_json::to_string_pretty(&result)
+            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize result: {}", e)))
+    }
+}
+
+fn normalize_tavily_documents(response: &Value, fallback_url: &str) -> Vec<Value> {
+    let mut documents = Vec::new();
+    if let Some(results) = response.get("results").and_then(|v| v.as_array()) {
+        for result in results {
+            let url = result
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or(fallback_url);
+            let title = result.get("title").and_then(|v| v.as_str()).unwrap_or("");
+            let raw = result
+                .get("raw_content")
+                .or_else(|| result.get("content"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+            documents.push(json!({
+                "url": url,
+                "title": title,
+                "content": raw,
+                "raw_content": raw,
+                "metadata": {"sourceURL": url, "title": title},
+            }));
+        }
+    }
+    if let Some(failed) = response.get("failed_results").and_then(|v| v.as_array()) {
+        for failure in failed {
+            let url = failure
+                .get("url")
+                .and_then(|v| v.as_str())
+                .unwrap_or(fallback_url);
+            let error = failure
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("extraction failed");
+            documents.push(json!({
+                "url": url,
+                "title": "",
+                "content": "",
+                "raw_content": "",
+                "error": error,
+                "metadata": {"sourceURL": url},
+            }));
+        }
+    }
+    if let Some(failed_urls) = response.get("failed_urls").and_then(|v| v.as_array()) {
+        for failure in failed_urls {
+            let url = failure.as_str().unwrap_or(fallback_url);
+            documents.push(json!({
+                "url": url,
+                "title": "",
+                "content": "",
+                "raw_content": "",
+                "error": "extraction failed",
+                "metadata": {"sourceURL": url},
+            }));
+        }
+    }
+    documents
+}
+
 // ---------------------------------------------------------------------------
 // SearXNGSearchBackend
 // ---------------------------------------------------------------------------
@@ -531,17 +691,24 @@ impl WebSearchBackend for SearxngSearchBackend {
 ///
 /// Priority:
 /// 1. Explicit `HERMES_WEB_SEARCH_BACKEND` override
-///    - `exa`, `tavily`, `searxng`, `fallback`
+///    - `exa`, `tavily`, `firecrawl`, `xai`, `searxng`, `fallback`
 /// 2. Exa (`EXA_API_KEY`)
 /// 3. Tavily (`TAVILY_API_KEY`, optional `TAVILY_BASE_URL`)
-/// 4. SearXNG (`SEARXNG_BASE_URL`)
-/// 5. Fallback helpful message backend
+/// 4. Firecrawl (`FIRECRAWL_API_KEY`, `FIRECRAWL_API_URL`, or managed gateway)
+/// 5. SearXNG (`SEARXNG_BASE_URL`)
+/// 6. Fallback helpful message backend
 pub fn search_backend_from_env_or_fallback() -> Box<dyn WebSearchBackend> {
     match search_backend_choice_from_env() {
         "exa" => ExaSearchBackend::from_env()
             .map(|b| Box::new(b) as Box<dyn WebSearchBackend>)
             .unwrap_or_else(|_| Box::new(FallbackSearchBackend::new())),
         "tavily" => TavilySearchBackend::from_env()
+            .map(|b| Box::new(b) as Box<dyn WebSearchBackend>)
+            .unwrap_or_else(|_| Box::new(FallbackSearchBackend::new())),
+        "firecrawl" => FirecrawlSearchBackend::from_env_or_managed()
+            .map(|b| Box::new(b) as Box<dyn WebSearchBackend>)
+            .unwrap_or_else(|_| Box::new(FallbackSearchBackend::new())),
+        "xai" => XaiWebSearchBackend::from_env()
             .map(|b| Box::new(b) as Box<dyn WebSearchBackend>)
             .unwrap_or_else(|_| Box::new(FallbackSearchBackend::new())),
         "searxng" => SearxngSearchBackend::from_env()
@@ -556,6 +723,8 @@ fn search_backend_choice_from_env() -> &'static str {
         match choice.trim().to_ascii_lowercase().as_str() {
             "exa" => return "exa",
             "tavily" => return "tavily",
+            "firecrawl" => return "firecrawl",
+            "xai" | "grok" => return "xai",
             "searxng" | "searx" => return "searxng",
             "fallback" | "none" | "off" | "disabled" => return "fallback",
             _ => {}
@@ -566,10 +735,50 @@ fn search_backend_choice_from_env() -> &'static str {
         "exa"
     } else if env_present_nonempty("TAVILY_API_KEY") {
         "tavily"
+    } else if firecrawl_direct_config_present() || firecrawl_managed_config_present() {
+        "firecrawl"
     } else if env_present_nonempty("SEARXNG_BASE_URL") {
         "searxng"
     } else {
         "fallback"
+    }
+}
+
+/// Resolve preferred web-extract backend from environment.
+///
+/// Priority:
+/// 1. Explicit `HERMES_WEB_EXTRACT_BACKEND` override: `firecrawl`, `tavily`, `simple`
+/// 2. Firecrawl direct/self-hosted/managed when configured
+/// 3. Tavily when configured
+/// 4. Simple local HTML fetch fallback
+pub fn extract_backend_from_env_or_fallback() -> Box<dyn WebExtractBackend> {
+    match extract_backend_choice_from_env() {
+        "firecrawl" => FirecrawlExtractBackend::from_env_or_managed()
+            .map(|b| Box::new(b) as Box<dyn WebExtractBackend>)
+            .unwrap_or_else(|_| Box::new(SimpleExtractBackend::new())),
+        "tavily" => TavilyExtractBackend::from_env()
+            .map(|b| Box::new(b) as Box<dyn WebExtractBackend>)
+            .unwrap_or_else(|_| Box::new(SimpleExtractBackend::new())),
+        _ => Box::new(SimpleExtractBackend::new()),
+    }
+}
+
+fn extract_backend_choice_from_env() -> &'static str {
+    if let Ok(choice) = std::env::var("HERMES_WEB_EXTRACT_BACKEND") {
+        match choice.trim().to_ascii_lowercase().as_str() {
+            "firecrawl" => return "firecrawl",
+            "tavily" => return "tavily",
+            "simple" | "fallback" | "local" | "none" | "off" | "disabled" => return "simple",
+            _ => {}
+        }
+    }
+
+    if firecrawl_direct_config_present() || firecrawl_managed_config_present() {
+        "firecrawl"
+    } else if env_present_nonempty("TAVILY_API_KEY") {
+        "tavily"
+    } else {
+        "simple"
     }
 }
 
@@ -580,17 +789,359 @@ fn env_present_nonempty(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+fn env_optional_nonempty(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
 // ---------------------------------------------------------------------------
-// FirecrawlExtractBackend
+// XaiWebSearchBackend
+// ---------------------------------------------------------------------------
+
+/// xAI Responses API search backend using the server-side `web_search` tool.
+pub struct XaiWebSearchBackend {
+    client: Client,
+    api_key: String,
+    base_url: String,
+    model: String,
+    allowed_domains: Vec<String>,
+    excluded_domains: Vec<String>,
+    timeout_secs: u64,
+}
+
+impl XaiWebSearchBackend {
+    pub fn new(api_key: String) -> Self {
+        Self {
+            client: Client::new(),
+            api_key,
+            base_url: XAI_BASE_URL_DEFAULT.to_string(),
+            model: XAI_WEB_MODEL_DEFAULT.to_string(),
+            allowed_domains: Vec::new(),
+            excluded_domains: Vec::new(),
+            timeout_secs: XAI_WEB_TIMEOUT_SECS_DEFAULT,
+        }
+    }
+
+    pub fn from_env() -> Result<Self, ToolError> {
+        let api_key = env_optional_nonempty("XAI_API_KEY").ok_or_else(|| {
+            ToolError::ExecutionFailed(
+                "XAI_API_KEY environment variable not set for xAI web search".into(),
+            )
+        })?;
+        let mut backend = Self::new(api_key);
+        if let Some(base_url) = env_optional_nonempty("XAI_BASE_URL") {
+            backend.base_url = base_url.trim_end_matches('/').to_string();
+        }
+        if let Some(model) = env_optional_nonempty("HERMES_WEB_XAI_MODEL") {
+            backend.model = model;
+        }
+        backend.allowed_domains = parse_domain_filter_env("HERMES_WEB_XAI_ALLOWED_DOMAINS");
+        backend.excluded_domains = parse_domain_filter_env("HERMES_WEB_XAI_EXCLUDED_DOMAINS");
+        if !backend.allowed_domains.is_empty() && !backend.excluded_domains.is_empty() {
+            return Err(ToolError::ExecutionFailed(
+                "HERMES_WEB_XAI_ALLOWED_DOMAINS and HERMES_WEB_XAI_EXCLUDED_DOMAINS cannot both be set"
+                    .into(),
+            ));
+        }
+        if let Some(timeout) = env_optional_nonempty("HERMES_WEB_XAI_TIMEOUT") {
+            backend.timeout_secs = timeout
+                .parse::<u64>()
+                .unwrap_or(XAI_WEB_TIMEOUT_SECS_DEFAULT);
+        }
+        Ok(backend)
+    }
+
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    pub fn model(&self) -> &str {
+        &self.model
+    }
+
+    fn build_prompt(query: &str, limit: usize) -> String {
+        format!(
+            "Use the web_search tool to find current information for the query below, \
+then respond with ONLY a single JSON object - no prose, no markdown fences, \
+no inline citation links - matching this exact schema:\n\n\
+{{\"results\": [{{\"title\": \"string\", \"url\": \"string\", \"description\": \"1-2 sentence summary\"}}]}}\n\n\
+Return at most {limit} results, ordered by relevance, with absolute https:// URLs. \
+If no usable results exist, return {{\"results\": []}}.\n\n\
+Query: {query}"
+        )
+    }
+
+    fn parse_results(response_data: &Value, limit: usize) -> Vec<Value> {
+        let (text_blocks, annotations) = collect_xai_output_text(response_data);
+        for block in &text_blocks {
+            let parsed = parse_xai_json_results(block, limit);
+            if !parsed.is_empty() {
+                return parsed;
+            }
+        }
+
+        if !annotations.is_empty() {
+            let joined = text_blocks.join("\n");
+            let parsed = xai_results_from_annotations(&annotations, &joined, limit);
+            if !parsed.is_empty() {
+                return parsed;
+            }
+        }
+
+        response_data
+            .get("citations")
+            .and_then(|v| v.as_array())
+            .map(|citations| {
+                citations
+                    .iter()
+                    .filter_map(|v| v.as_str())
+                    .filter(|url| !url.trim().is_empty())
+                    .take(limit)
+                    .enumerate()
+                    .map(|(idx, url)| {
+                        json!({
+                            "title": "",
+                            "url": url,
+                            "description": "",
+                            "position": idx + 1,
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
+#[async_trait]
+impl WebSearchBackend for XaiWebSearchBackend {
+    async fn search(
+        &self,
+        query: &str,
+        num_results: usize,
+        _category: Option<&str>,
+    ) -> Result<String, ToolError> {
+        if !self.excluded_domains.is_empty() && !self.allowed_domains.is_empty() {
+            return Err(ToolError::ExecutionFailed(
+                "xAI allowed_domains and excluded_domains cannot both be set".into(),
+            ));
+        }
+
+        let limit = num_results.clamp(1, 100);
+        let mut web_search_tool = json!({"type": "web_search"});
+        if !self.allowed_domains.is_empty() {
+            web_search_tool["filters"] = json!({"allowed_domains": &self.allowed_domains});
+        } else if !self.excluded_domains.is_empty() {
+            web_search_tool["filters"] = json!({"excluded_domains": &self.excluded_domains});
+        }
+
+        let payload = json!({
+            "model": &self.model,
+            "input": [{"role": "user", "content": Self::build_prompt(query, limit)}],
+            "tools": [web_search_tool],
+            "include": ["no_inline_citations"],
+        });
+
+        let resp = self
+            .client
+            .post(format!("{}/responses", self.base_url))
+            .bearer_auth(&self.api_key)
+            .header("Content-Type", "application/json")
+            .header("User-Agent", "hermes-agent-ultra/rust-web-search")
+            .timeout(std::time::Duration::from_secs(self.timeout_secs))
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| {
+                ToolError::ExecutionFailed(format!("xAI web search request failed: {e}"))
+            })?;
+
+        let status = resp.status();
+        let text = resp.text().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to read xAI web search response: {e}"))
+        })?;
+        if !status.is_success() {
+            return Err(ToolError::ExecutionFailed(format!(
+                "xAI web search API error ({status}): {text}"
+            )));
+        }
+
+        let data: Value = serde_json::from_str(&text).map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to parse xAI web search response: {e}"))
+        })?;
+        if let Some(api_error) = data.get("error").and_then(|v| v.as_object()) {
+            let message = api_error
+                .get("message")
+                .or_else(|| api_error.get("code"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown error");
+            return Err(ToolError::ExecutionFailed(format!(
+                "xAI returned an error: {message}"
+            )));
+        }
+
+        serde_json::to_string_pretty(&json!({
+            "results": Self::parse_results(&data, limit),
+            "provider": "xai",
+            "model": &self.model,
+        }))
+        .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {e}")))
+    }
+}
+
+fn parse_domain_filter_env(name: &str) -> Vec<String> {
+    env_optional_nonempty(name)
+        .map(|value| {
+            value
+                .split(',')
+                .filter_map(|part| {
+                    let domain = part.trim();
+                    if domain.is_empty() {
+                        None
+                    } else {
+                        Some(domain.to_string())
+                    }
+                })
+                .take(5)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+fn collect_xai_output_text(response_data: &Value) -> (Vec<String>, Vec<Value>) {
+    let mut text_blocks = Vec::new();
+    let mut annotations = Vec::new();
+    if let Some(output) = response_data.get("output").and_then(|v| v.as_array()) {
+        for item in output {
+            if item.get("type").and_then(|v| v.as_str()) != Some("message") {
+                continue;
+            }
+            let Some(content) = item.get("content").and_then(|v| v.as_array()) else {
+                continue;
+            };
+            for chunk in content {
+                if chunk.get("type").and_then(|v| v.as_str()) != Some("output_text") {
+                    continue;
+                }
+                if let Some(text) = chunk.get("text").and_then(|v| v.as_str()) {
+                    if !text.trim().is_empty() {
+                        text_blocks.push(text.to_string());
+                    }
+                }
+                if let Some(chunk_annotations) = chunk.get("annotations").and_then(|v| v.as_array())
+                {
+                    annotations.extend(chunk_annotations.iter().cloned());
+                }
+            }
+        }
+    }
+    (text_blocks, annotations)
+}
+
+fn parse_xai_json_results(text: &str, limit: usize) -> Vec<Value> {
+    let mut candidates = vec![text];
+    if let (Some(start), Some(end)) = (text.find('{'), text.rfind('}')) {
+        if start < end {
+            candidates.push(&text[start..=end]);
+        }
+    }
+
+    for candidate in candidates {
+        let Ok(parsed) = serde_json::from_str::<Value>(candidate) else {
+            continue;
+        };
+        let Some(results) = parsed.get("results").and_then(|v| v.as_array()) else {
+            continue;
+        };
+        let mut normalized = Vec::new();
+        for row in results.iter().take(limit) {
+            let Some(url) = row.get("url").and_then(|v| v.as_str()).map(str::trim) else {
+                continue;
+            };
+            if url.is_empty() {
+                continue;
+            }
+            normalized.push(json!({
+                "title": row.get("title").and_then(|v| v.as_str()).unwrap_or("").trim(),
+                "url": url,
+                "description": row.get("description").and_then(|v| v.as_str()).unwrap_or("").trim(),
+                "position": normalized.len() + 1,
+            }));
+        }
+        if !normalized.is_empty() {
+            return normalized;
+        }
+    }
+    Vec::new()
+}
+
+fn xai_results_from_annotations(
+    annotations: &[Value],
+    joined_text: &str,
+    limit: usize,
+) -> Vec<Value> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut results = Vec::new();
+    for annotation in annotations {
+        if annotation.get("type").and_then(|v| v.as_str()) != Some("url_citation") {
+            continue;
+        }
+        let Some(url) = annotation
+            .get("url")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+        else {
+            continue;
+        };
+        if url.is_empty() || !seen.insert(url.to_string()) {
+            continue;
+        }
+        let description = annotation
+            .get("start_index")
+            .and_then(|v| v.as_u64())
+            .and_then(|idx| {
+                let idx = idx as usize;
+                if joined_text.is_char_boundary(idx) {
+                    Some(
+                        joined_text[..idx]
+                            .chars()
+                            .rev()
+                            .take(200)
+                            .collect::<String>(),
+                    )
+                } else {
+                    None
+                }
+            })
+            .map(|s| s.chars().rev().collect::<String>().trim().to_string())
+            .unwrap_or_default();
+        results.push(json!({
+            "title": "",
+            "url": url,
+            "description": description,
+            "position": results.len() + 1,
+        }));
+        if results.len() >= limit {
+            break;
+        }
+    }
+    results
+}
+
+// ---------------------------------------------------------------------------
+// Firecrawl backends
 // ---------------------------------------------------------------------------
 
 /// Identifies how a Firecrawl request reaches the API. Reflected in the
 /// returned JSON's `transport` field for observability.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum FirecrawlTransport {
-    /// Direct call to `https://api.firecrawl.dev/v1/...` with the user's
-    /// `FIRECRAWL_API_KEY`.
-    Direct { api_key: String },
+    /// Direct call to Firecrawl Cloud or a self-hosted Firecrawl endpoint.
+    Direct {
+        endpoint_root: String,
+        api_key: Option<String>,
+    },
     /// Routed through a Nous-managed gateway with a Nous OAuth bearer.
     Managed {
         endpoint_root: String,
@@ -606,19 +1157,192 @@ impl FirecrawlTransport {
         }
     }
 
-    fn scrape_endpoint(&self) -> String {
+    fn endpoint(&self, path: &str) -> String {
+        let path = path.trim_start_matches('/');
         match self {
-            Self::Direct { .. } => "https://api.firecrawl.dev/v1/scrape".into(),
-            Self::Managed { endpoint_root, .. } => format!("{endpoint_root}/v1/scrape"),
+            Self::Direct { endpoint_root, .. } | Self::Managed { endpoint_root, .. } => {
+                format!("{endpoint_root}/v1/{path}")
+            }
         }
     }
 
-    fn bearer(&self) -> &str {
+    fn auth_bearer(&self) -> Option<&str> {
         match self {
-            Self::Direct { api_key } => api_key,
-            Self::Managed { nous_token, .. } => nous_token,
+            Self::Direct { api_key, .. } => api_key.as_deref(),
+            Self::Managed { nous_token, .. } => Some(nous_token),
         }
     }
+}
+
+fn normalize_firecrawl_endpoint_root(raw: &str) -> String {
+    let mut root = raw.trim().trim_end_matches('/').to_string();
+    if root.ends_with("/v1") {
+        root.truncate(root.len() - 3);
+    }
+    if root.is_empty() {
+        FIRECRAWL_BASE_URL_DEFAULT.to_string()
+    } else {
+        root
+    }
+}
+
+fn firecrawl_direct_config_present() -> bool {
+    env_present_nonempty("FIRECRAWL_API_KEY") || env_present_nonempty("FIRECRAWL_API_URL")
+}
+
+fn firecrawl_managed_config_present() -> bool {
+    resolve_managed_tool_gateway("firecrawl", ResolveOptions::default()).is_some()
+}
+
+fn firecrawl_transport_from_env_or_managed() -> Result<FirecrawlTransport, ToolError> {
+    let api_key = env_optional_nonempty("FIRECRAWL_API_KEY");
+    let api_url = env_optional_nonempty("FIRECRAWL_API_URL");
+    if api_key.is_some() || api_url.is_some() {
+        let endpoint_root = api_url
+            .as_deref()
+            .map(normalize_firecrawl_endpoint_root)
+            .unwrap_or_else(|| FIRECRAWL_BASE_URL_DEFAULT.to_string());
+        return Ok(FirecrawlTransport::Direct {
+            endpoint_root,
+            api_key,
+        });
+    }
+    if let Some(cfg) = resolve_managed_tool_gateway("firecrawl", ResolveOptions::default()) {
+        return Ok(FirecrawlTransport::Managed {
+            endpoint_root: normalize_firecrawl_endpoint_root(&cfg.gateway_origin),
+            nous_token: cfg.nous_user_token,
+        });
+    }
+    Err(ToolError::ExecutionFailed(
+        "FIRECRAWL_API_KEY/FIRECRAWL_API_URL not set and Nous-managed firecrawl gateway is not configured."
+            .into(),
+    ))
+}
+
+/// Firecrawl search backend using `/v1/search`.
+#[derive(Debug)]
+pub struct FirecrawlSearchBackend {
+    client: Client,
+    transport: FirecrawlTransport,
+}
+
+impl FirecrawlSearchBackend {
+    pub fn new(api_key: String) -> Self {
+        Self {
+            client: Client::new(),
+            transport: FirecrawlTransport::Direct {
+                endpoint_root: FIRECRAWL_BASE_URL_DEFAULT.to_string(),
+                api_key: Some(api_key),
+            },
+        }
+    }
+
+    pub fn from_managed(cfg: &ManagedToolGatewayConfig) -> Self {
+        Self {
+            client: Client::new(),
+            transport: FirecrawlTransport::Managed {
+                endpoint_root: normalize_firecrawl_endpoint_root(&cfg.gateway_origin),
+                nous_token: cfg.nous_user_token.clone(),
+            },
+        }
+    }
+
+    pub fn from_env_or_managed() -> Result<Self, ToolError> {
+        Ok(Self {
+            client: Client::new(),
+            transport: firecrawl_transport_from_env_or_managed()?,
+        })
+    }
+
+    pub fn transport_label(&self) -> &'static str {
+        self.transport.label()
+    }
+}
+
+#[async_trait]
+impl WebSearchBackend for FirecrawlSearchBackend {
+    async fn search(
+        &self,
+        query: &str,
+        num_results: usize,
+        _category: Option<&str>,
+    ) -> Result<String, ToolError> {
+        let body = json!({
+            "query": query,
+            "limit": num_results,
+        });
+        let mut req = self
+            .client
+            .post(self.transport.endpoint("search"))
+            .header("Content-Type", "application/json")
+            .json(&body);
+        if let Some(token) = self.transport.auth_bearer() {
+            req = req.header("Authorization", format!("Bearer {token}"));
+        }
+
+        let resp = req.send().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Firecrawl search request failed: {}", e))
+        })?;
+        let status = resp.status();
+        let text = resp.text().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to read Firecrawl search response: {}", e))
+        })?;
+
+        if !status.is_success() {
+            return Err(ToolError::ExecutionFailed(format!(
+                "Firecrawl search API error ({}): {}",
+                status, text
+            )));
+        }
+
+        let data: Value = serde_json::from_str(&text).map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to parse Firecrawl search response: {}", e))
+        })?;
+        let formatted = normalize_firecrawl_search_results(&data);
+        serde_json::to_string_pretty(&json!({
+            "results": formatted,
+            "transport": self.transport.label(),
+        }))
+        .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {}", e)))
+    }
+}
+
+fn normalize_firecrawl_search_results(response: &Value) -> Vec<Value> {
+    let candidates = [
+        response.get("data"),
+        response.get("data").and_then(|d| d.get("web")),
+        response.get("data").and_then(|d| d.get("results")),
+        response.get("web"),
+        response.get("results"),
+    ];
+
+    candidates
+        .into_iter()
+        .flatten()
+        .find_map(|v| v.as_array())
+        .map(|results| {
+            results
+                .iter()
+                .map(|result| {
+                    let title = result.get("title").and_then(|v| v.as_str()).unwrap_or("");
+                    let url = result.get("url").and_then(|v| v.as_str()).unwrap_or("");
+                    let text = result
+                        .get("description")
+                        .or_else(|| result.get("content"))
+                        .or_else(|| result.get("markdown"))
+                        .or_else(|| result.get("text"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    json!({
+                        "title": title,
+                        "url": url,
+                        "text": text,
+                        "score": result.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Real Firecrawl API extract backend.
@@ -643,7 +1367,10 @@ impl FirecrawlExtractBackend {
     pub fn new(api_key: String) -> Self {
         Self {
             client: Client::new(),
-            transport: FirecrawlTransport::Direct { api_key },
+            transport: FirecrawlTransport::Direct {
+                endpoint_root: FIRECRAWL_BASE_URL_DEFAULT.to_string(),
+                api_key: Some(api_key),
+            },
         }
     }
 
@@ -652,7 +1379,7 @@ impl FirecrawlExtractBackend {
         Self {
             client: Client::new(),
             transport: FirecrawlTransport::Managed {
-                endpoint_root: cfg.gateway_origin.trim_end_matches('/').to_string(),
+                endpoint_root: normalize_firecrawl_endpoint_root(&cfg.gateway_origin),
                 nous_token: cfg.nous_user_token.clone(),
             },
         }
@@ -660,22 +1387,13 @@ impl FirecrawlExtractBackend {
 
     /// Resolve the best-available transport.
     ///
-    /// Priority: direct `FIRECRAWL_API_KEY` → Nous-managed `firecrawl`
-    /// vendor → `Err` with a hint covering both paths.
+    /// Priority: direct `FIRECRAWL_API_KEY` / `FIRECRAWL_API_URL` →
+    /// Nous-managed `firecrawl` vendor → `Err` with a hint covering both paths.
     pub fn from_env_or_managed() -> Result<Self, ToolError> {
-        if let Ok(api_key) = std::env::var("FIRECRAWL_API_KEY") {
-            let trimmed = api_key.trim();
-            if !trimmed.is_empty() {
-                return Ok(Self::new(trimmed.to_string()));
-            }
-        }
-        if let Some(cfg) = resolve_managed_tool_gateway("firecrawl", ResolveOptions::default()) {
-            return Ok(Self::from_managed(&cfg));
-        }
-        Err(ToolError::ExecutionFailed(
-            "FIRECRAWL_API_KEY not set and Nous-managed firecrawl gateway is not configured."
-                .into(),
-        ))
+        Ok(Self {
+            client: Client::new(),
+            transport: firecrawl_transport_from_env_or_managed()?,
+        })
     }
 
     /// Backwards-compatible alias of [`from_env_or_managed`]. Kept for any
@@ -702,18 +1420,17 @@ impl WebExtractBackend for FirecrawlExtractBackend {
 
         let resp = self
             .client
-            .post(self.transport.scrape_endpoint())
-            .header(
-                "Authorization",
-                format!("Bearer {}", self.transport.bearer()),
-            )
+            .post(self.transport.endpoint("scrape"))
             .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| {
-                ToolError::ExecutionFailed(format!("Firecrawl API request failed: {}", e))
-            })?;
+            .json(&body);
+        let resp = if let Some(token) = self.transport.auth_bearer() {
+            resp.header("Authorization", format!("Bearer {token}"))
+        } else {
+            resp
+        }
+        .send()
+        .await
+        .map_err(|e| ToolError::ExecutionFailed(format!("Firecrawl API request failed: {}", e)))?;
 
         let status = resp.status();
         let text = resp.text().await.map_err(|e| {
@@ -778,8 +1495,21 @@ mod web_search_env_tests {
                 "EXA_API_KEY",
                 "TAVILY_API_KEY",
                 "TAVILY_BASE_URL",
+                "FIRECRAWL_API_KEY",
+                "FIRECRAWL_API_URL",
+                "HERMES_ENABLE_NOUS_MANAGED_TOOLS",
+                "TOOL_GATEWAY_USER_TOKEN",
+                "TOOL_GATEWAY_DOMAIN",
+                "TOOL_GATEWAY_SCHEME",
                 "SEARXNG_BASE_URL",
+                "XAI_API_KEY",
+                "XAI_BASE_URL",
                 "HERMES_WEB_SEARCH_BACKEND",
+                "HERMES_WEB_EXTRACT_BACKEND",
+                "HERMES_WEB_XAI_MODEL",
+                "HERMES_WEB_XAI_ALLOWED_DOMAINS",
+                "HERMES_WEB_XAI_EXCLUDED_DOMAINS",
+                "HERMES_WEB_XAI_TIMEOUT",
             ];
             let original = keys.iter().map(|k| (*k, std::env::var(k).ok())).collect();
             for k in &keys {
@@ -848,6 +1578,22 @@ mod web_search_env_tests {
     }
 
     #[test]
+    fn search_backend_choice_uses_firecrawl_when_configured() {
+        let _scope = EnvScope::new();
+        std::env::set_var("FIRECRAWL_API_URL", "http://127.0.0.1:3002/v1");
+        assert_eq!(search_backend_choice_from_env(), "firecrawl");
+    }
+
+    #[test]
+    fn search_backend_choice_uses_xai_only_when_explicit() {
+        let _scope = EnvScope::new();
+        std::env::set_var("XAI_API_KEY", "xai-key");
+        assert_eq!(search_backend_choice_from_env(), "fallback");
+        std::env::set_var("HERMES_WEB_SEARCH_BACKEND", "xai");
+        assert_eq!(search_backend_choice_from_env(), "xai");
+    }
+
+    #[test]
     fn search_backend_choice_honors_explicit_override() {
         let _scope = EnvScope::new();
         std::env::set_var("HERMES_WEB_SEARCH_BACKEND", "searxng");
@@ -864,6 +1610,65 @@ mod web_search_env_tests {
             .await
             .expect("fallback backend should return json");
         assert!(out.contains("\"no_api_key\""));
+    }
+
+    #[test]
+    fn extract_backend_choice_prefers_firecrawl_then_tavily_then_simple() {
+        let _scope = EnvScope::new();
+        assert_eq!(extract_backend_choice_from_env(), "simple");
+        std::env::set_var("TAVILY_API_KEY", "tavily-key");
+        assert_eq!(extract_backend_choice_from_env(), "tavily");
+        std::env::set_var("FIRECRAWL_API_KEY", "fire-key");
+        assert_eq!(extract_backend_choice_from_env(), "firecrawl");
+    }
+
+    #[test]
+    fn normalize_tavily_documents_maps_results_and_failures() {
+        let docs = normalize_tavily_documents(
+            &json!({
+                "results": [{"url": "https://ok.example", "title": "OK", "raw_content": "body"}],
+                "failed_results": [{"url": "https://bad.example", "error": "blocked"}],
+                "failed_urls": ["https://missing.example"]
+            }),
+            "https://fallback.example",
+        );
+        assert_eq!(docs.len(), 3);
+        assert_eq!(docs[0]["content"], "body");
+        assert_eq!(docs[1]["error"], "blocked");
+        assert_eq!(docs[2]["url"], "https://missing.example");
+    }
+
+    #[test]
+    fn normalize_firecrawl_search_results_accepts_nested_web_shape() {
+        let rows = normalize_firecrawl_search_results(&json!({
+            "data": {
+                "web": [{"title": "Rust", "url": "https://rust-lang.org", "description": "lang"}]
+            }
+        }));
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["title"], "Rust");
+        assert_eq!(rows[0]["text"], "lang");
+    }
+
+    #[test]
+    fn xai_json_results_parse_and_renumber_valid_rows() {
+        let rows = parse_xai_json_results(
+            r#"prefix {"results":[{"title":"A","url":"","description":"drop"},{"title":"B","url":"https://b.example","description":"keep"}]} suffix"#,
+            10,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["position"], 1);
+        assert_eq!(rows[0]["url"], "https://b.example");
+    }
+
+    #[test]
+    fn xai_parse_results_falls_back_to_citations() {
+        let rows = XaiWebSearchBackend::parse_results(
+            &json!({"citations": ["https://one.example", "https://two.example"]}),
+            1,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["url"], "https://one.example");
     }
 }
 
@@ -886,6 +1691,7 @@ mod firecrawl_managed_tests {
             let keys = [
                 "HERMES_HOME",
                 "FIRECRAWL_API_KEY",
+                "FIRECRAWL_API_URL",
                 "HERMES_ENABLE_NOUS_MANAGED_TOOLS",
                 "TOOL_GATEWAY_USER_TOKEN",
                 "TOOL_GATEWAY_DOMAIN",
@@ -942,6 +1748,28 @@ mod firecrawl_managed_tests {
     }
 
     #[test]
+    fn from_env_or_managed_accepts_self_hosted_url_without_key() {
+        let _g = EnvScope::new();
+        std::env::set_var("FIRECRAWL_API_URL", "http://127.0.0.1:3002/v1/");
+        let b = FirecrawlExtractBackend::from_env_or_managed().unwrap();
+        assert_eq!(b.transport_label(), "direct");
+        match &b.transport {
+            FirecrawlTransport::Direct {
+                endpoint_root,
+                api_key,
+            } => {
+                assert_eq!(endpoint_root, "http://127.0.0.1:3002");
+                assert!(api_key.is_none());
+                assert_eq!(
+                    b.transport.endpoint("scrape"),
+                    "http://127.0.0.1:3002/v1/scrape"
+                );
+            }
+            _ => panic!("expected direct transport"),
+        }
+    }
+
+    #[test]
     fn from_managed_uses_resolved_origin_and_token() {
         let cfg = ManagedToolGatewayConfig {
             vendor: "firecrawl".into(),
@@ -958,7 +1786,7 @@ mod firecrawl_managed_tests {
                 assert_eq!(endpoint_root, "https://firecrawl.gw.example.com");
                 assert_eq!(nous_token, "tok");
                 assert_eq!(
-                    b.transport.scrape_endpoint(),
+                    b.transport.endpoint("scrape"),
                     "https://firecrawl.gw.example.com/v1/scrape"
                 );
             }

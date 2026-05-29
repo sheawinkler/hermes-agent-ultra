@@ -105,8 +105,9 @@ pub use backends::tts::MultiTtsBackend;
 pub use backends::video::VisionFrameSamplingVideoBackend;
 pub use backends::vision::OpenAiVisionBackend;
 pub use backends::web::{
-    search_backend_from_env_or_fallback, ExaSearchBackend, FallbackSearchBackend,
-    FirecrawlExtractBackend, SimpleExtractBackend, TavilySearchBackend,
+    extract_backend_from_env_or_fallback, search_backend_from_env_or_fallback, ExaSearchBackend,
+    FallbackSearchBackend, FirecrawlExtractBackend, FirecrawlSearchBackend, SimpleExtractBackend,
+    TavilyExtractBackend, TavilySearchBackend, XaiWebSearchBackend,
 };
 
 // Re-export builtin registration helper

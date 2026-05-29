@@ -479,6 +479,20 @@
       "ticket": 25
     },
     {
+      "path": "plugins/web/firecrawl/provider.py",
+      "classification": "intentional_divergence",
+      "rationale": "Rust-native Firecrawl search/extract backends now cover direct, self-hosted, and Nous-managed routing; the Python plugin remains reference/compatibility code in the Rust-only runtime.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "plugins/web/xai/provider.py",
+      "classification": "intentional_divergence",
+      "rationale": "Rust-native xAI web search now routes through the Responses API server-side web_search tool with deterministic result normalization; the Python plugin remains reference/compatibility code.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "plugins/platforms/discord/adapter.py",
       "classification": "policy_only",
       "rationale": "The remaining shared diff is whitespace-only and does not change Discord adapter behavior; runtime message filtering remains covered by Discord gateway tests.",

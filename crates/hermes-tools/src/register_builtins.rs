@@ -61,9 +61,9 @@ pub fn register_builtin_tools(
     reg(
         registry,
         "web",
-        Arc::new(crate::tools::web::WebExtractHandler::new(Box::new(
-            crate::backends::web::SimpleExtractBackend::new(),
-        ))),
+        Arc::new(crate::tools::web::WebExtractHandler::new(
+            crate::backends::web::extract_backend_from_env_or_fallback(),
+        )),
         "📄",
         vec![],
     );

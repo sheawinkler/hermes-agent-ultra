@@ -1,10 +1,10 @@
 # Parity Matrix
 
-Generated: `2026-05-29T21:10:01.831190+00:00`
+Generated: `2026-05-29T21:30:08.097108+00:00`
 
 ## Scope
 
-- Local ref: `HEAD` (`ee370d4bedefa745f0d0519caf4aa456bb02f94f`)
+- Local ref: `HEAD` (`36a58a2027d6e4ad10f9a777dce04bcbb98af4fa`)
 - Upstream ref: `upstream/main` (`689ef5e233980f5d5a32080e959f44c8991dd03a`)
 - Merge base: `none (history divergence)`
 
@@ -13,7 +13,7 @@ Generated: `2026-05-29T21:10:01.831190+00:00`
 | Metric | Value |
 | --- | ---: |
 | Commits behind local (`upstream` ancestry only) | 4399 |
-| Commits ahead local (`local` ancestry only) | 778 |
+| Commits ahead local (`local` ancestry only) | 779 |
 | Upstream commits missing by patch-id (`git cherry local upstream`, `+`) | 4281 |
 | Upstream commits represented by patch-id (`git cherry local upstream`, `-`) | 2 |
 | Local commits unique by patch-id (`git cherry upstream local`, `+`) | 673 |
