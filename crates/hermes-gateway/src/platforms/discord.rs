@@ -8,7 +8,7 @@
 //! MESSAGE_CREATE, MESSAGE_UPDATE, INTERACTION_CREATE, VOICE_STATE_UPDATE,
 //! MESSAGE_REACTION_ADD, MESSAGE_REACTION_REMOVE).
 
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -861,6 +861,621 @@ pub fn discord_skill_command_decision(
     DiscordSkillCommandDecision::Dispatch { text }
 }
 
+// ---------------------------------------------------------------------------
+// Discord gateway parity helpers
+// ---------------------------------------------------------------------------
+
+fn discord_user_identifier_requires_member_lookup(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let candidate = trimmed
+        .strip_prefix('@')
+        .unwrap_or(trimmed)
+        .trim()
+        .trim_matches(|c| c == '<' || c == '>');
+    !candidate.is_empty() && !candidate.chars().all(|c| c.is_ascii_digit())
+}
+
+/// Whether Discord connect must request the privileged members intent.
+pub fn discord_members_intent_required(
+    allowed_users: impl IntoIterator<Item = impl AsRef<str>>,
+) -> bool {
+    allowed_users
+        .into_iter()
+        .any(|user| discord_user_identifier_requires_member_lookup(user.as_ref()))
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscordClientReentryAction {
+    ReuseFreshSlot,
+    ClosePreviousClient,
+}
+
+/// Re-entering connect with an open client must close the old websocket first.
+pub fn discord_client_reentry_action(previous_client_open: bool) -> DiscordClientReentryAction {
+    if previous_client_open {
+        DiscordClientReentryAction::ClosePreviousClient
+    } else {
+        DiscordClientReentryAction::ReuseFreshSlot
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscordSlashSyncPolicy {
+    Off,
+    Diff,
+    Bulk,
+}
+
+impl DiscordSlashSyncPolicy {
+    pub fn parse(raw: Option<&str>) -> Self {
+        match raw.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(value) if value.eq_ignore_ascii_case("off") => Self::Off,
+            Some(value) if value.eq_ignore_ascii_case("bulk") => Self::Bulk,
+            _ => Self::Diff,
+        }
+    }
+
+    pub fn should_register(self, slash_commands_enabled: bool) -> bool {
+        slash_commands_enabled && self != Self::Off
+    }
+}
+
+/// Resolve a Discord channel prompt, preferring exact thread/channel IDs over parents.
+pub fn discord_resolve_channel_prompt<'a>(
+    prompts: &'a BTreeMap<String, String>,
+    channel_id: &str,
+    parent_channel_id: Option<&str>,
+) -> Option<&'a str> {
+    let channel_id = channel_id.trim();
+    if !channel_id.is_empty() {
+        if let Some(prompt) = prompts
+            .get(channel_id)
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|prompt| !prompt.is_empty())
+        {
+            return Some(prompt);
+        }
+    }
+
+    parent_channel_id
+        .map(str::trim)
+        .filter(|parent| !parent.is_empty())
+        .and_then(|parent| prompts.get(parent))
+        .map(String::as_str)
+        .map(str::trim)
+        .filter(|prompt| !prompt.is_empty())
+}
+
+/// Compose per-run system prompt layers in Python gateway order.
+pub fn discord_compose_ephemeral_system_prompt(
+    context_prompt: Option<&str>,
+    channel_prompt: Option<&str>,
+    global_prompt: Option<&str>,
+) -> Option<String> {
+    let parts = [context_prompt, channel_prompt, global_prompt]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(String::from)
+        .collect::<Vec<_>>();
+    (!parts.is_empty()).then(|| parts.join("\n\n"))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscordModelPickerEdit {
+    pub title: String,
+    pub description: String,
+    pub clears_view: bool,
+}
+
+pub fn discord_model_picker_switch_edits(
+    model_id: &str,
+    switch_result: &str,
+) -> (DiscordModelPickerEdit, DiscordModelPickerEdit) {
+    (
+        DiscordModelPickerEdit {
+            title: "Switching Model".into(),
+            description: format!("Switching to `{}`...", model_id.trim()),
+            clears_view: true,
+        },
+        DiscordModelPickerEdit {
+            title: "Model Switched".into(),
+            description: switch_result.to_string(),
+            clears_view: true,
+        },
+    )
+}
+
+fn strip_discord_mentions(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut chars = raw.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '<' && matches!(chars.peek(), Some('@' | '#' | '&')) {
+            let mut consumed_marker = false;
+            for next in chars.by_ref() {
+                if next == '>' {
+                    consumed_marker = true;
+                    break;
+                }
+            }
+            if consumed_marker {
+                out.push(' ');
+                continue;
+            }
+        }
+        out.push(ch);
+    }
+    out.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+pub fn discord_auto_thread_name(content: &str) -> String {
+    let stripped = strip_discord_mentions(content);
+    let candidate = stripped.trim();
+    let candidate = if candidate.is_empty() {
+        "Hermes"
+    } else {
+        candidate
+    };
+
+    let mut name = candidate.chars().take(80).collect::<String>();
+    if candidate.chars().count() > 80 {
+        while name.chars().count() > 77 {
+            name.pop();
+        }
+        name.push_str("...");
+    }
+    name
+}
+
+pub fn discord_thread_create_success_message(thread_id: &str) -> String {
+    format!("Created thread <#{}>.", thread_id.trim())
+}
+
+pub fn discord_thread_create_failure_message(error: &str) -> String {
+    format!("Failed to create thread: {}", error.trim())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiscordAttachmentKind {
+    Image,
+    Audio,
+    Document,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscordAttachmentHandling {
+    pub kind: DiscordAttachmentKind,
+    pub prefer_bot_session_read: bool,
+    pub fallback_uses_ssrf_gate: bool,
+    pub inject_text_content: bool,
+}
+
+pub fn discord_attachment_handling(
+    filename: &str,
+    content_type: Option<&str>,
+    size_bytes: u64,
+) -> DiscordAttachmentHandling {
+    let ext = Path::new(filename)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let content_type = content_type.unwrap_or_default().to_ascii_lowercase();
+    let kind = if content_type.starts_with("image/")
+        || matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp")
+    {
+        DiscordAttachmentKind::Image
+    } else if content_type.starts_with("audio/")
+        || matches!(ext.as_str(), "mp3" | "wav" | "ogg" | "m4a" | "flac")
+    {
+        DiscordAttachmentKind::Audio
+    } else if !filename.trim().is_empty() {
+        DiscordAttachmentKind::Document
+    } else {
+        DiscordAttachmentKind::Other
+    };
+    let inject_text_content = kind == DiscordAttachmentKind::Document
+        && size_bytes <= 100 * 1024
+        && (content_type.starts_with("text/")
+            || matches!(ext.as_str(), "txt" | "md" | "markdown" | "log"));
+
+    DiscordAttachmentHandling {
+        kind,
+        prefer_bot_session_read: matches!(
+            kind,
+            DiscordAttachmentKind::Image
+                | DiscordAttachmentKind::Audio
+                | DiscordAttachmentKind::Document
+        ),
+        fallback_uses_ssrf_gate: !matches!(kind, DiscordAttachmentKind::Other),
+        inject_text_content,
+    }
+}
+
+pub fn discord_inject_document_text(caption: &str, filename: &str, document_text: &str) -> String {
+    let injected = format!(
+        "[Content of {}]:\n{}",
+        filename.trim(),
+        document_text.trim_end()
+    );
+    let caption = caption.trim();
+    if caption.is_empty() {
+        injected
+    } else {
+        format!("{}\n\n{}", injected, caption)
+    }
+}
+
+pub fn discord_opus_library_candidates(
+    platform: &str,
+    find_library_result: Option<&str>,
+) -> Vec<String> {
+    if let Some(found) = find_library_result
+        .map(str::trim)
+        .filter(|found| !found.is_empty())
+    {
+        return vec![found.to_string()];
+    }
+
+    if platform.eq_ignore_ascii_case("darwin") || platform.eq_ignore_ascii_case("macos") {
+        vec![
+            "/opt/homebrew/lib/libopus.dylib".into(),
+            "/usr/local/lib/libopus.dylib".into(),
+        ]
+    } else {
+        Vec::new()
+    }
+}
+
+pub fn discord_should_log_opus_decode_error(error: Option<&str>) -> bool {
+    error.map(str::trim).filter(|err| !err.is_empty()).is_some()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiscordVoiceJoinAction {
+    Connect,
+    MoveExisting,
+    AlreadyConnected,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct DiscordVoiceJoinTracker {
+    connected_guilds: BTreeSet<String>,
+    inflight_guilds: BTreeSet<String>,
+}
+
+impl DiscordVoiceJoinTracker {
+    pub fn begin_join(&mut self, guild_id: impl Into<String>) -> DiscordVoiceJoinAction {
+        let guild_id = guild_id.into();
+        if self.connected_guilds.contains(&guild_id) {
+            return DiscordVoiceJoinAction::AlreadyConnected;
+        }
+        if self.inflight_guilds.contains(&guild_id) {
+            return DiscordVoiceJoinAction::MoveExisting;
+        }
+        self.inflight_guilds.insert(guild_id);
+        DiscordVoiceJoinAction::Connect
+    }
+
+    pub fn complete_join(&mut self, guild_id: impl AsRef<str>, connected: bool) {
+        let guild_id = guild_id.as_ref();
+        self.inflight_guilds.remove(guild_id);
+        if connected {
+            self.connected_guilds.insert(guild_id.to_string());
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DiscordSlashRegistrationSpec {
+    pub name: String,
+    pub description: String,
+    pub args_hint: Option<String>,
+    pub command_text: String,
+}
+
+impl DiscordSlashRegistrationSpec {
+    pub fn new(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        args_hint: Option<impl Into<String>>,
+        command_text: impl Into<String>,
+    ) -> Self {
+        let args_hint = args_hint
+            .map(Into::into)
+            .map(|hint: String| hint.trim().to_string())
+            .filter(|hint| !hint.is_empty());
+        Self {
+            name: name.into(),
+            description: description.into(),
+            args_hint,
+            command_text: command_text.into(),
+        }
+    }
+
+    pub fn to_slash_command(&self) -> SlashCommand {
+        let options = self.args_hint.as_ref().map(|hint| {
+            vec![SlashCommandOption {
+                name: "args".into(),
+                description: hint.chars().take(100).collect(),
+                option_type: 3,
+                required: Some(false),
+                choices: None,
+            }]
+        });
+        SlashCommand {
+            name: self.name.clone(),
+            description: self.description.chars().take(100).collect(),
+            options,
+            default_member_permissions: None,
+            dm_permission: Some(true),
+            nsfw: Some(false),
+            contexts: None,
+            integration_types: None,
+            command_type: 1,
+        }
+    }
+
+    pub fn dispatch_text(&self, args: Option<&str>) -> String {
+        let args = args.map(str::trim).filter(|args| !args.is_empty());
+        match args {
+            Some(args) => format!("{} {}", self.command_text.trim(), args),
+            None => self.command_text.trim().to_string(),
+        }
+    }
+}
+
+pub fn discord_auto_registered_commands(
+    explicit_names: impl IntoIterator<Item = impl AsRef<str>>,
+    gateway_specs: impl IntoIterator<Item = DiscordSlashRegistrationSpec>,
+    plugin_specs: impl IntoIterator<Item = DiscordSlashRegistrationSpec>,
+) -> Vec<DiscordSlashRegistrationSpec> {
+    let mut registered = explicit_names
+        .into_iter()
+        .map(|name| {
+            name.as_ref()
+                .trim()
+                .trim_start_matches('/')
+                .to_ascii_lowercase()
+        })
+        .filter(|name| !name.is_empty())
+        .collect::<BTreeSet<_>>();
+    let mut out = Vec::new();
+    for spec in gateway_specs.into_iter().chain(plugin_specs) {
+        let key = spec
+            .name
+            .trim()
+            .trim_start_matches('/')
+            .to_ascii_lowercase();
+        if key.is_empty() || registered.contains(&key) {
+            continue;
+        }
+        registered.insert(key);
+        out.push(spec);
+    }
+    out
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DiscordCommandSyncSummary {
+    pub total: usize,
+    pub unchanged: usize,
+    pub updated: usize,
+    pub recreated: usize,
+    pub created: usize,
+    pub deleted: usize,
+    pub mutations: Vec<DiscordCommandSyncMutation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DiscordCommandSyncMutation {
+    Create { name: String },
+    Update { name: String },
+    Recreate { name: String },
+    Delete { name: String },
+}
+
+fn json_to_sorted(value: &serde_json::Value) -> serde_json::Value {
+    match value {
+        serde_json::Value::Object(map) => {
+            let sorted = map
+                .iter()
+                .map(|(key, value)| (key.clone(), json_to_sorted(value)))
+                .collect::<serde_json::Map<_, _>>();
+            serde_json::Value::Object(sorted)
+        }
+        serde_json::Value::Array(values) => {
+            serde_json::Value::Array(values.iter().map(json_to_sorted).collect())
+        }
+        other => other.clone(),
+    }
+}
+
+fn command_key(payload: &serde_json::Value) -> Option<(String, u64)> {
+    let name = payload.get("name")?.as_str()?.trim().to_ascii_lowercase();
+    if name.is_empty() {
+        return None;
+    }
+    let command_type = payload.get("type").and_then(|v| v.as_u64()).unwrap_or(1);
+    Some((name, command_type))
+}
+
+fn normalize_command_payload(payload: &serde_json::Value) -> serde_json::Value {
+    let mut normalized = match payload {
+        serde_json::Value::Object(map) => map.clone(),
+        _ => serde_json::Map::new(),
+    };
+    for key in [
+        "id",
+        "application_id",
+        "version",
+        "name_localizations",
+        "description_localizations",
+    ] {
+        normalized.remove(key);
+    }
+    normalized.retain(|_, value| !value.is_null());
+    normalized
+        .entry("type")
+        .or_insert_with(|| serde_json::json!(1));
+    normalized
+        .entry("options")
+        .or_insert_with(|| serde_json::json!([]));
+    normalized
+        .entry("nsfw")
+        .or_insert_with(|| serde_json::json!(false));
+    normalized
+        .entry("dm_permission")
+        .or_insert_with(|| serde_json::json!(true));
+    json_to_sorted(&serde_json::Value::Object(normalized))
+}
+
+fn command_patchable_view(payload: &serde_json::Value) -> serde_json::Value {
+    let mut map = match normalize_command_payload(payload) {
+        serde_json::Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    for key in [
+        "nsfw",
+        "dm_permission",
+        "default_member_permissions",
+        "contexts",
+        "integration_types",
+    ] {
+        map.remove(key);
+    }
+    serde_json::Value::Object(map)
+}
+
+fn command_requires_recreate(desired: &serde_json::Value, existing: &serde_json::Value) -> bool {
+    let desired = normalize_command_payload(desired);
+    let existing = normalize_command_payload(existing);
+    [
+        "nsfw",
+        "dm_permission",
+        "default_member_permissions",
+        "contexts",
+        "integration_types",
+    ]
+    .into_iter()
+    .any(|key| desired.get(key) != existing.get(key))
+}
+
+pub fn plan_discord_command_sync(
+    desired: &[serde_json::Value],
+    existing: &[serde_json::Value],
+) -> DiscordCommandSyncSummary {
+    let mut existing_by_key = existing
+        .iter()
+        .filter_map(|payload| command_key(payload).map(|key| (key, payload)))
+        .collect::<BTreeMap<_, _>>();
+    let mut summary = DiscordCommandSyncSummary {
+        total: desired.len(),
+        ..DiscordCommandSyncSummary::default()
+    };
+
+    for desired_payload in desired {
+        let Some((name, command_type)) = command_key(desired_payload) else {
+            continue;
+        };
+        match existing_by_key.remove(&(name.clone(), command_type)) {
+            None => {
+                summary.created += 1;
+                summary
+                    .mutations
+                    .push(DiscordCommandSyncMutation::Create { name });
+            }
+            Some(existing_payload)
+                if normalize_command_payload(desired_payload)
+                    == normalize_command_payload(existing_payload) =>
+            {
+                summary.unchanged += 1;
+            }
+            Some(existing_payload)
+                if command_requires_recreate(desired_payload, existing_payload) =>
+            {
+                summary.recreated += 1;
+                summary
+                    .mutations
+                    .push(DiscordCommandSyncMutation::Recreate { name });
+            }
+            Some(existing_payload)
+                if command_patchable_view(desired_payload)
+                    != command_patchable_view(existing_payload) =>
+            {
+                summary.updated += 1;
+                summary
+                    .mutations
+                    .push(DiscordCommandSyncMutation::Update { name });
+            }
+            Some(_) => {
+                summary.unchanged += 1;
+            }
+        }
+    }
+
+    for ((name, _), _) in existing_by_key {
+        summary.deleted += 1;
+        summary
+            .mutations
+            .push(DiscordCommandSyncMutation::Delete { name });
+    }
+    summary
+}
+
+pub fn discord_command_fingerprint(commands: &[serde_json::Value]) -> String {
+    let mut normalized = commands
+        .iter()
+        .map(normalize_command_payload)
+        .collect::<Vec<_>>();
+    normalized.sort_by(|a, b| command_key(a).cmp(&command_key(b)));
+    serde_json::to_string(&normalized).unwrap_or_default()
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DiscordCommandSyncStateEntry {
+    pub fingerprint: Option<String>,
+    pub last_success_at: Option<u64>,
+    pub last_attempt_at: Option<u64>,
+    pub retry_after_until: Option<u64>,
+    pub retry_after: Option<u64>,
+}
+
+impl DiscordCommandSyncStateEntry {
+    pub fn should_attempt(&self, fingerprint: &str, now_epoch_secs: u64) -> bool {
+        if self
+            .retry_after_until
+            .map(|until| until > now_epoch_secs)
+            .unwrap_or(false)
+        {
+            return false;
+        }
+        self.fingerprint.as_deref() != Some(fingerprint)
+    }
+
+    pub fn record_attempt(&mut self, now_epoch_secs: u64) {
+        self.last_attempt_at = Some(now_epoch_secs);
+    }
+
+    pub fn record_success(&mut self, fingerprint: impl Into<String>, now_epoch_secs: u64) {
+        self.fingerprint = Some(fingerprint.into());
+        self.last_success_at = Some(now_epoch_secs);
+        self.retry_after = None;
+        self.retry_after_until = None;
+    }
+
+    pub fn record_rate_limit(&mut self, retry_after_secs: u64, now_epoch_secs: u64) {
+        self.retry_after = Some(retry_after_secs);
+        self.retry_after_until = Some(now_epoch_secs.saturating_add(retry_after_secs));
+    }
+}
+
 /// Channel-bound skill binding parsed from Python-style Discord config.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiscordChannelSkillBinding {
@@ -1416,6 +2031,14 @@ pub struct SlashCommand {
     /// Discord permission bitset string. "0" hides the command by default.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub default_member_permissions: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dm_permission: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub nsfw: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub contexts: Option<Vec<u8>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub integration_types: Option<Vec<u8>>,
     /// Command type (1 = CHAT_INPUT, 2 = USER, 3 = MESSAGE). Default 1.
     #[serde(rename = "type", default = "default_command_type")]
     pub command_type: u8,
@@ -3558,6 +4181,345 @@ mod tests {
     }
 
     #[test]
+    fn discord_connect_policy_matches_members_intent_and_sync_opt_out() {
+        assert!(!discord_members_intent_required(["769524422783664158"]));
+        assert!(discord_members_intent_required(["abhey-gupta"]));
+        assert!(discord_members_intent_required([
+            "769524422783664158",
+            "abhey-gupta"
+        ]));
+
+        assert_eq!(
+            discord_client_reentry_action(false),
+            DiscordClientReentryAction::ReuseFreshSlot
+        );
+        assert_eq!(
+            discord_client_reentry_action(true),
+            DiscordClientReentryAction::ClosePreviousClient
+        );
+
+        assert!(!DiscordSlashSyncPolicy::Off.should_register(true));
+        assert!(!DiscordSlashSyncPolicy::Bulk.should_register(false));
+        assert!(DiscordSlashSyncPolicy::parse(Some("bulk")).should_register(true));
+        assert_eq!(
+            DiscordSlashSyncPolicy::parse(Some("unknown")),
+            DiscordSlashSyncPolicy::Diff
+        );
+    }
+
+    #[test]
+    fn discord_command_sync_plans_diffs_recreates_and_deletes() {
+        let desired = vec![
+            serde_json::json!({
+                "name": "status",
+                "description": "Show Hermes status",
+                "type": 1,
+                "options": [],
+                "nsfw": false,
+                "dm_permission": true,
+                "default_member_permissions": null,
+            }),
+            serde_json::json!({
+                "name": "help",
+                "description": "Show available commands",
+                "type": 1,
+                "options": [],
+                "nsfw": false,
+                "dm_permission": true,
+            }),
+            serde_json::json!({
+                "name": "metricas",
+                "description": "Metrics dashboard",
+                "type": 1,
+                "options": [],
+            }),
+            serde_json::json!({
+                "name": "admin",
+                "description": "Admin-only command",
+                "type": 1,
+                "options": [],
+                "nsfw": true,
+                "dm_permission": false,
+                "default_member_permissions": "8",
+            }),
+            serde_json::json!({
+                "name": "contexts",
+                "description": "Context drift check",
+                "type": 1,
+                "options": [],
+                "contexts": [0, 1, 2],
+                "integration_types": [0, 1],
+            }),
+        ];
+        let existing = vec![
+            serde_json::json!({
+                "id": 11,
+                "application_id": 999,
+                "name": "status",
+                "description": "Show Hermes status",
+                "type": 1,
+                "options": [],
+                "nsfw": false,
+                "dm_permission": true,
+                "default_member_permissions": null,
+                "name_localizations": {},
+                "description_localizations": {},
+            }),
+            serde_json::json!({
+                "id": 12,
+                "application_id": 999,
+                "name": "help",
+                "description": "Old help text",
+                "type": 1,
+                "options": [],
+                "nsfw": false,
+                "dm_permission": true,
+            }),
+            serde_json::json!({
+                "id": 13,
+                "name": "old-command",
+                "description": "To be deleted",
+                "type": 1,
+                "options": [],
+            }),
+            serde_json::json!({
+                "id": 14,
+                "name": "admin",
+                "description": "Admin-only command",
+                "type": 1,
+                "options": [],
+                "nsfw": true,
+                "dm_permission": false,
+            }),
+            serde_json::json!({
+                "id": 15,
+                "name": "contexts",
+                "description": "Context drift check",
+                "type": 1,
+                "options": [],
+                "contexts": [0],
+                "integration_types": [0],
+            }),
+        ];
+
+        let summary = plan_discord_command_sync(&desired, &existing);
+
+        assert_eq!(summary.total, 5);
+        assert_eq!(summary.unchanged, 1);
+        assert_eq!(summary.updated, 1);
+        assert_eq!(summary.recreated, 2);
+        assert_eq!(summary.created, 1);
+        assert_eq!(summary.deleted, 1);
+        assert!(summary
+            .mutations
+            .contains(&DiscordCommandSyncMutation::Update {
+                name: "help".into()
+            }));
+        assert!(summary
+            .mutations
+            .contains(&DiscordCommandSyncMutation::Recreate {
+                name: "admin".into()
+            }));
+        assert!(summary
+            .mutations
+            .contains(&DiscordCommandSyncMutation::Recreate {
+                name: "contexts".into()
+            }));
+        assert!(summary
+            .mutations
+            .contains(&DiscordCommandSyncMutation::Create {
+                name: "metricas".into()
+            }));
+        assert!(summary
+            .mutations
+            .contains(&DiscordCommandSyncMutation::Delete {
+                name: "old-command".into()
+            }));
+    }
+
+    #[test]
+    fn discord_command_sync_state_skips_same_fingerprint_and_honors_retry_after() {
+        let commands = vec![serde_json::json!({
+            "name": "status",
+            "description": "Show Hermes status",
+            "type": 1,
+            "options": [],
+        })];
+        let fingerprint = discord_command_fingerprint(&commands);
+        let mut state = DiscordCommandSyncStateEntry::default();
+
+        assert!(state.should_attempt(&fingerprint, 10));
+        state.record_attempt(10);
+        state.record_success(fingerprint.clone(), 11);
+        assert!(!state.should_attempt(&fingerprint, 12));
+
+        let changed = discord_command_fingerprint(&[serde_json::json!({
+            "name": "status",
+            "description": "Show current Hermes status",
+            "type": 1,
+            "options": [],
+        })]);
+        assert!(state.should_attempt(&changed, 13));
+        state.record_rate_limit(123, 20);
+        assert!(!state.should_attempt(&changed, 100));
+        assert!(state.should_attempt(&changed, 144));
+        assert_eq!(state.retry_after, Some(123));
+        assert_eq!(state.retry_after_until, Some(143));
+    }
+
+    #[test]
+    fn discord_channel_prompt_and_model_picker_contracts_match_python_order() {
+        let prompts = BTreeMap::from([
+            ("200".to_string(), "Parent prompt".to_string()),
+            ("999".to_string(), "Thread prompt".to_string()),
+            ("blank".to_string(), "   ".to_string()),
+        ]);
+
+        assert_eq!(
+            discord_resolve_channel_prompt(&prompts, "999", Some("200")),
+            Some("Thread prompt")
+        );
+        assert_eq!(
+            discord_resolve_channel_prompt(&prompts, "123", Some("200")),
+            Some("Parent prompt")
+        );
+        assert_eq!(
+            discord_resolve_channel_prompt(&prompts, "blank", None),
+            None
+        );
+        assert_eq!(
+            discord_compose_ephemeral_system_prompt(
+                Some("Context prompt"),
+                Some("Channel prompt"),
+                Some("Global prompt"),
+            )
+            .as_deref(),
+            Some("Context prompt\n\nChannel prompt\n\nGlobal prompt")
+        );
+
+        let (initial, final_edit) = discord_model_picker_switch_edits("gpt-5.4", "Model switched");
+        assert_eq!(initial.title, "Switching Model");
+        assert_eq!(initial.description, "Switching to `gpt-5.4`...");
+        assert!(initial.clears_view);
+        assert_eq!(final_edit.title, "Model Switched");
+        assert_eq!(final_edit.description, "Model switched");
+        assert!(final_edit.clears_view);
+    }
+
+    #[test]
+    fn discord_auto_thread_names_and_feedback_match_slash_contract() {
+        assert_eq!(
+            discord_auto_thread_name("<@&1490963422786093149> <@555> please help <#123>"),
+            "please help"
+        );
+        assert_eq!(
+            discord_auto_thread_name("<@&1490963422786093149>"),
+            "Hermes"
+        );
+        let long_name = discord_auto_thread_name(&"a".repeat(200));
+        assert_eq!(long_name.len(), 80);
+        assert!(long_name.ends_with("..."));
+        assert!(discord_thread_create_success_message("555").contains("<#555>"));
+        assert!(discord_thread_create_failure_message("nope").contains("Failed to create thread"));
+    }
+
+    #[test]
+    fn discord_attachment_document_opus_and_voice_contracts_match_upstream_cases() {
+        let image = discord_attachment_handling("file.png", Some("image/png"), 64);
+        assert_eq!(image.kind, DiscordAttachmentKind::Image);
+        assert!(image.prefer_bot_session_read);
+        assert!(image.fallback_uses_ssrf_gate);
+        assert!(!image.inject_text_content);
+
+        let audio = discord_attachment_handling("voice.ogg", Some("audio/ogg"), 64);
+        assert_eq!(audio.kind, DiscordAttachmentKind::Audio);
+        assert!(audio.prefer_bot_session_read);
+
+        let txt = discord_attachment_handling("notes.txt", Some("text/plain"), 1024);
+        assert_eq!(txt.kind, DiscordAttachmentKind::Document);
+        assert!(txt.prefer_bot_session_read);
+        assert!(txt.fallback_uses_ssrf_gate);
+        assert!(txt.inject_text_content);
+        assert_eq!(
+            discord_inject_document_text("summarize this", "notes.txt", "Hello"),
+            "[Content of notes.txt]:\nHello\n\nsummarize this"
+        );
+
+        let pdf = discord_attachment_handling("report.pdf", Some("application/pdf"), 1024);
+        assert_eq!(pdf.kind, DiscordAttachmentKind::Document);
+        assert!(!pdf.inject_text_content);
+
+        assert_eq!(
+            discord_opus_library_candidates("linux", Some("libopus.so")),
+            vec!["libopus.so".to_string()]
+        );
+        let mac_fallbacks = discord_opus_library_candidates("darwin", None);
+        assert!(mac_fallbacks[0].contains("/opt/homebrew"));
+        assert!(discord_should_log_opus_decode_error(Some("decode failed")));
+
+        let mut joins = DiscordVoiceJoinTracker::default();
+        assert_eq!(joins.begin_join("42"), DiscordVoiceJoinAction::Connect);
+        assert_eq!(joins.begin_join("42"), DiscordVoiceJoinAction::MoveExisting);
+        joins.complete_join("42", true);
+        assert_eq!(
+            joins.begin_join("42"),
+            DiscordVoiceJoinAction::AlreadyConnected
+        );
+    }
+
+    #[test]
+    fn discord_auto_registration_skips_conflicts_and_dispatches_args() {
+        let gateway = vec![
+            DiscordSlashRegistrationSpec::new(
+                "debug",
+                "Generate a debug report",
+                None::<String>,
+                "/debug",
+            ),
+            DiscordSlashRegistrationSpec::new(
+                "branch",
+                "Show or switch branch",
+                Some("[name]"),
+                "/branch",
+            ),
+        ];
+        let plugins = vec![
+            DiscordSlashRegistrationSpec::new(
+                "status",
+                "Plugin status",
+                None::<String>,
+                "/status-plugin",
+            ),
+            DiscordSlashRegistrationSpec::new(
+                "metricas",
+                "Metrics dashboard",
+                Some("dias:7 formato:json"),
+                "/metricas",
+            ),
+        ];
+
+        let registered = discord_auto_registered_commands(["status", "thread"], gateway, plugins);
+        let names = registered
+            .iter()
+            .map(|spec| spec.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(names, vec!["debug", "branch", "metricas"]);
+        assert_eq!(registered[0].dispatch_text(None), "/debug");
+        assert_eq!(
+            registered[1].dispatch_text(Some("my-branch")),
+            "/branch my-branch"
+        );
+        assert_eq!(
+            registered[2].dispatch_text(Some("dias:7 formato:json")),
+            "/metricas dias:7 formato:json"
+        );
+
+        let slash = registered[1].to_slash_command();
+        assert_eq!(slash.name, "branch");
+        assert_eq!(slash.options.as_ref().map(Vec::len), Some(1));
+    }
+
+    #[test]
     fn discord_channel_skill_bindings_resolve_exact_parent_and_deduped_skills() {
         let bindings = DiscordChannelSkillBinding::list_from_json(Some(&serde_json::json!([
             {"id": "100", "skills": ["a", "b", "a", "c", "b"]},
@@ -4222,6 +5184,10 @@ mod tests {
             name: "greet".into(),
             description: "Say hello".into(),
             default_member_permissions: None,
+            dm_permission: None,
+            nsfw: None,
+            contexts: None,
+            integration_types: None,
             command_type: 1,
             options: Some(vec![
                 SlashCommandOption {
@@ -4268,6 +5234,10 @@ mod tests {
             description: "Restart Hermes".into(),
             options: None,
             default_member_permissions: None,
+            dm_permission: None,
+            nsfw: None,
+            contexts: None,
+            integration_types: None,
             command_type: 1,
         }];
 

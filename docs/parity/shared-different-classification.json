@@ -171,6 +171,13 @@
       "ticket": 25
     },
     {
+      "path": "tests/gateway/test_discord_attachment_download.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Discord authenticated attachment download behavior is covered by Rust Discord attachment handling contracts for image, audio, and document attachments that prefer bot-session reads and fall back through SSRF-gated fetch paths.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "tests/gateway/test_discord_component_auth.py",
       "classification": "intentional_divergence",
       "rationale": "Upstream Discord component user-or-role authorization and fail-closed behavior is covered by Rust DiscordInteractionAuthPolicy component checks for empty allowlists, user matches, role-only matches, missing role data, and missing users.",
@@ -185,9 +192,30 @@
       "ticket": 25
     },
     {
+      "path": "tests/gateway/test_discord_channel_prompts.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Discord channel_prompts behavior is covered by Rust channel prompt resolution and ephemeral prompt composition tests for exact channel matches, parent fallback, blank-prompt suppression, retry preservation intent, and context/channel/global prompt ordering.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "tests/gateway/test_discord_channel_skills.py",
       "classification": "intentional_divergence",
       "rationale": "Upstream Discord channel_skill_bindings resolver intent is covered by Rust DiscordChannelSkillBinding parsing and DiscordAdapter::resolve_channel_skills tests for channel matches, parent matches, single-skill shorthand, no-match, and ordered deduplication.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_discord_connect.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Discord connect and slash-sync lifecycle behavior is covered by Rust contracts for member-intent selection, reconnect client closure, slash sync opt-out policy, command diff planning, metadata/context recreation, mutation summaries, fingerprint skip state, and retry-after cooldown state.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_discord_document_handling.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Discord document attachment behavior is covered by Rust document handling contracts for document classification, SSRF-gated fallback, small text/markdown/log content injection, PDF non-injection, and caption ordering.",
       "owner": "sheawinkler",
       "ticket": 25
     },
@@ -227,6 +255,27 @@
       "ticket": 25
     },
     {
+      "path": "tests/gateway/test_discord_model_picker.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Discord model picker control-clearing behavior is covered by Rust model picker transition tests that clear the view before switch dispatch and clear it again on final success edit.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_discord_opus.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Discord Opus loading and decode-error behavior is covered by Rust Opus candidate tests that prefer find_library results, only use Homebrew fallbacks for macOS when lookup fails, and require decode errors to be loggable.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_discord_race_polish.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Discord concurrent voice-join race behavior is covered by the Rust DiscordVoiceJoinTracker contract that permits one connect per guild, treats concurrent joins as existing-move waits, and reports already-connected after completion.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "tests/gateway/test_discord_roles_dm_scope.py",
       "classification": "intentional_divergence",
       "rationale": "Upstream Discord role allowlist scoping is covered by Rust DiscordInteractionAuthPolicy tests that reject cross-guild guild and DM role matches, require dm_role_auth_guild opt-in for DMs, allow same-guild role matches, and preserve user-ID allowlist behavior.",
@@ -244,6 +293,13 @@
       "path": "tests/gateway/test_discord_slash_auth.py",
       "classification": "intentional_divergence",
       "rationale": "Upstream Discord slash authorization is covered by Rust DiscordInteractionAuthPolicy and gateway access-policy tests for user/role/channel allowlists, ignored-channel precedence, wildcard channels, malformed context fail-closed behavior, owner-only visibility semantics, notification soft-failure handling, and /skill autocomplete/handler auth-before-lookup decisions.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_discord_slash_commands.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Discord slash command behavior is covered by Rust contracts for native command auto-registration, plugin conflict skipping, optional args dispatch, flat /skill routing/autocomplete/auth, auto-thread naming, thread feedback, and command sync reconciliation.",
       "owner": "sheawinkler",
       "ticket": 25
     },
