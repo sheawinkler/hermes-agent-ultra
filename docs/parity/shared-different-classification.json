@@ -1361,6 +1361,62 @@
       "ticket": 25
     },
     {
+      "path": "tests/tools/test_skill_env_passthrough.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream skill required-environment metadata normalization is covered by Rust skill_utils required-env parsing while Ultra exposes env_passthrough as an explicit Rust tool instead of Python's implicit global registry.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_skill_improvements.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream skill fuzzy-patch intent is covered by the Rust generic patch backend plus skill storage/path guards; Ultra does not vendor the Python-only skill_manager_tool helper.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_skill_manager_tool.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream skill create/edit/delete validation intent is covered by Rust SkillManager, FileSkillStore, and skill_manage contracts for canonical names/categories, traversal rejection, duplicate creation rejection, managed content size limits, update/delete, and generic fuzzy file patching.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_skill_size_limits.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream managed skill content-size guard intent is covered by Rust SkillManager MAX_SKILL_CONTENT_CHARS tests while hand-placed skill files remain loadable through the store path.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_skill_view_traversal.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream skill_view traversal regression intent is covered by Rust SkillViewHandler tests for dot-dot traversal, legitimate in-skill file reads, symlink escape rejection, and secret non-leakage.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_skills_guard.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream skill security scanner intent is covered by Rust SkillGuard install policy, trust-level resolution, file and directory scanning, content hashing, symlink escape detection, invisible Unicode, prompt-injection, credential, eval, reverse-shell, and destructive command findings.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_skills_hub.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream skills hub trust, content hashing, and remote skill integrity intent is covered by Rust SkillsHubClient search/download/upload/update contracts, Ed25519 signature verification, trusted source resolution, and scan-before-use policy; Python source-adapter breadth remains reference-only.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_skills_tool.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream skills_tool discovery/frontmatter/tag/platform/view intent is covered by Rust skill_utils frontmatter fallback, tag parsing, recursive safe discovery, required-env metadata parsing, platform matching, and SkillViewHandler/SkillsListHandler contracts.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "tests/providers",
       "classification": "functional",
       "rationale": "Provider tests cover model transport compatibility and error handling.",

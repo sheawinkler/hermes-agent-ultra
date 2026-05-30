@@ -13,6 +13,8 @@ use hermes_core::types::{Skill, SkillMeta};
 use crate::guard::SkillGuard;
 use crate::skill::SkillError;
 
+pub const MAX_SKILL_NAME_LENGTH: usize = 128;
+
 // ---------------------------------------------------------------------------
 // SkillStore trait
 // ---------------------------------------------------------------------------
@@ -83,9 +85,9 @@ impl FileSkillStore {
                 "Invalid skill {field}: value must be non-empty"
             )));
         }
-        if trimmed.len() > 128 {
+        if trimmed.len() > MAX_SKILL_NAME_LENGTH {
             return Err(SkillError::GuardViolation(format!(
-                "Invalid skill {field}: value exceeds 128 chars"
+                "Invalid skill {field}: value exceeds {MAX_SKILL_NAME_LENGTH} chars"
             )));
         }
 
@@ -103,6 +105,19 @@ impl FileSkillStore {
         if segment.starts_with('.') {
             return Err(SkillError::GuardViolation(format!(
                 "Invalid skill {field}: hidden path segments are not allowed"
+            )));
+        }
+        if segment.starts_with('-') {
+            return Err(SkillError::GuardViolation(format!(
+                "Invalid skill {field}: leading '-' is not allowed"
+            )));
+        }
+        if !segment
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_' | '.'))
+        {
+            return Err(SkillError::GuardViolation(format!(
+                "Invalid skill {field}: use lowercase letters, digits, '-', '_' or '.'"
             )));
         }
         if segment.chars().any(|c| c.is_control()) {
@@ -595,6 +610,32 @@ mod tests {
         };
         assert!(store.save(&skill).await.is_err());
         assert!(store.load("../escape").await.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_reject_non_canonical_skill_names() {
+        let dir = tempdir().unwrap();
+        let store = FileSkillStore::new(dir.path().to_path_buf());
+
+        for name in ["MySkill", "-invalid", "skill name", "skill@name"] {
+            let skill = Skill {
+                name: name.to_string(),
+                content: "Body".to_string(),
+                category: None,
+                description: None,
+            };
+            assert!(store.save(&skill).await.is_err(), "{name} should fail");
+        }
+
+        for name in ["my-skill", "skill123", "my_skill.v2", "a"] {
+            let skill = Skill {
+                name: name.to_string(),
+                content: "Body".to_string(),
+                category: None,
+                description: None,
+            };
+            assert!(store.save(&skill).await.is_ok(), "{name} should pass");
+        }
     }
 
     #[tokio::test]
