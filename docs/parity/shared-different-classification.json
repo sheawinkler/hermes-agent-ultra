@@ -577,6 +577,13 @@
       "ticket": 25
     },
     {
+      "path": "tests/agent/test_auxiliary_client.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream auxiliary client routing, OAuth token selection, fallback, payment/rate-limit classification, Kimi temperature omission, Anthropic-compatible image conversion, and credential-refresh retry intent is covered by Rust hermes-intelligence auxiliary client contracts plus hermes-agent auxiliary_builder/provider auth-routing tests; the Python test file remains reference-only.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "tests/agent/test_codex_cloudflare_headers.py",
       "classification": "intentional_divergence",
       "rationale": "Upstream Codex Cloudflare mitigation header intent is covered by Rust hermes-agent Codex header extraction/build-request tests plus shared openai-codex provider wiring used by primary and auxiliary runtime construction; the Python test file remains reference-only.",
@@ -619,9 +626,65 @@
       "ticket": 25
     },
     {
+      "path": "tests/agent/test_deepseek_anthropic_thinking.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream DeepSeek Anthropic-compatible thinking replay intent is covered by Rust hermes-agent AnthropicProvider message conversion tests that preserve Kimi/DeepSeek-style reasoning content only for compatible endpoints while stripping stale thinking for non-compatible endpoints; the Python test file remains reference-only.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/agent/test_display.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream display formatting, tool preview, terminal preview length, and edit-diff rendering intent is covered by Rust hermes-intelligence display contracts and hermes-cli tool_preview/rendering tests; the Python test file remains reference-only.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/agent/test_error_classifier.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream failover-reason, status/body extraction, billing/rate-limit/auth/context/format classification, provider metadata, wrapped OpenRouter errors, SSL, and adversarial shape intent is covered by Rust hermes-intelligence ErrorClassifier property/unit tests and hermes-cli provider-error guards; the Python test file remains reference-only.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "tests/agent/test_gemini_fast_fallback.py",
       "classification": "intentional_divergence",
       "rationale": "Upstream CloudCode/Gemini CLI rate-limit fallback intent is covered by Rust hermes-agent retry tests for google-gemini-cli, cloudcode-pa:// base URLs, non-CloudCode multi-key pool retries, and single-key fallback; the Python test file remains reference-only.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/agent/test_gemini_cloudcode.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Gemini CloudCode OAuth, packed refresh, project resolution, provider registration, request/response translation, and auth-status intent is covered by Rust hermes-cli google-gemini-cli auth/runtime-provider tests plus hermes-agent provider request-shape and fallback contracts; the Python test file remains reference-only.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/agent/test_image_routing.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream image-routing mode, native multimodal content, MIME sniffing, path hints, and large-image non-resize intent is covered by Rust ACP multimodal preservation, Anthropic/OpenAI image block conversion, fixed image-token accounting, and CLI image hint contracts; the Python test file remains reference-only.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/agent/test_model_metadata.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream model-metadata token estimation, image-token bounding, default context table, 256K probe tiers, provider-prefix stripping, error-limit parsing, and model context fallback intent is covered by Rust hermes-intelligence model_metadata contracts including Unicode-aware token counting and bounded image-content estimates; the Python test file remains reference-only.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/agent/test_models_dev.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream models.dev provider mapping, disk/in-memory cache, context extraction, provider-aware lookup, and capability parsing intent is covered by Rust hermes-intelligence models_dev mapping/cache/parse/client tests and CLI provider registry contracts; the Python test file remains reference-only.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/agent/test_moonshot_schema.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Moonshot/Kimi tool-schema sanitizer intent is covered by Rust hermes-agent provider contracts that detect Kimi/Moonshot models, fill missing property types, collapse nullable anyOf branches, preserve $ref nodes, strip invalid scalar enum values, and sanitize OpenAI-format tools before request construction; the Python test file remains reference-only.",
       "owner": "sheawinkler",
       "ticket": 25
     },

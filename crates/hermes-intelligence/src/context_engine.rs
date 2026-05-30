@@ -8,6 +8,7 @@ use serde_json::Value;
 use std::time::Duration;
 
 use crate::model_metadata::estimate_tokens_rough;
+pub use crate::model_metadata::IMAGE_TOKEN_ESTIMATE;
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -463,13 +464,6 @@ impl ContextEngine for ImportanceBasedEngine {
 // ---------------------------------------------------------------------------
 // Token counting helpers
 // ---------------------------------------------------------------------------
-
-/// Fixed rough budget charged for a single image block.
-///
-/// The upstream Python compressor intentionally avoids counting raw base64
-/// payload bytes as text tokens; a giant data URL is still one image from the
-/// model-budget perspective, not hundreds of thousands of prompt tokens.
-pub const IMAGE_TOKEN_ESTIMATE: u64 = 1024;
 
 fn is_image_content_block(block: &Value) -> bool {
     matches!(
