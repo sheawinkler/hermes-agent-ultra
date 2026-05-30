@@ -9141,6 +9141,28 @@ mod tests {
             .expect("env test lock poisoned")
     }
 
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
     fn isolate_route_learning_home(config: &mut AgentConfig) -> tempfile::TempDir {
         let tmp = tempfile::tempdir().expect("tempdir");
         config.hermes_home = Some(tmp.path().to_string_lossy().to_string());
@@ -13272,6 +13294,8 @@ mod tests {
 
     #[test]
     fn test_repo_review_tool_profile_keeps_todo_filters_messaging() {
+        let _guard = env_test_lock();
+        let _env = EnvVarGuard::set("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE", "balanced");
         let msgs = vec![Message::user("review repo at /tmp/app and diagnose issue")];
         let mut calls = vec![
             ToolCall {
@@ -13300,7 +13324,7 @@ mod tests {
     #[test]
     fn test_repo_review_tool_profile_escape_hatch_disables_filtering() {
         let _guard = env_test_lock();
-        std::env::set_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE", "focus");
+        let _env = EnvVarGuard::set("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE", "focus");
         let msgs = vec![Message::user(
             "review repo at /tmp/app and diagnose issue; allow all tools",
         )];
@@ -13315,13 +13339,12 @@ mod tests {
         let note = apply_repo_review_tool_profile_narrowing(&mut calls, &msgs);
         assert!(note.is_some());
         assert_eq!(calls.len(), 1, "escape hatch should bypass filtering");
-        std::env::remove_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE");
     }
 
     #[test]
     fn test_repo_review_tool_profile_off_mode_disables_filtering() {
         let _guard = env_test_lock();
-        std::env::set_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE", "off");
+        let _env = EnvVarGuard::set("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE", "off");
         let msgs = vec![Message::user("review repo at /tmp/app and diagnose issue")];
         let mut calls = vec![ToolCall {
             id: "b".to_string(),
@@ -13334,13 +13357,12 @@ mod tests {
         let note = apply_repo_review_tool_profile_narrowing(&mut calls, &msgs);
         assert!(note.is_none());
         assert_eq!(calls.len(), 1, "off mode should keep all calls");
-        std::env::remove_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE");
     }
 
     #[test]
     fn test_repo_review_discovery_policy_trims_repeated_loops() {
         let _guard = env_test_lock();
-        std::env::set_var("HERMES_REPO_REVIEW_DISCOVERY_BUDGET_MODE", "enforce");
+        let _env = EnvVarGuard::set("HERMES_REPO_REVIEW_DISCOVERY_BUDGET_MODE", "enforce");
         let msgs = vec![Message::user(
             "inspect repo /tmp/app and review codebase deeply",
         )];
@@ -13383,13 +13405,12 @@ mod tests {
         let note = apply_repo_review_discovery_budget_policy(&mut third, &msgs, &mut state);
         assert!(note.is_some());
         assert!(third.len() < 3);
-        std::env::remove_var("HERMES_REPO_REVIEW_DISCOVERY_BUDGET_MODE");
     }
 
     #[test]
     fn test_repo_review_discovery_policy_advisory_keeps_calls() {
         let _guard = env_test_lock();
-        std::env::set_var("HERMES_REPO_REVIEW_DISCOVERY_BUDGET_MODE", "advisory");
+        let _env = EnvVarGuard::set("HERMES_REPO_REVIEW_DISCOVERY_BUDGET_MODE", "advisory");
         let msgs = vec![Message::user(
             "inspect repo /tmp/app and review codebase deeply",
         )];
@@ -13427,7 +13448,6 @@ mod tests {
         let note = apply_repo_review_discovery_budget_policy(&mut third, &msgs, &mut state);
         assert!(note.is_some());
         assert_eq!(third.len(), 3, "advisory mode must not trim tool calls");
-        std::env::remove_var("HERMES_REPO_REVIEW_DISCOVERY_BUDGET_MODE");
     }
 
     #[test]
