@@ -1389,6 +1389,13 @@
       "ticket": 25
     },
     {
+      "path": "tests/tools/test_command_guards.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream combined Tirith plus dangerous-command guard intent is covered by Rust hermes-tools approval contracts for container bypass, noninteractive external-scan skip, Tirith allow/warn/block handling, combined warning prompts, session and process approval persistence, scanner-unavailable allow behavior, and scanner programming-error propagation.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "tests/tools/test_approval_heartbeat.py",
       "classification": "intentional_divergence",
       "rationale": "Current upstream heartbeat file contains setup helpers but no executable test methods; Hermes Ultra's Rust terminal approval path fail-closes without entering Python's blocking gateway approval wait, so the inactivity-heartbeat wait loop is not a Rust runtime surface.",
