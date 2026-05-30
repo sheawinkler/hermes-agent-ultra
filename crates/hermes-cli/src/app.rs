@@ -4168,6 +4168,28 @@ mod tests {
     }
 
     #[test]
+    fn test_build_agent_config_maps_named_custom_runtime_provider() {
+        let mut cfg = GatewayConfig::default();
+        cfg.llm_providers.insert(
+            "beans".to_string(),
+            LlmProviderConfig {
+                api_key: Some("sk-beans".to_string()),
+                base_url: Some("http://beans.local/v1".to_string()),
+                ..LlmProviderConfig::default()
+            },
+        );
+
+        let agent_cfg = build_agent_config(&cfg, "beans:my-model");
+        assert_eq!(agent_cfg.provider.as_deref(), Some("beans"));
+        let runtime = agent_cfg
+            .runtime_providers
+            .get("beans")
+            .expect("named custom runtime provider should exist");
+        assert_eq!(runtime.api_key.as_deref(), Some("sk-beans"));
+        assert_eq!(runtime.base_url.as_deref(), Some("http://beans.local/v1"));
+    }
+
+    #[test]
     fn test_build_agent_config_forwards_provider_extra_body() {
         let mut cfg = GatewayConfig::default();
         cfg.llm_providers.insert(
@@ -4301,6 +4323,22 @@ mod tests {
         let (provider, model) = resolve_provider_and_model(&cfg, "step-3.5-flash");
         assert_eq!(provider, "stepfun");
         assert_eq!(model, "step-3.5-flash");
+    }
+
+    #[test]
+    fn test_resolve_provider_and_model_uses_named_custom_provider_model() {
+        let mut cfg = GatewayConfig::default();
+        cfg.llm_providers.insert(
+            "beans".to_string(),
+            LlmProviderConfig {
+                model: Some("my-model".to_string()),
+                base_url: Some("http://beans.local/v1".to_string()),
+                ..LlmProviderConfig::default()
+            },
+        );
+        let (provider, model) = resolve_provider_and_model(&cfg, "my-model");
+        assert_eq!(provider, "beans");
+        assert_eq!(model, "my-model");
     }
 
     #[test]

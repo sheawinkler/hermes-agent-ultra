@@ -38,6 +38,15 @@ fn normalized_base_url(value: &Value) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
+fn canonical_custom_provider_name(provider: &str) -> String {
+    provider
+        .trim()
+        .strip_prefix("custom:")
+        .unwrap_or_else(|| provider.trim())
+        .trim()
+        .to_string()
+}
+
 /// Lift `agent.max_turns` to root `max_turns` when the latter is absent.
 fn lift_agent_max_turns(map: &mut Mapping) {
     let max_key = key("max_turns");
@@ -111,9 +120,9 @@ fn normalize_model_block(map: &mut Mapping) {
                 .filter(|s| !s.is_empty());
 
             let model_str = match (provider, default) {
-                (Some(p), Some(d)) => format!("{p}:{d}"),
+                (Some(p), Some(d)) => format!("{}:{d}", canonical_custom_provider_name(p)),
                 (None, Some(d)) => d.to_string(),
-                (Some(p), None) => format!("{p}:"),
+                (Some(p), None) => format!("{}:", canonical_custom_provider_name(p)),
                 (None, None) => {
                     map.insert(model_key, Value::Mapping(m));
                     return;
@@ -124,13 +133,14 @@ fn normalize_model_block(map: &mut Mapping) {
             if let Some(p) = provider
                 .filter(|_| base_url.is_some() || api_key.is_some() || api_key_env.is_some())
             {
+                let provider_name = canonical_custom_provider_name(p);
                 let llm_key = key("llm_providers");
                 let mut llm = match map.get(&llm_key).cloned() {
                     Some(Value::Mapping(x)) => x,
                     _ => Mapping::new(),
                 };
                 let prov_entry = llm
-                    .entry(Value::String(p.to_string()))
+                    .entry(Value::String(provider_name))
                     .or_insert_with(|| Value::Mapping(Mapping::new()));
                 if let Value::Mapping(ref mut em) = prov_entry {
                     if let Some(bu) = base_url {
@@ -150,6 +160,71 @@ fn normalize_model_block(map: &mut Mapping) {
             map.insert(model_key, other);
         }
     }
+}
+
+/// `custom_providers: [{ name, base_url, ... }]` → merge into `llm_providers`.
+fn merge_custom_providers_into_llm(map: &mut Mapping) {
+    let Some(Value::Sequence(providers)) = map.remove(&key("custom_providers")) else {
+        return;
+    };
+    if providers.is_empty() {
+        return;
+    }
+
+    let llm_key = key("llm_providers");
+    let mut llm = match map.get(&llm_key).cloned() {
+        Some(Value::Mapping(x)) => x,
+        _ => Mapping::new(),
+    };
+
+    for entry in providers {
+        let Value::Mapping(src) = entry else {
+            continue;
+        };
+        let Some(provider_name) = src
+            .get(&key("name"))
+            .and_then(as_str)
+            .map(canonical_custom_provider_name)
+            .filter(|s| !s.is_empty())
+        else {
+            continue;
+        };
+        let slot = llm
+            .entry(Value::String(provider_name))
+            .or_insert_with(|| Value::Mapping(Mapping::new()));
+        if let Value::Mapping(provider_cfg) = slot {
+            for field in [
+                "api_key",
+                "api_key_env",
+                "base_url",
+                "command",
+                "args",
+                "model",
+                "max_tokens",
+                "temperature",
+                "extra_body",
+                "rate_limit",
+                "credential_pool",
+                "oauth_token_url",
+                "oauth_client_id",
+            ] {
+                let field_key = key(field);
+                let Some(value) = src.get(&field_key) else {
+                    continue;
+                };
+                let normalized = if field == "base_url" {
+                    normalized_base_url(value).map(Value::String)
+                } else {
+                    Some(value.clone())
+                };
+                if let Some(value) = normalized {
+                    provider_cfg.insert(field_key, value);
+                }
+            }
+        }
+    }
+
+    map.insert(llm_key, Value::Mapping(llm));
 }
 
 /// `providers: { openai: { api_key: ... } }` → merge into `llm_providers`.
@@ -464,6 +539,7 @@ fn lift_root_platform_blocks(map: &mut Mapping) {
 pub(crate) fn normalize_config_yaml_root(map: &mut Mapping) {
     // Order matters: model before merge_providers (may touch llm_providers)
     normalize_model_block(map);
+    merge_custom_providers_into_llm(map);
     merge_providers_into_llm(map);
     normalize_fallback_chain(map);
     lift_agent_max_turns(map);
@@ -523,6 +599,40 @@ model:
         );
         assert_eq!(provider.api_key.as_deref(), Some("sk-local"));
         assert_eq!(provider.api_key_env.as_deref(), Some("DEEPSEEK_API_KEY"));
+    }
+
+    #[test]
+    fn python_custom_providers_merge_into_llm_provider_config() {
+        let raw = r#"
+model:
+  default: my-model
+  provider: custom:beans
+custom_providers:
+  - name: beans
+    base_url: http://beans.local/v1/
+    api_key: sk-beans
+    api_key_env: BEANS_API_KEY
+    model: fallback-beans-model
+  - name: local
+    base_url: http://localhost:8080/v1/
+"#;
+        let mut root: Value = serde_yaml::from_str(raw).unwrap();
+        let Value::Mapping(ref mut m) = root else {
+            panic!();
+        };
+        normalize_config_yaml_root(m);
+        let cfg: crate::config::GatewayConfig = serde_yaml::from_value(root).unwrap();
+
+        assert_eq!(cfg.model.as_deref(), Some("beans:my-model"));
+        let beans = cfg.llm_providers.get("beans").expect("beans provider");
+        assert_eq!(beans.base_url.as_deref(), Some("http://beans.local/v1"));
+        assert_eq!(beans.api_key.as_deref(), Some("sk-beans"));
+        assert_eq!(beans.api_key_env.as_deref(), Some("BEANS_API_KEY"));
+        assert_eq!(beans.model.as_deref(), Some("fallback-beans-model"));
+
+        let local = cfg.llm_providers.get("local").expect("local provider");
+        assert_eq!(local.base_url.as_deref(), Some("http://localhost:8080/v1"));
+        assert!(local.api_key.is_none());
     }
 
     #[test]
