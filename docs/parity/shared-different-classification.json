@@ -809,8 +809,8 @@
     },
     {
       "path": "plugins/context_engine/__init__.py",
-      "classification": "functional",
-      "rationale": "Context engine loader differences affect plugin registration behavior and need runtime parity review against the Rust-first plugin command surface.",
+      "classification": "policy_only",
+      "rationale": "No current shared-different content remains for this upstream file; the Rust-first command surface rejects Python plugin dispatch and the Python context-engine loader is retained only as upstream reference material.",
       "owner": "sheawinkler",
       "ticket": 25
     },
