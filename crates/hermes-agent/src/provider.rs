@@ -674,6 +674,180 @@ fn opencode_go_deepseek_reasoning_effort(effort: Option<&str>) -> Option<&'stati
     }
 }
 
+fn is_moonshot_model(model: &str) -> bool {
+    let lower = model.trim().to_ascii_lowercase();
+    if lower.is_empty() {
+        return false;
+    }
+    flat_model_name(&lower).starts_with("kimi-k2") || lower.contains("moonshotai/")
+}
+
+fn format_tools_for_openai_api_with_model(
+    tools: &[ToolSchema],
+    effective_model: &str,
+    base_url: &str,
+) -> Value {
+    let mut formatted = GenericProvider::format_tools_for_openai_api(tools);
+    if is_moonshot_model(effective_model)
+        || AnthropicProvider::is_kimi_coding_endpoint(Some(base_url))
+    {
+        sanitize_moonshot_tools_value(&mut formatted);
+    }
+    formatted
+}
+
+fn sanitize_moonshot_tools_value(tools: &mut Value) {
+    let Some(items) = tools.as_array_mut() else {
+        return;
+    };
+    for tool in items {
+        let Some(function) = tool.get_mut("function").and_then(Value::as_object_mut) else {
+            continue;
+        };
+        let params = function
+            .remove("parameters")
+            .unwrap_or_else(|| serde_json::json!({"type": "object", "properties": {}}));
+        function.insert(
+            "parameters".to_string(),
+            sanitize_moonshot_tool_parameters(&params),
+        );
+    }
+}
+
+fn sanitize_moonshot_tool_parameters(params: &Value) -> Value {
+    let mut root = match params.as_object() {
+        Some(obj) => Value::Object(obj.clone()),
+        None => serde_json::json!({"type": "object", "properties": {}}),
+    };
+    sanitize_moonshot_schema_node(&mut root, true);
+    root
+}
+
+fn sanitize_moonshot_schema_node(node: &mut Value, top_level: bool) {
+    let Some(obj) = node.as_object_mut() else {
+        if top_level {
+            *node = serde_json::json!({"type": "object", "properties": {}});
+        }
+        return;
+    };
+
+    let has_ref = obj.contains_key("$ref");
+
+    if let Some(any_of) = obj.get_mut("anyOf").and_then(Value::as_array_mut) {
+        for branch in any_of.iter_mut() {
+            sanitize_moonshot_schema_node(branch, false);
+        }
+        any_of.retain(|branch| {
+            branch
+                .get("type")
+                .and_then(Value::as_str)
+                .is_none_or(|kind| kind != "null")
+        });
+    }
+
+    if obj.contains_key("anyOf") {
+        let non_null = obj
+            .get("anyOf")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        if non_null.len() == 1 {
+            obj.remove("anyOf");
+            if let Some(branch_obj) = non_null
+                .into_iter()
+                .next()
+                .and_then(|v| v.as_object().cloned())
+            {
+                for (key, value) in branch_obj {
+                    obj.insert(key, value);
+                }
+            }
+        } else {
+            obj.remove("type");
+        }
+    }
+
+    obj.remove("nullable");
+
+    if let Some(props) = obj.get_mut("properties").and_then(Value::as_object_mut) {
+        for value in props.values_mut() {
+            sanitize_moonshot_schema_node(value, false);
+        }
+    }
+
+    if let Some(items) = obj.get_mut("items") {
+        sanitize_moonshot_schema_node(items, false);
+    }
+
+    if let Some(any_of) = obj.get_mut("anyOf").and_then(Value::as_array_mut) {
+        for branch in any_of {
+            sanitize_moonshot_schema_node(branch, false);
+        }
+    }
+
+    clean_moonshot_enum(obj);
+
+    if top_level {
+        obj.insert("type".to_string(), Value::String("object".to_string()));
+        if !obj.get("properties").is_some_and(Value::is_object) {
+            obj.insert(
+                "properties".to_string(),
+                Value::Object(serde_json::Map::new()),
+            );
+        }
+        return;
+    }
+
+    if !has_ref && !obj.contains_key("type") && !obj.contains_key("anyOf") {
+        let inferred = infer_moonshot_schema_type(obj);
+        obj.insert("type".to_string(), Value::String(inferred.to_string()));
+        clean_moonshot_enum(obj);
+    }
+}
+
+fn clean_moonshot_enum(obj: &mut serde_json::Map<String, Value>) {
+    let scalar = matches!(
+        obj.get("type").and_then(Value::as_str),
+        Some("string" | "integer" | "number" | "boolean")
+    );
+    if !scalar {
+        return;
+    }
+    let Some(values) = obj.get_mut("enum").and_then(Value::as_array_mut) else {
+        return;
+    };
+    values.retain(|value| !value.is_null() && !matches!(value.as_str(), Some("")));
+    if values.is_empty() {
+        obj.remove("enum");
+    }
+}
+
+fn infer_moonshot_schema_type(obj: &serde_json::Map<String, Value>) -> &'static str {
+    if obj.get("properties").is_some_and(Value::is_object) {
+        return "object";
+    }
+    if obj.contains_key("items") {
+        return "array";
+    }
+    if let Some(values) = obj.get("enum").and_then(Value::as_array) {
+        if let Some(first) = values
+            .iter()
+            .find(|value| !value.is_null() && !matches!(value.as_str(), Some("")))
+        {
+            if first.is_boolean() {
+                return "boolean";
+            }
+            if first.is_i64() || first.is_u64() {
+                return "integer";
+            }
+            if first.is_number() {
+                return "number";
+            }
+        }
+    }
+    "string"
+}
+
 #[async_trait]
 impl LlmProvider for GenericProvider {
     async fn chat_completion(
@@ -704,7 +878,8 @@ impl LlmProvider for GenericProvider {
             body["temperature"] = serde_json::json!(temp);
         }
         if !tools.is_empty() {
-            body["tools"] = Self::format_tools_for_openai_api(tools);
+            body["tools"] =
+                format_tools_for_openai_api_with_model(tools, effective_model, &self.base_url);
         }
         Self::merge_extra_body_fields(&mut body, extra_body);
         self.apply_runtime_hints(&mut body, messages, extra_body);
@@ -774,7 +949,11 @@ impl LlmProvider for GenericProvider {
                 body["temperature"] = serde_json::json!(temp);
             }
             if !tools.is_empty() {
-                body["tools"] = GenericProvider::format_tools_for_openai_api(&tools);
+                body["tools"] = format_tools_for_openai_api_with_model(
+                    &tools,
+                    effective_model,
+                    &provider.base_url,
+                );
             }
             GenericProvider::merge_extra_body_fields(&mut body, extra_body.as_ref());
             provider.apply_runtime_hints(&mut body, &messages, extra_body.as_ref());
@@ -2072,7 +2251,8 @@ impl LlmProvider for OpenRouterProvider {
             body["temperature"] = serde_json::json!(temp);
         }
         if !tools.is_empty() {
-            body["tools"] = GenericProvider::format_tools_for_openai_api(tools);
+            body["tools"] =
+                format_tools_for_openai_api_with_model(tools, effective_model, &provider.base_url);
         }
         GenericProvider::merge_extra_body_fields(&mut body, merged_extra.as_ref());
 
@@ -2504,6 +2684,75 @@ mod tests {
         assert_eq!(rows[0]["function"]["name"], "read_file");
         assert_eq!(rows[0]["function"]["description"], "Read file content");
         assert_eq!(rows[0]["function"]["parameters"]["type"], "object");
+    }
+
+    #[test]
+    fn test_moonshot_tool_schema_sanitizer_repairs_mcp_shapes() {
+        let params = serde_json::json!({
+            "type": "object",
+            "properties": {
+                "query": {"description": "search text"},
+                "filter": {
+                    "type": "string",
+                    "anyOf": [
+                        {"type": "string"},
+                        {"type": "null"}
+                    ]
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"description": "tag"}
+                },
+                "db_type": {
+                    "anyOf": [
+                        {"enum": ["mysql", "postgresql", "", null]},
+                        {"type": "null"}
+                    ],
+                    "nullable": true
+                },
+                "payload": {"$ref": "#/$defs/Payload"}
+            },
+            "$defs": {"Payload": {"type": "object", "properties": {}}}
+        });
+
+        let out = sanitize_moonshot_tool_parameters(&params);
+        assert_eq!(out["type"], "object");
+        assert_eq!(out["properties"]["query"]["type"], "string");
+        assert_eq!(out["properties"]["filter"]["type"], "string");
+        assert!(out["properties"]["filter"].get("anyOf").is_none());
+        assert_eq!(out["properties"]["tags"]["items"]["type"], "string");
+        assert_eq!(out["properties"]["db_type"]["type"], "string");
+        assert_eq!(
+            out["properties"]["db_type"]["enum"],
+            serde_json::json!(["mysql", "postgresql"])
+        );
+        assert!(out["properties"]["db_type"].get("nullable").is_none());
+        assert!(out["properties"]["payload"].get("type").is_none());
+        assert_eq!(out["properties"]["payload"]["$ref"], "#/$defs/Payload");
+    }
+
+    #[test]
+    fn test_moonshot_model_tool_formatter_applies_sanitizer() {
+        let mut params = hermes_core::JsonSchema::new("object");
+        params.properties = Some(Default::default());
+        params
+            .properties
+            .as_mut()
+            .expect("properties")
+            .insert("q".to_string(), serde_json::json!({"description": "query"}));
+        let tools = vec![ToolSchema::new("search", "Search", params)];
+
+        let formatted = format_tools_for_openai_api_with_model(
+            &tools,
+            "openrouter/moonshotai/kimi-k2.6",
+            "https://openrouter.ai/api/v1",
+        );
+        assert_eq!(
+            formatted[0]["function"]["parameters"]["properties"]["q"]["type"],
+            "string"
+        );
+        assert!(is_moonshot_model("nous/moonshotai/kimi-k2-thinking"));
+        assert!(!is_moonshot_model("anthropic/claude-sonnet-4.6"));
     }
 
     #[test]

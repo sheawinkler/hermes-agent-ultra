@@ -13,10 +13,13 @@ use serde::{Deserialize, Serialize};
 // ---------------------------------------------------------------------------
 
 /// Descending tiers for context length probing when the model is unknown.
-pub const CONTEXT_PROBE_TIERS: &[u64] = &[128_000, 64_000, 32_000, 16_000, 8_000];
+pub const CONTEXT_PROBE_TIERS: &[u64] = &[256_000, 128_000, 64_000, 32_000, 16_000, 8_000];
 
 /// Default context length when no detection method succeeds.
-pub const DEFAULT_FALLBACK_CONTEXT: u64 = 128_000;
+pub const DEFAULT_FALLBACK_CONTEXT: u64 = 256_000;
+
+/// Fixed rough budget charged for a single image block in multimodal content.
+pub const IMAGE_TOKEN_ESTIMATE: u64 = 1_500;
 
 /// Minimum context length for Hermes Agent tool-calling workflows.
 pub const MINIMUM_CONTEXT_LENGTH: u64 = 64_000;
@@ -392,13 +395,12 @@ pub fn estimate_tokens_rough(text: &str) -> u64 {
     if text.is_empty() {
         return 0;
     }
-    ((text.len() as u64) + 3) / 4
+    ((text.chars().count() as u64) + 3) / 4
 }
 
 /// Rough token estimate for a serialized message list.
 pub fn estimate_messages_tokens_rough(messages: &[serde_json::Value]) -> u64 {
-    let total_chars: usize = messages.iter().map(|m| m.to_string().len()).sum();
-    ((total_chars as u64) + 3) / 4
+    messages.iter().map(estimate_message_tokens_rough).sum()
 }
 
 /// Rough token estimate for a full request (messages + system + tools).
@@ -413,6 +415,58 @@ pub fn estimate_request_tokens_rough(
         total_chars += tools.iter().map(|t| t.to_string().len()).sum::<usize>();
     }
     ((total_chars as u64) + 3) / 4
+}
+
+fn estimate_message_tokens_rough(message: &serde_json::Value) -> u64 {
+    let Some(content) = message.get("content") else {
+        return estimate_tokens_rough(&message.to_string());
+    };
+    if !content.is_array() {
+        return estimate_tokens_rough(&message.to_string());
+    }
+
+    let mut envelope = message.clone();
+    if let Some(obj) = envelope.as_object_mut() {
+        obj.insert(
+            "content".to_string(),
+            serde_json::Value::String(String::new()),
+        );
+    }
+
+    estimate_tokens_rough(&envelope.to_string()) + estimate_content_tokens_rough(content)
+}
+
+fn estimate_content_tokens_rough(content: &serde_json::Value) -> u64 {
+    if let Some(text) = content.as_str() {
+        return estimate_tokens_rough(text);
+    }
+
+    let Some(parts) = content.as_array() else {
+        return estimate_tokens_rough(&content.to_string());
+    };
+
+    parts
+        .iter()
+        .map(|part| {
+            if is_image_content_block(part) {
+                return IMAGE_TOKEN_ESTIMATE;
+            }
+            if let Some(text) = part.as_str() {
+                return estimate_tokens_rough(text);
+            }
+            if let Some(text) = part.get("text").and_then(|value| value.as_str()) {
+                return estimate_tokens_rough(text);
+            }
+            estimate_tokens_rough(&part.to_string())
+        })
+        .sum()
+}
+
+fn is_image_content_block(part: &serde_json::Value) -> bool {
+    matches!(
+        part.get("type").and_then(|value| value.as_str()),
+        Some("image") | Some("image_url") | Some("input_image")
+    ) || part.get("image_url").is_some()
 }
 
 // ---------------------------------------------------------------------------
@@ -578,7 +632,7 @@ mod tests {
         assert_eq!(get_model_context_length("xiaomi/mimo-v2.5-pro"), 1_000_000);
         assert_eq!(
             get_model_context_length("unknown-model"),
-            DEFAULT_FALLBACK_CONTEXT
+            CONTEXT_PROBE_TIERS[0]
         );
     }
 
@@ -587,6 +641,25 @@ mod tests {
         assert_eq!(estimate_tokens_rough(""), 0);
         assert_eq!(estimate_tokens_rough("hello world"), 3); // 11 chars -> 3
         assert_eq!(estimate_tokens_rough("hi"), 1); // 2 chars -> ceiling(5/4) = 1
+        assert_eq!(estimate_tokens_rough("你好世界"), 1); // 4 Unicode chars -> 1
+    }
+
+    #[test]
+    fn test_estimate_messages_tokens_counts_image_blocks_without_base64_payload() {
+        let huge = "A".repeat(1024 * 1024);
+        let messages = vec![serde_json::json!({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "describe"},
+                {"type": "image_url", "image_url": {"url": format!("data:image/png;base64,{huge}")}}
+            ]
+        })];
+        let estimate = estimate_messages_tokens_rough(&messages);
+        assert!(estimate >= IMAGE_TOKEN_ESTIMATE);
+        assert!(
+            estimate < 5_000,
+            "image payload bytes should not dominate token estimate"
+        );
     }
 
     #[test]
@@ -605,6 +678,10 @@ mod tests {
 
     #[test]
     fn test_get_next_probe_tier() {
+        assert_eq!(CONTEXT_PROBE_TIERS[0], 256_000);
+        assert_eq!(DEFAULT_FALLBACK_CONTEXT, 256_000);
+        assert_eq!(get_next_probe_tier(500_000), Some(256_000));
+        assert_eq!(get_next_probe_tier(256_000), Some(128_000));
         assert_eq!(get_next_probe_tier(128_000), Some(64_000));
         assert_eq!(get_next_probe_tier(64_000), Some(32_000));
         assert_eq!(get_next_probe_tier(8_000), None);
