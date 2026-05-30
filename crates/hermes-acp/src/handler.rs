@@ -13,6 +13,9 @@ use base64::Engine as _;
 use serde_json::{json, Value};
 use url::Url;
 
+use crate::auth::{
+    build_auth_methods_for_provider, detect_provider, TERMINAL_SETUP_AUTH_METHOD_ID,
+};
 use crate::events::{AcpEvent, EventSink};
 use crate::permissions::PermissionStore;
 use crate::protocol::*;
@@ -600,6 +603,7 @@ pub struct HermesAcpHandler {
     pub permission_store: Arc<PermissionStore>,
     version: String,
     prompt_executor: Option<Arc<dyn AcpPromptExecutor>>,
+    auth_provider_resolver: Arc<dyn Fn() -> Option<String> + Send + Sync>,
 }
 
 impl HermesAcpHandler {
@@ -614,11 +618,20 @@ impl HermesAcpHandler {
             permission_store,
             version: env!("CARGO_PKG_VERSION").to_string(),
             prompt_executor: None,
+            auth_provider_resolver: Arc::new(detect_provider),
         }
     }
 
     pub fn with_prompt_executor(mut self, prompt_executor: Arc<dyn AcpPromptExecutor>) -> Self {
         self.prompt_executor = Some(prompt_executor);
+        self
+    }
+
+    pub fn with_auth_provider_resolver(
+        mut self,
+        resolver: Arc<dyn Fn() -> Option<String> + Send + Sync>,
+    ) -> Self {
+        self.auth_provider_resolver = resolver;
         self
     }
 
@@ -838,6 +851,7 @@ impl AcpHandler for HermesAcpHandler {
         match method {
             // -- Lifecycle --------------------------------------------------
             AcpMethod::Initialize => {
+                let auth_provider = (self.auth_provider_resolver)();
                 let resp = InitializeResponse {
                     protocol_version: 1,
                     agent_info: Implementation {
@@ -854,12 +868,31 @@ impl AcpHandler for HermesAcpHandler {
                         streaming: true,
                         ..Default::default()
                     },
-                    auth_methods: None,
+                    auth_methods: Some(build_auth_methods_for_provider(auth_provider.as_deref())),
                 };
                 AcpResponse::success(request.id, serde_json::to_value(&resp).unwrap())
             }
 
-            AcpMethod::Authenticate => AcpResponse::success(request.id, json!({})),
+            AcpMethod::Authenticate => {
+                let method_id = params_obj(&request.params)
+                    .and_then(|p| param_str(p, "method_id").or_else(|| param_str(p, "methodId")))
+                    .map(str::trim)
+                    .unwrap_or("");
+                let normalized_method = method_id.to_ascii_lowercase();
+                let provider = (self.auth_provider_resolver)()
+                    .map(|provider| provider.trim().to_ascii_lowercase())
+                    .filter(|provider| !provider.is_empty());
+                let accepted = match provider.as_deref() {
+                    Some(provider) if normalized_method == provider => true,
+                    Some(_) if normalized_method == TERMINAL_SETUP_AUTH_METHOD_ID => true,
+                    _ => false,
+                };
+                if accepted {
+                    AcpResponse::success(request.id, json!({}))
+                } else {
+                    AcpResponse::success(request.id, Value::Null)
+                }
+            }
 
             // -- Session management -----------------------------------------
             AcpMethod::NewSession => {
@@ -1362,6 +1395,10 @@ mod tests {
         )
     }
 
+    fn make_handler_with_auth_provider(provider: Option<&'static str>) -> HermesAcpHandler {
+        make_handler().with_auth_provider_resolver(Arc::new(move || provider.map(str::to_string)))
+    }
+
     #[tokio::test]
     async fn test_initialize() {
         let handler = make_handler();
@@ -1375,6 +1412,113 @@ mod tests {
         assert!(resp.result.is_some());
         let result = resp.result.unwrap();
         assert_eq!(result["agent_info"]["name"], "hermes-agent");
+    }
+
+    #[tokio::test]
+    async fn test_initialize_advertises_provider_and_terminal_auth_methods() {
+        let handler = make_handler_with_auth_provider(Some("openrouter"));
+        let req = AcpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(1)),
+            method: "initialize".into(),
+            params: None,
+        };
+        let resp = handler.handle_request(req).await;
+        let result = resp.result.unwrap();
+        let methods = result["auth_methods"].as_array().expect("auth methods");
+
+        assert_eq!(methods[0]["id"], "openrouter");
+        assert_eq!(methods[0]["name"], "openrouter runtime credentials");
+        let terminal = methods
+            .iter()
+            .find(|method| method["id"] == TERMINAL_SETUP_AUTH_METHOD_ID)
+            .expect("terminal setup auth method");
+        assert_eq!(terminal["type"], "terminal");
+        assert_eq!(terminal["args"], json!(["--setup"]));
+    }
+
+    #[tokio::test]
+    async fn test_initialize_advertises_terminal_setup_auth_when_no_provider() {
+        let handler = make_handler_with_auth_provider(None);
+        let req = AcpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(1)),
+            method: "initialize".into(),
+            params: None,
+        };
+        let resp = handler.handle_request(req).await;
+        let result = resp.result.unwrap();
+
+        assert_eq!(
+            result["auth_methods"],
+            json!([{
+                "args": ["--setup"],
+                "description": "Open Hermes' interactive model/provider setup in a terminal. Use this when Hermes has not been configured on this machine yet.",
+                "id": TERMINAL_SETUP_AUTH_METHOD_ID,
+                "name": "Configure Hermes provider",
+                "type": "terminal",
+            }])
+        );
+    }
+
+    #[tokio::test]
+    async fn test_authenticate_accepts_matching_method_id_case_insensitively() {
+        let handler = make_handler_with_auth_provider(Some("openrouter"));
+        let req = AcpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(1)),
+            method: "authenticate".into(),
+            params: Some(json!({"method_id": "OpenRouter"})),
+        };
+
+        let resp = handler.handle_request(req).await;
+        assert_eq!(resp.result, Some(json!({})));
+        assert!(resp.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_authenticate_rejects_mismatched_method_id() {
+        let handler = make_handler_with_auth_provider(Some("openrouter"));
+        let req = AcpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(1)),
+            method: "authenticate".into(),
+            params: Some(json!({"method_id": "totally-invalid-method"})),
+        };
+
+        let resp = handler.handle_request(req).await;
+        assert_eq!(resp.result, Some(Value::Null));
+        assert!(resp.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_authenticate_accepts_terminal_setup_after_provider_configured() {
+        let handler = make_handler_with_auth_provider(Some("openrouter"));
+        let req = AcpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(1)),
+            method: "authenticate".into(),
+            params: Some(json!({"method_id": TERMINAL_SETUP_AUTH_METHOD_ID})),
+        };
+
+        let resp = handler.handle_request(req).await;
+        assert_eq!(resp.result, Some(json!({})));
+        assert!(resp.error.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_authenticate_rejects_terminal_setup_without_provider() {
+        let handler = make_handler_with_auth_provider(None);
+        let req = AcpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(1)),
+            method: "authenticate".into(),
+            params: Some(json!({"method_id": TERMINAL_SETUP_AUTH_METHOD_ID})),
+        };
+
+        let resp = handler.handle_request(req).await;
+        assert_eq!(resp.result, Some(Value::Null));
+        assert!(resp.error.is_none());
     }
 
     #[tokio::test]

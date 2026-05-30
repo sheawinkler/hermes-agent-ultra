@@ -10,6 +10,7 @@
 //! - **Events**: thinking, tool progress, message streaming
 //! - **Permissions**: approval callback bridging
 
+pub mod auth;
 pub mod events;
 pub mod handler;
 pub mod permissions;
@@ -17,6 +18,7 @@ pub mod protocol;
 pub mod server;
 pub mod session;
 
+pub use auth::{build_auth_methods, detect_provider, has_provider, TERMINAL_SETUP_AUTH_METHOD_ID};
 pub use events::{AcpEvent, AcpEventKind, EventSink, ToolCallIdTracker};
 pub use handler::{
     AcpHandler, AcpPromptExecutor, DefaultAcpHandler, HermesAcpHandler, PromptExecutionOutput,

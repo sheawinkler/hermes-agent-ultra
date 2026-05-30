@@ -1606,16 +1606,16 @@
       "workstream": "WS6"
     },
     {
-      "action": "Map upstream test intent to Rust/Python contract coverage; add missing regression tests.",
-      "classification": "functional",
-      "classification_path": "tests/acp",
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "tests/acp/test_auth.py",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "ffb07463f8d60eb933b263fc611e1bbdcaaace92",
-      "necessity": "necessary_review",
+      "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "tests/acp/test_auth.py",
-      "rust_requirement": "rust_equivalent_or_contract_test_required",
-      "status": "pending_review",
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
       "ticket": 25,
       "upstream_blob": "0610d3e33505471d462dcca2bb53d1b3fe4e01cd",
       "workstream": "WS6"
@@ -15271,29 +15271,29 @@
       "workstream": "WS5"
     }
   ],
-  "generated_at_utc": "2026-05-30T00:58:41.862565+00:00",
+  "generated_at_utc": "2026-05-30T01:14:38.807690+00:00",
   "refs": {
     "local_ref": "main",
-    "local_sha": "049546fd77db89fc1eb6a037f613857d288857fd",
+    "local_sha": "fc57078bd5d330cadae842c4512f2639013ff88d",
     "upstream_ref": "upstream/main",
     "upstream_sha": "bcc83010006c7059ee4d0be63fe74afc74867625"
   },
   "summary": {
     "by_classification": {
       "branding_only": 1,
-      "functional": 759,
-      "intentional_divergence": 90,
+      "functional": 758,
+      "intentional_divergence": 91,
       "policy_only": 168
     },
     "by_rust_requirement": {
-      "not_required_for_runtime": 259,
-      "rust_equivalent_or_contract_test_required": 680,
+      "not_required_for_runtime": 260,
+      "rust_equivalent_or_contract_test_required": 679,
       "rust_primary_ux_or_documented_divergence_required": 79
     },
     "by_status": {
-      "cleared_intentional_divergence": 90,
+      "cleared_intentional_divergence": 91,
       "cleared_non_runtime": 169,
-      "pending_review": 759
+      "pending_review": 758
     },
     "by_workstream": {
       "WS3": 53,
@@ -15302,10 +15302,10 @@
       "WS6": 683,
       "WS8": 13
     },
-    "cleared_intentional_divergence": 90,
+    "cleared_intentional_divergence": 91,
     "cleared_non_runtime": 169,
     "pending_classification": 0,
-    "pending_review": 759,
+    "pending_review": 758,
     "total_shared_different": 1018
   }
 }
