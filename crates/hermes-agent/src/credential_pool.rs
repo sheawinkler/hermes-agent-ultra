@@ -150,6 +150,20 @@ impl CredentialPool {
         self.inner.lock().map(|i| i.keys.len()).unwrap_or(0)
     }
 
+    /// Return true when at least one active key is not currently rate-limited.
+    pub fn has_available(&self) -> bool {
+        let mut inner = match self.inner.lock() {
+            Ok(i) => i,
+            Err(e) => e.into_inner(),
+        };
+        Self::recover_failed_inner(&mut inner);
+        let now = Instant::now();
+        inner
+            .keys
+            .iter()
+            .any(|entry| entry.rate_limited_until.map_or(true, |until| until <= now))
+    }
+
     /// Check if the pool is empty.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
@@ -274,8 +288,11 @@ mod tests {
             "key-c".to_string(),
         ]);
 
+        assert!(pool.has_available());
+
         // Rate-limit key-a
         pool.mark_rate_limited("key-a", Duration::from_secs(60));
+        assert!(pool.has_available());
 
         let k1 = pool.get_key();
         assert_ne!(k1, "key-a");
@@ -296,6 +313,7 @@ mod tests {
 
         pool.mark_rate_limited("key-a", Duration::from_secs(60));
         pool.mark_rate_limited("key-b", Duration::from_secs(10));
+        assert!(!pool.has_available());
 
         // Should pick key-b since it expires sooner
         let key = pool.get_key();

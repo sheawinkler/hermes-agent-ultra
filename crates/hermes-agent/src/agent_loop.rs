@@ -973,6 +973,31 @@ fn classify_error(err: &str) -> ErrorClass {
     }
 }
 
+fn provider_or_base_url_uses_cloudcode_quota(provider: &str, base_url: Option<&str>) -> bool {
+    let provider = provider.trim().to_ascii_lowercase();
+    matches!(
+        provider.as_str(),
+        "google-gemini-cli" | "gemini-cli" | "gemini-oauth"
+    ) || base_url
+        .map(str::trim)
+        .map(|url| url.to_ascii_lowercase().starts_with("cloudcode-pa://"))
+        .unwrap_or(false)
+}
+
+fn credential_pool_may_recover_from_rate_limit(
+    pool: Option<&Arc<CredentialPool>>,
+    provider: &str,
+    base_url: Option<&str>,
+) -> bool {
+    let Some(pool) = pool else {
+        return false;
+    };
+    if provider_or_base_url_uses_cloudcode_quota(provider, base_url) {
+        return false;
+    }
+    pool.has_available() && pool.len() > 1
+}
+
 fn is_tool_payload_validation_error(err: &str) -> bool {
     let lower = err.to_ascii_lowercase();
     (lower.contains("invalid input") && lower.contains("function"))
@@ -3741,6 +3766,9 @@ impl AgentLoop {
             .filter(|s| !s.is_empty())
             .map(str::to_string);
         let active_provider = route_provider_hint.unwrap_or(inferred_provider);
+        let active_base_url = route
+            .and_then(|r| r.base_url.clone())
+            .or_else(|| self.resolve_runtime_base_url(active_provider.as_str(), None));
         // Always try the requested model first. Some providers only reveal tool
         // schema limitations at request time, so proactive substitution hides
         // the real model behavior and makes quorum voters appear to "succeed"
@@ -4021,13 +4049,49 @@ impl AgentLoop {
                             return Err(AgentError::LlmApi(err_str));
                         }
                         ErrorClass::RateLimit | ErrorClass::Retryable => {
-                            if attempt >= effective_max_retries {
-                                let failover_chain = self.resolve_retry_failover_chain(model);
+                            let pool_may_recover = if class == ErrorClass::RateLimit {
+                                let active_pool = match route {
+                                    Some(rt) => self.credential_pool_for_route(rt),
+                                    None => self.primary_credential_pool.as_ref(),
+                                };
+                                credential_pool_may_recover_from_rate_limit(
+                                    active_pool,
+                                    active_provider.as_str(),
+                                    active_base_url.as_deref(),
+                                )
+                            } else {
+                                false
+                            };
+                            let configured_failover = !retry.fallback_models.is_empty()
+                                || retry
+                                    .fallback_model
+                                    .as_deref()
+                                    .map(str::trim)
+                                    .map(|m| !m.is_empty())
+                                    .unwrap_or(false);
+                            let eager_failover = class == ErrorClass::RateLimit
+                                && !pool_may_recover
+                                && configured_failover;
+                            let failover_chain =
+                                if attempt >= effective_max_retries || eager_failover {
+                                    self.resolve_retry_failover_chain(model)
+                                } else {
+                                    Vec::new()
+                                };
+                            if attempt >= effective_max_retries
+                                || (eager_failover && !failover_chain.is_empty())
+                            {
                                 if !failover_chain.is_empty() {
                                     let mut failover_errors = Vec::new();
                                     for fallback in failover_chain {
+                                        let reason = if eager_failover {
+                                            "Rate limited; credential pool rotation cannot recover"
+                                        } else {
+                                            "All retries exhausted"
+                                        };
                                         tracing::info!(
-                                            "All retries exhausted on {}. Trying fallback: {}",
+                                            "{} on {}. Trying fallback: {}",
+                                            reason,
                                             model,
                                             fallback
                                         );
@@ -4047,8 +4111,8 @@ impl AgentLoop {
                                                 self.emit_status(
                                                     "lifecycle",
                                                     &format!(
-                                                        "Failover recovered request via {}",
-                                                        fallback
+                                                        "{}; failover recovered request via {}",
+                                                        reason, fallback
                                                     ),
                                                 );
                                                 return Ok(resp);
@@ -9628,6 +9692,188 @@ mod tests {
         assert_eq!(resp.message.content.as_deref(), Some("ok"));
 
         let seen = seen_models.lock().expect("seen model lock").clone();
+        assert_eq!(
+            seen,
+            vec!["primary-model".to_string(), "backup-model".to_string()]
+        );
+    }
+
+    struct RateLimitFallbackProvider {
+        seen_models: Arc<std::sync::Mutex<Vec<String>>>,
+        primary_calls_before_success: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for RateLimitFallbackProvider {
+        async fn chat_completion(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolSchema],
+            _max_tokens: Option<u32>,
+            _temperature: Option<f64>,
+            model: Option<&str>,
+            _extra_body: Option<&serde_json::Value>,
+        ) -> Result<hermes_core::LlmResponse, AgentError> {
+            let model = model.unwrap_or_default().to_string();
+            self.seen_models
+                .lock()
+                .expect("seen model lock")
+                .push(model.clone());
+            if model == "backup-model" {
+                return Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("fallback-ok"),
+                    usage: None,
+                    model: "backup-model".to_string(),
+                    finish_reason: Some("stop".to_string()),
+                });
+            }
+            let remaining = self
+                .primary_calls_before_success
+                .fetch_update(
+                    std::sync::atomic::Ordering::SeqCst,
+                    std::sync::atomic::Ordering::SeqCst,
+                    |value| value.checked_sub(1),
+                )
+                .unwrap_or(0);
+            if remaining > 0 {
+                return Err(AgentError::LlmApi(
+                    "API error 429: synthetic rate limit".to_string(),
+                ));
+            }
+            Ok(hermes_core::LlmResponse {
+                message: Message::assistant("primary-ok"),
+                usage: None,
+                model: "primary-model".to_string(),
+                finish_reason: Some("stop".to_string()),
+            })
+        }
+
+        fn chat_completion_stream(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolSchema],
+            _max_tokens: Option<u32>,
+            _temperature: Option<f64>,
+            _model: Option<&str>,
+            _extra_body: Option<&serde_json::Value>,
+        ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+            futures::stream::empty().boxed()
+        }
+    }
+
+    async fn run_rate_limit_fallback_probe(
+        provider: &str,
+        base_url: Option<&str>,
+        pool: Arc<CredentialPool>,
+        primary_failures_before_success: usize,
+    ) -> Vec<String> {
+        let seen_models = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let mut cfg = AgentConfig::default();
+        cfg.model = "primary-model".to_string();
+        cfg.provider = Some(provider.to_string());
+        cfg.retry.max_retries = 3;
+        cfg.retry.base_delay_ms = 0;
+        cfg.retry.max_delay_ms = 0;
+        cfg.retry.fallback_model = Some("openrouter:backup-model".to_string());
+        if let Some(base_url) = base_url {
+            cfg.runtime_providers.insert(
+                provider.to_string(),
+                RuntimeProviderConfig {
+                    base_url: Some(base_url.to_string()),
+                    ..RuntimeProviderConfig::default()
+                },
+            );
+        }
+
+        let provider = Arc::new(RateLimitFallbackProvider {
+            seen_models: seen_models.clone(),
+            primary_calls_before_success: std::sync::atomic::AtomicUsize::new(
+                primary_failures_before_success,
+            ),
+        });
+        let agent = AgentLoop::new(cfg, Arc::new(ToolRegistry::new()), provider)
+            .with_primary_credential_pool(pool);
+        let mut ctx = ContextManager::new(32);
+        ctx.add_message(Message::user("hello"));
+
+        let _ = agent
+            .call_llm_with_retry_inner(&ctx, &[], None, None)
+            .await
+            .expect("probe should recover");
+        let seen = seen_models.lock().expect("seen model lock").clone();
+        seen
+    }
+
+    #[tokio::test]
+    async fn cloudcode_rate_limit_uses_fallback_without_pool_retry() {
+        let seen = run_rate_limit_fallback_probe(
+            "google-gemini-cli",
+            None,
+            Arc::new(CredentialPool::new(vec![
+                "oauth-a".to_string(),
+                "oauth-b".to_string(),
+                "oauth-c".to_string(),
+            ])),
+            10,
+        )
+        .await;
+
+        assert_eq!(
+            seen,
+            vec!["primary-model".to_string(), "backup-model".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn cloudcode_base_url_uses_fallback_even_for_alias_provider() {
+        let seen = run_rate_limit_fallback_probe(
+            "custom-provider",
+            Some("cloudcode-pa://google"),
+            Arc::new(CredentialPool::new(vec![
+                "oauth-a".to_string(),
+                "oauth-b".to_string(),
+                "oauth-c".to_string(),
+            ])),
+            10,
+        )
+        .await;
+
+        assert_eq!(
+            seen,
+            vec!["primary-model".to_string(), "backup-model".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn non_cloudcode_multi_key_pool_retries_primary_before_fallback() {
+        let seen = run_rate_limit_fallback_probe(
+            "openrouter",
+            Some("https://openrouter.ai/api/v1"),
+            Arc::new(CredentialPool::new(vec![
+                "key-a".to_string(),
+                "key-b".to_string(),
+                "key-c".to_string(),
+            ])),
+            1,
+        )
+        .await;
+
+        assert_eq!(
+            seen,
+            vec!["primary-model".to_string(), "primary-model".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn single_entry_pool_rate_limit_uses_fallback_without_retry() {
+        let seen = run_rate_limit_fallback_probe(
+            "openrouter",
+            Some("https://openrouter.ai/api/v1"),
+            Arc::new(CredentialPool::single("key-a")),
+            10,
+        )
+        .await;
+
         assert_eq!(
             seen,
             vec!["primary-model".to_string(), "backup-model".to_string()]
