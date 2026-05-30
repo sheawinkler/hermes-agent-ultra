@@ -50,6 +50,17 @@ pub struct ConfigVar {
     pub env_var: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RequiredEnvironmentVariable {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub help: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub required_for: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Frontmatter parsing
 // ---------------------------------------------------------------------------
@@ -75,9 +86,64 @@ pub fn parse_frontmatter(content: &str) -> (HashMap<String, Value>, String) {
         .trim_start_matches('\n')
         .to_string();
 
-    let frontmatter: HashMap<String, Value> = serde_yaml::from_str(yaml_block).unwrap_or_default();
+    let frontmatter: HashMap<String, Value> =
+        serde_yaml::from_str(yaml_block).unwrap_or_else(|_| parse_frontmatter_fallback(yaml_block));
 
     (frontmatter, body)
+}
+
+fn parse_frontmatter_fallback(yaml_block: &str) -> HashMap<String, Value> {
+    let mut frontmatter = HashMap::new();
+    for line in yaml_block.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = trimmed.split_once(':') else {
+            continue;
+        };
+        let key = key.trim();
+        if key.is_empty()
+            || key
+                .chars()
+                .any(|c| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-')))
+        {
+            continue;
+        }
+        let value = value
+            .trim()
+            .trim_matches(|c| matches!(c, '"' | '\''))
+            .to_string();
+        frontmatter.insert(key.to_string(), Value::String(value));
+    }
+    frontmatter
+}
+
+pub fn parse_tags(value: &Value) -> Vec<String> {
+    match value {
+        Value::Array(items) => items
+            .iter()
+            .filter_map(|v| v.as_str())
+            .map(clean_tag)
+            .filter(|v| !v.is_empty())
+            .collect(),
+        Value::String(raw) => raw
+            .trim()
+            .trim_start_matches('[')
+            .trim_end_matches(']')
+            .split(',')
+            .map(clean_tag)
+            .filter(|v| !v.is_empty())
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+fn clean_tag(raw: &str) -> String {
+    raw.trim()
+        .trim_matches(|c| matches!(c, '"' | '\''))
+        .trim()
+        .to_string()
 }
 
 // ---------------------------------------------------------------------------
@@ -93,64 +159,59 @@ pub fn discover_skills(dirs: &[PathBuf]) -> Vec<SkillInfo> {
             continue;
         }
 
-        let Ok(entries) = std::fs::read_dir(dir) else {
-            continue;
-        };
-
-        for entry in entries.filter_map(|e| e.ok()) {
-            let path = entry.path();
-            if !path.is_dir() {
-                continue;
-            }
-
-            let skill_md = path.join("SKILL.md");
-            if !skill_md.exists() {
-                continue;
-            }
-
-            let Ok(content) = std::fs::read_to_string(&skill_md) else {
+        let mut stack = vec![dir.clone()];
+        while let Some(current) = stack.pop() {
+            let Some(dirname) = current.file_name().and_then(|v| v.to_str()) else {
                 continue;
             };
+            if should_skip_skill_scan_dir(dirname) && current.as_path() != dir.as_path() {
+                continue;
+            }
 
-            let name = path
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned();
+            let skill_md = current.join("SKILL.md");
+            if skill_md.exists() {
+                if let Ok(content) = std::fs::read_to_string(&skill_md) {
+                    let (frontmatter, body) = parse_frontmatter(&content);
+                    let name = frontmatter
+                        .get("name")
+                        .and_then(|v| v.as_str())
+                        .filter(|v| !v.trim().is_empty())
+                        .unwrap_or(dirname)
+                        .to_string();
 
-            let (frontmatter, body) = parse_frontmatter(&content);
+                    skills.push(SkillInfo {
+                        name,
+                        path: current.clone(),
+                        content,
+                        frontmatter,
+                        body,
+                    });
+                }
+                continue;
+            }
 
-            skills.push(SkillInfo {
-                name,
-                path: path.clone(),
-                content,
-                frontmatter,
-                body,
-            });
-        }
-
-        // Also check for standalone SKILL.md files (not in subdirs)
-        let standalone = dir.join("SKILL.md");
-        if standalone.exists() {
-            if let Ok(content) = std::fs::read_to_string(&standalone) {
-                let name = dir
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned();
-                let (frontmatter, body) = parse_frontmatter(&content);
-                skills.push(SkillInfo {
-                    name,
-                    path: dir.clone(),
-                    content,
-                    frontmatter,
-                    body,
-                });
+            let Ok(entries) = std::fs::read_dir(&current) else {
+                continue;
+            };
+            for entry in entries.filter_map(|e| e.ok()) {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                }
             }
         }
     }
 
+    skills.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.path.cmp(&b.path)));
     skills
+}
+
+fn should_skip_skill_scan_dir(dirname: &str) -> bool {
+    dirname.starts_with('.')
+        || matches!(
+            dirname,
+            "node_modules" | "site-packages" | "__pycache__" | "venv" | ".venv" | "target"
+        )
 }
 
 // ---------------------------------------------------------------------------
@@ -246,6 +307,64 @@ pub fn extract_skill_config_vars(skill: &SkillInfo) -> Vec<ConfigVar> {
                         env_var,
                     });
                 }
+            }
+        }
+    }
+
+    vars
+}
+
+pub fn extract_required_environment_variables(
+    frontmatter: &HashMap<String, Value>,
+) -> Vec<RequiredEnvironmentVariable> {
+    let mut vars = Vec::new();
+
+    if let Some(Value::Array(items)) = frontmatter.get("required_environment_variables") {
+        for item in items {
+            match item {
+                Value::String(name) if !name.trim().is_empty() => {
+                    vars.push(RequiredEnvironmentVariable {
+                        name: name.trim().to_string(),
+                        prompt: Some(format!("Enter value for {}", name.trim())),
+                        help: None,
+                        required_for: None,
+                    });
+                }
+                Value::Object(obj) => {
+                    let Some(name) = obj.get("name").and_then(|v| v.as_str()) else {
+                        continue;
+                    };
+                    if name.trim().is_empty() {
+                        continue;
+                    }
+                    vars.push(RequiredEnvironmentVariable {
+                        name: name.trim().to_string(),
+                        prompt: obj.get("prompt").and_then(|v| v.as_str()).map(String::from),
+                        help: obj.get("help").and_then(|v| v.as_str()).map(String::from),
+                        required_for: obj
+                            .get("required_for")
+                            .and_then(|v| v.as_str())
+                            .map(String::from),
+                    });
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if let Some(Value::Object(prereqs)) = frontmatter.get("prerequisites") {
+        if let Some(Value::Array(env_vars)) = prereqs.get("env_vars") {
+            for item in env_vars.iter().filter_map(|v| v.as_str()) {
+                let name = item.trim();
+                if name.is_empty() || vars.iter().any(|v| v.name == name) {
+                    continue;
+                }
+                vars.push(RequiredEnvironmentVariable {
+                    name: name.to_string(),
+                    prompt: Some(format!("Enter value for {name}")),
+                    help: None,
+                    required_for: None,
+                });
             }
         }
     }
@@ -366,6 +485,31 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_frontmatter_malformed_yaml_fallback_keeps_simple_keys() {
+        let content = "---\nname: test-skill\ndescription: desc\n: invalid\n---\n# Body";
+        let (fm, body) = parse_frontmatter(content);
+        assert_eq!(fm.get("name").and_then(|v| v.as_str()), Some("test-skill"));
+        assert_eq!(fm.get("description").and_then(|v| v.as_str()), Some("desc"));
+        assert_eq!(body, "# Body");
+    }
+
+    #[test]
+    fn test_parse_tags_variants() {
+        assert_eq!(
+            parse_tags(&serde_json::json!(["a", "b", ""])),
+            vec!["a", "b"]
+        );
+        assert_eq!(
+            parse_tags(&Value::String("\"tag1\", 'tag2'".into())),
+            vec!["tag1", "tag2"]
+        );
+        assert_eq!(
+            parse_tags(&Value::String("[a, b, c]".into())),
+            vec!["a", "b", "c"]
+        );
+    }
+
+    #[test]
     fn test_match_platform_any() {
         let skill = SkillInfo {
             name: "test".into(),
@@ -449,6 +593,55 @@ mod tests {
         assert!(vars[0].required);
         assert_eq!(vars[0].env_var.as_deref(), Some("MY_API_KEY"));
         assert_eq!(vars[1].default.as_deref(), Some("30"));
+    }
+
+    #[test]
+    fn test_extract_required_environment_variables_new_and_legacy() {
+        let mut fm = HashMap::new();
+        fm.insert(
+            "required_environment_variables".into(),
+            serde_json::json!([
+                {
+                    "name": "TENOR_API_KEY",
+                    "prompt": "Tenor API key",
+                    "help": "Get a key",
+                    "required_for": "full functionality"
+                }
+            ]),
+        );
+        fm.insert(
+            "prerequisites".into(),
+            serde_json::json!({"env_vars": ["LEGACY_KEY", "TENOR_API_KEY"]}),
+        );
+
+        let vars = extract_required_environment_variables(&fm);
+        assert_eq!(vars.len(), 2);
+        assert_eq!(vars[0].name, "TENOR_API_KEY");
+        assert_eq!(vars[0].prompt.as_deref(), Some("Tenor API key"));
+        assert_eq!(vars[1].name, "LEGACY_KEY");
+        assert_eq!(
+            vars[1].prompt.as_deref(),
+            Some("Enter value for LEGACY_KEY")
+        );
+    }
+
+    #[test]
+    fn test_discover_skills_recurses_categories_and_skips_hidden_dependency_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("mlops").join("axolotl")).unwrap();
+        std::fs::write(
+            root.join("mlops").join("axolotl").join("SKILL.md"),
+            "---\nname: axolotl-skill\n---\n# Body",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join(".venv").join("fake")).unwrap();
+        std::fs::write(root.join(".venv").join("fake").join("SKILL.md"), "# Fake").unwrap();
+
+        let skills = discover_skills(&[root.to_path_buf()]);
+        assert_eq!(skills.len(), 1);
+        assert_eq!(skills[0].name, "axolotl-skill");
+        assert!(skills[0].path.ends_with("mlops/axolotl"));
     }
 
     #[test]

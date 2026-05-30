@@ -1,29 +1,29 @@
 # Parity Matrix
 
-Generated: `2026-05-30T12:01:27.664242+00:00`
+Generated: `2026-05-30T12:38:10.386905+00:00`
 
 ## Scope
 
-- Local ref: `main` (`bd91290c5b50f5ab69203322b698f7b4846c7fa5`)
-- Upstream ref: `upstream/main` (`61268ff7a9be93673361e433cbf2e775798a13ae`)
+- Local ref: `main` (`3656758c30a8c13aee3468ba024c144175571a45`)
+- Upstream ref: `upstream/main` (`44f3e5186502167e68b6073b4f7bdfae7bfb4fbe`)
 - Merge base: `none (history divergence)`
 
 ## Summary
 
 | Metric | Value |
 | --- | ---: |
-| Commits behind local (`upstream` ancestry only) | 4466 |
-| Commits ahead local (`local` ancestry only) | 865 |
-| Upstream commits missing by patch-id (`git cherry local upstream`, `+`) | 4346 |
+| Commits behind local (`upstream` ancestry only) | 4469 |
+| Commits ahead local (`local` ancestry only) | 867 |
+| Upstream commits missing by patch-id (`git cherry local upstream`, `+`) | 4349 |
 | Upstream commits represented by patch-id (`git cherry local upstream`, `-`) | 2 |
-| Local commits unique by patch-id (`git cherry upstream local`, `+`) | 716 |
+| Local commits unique by patch-id (`git cherry upstream local`, `+`) | 717 |
 | Files only in upstream tree | 1484 |
 | Files only in local tree | 570 |
 | Shared files identical content | 1691 |
 | Shared files different content | 1028 |
 | Total files changed (`local` vs `upstream`) | 3082 |
-| Insertions (`local` vs `upstream`) | 746550 |
-| Deletions (`local` vs `upstream`) | 394687 |
+| Insertions (`local` vs `upstream`) | 746713 |
+| Deletions (`local` vs `upstream`) | 395609 |
 
 ## Top 40 upstream-only buckets
 
@@ -174,9 +174,9 @@ Generated: `2026-05-30T12:01:27.664242+00:00`
 
 ## Commit Mapping
 
-- Upstream missing by patch-id: `4346`
+- Upstream missing by patch-id: `4349`
 - Upstream represented by patch-id: `2`
-- Local unique by patch-id: `716`
+- Local unique by patch-id: `717`
 - Intentional divergence tracked items: `8` (covered files: `904`)
 - Merge base is absent; patch-id mapping is used as primary commit equivalence signal.
 

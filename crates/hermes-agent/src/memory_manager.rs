@@ -1020,6 +1020,9 @@ mod tests {
 
     #[test]
     fn test_prefetch_all_wraps_in_fence() {
+        let _guard = FUSION_ENV_LOCK.lock().expect("fusion env lock");
+        let orig = std::env::var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE").ok();
+        std::env::remove_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE");
         let mut mm = MemoryManager::new();
         mm.add_provider(Arc::new(
             TestProvider::new("builtin").with_prefetch("User likes Rust."),
@@ -1028,6 +1031,10 @@ mod tests {
         assert!(ctx.contains("<memory-context>"));
         assert!(ctx.contains("User likes Rust."));
         assert!(ctx.contains("</memory-context>"));
+        match orig {
+            Some(v) => std::env::set_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE", v),
+            None => std::env::remove_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE"),
+        }
     }
 
     #[test]

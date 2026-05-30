@@ -2,13 +2,13 @@
   "ci_gate": {
     "checks": [
       {
-        "actual": 4466.0,
+        "actual": 4469.0,
         "limit": 5500,
         "metric": "max_commits_behind",
         "status": "pass"
       },
       {
-        "actual": 4346.0,
+        "actual": 4349.0,
         "limit": 5000,
         "metric": "max_upstream_patch_missing",
         "status": "pass"
@@ -47,7 +47,7 @@
     "mode": "tree-drift",
     "pass": true
   },
-  "generated_at_utc": "2026-05-30T12:04:39.420971+00:00",
+  "generated_at_utc": "2026-05-30T12:39:36.615184+00:00",
   "gpar_completion": {
     "GPAR-01": true,
     "GPAR-02": true,
@@ -60,12 +60,12 @@
     "GPAR-09": true
   },
   "metrics": {
-    "max_commits_behind": 4466.0,
+    "max_commits_behind": 4469.0,
     "max_divergence_review_overdue": 0.0,
     "max_files_only_upstream": 1484.0,
     "max_queue_pending_commits": 0.0,
     "max_unowned_divergences": 0.0,
-    "max_upstream_patch_missing": 4346.0,
+    "max_upstream_patch_missing": 4349.0,
     "min_test_intent_mapping_ratio": 1.0
   },
   "program": {
