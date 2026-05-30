@@ -24129,6 +24129,67 @@ fn acp_history_to_messages(
     messages
 }
 
+fn acp_tool_arguments(arguments: &str) -> Option<serde_json::Value> {
+    let trimmed = arguments.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(
+        serde_json::from_str(trimmed)
+            .unwrap_or_else(|_| serde_json::Value::String(arguments.to_string())),
+    )
+}
+
+fn acp_events_from_agent_messages(
+    session_id: &str,
+    messages: &[hermes_core::Message],
+) -> Vec<hermes_acp::AcpEvent> {
+    let mut events = Vec::new();
+    let mut tool_names_by_id: HashMap<String, String> = HashMap::new();
+    let mut generated_ids = 0u64;
+
+    for message in messages {
+        match message.role {
+            hermes_core::MessageRole::Assistant => {
+                for tool_call in message.tool_calls.as_deref().unwrap_or(&[]) {
+                    let tool_call_id = if tool_call.id.trim().is_empty() {
+                        generated_ids = generated_ids.saturating_add(1);
+                        format!("tc-{:08x}", generated_ids)
+                    } else {
+                        tool_call.id.clone()
+                    };
+                    tool_names_by_id.insert(tool_call_id.clone(), tool_call.function.name.clone());
+                    events.push(hermes_acp::AcpEvent::tool_call_start(
+                        session_id,
+                        &tool_call_id,
+                        &tool_call.function.name,
+                        acp_tool_arguments(&tool_call.function.arguments),
+                    ));
+                }
+            }
+            hermes_core::MessageRole::Tool => {
+                let Some(tool_call_id) = message.tool_call_id.as_deref() else {
+                    continue;
+                };
+                let tool_name = tool_names_by_id
+                    .get(tool_call_id)
+                    .cloned()
+                    .or_else(|| message.name.clone())
+                    .unwrap_or_else(|| "tool".to_string());
+                events.push(hermes_acp::AcpEvent::tool_call_complete(
+                    session_id,
+                    tool_call_id,
+                    &tool_name,
+                    message.content.clone(),
+                ));
+            }
+            _ => {}
+        }
+    }
+
+    events
+}
+
 struct CliAcpPromptExecutor {
     config: Arc<hermes_config::GatewayConfig>,
     tool_registry: Arc<hermes_tools::ToolRegistry>,
@@ -24185,6 +24246,7 @@ impl hermes_acp::AcpPromptExecutor for CliAcpPromptExecutor {
             response_text,
             usage,
             total_turns: Some(result.total_turns),
+            events: acp_events_from_agent_messages(&session.session_id, &result.messages),
         })
     }
 }
@@ -24819,6 +24881,61 @@ mod tests {
         let content = messages[0].content.as_deref().unwrap_or("");
         assert!(content.contains("done"));
         assert!(content.contains("Attached image"));
+    }
+
+    #[test]
+    fn test_acp_events_from_agent_messages_pairs_tool_results_by_call_id() {
+        let messages = vec![
+            hermes_core::Message::assistant_with_tool_calls(
+                Some("checking files".to_string()),
+                vec![
+                    hermes_core::ToolCall {
+                        id: "tc-read".to_string(),
+                        function: hermes_core::FunctionCall {
+                            name: "read_file".to_string(),
+                            arguments: r#"{"path":"/etc/hosts"}"#.to_string(),
+                        },
+                        extra_content: None,
+                    },
+                    hermes_core::ToolCall {
+                        id: "tc-web".to_string(),
+                        function: hermes_core::FunctionCall {
+                            name: "web_search".to_string(),
+                            arguments: r#"{"query":"rust acp"}"#.to_string(),
+                        },
+                        extra_content: None,
+                    },
+                ],
+            ),
+            hermes_core::Message::tool_result("tc-read", "127.0.0.1 localhost"),
+            hermes_core::Message::tool_result("tc-web", r#"{"data":{"web":[]}}"#),
+        ];
+
+        let events = acp_events_from_agent_messages("session-1", &messages);
+
+        assert_eq!(events.len(), 4);
+        assert_eq!(events[0].tool_call_id.as_deref(), Some("tc-read"));
+        assert_eq!(events[0].tool_name.as_deref(), Some("read_file"));
+        assert_eq!(events[0].arguments.as_ref().unwrap()["path"], "/etc/hosts");
+        assert_eq!(events[1].tool_call_id.as_deref(), Some("tc-web"));
+        assert_eq!(events[2].tool_call_id.as_deref(), Some("tc-read"));
+        assert_eq!(events[2].tool_name.as_deref(), Some("read_file"));
+        assert_eq!(events[2].result.as_deref(), Some("127.0.0.1 localhost"));
+        assert_eq!(events[3].tool_call_id.as_deref(), Some("tc-web"));
+        assert_eq!(events[3].tool_name.as_deref(), Some("web_search"));
+    }
+
+    #[test]
+    fn test_acp_events_from_agent_messages_uses_fallback_for_untracked_tool_result() {
+        let mut result = hermes_core::Message::tool_result("tc-untracked", "ok");
+        result.name = Some("terminal".to_string());
+
+        let events = acp_events_from_agent_messages("session-1", &[result]);
+
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].tool_call_id.as_deref(), Some("tc-untracked"));
+        assert_eq!(events[0].tool_name.as_deref(), Some("terminal"));
+        assert_eq!(events[0].result.as_deref(), Some("ok"));
     }
 
     #[test]

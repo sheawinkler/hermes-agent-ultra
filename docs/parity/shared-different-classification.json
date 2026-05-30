@@ -416,6 +416,20 @@
       "ticket": 25
     },
     {
+      "path": "tests/acp/test_events.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream ACP event callback intent is covered by Rust ACP event emission tests: prompt executor events are enqueued, test transports flush session/update notifications, and CLI ACP output derives paired tool start/complete events from Rust AgentResult messages.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/acp/test_mcp_e2e.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream ACP MCP E2E tool-event expectations are covered by Rust ACP prompt/session-update tests and CLI AgentResult-to-ACP tool event extraction; Python MCP mocking mechanics are reference-only for the Rust runtime.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "tests/acp/test_permissions.py",
       "classification": "intentional_divergence",
       "rationale": "Upstream ACP permission option and outcome-mapping contracts are covered by Rust ACP permission tests; Python async scheduler mechanics are reference-only for the Rust runtime.",

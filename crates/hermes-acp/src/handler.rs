@@ -33,6 +33,7 @@ pub struct PromptExecutionOutput {
     pub response_text: String,
     pub usage: Option<Usage>,
     pub total_turns: Option<u32>,
+    pub events: Vec<AcpEvent>,
 }
 
 /// Pluggable ACP prompt executor.
@@ -1071,6 +1072,7 @@ impl AcpHandler for HermesAcpHandler {
                         ),
                         usage: None,
                         total_turns: Some(1),
+                        events: Vec::new(),
                     })
                 };
                 let prompt_result = match prompt_result {
@@ -1083,7 +1085,18 @@ impl AcpHandler for HermesAcpHandler {
                     }
                 };
 
-                let response_text = prompt_result.response_text.trim().to_string();
+                let PromptExecutionOutput {
+                    response_text,
+                    usage,
+                    total_turns,
+                    events,
+                } = prompt_result;
+
+                for event in events {
+                    self.event_sink.push(event);
+                }
+
+                let response_text = response_text.trim().to_string();
                 if !response_text.is_empty() {
                     self.event_sink
                         .push(AcpEvent::message_delta(session_id, &response_text));
@@ -1092,7 +1105,7 @@ impl AcpHandler for HermesAcpHandler {
                 }
                 self.event_sink.push(AcpEvent::step_complete(
                     session_id,
-                    prompt_result.total_turns.unwrap_or(1),
+                    total_turns.unwrap_or(1),
                 ));
 
                 history.push(json!({
@@ -1101,7 +1114,7 @@ impl AcpHandler for HermesAcpHandler {
                 }));
                 self.session_manager.set_history(session_id, history);
 
-                if let Some(usage) = prompt_result.usage.as_ref() {
+                if let Some(usage) = usage.as_ref() {
                     self.session_manager.add_usage(
                         session_id,
                         usage.input_tokens,
@@ -1114,7 +1127,7 @@ impl AcpHandler for HermesAcpHandler {
                     .set_phase(session_id, SessionPhase::Idle);
 
                 let mut payload = json!({"stop_reason": "end_turn"});
-                if let Some(usage) = prompt_result.usage {
+                if let Some(usage) = usage {
                     payload["usage"] = serde_json::to_value(usage).unwrap_or_else(|_| json!({}));
                 }
                 AcpResponse::success(request.id, payload)
@@ -1361,6 +1374,7 @@ impl AcpHandler for DefaultAcpHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::AcpEventKind;
     use serde_json::json;
 
     struct EchoPromptExecutor;
@@ -1383,6 +1397,39 @@ mod tests {
                     cached_read_tokens: None,
                 }),
                 total_turns: Some(2),
+                events: Vec::new(),
+            })
+        }
+    }
+
+    struct ToolEventPromptExecutor;
+
+    #[async_trait::async_trait]
+    impl AcpPromptExecutor for ToolEventPromptExecutor {
+        async fn execute_prompt(
+            &self,
+            session: &SessionState,
+            _user_text: &str,
+            _history: &[Value],
+        ) -> Result<PromptExecutionOutput, String> {
+            Ok(PromptExecutionOutput {
+                response_text: "done".to_string(),
+                usage: None,
+                total_turns: Some(1),
+                events: vec![
+                    AcpEvent::tool_call_start(
+                        &session.session_id,
+                        "tc-read",
+                        "read_file",
+                        Some(json!({"path": "/tmp/a.txt"})),
+                    ),
+                    AcpEvent::tool_call_complete(
+                        &session.session_id,
+                        "tc-read",
+                        "read_file",
+                        Some("contents".to_string()),
+                    ),
+                ],
             })
         }
     }
@@ -1829,6 +1876,64 @@ mod tests {
                 .and_then(|v| v.as_str()),
             Some("executor:hello")
         );
+    }
+
+    #[tokio::test]
+    async fn test_prompt_enqueues_executor_tool_events() {
+        let event_sink = Arc::new(EventSink::default());
+        let handler = HermesAcpHandler::new(
+            Arc::new(SessionManager::new()),
+            event_sink.clone(),
+            Arc::new(PermissionStore::new()),
+        )
+        .with_prompt_executor(Arc::new(ToolEventPromptExecutor));
+
+        let req = AcpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(1)),
+            method: "session/new".into(),
+            params: Some(json!({"cwd": "."})),
+        };
+        let resp = handler.handle_request(req).await;
+        let session_id = resp.result.unwrap()["session_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let req = AcpRequest {
+            jsonrpc: "2.0".into(),
+            id: Some(json!(2)),
+            method: "prompt".into(),
+            params: Some(json!({
+                "session_id": session_id.clone(),
+                "text": "read file"
+            })),
+        };
+        let resp = handler.handle_request(req).await;
+        assert_eq!(
+            resp.result.unwrap()["stop_reason"].as_str(),
+            Some("end_turn")
+        );
+
+        let events = event_sink.drain_for_session(&session_id);
+        let tool_events: Vec<_> = events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event.kind,
+                    AcpEventKind::ToolCallStart | AcpEventKind::ToolCallComplete
+                )
+            })
+            .collect();
+        assert_eq!(tool_events.len(), 2);
+        assert_eq!(tool_events[0].tool_call_id.as_deref(), Some("tc-read"));
+        assert_eq!(tool_events[0].tool_name.as_deref(), Some("read_file"));
+        assert_eq!(
+            tool_events[0].arguments.as_ref().unwrap()["path"],
+            "/tmp/a.txt"
+        );
+        assert_eq!(tool_events[1].tool_call_id.as_deref(), Some("tc-read"));
+        assert_eq!(tool_events[1].result.as_deref(), Some("contents"));
     }
 
     #[tokio::test]
