@@ -349,6 +349,83 @@ mod tests {
     }
 
     #[test]
+    fn permission_store_instances_do_not_share_pending_or_resolved_requests() {
+        let store_a = PermissionStore::new();
+        let store_b = PermissionStore::new();
+        let mut request = build_permission_request(
+            "acp-session-A",
+            "rm -rf /tmp/a",
+            "dangerous command",
+            true,
+            0,
+        );
+        request.id = "req-a".to_string();
+
+        store_a.add_pending(request);
+        assert_eq!(store_a.list_pending().len(), 1);
+        assert!(store_b.list_pending().is_empty());
+
+        assert!(store_a.resolve("req-a", PermissionOutcome::Denied));
+        assert!(!store_b.resolve("req-a", PermissionOutcome::Denied));
+        assert_eq!(store_a.drain_resolved().len(), 1);
+        assert!(store_b.drain_resolved().is_empty());
+    }
+
+    #[test]
+    fn permission_store_keeps_overlapping_sessions_isolated() {
+        use std::sync::{Arc, Barrier};
+
+        let store = Arc::new(PermissionStore::new());
+        let barrier = Arc::new(Barrier::new(3));
+        let mut handles = Vec::new();
+
+        for (session_id, request_id, command, outcome) in [
+            (
+                "acp-session-A",
+                "req-a",
+                "rm -rf /tmp/a",
+                PermissionOutcome::Denied,
+            ),
+            (
+                "acp-session-B",
+                "req-b",
+                "sudo apt update",
+                PermissionOutcome::Allowed {
+                    option_id: "allow_once".to_string(),
+                },
+            ),
+        ] {
+            let store = Arc::clone(&store);
+            let barrier = Arc::clone(&barrier);
+            handles.push(std::thread::spawn(move || {
+                let mut request =
+                    build_permission_request(session_id, command, "dangerous command", true, 0);
+                request.id = request_id.to_string();
+                store.add_pending(request);
+                barrier.wait();
+                assert!(store.resolve(request_id, outcome));
+            }));
+        }
+
+        barrier.wait();
+        for handle in handles {
+            handle.join().expect("permission thread should not panic");
+        }
+
+        assert!(store.list_pending().is_empty());
+        let mut resolved = store.drain_resolved();
+        resolved.sort_by(|left, right| left.0.cmp(&right.0));
+        assert_eq!(resolved.len(), 2);
+        assert_eq!(resolved[0].0, "req-a");
+        assert!(matches!(resolved[0].1, PermissionOutcome::Denied));
+        assert_eq!(resolved[1].0, "req-b");
+        assert!(matches!(
+            &resolved[1].1,
+            PermissionOutcome::Allowed { option_id } if option_id == "allow_once"
+        ));
+    }
+
+    #[test]
     fn test_auto_callbacks() {
         let deny = auto_deny_callback();
         assert_eq!(deny("cmd", "desc"), "deny");

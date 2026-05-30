@@ -197,6 +197,7 @@ mod tests {
     use super::*;
     use crate::events::AcpEvent;
     use crate::handler::HermesAcpHandler;
+    use crate::permissions::{build_permission_request, PermissionOutcome};
 
     #[tokio::test]
     async fn run_on_flushes_pending_events_after_each_response() {
@@ -235,5 +236,40 @@ mod tests {
         assert_eq!(lines[1]["params"]["tool_call_id"], "tc-read");
         assert_eq!(lines[1]["params"]["tool_name"], "read_file");
         assert_eq!(lines[1]["params"]["arguments"]["path"], "/tmp/a.txt");
+    }
+
+    #[test]
+    fn server_permission_stores_are_instance_scoped() {
+        let handler_a = Arc::new(HermesAcpHandler::new(
+            Arc::new(SessionManager::new()),
+            Arc::new(EventSink::default()),
+            Arc::new(PermissionStore::new()),
+        ));
+        let handler_b = Arc::new(HermesAcpHandler::new(
+            Arc::new(SessionManager::new()),
+            Arc::new(EventSink::default()),
+            Arc::new(PermissionStore::new()),
+        ));
+        let server_a = AcpServer::new(handler_a);
+        let server_b = AcpServer::new(handler_b);
+
+        let mut request = build_permission_request(
+            "acp-session-A",
+            "rm -rf /tmp/a",
+            "dangerous command",
+            true,
+            0,
+        );
+        request.id = "req-a".to_string();
+        server_a.permission_store().add_pending(request);
+
+        assert_eq!(server_a.permission_store().list_pending().len(), 1);
+        assert!(server_b.permission_store().list_pending().is_empty());
+        assert!(server_a
+            .permission_store()
+            .resolve("req-a", PermissionOutcome::Denied));
+        assert!(!server_b
+            .permission_store()
+            .resolve("req-a", PermissionOutcome::Denied));
     }
 }
