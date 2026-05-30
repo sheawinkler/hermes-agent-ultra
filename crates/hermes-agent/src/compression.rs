@@ -269,6 +269,19 @@ impl ContextCompressor {
         current_prompt_tokens.unwrap_or(self.last_prompt_tokens) >= self.threshold_tokens
     }
 
+    fn rehydrate_previous_summary_from_messages(&mut self, messages: &[Message]) {
+        if self.previous_summary.is_some() {
+            return;
+        }
+        self.previous_summary = messages
+            .iter()
+            .filter_map(|msg| msg.content.as_deref())
+            .filter_map(summary_body_from_handoff)
+            .map(|body| body.trim().to_string())
+            .filter(|body| !body.is_empty())
+            .last();
+    }
+
     // ------------------------------------------------------------------
     // Phase 1: tool-output pruning (cheap, no LLM call).
     // ------------------------------------------------------------------
@@ -731,6 +744,7 @@ Write only the summary body. Do not include any preamble or prefix."
                 pruned_count
             );
         }
+        self.rehydrate_previous_summary_from_messages(&messages);
 
         // Phase 2: determine boundaries.
         let compress_start = self.align_boundary_forward(&messages, self.config.protect_first_n);
@@ -738,7 +752,14 @@ Write only the summary body. Do not include any preamble or prefix."
         if compress_start >= compress_end {
             return messages;
         }
-        let turns_to_summarize: Vec<Message> = messages[compress_start..compress_end].to_vec();
+        let turns_to_summarize: Vec<Message> = messages[compress_start..compress_end]
+            .iter()
+            .filter(|msg| !is_summary_handoff_message(msg))
+            .cloned()
+            .collect();
+        if turns_to_summarize.is_empty() {
+            return messages;
+        }
 
         if !self.config.quiet_mode {
             let tail_msgs = n_messages - compress_end;
@@ -901,6 +922,24 @@ pub fn with_summary_prefix(summary: &str) -> String {
     }
 }
 
+fn summary_body_from_handoff(content: &str) -> Option<String> {
+    let trimmed = content.trim();
+    if let Some(rest) = trimmed.strip_prefix(SUMMARY_PREFIX) {
+        Some(rest.trim_start().to_string())
+    } else {
+        trimmed
+            .strip_prefix(LEGACY_SUMMARY_PREFIX)
+            .map(|rest| rest.trim_start().to_string())
+    }
+}
+
+fn is_summary_handoff_message(msg: &Message) -> bool {
+    msg.content
+        .as_deref()
+        .and_then(summary_body_from_handoff)
+        .is_some()
+}
+
 fn role_label(role: MessageRole) -> &'static str {
     match role {
         MessageRole::System => "system",
@@ -1035,6 +1074,7 @@ mod tests {
     struct CannedSummaryProvider {
         canned: String,
         calls: Mutex<usize>,
+        prompts: Mutex<Vec<String>>,
     }
 
     impl CannedSummaryProvider {
@@ -1042,10 +1082,14 @@ mod tests {
             Arc::new(Self {
                 canned: canned.into(),
                 calls: Mutex::new(0),
+                prompts: Mutex::new(Vec::new()),
             })
         }
         fn call_count(&self) -> usize {
             *self.calls.lock().unwrap()
+        }
+        fn last_prompt(&self) -> Option<String> {
+            self.prompts.lock().unwrap().last().cloned()
         }
     }
 
@@ -1053,7 +1097,7 @@ mod tests {
     impl LlmProvider for CannedSummaryProvider {
         async fn chat_completion(
             &self,
-            _messages: &[Message],
+            messages: &[Message],
             _tools: &[ToolSchema],
             _max_tokens: Option<u32>,
             _temperature: Option<f64>,
@@ -1061,6 +1105,12 @@ mod tests {
             _extra_body: Option<&serde_json::Value>,
         ) -> Result<LlmResponse, AgentError> {
             *self.calls.lock().unwrap() += 1;
+            self.prompts.lock().unwrap().push(
+                messages
+                    .first()
+                    .and_then(|message| message.content.clone())
+                    .unwrap_or_default(),
+            );
             Ok(LlmResponse {
                 message: Message {
                     role: MessageRole::Assistant,
@@ -1266,6 +1316,22 @@ mod tests {
     }
 
     #[test]
+    fn should_compress_uses_prompt_tokens_only() {
+        let cfg = CompressorConfig {
+            context_length: 200_000,
+            threshold_percent: 0.5,
+            ..quiet_config()
+        };
+        let mut compressor =
+            ContextCompressor::new(cfg, aux_with_provider(CannedSummaryProvider::new("x")));
+
+        compressor.update_from_usage(40_000);
+        assert!(!compressor.should_compress(None));
+        assert!(!compressor.should_compress(Some(40_000)));
+        assert!(compressor.should_compress(Some(110_000)));
+    }
+
+    #[test]
     fn budget_clamped_between_min_and_ceiling() {
         let cfg = CompressorConfig {
             context_length: 1_000_000,
@@ -1366,6 +1432,102 @@ mod tests {
         let s2 = compressor.generate_summary(&turns).await.unwrap().unwrap();
         assert!(s2.contains("Goal: build it."));
         assert_eq!(provider.call_count(), 2);
+    }
+
+    fn messages_with_handoff(summary_body: &str) -> Vec<Message> {
+        vec![
+            msg(MessageRole::System, "system prompt"),
+            msg(
+                MessageRole::User,
+                &format!("{SUMMARY_PREFIX}\n{summary_body}"),
+            ),
+            msg(MessageRole::Assistant, "handoff acknowledged after resume"),
+            msg(MessageRole::User, "new user turn after resume"),
+            msg(MessageRole::Assistant, "new assistant work after resume"),
+            msg(MessageRole::User, "more new work after resume"),
+            msg(MessageRole::Assistant, "latest tail response"),
+            msg(
+                MessageRole::User,
+                "final active request stays in protected tail",
+            ),
+        ]
+    }
+
+    #[tokio::test]
+    async fn compress_rehydrates_previous_summary_from_handoff_message() {
+        let old_summary = "RESUMED-SUMMARY-BODY durable continuity facts";
+        let provider = CannedSummaryProvider::new("updated summary");
+        let aux = aux_with_provider(provider.clone());
+        let cfg = CompressorConfig {
+            context_length: 1_000,
+            threshold_percent: 0.10,
+            protect_first_n: 1,
+            protect_last_n: 1,
+            ..quiet_config()
+        };
+        let mut compressor = ContextCompressor::new(cfg, aux);
+
+        let _ = compressor
+            .compress(messages_with_handoff(old_summary), Some(150))
+            .await;
+
+        let prompt = provider.last_prompt().expect("summary prompt");
+        assert!(prompt.contains("PREVIOUS SUMMARY:"));
+        assert!(prompt.contains("NEW TURNS TO INCORPORATE:"));
+        assert!(!prompt.contains("TURNS TO SUMMARIZE:"));
+        assert_eq!(prompt.matches(old_summary).count(), 1);
+        assert!(!prompt.contains(&format!("[USER]: {SUMMARY_PREFIX}")));
+    }
+
+    #[tokio::test]
+    async fn compress_does_not_serialize_existing_handoff_twice() {
+        let old_summary = "OLD-SUMMARY-BODY unique continuity facts";
+        let provider = CannedSummaryProvider::new("updated summary");
+        let aux = aux_with_provider(provider.clone());
+        let cfg = CompressorConfig {
+            context_length: 1_000,
+            threshold_percent: 0.10,
+            protect_first_n: 1,
+            protect_last_n: 1,
+            ..quiet_config()
+        };
+        let mut compressor = ContextCompressor::new(cfg, aux);
+        compressor.previous_summary = Some(old_summary.to_string());
+
+        let _ = compressor
+            .compress(messages_with_handoff(old_summary), Some(150))
+            .await;
+
+        let prompt = provider.last_prompt().expect("summary prompt");
+        assert!(prompt.contains("PREVIOUS SUMMARY:"));
+        assert!(prompt.contains("NEW TURNS TO INCORPORATE:"));
+        assert_eq!(prompt.matches(old_summary).count(), 1);
+        assert!(!prompt.contains(&format!("[USER]: {SUMMARY_PREFIX}")));
+    }
+
+    #[tokio::test]
+    async fn protected_head_handoff_rehydrates_previous_summary() {
+        let old_summary = "PROTECTED-HEAD-SUMMARY durable facts from before restart";
+        let provider = CannedSummaryProvider::new("updated summary");
+        let aux = aux_with_provider(provider.clone());
+        let cfg = CompressorConfig {
+            context_length: 1_000,
+            threshold_percent: 0.10,
+            protect_first_n: 2,
+            protect_last_n: 1,
+            ..quiet_config()
+        };
+        let mut compressor = ContextCompressor::new(cfg, aux);
+
+        let _ = compressor
+            .compress(messages_with_handoff(old_summary), Some(150))
+            .await;
+
+        let prompt = provider.last_prompt().expect("summary prompt");
+        assert!(prompt.contains("PREVIOUS SUMMARY:"));
+        assert!(prompt.contains("NEW TURNS TO INCORPORATE:"));
+        assert_eq!(prompt.matches(old_summary).count(), 1);
+        assert!(!prompt.contains(&format!("[USER]: {SUMMARY_PREFIX}")));
     }
 
     #[tokio::test]

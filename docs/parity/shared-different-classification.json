@@ -234,6 +234,13 @@
       "ticket": 25
     },
     {
+      "path": "tests/agent/test_context_compressor_summary_continuity.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream iterative context-summary continuity intent is covered by Rust hermes-agent ContextCompressor tests for same-process previous-summary reuse, resume handoff rehydration, protected-head handoffs, and exclusion of existing handoff messages from the new-turn summary block; the Python test file remains reference-only.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "tests/agent/test_redact.py",
       "classification": "intentional_divergence",
       "rationale": "Upstream redaction test intent is covered by Rust hermes-intelligence redaction contracts for vendor prefixes, env/json/auth tokens, JWTs, Discord IDs, URL query/userinfo, DB connection strings, and form bodies; the Python test file remains reference-only.",
@@ -265,6 +272,13 @@
       "path": "tests/run_agent",
       "classification": "functional",
       "rationale": "Run-agent tests cover orchestration and provider execution semantics.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/run_agent/test_compression_trigger_excludes_reasoning.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream compression-trigger prompt-token-only intent is covered by Rust hermes-agent ContextCompressor threshold tests: usage updates track prompt tokens only, completion/reasoning tokens are not accepted by the trigger path, and explicit prompt-token values gate compression; the Python test file remains reference-only.",
       "owner": "sheawinkler",
       "ticket": 25
     },
