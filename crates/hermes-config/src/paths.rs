@@ -153,6 +153,7 @@ mod tests {
     /// avoid races with parallel test threads.
     #[test]
     fn derived_paths_and_explicit_home() {
+        let _guard = crate::managed_gateway::test_lock::lock();
         let original = std::env::var("HERMES_HOME").ok();
         let original_ultra = std::env::var("HERMES_AGENT_ULTRA_HOME").ok();
 
