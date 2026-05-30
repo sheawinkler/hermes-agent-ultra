@@ -4,6 +4,10 @@
 //! OpenAI, Anthropic, and OpenRouter APIs.
 
 use async_trait::async_trait;
+use base64::{
+    engine::general_purpose::{URL_SAFE, URL_SAFE_NO_PAD},
+    Engine as _,
+};
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use reqwest::Client;
@@ -28,6 +32,77 @@ use crate::credential_pool::CredentialPool;
 use crate::rate_limit::RateLimitTracker;
 
 const ACP_MULTIMODAL_PREFIX: &str = "__hermes_acp_parts_json__:";
+pub const OPENAI_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
+const CODEX_CLOUDFLARE_ORIGINATOR: &str = "codex_cli_rs";
+
+pub fn codex_cloudflare_headers(access_token: Option<&str>) -> Vec<(String, String)> {
+    let mut headers = vec![
+        (
+            "originator".to_string(),
+            CODEX_CLOUDFLARE_ORIGINATOR.to_string(),
+        ),
+        (
+            "User-Agent".to_string(),
+            format!(
+                "{CODEX_CLOUDFLARE_ORIGINATOR}/{}",
+                env!("CARGO_PKG_VERSION")
+            ),
+        ),
+    ];
+
+    if let Some(account_id) = access_token.and_then(codex_chatgpt_account_id) {
+        headers.push(("ChatGPT-Account-ID".to_string(), account_id));
+    }
+
+    headers
+}
+
+pub fn openai_codex_provider(
+    api_key: impl Into<String>,
+    model: impl Into<String>,
+    base_url: Option<&str>,
+) -> OpenAiProvider {
+    let api_key = api_key.into();
+    let base_url = base_url
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(OPENAI_CODEX_BASE_URL)
+        .to_string();
+    let mut provider = OpenAiProvider::new(api_key.as_str())
+        .with_model(model)
+        .with_base_url(base_url.as_str());
+    if is_codex_cloudflare_base_url(base_url.as_str()) {
+        provider = provider.with_headers(codex_cloudflare_headers(Some(api_key.as_str())));
+    }
+    provider
+}
+
+fn is_codex_cloudflare_base_url(base_url: &str) -> bool {
+    base_url
+        .trim()
+        .to_ascii_lowercase()
+        .contains("chatgpt.com/backend-api/codex")
+}
+
+fn codex_chatgpt_account_id(token: &str) -> Option<String> {
+    let token = token.trim();
+    if token.is_empty() {
+        return None;
+    }
+    let payload = token.split('.').nth(1)?;
+    let decoded = URL_SAFE_NO_PAD
+        .decode(payload.as_bytes())
+        .or_else(|_| URL_SAFE.decode(payload.as_bytes()))
+        .ok()?;
+    let claims: Value = serde_json::from_slice(&decoded).ok()?;
+    claims
+        .get("https://api.openai.com/auth")
+        .and_then(|auth| auth.get("chatgpt_account_id"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+}
 
 fn parse_acp_multimodal_parts(content: &str) -> Option<Vec<Value>> {
     let payload = content.trim().strip_prefix(ACP_MULTIMODAL_PREFIX)?;
@@ -827,6 +902,26 @@ impl OpenAiProvider {
         Self {
             inner: self.inner.with_model(model),
         }
+    }
+
+    /// Add a custom header to every OpenAI-compatible request.
+    pub fn with_header(self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        Self {
+            inner: self.inner.with_header(key, value),
+        }
+    }
+
+    /// Add several custom headers to every OpenAI-compatible request.
+    pub fn with_headers<I, K, V>(mut self, headers: I) -> Self
+    where
+        I: IntoIterator<Item = (K, V)>,
+        K: Into<String>,
+        V: Into<String>,
+    {
+        for (key, value) in headers {
+            self = self.with_header(key, value);
+        }
+        self
     }
 
     /// Attach a credential pool for API key rotation.
@@ -2284,6 +2379,116 @@ fn summarize_openai_response_shape(json: &Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn codex_jwt_with_account(account_id: Option<&str>) -> String {
+        let header = URL_SAFE_NO_PAD.encode(br#"{"alg":"RS256","typ":"JWT"}"#);
+        let claims = match account_id {
+            Some(account_id) => serde_json::json!({
+                "sub": "user-xyz",
+                "exp": 9_999_999_999_i64,
+                "https://api.openai.com/auth": {
+                    "chatgpt_account_id": account_id,
+                    "chatgpt_plan_type": "plus"
+                }
+            }),
+            None => serde_json::json!({
+                "sub": "user-xyz",
+                "exp": 9_999_999_999_i64
+            }),
+        };
+        let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&claims).unwrap());
+        format!("{header}.{payload}.sig")
+    }
+
+    fn header_value<'a>(headers: &'a [(String, String)], key: &str) -> Option<&'a str> {
+        headers
+            .iter()
+            .find(|(name, _)| name == key)
+            .map(|(_, value)| value.as_str())
+    }
+
+    #[test]
+    fn codex_cloudflare_headers_match_codex_cli_rs_contract() {
+        let token = codex_jwt_with_account(Some("acct-abc-999"));
+        let headers = codex_cloudflare_headers(Some(token.as_str()));
+
+        assert_eq!(header_value(&headers, "originator"), Some("codex_cli_rs"));
+        assert!(header_value(&headers, "User-Agent")
+            .expect("user agent")
+            .starts_with("codex_cli_rs/"));
+        assert_eq!(
+            header_value(&headers, "ChatGPT-Account-ID"),
+            Some("acct-abc-999")
+        );
+        assert!(header_value(&headers, "chatgpt-account-id").is_none());
+        assert!(header_value(&headers, "ChatGPT-Account-Id").is_none());
+    }
+
+    #[test]
+    fn codex_cloudflare_headers_ignore_malformed_or_missing_account_tokens() {
+        for token in ["not-a-jwt", "", "only.one", "  ", "...."] {
+            let headers = codex_cloudflare_headers(Some(token));
+            assert_eq!(header_value(&headers, "originator"), Some("codex_cli_rs"));
+            assert!(header_value(&headers, "ChatGPT-Account-ID").is_none());
+        }
+
+        let token = codex_jwt_with_account(None);
+        let headers = codex_cloudflare_headers(Some(token.as_str()));
+        assert_eq!(header_value(&headers, "originator"), Some("codex_cli_rs"));
+        assert!(header_value(&headers, "ChatGPT-Account-ID").is_none());
+    }
+
+    #[test]
+    fn openai_codex_provider_attaches_cloudflare_headers_to_requests() {
+        let token = codex_jwt_with_account(Some("acct-request"));
+        let provider = openai_codex_provider(token.as_str(), "gpt-5.4", None);
+        assert_eq!(provider.inner.base_url, OPENAI_CODEX_BASE_URL);
+
+        let request = provider
+            .inner
+            .build_request(
+                &Client::new(),
+                &format!("{}/chat/completions", OPENAI_CODEX_BASE_URL),
+                token.as_str(),
+                &serde_json::json!({"model": "gpt-5.4", "messages": []}),
+            )
+            .build()
+            .expect("request");
+        let headers = request.headers();
+
+        assert_eq!(headers.get("originator").unwrap(), "codex_cli_rs");
+        assert!(headers
+            .get("User-Agent")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .starts_with("codex_cli_rs/"));
+        assert_eq!(headers.get("ChatGPT-Account-ID").unwrap(), "acct-request");
+    }
+
+    #[test]
+    fn openai_codex_provider_skips_cloudflare_headers_for_non_chatgpt_override() {
+        let token = codex_jwt_with_account(Some("acct-request"));
+        let provider = openai_codex_provider(
+            token.as_str(),
+            "gpt-5.4",
+            Some("https://openrouter.ai/api/v1"),
+        );
+
+        let request = provider
+            .inner
+            .build_request(
+                &Client::new(),
+                "https://openrouter.ai/api/v1/chat/completions",
+                token.as_str(),
+                &serde_json::json!({"model": "gpt-5.4", "messages": []}),
+            )
+            .build()
+            .expect("request");
+
+        assert!(request.headers().get("originator").is_none());
+        assert!(request.headers().get("ChatGPT-Account-ID").is_none());
+    }
 
     #[test]
     fn test_format_tools_for_openai_api_shape() {

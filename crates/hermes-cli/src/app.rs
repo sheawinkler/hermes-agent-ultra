@@ -15,7 +15,8 @@ use uuid::Uuid;
 
 use hermes_agent::agent_loop::ToolRegistry as AgentToolRegistry;
 use hermes_agent::provider::{
-    AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider,
+    openai_codex_provider, AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider,
+    OPENAI_CODEX_BASE_URL,
 };
 use hermes_agent::providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
@@ -5334,7 +5335,6 @@ pub fn bridge_tool_registry(tools: &ToolRegistry) -> AgentToolRegistry {
 // ---------------------------------------------------------------------------
 
 const STEPFUN_BASE_URL: &str = "https://api.stepfun.ai/step_plan/v1";
-const OPENAI_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const QWEN_BASE_URL: &str = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
 const ALIBABA_CODING_PLAN_BASE_URL: &str = "https://coding-intl.dashscope.aliyuncs.com/v1";
 const GOOGLE_GEMINI_CLI_BASE_URL: &str = "cloudcode-pa://google";
@@ -5871,11 +5871,11 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
             }
             Arc::new(p)
         }
-        "openai-codex" | "codex" => {
-            let mut p = OpenAiProvider::new(&api_key).with_model(model_name.as_str());
-            p = p.with_base_url(base_url.unwrap_or_else(|| OPENAI_CODEX_BASE_URL.to_string()));
-            Arc::new(p)
-        }
+        "openai-codex" | "codex" => Arc::new(openai_codex_provider(
+            &api_key,
+            model_name.as_str(),
+            base_url.as_deref(),
+        )),
         "anthropic" => {
             let mut p = AnthropicProvider::new(&api_key).with_model(model_name.as_str());
             if let Some(url) = base_url {

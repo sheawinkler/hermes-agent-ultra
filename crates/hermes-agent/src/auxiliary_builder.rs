@@ -13,7 +13,9 @@ use hermes_intelligence::auxiliary::{
     AuxiliaryClient, AuxiliaryConfig, AuxiliarySource, ProviderCandidate,
 };
 
-use crate::provider::{AnthropicProvider, GenericProvider, OpenRouterProvider};
+use crate::provider::{
+    openai_codex_provider, AnthropicProvider, GenericProvider, OpenRouterProvider,
+};
 use crate::providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
 };
@@ -321,6 +323,7 @@ fn build_main_runtime_candidate(
                 .with_http_referer("https://hermes-agent.nousresearch.com")
                 .with_x_title("Hermes Agent"),
         ),
+        "openai-codex" => Arc::new(openai_codex_provider(api_key, model, base_url.as_deref())),
         "anthropic" => {
             let mut provider = AnthropicProvider::new(api_key).with_model(model);
             if let Some(url) = base_url {

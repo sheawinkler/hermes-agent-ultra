@@ -227,6 +227,13 @@
       "ticket": 25
     },
     {
+      "path": "tests/agent/test_codex_cloudflare_headers.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Codex Cloudflare mitigation header intent is covered by Rust hermes-agent Codex header extraction/build-request tests plus shared openai-codex provider wiring used by primary and auxiliary runtime construction; the Python test file remains reference-only.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "tests/agent/test_redact.py",
       "classification": "intentional_divergence",
       "rationale": "Upstream redaction test intent is covered by Rust hermes-intelligence redaction contracts for vendor prefixes, env/json/auth tokens, JWTs, Discord IDs, URL query/userinfo, DB connection strings, and form bodies; the Python test file remains reference-only.",

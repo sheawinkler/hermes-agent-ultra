@@ -1636,6 +1636,7 @@ version = "0.14.2"
 dependencies = [
  "async-stream",
  "async-trait",
+ "base64 0.22.1",
  "chrono",
  "dirs",
  "eventsource-stream",
