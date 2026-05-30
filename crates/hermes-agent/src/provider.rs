@@ -567,7 +567,7 @@ impl GenericProvider {
     }
 
     fn format_tools_for_openai_api(tools: &[ToolSchema]) -> Value {
-        Value::Array(
+        let formatted = Value::Array(
             tools
                 .iter()
                 .map(|tool| {
@@ -581,7 +581,8 @@ impl GenericProvider {
                     })
                 })
                 .collect(),
-        )
+        );
+        hermes_core::sanitize_tool_schemas(Some(&formatted)).unwrap_or(formatted)
     }
 
     fn build_request(
