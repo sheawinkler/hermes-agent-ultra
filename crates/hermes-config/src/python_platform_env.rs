@@ -231,9 +231,17 @@ pub fn apply_python_named_platform_env(config: &mut GatewayConfig) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn env_lock() -> MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|err| err.into_inner())
+    }
 
     #[test]
     fn weixin_env_sets_platform_extra_and_token() {
+        let _env = env_lock();
         unsafe {
             std::env::set_var("WEIXIN_ACCOUNT_ID", "acc_x");
             std::env::set_var("WEIXIN_TOKEN", "tok_y");
@@ -270,6 +278,7 @@ mod tests {
 
     #[test]
     fn discord_env_sets_bot_policy_and_reaction_fields() {
+        let _env = env_lock();
         unsafe {
             std::env::set_var("DISCORD_BOT_TOKEN", "discord-token");
             std::env::set_var("DISCORD_APPLICATION_ID", "app-123");
@@ -380,6 +389,7 @@ mod tests {
 
     #[test]
     fn discord_reply_to_mode_env_ignores_invalid_values() {
+        let _env = env_lock();
         unsafe {
             std::env::set_var("DISCORD_REPLY_TO_MODE", "banana");
         }
@@ -404,6 +414,7 @@ mod tests {
 
     #[test]
     fn dingtalk_env_sets_client_fields() {
+        let _env = env_lock();
         unsafe {
             std::env::set_var("DINGTALK_CLIENT_ID", "cid");
             std::env::set_var("DINGTALK_CLIENT_SECRET", "sec");
@@ -433,6 +444,7 @@ mod tests {
 
     #[test]
     fn ntfy_env_sets_topic_and_auto_enables() {
+        let _env = env_lock();
         unsafe {
             std::env::set_var("NTFY_TOPIC", "hermes-in");
             std::env::set_var("NTFY_SERVER_URL", "https://ntfy.example.com");
