@@ -1,6 +1,16 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::{LazyLock, Mutex};
+
+use hermes_core::ToolSchema;
+
+use crate::agent_loop::AgentLoop;
+use crate::context::{SystemPromptBuilder, load_builtin_memory_snapshot, load_soul_md, resolve_personality};
+use crate::prompt_builder::{
+    COMPUTER_USE_GUIDANCE, MEMORY_GUIDANCE, OPENAI_MODEL_EXECUTION_GUIDANCE, SESSION_SEARCH_GUIDANCE,
+    SKILLS_GUIDANCE, TASK_COMPLETION_GUIDANCE, TOOL_USE_ENFORCEMENT_GUIDANCE,
+    GOOGLE_MODEL_OPERATIONAL_GUIDANCE,
+};
 
 pub static PLATFORM_HINTS: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
     HashMap::from([
@@ -393,6 +403,168 @@ fn is_wsl() -> bool {
         return false;
     };
     content.to_lowercase().contains("microsoft")
+}
+
+impl AgentLoop {
+    /// Build the full system prompt including identity, memory, and plugin context.
+    ///
+    /// Aligns with Python behavior:
+    /// - prefer `~/.hermes/SOUL.md` as identity
+    /// - fallback to default identity in `SystemPromptBuilder`
+    /// - then append optional configured `system_prompt`
+    pub(crate) fn build_system_prompt(
+        &self,
+        _task_hint: &str,
+        tool_schemas: &[ToolSchema],
+        model_for_prompt: &str,
+    ) -> String {
+        let soul = load_soul_md();
+        let mut builder = SystemPromptBuilder::new().with_personality(soul.as_deref());
+        if let Some(base) = self.config().system_prompt.as_deref() {
+            builder = builder.with_system_message(base);
+        }
+        builder = builder.with_block(crate::agent_loop::CONVERSATIONAL_SUPPORT_GUIDANCE);
+        let tool_names: HashSet<&str> = tool_schemas.iter().map(|t| t.name.as_str()).collect();
+
+        if self.config().task_completion_guidance && !tool_names.is_empty() {
+            builder = builder.with_block(TASK_COMPLETION_GUIDANCE);
+        }
+
+        // Tool-aware behavioral guidance: only inject when the tools are loaded
+        let mut tool_guidance = Vec::new();
+        if tool_names.contains("memory") {
+            tool_guidance.push(MEMORY_GUIDANCE);
+        }
+        if tool_names.contains("session_search") {
+            tool_guidance.push(SESSION_SEARCH_GUIDANCE);
+        }
+        if tool_names.contains("skill_manage") {
+            tool_guidance.push(SKILLS_GUIDANCE);
+        }
+        if tool_names.contains("computer_use") {
+            tool_guidance.push(COMPUTER_USE_GUIDANCE);
+        }
+        if !tool_guidance.is_empty() {
+            builder = builder.with_tool_guidance(&tool_guidance.join(" "));
+        }
+
+        if !tool_names.is_empty() && self.should_inject_tool_enforcement(model_for_prompt) {
+            builder = builder.with_block(TOOL_USE_ENFORCEMENT_GUIDANCE);
+            let model_lower = model_for_prompt.to_lowercase();
+            if model_lower.contains("gemini") || model_lower.contains("gemma") {
+                builder = builder.with_block(GOOGLE_MODEL_OPERATIONAL_GUIDANCE);
+            }
+            if model_lower.contains("gpt")
+                || model_lower.contains("codex")
+                || model_lower.contains("grok")
+            {
+                builder = builder.with_block(OPENAI_MODEL_EXECUTION_GUIDANCE);
+            }
+        }
+        if tool_names.contains("contextlattice_search")
+            || tool_names.contains("contextlattice_context_pack")
+        {
+            builder = builder.with_block(crate::agent_loop::CONTEXTLATTICE_OPERATIONAL_GUIDANCE);
+        }
+
+        if let Some(ref personality) = self.config().personality {
+            let requested = personality.trim();
+            if !requested.is_empty() {
+                if requested.eq_ignore_ascii_case("default") {
+                    // "default" means keep SOUL/default identity only.
+                } else if let Some(profile) =
+                    resolve_personality(requested, self.config().hermes_home.as_deref())
+                {
+                    builder =
+                        builder.with_block(&format!("## Active Personality ({requested})\n{profile}"));
+                } else if requested.contains(char::is_whitespace) {
+                    // Compatibility path: historically this field was appended verbatim.
+                    builder = builder.with_block(&format!("Personality: {requested}"));
+                    tracing::warn!(
+                        "personality '{requested}' not found as a named profile; using inline value"
+                    );
+                } else {
+                    tracing::warn!(
+                        "personality '{}' not found; falling back to default identity",
+                        requested
+                    );
+                }
+            }
+        }
+
+        if !self.config().skip_memory {
+            let (memory_block, user_block) =
+                load_builtin_memory_snapshot(self.config().hermes_home.as_deref());
+            if let Some(block) = memory_block {
+                builder = builder.with_block(&block);
+            }
+            if let Some(block) = user_block {
+                builder = builder.with_block(&block);
+            }
+        }
+        if self.config().interest.enabled {
+            if let Some(block) = crate::user_interest::load_interest_snapshot(
+                self.config().hermes_home.as_deref(),
+                &self.config().interest,
+            ) {
+                builder = builder.with_block(&block);
+            }
+        }
+
+        let mem_block = self.memory_system_prompt();
+        if !mem_block.is_empty() {
+            builder = builder.with_memory_context(&mem_block);
+        }
+
+        if let Some(skills_prompt) = self.skills_system_prompt(&tool_names) {
+            builder = builder.with_skills_prompt(&skills_prompt);
+        }
+
+        if let Some(context_prompt) = self.context_files_prompt() {
+            builder = builder.with_context_files(&context_prompt);
+        }
+        if let Some(repo_map) = self.code_index_repo_map_block() {
+            builder = builder.with_block(&repo_map);
+        }
+
+        let provider = self.effective_provider_for_prompt(model_for_prompt);
+        builder = builder.with_timestamp(Some(model_for_prompt), provider.as_deref());
+
+        let mut timestamp_extras = String::new();
+        if self.config().pass_session_id {
+            if let Some(ref sid) = self.config().session_id {
+                if !sid.trim().is_empty() {
+                    timestamp_extras.push_str(&format!("Session ID: {}\n", sid.trim()));
+                }
+            }
+        }
+        if !timestamp_extras.trim().is_empty() {
+            builder = builder.with_block(timestamp_extras.trim_end());
+        }
+
+        if provider.as_deref() == Some("alibaba") {
+            let model_short = model_for_prompt
+                .split('/')
+                .next_back()
+                .unwrap_or(model_for_prompt);
+            builder = builder.with_block(&format!(
+                "You are powered by the model named {}. The exact model ID is {}. When asked what model you are, always answer based on this information, not on any model name returned by the API.",
+                model_short, model_for_prompt
+            ));
+        }
+
+        let environment_hints =
+            build_environment_hints(|backend| self.probe_remote_backend_text(backend));
+        if !environment_hints.trim().is_empty() {
+            builder = builder.with_block(&environment_hints);
+        }
+
+        if let Some(hint) = self.platform_hint_text() {
+            builder = builder.with_block(hint);
+        }
+
+        builder.build().to_string()
+    }
 }
 
 #[cfg(test)]

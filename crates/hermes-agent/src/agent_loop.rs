@@ -35,10 +35,7 @@ use crate::auxiliary_builder::{AuxiliaryBuildParams, build_auxiliary_client};
 use crate::budget;
 use crate::code_index::CodeIndex;
 use crate::compression::{CompressorConfig, ContextCompressor, estimate_messages_tokens};
-use crate::context::{
-    ContextManager, SystemPromptBuilder, load_builtin_memory_snapshot, load_soul_md,
-    resolve_personality,
-};
+use crate::context::ContextManager;
 use crate::context_files::{load_hermes_context_files, load_workspace_context};
 use crate::context_references::preprocess_context_references_async;
 use crate::credential_pool::CredentialPool;
@@ -64,21 +61,14 @@ use crate::smart_model_routing::{
     detect_api_mode_for_url, resolve_turn_route,
 };
 use crate::steer::PendingSteer;
-use crate::user_interest::{
-    InterestStore, ingest_user_message, is_poi_synthetic_user_text, load_interest_snapshot,
-    spawn_session_end_ingest,
-};
-use hermes_intelligence::auxiliary::AuxiliaryClient;
-use crate::prompt_builder::{
-    DEFAULT_AGENT_IDENTITY,
-    SKILLS_GUIDANCE, KANBAN_GUIDANCE, TOOL_USE_ENFORCEMENT_GUIDANCE,
-    MEMORY_GUIDANCE, SESSION_SEARCH_GUIDANCE, GOOGLE_MODEL_OPERATIONAL_GUIDANCE, OPENAI_MODEL_EXECUTION_GUIDANCE,
-    COMPUTER_USE_GUIDANCE,
-};
 use crate::system_prompt::{
-    BACKEND_PROBE_COMMAND, build_environment_hints, format_probe_output, platform_hint_for,
+    BACKEND_PROBE_COMMAND, format_probe_output, platform_hint_for,
     probe_remote_backend_cached,
 };
+use crate::user_interest::{
+    InterestStore, ingest_user_message, is_poi_synthetic_user_text, spawn_session_end_ingest,
+};
+use hermes_intelligence::auxiliary::AuxiliaryClient;
 
 // ---------------------------------------------------------------------------
 // ToolRegistry
@@ -235,7 +225,7 @@ struct OAuthStoreCredential {
     expires_at: Option<DateTime<Utc>>,
 }
 
-const CONVERSATIONAL_SUPPORT_GUIDANCE: &str = "# Conversational support protocol\nWhen users share personal stress, emotions, or difficult decisions, start with a brief non-judgmental acknowledgment, ask one clarifying question if context is missing, then offer practical options with trade-offs. Keep factual or technical requests direct and do not force emotional language where it does not fit. Do not present yourself as a therapist or crisis service; when safety risk appears, urge the user to seek immediate professional or emergency help.";
+pub(crate) const CONVERSATIONAL_SUPPORT_GUIDANCE: &str = "# Conversational support protocol\nWhen users share personal stress, emotions, or difficult decisions, start with a brief non-judgmental acknowledgment, ask one clarifying question if context is missing, then offer practical options with trade-offs. Keep factual or technical requests direct and do not force emotional language where it does not fit. Do not present yourself as a therapist or crisis service; when safety risk appears, urge the user to seek immediate professional or emergency help.";
 const OAUTH_REFRESH_BACKOFF_SECS: u64 = 60;
 const SESSION_OBJECTIVE_PREFIX: &str = "[SESSION_OBJECTIVE] ";
 const OBJECTIVE_PATCH_TAG: &str = "PATCH_VERIFIED:";
@@ -442,7 +432,7 @@ Act on whichever of the two dimensions has real signal. If \
 genuinely nothing stands out on either, say 'Nothing to save.' \
 and stop — but don't reach for that conclusion as a default.";
 
-const CONTEXTLATTICE_OPERATIONAL_GUIDANCE: &str = "# ContextLattice operational guidance\nWhen a user asks to confirm, connect, verify, or harden ContextLattice integration, do not answer from assumptions. First check local integration instructions when present (env `HERMES_CONTEXTLATTICE_INSTRUCTIONS_PATH`, or local `scripts/agent_orchestration.py` in the workspace, typically `/Users/sheawinkler/Documents/Projects/scripts/agent_orchestration.py`). Then attempt ContextLattice tool calls: use `contextlattice_search` for a direct probe and `contextlattice_context_pack` when broader grounding is needed. If a call fails, report the concrete error and provide the exact remediation steps. Never run shell command `contextlattice` for this workflow; use the ContextLattice tools directly. Do not claim lack of access before attempting at least one ContextLattice tool call in the current turn.";
+pub(crate) const CONTEXTLATTICE_OPERATIONAL_GUIDANCE: &str = "# ContextLattice operational guidance\nWhen a user asks to confirm, connect, verify, or harden ContextLattice integration, do not answer from assumptions. First check local integration instructions when present (env `HERMES_CONTEXTLATTICE_INSTRUCTIONS_PATH`, or local `scripts/agent_orchestration.py` in the workspace, typically `/Users/sheawinkler/Documents/Projects/scripts/agent_orchestration.py`). Then attempt ContextLattice tool calls: use `contextlattice_search` for a direct probe and `contextlattice_context_pack` when broader grounding is needed. If a call fails, report the concrete error and provide the exact remediation steps. Never run shell command `contextlattice` for this workflow; use the ContextLattice tools directly. Do not claim lack of access before attempting at least one ContextLattice tool call in the current turn.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CompactionGovernanceMode {
@@ -614,6 +604,10 @@ pub struct AgentConfig {
     /// Include session_id in system prompt timestamp block.
     #[serde(default)]
     pub pass_session_id: bool,
+
+    /// Inject universal "Finishing the job" guidance into system prompt.
+    #[serde(default = "default_task_completion_guidance")]
+    pub task_completion_guidance: bool,
 
     /// Runtime provider credentials/endpoints keyed by provider name.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
@@ -849,6 +843,10 @@ fn default_memory_flush_interval() -> u32 {
     5
 }
 
+fn default_task_completion_guidance() -> bool {
+    true
+}
+
 fn default_cost_guard_degrade_at_ratio() -> f64 {
     0.8
 }
@@ -981,6 +979,7 @@ impl Default for AgentConfig {
             enabled_skills: Vec::new(),
             disabled_skills: Vec::new(),
             pass_session_id: false,
+            task_completion_guidance: default_task_completion_guidance(),
             runtime_providers: HashMap::new(),
             providers_allowed: Vec::new(),
             providers_ignored: Vec::new(),
@@ -3218,7 +3217,7 @@ impl AgentLoop {
         }
     }
 
-    fn memory_system_prompt(&self) -> String {
+    pub(crate) fn memory_system_prompt(&self) -> String {
         if self.config().skip_memory {
             return String::new();
         }
@@ -3431,7 +3430,7 @@ impl AgentLoop {
         let _ = self.invoke_hook(HookType::PreApiRequest, &hook_ctx);
     }
 
-    fn code_index_repo_map_block(&self) -> Option<String> {
+    pub(crate) fn code_index_repo_map_block(&self) -> Option<String> {
         let Some(ref idx) = self.code_index else {
             return None;
         };
@@ -3462,15 +3461,15 @@ impl AgentLoop {
         build_lsp_context_note(tool_calls, results, &mut idx, &self.lsp_context)
     }
 
-    fn should_inject_tool_enforcement(&self, model: &str) -> bool {
+    pub(crate) fn should_inject_tool_enforcement(&self, model: &str) -> bool {
         should_inject_tool_enforcement_for_model(model)
     }
 
-    fn platform_hint_text(&self) -> Option<&'static str> {
+    pub(crate) fn platform_hint_text(&self) -> Option<&'static str> {
         platform_hint_for(self.config().platform.as_deref())
     }
 
-    fn probe_remote_backend_text(&self, env_type: &str) -> Option<String> {
+    pub(crate) fn probe_remote_backend_text(&self, env_type: &str) -> Option<String> {
         let cwd_hint = std::env::var("TERMINAL_CWD").unwrap_or_default();
         probe_remote_backend_cached(env_type, &cwd_hint, || {
             let terminal = self.tool_registry.get("terminal")?;
@@ -3479,7 +3478,7 @@ impl AgentLoop {
         })
     }
 
-    fn effective_provider_for_prompt(&self, model: &str) -> Option<String> {
+    pub(crate) fn effective_provider_for_prompt(&self, model: &str) -> Option<String> {
         if let Some(ref p) = self.config().provider {
             let trimmed = p.trim();
             if !trimmed.is_empty() {
@@ -3568,7 +3567,7 @@ impl AgentLoop {
         }
     }
 
-    fn skills_system_prompt(&self, tool_names: &HashSet<&str>) -> Option<String> {
+    pub(crate) fn skills_system_prompt(&self, tool_names: &HashSet<&str>) -> Option<String> {
         let has_skills_tools = ["skills_list", "skill_view", "skill_manage"]
             .iter()
             .any(|t| tool_names.contains(*t));
@@ -3628,7 +3627,7 @@ impl AgentLoop {
         Some(body)
     }
 
-    fn context_files_prompt(&self) -> Option<String> {
+    pub(crate) fn context_files_prompt(&self) -> Option<String> {
         if self.config().skip_context_files {
             return None;
         }
@@ -4494,156 +4493,6 @@ impl AgentLoop {
             cfg.use_prompt_caching = should_cache;
             cfg.use_native_cache_layout = native;
         }
-    }
-
-    /// Build the full system prompt including identity, memory, and plugin context.
-    ///
-    /// Aligns with Python behavior:
-    /// - prefer `~/.hermes/SOUL.md` as identity
-    /// - fallback to `DEFAULT_AGENT_IDENTITY`
-    /// - then append optional configured `system_prompt`
-    fn build_system_prompt(
-        &self,
-        _task_hint: &str,
-        tool_schemas: &[ToolSchema],
-        model_for_prompt: &str,
-    ) -> String {
-        let soul = load_soul_md();
-        let mut builder = SystemPromptBuilder::new().with_personality(soul.as_deref());
-        if let Some(base) = self.config().system_prompt.as_deref() {
-            builder = builder.with_system_message(base);
-        }
-        builder = builder.with_block(CONVERSATIONAL_SUPPORT_GUIDANCE);
-        let tool_names: HashSet<&str> = tool_schemas.iter().map(|t| t.name.as_str()).collect();
-        let mut tool_guidance = Vec::new();
-        if tool_names.contains("memory") {
-            tool_guidance.push(MEMORY_GUIDANCE);
-        }
-        if tool_names.contains("session_search") {
-            tool_guidance.push(SESSION_SEARCH_GUIDANCE);
-        }
-        if tool_names.contains("skill_manage") {
-            tool_guidance.push(SKILLS_GUIDANCE);
-        }
-        if tool_names.contains("computer_use") {
-            tool_guidance.push(COMPUTER_USE_GUIDANCE);
-        }
-        if !tool_guidance.is_empty() {
-            builder = builder.with_tool_guidance(&tool_guidance.join(" "));
-        }
-
-        if !tool_names.is_empty() && self.should_inject_tool_enforcement(model_for_prompt) {
-            builder = builder.with_block(TOOL_USE_ENFORCEMENT_GUIDANCE);
-            let model_lower = model_for_prompt.to_lowercase();
-            if model_lower.contains("gemini") || model_lower.contains("gemma") {
-                builder = builder.with_block(GOOGLE_MODEL_OPERATIONAL_GUIDANCE);
-            }
-            if model_lower.contains("gpt") || model_lower.contains("codex") {
-                builder = builder.with_block(OPENAI_MODEL_EXECUTION_GUIDANCE);
-            }
-        }
-        if tool_names.contains("contextlattice_search")
-            || tool_names.contains("contextlattice_context_pack")
-        {
-            builder = builder.with_block(CONTEXTLATTICE_OPERATIONAL_GUIDANCE);
-        }
-
-        if let Some(ref personality) = self.config().personality {
-            let requested = personality.trim();
-            if !requested.is_empty() {
-                if requested.eq_ignore_ascii_case("default") {
-                    // "default" means keep SOUL/default identity only.
-                } else if let Some(profile) =
-                    resolve_personality(requested, self.config().hermes_home.as_deref())
-                {
-                    builder = builder
-                        .with_block(&format!("## Active Personality ({requested})\n{profile}"));
-                } else if requested.contains(char::is_whitespace) {
-                    // Compatibility path: historically this field was appended verbatim.
-                    builder = builder.with_block(&format!("Personality: {requested}"));
-                    tracing::warn!(
-                        "personality '{requested}' not found as a named profile; using inline value"
-                    );
-                } else {
-                    tracing::warn!(
-                        "personality '{}' not found; falling back to default identity",
-                        requested
-                    );
-                }
-            }
-        }
-
-        if !self.config().skip_memory {
-            let (memory_block, user_block) =
-                load_builtin_memory_snapshot(self.config().hermes_home.as_deref());
-            if let Some(block) = memory_block {
-                builder = builder.with_block(&block);
-            }
-            if let Some(block) = user_block {
-                builder = builder.with_block(&block);
-            }
-        }
-        if self.config().interest.enabled {
-            if let Some(block) = load_interest_snapshot(
-                self.config().hermes_home.as_deref(),
-                &self.config().interest,
-            ) {
-                builder = builder.with_block(&block);
-            }
-        }
-
-        let mem_block = self.memory_system_prompt();
-        if !mem_block.is_empty() {
-            builder = builder.with_memory_context(&mem_block);
-        }
-
-        if let Some(skills_prompt) = self.skills_system_prompt(&tool_names) {
-            builder = builder.with_skills_prompt(&skills_prompt);
-        }
-
-        if let Some(context_prompt) = self.context_files_prompt() {
-            builder = builder.with_context_files(&context_prompt);
-        }
-        if let Some(repo_map) = self.code_index_repo_map_block() {
-            builder = builder.with_block(&repo_map);
-        }
-
-        let provider = self.effective_provider_for_prompt(model_for_prompt);
-        builder = builder.with_timestamp(Some(model_for_prompt), provider.as_deref());
-
-        let mut timestamp_extras = String::new();
-        if self.config().pass_session_id {
-            if let Some(ref sid) = self.config().session_id {
-                if !sid.trim().is_empty() {
-                    timestamp_extras.push_str(&format!("Session ID: {}\n", sid.trim()));
-                }
-            }
-        }
-        if !timestamp_extras.trim().is_empty() {
-            builder = builder.with_block(timestamp_extras.trim_end());
-        }
-
-        if provider.as_deref() == Some("alibaba") {
-            let model_short = model_for_prompt
-                .split('/')
-                .next_back()
-                .unwrap_or(model_for_prompt);
-            builder = builder.with_block(&format!(
-                "You are powered by the model named {}. The exact model ID is {}. When asked what model you are, always answer based on this information, not on any model name returned by the API.",
-                model_short, model_for_prompt
-            ));
-        }
-
-        let environment_hints = build_environment_hints(|backend| self.probe_remote_backend_text(backend));
-        if !environment_hints.trim().is_empty() {
-            builder = builder.with_block(&environment_hints);
-        }
-
-        if let Some(hint) = self.platform_hint_text() {
-            builder = builder.with_block(hint);
-        }
-
-        builder.build().to_string()
     }
 
     /// Returns `(prompt, restored_from_storage)` - restored prompts skip fresh `build_system_prompt`.
@@ -13279,6 +13128,156 @@ mod tests {
         let prompt = agent.build_system_prompt("", &[], "gpt-4o");
         assert!(!prompt.contains("## Active Personality (default)"));
         assert!(prompt.contains("You are Hermes Agent"));
+    }
+
+    #[test]
+    fn test_task_completion_guidance_default_injects_when_tools_present() {
+        use futures::stream::BoxStream;
+        use hermes_core::JsonSchema;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let agent = AgentLoop::new(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let tools = vec![ToolSchema::new(
+            "terminal",
+            "Execute commands",
+            JsonSchema::new("object"),
+        )];
+        let prompt = agent.build_system_prompt("", &tools, "anthropic/claude-opus-4.8");
+        assert!(prompt.contains(crate::prompt_builder::TASK_COMPLETION_GUIDANCE));
+    }
+
+    #[test]
+    fn test_task_completion_guidance_false_disables_injection() {
+        use futures::stream::BoxStream;
+        use hermes_core::JsonSchema;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let config = AgentConfig {
+            task_completion_guidance: false,
+            ..AgentConfig::default()
+        };
+        let agent = AgentLoop::new(config, Arc::new(ToolRegistry::new()), Arc::new(DummyProvider));
+        let tools = vec![ToolSchema::new(
+            "terminal",
+            "Execute commands",
+            JsonSchema::new("object"),
+        )];
+        let prompt = agent.build_system_prompt("", &tools, "anthropic/claude-opus-4.8");
+        assert!(!prompt.contains(crate::prompt_builder::TASK_COMPLETION_GUIDANCE));
+    }
+
+    #[test]
+    fn test_task_completion_guidance_not_injected_without_tools() {
+        use futures::stream::BoxStream;
+
+        struct DummyProvider;
+        #[async_trait::async_trait]
+        impl LlmProvider for DummyProvider {
+            async fn chat_completion(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> Result<hermes_core::LlmResponse, AgentError> {
+                Ok(hermes_core::LlmResponse {
+                    message: Message::assistant("dummy"),
+                    usage: None,
+                    model: "dummy".into(),
+                    finish_reason: Some("stop".into()),
+                })
+            }
+
+            fn chat_completion_stream(
+                &self,
+                _messages: &[Message],
+                _tools: &[ToolSchema],
+                _max_tokens: Option<u32>,
+                _temperature: Option<f64>,
+                _model: Option<&str>,
+                _extra_body: Option<&serde_json::Value>,
+            ) -> BoxStream<'static, Result<StreamChunk, AgentError>> {
+                futures::stream::empty().boxed()
+            }
+        }
+
+        let agent = AgentLoop::new(
+            AgentConfig::default(),
+            Arc::new(ToolRegistry::new()),
+            Arc::new(DummyProvider),
+        );
+        let prompt = agent.build_system_prompt("", &[], "anthropic/claude-opus-4.8");
+        assert!(!prompt.contains(crate::prompt_builder::TASK_COMPLETION_GUIDANCE));
     }
 
     #[test]
