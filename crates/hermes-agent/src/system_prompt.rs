@@ -7,8 +7,8 @@ use hermes_core::ToolSchema;
 use crate::agent_loop::AgentLoop;
 use crate::context::{SystemPromptBuilder, load_builtin_memory_snapshot, load_soul_md, resolve_personality};
 use crate::prompt_builder::{
-    COMPUTER_USE_GUIDANCE, MEMORY_GUIDANCE, OPENAI_MODEL_EXECUTION_GUIDANCE, SESSION_SEARCH_GUIDANCE,
-    SKILLS_GUIDANCE, TASK_COMPLETION_GUIDANCE, TOOL_USE_ENFORCEMENT_GUIDANCE,
+    COMPUTER_USE_GUIDANCE, KANBAN_GUIDANCE, MEMORY_GUIDANCE, OPENAI_MODEL_EXECUTION_GUIDANCE,
+    SESSION_SEARCH_GUIDANCE, SKILLS_GUIDANCE, TASK_COMPLETION_GUIDANCE, TOOL_USE_ENFORCEMENT_GUIDANCE,
     GOOGLE_MODEL_OPERATIONAL_GUIDANCE,
 };
 
@@ -440,6 +440,9 @@ impl AgentLoop {
         }
         if tool_names.contains("skill_manage") {
             tool_guidance.push(SKILLS_GUIDANCE);
+        }
+        if tool_names.contains("kanban_show") {
+            tool_guidance.push(KANBAN_GUIDANCE);
         }
         if tool_names.contains("computer_use") {
             tool_guidance.push(COMPUTER_USE_GUIDANCE);

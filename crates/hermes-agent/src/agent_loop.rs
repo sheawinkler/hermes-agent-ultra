@@ -48,6 +48,7 @@ use crate::provider::{AnthropicProvider, GenericProvider, OpenAiProvider, OpenRo
 use crate::providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
 };
+use crate::prompt_builder::TOOL_USE_ENFORCEMENT_MODELS;
 use crate::python_alignment::{
     CODEX_CONTINUE_USER_MESSAGE, budget_pressure_text,
     inject_budget_pressure_into_last_tool_result, looks_like_codex_intermediate_ack,
@@ -497,7 +498,16 @@ fn should_inject_tool_enforcement_for_model(_model: &str) -> bool {
             v == "1" || v == "true" || v == "yes" || v == "on"
         })
         .unwrap_or(false);
-    !disabled
+    if disabled {
+        return false;
+    }
+
+    let model_lower = _model.to_ascii_lowercase();
+    TOOL_USE_ENFORCEMENT_MODELS
+        .split(',')
+        .map(str::trim)
+        .filter(|pattern| !pattern.is_empty())
+        .any(|pattern| model_lower.contains(pattern))
 }
 
 /// Configuration for the agent loop.
@@ -11417,14 +11427,17 @@ mod tests {
     }
 
     #[test]
-    fn tool_enforcement_prompt_gate_applies_to_non_openai_model_names() {
+    fn tool_enforcement_prompt_gate_matches_python_model_patterns() {
         assert!(should_inject_tool_enforcement_for_model(
-            "nous:nousresearch/hermes-4-70b"
+            "openai:gpt-5"
         ));
         assert!(should_inject_tool_enforcement_for_model(
-            "openrouter:moonshotai/kimi-k2.6"
+            "xai:grok-4-fast"
         ));
         assert!(should_inject_tool_enforcement_for_model(
+            "zhipu:glm-4.5"
+        ));
+        assert!(!should_inject_tool_enforcement_for_model(
             "anthropic:claude-3-7-sonnet"
         ));
     }
