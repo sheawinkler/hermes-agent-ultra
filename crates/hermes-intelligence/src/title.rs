@@ -6,6 +6,9 @@ use std::sync::Arc;
 
 use hermes_core::{AgentError, LlmProvider, Message};
 
+const MAX_TITLE_CHARS: usize = 80;
+const TITLE_ELLIPSIS_CHARS: usize = 3;
+
 // ---------------------------------------------------------------------------
 // TitleError
 // ---------------------------------------------------------------------------
@@ -101,25 +104,14 @@ impl TitleGenerator {
             .await
             .map_err(TitleError::from)?;
 
-        let title = response
+        let raw_title = response
             .message
             .content
             .unwrap_or_default()
             .trim()
             .to_string();
 
-        if title.is_empty() {
-            return Err(TitleError::EmptyResult);
-        }
-
-        // Strip surrounding quotes if present
-        let title = title
-            .strip_prefix('"')
-            .and_then(|t| t.strip_suffix('"'))
-            .unwrap_or(&title)
-            .to_string();
-
-        Ok(title)
+        clean_generated_title(&raw_title).ok_or(TitleError::EmptyResult)
     }
 
     /// Truncate messages into a single string for the title prompt.
@@ -152,9 +144,133 @@ impl TitleGenerator {
     }
 }
 
+fn clean_generated_title(raw_title: &str) -> Option<String> {
+    let mut title = raw_title.trim();
+    if title.is_empty() {
+        return None;
+    }
+
+    title = strip_matching_quotes(title).trim();
+    if title
+        .get(..6)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("title:"))
+    {
+        title = title[6..].trim();
+        title = strip_matching_quotes(title).trim();
+    }
+
+    if title.is_empty() {
+        return None;
+    }
+
+    if title.chars().count() > MAX_TITLE_CHARS {
+        let keep = MAX_TITLE_CHARS.saturating_sub(TITLE_ELLIPSIS_CHARS);
+        let mut truncated = title.chars().take(keep).collect::<String>();
+        truncated.push_str("...");
+        return Some(truncated);
+    }
+
+    Some(title.to_string())
+}
+
+fn strip_matching_quotes(value: &str) -> &str {
+    let bytes = value.as_bytes();
+    if bytes.len() >= 2 {
+        let first = bytes[0];
+        let last = bytes[bytes.len() - 1];
+        if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
+            return &value[1..value.len() - 1];
+        }
+    }
+    value
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hermes_core::{LlmResponse, MessageRole, StreamChunk, ToolSchema};
+    use std::sync::{Arc, Mutex};
+
+    struct ScriptedProvider {
+        response: Mutex<Result<String, AgentError>>,
+        recorded: Mutex<Vec<RecordedTitleCall>>,
+    }
+
+    #[derive(Clone, Debug)]
+    struct RecordedTitleCall {
+        messages: Vec<Message>,
+        max_tokens: Option<u32>,
+        temperature: Option<f64>,
+        model: Option<String>,
+    }
+
+    impl ScriptedProvider {
+        fn with_response(text: &str) -> Arc<Self> {
+            Arc::new(Self {
+                response: Mutex::new(Ok(text.to_string())),
+                recorded: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn with_error(message: &str) -> Arc<Self> {
+            Arc::new(Self {
+                response: Mutex::new(Err(AgentError::LlmApi(message.to_string()))),
+                recorded: Mutex::new(Vec::new()),
+            })
+        }
+
+        fn recorded(&self) -> Vec<RecordedTitleCall> {
+            self.recorded.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl LlmProvider for ScriptedProvider {
+        async fn chat_completion(
+            &self,
+            messages: &[Message],
+            _tools: &[ToolSchema],
+            max_tokens: Option<u32>,
+            temperature: Option<f64>,
+            model: Option<&str>,
+            _extra_body: Option<&serde_json::Value>,
+        ) -> Result<LlmResponse, AgentError> {
+            self.recorded.lock().unwrap().push(RecordedTitleCall {
+                messages: messages.to_vec(),
+                max_tokens,
+                temperature,
+                model: model.map(ToOwned::to_owned),
+            });
+
+            let response = self.response.lock().unwrap().clone()?;
+            Ok(LlmResponse {
+                message: Message {
+                    role: MessageRole::Assistant,
+                    content: Some(response),
+                    tool_calls: None,
+                    tool_call_id: None,
+                    name: None,
+                    reasoning_content: None,
+                    cache_control: None,
+                },
+                usage: None,
+                model: model.unwrap_or("test-title-model").to_string(),
+                finish_reason: Some("stop".into()),
+            })
+        }
+
+        fn chat_completion_stream(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolSchema],
+            _max_tokens: Option<u32>,
+            _temperature: Option<f64>,
+            _model: Option<&str>,
+            _extra_body: Option<&serde_json::Value>,
+        ) -> futures::stream::BoxStream<'static, Result<StreamChunk, AgentError>> {
+            panic!("ScriptedProvider streaming is not used by title tests")
+        }
+    }
 
     #[test]
     fn test_truncate_messages() {
@@ -186,6 +302,107 @@ mod tests {
         let rt = tokio::runtime::Runtime::new().unwrap();
         let result = rt.block_on(gen.generate_title(&[]));
         assert!(matches!(result, Err(TitleError::NoMessages)));
+    }
+
+    #[test]
+    fn test_generate_title_strips_quotes() {
+        let provider = ScriptedProvider::with_response("\"Setting Up Docker Environment\"");
+        let gen = TitleGenerator::new(provider, "title-model");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        let title = rt
+            .block_on(gen.generate_title(&[
+                Message::user("how do I set up docker"),
+                Message::assistant("First install Docker Desktop."),
+            ]))
+            .unwrap();
+
+        assert_eq!(title, "Setting Up Docker Environment");
+    }
+
+    #[test]
+    fn test_generate_title_strips_title_prefix() {
+        let provider = ScriptedProvider::with_response("Title: Kubernetes Pod Debugging");
+        let gen = TitleGenerator::new(provider, "title-model");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        let title = rt
+            .block_on(gen.generate_title(&[
+                Message::user("my pod keeps crashing"),
+                Message::assistant("Let me inspect the logs."),
+            ]))
+            .unwrap();
+
+        assert_eq!(title, "Kubernetes Pod Debugging");
+    }
+
+    #[test]
+    fn test_generate_title_truncates_long_titles() {
+        let provider = ScriptedProvider::with_response(&"A".repeat(100));
+        let gen = TitleGenerator::new(provider, "title-model");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        let title = rt
+            .block_on(
+                gen.generate_title(&[Message::user("question"), Message::assistant("answer")]),
+            )
+            .unwrap();
+
+        assert_eq!(title.chars().count(), 80);
+        assert!(title.ends_with("..."));
+    }
+
+    #[test]
+    fn test_generate_title_returns_empty_result_for_empty_response() {
+        let provider = ScriptedProvider::with_response("");
+        let gen = TitleGenerator::new(provider, "title-model");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        let result = rt.block_on(
+            gen.generate_title(&[Message::user("question"), Message::assistant("answer")]),
+        );
+
+        assert!(matches!(result, Err(TitleError::EmptyResult)));
+    }
+
+    #[test]
+    fn test_generate_title_surfaces_provider_errors() {
+        let provider = ScriptedProvider::with_error("no provider");
+        let gen = TitleGenerator::new(provider, "title-model");
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        let result = rt.block_on(
+            gen.generate_title(&[Message::user("question"), Message::assistant("answer")]),
+        );
+
+        assert!(
+            matches!(result, Err(TitleError::LlmError(message)) if message.contains("no provider"))
+        );
+    }
+
+    #[test]
+    fn test_generate_title_request_uses_small_title_budget_and_truncated_prompt() {
+        let provider = ScriptedProvider::with_response("Short Title");
+        let gen = TitleGenerator::new(provider.clone(), "title-model").with_max_message_chars(20);
+        let rt = tokio::runtime::Runtime::new().unwrap();
+
+        let title = rt
+            .block_on(gen.generate_title(&[
+                Message::user("x".repeat(1000)),
+                Message::assistant("y".repeat(1000)),
+            ]))
+            .unwrap();
+
+        assert_eq!(title, "Short Title");
+        let calls = provider.recorded();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].max_tokens, Some(32));
+        assert_eq!(calls[0].temperature, Some(0.3));
+        assert_eq!(calls[0].model.as_deref(), Some("title-model"));
+        let user_prompt = calls[0].messages[1].content.as_deref().unwrap();
+        assert!(user_prompt.contains("User:"));
+        assert!(user_prompt.contains("Assistant:"));
+        assert!(user_prompt.len() < 100);
     }
 
     // Helper for tests that don't need a real provider

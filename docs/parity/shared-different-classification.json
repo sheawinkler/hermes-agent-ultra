@@ -199,6 +199,13 @@
       "ticket": 25
     },
     {
+      "path": "tests/agent/test_title_generator.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream title-generation sanitization, truncation, provider-error, and prompt-budget intent is covered by Rust hermes-intelligence TitleGenerator tests; Python thread/session DB worker tests remain reference-only because Hermes Ultra owns session title orchestration in Rust CLI/session code.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "tests/agent/test_unsupported_temperature_retry.py",
       "classification": "intentional_divergence",
       "rationale": "Upstream's unsupported-temperature and OpenAI-compatible max-token omission regression intent is covered by Rust auxiliary-client tests; the Python test file remains reference-only.",
