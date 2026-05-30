@@ -4,6 +4,7 @@
 //! Mirrors the Python `acp_adapter/permissions.py` implementation.
 
 use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
@@ -72,29 +73,97 @@ pub enum PermissionOutcome {
     Timeout,
 }
 
+impl PermissionOutcome {
+    /// Map an ACP permission outcome into Hermes approval strings.
+    ///
+    /// ACP "kind" alone cannot express Hermes' session-scoped allowance, so
+    /// mapping is intentionally based on the stable option id.
+    pub fn to_hermes_result(&self, allowed_options: &[PermissionOption]) -> &'static str {
+        let Self::Allowed { option_id } = self else {
+            return "deny";
+        };
+        if !allowed_options
+            .iter()
+            .any(|option| option.option_id == *option_id)
+        {
+            return "deny";
+        }
+        match option_id.as_str() {
+            "allow_once" => "once",
+            "allow_session" => "session",
+            "allow_always" => "always",
+            "deny" | "deny_always" => "deny",
+            _ => "deny",
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Default permission options
 // ---------------------------------------------------------------------------
 
 /// Build the standard set of permission options.
 pub fn default_permission_options() -> Vec<PermissionOption> {
-    vec![
+    permission_options(true)
+}
+
+/// Build ACP permission options that match Hermes approval semantics.
+pub fn permission_options(allow_permanent: bool) -> Vec<PermissionOption> {
+    let mut options = vec![
         PermissionOption {
             option_id: "allow_once".to_string(),
             kind: PermissionKind::AllowOnce,
             name: "Allow once".to_string(),
         },
         PermissionOption {
+            option_id: "allow_session".to_string(),
+            // ACP has no session-scoped kind; keep Hermes semantics in the
+            // stable option id while using the closest ACP persistence hint.
+            kind: PermissionKind::AllowAlways,
+            name: "Allow for session".to_string(),
+        },
+    ];
+    if allow_permanent {
+        options.push(PermissionOption {
             option_id: "allow_always".to_string(),
             kind: PermissionKind::AllowAlways,
             name: "Allow always".to_string(),
-        },
+        });
+    }
+    options.extend([
         PermissionOption {
             option_id: "deny".to_string(),
             kind: PermissionKind::RejectOnce,
             name: "Deny".to_string(),
         },
-    ]
+        PermissionOption {
+            option_id: "deny_always".to_string(),
+            kind: PermissionKind::RejectAlways,
+            name: "Deny always".to_string(),
+        },
+    ]);
+    options
+}
+
+static PERMISSION_REQUEST_IDS: AtomicU64 = AtomicU64::new(1);
+
+/// Build a pending permission request with a stable, unique `perm-check-N` id.
+pub fn build_permission_request(
+    session_id: impl Into<String>,
+    command: impl Into<String>,
+    description: impl Into<String>,
+    allow_permanent: bool,
+    created_at: u64,
+) -> PermissionRequest {
+    let id = PERMISSION_REQUEST_IDS.fetch_add(1, Ordering::Relaxed);
+    PermissionRequest {
+        id: format!("perm-check-{id}"),
+        session_id: session_id.into(),
+        command: command.into(),
+        description: description.into(),
+        options: permission_options(allow_permanent),
+        created_at,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -185,19 +254,93 @@ mod tests {
         assert_eq!(PermissionKind::AllowOnce.to_hermes_result(), "once");
         assert_eq!(PermissionKind::AllowAlways.to_hermes_result(), "always");
         assert_eq!(PermissionKind::RejectOnce.to_hermes_result(), "deny");
+        assert_eq!(PermissionKind::RejectAlways.to_hermes_result(), "deny");
+    }
+
+    #[test]
+    fn test_permission_options_match_upstream_contract() {
+        let options = permission_options(true);
+        let ids: Vec<_> = options
+            .iter()
+            .map(|option| (option.option_id.as_str(), option.kind, option.name.as_str()))
+            .collect();
+        assert_eq!(
+            ids,
+            vec![
+                ("allow_once", PermissionKind::AllowOnce, "Allow once"),
+                (
+                    "allow_session",
+                    PermissionKind::AllowAlways,
+                    "Allow for session"
+                ),
+                ("allow_always", PermissionKind::AllowAlways, "Allow always"),
+                ("deny", PermissionKind::RejectOnce, "Deny"),
+                ("deny_always", PermissionKind::RejectAlways, "Deny always"),
+            ]
+        );
+
+        let no_permanent_options = permission_options(false);
+        let no_permanent_ids: Vec<_> = no_permanent_options
+            .iter()
+            .map(|option| option.option_id.as_str())
+            .collect();
+        assert_eq!(
+            no_permanent_ids,
+            vec!["allow_once", "allow_session", "deny", "deny_always"]
+        );
+    }
+
+    #[test]
+    fn test_permission_outcome_maps_by_option_id() {
+        let options = permission_options(true);
+        for (option_id, expected) in [
+            ("allow_once", "once"),
+            ("allow_session", "session"),
+            ("allow_always", "always"),
+            ("deny", "deny"),
+            ("deny_always", "deny"),
+            ("unexpected", "deny"),
+        ] {
+            let outcome = PermissionOutcome::Allowed {
+                option_id: option_id.to_string(),
+            };
+            assert_eq!(outcome.to_hermes_result(&options), expected);
+        }
+        assert_eq!(PermissionOutcome::Denied.to_hermes_result(&options), "deny");
+        assert_eq!(
+            PermissionOutcome::Timeout.to_hermes_result(&options),
+            "deny"
+        );
+    }
+
+    #[test]
+    fn test_permission_request_builder_uses_unique_perm_check_ids() {
+        let first = build_permission_request("s1", "rm -rf /", "dangerous command", true, 42);
+        let second = build_permission_request("s1", "echo ok", "safe command", false, 43);
+
+        assert!(first.id.starts_with("perm-check-"));
+        assert!(second.id.starts_with("perm-check-"));
+        assert_ne!(first.id, second.id);
+        assert_eq!(first.session_id, "s1");
+        assert_eq!(first.command, "rm -rf /");
+        assert_eq!(first.description, "dangerous command");
+        assert_eq!(first.created_at, 42);
+        assert_eq!(
+            second
+                .options
+                .iter()
+                .map(|option| option.option_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["allow_once", "allow_session", "deny", "deny_always"]
+        );
     }
 
     #[test]
     fn test_permission_store() {
         let store = PermissionStore::new();
-        store.add_pending(PermissionRequest {
-            id: "req1".to_string(),
-            session_id: "s1".to_string(),
-            command: "rm -rf /".to_string(),
-            description: "dangerous command".to_string(),
-            options: default_permission_options(),
-            created_at: 0,
-        });
+        let mut request = build_permission_request("s1", "rm -rf /", "dangerous command", true, 0);
+        request.id = "req1".to_string();
+        store.add_pending(request);
 
         assert_eq!(store.list_pending().len(), 1);
         assert!(store.resolve("req1", PermissionOutcome::Denied));
