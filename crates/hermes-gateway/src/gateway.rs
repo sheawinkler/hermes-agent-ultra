@@ -494,6 +494,18 @@ impl Gateway {
                 error: "❌",
             });
         }
+        if incoming.platform.eq_ignore_ascii_case("telegram")
+            && matches!(
+                access_policy.and_then(|policy| policy.reactions_enabled),
+                Some(true)
+            )
+        {
+            return Some(ReactionLifecyclePlan {
+                start: "👀",
+                success: "👍",
+                error: "👎",
+            });
+        }
         None
     }
 
@@ -4003,6 +4015,57 @@ mod tests {
         };
         assert!(gw.route_message(&incoming).await.is_ok());
         assert!(reactions.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn gateway_telegram_reactions_require_explicit_policy_enable() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let reactions = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(ReactionTestAdapter {
+            messages: sent.clone(),
+            reactions: reactions.clone(),
+        });
+
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_pair_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("telegram", adapter).await;
+        gw.set_message_handler(Arc::new(|_messages| {
+            Box::pin(async { Ok("done".to_string()) })
+        }))
+        .await;
+
+        let incoming = IncomingMessage {
+            platform: "telegram".into(),
+            chat_id: "123".into(),
+            user_id: "user1".into(),
+            text: "hello".into(),
+            message_id: Some("456".into()),
+            is_dm: true,
+        };
+        assert!(gw.route_message(&incoming).await.is_ok());
+        assert!(reactions.lock().unwrap().is_empty());
+
+        let mut policies = HashMap::new();
+        policies.insert(
+            "telegram".to_string(),
+            PlatformAccessPolicy {
+                reactions_enabled: Some(true),
+                ..PlatformAccessPolicy::default()
+            },
+        );
+        gw.set_platform_access_policies(policies).await;
+
+        assert!(gw.route_message(&incoming).await.is_ok());
+        assert_eq!(
+            reactions.lock().unwrap().clone(),
+            vec![
+                "add:123:456:👀".to_string(),
+                "remove:123:456:👀".to_string(),
+                "add:123:456:👍".to_string()
+            ]
+        );
     }
 
     #[tokio::test]

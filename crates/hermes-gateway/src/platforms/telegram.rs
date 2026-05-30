@@ -40,7 +40,9 @@ const RATE_LIMIT_MAX_RETRIES: u32 = 3;
 const TELEGRAM_MAX_DOCUMENT_SIZE_BYTES: u64 = 20 * 1024 * 1024;
 
 /// Supported document extensions for Telegram document processing.
-const SUPPORTED_DOCUMENT_EXTENSIONS: &[&str] = &["pdf", "md", "txt", "docx", "xlsx", "pptx"];
+const SUPPORTED_DOCUMENT_EXTENSIONS: &[&str] = &[
+    "pdf", "md", "txt", "docx", "xlsx", "pptx", "zip", "png", "jpg", "jpeg",
+];
 
 // ---------------------------------------------------------------------------
 // TelegramConfig
@@ -55,6 +57,10 @@ pub struct TelegramConfig {
     /// Optional webhook URL for receiving updates.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub webhook_url: Option<String>,
+
+    /// Secret token required for webhook delivery.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub webhook_secret: Option<String>,
 
     /// Whether to use polling (true) or webhooks (false) for updates.
     #[serde(default = "default_true")]
@@ -76,6 +82,14 @@ pub struct TelegramConfig {
     #[serde(default = "default_poll_timeout")]
     pub poll_timeout: u64,
 
+    /// Reply threading behavior for split replies: off, first, or all.
+    #[serde(default = "default_reply_to_mode")]
+    pub reply_to_mode: String,
+
+    /// Whether Telegram message reactions are enabled.
+    #[serde(default)]
+    pub reactions: bool,
+
     /// Bot username (without @), used for mention filtering in groups.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bot_username: Option<String>,
@@ -87,6 +101,36 @@ fn default_true() -> bool {
 
 fn default_poll_timeout() -> u64 {
     DEFAULT_POLL_TIMEOUT
+}
+
+fn default_reply_to_mode() -> String {
+    "first".to_string()
+}
+
+/// Effective behavior for Telegram reply anchors across split chunks.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TelegramReplyToMode {
+    Off,
+    First,
+    All,
+}
+
+impl TelegramReplyToMode {
+    pub fn parse(raw: Option<&str>) -> Self {
+        match raw.map(str::trim).filter(|s| !s.is_empty()) {
+            Some(mode) if mode.eq_ignore_ascii_case("off") => Self::Off,
+            Some(mode) if mode.eq_ignore_ascii_case("all") => Self::All,
+            _ => Self::First,
+        }
+    }
+
+    pub fn references_chunk(self, chunk_index: usize) -> bool {
+        match self {
+            Self::Off => false,
+            Self::First => chunk_index == 0,
+            Self::All => true,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -372,6 +416,8 @@ pub struct TelegramAdapter {
 impl TelegramAdapter {
     /// Create a new Telegram adapter with the given configuration.
     pub fn new(config: TelegramConfig) -> Result<Self, GatewayError> {
+        Self::validate_webhook_secret(&config)?;
+
         let base = BasePlatformAdapter::new(&config.token).with_proxy(config.proxy.clone());
 
         base.validate_token()?;
@@ -395,6 +441,67 @@ impl TelegramAdapter {
     /// Get a reference to the configuration.
     pub fn config(&self) -> &TelegramConfig {
         &self.config
+    }
+
+    fn validate_webhook_secret(config: &TelegramConfig) -> Result<(), GatewayError> {
+        let webhook_url = config.webhook_url.as_deref().map(str::trim);
+        let webhook_enabled = webhook_url.filter(|s| !s.is_empty()).is_some() || !config.polling;
+        if !webhook_enabled {
+            return Ok(());
+        }
+
+        let has_secret = config
+            .webhook_secret
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .is_some();
+        if has_secret {
+            return Ok(());
+        }
+
+        Err(GatewayError::Auth(
+            "Telegram webhook mode requires TELEGRAM_WEBHOOK_SECRET / webhook_secret; \
+             generate one with `openssl rand -hex 32` and set it before enabling webhooks \
+             (GHSA-3vpc-7q5r-276h)"
+                .to_string(),
+        ))
+    }
+
+    pub fn reply_to_mode(&self) -> TelegramReplyToMode {
+        TelegramReplyToMode::parse(Some(&self.config.reply_to_mode))
+    }
+
+    pub fn should_thread_reply(
+        &self,
+        reply_to_message_id: Option<i64>,
+        chunk_index: usize,
+    ) -> bool {
+        reply_to_message_id.is_some() && self.reply_to_mode().references_chunk(chunk_index)
+    }
+
+    /// Merge media captions without using substring checks that drop distinct captions.
+    pub fn merge_caption(existing: Option<&str>, caption: &str) -> String {
+        let caption = caption.trim();
+        let existing = existing.unwrap_or("").trim();
+
+        if existing.is_empty() {
+            return caption.to_string();
+        }
+        if caption.is_empty() {
+            return existing.to_string();
+        }
+
+        let seen = existing
+            .split("\n\n")
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .any(|part| part == caption);
+        if seen {
+            existing.to_string()
+        } else {
+            format!("{existing}\n\n{caption}")
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -461,8 +568,7 @@ impl TelegramAdapter {
                 body["message_thread_id"] = serde_json::Value::Number(thread_id.into());
             }
 
-            // Only reply to the original message for the first chunk.
-            if i == 0 {
+            if self.should_thread_reply(reply_to_message_id, i) {
                 if let Some(reply_id) = reply_to_message_id {
                     body["reply_to_message_id"] = serde_json::Value::Number(reply_id.into());
                 }
@@ -987,7 +1093,7 @@ impl TelegramAdapter {
     pub fn document_exceeds_size_limit(doc: &Document) -> bool {
         doc.file_size
             .map(|sz| sz > TELEGRAM_MAX_DOCUMENT_SIZE_BYTES)
-            .unwrap_or(false)
+            .unwrap_or(true)
     }
 
     fn extract_extension(name: &str) -> Option<String> {
@@ -1003,6 +1109,9 @@ impl TelegramAdapter {
             "application/pdf" => Some("pdf".to_string()),
             "text/markdown" => Some("md".to_string()),
             "text/plain" => Some("txt".to_string()),
+            "application/zip" => Some("zip".to_string()),
+            "image/png" => Some("png".to_string()),
+            "image/jpeg" => Some("jpg".to_string()),
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => {
                 Some("docx".to_string())
             }
@@ -1014,6 +1123,35 @@ impl TelegramAdapter {
             }
             _ => None,
         }
+    }
+
+    async fn set_message_reaction(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        reaction: Option<&str>,
+    ) -> Result<(), GatewayError> {
+        if !self.config.reactions {
+            return Ok(());
+        }
+
+        let message_id = message_id.parse::<i64>().map_err(|_| {
+            GatewayError::SendFailed(format!(
+                "Invalid Telegram message_id for reaction: {message_id}"
+            ))
+        })?;
+        let reaction_value = match reaction {
+            Some(emoji) => serde_json::json!([{ "type": "emoji", "emoji": emoji }]),
+            None => serde_json::json!([]),
+        };
+        let body = serde_json::json!({
+            "chat_id": chat_id,
+            "message_id": message_id,
+            "reaction": reaction_value,
+        });
+        let url = format!("{}/setMessageReaction", self.api_base);
+        let _resp: TelegramResponse<bool> = self.post_json(&url, &body).await?;
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
@@ -1227,6 +1365,25 @@ impl PlatformAdapter for TelegramAdapter {
         Ok(())
     }
 
+    async fn add_reaction(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        emoji: &str,
+    ) -> Result<(), GatewayError> {
+        self.set_message_reaction(chat_id, message_id, Some(emoji))
+            .await
+    }
+
+    async fn remove_reaction(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        _emoji: &str,
+    ) -> Result<(), GatewayError> {
+        self.set_message_reaction(chat_id, message_id, None).await
+    }
+
     fn is_running(&self) -> bool {
         self.base.is_running()
     }
@@ -1274,6 +1431,29 @@ fn split_message(text: &str, max_len: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::Value;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    fn test_config() -> TelegramConfig {
+        TelegramConfig {
+            token: "fake_token_12345".into(),
+            webhook_url: None,
+            webhook_secret: None,
+            polling: true,
+            proxy: AdapterProxyConfig::default(),
+            parse_markdown: false,
+            parse_html: false,
+            poll_timeout: 30,
+            reply_to_mode: "first".into(),
+            reactions: false,
+            bot_username: None,
+        }
+    }
+
+    fn test_adapter(config: TelegramConfig) -> TelegramAdapter {
+        TelegramAdapter::new(config).unwrap()
+    }
 
     // -----------------------------------------------------------------------
     // split_message tests (original)
@@ -1309,6 +1489,148 @@ mod tests {
         let chunks = split_message(&text, 4096);
         assert_eq!(chunks.len(), 2);
         assert!(chunks[0].ends_with('\n'));
+    }
+
+    #[test]
+    fn telegram_reply_to_mode_parse_and_chunk_policy() {
+        assert_eq!(TelegramReplyToMode::parse(None), TelegramReplyToMode::First);
+        assert_eq!(
+            TelegramReplyToMode::parse(Some("off")),
+            TelegramReplyToMode::Off
+        );
+        assert_eq!(
+            TelegramReplyToMode::parse(Some("ALL")),
+            TelegramReplyToMode::All
+        );
+        assert_eq!(
+            TelegramReplyToMode::parse(Some("invalid")),
+            TelegramReplyToMode::First
+        );
+
+        assert!(!TelegramReplyToMode::Off.references_chunk(0));
+        assert!(TelegramReplyToMode::First.references_chunk(0));
+        assert!(!TelegramReplyToMode::First.references_chunk(1));
+        assert!(TelegramReplyToMode::All.references_chunk(10));
+    }
+
+    #[test]
+    fn telegram_should_thread_reply_respects_reply_mode() {
+        let mut cfg = test_config();
+        cfg.reply_to_mode = "off".into();
+        let adapter = test_adapter(cfg);
+        assert!(!adapter.should_thread_reply(Some(99), 0));
+
+        let mut cfg = test_config();
+        cfg.reply_to_mode = "first".into();
+        let adapter = test_adapter(cfg);
+        assert!(adapter.should_thread_reply(Some(99), 0));
+        assert!(!adapter.should_thread_reply(Some(99), 1));
+        assert!(!adapter.should_thread_reply(None, 0));
+
+        let mut cfg = test_config();
+        cfg.reply_to_mode = "all".into();
+        let adapter = test_adapter(cfg);
+        assert!(adapter.should_thread_reply(Some(99), 0));
+        assert!(adapter.should_thread_reply(Some(99), 2));
+    }
+
+    #[test]
+    fn telegram_merge_caption_uses_exact_dedupe() {
+        assert_eq!(TelegramAdapter::merge_caption(None, "Hello"), "Hello");
+        assert_eq!(
+            TelegramAdapter::merge_caption(Some("Revenue"), "Revenue  "),
+            "Revenue"
+        );
+        assert_eq!(
+            TelegramAdapter::merge_caption(Some("Meeting agenda"), "Meeting"),
+            "Meeting agenda\n\nMeeting"
+        );
+        assert_eq!(
+            TelegramAdapter::merge_caption(Some("Revenue"), "Revenue and Profit"),
+            "Revenue\n\nRevenue and Profit"
+        );
+        let merged = TelegramAdapter::merge_caption(Some("A\n\nB"), "A");
+        assert_eq!(merged, "A\n\nB");
+    }
+
+    #[test]
+    fn telegram_webhook_secret_required_only_for_webhook_mode() {
+        let polling = test_config();
+        assert!(TelegramAdapter::new(polling).is_ok());
+
+        let mut webhook = test_config();
+        webhook.webhook_url = Some("https://hooks.example.com/tg".into());
+        let err = match TelegramAdapter::new(webhook) {
+            Ok(_) => panic!("webhook mode without secret must fail"),
+            Err(err) => err.to_string(),
+        };
+        assert!(err.contains("TELEGRAM_WEBHOOK_SECRET"));
+        assert!(err.contains("GHSA-3vpc-7q5r-276h"));
+        assert!(err.contains("openssl rand"));
+
+        let mut webhook = test_config();
+        webhook.webhook_url = Some("https://hooks.example.com/tg".into());
+        webhook.webhook_secret = Some("secret-token".into());
+        assert!(TelegramAdapter::new(webhook).is_ok());
+    }
+
+    #[tokio::test]
+    async fn telegram_reactions_call_set_message_reaction_when_enabled() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/botfake_token_12345/setMessageReaction"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "result": true
+            })))
+            .mount(&server)
+            .await;
+
+        let mut cfg = test_config();
+        cfg.reactions = true;
+        let mut adapter = test_adapter(cfg);
+        adapter.api_base = format!("{}/botfake_token_12345", server.uri());
+
+        adapter.add_reaction("123", "456", "👀").await.unwrap();
+        adapter.remove_reaction("123", "456", "👀").await.unwrap();
+
+        let requests = server.received_requests().await.expect("requests");
+        assert_eq!(requests.len(), 2);
+        let add_json: Value = serde_json::from_slice(&requests[0].body).expect("add json");
+        assert_eq!(
+            add_json.pointer("/chat_id").and_then(|v| v.as_str()),
+            Some("123")
+        );
+        assert_eq!(
+            add_json.pointer("/message_id").and_then(|v| v.as_i64()),
+            Some(456)
+        );
+        assert_eq!(
+            add_json
+                .pointer("/reaction/0/emoji")
+                .and_then(|v| v.as_str()),
+            Some("👀")
+        );
+        let remove_json: Value = serde_json::from_slice(&requests[1].body).expect("remove json");
+        assert_eq!(
+            remove_json
+                .pointer("/reaction")
+                .and_then(|v| v.as_array())
+                .map(Vec::len),
+            Some(0)
+        );
+    }
+
+    #[tokio::test]
+    async fn telegram_reactions_are_noop_when_disabled() {
+        let server = MockServer::start().await;
+        let mut adapter = test_adapter(test_config());
+        adapter.api_base = format!("{}/botfake_token_12345", server.uri());
+
+        adapter.add_reaction("123", "456", "👀").await.unwrap();
+
+        let requests = server.received_requests().await.expect("requests");
+        assert!(requests.is_empty());
     }
 
     // -----------------------------------------------------------------------
@@ -1972,6 +2294,24 @@ mod tests {
             file_size: Some(1024),
         };
         assert!(!TelegramAdapter::is_supported_document(&doc_unsupported));
+
+        let zip_doc = Document {
+            file_id: "d4".into(),
+            file_unique_id: None,
+            file_name: Some("archive.zip".into()),
+            mime_type: Some("application/zip".into()),
+            file_size: Some(1024),
+        };
+        assert!(TelegramAdapter::is_supported_document(&zip_doc));
+
+        let png_doc_from_mime = Document {
+            file_id: "d5".into(),
+            file_unique_id: None,
+            file_name: None,
+            mime_type: Some("image/png".into()),
+            file_size: Some(1024),
+        };
+        assert!(TelegramAdapter::is_supported_document(&png_doc_from_mime));
     }
 
     #[test]
@@ -1993,6 +2333,15 @@ mod tests {
             file_size: Some(TELEGRAM_MAX_DOCUMENT_SIZE_BYTES + 1),
         };
         assert!(TelegramAdapter::document_exceeds_size_limit(&large));
+
+        let unknown_size = Document {
+            file_id: "d3".into(),
+            file_unique_id: None,
+            file_name: Some("unknown.pdf".into()),
+            mime_type: Some("application/pdf".into()),
+            file_size: None,
+        };
+        assert!(TelegramAdapter::document_exceeds_size_limit(&unknown_size));
     }
 
     // -----------------------------------------------------------------------
@@ -2000,16 +2349,8 @@ mod tests {
     // -----------------------------------------------------------------------
 
     fn make_adapter_with_bot_username(username: Option<&str>) -> TelegramAdapter {
-        let config = TelegramConfig {
-            token: "fake_token_12345".into(),
-            webhook_url: None,
-            polling: true,
-            proxy: AdapterProxyConfig::default(),
-            parse_markdown: false,
-            parse_html: false,
-            poll_timeout: 30,
-            bot_username: username.map(|s| s.to_string()),
-        };
+        let mut config = test_config();
+        config.bot_username = username.map(|s| s.to_string());
         TelegramAdapter::new(config).unwrap()
     }
 
@@ -2083,6 +2424,9 @@ mod tests {
         assert!(!cfg.parse_markdown);
         assert!(!cfg.parse_html);
         assert_eq!(cfg.poll_timeout, DEFAULT_POLL_TIMEOUT);
+        assert_eq!(cfg.reply_to_mode, "first");
+        assert!(cfg.webhook_secret.is_none());
+        assert!(!cfg.reactions);
         assert!(cfg.bot_username.is_none());
     }
 
@@ -2091,5 +2435,19 @@ mod tests {
         let json = r#"{"token": "abc", "bot_username": "mybot"}"#;
         let cfg: TelegramConfig = serde_json::from_str(json).unwrap();
         assert_eq!(cfg.bot_username, Some("mybot".into()));
+    }
+
+    #[test]
+    fn config_with_reply_mode_webhook_secret_and_reactions() {
+        let json = r#"{
+            "token": "abc",
+            "webhook_secret": "secret",
+            "reply_to_mode": "all",
+            "reactions": true
+        }"#;
+        let cfg: TelegramConfig = serde_json::from_str(json).unwrap();
+        assert_eq!(cfg.webhook_secret.as_deref(), Some("secret"));
+        assert_eq!(cfg.reply_to_mode, "all");
+        assert!(cfg.reactions);
     }
 }
