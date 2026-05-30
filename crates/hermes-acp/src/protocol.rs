@@ -2,7 +2,6 @@
 //!
 //! Defines the full set of ACP JSON-RPC methods, request/response types,
 //! capability declarations, content blocks, and session update structures.
-//! Mirrors the Python `acp.schema` module.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -140,9 +139,14 @@ impl From<&str> for AcpMethod {
 /// Agent capabilities advertised during `initialize`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct AgentCapabilities {
-    #[serde(default)]
+    #[serde(rename = "loadSession", alias = "load_session", default)]
     pub load_session: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
+    #[serde(
+        rename = "sessionCapabilities",
+        alias = "session_capabilities",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub session_capabilities: Option<SessionCapabilities>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tools: Option<Vec<String>>,
@@ -196,10 +200,18 @@ pub struct AuthMethod {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct InitializeResponse {
+    #[serde(rename = "protocolVersion", alias = "protocol_version")]
     pub protocol_version: u32,
+    #[serde(rename = "agentInfo", alias = "agent_info")]
     pub agent_info: Implementation,
+    #[serde(rename = "agentCapabilities", alias = "agent_capabilities")]
     pub agent_capabilities: AgentCapabilities,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "authMethods",
+        alias = "auth_methods",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub auth_methods: Option<Vec<AuthMethod>>,
 }
 
@@ -285,7 +297,12 @@ pub enum SessionUpdate {
 pub struct AvailableCommand {
     pub name: String,
     pub description: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "inputHint",
+        alias = "input_hint",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub input_hint: Option<String>,
 }
 
@@ -296,15 +313,25 @@ pub struct AvailableCommand {
 /// Token usage statistics.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Usage {
-    #[serde(default)]
+    #[serde(rename = "inputTokens", alias = "input_tokens", default)]
     pub input_tokens: u64,
-    #[serde(default)]
+    #[serde(rename = "outputTokens", alias = "output_tokens", default)]
     pub output_tokens: u64,
-    #[serde(default)]
+    #[serde(rename = "totalTokens", alias = "total_tokens", default)]
     pub total_tokens: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "thoughtTokens",
+        alias = "thought_tokens",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub thought_tokens: Option<u64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        rename = "cachedReadTokens",
+        alias = "cached_read_tokens",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
     pub cached_read_tokens: Option<u64>,
 }
 
@@ -326,6 +353,7 @@ pub enum StopReason {
 /// Response to a `prompt` request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PromptResponse {
+    #[serde(rename = "stopReason", alias = "stop_reason")]
     pub stop_reason: StopReason,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
@@ -374,6 +402,7 @@ pub struct EnvVar {
 /// Session info for listing.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AcpSessionInfo {
+    #[serde(rename = "sessionId", alias = "session_id")]
     pub session_id: String,
     pub cwd: String,
 }
@@ -454,7 +483,8 @@ mod tests {
             ..Default::default()
         };
         let json = serde_json::to_value(&caps).unwrap();
-        assert_eq!(json["load_session"], true);
+        assert_eq!(json["loadSession"], true);
+        assert_eq!(json["sessionCapabilities"]["fork"], true);
         assert_eq!(json["streaming"], true);
     }
 }

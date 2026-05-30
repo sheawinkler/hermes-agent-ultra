@@ -894,13 +894,13 @@ pub async fn build_acp_conformance_report() -> ProtocolConformanceReport {
         .await;
     checks.push(match initialize.result.as_ref() {
         Some(value)
-            if value.get("protocol_version").is_some()
-                && value.get("agent_info").is_some()
-                && value.get("agent_capabilities").is_some() =>
+            if value.get("protocolVersion").is_some()
+                && value.get("agentInfo").is_some()
+                && value.get("agentCapabilities").is_some() =>
         {
             pass(
                 "initialize",
-                "advertises protocol, agent_info, and capabilities",
+                "advertises protocol, agentInfo, and capabilities",
             )
         }
         Some(value) => fail("initialize", format!("unexpected response shape: {value}")),
@@ -913,7 +913,7 @@ pub async fn build_acp_conformance_report() -> ProtocolConformanceReport {
     let session_id = new_session
         .result
         .as_ref()
-        .and_then(|value| value.get("session_id"))
+        .and_then(|value| value.get("sessionId"))
         .and_then(Value::as_str)
         .map(str::to_string);
     checks.push(match session_id.as_deref() {
@@ -926,13 +926,11 @@ pub async fn build_acp_conformance_report() -> ProtocolConformanceReport {
             .handle_request(acp_request(
                 3,
                 "prompt",
-                Some(
-                    json!({"session_id": session_id, "content": [{"type":"text", "text":"ping"}]}),
-                ),
+                Some(json!({"sessionId": session_id, "content": [{"type":"text", "text":"ping"}]})),
             ))
             .await;
         checks.push(match prompt.result.as_ref() {
-            Some(value) if value.get("stop_reason").and_then(Value::as_str) == Some("end_turn") => {
+            Some(value) if value.get("stopReason").and_then(Value::as_str) == Some("end_turn") => {
                 pass("prompt", "accepts text content and returns end_turn")
             }
             Some(value) => fail("prompt", format!("unexpected response shape: {value}")),
@@ -943,7 +941,7 @@ pub async fn build_acp_conformance_report() -> ProtocolConformanceReport {
             .handle_request(acp_request(
                 4,
                 "session/cancel",
-                Some(json!({"session_id": session_id})),
+                Some(json!({"sessionId": session_id})),
             ))
             .await;
         checks.push(match cancel.result.as_ref() {

@@ -1,7 +1,6 @@
 //! ACP session state management.
 //!
 //! Maps ACP sessions to Hermes agent instances with persistence support.
-//! Mirrors the Python `acp_adapter/session.py` implementation.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -285,6 +284,12 @@ impl SessionManager {
     pub fn list_sessions(&self) -> Vec<SessionInfo> {
         let sessions = self.sessions.lock().unwrap();
         sessions.values().map(SessionInfo::from).collect()
+    }
+
+    /// List all session states.
+    pub fn list_session_states(&self) -> Vec<SessionState> {
+        let sessions = self.sessions.lock().unwrap();
+        sessions.values().cloned().collect()
     }
 
     /// Persist a session state via the registered callback.

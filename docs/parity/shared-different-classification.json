@@ -451,6 +451,13 @@
       "ticket": 25
     },
     {
+      "path": "tests/acp/test_server.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream ACP server lifecycle intent is covered by Rust ACP JSON-RPC server and handler tests: initialize/authenticate, camelCase wire aliases, session create/load/resume/fork/list/cancel, list filtering and pagination, prompt content aliases, refusal handling for missing sessions, usage serialization, slash commands, and MCP/server event flushing.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "tests/acp/test_tools.py",
       "classification": "intentional_divergence",
       "rationale": "Upstream ACP tool metadata and rendering intent is covered by Rust ACP tool helpers and event metadata: common tool kind mapping, stable tc-* call IDs, human-readable titles, structured failure status detection, and tool_kind/title/status fields on emitted ACP tool events.",

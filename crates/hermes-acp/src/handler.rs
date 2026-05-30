@@ -1,6 +1,4 @@
-//! Full ACP request handler — implements all ACP protocol methods.
-//!
-//! Mirrors the Python `acp_adapter/server.py` HermesACPAgent class.
+//! Full ACP request handler that implements the ACP protocol methods.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -439,7 +437,7 @@ fn embedded_resource_to_parts(block: &serde_json::Map<String, Value>) -> Vec<Val
 }
 
 fn extract_prompt_payload(p: &serde_json::Map<String, Value>) -> PromptExtraction {
-    if let Some(prompt_val) = p.get("prompt") {
+    if let Some(prompt_val) = p.get("prompt").or_else(|| p.get("content")) {
         if let Some(s) = prompt_val.as_str() {
             let text = s.to_string();
             return PromptExtraction {
@@ -836,6 +834,10 @@ fn param_str<'a>(p: &'a serde_json::Map<String, Value>, key: &str) -> Option<&'a
     p.get(key)?.as_str()
 }
 
+fn param_str_any<'a>(p: &'a serde_json::Map<String, Value>, keys: &[&str]) -> Option<&'a str> {
+    keys.iter().find_map(|key| param_str(p, key))
+}
+
 fn param_value_as_string(p: &serde_json::Map<String, Value>, key: &str) -> Option<String> {
     let value = p.get(key)?;
     if let Some(s) = value.as_str() {
@@ -843,6 +845,60 @@ fn param_value_as_string(p: &serde_json::Map<String, Value>, key: &str) -> Optio
     } else {
         Some(value.to_string())
     }
+}
+
+fn param_value_as_string_any(p: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|key| param_value_as_string(p, key))
+}
+
+fn prompt_response_value(stop_reason: StopReason, usage: Option<Usage>) -> Value {
+    serde_json::to_value(PromptResponse { stop_reason, usage }).unwrap_or_else(|_| json!({}))
+}
+
+fn session_id_response(session_id: &str) -> Value {
+    json!({"sessionId": session_id})
+}
+
+fn session_title_from_history(history: &[Value]) -> Option<String> {
+    history.iter().find_map(|message| {
+        let role = message.get("role").and_then(Value::as_str)?;
+        if role != "user" {
+            return None;
+        }
+        let content = message.get("content")?;
+        let text = if let Some(text) = content.as_str() {
+            text.to_string()
+        } else if let Some(parts) = content.as_array() {
+            parts
+                .iter()
+                .filter_map(|part| part.get("text").and_then(Value::as_str))
+                .collect::<Vec<_>>()
+                .join(" ")
+        } else {
+            String::new()
+        };
+        let title = text.split_whitespace().collect::<Vec<_>>().join(" ");
+        (!title.is_empty()).then(|| {
+            if title.chars().count() > 80 {
+                format!("{}...", title.chars().take(77).collect::<String>())
+            } else {
+                title
+            }
+        })
+    })
+}
+
+fn session_info_value(session: &SessionState) -> Value {
+    json!({
+        "sessionId": session.session_id,
+        "cwd": session.cwd,
+        "model": session.model,
+        "phase": session.phase,
+        "historyLen": session.history.len(),
+        "createdAt": session.created_at.to_string(),
+        "updatedAt": session.updated_at.to_string(),
+        "title": session_title_from_history(&session.history),
+    })
 }
 
 #[async_trait::async_trait]
@@ -901,14 +957,14 @@ impl AcpHandler for HermesAcpHandler {
                     .and_then(|p| param_str(p, "cwd"))
                     .unwrap_or(".");
                 let state = self.session_manager.create_session(cwd);
-                AcpResponse::success(request.id, json!({"session_id": state.session_id}))
+                AcpResponse::success(request.id, session_id_response(&state.session_id))
             }
 
             AcpMethod::LoadSession => {
                 let Some(p) = params_obj(&request.params) else {
                     return AcpResponse::error(request.id, -32602, "Missing params");
                 };
-                let session_id = param_str(p, "session_id").unwrap_or("");
+                let session_id = param_str_any(p, &["sessionId", "session_id"]).unwrap_or("");
                 let cwd = param_str(p, "cwd").unwrap_or(".");
 
                 match self.session_manager.update_cwd(session_id, cwd) {
@@ -925,7 +981,7 @@ impl AcpHandler for HermesAcpHandler {
                 let Some(p) = params_obj(&request.params) else {
                     return AcpResponse::error(request.id, -32602, "Missing params");
                 };
-                let session_id = param_str(p, "session_id").unwrap_or("");
+                let session_id = param_str_any(p, &["sessionId", "session_id"]).unwrap_or("");
                 let cwd = param_str(p, "cwd").unwrap_or(".");
 
                 if self.session_manager.get_session(session_id).is_some() {
@@ -933,7 +989,7 @@ impl AcpHandler for HermesAcpHandler {
                     AcpResponse::success(request.id, json!({}))
                 } else {
                     let state = self.session_manager.create_session(cwd);
-                    AcpResponse::success(request.id, json!({"session_id": state.session_id}))
+                    AcpResponse::success(request.id, session_id_response(&state.session_id))
                 }
             }
 
@@ -941,14 +997,13 @@ impl AcpHandler for HermesAcpHandler {
                 let Some(p) = params_obj(&request.params) else {
                     return AcpResponse::error(request.id, -32602, "Missing params");
                 };
-                let session_id = param_str(p, "session_id").unwrap_or("");
+                let session_id = param_str_any(p, &["sessionId", "session_id"]).unwrap_or("");
                 let cwd = param_str(p, "cwd").unwrap_or(".");
 
                 match self.session_manager.fork_session(session_id, cwd) {
-                    Some(new_state) => AcpResponse::success(
-                        request.id,
-                        json!({"session_id": new_state.session_id}),
-                    ),
+                    Some(new_state) => {
+                        AcpResponse::success(request.id, session_id_response(&new_state.session_id))
+                    }
                     None => AcpResponse::error(
                         request.id,
                         -32602,
@@ -958,23 +1013,48 @@ impl AcpHandler for HermesAcpHandler {
             }
 
             AcpMethod::ListSessions => {
-                let sessions: Vec<Value> = self
-                    .session_manager
-                    .list_sessions()
-                    .iter()
-                    .map(|s| {
-                        json!({
-                            "session_id": s.session_id,
-                            "cwd": s.cwd,
-                        })
-                    })
-                    .collect();
-                AcpResponse::success(request.id, json!({"sessions": sessions}))
+                let cwd_filter = params_obj(&request.params)
+                    .and_then(|p| param_str(p, "cwd"))
+                    .filter(|cwd| !cwd.trim().is_empty());
+                let cursor = params_obj(&request.params)
+                    .and_then(|p| param_str(p, "cursor"))
+                    .filter(|cursor| !cursor.trim().is_empty());
+                let mut sessions = self.session_manager.list_session_states();
+                if let Some(cwd) = cwd_filter {
+                    sessions.retain(|s| s.cwd == cwd);
+                }
+                sessions.sort_by(|a, b| {
+                    b.updated_at
+                        .cmp(&a.updated_at)
+                        .then_with(|| a.session_id.cmp(&b.session_id))
+                });
+                if let Some(cursor) = cursor {
+                    if let Some(index) = sessions.iter().position(|s| s.session_id == cursor) {
+                        sessions = sessions.into_iter().skip(index + 1).collect();
+                    } else {
+                        sessions.clear();
+                    }
+                }
+                const LIST_SESSIONS_PAGE_SIZE: usize = 50;
+                let next_cursor = (sessions.len() > LIST_SESSIONS_PAGE_SIZE)
+                    .then(|| sessions[LIST_SESSIONS_PAGE_SIZE - 1].session_id.clone());
+                let page = sessions
+                    .into_iter()
+                    .take(LIST_SESSIONS_PAGE_SIZE)
+                    .map(|s| session_info_value(&s))
+                    .collect::<Vec<_>>();
+                AcpResponse::success(
+                    request.id,
+                    json!({
+                        "sessions": page,
+                        "nextCursor": next_cursor,
+                    }),
+                )
             }
 
             AcpMethod::Cancel => {
                 let session_id = params_obj(&request.params)
-                    .and_then(|p| param_str(p, "session_id"))
+                    .and_then(|p| param_str_any(p, &["sessionId", "session_id"]))
                     .unwrap_or("");
                 self.session_manager
                     .set_phase(session_id, SessionPhase::Cancelled);
@@ -987,13 +1067,12 @@ impl AcpHandler for HermesAcpHandler {
                 let Some(p) = params_obj(&request.params) else {
                     return AcpResponse::error(request.id, -32602, "Missing params");
                 };
-                let session_id = param_str(p, "session_id").unwrap_or("");
+                let session_id = param_str_any(p, &["sessionId", "session_id"]).unwrap_or("");
 
                 if self.session_manager.get_session(session_id).is_none() {
-                    return AcpResponse::error(
+                    return AcpResponse::success(
                         request.id,
-                        -32602,
-                        format!("Session not found: {}", session_id),
+                        prompt_response_value(StopReason::Refusal, None),
                     );
                 }
 
@@ -1004,7 +1083,10 @@ impl AcpHandler for HermesAcpHandler {
                 let has_content = extraction.has_content;
 
                 if !has_content {
-                    return AcpResponse::success(request.id, json!({"stop_reason": "end_turn"}));
+                    return AcpResponse::success(
+                        request.id,
+                        prompt_response_value(StopReason::EndTurn, None),
+                    );
                 }
 
                 // Intercept slash commands
@@ -1014,7 +1096,7 @@ impl AcpHandler for HermesAcpHandler {
                             .push(AcpEvent::message_complete(session_id, &response_text));
                         return AcpResponse::success(
                             request.id,
-                            json!({"stop_reason": "end_turn"}),
+                            prompt_response_value(StopReason::EndTurn, None),
                         );
                     }
                 }
@@ -1126,11 +1208,10 @@ impl AcpHandler for HermesAcpHandler {
                 self.session_manager
                     .set_phase(session_id, SessionPhase::Idle);
 
-                let mut payload = json!({"stop_reason": "end_turn"});
-                if let Some(usage) = usage {
-                    payload["usage"] = serde_json::to_value(usage).unwrap_or_else(|_| json!({}));
-                }
-                AcpResponse::success(request.id, payload)
+                AcpResponse::success(
+                    request.id,
+                    prompt_response_value(StopReason::EndTurn, usage),
+                )
             }
 
             // -- Session configuration --------------------------------------
@@ -1138,8 +1219,8 @@ impl AcpHandler for HermesAcpHandler {
                 let Some(p) = params_obj(&request.params) else {
                     return AcpResponse::error(request.id, -32602, "Missing params");
                 };
-                let session_id = param_str(p, "session_id").unwrap_or("");
-                let model_id = param_str(p, "model_id")
+                let session_id = param_str_any(p, &["sessionId", "session_id"]).unwrap_or("");
+                let model_id = param_str_any(p, &["modelId", "model_id"])
                     .or_else(|| param_str(p, "model"))
                     .unwrap_or("");
 
@@ -1168,8 +1249,8 @@ impl AcpHandler for HermesAcpHandler {
                 let Some(p) = params_obj(&request.params) else {
                     return AcpResponse::error(request.id, -32602, "Missing params");
                 };
-                let session_id = param_str(p, "session_id").unwrap_or("");
-                let mode_id = param_str(p, "mode_id")
+                let session_id = param_str_any(p, &["sessionId", "session_id"]).unwrap_or("");
+                let mode_id = param_str_any(p, &["modeId", "mode_id"])
                     .or_else(|| param_str(p, "mode"))
                     .unwrap_or("");
                 if mode_id.trim().is_empty() {
@@ -1193,13 +1274,14 @@ impl AcpHandler for HermesAcpHandler {
                 let Some(p) = params_obj(&request.params) else {
                     return AcpResponse::error(request.id, -32602, "Missing params");
                 };
-                let session_id = param_str(p, "session_id").unwrap_or("");
-                let key = param_str(p, "key")
+                let session_id = param_str_any(p, &["sessionId", "session_id"]).unwrap_or("");
+                let key = param_str_any(p, &["configId", "config_id"])
+                    .or_else(|| param_str(p, "key"))
                     .or_else(|| param_str(p, "option"))
                     .or_else(|| param_str(p, "name"))
                     .unwrap_or("");
                 let value = param_value_as_string(p, "value")
-                    .or_else(|| param_value_as_string(p, "option_value"))
+                    .or_else(|| param_value_as_string_any(p, &["optionValue", "option_value"]))
                     .unwrap_or_default();
 
                 if key.trim().is_empty() {
@@ -1216,7 +1298,7 @@ impl AcpHandler for HermesAcpHandler {
                 {
                     Some(_) => AcpResponse::success(
                         request.id,
-                        json!({"config_options": [{"key": key, "value": value}]}),
+                        json!({"configOptions": [{"configId": key, "value": value}]}),
                     ),
                     None => AcpResponse::error(
                         request.id,
@@ -1458,7 +1540,32 @@ mod tests {
         let resp = handler.handle_request(req).await;
         assert!(resp.result.is_some());
         let result = resp.result.unwrap();
-        assert_eq!(result["agent_info"]["name"], "hermes-agent");
+        assert_eq!(result["agentInfo"]["name"], "hermes-agent");
+    }
+
+    #[tokio::test]
+    async fn test_initialize_uses_acp_wire_aliases() {
+        let handler = make_handler();
+        let resp = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(1)),
+                method: "initialize".into(),
+                params: None,
+            })
+            .await;
+        let result = resp.result.unwrap();
+
+        assert_eq!(result["protocolVersion"], 1);
+        assert_eq!(result["agentInfo"]["name"], "hermes-agent");
+        assert_eq!(result["agentCapabilities"]["loadSession"], true);
+        assert_eq!(
+            result["agentCapabilities"]["sessionCapabilities"]["fork"],
+            true
+        );
+        assert!(result.get("protocol_version").is_none());
+        assert!(result.get("agent_info").is_none());
+        assert!(result["agentCapabilities"].get("load_session").is_none());
     }
 
     #[tokio::test]
@@ -1472,7 +1579,7 @@ mod tests {
         };
         let resp = handler.handle_request(req).await;
         let result = resp.result.unwrap();
-        let methods = result["auth_methods"].as_array().expect("auth methods");
+        let methods = result["authMethods"].as_array().expect("auth methods");
 
         assert_eq!(methods[0]["id"], "openrouter");
         assert_eq!(methods[0]["name"], "openrouter runtime credentials");
@@ -1497,7 +1604,7 @@ mod tests {
         let result = resp.result.unwrap();
 
         assert_eq!(
-            result["auth_methods"],
+            result["authMethods"],
             json!([{
                 "args": ["--setup"],
                 "description": "Open Hermes' interactive model/provider setup in a terminal. Use this when Hermes has not been configured on this machine yet.",
@@ -1580,7 +1687,7 @@ mod tests {
             params: Some(json!({"cwd": "/tmp"})),
         };
         let resp = handler.handle_request(req).await;
-        let session_id = resp.result.unwrap()["session_id"]
+        let session_id = resp.result.unwrap()["sessionId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -1608,6 +1715,139 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_session_methods_accept_camel_case_wire_fields() {
+        let handler = make_handler();
+        let created = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(1)),
+                method: "session/new".into(),
+                params: Some(json!({"cwd": "/tmp"})),
+            })
+            .await
+            .result
+            .unwrap();
+        let session_id = created["sessionId"].as_str().unwrap().to_string();
+
+        let loaded = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(2)),
+                method: "session/load".into(),
+                params: Some(json!({"sessionId": session_id, "cwd": "/work"})),
+            })
+            .await;
+        assert!(loaded.error.is_none());
+
+        let model = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(3)),
+                method: "session/set_model".into(),
+                params: Some(json!({"sessionId": session_id, "modelId": "nous:gpt-5.4"})),
+            })
+            .await;
+        assert!(model.error.is_none());
+
+        let mode = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(4)),
+                method: "session/set_mode".into(),
+                params: Some(json!({"sessionId": session_id, "modeId": "code"})),
+            })
+            .await;
+        assert!(mode.error.is_none());
+
+        let config = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(5)),
+                method: "session/set_config".into(),
+                params: Some(json!({
+                    "sessionId": session_id,
+                    "configId": "approval_mode",
+                    "value": "auto"
+                })),
+            })
+            .await
+            .result
+            .unwrap();
+        assert_eq!(config["configOptions"][0]["configId"], "approval_mode");
+
+        let state = handler.session_manager.get_session(&session_id).unwrap();
+        assert_eq!(state.cwd, "/work");
+        assert_eq!(state.model.as_deref(), Some("nous:gpt-5.4"));
+        assert_eq!(state.mode.as_deref(), Some("code"));
+        assert_eq!(
+            state
+                .config_options
+                .get("approval_mode")
+                .map(String::as_str),
+            Some("auto")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_list_sessions_filters_paginates_and_uses_wire_metadata() {
+        let handler = make_handler();
+        let keep = handler.session_manager.create_session("/keep");
+        handler.session_manager.set_history(
+            &keep.session_id,
+            vec![json!({"role": "user", "content": "Fix server wire format"})],
+        );
+        handler.session_manager.create_session("/drop");
+
+        let filtered = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(1)),
+                method: "session/list".into(),
+                params: Some(json!({"cwd": "/keep"})),
+            })
+            .await
+            .result
+            .unwrap();
+        let sessions = filtered["sessions"].as_array().unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0]["sessionId"], keep.session_id);
+        assert_eq!(sessions[0]["title"], "Fix server wire format");
+        assert!(sessions[0].get("updatedAt").is_some());
+        assert!(sessions[0].get("historyLen").is_some());
+
+        let pager = make_handler();
+        for _ in 0..52 {
+            pager.session_manager.create_session("/page");
+        }
+        let first_page = pager
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(2)),
+                method: "session/list".into(),
+                params: Some(json!({"cwd": "/page"})),
+            })
+            .await
+            .result
+            .unwrap();
+        let first_sessions = first_page["sessions"].as_array().unwrap();
+        assert_eq!(first_sessions.len(), 50);
+        let cursor = first_page["nextCursor"].as_str().unwrap();
+
+        let second_page = pager
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(3)),
+                method: "session/list".into(),
+                params: Some(json!({"cwd": "/page", "cursor": cursor})),
+            })
+            .await
+            .result
+            .unwrap();
+        assert_eq!(second_page["sessions"].as_array().unwrap().len(), 2);
+        assert!(second_page["nextCursor"].is_null());
+    }
+
+    #[tokio::test]
     async fn test_prompt_slash_command() {
         let handler = make_handler();
 
@@ -1618,7 +1858,7 @@ mod tests {
             params: Some(json!({"cwd": "."})),
         };
         let resp = handler.handle_request(req).await;
-        let session_id = resp.result.unwrap()["session_id"]
+        let session_id = resp.result.unwrap()["sessionId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -1634,9 +1874,57 @@ mod tests {
         };
         let resp = handler.handle_request(req).await;
         assert_eq!(
-            resp.result.unwrap()["stop_reason"].as_str().unwrap(),
+            resp.result.unwrap()["stopReason"].as_str().unwrap(),
             "end_turn"
         );
+    }
+
+    #[tokio::test]
+    async fn test_prompt_accepts_content_alias_and_refuses_missing_session() {
+        let handler = make_handler();
+        let created = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(1)),
+                method: "session/new".into(),
+                params: Some(json!({"cwd": "."})),
+            })
+            .await
+            .result
+            .unwrap();
+        let session_id = created["sessionId"].as_str().unwrap().to_string();
+
+        let prompt = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(2)),
+                method: "prompt".into(),
+                params: Some(json!({
+                    "sessionId": session_id,
+                    "content": [{"type": "text", "text": "ping"}],
+                })),
+            })
+            .await
+            .result
+            .unwrap();
+        assert_eq!(prompt["stopReason"], "end_turn");
+
+        let state = handler.session_manager.get_session(&session_id).unwrap();
+        assert_eq!(state.history[0]["content"][0]["text"], "ping");
+
+        let missing = handler
+            .handle_request(AcpRequest {
+                jsonrpc: "2.0".into(),
+                id: Some(json!(3)),
+                method: "prompt".into(),
+                params: Some(json!({
+                    "sessionId": "missing",
+                    "content": [{"type": "text", "text": "ping"}],
+                })),
+            })
+            .await;
+        assert!(missing.error.is_none());
+        assert_eq!(missing.result.unwrap()["stopReason"], "refusal");
     }
 
     #[tokio::test]
@@ -1655,7 +1943,7 @@ mod tests {
             params: Some(json!({"cwd": "."})),
         };
         let resp = handler.handle_request(req).await;
-        let session_id = resp.result.unwrap()["session_id"]
+        let session_id = resp.result.unwrap()["sessionId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -1678,7 +1966,7 @@ mod tests {
         };
         let resp = handler.handle_request(req).await;
         assert_eq!(
-            resp.result.as_ref().unwrap()["stop_reason"].as_str(),
+            resp.result.as_ref().unwrap()["stopReason"].as_str(),
             Some("end_turn")
         );
         let state = handler.session_manager.get_session(&session_id).unwrap();
@@ -1713,7 +2001,7 @@ mod tests {
             params: Some(json!({"cwd": "."})),
         };
         let resp = handler.handle_request(req).await;
-        let session_id = resp.result.unwrap()["session_id"]
+        let session_id = resp.result.unwrap()["sessionId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -1781,7 +2069,7 @@ mod tests {
             params: Some(json!({"cwd": "."})),
         };
         let resp = handler.handle_request(req).await;
-        let session_id = resp.result.unwrap()["session_id"]
+        let session_id = resp.result.unwrap()["sessionId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -1846,7 +2134,7 @@ mod tests {
             params: Some(json!({"cwd": "."})),
         };
         let resp = handler.handle_request(req).await;
-        let session_id = resp.result.unwrap()["session_id"]
+        let session_id = resp.result.unwrap()["sessionId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -1862,8 +2150,8 @@ mod tests {
         };
         let resp = handler.handle_request(req).await;
         let usage = resp.result.unwrap()["usage"].clone();
-        assert_eq!(usage["input_tokens"], 3);
-        assert_eq!(usage["output_tokens"], 5);
+        assert_eq!(usage["inputTokens"], 3);
+        assert_eq!(usage["outputTokens"], 5);
 
         let state = handler.session_manager.get_session(&session_id).unwrap();
         assert_eq!(state.total_prompt_tokens, 3);
@@ -1895,7 +2183,7 @@ mod tests {
             params: Some(json!({"cwd": "."})),
         };
         let resp = handler.handle_request(req).await;
-        let session_id = resp.result.unwrap()["session_id"]
+        let session_id = resp.result.unwrap()["sessionId"]
             .as_str()
             .unwrap()
             .to_string();
@@ -1911,7 +2199,7 @@ mod tests {
         };
         let resp = handler.handle_request(req).await;
         assert_eq!(
-            resp.result.unwrap()["stop_reason"].as_str(),
+            resp.result.unwrap()["stopReason"].as_str(),
             Some("end_turn")
         );
 
@@ -1947,7 +2235,7 @@ mod tests {
             params: Some(json!({"cwd": "."})),
         };
         let resp = handler.handle_request(req).await;
-        let session_id = resp.result.unwrap()["session_id"]
+        let session_id = resp.result.unwrap()["sessionId"]
             .as_str()
             .unwrap()
             .to_string();
