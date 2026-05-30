@@ -92,6 +92,87 @@ fn target_channel_id_for_metadata<'a>(
         .unwrap_or(channel_id)
 }
 
+const DISCORD_ALLOW_MENTION_EVERYONE_ENV: &str = "DISCORD_ALLOW_MENTION_EVERYONE";
+const DISCORD_ALLOW_MENTION_ROLES_ENV: &str = "DISCORD_ALLOW_MENTION_ROLES";
+const DISCORD_ALLOW_MENTION_USERS_ENV: &str = "DISCORD_ALLOW_MENTION_USERS";
+const DISCORD_ALLOW_MENTION_REPLIED_USER_ENV: &str = "DISCORD_ALLOW_MENTION_REPLIED_USER";
+
+/// Discord REST `allowed_mentions` payload.
+///
+/// Safe defaults block broad server pings while preserving direct user and
+/// reply-reference pings, matching the upstream gateway adapter contract.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DiscordAllowedMentions {
+    pub parse: Vec<String>,
+    pub replied_user: bool,
+}
+
+impl DiscordAllowedMentions {
+    pub fn from_flags(everyone: bool, roles: bool, users: bool, replied_user: bool) -> Self {
+        let mut parse = Vec::new();
+        if everyone {
+            parse.push("everyone".to_string());
+        }
+        if roles {
+            parse.push("roles".to_string());
+        }
+        if users {
+            parse.push("users".to_string());
+        }
+
+        Self {
+            parse,
+            replied_user,
+        }
+    }
+}
+
+fn parse_allowed_mention_bool(raw: &str, default: bool) -> bool {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => true,
+        "false" | "0" | "no" | "off" => false,
+        "" => default,
+        _ => default,
+    }
+}
+
+fn discord_allowed_mentions_from_lookup<F>(mut lookup: F) -> DiscordAllowedMentions
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    let allow_everyone = lookup(DISCORD_ALLOW_MENTION_EVERYONE_ENV)
+        .map(|raw| parse_allowed_mention_bool(&raw, false))
+        .unwrap_or(false);
+    let allow_roles = lookup(DISCORD_ALLOW_MENTION_ROLES_ENV)
+        .map(|raw| parse_allowed_mention_bool(&raw, false))
+        .unwrap_or(false);
+    let allow_users = lookup(DISCORD_ALLOW_MENTION_USERS_ENV)
+        .map(|raw| parse_allowed_mention_bool(&raw, true))
+        .unwrap_or(true);
+    let allow_replied_user = lookup(DISCORD_ALLOW_MENTION_REPLIED_USER_ENV)
+        .map(|raw| parse_allowed_mention_bool(&raw, true))
+        .unwrap_or(true);
+
+    DiscordAllowedMentions::from_flags(allow_everyone, allow_roles, allow_users, allow_replied_user)
+}
+
+fn default_discord_allowed_mentions() -> DiscordAllowedMentions {
+    discord_allowed_mentions_from_lookup(|name| std::env::var(name).ok())
+}
+
+fn with_allowed_mentions(
+    mut body: serde_json::Value,
+    allowed_mentions: DiscordAllowedMentions,
+) -> serde_json::Value {
+    body["allowed_mentions"] =
+        serde_json::to_value(allowed_mentions).expect("DiscordAllowedMentions serializes");
+    body
+}
+
+fn with_default_allowed_mentions(body: serde_json::Value) -> serde_json::Value {
+    with_allowed_mentions(body, default_discord_allowed_mentions())
+}
+
 // ---------------------------------------------------------------------------
 // Discord Gateway opcodes & payload
 // ---------------------------------------------------------------------------
@@ -697,7 +778,7 @@ impl DiscordAdapter {
                 "{}/channels/{}/messages",
                 DISCORD_API_BASE, target_channel_id
             );
-            let body = serde_json::json!({ "content": chunk });
+            let body = with_default_allowed_mentions(serde_json::json!({ "content": chunk }));
 
             let resp = self
                 .client
@@ -739,9 +820,9 @@ impl DiscordAdapter {
             DISCORD_API_BASE, channel_id, message_id
         );
 
-        let body = serde_json::json!({
+        let body = with_default_allowed_mentions(serde_json::json!({
             "content": &content[..content.len().min(MAX_MESSAGE_LENGTH)],
-        });
+        }));
 
         let resp = self
             .client
@@ -793,7 +874,7 @@ impl DiscordAdapter {
             DISCORD_API_BASE, target_channel_id
         );
 
-        let mut body = serde_json::json!({ "embeds": embeds });
+        let mut body = with_default_allowed_mentions(serde_json::json!({ "embeds": embeds }));
         if let Some(text) = content {
             body["content"] = serde_json::Value::String(text.to_string());
         }
@@ -866,10 +947,11 @@ impl DiscordAdapter {
 
         let mut form = reqwest::multipart::Form::new().part("files[0]", part);
 
-        if let Some(cap) = caption {
-            let payload = serde_json::json!({ "content": cap });
-            form = form.text("payload_json", payload.to_string());
-        }
+        let payload = with_default_allowed_mentions(match caption {
+            Some(cap) => serde_json::json!({ "content": cap }),
+            None => serde_json::json!({}),
+        });
+        form = form.text("payload_json", payload.to_string());
 
         let resp = self
             .client
@@ -1677,6 +1759,50 @@ mod tests {
         let blank_metadata = DiscordSendMetadata::with_thread_id("   ");
         assert_eq!(blank_metadata.target_channel_id("123"), "123");
         assert_eq!(target_channel_id_for_metadata("123", None), "123");
+    }
+
+    #[test]
+    fn allowed_mentions_safe_defaults_block_broad_pings() {
+        let mentions = discord_allowed_mentions_from_lookup(|_| None);
+        assert_eq!(mentions.parse, vec!["users".to_string()]);
+        assert!(mentions.replied_user);
+
+        let body = with_allowed_mentions(serde_json::json!({ "content": "hello" }), mentions);
+        assert_eq!(
+            body["allowed_mentions"],
+            serde_json::json!({ "parse": ["users"], "replied_user": true })
+        );
+    }
+
+    #[test]
+    fn allowed_mentions_env_style_knobs_parse_like_upstream() {
+        let mentions = discord_allowed_mentions_from_lookup(|name| match name {
+            DISCORD_ALLOW_MENTION_EVERYONE_ENV => Some(" true ".to_string()),
+            DISCORD_ALLOW_MENTION_ROLES_ENV => Some("YES".to_string()),
+            DISCORD_ALLOW_MENTION_USERS_ENV => Some("false".to_string()),
+            DISCORD_ALLOW_MENTION_REPLIED_USER_ENV => Some("0".to_string()),
+            _ => None,
+        });
+
+        assert_eq!(
+            mentions,
+            DiscordAllowedMentions::from_flags(true, true, false, false)
+        );
+    }
+
+    #[test]
+    fn allowed_mentions_boolean_parser_falls_back_for_empty_or_unknown_values() {
+        for raw in ["true", "True", "1", "yes", "on", " true "] {
+            assert!(parse_allowed_mention_bool(raw, false));
+        }
+        for raw in ["false", "False", "0", "no", "off"] {
+            assert!(!parse_allowed_mention_bool(raw, true));
+        }
+
+        assert!(!parse_allowed_mention_bool("", false));
+        assert!(parse_allowed_mention_bool("", true));
+        assert!(!parse_allowed_mention_bool("garbage", false));
+        assert!(parse_allowed_mention_bool("garbage", true));
     }
 
     #[test]
