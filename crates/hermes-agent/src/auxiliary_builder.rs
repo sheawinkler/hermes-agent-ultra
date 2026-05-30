@@ -14,6 +14,9 @@ use hermes_intelligence::auxiliary::{
 };
 
 use crate::provider::{AnthropicProvider, GenericProvider, OpenRouterProvider};
+use crate::providers_extra::{
+    CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
+};
 
 /// Default auxiliary models per source. Mirrors the Python
 /// `_API_KEY_PROVIDER_AUX_MODELS` table — chosen to be cheap and fast.
@@ -27,12 +30,80 @@ mod default_models {
     pub const GEMINI: &str = "gemini-3-flash-preview";
 }
 
+mod default_base_urls {
+    pub const OPENAI: &str = "https://api.openai.com/v1";
+    pub const OPENAI_CODEX: &str = "https://chatgpt.com/backend-api/codex";
+    pub const DEEPSEEK: &str = "https://api.deepseek.com/v1";
+    pub const GEMINI: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
+    pub const XAI: &str = "https://api.x.ai/v1";
+    pub const XIAOMI: &str = "https://api.xiaomimimo.com/v1";
+    pub const HUGGINGFACE: &str = "https://router.huggingface.co/v1";
+    pub const ZAI: &str = "https://api.z.ai/api/paas/v4";
+    pub const NOVITA: &str = "https://api.novita.ai/openai/v1";
+    pub const NVIDIA: &str = "https://integrate.api.nvidia.com/v1";
+    pub const ARCEE: &str = "https://api.arcee.ai/api/v1";
+    pub const OLLAMA_LOCAL: &str = "http://127.0.0.1:11434/v1";
+    pub const LLAMA_CPP: &str = "http://127.0.0.1:8080/v1";
+    pub const VLLM: &str = "http://127.0.0.1:8000/v1";
+    pub const MLX: &str = "http://127.0.0.1:8080/v1";
+    pub const APPLE_ANE: &str = "http://127.0.0.1:8081/v1";
+    pub const SGLANG: &str = "http://127.0.0.1:30000/v1";
+    pub const TGI: &str = "http://127.0.0.1:8082/v1";
+}
+
 /// Returned by [`build_default_auxiliary_client`] alongside the client so
 /// callers can introspect what was wired (e.g. for `hermes status`).
 #[derive(Debug, Clone)]
 pub struct AuxiliaryWiringSummary {
     pub registered: Vec<String>,
     pub skipped: Vec<String>,
+}
+
+/// Runtime-selected main provider/model to try before the cheap auxiliary chain.
+///
+/// This is the Rust equivalent of upstream's `main_runtime` path: `auto`
+/// auxiliary routing first uses the active chat provider and model when a
+/// working client can be built. Explicit per-task provider/model overrides are
+/// still resolved inside `AuxiliaryClient` and bypass the auto chain.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AuxiliaryMainRuntime {
+    pub provider: Option<String>,
+    pub model: Option<String>,
+    pub base_url: Option<String>,
+    pub api_key: Option<String>,
+    pub api_key_env: Option<String>,
+    pub supports_vision: bool,
+}
+
+impl AuxiliaryMainRuntime {
+    pub fn new(provider: impl Into<String>, model: impl Into<String>) -> Self {
+        Self {
+            provider: Some(provider.into()),
+            model: Some(model.into()),
+            supports_vision: true,
+            ..Default::default()
+        }
+    }
+
+    pub fn with_base_url(mut self, base_url: impl Into<String>) -> Self {
+        self.base_url = Some(base_url.into());
+        self
+    }
+
+    pub fn with_api_key(mut self, api_key: impl Into<String>) -> Self {
+        self.api_key = Some(api_key.into());
+        self
+    }
+
+    pub fn with_api_key_env(mut self, env_var: impl Into<String>) -> Self {
+        self.api_key_env = Some(env_var.into());
+        self
+    }
+
+    pub fn with_supports_vision(mut self, supports_vision: bool) -> Self {
+        self.supports_vision = supports_vision;
+        self
+    }
 }
 
 /// Build an [`AuxiliaryClient`] from environment variables.
@@ -50,13 +121,27 @@ pub struct AuxiliaryWiringSummary {
 pub fn build_default_auxiliary_client(
     config: AuxiliaryConfig,
 ) -> (AuxiliaryClient, AuxiliaryWiringSummary) {
+    build_auxiliary_client_with_main_runtime(config, None)
+}
+
+pub fn build_auxiliary_client_with_main_runtime(
+    config: AuxiliaryConfig,
+    main_runtime: Option<AuxiliaryMainRuntime>,
+) -> (AuxiliaryClient, AuxiliaryWiringSummary) {
     let mut summary = AuxiliaryWiringSummary {
         registered: Vec::new(),
         skipped: Vec::new(),
     };
     let mut builder = AuxiliaryClient::builder().config(config);
+    let main_label = main_runtime
+        .as_ref()
+        .and_then(|main| register_main_runtime(&mut builder, &mut summary, main));
 
-    if let Ok(key) = std::env::var("OPENROUTER_API_KEY") {
+    if main_label.as_deref() == Some("openrouter") {
+        summary
+            .skipped
+            .push("openrouter (covered by main runtime)".into());
+    } else if let Ok(key) = std::env::var("OPENROUTER_API_KEY") {
         if !key.trim().is_empty() {
             let provider: Arc<dyn LlmProvider> = Arc::new(
                 OpenRouterProvider::new(key.trim())
@@ -64,11 +149,14 @@ pub fn build_default_auxiliary_client(
                     .with_http_referer("https://hermes-agent.nousresearch.com")
                     .with_x_title("Hermes Agent"),
             );
-            builder = builder.add_candidate(ProviderCandidate::new(
-                AuxiliarySource::OpenRouter,
-                default_models::OPENROUTER,
-                provider,
-            ));
+            add_candidate(
+                &mut builder,
+                ProviderCandidate::new(
+                    AuxiliarySource::OpenRouter,
+                    default_models::OPENROUTER,
+                    provider,
+                ),
+            );
             summary.registered.push("openrouter".into());
         } else {
             summary.skipped.push("openrouter (empty)".into());
@@ -81,7 +169,11 @@ pub fn build_default_auxiliary_client(
     // legacy OPENAI_API_KEY + custom base URLs). We mark it `Custom` rather
     // than the OpenAI source so that the chain dedup logic doesn't collide
     // with explicitly-named providers.
-    if let Some(key) = std::env::var("HERMES_OPENAI_API_KEY")
+    if main_label.as_deref() == Some("custom") {
+        summary
+            .skipped
+            .push("custom (covered by main runtime)".into());
+    } else if let Some(key) = std::env::var("HERMES_OPENAI_API_KEY")
         .ok()
         .filter(|s| !s.trim().is_empty())
         .or_else(|| std::env::var("OPENAI_API_KEY").ok())
@@ -97,11 +189,10 @@ pub fn build_default_auxiliary_client(
                 .unwrap_or_else(|| default_models::OPENAI.into());
             let provider: Arc<dyn LlmProvider> =
                 Arc::new(GenericProvider::new(base_url, key.trim(), model.clone()));
-            builder = builder.add_candidate(ProviderCandidate::new(
-                AuxiliarySource::Custom,
-                model,
-                provider,
-            ));
+            add_candidate(
+                &mut builder,
+                ProviderCandidate::new(AuxiliarySource::Custom, model, provider),
+            );
             summary.registered.push("custom".into());
         } else {
             summary.skipped.push("custom (empty key)".into());
@@ -110,15 +201,22 @@ pub fn build_default_auxiliary_client(
         summary.skipped.push("custom (no key)".into());
     }
 
-    if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
+    if main_label.as_deref() == Some("anthropic") {
+        summary
+            .skipped
+            .push("anthropic (covered by main runtime)".into());
+    } else if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
         if !key.trim().is_empty() {
             let provider: Arc<dyn LlmProvider> =
                 Arc::new(AnthropicProvider::new(key.trim()).with_model(default_models::ANTHROPIC));
-            builder = builder.add_candidate(ProviderCandidate::new(
-                AuxiliarySource::Anthropic,
-                default_models::ANTHROPIC,
-                provider,
-            ));
+            add_candidate(
+                &mut builder,
+                ProviderCandidate::new(
+                    AuxiliarySource::Anthropic,
+                    default_models::ANTHROPIC,
+                    provider,
+                ),
+            );
             summary.registered.push("anthropic".into());
         }
     } else {
@@ -132,6 +230,7 @@ pub fn build_default_auxiliary_client(
         "zai",
         "https://api.z.ai/api/coding/paas/v4",
         default_models::ZAI,
+        main_label.as_deref(),
     );
     register_direct_key(
         &mut builder,
@@ -140,6 +239,7 @@ pub fn build_default_auxiliary_client(
         "kimi",
         "https://api.moonshot.ai/v1",
         default_models::KIMI,
+        main_label.as_deref(),
     );
     register_direct_key(
         &mut builder,
@@ -148,6 +248,7 @@ pub fn build_default_auxiliary_client(
         "minimax",
         "https://api.minimax.io/v1",
         default_models::MINIMAX,
+        main_label.as_deref(),
     );
     register_direct_key(
         &mut builder,
@@ -156,10 +257,252 @@ pub fn build_default_auxiliary_client(
         "gemini",
         "https://generativelanguage.googleapis.com/v1beta/openai",
         default_models::GEMINI,
+        main_label.as_deref(),
     );
 
     let client = builder.build();
     (client, summary)
+}
+
+fn add_candidate(
+    builder: &mut hermes_intelligence::auxiliary::AuxiliaryClientBuilder,
+    candidate: ProviderCandidate,
+) {
+    let temp_builder = std::mem::take(builder);
+    *builder = temp_builder.add_candidate(candidate);
+}
+
+fn register_main_runtime(
+    builder: &mut hermes_intelligence::auxiliary::AuxiliaryClientBuilder,
+    summary: &mut AuxiliaryWiringSummary,
+    main: &AuxiliaryMainRuntime,
+) -> Option<String> {
+    let provider = main.provider.as_deref().map(str::trim).unwrap_or_default();
+    let model = main.model.as_deref().map(str::trim).unwrap_or_default();
+    if provider.is_empty() || model.is_empty() {
+        summary
+            .skipped
+            .push("main runtime (missing provider/model)".into());
+        return None;
+    }
+
+    let label = canonical_provider_label(provider);
+    let Some(candidate) = build_main_runtime_candidate(&label, model, main) else {
+        summary
+            .skipped
+            .push(format!("main:{label} (no working client)"));
+        return None;
+    };
+
+    add_candidate(builder, candidate);
+    summary.registered.push(format!("main:{label}"));
+    Some(label)
+}
+
+fn build_main_runtime_candidate(
+    label: &str,
+    model: &str,
+    main: &AuxiliaryMainRuntime,
+) -> Option<ProviderCandidate> {
+    let base_url = main
+        .base_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string);
+    let api_key = resolve_main_api_key(main, label).or_else(|| {
+        provider_allows_no_api_key(label, base_url.as_deref()).then(|| "local-no-key".to_string())
+    })?;
+
+    let provider: Arc<dyn LlmProvider> = match label {
+        "openrouter" => Arc::new(
+            OpenRouterProvider::new(api_key)
+                .with_model(model)
+                .with_http_referer("https://hermes-agent.nousresearch.com")
+                .with_x_title("Hermes Agent"),
+        ),
+        "anthropic" => {
+            let mut provider = AnthropicProvider::new(api_key).with_model(model);
+            if let Some(url) = base_url {
+                provider = provider.with_base_url(url);
+            }
+            Arc::new(provider)
+        }
+        "nous" => {
+            let mut provider = NousProvider::new(api_key).with_model(model);
+            if let Some(url) = base_url {
+                provider = provider.with_base_url(url);
+            }
+            Arc::new(provider)
+        }
+        "qwen" | "qwen-oauth" => {
+            let mut provider = QwenProvider::new(api_key).with_model(model);
+            if let Some(url) = base_url {
+                provider = provider.with_base_url(url);
+            }
+            Arc::new(provider)
+        }
+        "kimi" | "moonshot" => {
+            let mut provider = KimiProvider::new(api_key).with_model(model);
+            if let Some(url) = base_url {
+                provider = provider.with_base_url(url);
+            }
+            Arc::new(provider)
+        }
+        "minimax" => {
+            let mut provider = MiniMaxProvider::new(api_key).with_model(model);
+            if let Some(url) = base_url {
+                provider = provider.with_base_url(url);
+            }
+            Arc::new(provider)
+        }
+        "copilot" | "copilot-acp" => Arc::new(
+            CopilotProvider::new(
+                base_url.unwrap_or_else(|| "https://api.githubcopilot.com".to_string()),
+                api_key,
+            )
+            .with_model(model),
+        ),
+        _ => {
+            let url = base_url.or_else(|| default_base_url(label).map(str::to_string))?;
+            Arc::new(GenericProvider::new(url, api_key, model))
+        }
+    };
+
+    Some(
+        ProviderCandidate::new(source_for_label(label), model, provider)
+            .with_supports_vision(main.supports_vision),
+    )
+}
+
+fn canonical_provider_label(provider: &str) -> String {
+    match provider.trim().to_ascii_lowercase().as_str() {
+        "claude" | "claude-code" => "anthropic".to_string(),
+        "github" | "github-copilot" | "github-models" => "copilot".to_string(),
+        "moonshot" | "kimi-coding" | "kimi-coding-cn" => "kimi".to_string(),
+        "alibaba" | "alibaba-coding-plan" => "qwen".to_string(),
+        "gemini-cli" | "gemini-oauth" => "google-gemini-cli".to_string(),
+        "ollama" => "ollama-local".to_string(),
+        "llama.cpp" | "llamacpp" => "llama-cpp".to_string(),
+        "ollvm" | "llvm" => "vllm".to_string(),
+        "mlx-lm" | "apple-mlx" => "mlx".to_string(),
+        "ane" | "apple-neural-engine" | "neural-engine" => "apple-ane".to_string(),
+        "openai-codex" | "codex" => "openai-codex".to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn source_for_label(label: &str) -> AuxiliarySource {
+    match label {
+        "openrouter" => AuxiliarySource::OpenRouter,
+        "nous" => AuxiliarySource::Nous,
+        "custom" => AuxiliarySource::Custom,
+        "anthropic" => AuxiliarySource::Anthropic,
+        other => AuxiliarySource::DirectKey(other.to_string()),
+    }
+}
+
+fn resolve_main_api_key(main: &AuxiliaryMainRuntime, label: &str) -> Option<String> {
+    main.api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .or_else(|| {
+            main.api_key_env
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .and_then(|env_var| std::env::var(env_var).ok())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
+        .or_else(|| provider_api_key_from_env(label))
+}
+
+fn provider_api_key_from_env(label: &str) -> Option<String> {
+    let env_vars: &[&str] = match label {
+        "openai" => &["HERMES_OPENAI_API_KEY", "OPENAI_API_KEY"],
+        "openai-codex" => &["HERMES_OPENAI_CODEX_API_KEY"],
+        "openrouter" => &["OPENROUTER_API_KEY"],
+        "anthropic" => &[
+            "ANTHROPIC_API_KEY",
+            "ANTHROPIC_TOKEN",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+        ],
+        "nous" => &["NOUS_API_KEY"],
+        "qwen" | "qwen-oauth" => &["DASHSCOPE_API_KEY"],
+        "kimi" | "moonshot" => &[
+            "KIMI_API_KEY",
+            "KIMI_CODING_API_KEY",
+            "MOONSHOT_API_KEY",
+            "KIMI_CN_API_KEY",
+        ],
+        "minimax" => &["MINIMAX_API_KEY", "MINIMAX_CN_API_KEY"],
+        "copilot" | "copilot-acp" => &["GITHUB_COPILOT_TOKEN", "COPILOT_GITHUB_TOKEN"],
+        "deepseek" => &["DEEPSEEK_API_KEY"],
+        "gemini" | "google" => &["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+        "xai" => &["XAI_API_KEY"],
+        "xiaomi" => &["XIAOMI_API_KEY"],
+        "huggingface" => &["HF_TOKEN", "HUGGINGFACE_API_KEY"],
+        "zai" => &["GLM_API_KEY", "ZAI_API_KEY", "Z_AI_API_KEY"],
+        "novita" => &["NOVITA_API_KEY"],
+        "nvidia" => &["NVIDIA_API_KEY"],
+        "arcee" => &["ARCEEAI_API_KEY", "ARCEE_API_KEY"],
+        "ollama-cloud" => &["OLLAMA_API_KEY"],
+        "ollama-local" => &["OLLAMA_LOCAL_API_KEY", "OLLAMA_API_KEY"],
+        "llama-cpp" => &["LLAMA_CPP_API_KEY"],
+        "vllm" => &["VLLM_API_KEY"],
+        "mlx" => &["MLX_API_KEY"],
+        "apple-ane" => &["APPLE_ANE_API_KEY"],
+        "sglang" => &["SGLANG_API_KEY"],
+        "tgi" => &["TGI_API_KEY", "HUGGINGFACE_API_KEY"],
+        _ => &[],
+    };
+    env_vars.iter().find_map(|name| {
+        std::env::var(name)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    })
+}
+
+fn default_base_url(label: &str) -> Option<&'static str> {
+    match label {
+        "openai" | "custom" => Some(default_base_urls::OPENAI),
+        "openai-codex" => Some(default_base_urls::OPENAI_CODEX),
+        "deepseek" => Some(default_base_urls::DEEPSEEK),
+        "gemini" | "google" => Some(default_base_urls::GEMINI),
+        "xai" => Some(default_base_urls::XAI),
+        "xiaomi" => Some(default_base_urls::XIAOMI),
+        "huggingface" => Some(default_base_urls::HUGGINGFACE),
+        "zai" => Some(default_base_urls::ZAI),
+        "novita" => Some(default_base_urls::NOVITA),
+        "nvidia" => Some(default_base_urls::NVIDIA),
+        "arcee" => Some(default_base_urls::ARCEE),
+        "ollama-local" => Some(default_base_urls::OLLAMA_LOCAL),
+        "llama-cpp" => Some(default_base_urls::LLAMA_CPP),
+        "vllm" => Some(default_base_urls::VLLM),
+        "mlx" => Some(default_base_urls::MLX),
+        "apple-ane" => Some(default_base_urls::APPLE_ANE),
+        "sglang" => Some(default_base_urls::SGLANG),
+        "tgi" => Some(default_base_urls::TGI),
+        _ => None,
+    }
+}
+
+fn provider_allows_no_api_key(label: &str, base_url: Option<&str>) -> bool {
+    matches!(
+        label,
+        "ollama-local" | "llama-cpp" | "vllm" | "mlx" | "apple-ane" | "sglang" | "tgi"
+    ) || base_url.is_some_and(is_loopback_base_url)
+}
+
+fn is_loopback_base_url(base_url: &str) -> bool {
+    let trimmed = base_url.trim().to_ascii_lowercase();
+    trimmed.starts_with("http://127.")
+        || trimmed.starts_with("http://localhost")
+        || trimmed.starts_with("http://[::1]")
 }
 
 fn register_direct_key(
@@ -169,7 +512,15 @@ fn register_direct_key(
     label: &str,
     base_url: &str,
     default_model: &str,
+    skip_label: Option<&str>,
 ) {
+    if skip_label == Some(label) {
+        summary
+            .skipped
+            .push(format!("{label} (covered by main runtime)"));
+        return;
+    }
+
     let owned;
     let key = match std::env::var(env_var) {
         Ok(v) if !v.trim().is_empty() => {
@@ -183,12 +534,14 @@ fn register_direct_key(
     };
     let provider: Arc<dyn LlmProvider> =
         Arc::new(GenericProvider::new(base_url, key, default_model));
-    let temp_builder = std::mem::take(builder);
-    *builder = temp_builder.add_candidate(ProviderCandidate::new(
-        AuxiliarySource::DirectKey(label.to_string()),
-        default_model,
-        provider,
-    ));
+    add_candidate(
+        builder,
+        ProviderCandidate::new(
+            AuxiliarySource::DirectKey(label.to_string()),
+            default_model,
+            provider,
+        ),
+    );
     summary.registered.push(label.to_string());
 }
 
@@ -203,10 +556,26 @@ mod tests {
         "OPENAI_BASE_URL",
         "OPENAI_AUXILIARY_MODEL",
         "ANTHROPIC_API_KEY",
+        "ANTHROPIC_TOKEN",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "NOUS_API_KEY",
+        "DEEPSEEK_API_KEY",
+        "DASHSCOPE_API_KEY",
+        "GITHUB_COPILOT_TOKEN",
+        "COPILOT_GITHUB_TOKEN",
+        "XIAOMI_API_KEY",
+        "XAI_API_KEY",
+        "HF_TOKEN",
         "ZAI_API_KEY",
+        "GLM_API_KEY",
         "KIMI_API_KEY",
+        "KIMI_CODING_API_KEY",
+        "MOONSHOT_API_KEY",
+        "KIMI_CN_API_KEY",
         "MINIMAX_API_KEY",
+        "MINIMAX_CN_API_KEY",
         "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
     ];
 
     /// Save current env, then clear; restored when the guard drops.
@@ -260,7 +629,69 @@ mod tests {
         }
         std::env::remove_var("OPENROUTER_API_KEY");
 
-        // Scenario 3: full chain, deterministic order.
+        // Scenario 3: main OpenRouter runtime wins over the cheap OpenRouter default.
+        std::env::set_var("OPENROUTER_API_KEY", "sk-main-or");
+        {
+            let (client, summary) = build_auxiliary_client_with_main_runtime(
+                AuxiliaryConfig::default(),
+                Some(AuxiliaryMainRuntime::new(
+                    "openrouter",
+                    "anthropic/claude-sonnet-4.6",
+                )),
+            );
+            assert_eq!(client.chain_len(), 1);
+            assert_eq!(client.chain_labels(), vec!["openrouter"]);
+            assert_eq!(
+                client.chain_entries(),
+                vec![(
+                    "openrouter".to_string(),
+                    "anthropic/claude-sonnet-4.6".to_string(),
+                    true,
+                )]
+            );
+            assert_eq!(summary.registered, vec!["main:openrouter"]);
+            assert!(summary
+                .skipped
+                .contains(&"openrouter (covered by main runtime)".to_string()));
+        }
+        std::env::remove_var("OPENROUTER_API_KEY");
+
+        // Scenario 4: if main cannot build a client, the cheap chain is used.
+        std::env::set_var("OPENROUTER_API_KEY", "sk-fallback-or");
+        {
+            let (client, summary) = build_auxiliary_client_with_main_runtime(
+                AuxiliaryConfig::default(),
+                Some(AuxiliaryMainRuntime::new("anthropic", "claude-opus-4-6")),
+            );
+            assert_eq!(client.chain_labels(), vec!["openrouter"]);
+            assert!(summary
+                .skipped
+                .contains(&"main:anthropic (no working client)".to_string()));
+        }
+        std::env::remove_var("OPENROUTER_API_KEY");
+
+        // Scenario 5: non-aggregator main providers also use the main model first.
+        std::env::set_var("DEEPSEEK_API_KEY", "sk-deepseek");
+        std::env::set_var("OPENROUTER_API_KEY", "sk-or-fallback");
+        {
+            let (client, summary) = build_auxiliary_client_with_main_runtime(
+                AuxiliaryConfig::default(),
+                Some(
+                    AuxiliaryMainRuntime::new("deepseek", "deepseek-chat")
+                        .with_supports_vision(false),
+                ),
+            );
+            assert_eq!(client.chain_labels(), vec!["deepseek", "openrouter"]);
+            assert_eq!(
+                client.chain_entries()[0],
+                ("deepseek".to_string(), "deepseek-chat".to_string(), false,)
+            );
+            assert_eq!(summary.registered[0], "main:deepseek");
+        }
+        std::env::remove_var("DEEPSEEK_API_KEY");
+        std::env::remove_var("OPENROUTER_API_KEY");
+
+        // Scenario 6: full chain, deterministic order.
         std::env::set_var("OPENROUTER_API_KEY", "sk-or");
         std::env::set_var("HERMES_OPENAI_API_KEY", "sk-hermes-oa");
         std::env::set_var("OPENAI_API_KEY", "sk-oa-legacy");

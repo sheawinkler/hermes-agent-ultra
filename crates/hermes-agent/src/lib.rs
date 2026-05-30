@@ -51,7 +51,10 @@ pub use budget::{check_aggregate_budget, enforce_budget, truncate_result};
 
 // Re-export LLM providers
 pub use api_bridge::CodexProvider;
-pub use auxiliary_builder::{build_default_auxiliary_client, AuxiliaryWiringSummary};
+pub use auxiliary_builder::{
+    build_auxiliary_client_with_main_runtime, build_default_auxiliary_client, AuxiliaryMainRuntime,
+    AuxiliaryWiringSummary,
+};
 pub use provider::{AnthropicProvider, GenericProvider, OpenAiProvider, OpenRouterProvider};
 pub use providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,

@@ -173,6 +173,11 @@ impl AuxiliaryClient {
         self.base_chain.labels()
     }
 
+    /// Provider labels, default models, and vision capability in auto-detect order.
+    pub fn chain_entries(&self) -> Vec<(String, String, bool)> {
+        self.base_chain.entries()
+    }
+
     /// Override the loaded config (mostly useful for tests).
     pub fn set_config(&mut self, config: AuxiliaryConfig) {
         self.config = config;
@@ -676,9 +681,11 @@ mod tests {
             .build();
 
         let req = AuxiliaryRequest::new(AuxiliaryTask::Title, vec![user_msg("h")])
-            .with_provider("anthropic");
+            .with_provider("anthropic")
+            .with_model("explicit-anthropic-model");
         let resp = client.call(req).await.unwrap();
         assert_eq!(resp.provider_label, "anthropic");
+        assert_eq!(resp.model, "explicit-anthropic-model");
         assert_eq!(p1.call_count(), 0);
         assert_eq!(p2.call_count(), 1);
     }

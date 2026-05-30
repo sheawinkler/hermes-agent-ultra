@@ -182,6 +182,13 @@ impl ProviderChain {
     pub fn labels(&self) -> Vec<String> {
         self.candidates.iter().map(|c| c.label()).collect()
     }
+
+    pub fn entries(&self) -> Vec<(String, String, bool)> {
+        self.candidates
+            .iter()
+            .map(|c| (c.label(), c.default_model.clone(), c.supports_vision))
+            .collect()
+    }
 }
 
 #[cfg(test)]
