@@ -801,7 +801,7 @@ mod tests {
     impl EnvGuard {
         fn set(key: &'static str, value: &str) -> Self {
             let original = std::env::var_os(key);
-            std::env::set_var(key, value);
+            hermes_core::test_env::set_var(key, value);
             Self { key, original }
         }
     }
@@ -809,8 +809,8 @@ mod tests {
     impl Drop for EnvGuard {
         fn drop(&mut self) {
             match &self.original {
-                Some(v) => std::env::set_var(self.key, v),
-                None => std::env::remove_var(self.key),
+                Some(v) => hermes_core::test_env::set_var(self.key, v),
+                None => hermes_core::test_env::remove_var(self.key),
             }
         }
     }

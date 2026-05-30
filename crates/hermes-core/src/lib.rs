@@ -11,6 +11,8 @@ pub mod tool_schema;
 pub mod traits;
 pub mod types;
 
+pub mod test_env;
+
 #[cfg(test)]
 pub mod test_generators;
 

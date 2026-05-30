@@ -386,7 +386,7 @@ mod tests {
     async fn test_piper_requires_model_hint() {
         let backend = MultiTtsBackend::new();
         let _guard = EnvVarGuard::new("PIPER_MODEL");
-        std::env::remove_var("PIPER_MODEL");
+        hermes_core::test_env::remove_var("PIPER_MODEL");
         let err = backend
             .synthesize("hello", None, Some("piper"))
             .await
@@ -411,9 +411,9 @@ mod tests {
     impl Drop for EnvVarGuard {
         fn drop(&mut self) {
             if let Some(v) = &self.old {
-                std::env::set_var(self.key, v);
+                hermes_core::test_env::set_var(self.key, v);
             } else {
-                std::env::remove_var(self.key);
+                hermes_core::test_env::remove_var(self.key);
             }
         }
     }

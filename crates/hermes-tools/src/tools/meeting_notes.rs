@@ -1023,7 +1023,7 @@ mod tests {
 
     #[test]
     fn chunk_summary_prompt_contains_text() {
-        let p = chunk_summary_prompt("test content");
+        let p = chunk_summary_prompt("test content", None);
         assert!(p.contains("test content"));
         assert!(p.contains("JSON"));
     }

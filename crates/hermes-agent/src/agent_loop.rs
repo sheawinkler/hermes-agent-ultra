@@ -11596,13 +11596,13 @@ mod tests {
 
     #[test]
     fn delegation_spawning_paused_honors_env_toggle() {
-        std::env::remove_var("HERMES_DELEGATION_PAUSED");
+        hermes_core::test_env::remove_var("HERMES_DELEGATION_PAUSED");
         assert!(!delegation_spawning_paused());
-        std::env::set_var("HERMES_DELEGATION_PAUSED", "1");
+        hermes_core::test_env::set_var("HERMES_DELEGATION_PAUSED", "1");
         assert!(delegation_spawning_paused());
-        std::env::set_var("HERMES_DELEGATION_PAUSED", "true");
+        hermes_core::test_env::set_var("HERMES_DELEGATION_PAUSED", "true");
         assert!(delegation_spawning_paused());
-        std::env::set_var("HERMES_DELEGATION_PAUSED", "0");
+        hermes_core::test_env::set_var("HERMES_DELEGATION_PAUSED", "0");
         assert!(!delegation_spawning_paused());
     }
 
@@ -11705,7 +11705,7 @@ mod tests {
             preferred_tool_payload_fallback_model("openrouter", "openai/gpt-5.5"),
             None
         );
-        std::env::set_var(
+        hermes_core::test_env::set_var(
             "HERMES_TOOL_PAYLOAD_FALLBACK_MODEL",
             "nousresearch/hermes-4-405b",
         );
@@ -11713,7 +11713,7 @@ mod tests {
             preferred_tool_payload_fallback_model("nous", "openai/gpt-5.5"),
             Some("nousresearch/hermes-4-405b".to_string())
         );
-        std::env::remove_var("HERMES_TOOL_PAYLOAD_FALLBACK_MODEL");
+        hermes_core::test_env::remove_var("HERMES_TOOL_PAYLOAD_FALLBACK_MODEL");
     }
 
     #[test]
@@ -11843,7 +11843,7 @@ mod tests {
         }
 
         let prev = std::env::var("HERMES_HOOK_CONTEXT_SPILL_CHARS").ok();
-        std::env::set_var("HERMES_HOOK_CONTEXT_SPILL_CHARS", "1024");
+        hermes_core::test_env::set_var("HERMES_HOOK_CONTEXT_SPILL_CHARS", "1024");
         let tmp = tempfile::tempdir().expect("tempdir");
         let cfg = AgentConfig {
             hermes_home: Some(tmp.path().display().to_string()),
@@ -11864,9 +11864,9 @@ mod tests {
             "small payload must not spill"
         );
         if let Some(v) = prev {
-            std::env::set_var("HERMES_HOOK_CONTEXT_SPILL_CHARS", v);
+            hermes_core::test_env::set_var("HERMES_HOOK_CONTEXT_SPILL_CHARS", v);
         } else {
-            std::env::remove_var("HERMES_HOOK_CONTEXT_SPILL_CHARS");
+            hermes_core::test_env::remove_var("HERMES_HOOK_CONTEXT_SPILL_CHARS");
         }
     }
 
@@ -15045,8 +15045,8 @@ mod tests {
         );
 
         // Set conflicting env values - config must win.
-        std::env::set_var("HERMES_QWEN_OAUTH_TOKEN_URL", "https://env.example.com/tok");
-        std::env::set_var("HERMES_QWEN_OAUTH_CLIENT_ID", "env-client");
+        hermes_core::test_env::set_var("HERMES_QWEN_OAUTH_TOKEN_URL", "https://env.example.com/tok");
+        hermes_core::test_env::set_var("HERMES_QWEN_OAUTH_CLIENT_ID", "env-client");
 
         let (token_url, client_id) = agent.oauth_refresh_config("qwen-oauth").unwrap();
         assert_eq!(token_url, "https://cfg.example.com/token");
@@ -15057,8 +15057,8 @@ mod tests {
         assert_eq!(token_url, "https://cfg.example.com/custom-token");
         assert_eq!(client_id, "custom-client");
 
-        std::env::remove_var("HERMES_QWEN_OAUTH_TOKEN_URL");
-        std::env::remove_var("HERMES_QWEN_OAUTH_CLIENT_ID");
+        hermes_core::test_env::remove_var("HERMES_QWEN_OAUTH_TOKEN_URL");
+        hermes_core::test_env::remove_var("HERMES_QWEN_OAUTH_CLIENT_ID");
     }
 
     #[test]
@@ -15121,10 +15121,10 @@ mod tests {
             Arc::new(DummyProvider),
         );
 
-        std::env::set_var("MY_FALLBACK_KEY", "env-secret");
+        hermes_core::test_env::set_var("MY_FALLBACK_KEY", "env-secret");
         let resolved = agent.resolve_runtime_api_key("custom", None, None);
         assert_eq!(resolved.as_deref(), Some("env-secret"));
-        std::env::remove_var("MY_FALLBACK_KEY");
+        hermes_core::test_env::remove_var("MY_FALLBACK_KEY");
     }
 
     #[test]
@@ -15169,25 +15169,25 @@ mod tests {
             Arc::new(DummyProvider),
         );
 
-        std::env::remove_var("ANTHROPIC_API_KEY");
-        std::env::remove_var("ANTHROPIC_TOKEN");
-        std::env::set_var("CLAUDE_CODE_OAUTH_TOKEN", "claude-code-token");
+        hermes_core::test_env::remove_var("ANTHROPIC_API_KEY");
+        hermes_core::test_env::remove_var("ANTHROPIC_TOKEN");
+        hermes_core::test_env::set_var("CLAUDE_CODE_OAUTH_TOKEN", "claude-code-token");
         assert_eq!(
             agent
                 .resolve_runtime_api_key("anthropic", None, None)
                 .as_deref(),
             Some("claude-code-token")
         );
-        std::env::remove_var("CLAUDE_CODE_OAUTH_TOKEN");
+        hermes_core::test_env::remove_var("CLAUDE_CODE_OAUTH_TOKEN");
 
-        std::env::set_var("HERMES_GEMINI_OAUTH_API_KEY", "gemini-oauth-token");
+        hermes_core::test_env::set_var("HERMES_GEMINI_OAUTH_API_KEY", "gemini-oauth-token");
         assert_eq!(
             agent
                 .resolve_runtime_api_key("google-gemini-cli", None, None)
                 .as_deref(),
             Some("gemini-oauth-token")
         );
-        std::env::remove_var("HERMES_GEMINI_OAUTH_API_KEY");
+        hermes_core::test_env::remove_var("HERMES_GEMINI_OAUTH_API_KEY");
     }
 
     #[test]
@@ -15226,8 +15226,8 @@ mod tests {
             }
         }
 
-        std::env::remove_var("HERMES_ANTHROPIC_OAUTH_TOKEN_URL");
-        std::env::remove_var("HERMES_ANTHROPIC_OAUTH_CLIENT_ID");
+        hermes_core::test_env::remove_var("HERMES_ANTHROPIC_OAUTH_TOKEN_URL");
+        hermes_core::test_env::remove_var("HERMES_ANTHROPIC_OAUTH_CLIENT_ID");
         let agent = AgentLoop::new(
             AgentConfig::default(),
             Arc::new(ToolRegistry::new()),
@@ -15274,10 +15274,10 @@ mod tests {
             }
         }
 
-        std::env::remove_var("HERMES_OPENAI_OAUTH_TOKEN_URL");
-        std::env::remove_var("HERMES_OPENAI_OAUTH_CLIENT_ID");
-        std::env::remove_var("HERMES_OPENAI_CODEX_OAUTH_TOKEN_URL");
-        std::env::remove_var("HERMES_OPENAI_CODEX_OAUTH_CLIENT_ID");
+        hermes_core::test_env::remove_var("HERMES_OPENAI_OAUTH_TOKEN_URL");
+        hermes_core::test_env::remove_var("HERMES_OPENAI_OAUTH_CLIENT_ID");
+        hermes_core::test_env::remove_var("HERMES_OPENAI_CODEX_OAUTH_TOKEN_URL");
+        hermes_core::test_env::remove_var("HERMES_OPENAI_CODEX_OAUTH_CLIENT_ID");
         let agent = AgentLoop::new(
             AgentConfig::default(),
             Arc::new(ToolRegistry::new()),
@@ -15324,10 +15324,10 @@ mod tests {
             }
         }
 
-        std::env::remove_var("HERMES_NOUS_OAUTH_TOKEN_URL");
-        std::env::remove_var("HERMES_NOUS_OAUTH_CLIENT_ID");
-        std::env::remove_var("NOUS_PORTAL_BASE_URL");
-        std::env::remove_var("NOUS_CLIENT_ID");
+        hermes_core::test_env::remove_var("HERMES_NOUS_OAUTH_TOKEN_URL");
+        hermes_core::test_env::remove_var("HERMES_NOUS_OAUTH_CLIENT_ID");
+        hermes_core::test_env::remove_var("NOUS_PORTAL_BASE_URL");
+        hermes_core::test_env::remove_var("NOUS_CLIENT_ID");
         let agent = AgentLoop::new(
             AgentConfig::default(),
             Arc::new(ToolRegistry::new()),
@@ -15381,11 +15381,11 @@ mod tests {
             Arc::new(DummyProvider),
         );
 
-        std::env::remove_var("HERMES_STEPFUN_API_KEY");
-        std::env::set_var("STEPFUN_API_KEY", "stepfun-secret");
+        hermes_core::test_env::remove_var("HERMES_STEPFUN_API_KEY");
+        hermes_core::test_env::set_var("STEPFUN_API_KEY", "stepfun-secret");
         let resolved = agent.resolve_runtime_api_key("stepfun", None, None);
         assert_eq!(resolved.as_deref(), Some("stepfun-secret"));
-        std::env::remove_var("STEPFUN_API_KEY");
+        hermes_core::test_env::remove_var("STEPFUN_API_KEY");
 
         let base = agent.resolve_runtime_base_url("stepfun", None);
         assert_eq!(base.as_deref(), Some("https://api.stepfun.ai/step_plan/v1"));
@@ -15545,25 +15545,25 @@ mod tests {
 
     #[test]
     fn test_tool_loop_guard_trips_on_consecutive_full_failure_turns() {
-        std::env::set_var("HERMES_TOOL_LOOP_GUARD_ENABLED", "1");
-        std::env::set_var("HERMES_TOOL_LOOP_GUARD_MAX_CONSEC_ERROR_TURNS", "3");
-        std::env::set_var("HERMES_TOOL_LOOP_GUARD_MIN_FAILED_CALLS", "1");
+        hermes_core::test_env::set_var("HERMES_TOOL_LOOP_GUARD_ENABLED", "1");
+        hermes_core::test_env::set_var("HERMES_TOOL_LOOP_GUARD_MAX_CONSEC_ERROR_TURNS", "3");
+        hermes_core::test_env::set_var("HERMES_TOOL_LOOP_GUARD_MIN_FAILED_CALLS", "1");
         assert!(!should_trip_tool_loop_guard(2, 2, 2));
         assert!(should_trip_tool_loop_guard(3, 2, 2));
-        std::env::remove_var("HERMES_TOOL_LOOP_GUARD_ENABLED");
-        std::env::remove_var("HERMES_TOOL_LOOP_GUARD_MAX_CONSEC_ERROR_TURNS");
-        std::env::remove_var("HERMES_TOOL_LOOP_GUARD_MIN_FAILED_CALLS");
+        hermes_core::test_env::remove_var("HERMES_TOOL_LOOP_GUARD_ENABLED");
+        hermes_core::test_env::remove_var("HERMES_TOOL_LOOP_GUARD_MAX_CONSEC_ERROR_TURNS");
+        hermes_core::test_env::remove_var("HERMES_TOOL_LOOP_GUARD_MIN_FAILED_CALLS");
     }
 
     #[test]
     fn test_tool_loop_guard_ignores_partial_success_turns() {
-        std::env::set_var("HERMES_TOOL_LOOP_GUARD_ENABLED", "1");
-        std::env::set_var("HERMES_TOOL_LOOP_GUARD_MAX_CONSEC_ERROR_TURNS", "2");
-        std::env::set_var("HERMES_TOOL_LOOP_GUARD_MIN_FAILED_CALLS", "1");
+        hermes_core::test_env::set_var("HERMES_TOOL_LOOP_GUARD_ENABLED", "1");
+        hermes_core::test_env::set_var("HERMES_TOOL_LOOP_GUARD_MAX_CONSEC_ERROR_TURNS", "2");
+        hermes_core::test_env::set_var("HERMES_TOOL_LOOP_GUARD_MIN_FAILED_CALLS", "1");
         assert!(!should_trip_tool_loop_guard(4, 3, 2));
-        std::env::remove_var("HERMES_TOOL_LOOP_GUARD_ENABLED");
-        std::env::remove_var("HERMES_TOOL_LOOP_GUARD_MAX_CONSEC_ERROR_TURNS");
-        std::env::remove_var("HERMES_TOOL_LOOP_GUARD_MIN_FAILED_CALLS");
+        hermes_core::test_env::remove_var("HERMES_TOOL_LOOP_GUARD_ENABLED");
+        hermes_core::test_env::remove_var("HERMES_TOOL_LOOP_GUARD_MAX_CONSEC_ERROR_TURNS");
+        hermes_core::test_env::remove_var("HERMES_TOOL_LOOP_GUARD_MIN_FAILED_CALLS");
     }
 
     #[test]
@@ -15732,7 +15732,7 @@ mod tests {
     #[test]
     fn test_repo_review_tool_profile_escape_hatch_disables_filtering() {
         let _guard = env_test_lock();
-        std::env::set_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE", "focus");
+        hermes_core::test_env::set_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE", "focus");
         let msgs = vec![Message::user(
             "review repo at /tmp/app and diagnose issue; allow all tools",
         )];
@@ -15747,13 +15747,13 @@ mod tests {
         let note = apply_repo_review_tool_profile_narrowing(&mut calls, &msgs);
         assert!(note.is_some());
         assert_eq!(calls.len(), 1, "escape hatch should bypass filtering");
-        std::env::remove_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE");
+        hermes_core::test_env::remove_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE");
     }
 
     #[test]
     fn test_repo_review_tool_profile_off_mode_disables_filtering() {
         let _guard = env_test_lock();
-        std::env::set_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE", "off");
+        hermes_core::test_env::set_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE", "off");
         let msgs = vec![Message::user("review repo at /tmp/app and diagnose issue")];
         let mut calls = vec![ToolCall {
             id: "b".to_string(),
@@ -15766,13 +15766,13 @@ mod tests {
         let note = apply_repo_review_tool_profile_narrowing(&mut calls, &msgs);
         assert!(note.is_none());
         assert_eq!(calls.len(), 1, "off mode should keep all calls");
-        std::env::remove_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE");
+        hermes_core::test_env::remove_var("HERMES_REPO_REVIEW_TOOL_PROFILE_MODE");
     }
 
     #[test]
     fn test_repo_review_discovery_policy_trims_repeated_loops() {
         let _guard = env_test_lock();
-        std::env::set_var("HERMES_REPO_REVIEW_DISCOVERY_BUDGET_MODE", "enforce");
+        hermes_core::test_env::set_var("HERMES_REPO_REVIEW_DISCOVERY_BUDGET_MODE", "enforce");
         let msgs = vec![Message::user(
             "inspect repo /tmp/app and review codebase deeply",
         )];
@@ -15815,13 +15815,13 @@ mod tests {
         let note = apply_repo_review_discovery_budget_policy(&mut third, &msgs, &mut state);
         assert!(note.is_some());
         assert!(third.len() < 3);
-        std::env::remove_var("HERMES_REPO_REVIEW_DISCOVERY_BUDGET_MODE");
+        hermes_core::test_env::remove_var("HERMES_REPO_REVIEW_DISCOVERY_BUDGET_MODE");
     }
 
     #[test]
     fn test_repo_review_discovery_policy_advisory_keeps_calls() {
         let _guard = env_test_lock();
-        std::env::set_var("HERMES_REPO_REVIEW_DISCOVERY_BUDGET_MODE", "advisory");
+        hermes_core::test_env::set_var("HERMES_REPO_REVIEW_DISCOVERY_BUDGET_MODE", "advisory");
         let msgs = vec![Message::user(
             "inspect repo /tmp/app and review codebase deeply",
         )];
@@ -15859,7 +15859,7 @@ mod tests {
         let note = apply_repo_review_discovery_budget_policy(&mut third, &msgs, &mut state);
         assert!(note.is_some());
         assert_eq!(third.len(), 3, "advisory mode must not trim tool calls");
-        std::env::remove_var("HERMES_REPO_REVIEW_DISCOVERY_BUDGET_MODE");
+        hermes_core::test_env::remove_var("HERMES_REPO_REVIEW_DISCOVERY_BUDGET_MODE");
     }
 
     #[test]

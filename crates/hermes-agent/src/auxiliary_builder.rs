@@ -458,7 +458,7 @@ mod tests {
             let mut previous = Vec::new();
             for k in KEYS {
                 previous.push((*k, std::env::var(k).ok()));
-                std::env::remove_var(k);
+                hermes_core::test_env::remove_var(k);
             }
             Self { previous }
         }
@@ -468,8 +468,8 @@ mod tests {
         fn drop(&mut self) {
             for (k, v) in self.previous.drain(..) {
                 match v {
-                    Some(val) => std::env::set_var(k, val),
-                    None => std::env::remove_var(k),
+                    Some(val) => hermes_core::test_env::set_var(k, val),
+                    None => hermes_core::test_env::remove_var(k),
                 }
             }
         }
@@ -485,18 +485,18 @@ mod tests {
             assert!(summary.registered.is_empty());
         }
 
-        std::env::set_var("OPENROUTER_API_KEY", "sk-test");
+        hermes_core::test_env::set_var("OPENROUTER_API_KEY", "sk-test");
         {
             let (client, summary) = build_default_auxiliary_client(AuxiliaryConfig::default());
             assert_eq!(client.chain_len(), 1);
             assert_eq!(summary.registered, vec!["openrouter"]);
         }
-        std::env::remove_var("OPENROUTER_API_KEY");
+        hermes_core::test_env::remove_var("OPENROUTER_API_KEY");
 
-        std::env::set_var("OPENROUTER_API_KEY", "sk-or");
-        std::env::set_var("HERMES_OPENAI_API_KEY", "sk-hermes-oa");
-        std::env::set_var("ANTHROPIC_API_KEY", "sk-an");
-        std::env::set_var("ZAI_API_KEY", "z");
+        hermes_core::test_env::set_var("OPENROUTER_API_KEY", "sk-or");
+        hermes_core::test_env::set_var("HERMES_OPENAI_API_KEY", "sk-hermes-oa");
+        hermes_core::test_env::set_var("ANTHROPIC_API_KEY", "sk-an");
+        hermes_core::test_env::set_var("ZAI_API_KEY", "z");
         {
             let (client, _) = build_default_auxiliary_client(AuxiliaryConfig::default());
             assert_eq!(

@@ -2619,7 +2619,8 @@ mod tests {
             &messages,
             Some("https://api.anthropic.com"),
         );
-        let arr = system.expect("system").as_array().expect("system blocks");
+        let binding = system.expect("system");
+        let arr = binding.as_array().expect("system blocks");
         assert_eq!(arr[0]["cache_control"]["type"], "ephemeral");
         assert_eq!(arr[0]["cache_control"]["ttl"], "1h");
     }

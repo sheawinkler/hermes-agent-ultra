@@ -241,14 +241,10 @@ mod tests {
 
     #[test]
     fn python_candidates_include_hermes_python_and_fallbacks() {
-        unsafe {
-            std::env::set_var("HERMES_PYTHON", "/custom/python");
-        }
+        hermes_core::test_env::set_var("HERMES_PYTHON", "/custom/python");
         let cands = python_interpreter_candidates();
         assert_eq!(cands[0], vec!["/custom/python".to_string()]);
         assert!(cands.iter().any(|c| c == &vec!["python3".to_string()]));
-        unsafe {
-            std::env::remove_var("HERMES_PYTHON");
-        }
+        hermes_core::test_env::remove_var("HERMES_PYTHON");
     }
 }

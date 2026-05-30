@@ -242,9 +242,9 @@ mod fal_managed_tests {
             ];
             let original = keys.iter().map(|k| (*k, std::env::var(k).ok())).collect();
             for k in &keys {
-                std::env::remove_var(k);
+                hermes_core::test_env::remove_var(k);
             }
-            std::env::set_var("HERMES_HOME", tmp.path());
+            hermes_core::test_env::set_var("HERMES_HOME", tmp.path());
             Self {
                 _tmp: tmp,
                 original,
@@ -257,8 +257,8 @@ mod fal_managed_tests {
         fn drop(&mut self) {
             for (k, v) in &self.original {
                 match v {
-                    Some(val) => std::env::set_var(k, val),
-                    None => std::env::remove_var(k),
+                    Some(val) => hermes_core::test_env::set_var(k, val),
+                    None => hermes_core::test_env::remove_var(k),
                 }
             }
         }
@@ -267,7 +267,7 @@ mod fal_managed_tests {
     #[test]
     fn from_env_or_managed_prefers_direct_key() {
         let _g = EnvScope::new();
-        std::env::set_var("FAL_KEY", "direct-key");
+        hermes_core::test_env::set_var("FAL_KEY", "direct-key");
         let b = FalImageGenBackend::from_env_or_managed().unwrap();
         assert_eq!(b.transport_label(), "direct");
         assert_eq!(b.model_path(), DEFAULT_FAL_MODEL_PATH);
@@ -276,8 +276,8 @@ mod fal_managed_tests {
     #[test]
     fn from_env_or_managed_falls_back_to_nous_gateway() {
         let _g = EnvScope::new();
-        std::env::set_var("HERMES_ENABLE_NOUS_MANAGED_TOOLS", "1");
-        std::env::set_var("TOOL_GATEWAY_USER_TOKEN", "nous-tok");
+        hermes_core::test_env::set_var("HERMES_ENABLE_NOUS_MANAGED_TOOLS", "1");
+        hermes_core::test_env::set_var("TOOL_GATEWAY_USER_TOKEN", "nous-tok");
         let b = FalImageGenBackend::from_env_or_managed().unwrap();
         assert_eq!(b.transport_label(), "managed");
     }
@@ -328,7 +328,7 @@ mod fal_managed_tests {
     #[test]
     fn empty_direct_key_falls_through_to_error_when_no_managed() {
         let _g = EnvScope::new();
-        std::env::set_var("FAL_KEY", "  ");
+        hermes_core::test_env::set_var("FAL_KEY", "  ");
         let err = FalImageGenBackend::from_env_or_managed().unwrap_err();
         assert!(err.to_string().contains("FAL_KEY"));
     }

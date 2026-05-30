@@ -180,9 +180,9 @@ mod tests {
             all_keys.dedup();
             let original = all_keys.iter().map(|k| (*k, std::env::var(k).ok())).collect();
             for k in &all_keys {
-                std::env::remove_var(k);
+                hermes_core::test_env::remove_var(k);
             }
-            std::env::set_var("HERMES_HOME", tmp.path());
+            hermes_core::test_env::set_var("HERMES_HOME", tmp.path());
             Self {
                 _g: g,
                 _tmp: tmp,
@@ -195,8 +195,8 @@ mod tests {
         fn drop(&mut self) {
             for (k, v) in &self.original {
                 match v {
-                    Some(val) => std::env::set_var(k, val),
-                    None => std::env::remove_var(k),
+                    Some(val) => hermes_core::test_env::set_var(k, val),
+                    None => hermes_core::test_env::remove_var(k),
                 }
             }
         }
@@ -236,8 +236,8 @@ mod tests {
             "HERMES_ENABLE_NOUS_MANAGED_TOOLS",
             "TOOL_GATEWAY_USER_TOKEN",
         ]);
-        std::env::set_var(GATEWAY_URL_ENV, "https://legacy.example.com/");
-        std::env::set_var(GATEWAY_TOKEN_ENV, "legacy-tok");
+        hermes_core::test_env::set_var(GATEWAY_URL_ENV, "https://legacy.example.com/");
+        hermes_core::test_env::set_var(GATEWAY_TOKEN_ENV, "legacy-tok");
         let t = ManagedToolGatewayHandler::resolve_transport(Some("firecrawl")).unwrap();
         assert_eq!(t.base_url, "https://legacy.example.com");
         assert_eq!(t.bearer.as_deref(), Some("legacy-tok"));
@@ -253,8 +253,8 @@ mod tests {
             "TOOL_GATEWAY_USER_TOKEN",
             "TOOL_GATEWAY_DOMAIN",
         ]);
-        std::env::set_var("HERMES_ENABLE_NOUS_MANAGED_TOOLS", "1");
-        std::env::set_var("TOOL_GATEWAY_USER_TOKEN", "vendor-tok");
+        hermes_core::test_env::set_var("HERMES_ENABLE_NOUS_MANAGED_TOOLS", "1");
+        hermes_core::test_env::set_var("TOOL_GATEWAY_USER_TOKEN", "vendor-tok");
         let t = ManagedToolGatewayHandler::resolve_transport(Some("firecrawl")).unwrap();
         assert_eq!(t.base_url, "https://firecrawl-gateway.nousresearch.com");
         assert_eq!(t.bearer.as_deref(), Some("vendor-tok"));

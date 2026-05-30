@@ -80,6 +80,7 @@ pub async fn transcribe_audio_file(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::voice_providers::audio_extension_format;
     use hermes_config::managed_gateway::test_lock;
 
     struct EnvScope {
@@ -104,9 +105,9 @@ mod tests {
             ];
             let original = keys.iter().map(|k| (*k, std::env::var(k).ok())).collect();
             for k in &keys {
-                std::env::remove_var(k);
+                hermes_core::test_env::remove_var(k);
             }
-            std::env::set_var("HERMES_HOME", tmp.path());
+            hermes_core::test_env::set_var("HERMES_HOME", tmp.path());
             Self {
                 _tmp: tmp,
                 original,
@@ -119,8 +120,8 @@ mod tests {
         fn drop(&mut self) {
             for (k, v) in &self.original {
                 match v {
-                    Some(val) => std::env::set_var(k, val),
-                    None => std::env::remove_var(k),
+                    Some(val) => hermes_core::test_env::set_var(k, val),
+                    None => hermes_core::test_env::remove_var(k),
                 }
             }
         }
@@ -151,7 +152,7 @@ mod tests {
     #[tokio::test]
     async fn execute_errors_on_missing_path_param() {
         let _g = EnvScope::new();
-        std::env::set_var("OPENAI_API_KEY", "k");
+        hermes_core::test_env::set_var("OPENAI_API_KEY", "k");
         let h = TranscriptionHandler::new();
         let err = h.execute(json!({})).await.unwrap_err();
         assert!(matches!(err, ToolError::InvalidParams(_)));

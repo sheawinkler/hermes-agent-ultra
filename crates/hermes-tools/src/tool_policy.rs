@@ -1103,9 +1103,9 @@ mod tests {
         let patterns_orig = std::env::var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS").ok();
         let sandbox_orig = std::env::var("HERMES_EXECUTION_SANDBOX_PROFILE").ok();
 
-        std::env::set_var("HERMES_TOOL_POLICY_PRESET", "dev");
-        std::env::remove_var("HERMES_TOOL_POLICY_MODE");
-        std::env::remove_var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS");
+        hermes_core::test_env::set_var("HERMES_TOOL_POLICY_PRESET", "dev");
+        hermes_core::test_env::remove_var("HERMES_TOOL_POLICY_MODE");
+        hermes_core::test_env::remove_var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS");
 
         let dev = ToolPolicyEngine::from_env();
         let decision = dev.evaluate(
@@ -1115,7 +1115,7 @@ mod tests {
         assert!(decision.allow, "dev preset should audit, not enforce deny");
         assert!(decision.audited_only);
 
-        std::env::set_var("HERMES_TOOL_POLICY_PRESET", "strict");
+        hermes_core::test_env::set_var("HERMES_TOOL_POLICY_PRESET", "strict");
         let strict = ToolPolicyEngine::from_env();
         let decision = strict.evaluate(
             "terminal",
@@ -1124,20 +1124,20 @@ mod tests {
         assert!(!decision.allow, "strict preset should enforce deny");
 
         match mode_orig {
-            Some(v) => std::env::set_var("HERMES_TOOL_POLICY_MODE", v),
-            None => std::env::remove_var("HERMES_TOOL_POLICY_MODE"),
+            Some(v) => hermes_core::test_env::set_var("HERMES_TOOL_POLICY_MODE", v),
+            None => hermes_core::test_env::remove_var("HERMES_TOOL_POLICY_MODE"),
         }
         match preset_orig {
-            Some(v) => std::env::set_var("HERMES_TOOL_POLICY_PRESET", v),
-            None => std::env::remove_var("HERMES_TOOL_POLICY_PRESET"),
+            Some(v) => hermes_core::test_env::set_var("HERMES_TOOL_POLICY_PRESET", v),
+            None => hermes_core::test_env::remove_var("HERMES_TOOL_POLICY_PRESET"),
         }
         match patterns_orig {
-            Some(v) => std::env::set_var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS", v),
-            None => std::env::remove_var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS"),
+            Some(v) => hermes_core::test_env::set_var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS", v),
+            None => hermes_core::test_env::remove_var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS"),
         }
         match sandbox_orig {
-            Some(v) => std::env::set_var("HERMES_EXECUTION_SANDBOX_PROFILE", v),
-            None => std::env::remove_var("HERMES_EXECUTION_SANDBOX_PROFILE"),
+            Some(v) => hermes_core::test_env::set_var("HERMES_EXECUTION_SANDBOX_PROFILE", v),
+            None => hermes_core::test_env::remove_var("HERMES_EXECUTION_SANDBOX_PROFILE"),
         }
     }
 
@@ -1147,9 +1147,9 @@ mod tests {
         let preset_orig = std::env::var("HERMES_TOOL_POLICY_PRESET").ok();
         let patterns_orig = std::env::var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS").ok();
 
-        std::env::remove_var("HERMES_TOOL_POLICY_MODE");
-        std::env::remove_var("HERMES_TOOL_POLICY_PRESET");
-        std::env::remove_var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS");
+        hermes_core::test_env::remove_var("HERMES_TOOL_POLICY_MODE");
+        hermes_core::test_env::remove_var("HERMES_TOOL_POLICY_PRESET");
+        hermes_core::test_env::remove_var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS");
 
         let policy = ToolPolicyEngine::from_env();
         let api_key_decision = policy.evaluate(
@@ -1168,16 +1168,16 @@ mod tests {
         );
 
         match mode_orig {
-            Some(v) => std::env::set_var("HERMES_TOOL_POLICY_MODE", v),
-            None => std::env::remove_var("HERMES_TOOL_POLICY_MODE"),
+            Some(v) => hermes_core::test_env::set_var("HERMES_TOOL_POLICY_MODE", v),
+            None => hermes_core::test_env::remove_var("HERMES_TOOL_POLICY_MODE"),
         }
         match preset_orig {
-            Some(v) => std::env::set_var("HERMES_TOOL_POLICY_PRESET", v),
-            None => std::env::remove_var("HERMES_TOOL_POLICY_PRESET"),
+            Some(v) => hermes_core::test_env::set_var("HERMES_TOOL_POLICY_PRESET", v),
+            None => hermes_core::test_env::remove_var("HERMES_TOOL_POLICY_PRESET"),
         }
         match patterns_orig {
-            Some(v) => std::env::set_var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS", v),
-            None => std::env::remove_var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS"),
+            Some(v) => hermes_core::test_env::set_var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS", v),
+            None => hermes_core::test_env::remove_var("HERMES_TOOL_POLICY_DENY_PARAM_PATTERNS"),
         }
     }
 
@@ -1185,20 +1185,20 @@ mod tests {
     fn strict_sandbox_profile_blocks_remote_command_channels() {
         let profile_orig = std::env::var("HERMES_EXECUTION_SANDBOX_PROFILE").ok();
         let preset_orig = std::env::var("HERMES_TOOL_POLICY_PRESET").ok();
-        std::env::set_var("HERMES_TOOL_POLICY_PRESET", "strict");
-        std::env::set_var("HERMES_EXECUTION_SANDBOX_PROFILE", "strict");
+        hermes_core::test_env::set_var("HERMES_TOOL_POLICY_PRESET", "strict");
+        hermes_core::test_env::set_var("HERMES_EXECUTION_SANDBOX_PROFILE", "strict");
         let policy = ToolPolicyEngine::from_env();
         let decision = policy.evaluate("terminal", &serde_json::json!({"cmd":"ssh prod-host"}));
         assert!(!decision.allow);
         assert_eq!(decision.code.as_deref(), Some("sandbox_profile_violation"));
 
         match preset_orig {
-            Some(v) => std::env::set_var("HERMES_TOOL_POLICY_PRESET", v),
-            None => std::env::remove_var("HERMES_TOOL_POLICY_PRESET"),
+            Some(v) => hermes_core::test_env::set_var("HERMES_TOOL_POLICY_PRESET", v),
+            None => hermes_core::test_env::remove_var("HERMES_TOOL_POLICY_PRESET"),
         }
         match profile_orig {
-            Some(v) => std::env::set_var("HERMES_EXECUTION_SANDBOX_PROFILE", v),
-            None => std::env::remove_var("HERMES_EXECUTION_SANDBOX_PROFILE"),
+            Some(v) => hermes_core::test_env::set_var("HERMES_EXECUTION_SANDBOX_PROFILE", v),
+            None => hermes_core::test_env::remove_var("HERMES_EXECUTION_SANDBOX_PROFILE"),
         }
     }
 

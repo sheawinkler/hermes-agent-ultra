@@ -971,7 +971,7 @@ mod tests {
     fn test_fusion_deduplicates_and_orders_by_score() {
         let _guard = FUSION_ENV_LOCK.lock().expect("fusion env lock");
         let orig = std::env::var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE").ok();
-        std::env::remove_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE");
+        hermes_core::test_env::remove_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE");
         let candidates = vec![
             FusedMemoryCandidate {
                 provider: "builtin".to_string(),
@@ -992,8 +992,8 @@ mod tests {
         assert!(fused[0].contains("score="));
         assert!(fused[0].contains("conf="));
         match orig {
-            Some(v) => std::env::set_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE", v),
-            None => std::env::remove_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE"),
+            Some(v) => hermes_core::test_env::set_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE", v),
+            None => hermes_core::test_env::remove_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE"),
         }
     }
 
@@ -1001,7 +1001,7 @@ mod tests {
     fn test_fusion_min_confidence_gate_filters_low_confidence() {
         let _guard = FUSION_ENV_LOCK.lock().expect("fusion env lock");
         let orig = std::env::var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE").ok();
-        std::env::set_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE", "0.95");
+        hermes_core::test_env::set_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE", "0.95");
         let candidates = vec![
             FusedMemoryCandidate {
                 provider: "builtin".to_string(),
@@ -1016,8 +1016,8 @@ mod tests {
         assert_eq!(fused.len(), 1, "only high-confidence context should remain");
         assert!(fused[0].contains("contextlattice"));
         match orig {
-            Some(v) => std::env::set_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE", v),
-            None => std::env::remove_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE"),
+            Some(v) => hermes_core::test_env::set_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE", v),
+            None => hermes_core::test_env::remove_var("HERMES_MEMORY_FUSION_MIN_CONFIDENCE"),
         }
     }
 

@@ -347,7 +347,7 @@ mod tests {
     async fn prepare_turn_appends_user_and_sets_task_id() {
         use crate::agent_loop::AgentConfig;
         use futures::StreamExt;
-        use hermes_core::ToolRegistry;
+        use crate::agent_loop::ToolRegistry;
         use std::sync::Arc;
 
         struct StopProvider;
@@ -412,7 +412,7 @@ mod tests {
     fn hydrate_memory_nudge_from_history() {
         use crate::agent_loop::AgentConfig;
         use futures::StreamExt;
-        use hermes_core::ToolRegistry;
+        use crate::agent_loop::ToolRegistry;
         use std::sync::Arc;
 
         struct StopProvider;

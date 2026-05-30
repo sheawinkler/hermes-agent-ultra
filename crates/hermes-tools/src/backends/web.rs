@@ -1339,7 +1339,7 @@ mod web_search_env_tests {
             ];
             let original = keys.iter().map(|k| (*k, std::env::var(k).ok())).collect();
             for k in &keys {
-                std::env::remove_var(k);
+                hermes_core::test_env::remove_var(k);
             }
             Self { original, _g: g }
         }
@@ -1349,8 +1349,8 @@ mod web_search_env_tests {
         fn drop(&mut self) {
             for (k, v) in &self.original {
                 match v {
-                    Some(val) => std::env::set_var(k, val),
-                    None => std::env::remove_var(k),
+                    Some(val) => hermes_core::test_env::set_var(k, val),
+                    None => hermes_core::test_env::remove_var(k),
                 }
             }
         }
@@ -1359,7 +1359,7 @@ mod web_search_env_tests {
     #[test]
     fn tavily_from_env_defaults_base_url() {
         let _scope = EnvScope::new();
-        std::env::set_var("TAVILY_API_KEY", "tavily-key");
+        hermes_core::test_env::set_var("TAVILY_API_KEY", "tavily-key");
         let backend = TavilySearchBackend::from_env().expect("tavily backend from env");
         assert_eq!(backend.base_url(), TAVILY_BASE_URL_DEFAULT);
     }
@@ -1367,8 +1367,8 @@ mod web_search_env_tests {
     #[test]
     fn tavily_from_env_honors_custom_base_url() {
         let _scope = EnvScope::new();
-        std::env::set_var("TAVILY_API_KEY", "tavily-key");
-        std::env::set_var("TAVILY_BASE_URL", "https://proxy.example.com/tavily/");
+        hermes_core::test_env::set_var("TAVILY_API_KEY", "tavily-key");
+        hermes_core::test_env::set_var("TAVILY_BASE_URL", "https://proxy.example.com/tavily/");
         let backend = TavilySearchBackend::from_env().expect("tavily backend from env");
         assert_eq!(backend.base_url(), "https://proxy.example.com/tavily");
     }
@@ -1376,22 +1376,22 @@ mod web_search_env_tests {
     #[test]
     fn search_backend_choice_prefers_exa_over_tavily() {
         let _scope = EnvScope::new();
-        std::env::set_var("EXA_API_KEY", "exa-key");
-        std::env::set_var("TAVILY_API_KEY", "tavily-key");
+        hermes_core::test_env::set_var("EXA_API_KEY", "exa-key");
+        hermes_core::test_env::set_var("TAVILY_API_KEY", "tavily-key");
         assert_eq!(search_backend_choice_from_env(), "exa");
     }
 
     #[test]
     fn search_backend_choice_uses_tavily_when_exa_missing() {
         let _scope = EnvScope::new();
-        std::env::set_var("TAVILY_API_KEY", "tavily-key");
+        hermes_core::test_env::set_var("TAVILY_API_KEY", "tavily-key");
         assert_eq!(search_backend_choice_from_env(), "tavily");
     }
 
     #[test]
     fn searxng_from_env_normalizes_base_url() {
         let _scope = EnvScope::new();
-        std::env::set_var("SEARXNG_BASE_URL", "https://search.example.com/");
+        hermes_core::test_env::set_var("SEARXNG_BASE_URL", "https://search.example.com/");
         let backend = SearxngSearchBackend::from_env().expect("searxng backend from env");
         assert_eq!(backend.base_url(), "https://search.example.com");
     }
@@ -1399,15 +1399,15 @@ mod web_search_env_tests {
     #[test]
     fn search_backend_choice_uses_searxng_when_only_base_url_available() {
         let _scope = EnvScope::new();
-        std::env::set_var("SEARXNG_BASE_URL", "https://search.example.com");
+        hermes_core::test_env::set_var("SEARXNG_BASE_URL", "https://search.example.com");
         assert_eq!(search_backend_choice_from_env(), "searxng");
     }
 
     #[test]
     fn search_backend_choice_honors_explicit_override() {
         let _scope = EnvScope::new();
-        std::env::set_var("HERMES_WEB_SEARCH_BACKEND", "searxng");
-        std::env::set_var("EXA_API_KEY", "exa-key");
+        hermes_core::test_env::set_var("HERMES_WEB_SEARCH_BACKEND", "searxng");
+        hermes_core::test_env::set_var("EXA_API_KEY", "exa-key");
         assert_eq!(search_backend_choice_from_env(), "searxng");
     }
 
@@ -1420,7 +1420,7 @@ mod web_search_env_tests {
     #[test]
     fn search_backend_choice_accepts_duckduckgo_override() {
         let _scope = EnvScope::new();
-        std::env::set_var("HERMES_WEB_SEARCH_BACKEND", "duckduckgo");
+        hermes_core::test_env::set_var("HERMES_WEB_SEARCH_BACKEND", "duckduckgo");
         assert_eq!(search_backend_choice_from_env(), "fallback");
     }
 
@@ -1464,9 +1464,9 @@ mod firecrawl_managed_tests {
             ];
             let original = keys.iter().map(|k| (*k, std::env::var(k).ok())).collect();
             for k in &keys {
-                std::env::remove_var(k);
+                hermes_core::test_env::remove_var(k);
             }
-            std::env::set_var("HERMES_HOME", tmp.path());
+            hermes_core::test_env::set_var("HERMES_HOME", tmp.path());
             Self {
                 _tmp: tmp,
                 original,
@@ -1479,8 +1479,8 @@ mod firecrawl_managed_tests {
         fn drop(&mut self) {
             for (k, v) in &self.original {
                 match v {
-                    Some(val) => std::env::set_var(k, val),
-                    None => std::env::remove_var(k),
+                    Some(val) => hermes_core::test_env::set_var(k, val),
+                    None => hermes_core::test_env::remove_var(k),
                 }
             }
         }
@@ -1489,7 +1489,7 @@ mod firecrawl_managed_tests {
     #[test]
     fn from_env_or_managed_prefers_direct_key() {
         let _g = EnvScope::new();
-        std::env::set_var("FIRECRAWL_API_KEY", "direct-key");
+        hermes_core::test_env::set_var("FIRECRAWL_API_KEY", "direct-key");
         let b = FirecrawlExtractBackend::from_env_or_managed().unwrap();
         assert_eq!(b.transport_label(), "direct");
     }
@@ -1497,9 +1497,9 @@ mod firecrawl_managed_tests {
     #[test]
     fn from_env_or_managed_falls_back_to_nous_gateway() {
         let _g = EnvScope::new();
-        std::env::remove_var("FIRECRAWL_API_KEY");
-        std::env::set_var("HERMES_ENABLE_NOUS_MANAGED_TOOLS", "1");
-        std::env::set_var("TOOL_GATEWAY_USER_TOKEN", "nous-tok");
+        hermes_core::test_env::remove_var("FIRECRAWL_API_KEY");
+        hermes_core::test_env::set_var("HERMES_ENABLE_NOUS_MANAGED_TOOLS", "1");
+        hermes_core::test_env::set_var("TOOL_GATEWAY_USER_TOKEN", "nous-tok");
         let b = FirecrawlExtractBackend::from_env_or_managed().unwrap();
         assert_eq!(b.transport_label(), "managed");
     }
@@ -1540,7 +1540,7 @@ mod firecrawl_managed_tests {
     #[test]
     fn empty_direct_key_falls_through_to_managed_fallback_or_error() {
         let _g = EnvScope::new();
-        std::env::set_var("FIRECRAWL_API_KEY", "   ");
+        hermes_core::test_env::set_var("FIRECRAWL_API_KEY", "   ");
         // No managed config either → expect Err.
         let err = FirecrawlExtractBackend::from_env_or_managed().unwrap_err();
         assert!(err.to_string().contains("FIRECRAWL_API_KEY"));

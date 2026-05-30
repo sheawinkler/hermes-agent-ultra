@@ -234,7 +234,7 @@ mod tests {
     async fn enable_status_disable_roundtrip() {
         let _guard = env_lock();
         let temp = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", temp.path());
+        hermes_core::test_env::set_var("HERMES_HOME", temp.path());
 
         let handler = DashboardControlHandler;
         let enabled = handler
@@ -266,7 +266,7 @@ mod tests {
     async fn rejects_non_local_without_insecure() {
         let _guard = env_lock();
         let temp = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", temp.path());
+        hermes_core::test_env::set_var("HERMES_HOME", temp.path());
 
         let handler = DashboardControlHandler;
         let err = handler

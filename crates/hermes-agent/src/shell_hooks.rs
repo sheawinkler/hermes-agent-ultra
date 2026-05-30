@@ -35,7 +35,7 @@ pub fn set_process_accept_hooks(accept: bool) {
 #[cfg(test)]
 pub fn reset_process_accept_hooks_for_tests() {
     PROCESS_ACCEPT_HOOKS.store(false, Ordering::Relaxed);
-    std::env::remove_var("HERMES_ACCEPT_HOOKS");
+    hermes_core::test_env::remove_var("HERMES_ACCEPT_HOOKS");
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
