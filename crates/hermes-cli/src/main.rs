@@ -4048,11 +4048,17 @@ fn build_telegram_config(
     TelegramConfig {
         token,
         webhook_url: platform_cfg.webhook_url.clone(),
+        webhook_secret: extra_string(platform_cfg, "webhook_secret")
+            .or_else(|| std::env::var("TELEGRAM_WEBHOOK_SECRET").ok())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty()),
         polling,
         proxy: Default::default(),
         parse_markdown,
         parse_html,
         poll_timeout,
+        reply_to_mode: reply_to_mode_string(platform_cfg).unwrap_or_else(|| "first".to_string()),
+        reactions: extra_bool(platform_cfg, "reactions", false),
         bot_username: None,
     }
 }
@@ -4122,6 +4128,10 @@ fn extra_string_set(platform_cfg: &PlatformConfig, key: &str) -> HashSet<String>
 }
 
 fn discord_reply_to_mode_string(platform_cfg: &PlatformConfig) -> Option<String> {
+    reply_to_mode_string(platform_cfg)
+}
+
+fn reply_to_mode_string(platform_cfg: &PlatformConfig) -> Option<String> {
     let raw = platform_cfg.extra.get("reply_to_mode")?;
     let candidate = match raw {
         serde_json::Value::String(value) => value.trim().to_ascii_lowercase(),
@@ -14224,6 +14234,49 @@ mod tests {
     }
 
     #[test]
+    fn build_telegram_config_reads_reply_secret_and_reactions() {
+        let _guard = env_lock();
+        let previous_secret = std::env::var("TELEGRAM_WEBHOOK_SECRET").ok();
+        std::env::set_var("TELEGRAM_WEBHOOK_SECRET", "env-secret");
+
+        let mut platform = PlatformConfig {
+            webhook_url: Some("https://hooks.example.com/tg".to_string()),
+            ..PlatformConfig::default()
+        };
+        platform
+            .extra
+            .insert("reply_to_mode".to_string(), serde_json::json!("all"));
+        platform
+            .extra
+            .insert("reactions".to_string(), serde_json::json!(true));
+
+        let cfg = build_telegram_config(&platform, "token".to_string());
+        assert_eq!(
+            cfg.webhook_url.as_deref(),
+            Some("https://hooks.example.com/tg")
+        );
+        assert_eq!(cfg.webhook_secret.as_deref(), Some("env-secret"));
+        assert_eq!(cfg.reply_to_mode, "all");
+        assert!(cfg.reactions);
+
+        match previous_secret {
+            Some(value) => std::env::set_var("TELEGRAM_WEBHOOK_SECRET", value),
+            None => std::env::remove_var("TELEGRAM_WEBHOOK_SECRET"),
+        }
+    }
+
+    #[test]
+    fn build_telegram_config_maps_yaml_boolean_off_reply_mode() {
+        let mut platform = PlatformConfig::default();
+        platform
+            .extra
+            .insert("reply_to_mode".to_string(), serde_json::json!(false));
+
+        let cfg = build_telegram_config(&platform, "token".to_string());
+        assert_eq!(cfg.reply_to_mode, "off");
+    }
+
+    #[test]
     fn gateway_platform_access_policy_reads_discord_channel_lists() {
         let mut config = hermes_config::GatewayConfig::default();
         let mut discord = PlatformConfig {
@@ -15116,6 +15169,9 @@ max_turns: 50
         telegram
             .extra
             .insert("polling".to_string(), serde_json::json!(false));
+        telegram
+            .extra
+            .insert("webhook_secret".to_string(), serde_json::json!("tg-secret"));
         config.platforms.insert("telegram".to_string(), telegram);
 
         let mut weixin = make_platform(true, Some("wx-token"));

@@ -164,6 +164,34 @@
       "ticket": 25
     },
     {
+      "path": "tests/gateway/test_telegram_caption_merge.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Telegram caption exact-dedupe intent is covered by Rust TelegramAdapter::merge_caption tests for empty captions, whitespace-normalized exact duplicates, substring regressions, and multi-caption albums.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_telegram_reactions.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Telegram reaction lifecycle intent is covered by Rust Telegram adapter setMessageReaction contracts, disabled-by-default no-op behavior, config/env reaction hydration, and gateway lifecycle tests requiring explicit Telegram reactions policy.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_telegram_reply_mode.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Telegram reply_to_mode behavior is covered by Rust Telegram reply-mode parsing, chunk-reference policy tests for off/first/all/invalid modes, CLI config hydration, and env/YAML boolean-off bridging.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_telegram_webhook_secret.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Telegram webhook-secret guard is covered by Rust TelegramConfig webhook validation requiring webhook_secret/TELEGRAM_WEBHOOK_SECRET with GHSA remediation text while leaving polling mode unaffected.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "tests/gateway/test_discord_allowed_mentions.py",
       "classification": "intentional_divergence",
       "rationale": "Upstream Discord allowed_mentions safe-default intent is covered by Rust hermes-gateway DiscordAllowedMentions payload construction and env-style parsing tests; the Python test file remains reference-only.",

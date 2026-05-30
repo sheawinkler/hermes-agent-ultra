@@ -25226,9 +25226,9 @@ mod tests {
         let usage = latest_ui_assistant_text(&app);
         assert!(usage.contains("Usage: /handoff <platform>"));
 
-        handle_handoff_command(&mut app, &["telegram"]).expect("handoff unknown platform");
+        handle_handoff_command(&mut app, &["pagerduty"]).expect("handoff unknown platform");
         let unknown = latest_ui_assistant_text(&app);
-        assert!(unknown.contains("Unknown platform 'telegram'"));
+        assert!(unknown.contains("Unknown platform 'pagerduty'"));
     }
 
     #[test]

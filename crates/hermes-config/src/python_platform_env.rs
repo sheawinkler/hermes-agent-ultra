@@ -26,7 +26,7 @@ fn env_bool(raw: &str) -> bool {
     matches!(raw.to_lowercase().as_str(), "1" | "true" | "yes" | "on")
 }
 
-fn discord_reply_to_mode(raw: &str) -> Option<&'static str> {
+fn reply_to_mode(raw: &str) -> Option<&'static str> {
     match raw.trim().to_ascii_lowercase().as_str() {
         "off" => Some("off"),
         "first" => Some("first"),
@@ -37,6 +37,52 @@ fn discord_reply_to_mode(raw: &str) -> Option<&'static str> {
 
 fn set_extra(pc: &mut PlatformConfig, key: &str, val: Value) {
     pc.extra.insert(key.to_string(), val);
+}
+
+fn apply_telegram_env(config: &mut GatewayConfig) {
+    let token = env_nonempty("TELEGRAM_BOT_TOKEN");
+    let webhook_url = env_nonempty("TELEGRAM_WEBHOOK_URL");
+    let webhook_secret = env_nonempty("TELEGRAM_WEBHOOK_SECRET");
+    let reply_mode = env_nonempty("TELEGRAM_REPLY_TO_MODE").and_then(|v| reply_to_mode(&v));
+    let reactions = env_nonempty("TELEGRAM_REACTIONS");
+
+    if token.is_none()
+        && webhook_url.is_none()
+        && webhook_secret.is_none()
+        && reply_mode.is_none()
+        && reactions.is_none()
+    {
+        return;
+    }
+
+    let telegram = config
+        .platforms
+        .entry("telegram".into())
+        .or_insert_with(PlatformConfig::default);
+
+    if let Some(token) = token {
+        let enabled_was_explicit = telegram
+            .extra
+            .remove("_enabled_explicit")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !telegram.enabled && !enabled_was_explicit {
+            telegram.enabled = true;
+        }
+        telegram.token = Some(token);
+    }
+    if let Some(v) = webhook_url {
+        telegram.webhook_url = Some(v);
+    }
+    if let Some(v) = webhook_secret {
+        set_extra(telegram, "webhook_secret", json!(v));
+    }
+    if let Some(mode) = reply_mode {
+        set_extra(telegram, "reply_to_mode", json!(mode));
+    }
+    if let Some(v) = reactions {
+        set_extra(telegram, "reactions", json!(env_bool(&v)));
+    }
 }
 
 fn apply_weixin_env(config: &mut GatewayConfig) {
@@ -184,7 +230,7 @@ fn apply_discord_env(config: &mut GatewayConfig) {
         set_extra(discord, "reactions", json!(env_bool(&v)));
     }
     if let Some(v) = env_nonempty("DISCORD_REPLY_TO_MODE") {
-        if let Some(mode) = discord_reply_to_mode(&v) {
+        if let Some(mode) = reply_to_mode(&v) {
             set_extra(discord, "reply_to_mode", json!(mode));
         }
     }
@@ -222,6 +268,7 @@ fn apply_discord_env(config: &mut GatewayConfig) {
 
 /// 应用与 Python 文档一致的平台环境变量到 `platforms`。
 pub fn apply_python_named_platform_env(config: &mut GatewayConfig) {
+    apply_telegram_env(config);
     apply_discord_env(config);
     apply_weixin_env(config);
     apply_dingtalk_env(config);
@@ -273,6 +320,74 @@ mod tests {
             std::env::remove_var("WEIXIN_TOKEN");
             std::env::remove_var("WEIXIN_DM_POLICY");
             std::env::remove_var("WEIXIN_ALLOWED_USERS");
+        }
+    }
+
+    #[test]
+    fn telegram_env_sets_reply_reactions_webhook_secret_and_token() {
+        let _env = env_lock();
+        unsafe {
+            std::env::set_var("TELEGRAM_BOT_TOKEN", "telegram-token");
+            std::env::set_var("TELEGRAM_WEBHOOK_URL", "https://hooks.example.com/tg");
+            std::env::set_var("TELEGRAM_WEBHOOK_SECRET", "telegram-secret");
+            std::env::set_var("TELEGRAM_REPLY_TO_MODE", "ALL");
+            std::env::set_var("TELEGRAM_REACTIONS", "1");
+        }
+        let mut cfg = GatewayConfig::default();
+        apply_python_named_platform_env(&mut cfg);
+        let telegram = cfg.platforms.get("telegram").expect("telegram block");
+        assert!(telegram.enabled);
+        assert_eq!(telegram.token.as_deref(), Some("telegram-token"));
+        assert_eq!(
+            telegram.webhook_url.as_deref(),
+            Some("https://hooks.example.com/tg")
+        );
+        assert_eq!(
+            telegram
+                .extra
+                .get("webhook_secret")
+                .and_then(|v| v.as_str()),
+            Some("telegram-secret")
+        );
+        assert_eq!(
+            telegram.extra.get("reply_to_mode").and_then(|v| v.as_str()),
+            Some("all")
+        );
+        assert_eq!(
+            telegram.extra.get("reactions").and_then(|v| v.as_bool()),
+            Some(true)
+        );
+        unsafe {
+            std::env::remove_var("TELEGRAM_BOT_TOKEN");
+            std::env::remove_var("TELEGRAM_WEBHOOK_URL");
+            std::env::remove_var("TELEGRAM_WEBHOOK_SECRET");
+            std::env::remove_var("TELEGRAM_REPLY_TO_MODE");
+            std::env::remove_var("TELEGRAM_REACTIONS");
+        }
+    }
+
+    #[test]
+    fn telegram_reply_to_mode_env_ignores_invalid_values() {
+        let _env = env_lock();
+        unsafe {
+            std::env::set_var("TELEGRAM_REPLY_TO_MODE", "banana");
+        }
+        let mut cfg = GatewayConfig::default();
+        cfg.platforms
+            .entry("telegram".into())
+            .or_default()
+            .extra
+            .insert("reply_to_mode".into(), json!("off"));
+
+        apply_python_named_platform_env(&mut cfg);
+        let telegram = cfg.platforms.get("telegram").expect("telegram block");
+        assert_eq!(
+            telegram.extra.get("reply_to_mode").and_then(|v| v.as_str()),
+            Some("off")
+        );
+
+        unsafe {
+            std::env::remove_var("TELEGRAM_REPLY_TO_MODE");
         }
     }
 
