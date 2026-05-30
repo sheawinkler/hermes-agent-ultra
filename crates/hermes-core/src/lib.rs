@@ -4,6 +4,7 @@
 //! used across the hermes-agent-rust workspace.
 
 pub mod errors;
+pub mod schema_sanitizer;
 pub mod tool_call_parser;
 pub mod tool_schema;
 pub mod traits;
@@ -25,6 +26,11 @@ pub use types::{
 
 // Re-export tool schema types
 pub use tool_schema::{tool_schema, JsonSchema, ToolSchema};
+
+// Re-export schema sanitizer helpers
+pub use schema_sanitizer::{
+    sanitize_tool_parameters, sanitize_tool_schemas, strip_pattern_and_format, strip_slash_enum,
+};
 
 // Re-export trait definitions
 pub use traits::{

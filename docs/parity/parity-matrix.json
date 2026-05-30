@@ -1,25 +1,25 @@
 {
-  "generated_at_utc": "2026-05-30T13:16:13.680097+00:00",
+  "generated_at_utc": "2026-05-30T13:47:27.064383+00:00",
   "refs": {
     "local_ref": "main",
-    "local_sha": "eff4cb7a106c89eb11b9123c77fcd417d2fecce9",
+    "local_sha": "b644f01012a3ebd0b0593691561c6cc70c4c3329",
     "upstream_ref": "upstream/main",
     "upstream_sha": "44f3e5186502167e68b6073b4f7bdfae7bfb4fbe",
     "merge_base": null
   },
   "summary": {
     "commits_behind": 4469,
-    "commits_ahead": 869,
-    "upstream_patch_missing": 4349,
+    "commits_ahead": 871,
+    "upstream_patch_missing": 4351,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 718,
+    "local_patch_unique": 719,
     "files_only_upstream": 1484,
-    "files_only_local": 570,
+    "files_only_local": 573,
     "files_shared_identical": 1691,
     "files_shared_different": 1028,
-    "tree_files_changed": 3082,
+    "tree_files_changed": 3085,
     "tree_insertions": 746713,
-    "tree_deletions": 396453
+    "tree_deletions": 398480
   },
   "top_upstream_only": [
     {
@@ -395,6 +395,10 @@
       "count": 10
     },
     {
+      "path": "crates/hermes-skills",
+      "count": 10
+    },
+    {
       "path": "crates/hermes-cron",
       "count": 9
     },
@@ -408,10 +412,6 @@
     },
     {
       "path": "crates/hermes-mcp",
-      "count": 7
-    },
-    {
-      "path": "crates/hermes-skills",
       "count": 7
     },
     {
@@ -719,6 +719,10 @@
       "count": 10
     },
     {
+      "path": "crates/hermes-skills",
+      "count": 10
+    },
+    {
       "path": "crates/hermes-cron",
       "count": 9
     },
@@ -732,10 +736,6 @@
     },
     {
       "path": "crates/hermes-mcp",
-      "count": 7
-    },
-    {
-      "path": "crates/hermes-skills",
       "count": 7
     },
     {
@@ -858,7 +858,7 @@
       "name": "Compatibility and divergence policy",
       "upstream_only": 393,
       "shared_different": 12,
-      "local_only": 195,
+      "local_only": 198,
       "risk": "high",
       "effort": "XL"
     },
@@ -904,9 +904,9 @@
     }
   ],
   "commit_mapping": {
-    "upstream_patch_missing": 4349,
+    "upstream_patch_missing": 4351,
     "upstream_patch_represented": 2,
-    "local_patch_unique": 718,
+    "local_patch_unique": 719,
     "local_patch_equivalent_to_upstream": 1,
     "upstream_patch_missing_sample": [
       "99af222ecf56c0eed0d3eb82903a6bf33b6ff7d5",
