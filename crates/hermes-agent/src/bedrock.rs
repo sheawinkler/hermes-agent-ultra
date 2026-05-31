@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use chrono::{DateTime, Utc};
 use futures::stream::BoxStream;
 use hmac::{Hmac, Mac};
@@ -21,9 +22,13 @@ type HmacSha256 = Hmac<Sha256>;
 
 pub const BEDROCK_AUTH_MARKER: &str = "aws-sdk";
 pub const BEDROCK_DEFAULT_REGION: &str = "us-east-1";
+pub const BEDROCK_DEFAULT_CONTEXT_LENGTH: u64 = 200_000;
 pub const CONTEXT_1M_BETA: &str = "context-1m-2025-08-07";
+const ACP_MULTIMODAL_PREFIX: &str = "__hermes_acp_parts_json__:";
 const INTERLEAVED_THINKING_BETA: &str = "interleaved-thinking-2025-05-14";
 const FINE_GRAINED_TOOL_STREAMING_BETA: &str = "fine-grained-tool-streaming-2025-05-14";
+const BEDROCK_NOVA_PRO_CONTEXT_LENGTH: u64 = 300_000;
+const BEDROCK_NOVA_MICRO_CONTEXT_LENGTH: u64 = 128_000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AwsCredentials {
@@ -36,6 +41,32 @@ pub struct AwsCredentials {
 enum BedrockAuth {
     Bearer(String),
     SigV4(AwsCredentials),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BedrockErrorClass {
+    ContextOverflow,
+    RateLimit,
+    Overloaded,
+    Unknown,
+}
+
+impl BedrockErrorClass {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::ContextOverflow => "context_overflow",
+            Self::RateLimit => "rate_limit",
+            Self::Overloaded => "overloaded",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct StreamToolAccumulator {
+    id: Option<String>,
+    name: Option<String>,
+    input_fragments: String,
 }
 
 #[derive(Debug, Clone)]
@@ -330,20 +361,30 @@ async fn fetch_bedrock_catalog_endpoint(
 
 pub fn parse_bedrock_catalog_model_ids(payload: &Value) -> Vec<String> {
     let mut ids = Vec::new();
-    collect_model_ids(payload, "modelSummaries", "modelId", &mut ids);
+    collect_model_ids(payload, "modelSummaries", "modelId", true, &mut ids);
     collect_model_ids(
         payload,
         "inferenceProfileSummaries",
         "inferenceProfileId",
+        true,
         &mut ids,
     );
-    collect_model_ids(payload, "data", "id", &mut ids);
+    collect_model_ids(payload, "data", "id", false, &mut ids);
     dedup_model_ids(ids)
 }
 
-fn collect_model_ids(payload: &Value, array_key: &str, id_key: &str, out: &mut Vec<String>) {
+fn collect_model_ids(
+    payload: &Value,
+    array_key: &str,
+    id_key: &str,
+    apply_bedrock_filters: bool,
+    out: &mut Vec<String>,
+) {
     if let Some(rows) = payload.get(array_key).and_then(Value::as_array) {
         for row in rows {
+            if apply_bedrock_filters && !bedrock_catalog_row_is_supported(row) {
+                continue;
+            }
             if let Some(id) = row
                 .get(id_key)
                 .and_then(Value::as_str)
@@ -356,6 +397,43 @@ fn collect_model_ids(payload: &Value, array_key: &str, id_key: &str, out: &mut V
     }
 }
 
+fn bedrock_catalog_row_is_supported(row: &Value) -> bool {
+    bedrock_catalog_row_is_active(row)
+        && bedrock_catalog_row_supports_streaming(row)
+        && bedrock_catalog_row_supports_text_output(row)
+}
+
+fn bedrock_catalog_row_is_active(row: &Value) -> bool {
+    let status = row
+        .get("modelLifecycle")
+        .and_then(|v| v.get("status"))
+        .or_else(|| row.get("status"))
+        .or_else(|| row.get("modelStatus"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    status.is_none_or(|status| status.eq_ignore_ascii_case("ACTIVE"))
+}
+
+fn bedrock_catalog_row_supports_streaming(row: &Value) -> bool {
+    row.get("responseStreamingSupported")
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+}
+
+fn bedrock_catalog_row_supports_text_output(row: &Value) -> bool {
+    row.get("outputModalities")
+        .and_then(Value::as_array)
+        .map(|modalities| {
+            modalities.iter().any(|value| {
+                value
+                    .as_str()
+                    .is_some_and(|modality| modality.eq_ignore_ascii_case("TEXT"))
+            })
+        })
+        .unwrap_or(true)
+}
+
 fn dedup_model_ids(ids: Vec<String>) -> Vec<String> {
     let mut seen = HashSet::new();
     let mut dedup = Vec::new();
@@ -364,7 +442,17 @@ fn dedup_model_ids(ids: Vec<String>) -> Vec<String> {
             dedup.push(id);
         }
     }
-    dedup
+    let mut global = Vec::new();
+    let mut regional = Vec::new();
+    for id in dedup {
+        if id.to_ascii_lowercase().starts_with("global.") {
+            global.push(id);
+        } else {
+            regional.push(id);
+        }
+    }
+    global.extend(regional);
+    global
 }
 
 pub fn build_converse_body(
@@ -392,7 +480,7 @@ pub fn build_converse_body(
     if !inference.is_empty() {
         body["inferenceConfig"] = Value::Object(inference);
     }
-    if !tools.is_empty() {
+    if !tools.is_empty() && model_supports_bedrock_tool_use(model) {
         body["toolConfig"] = json!({
             "tools": convert_tools_to_bedrock(tools),
         });
@@ -424,10 +512,33 @@ fn merge_bedrock_extra_body(body: &mut Value, extra_body: Option<&Value>) {
                     body[key] = value.clone();
                 }
             }
+            "top_p" | "topP" => {
+                set_bedrock_inference_field(body, "topP", value.clone());
+            }
+            "guardrail_config" | "guardrailConfig" => {
+                if !value.as_object().is_some_and(Map::is_empty) && !value.is_null() {
+                    body["guardrailConfig"] = value.clone();
+                }
+            }
             _ => {
                 body[key] = value.clone();
             }
         }
+    }
+}
+
+fn set_bedrock_inference_field(body: &mut Value, key: &str, value: Value) {
+    if value.is_null() {
+        return;
+    }
+    if !body.get("inferenceConfig").is_some_and(Value::is_object) {
+        body["inferenceConfig"] = json!({});
+    }
+    if let Some(inference) = body
+        .get_mut("inferenceConfig")
+        .and_then(Value::as_object_mut)
+    {
+        inference.insert(key.to_string(), value);
     }
 }
 
@@ -447,13 +558,14 @@ fn convert_messages_to_bedrock(messages: &[Message]) -> (Vec<Value>, Vec<Value>)
                 }
             }
             MessageRole::User => {
-                converted.push(json!({
-                    "role": "user",
-                    "content": text_content_blocks(message.content.as_deref()),
-                }));
+                push_bedrock_message(
+                    &mut converted,
+                    "user",
+                    content_blocks_or_placeholder(message.content.as_deref()),
+                );
             }
             MessageRole::Assistant => {
-                let mut content = text_content_blocks(message.content.as_deref());
+                let mut content = optional_content_blocks(message.content.as_deref());
                 if let Some(reasoning) = message
                     .reasoning_content
                     .as_deref()
@@ -475,50 +587,207 @@ fn convert_messages_to_bedrock(messages: &[Message]) -> (Vec<Value>, Vec<Value>)
                         }));
                     }
                 }
-                converted.push(json!({
-                    "role": "assistant",
-                    "content": content,
-                }));
+                if content.is_empty() {
+                    content.push(json!({"text": " "}));
+                }
+                push_bedrock_message(&mut converted, "assistant", content);
             }
             MessageRole::Tool => {
-                converted.push(json!({
-                    "role": "user",
-                    "content": [{
+                push_bedrock_message(
+                    &mut converted,
+                    "user",
+                    vec![json!({
                         "toolResult": {
                             "toolUseId": message.tool_call_id.clone().unwrap_or_default(),
-                            "content": text_content_blocks(message.content.as_deref()),
+                            "content": content_blocks_or_placeholder(message.content.as_deref()),
                         }
-                    }],
-                }));
+                    })],
+                );
             }
         }
     }
-    if converted.is_empty() {
-        converted.push(json!({
-            "role": "user",
-            "content": [{"text": ""}],
-        }));
-    }
+    enforce_bedrock_message_boundaries(&mut converted);
     (system, converted)
 }
 
-fn text_content_blocks(content: Option<&str>) -> Vec<Value> {
+fn push_bedrock_message(messages: &mut Vec<Value>, role: &str, content: Vec<Value>) {
+    if let Some(last) = messages.last_mut() {
+        if last.get("role").and_then(Value::as_str) == Some(role) {
+            if let Some(existing) = last.get_mut("content").and_then(Value::as_array_mut) {
+                existing.extend(content);
+                return;
+            }
+        }
+    }
+    messages.push(json!({
+        "role": role,
+        "content": content,
+    }));
+}
+
+fn enforce_bedrock_message_boundaries(messages: &mut Vec<Value>) {
+    if messages.is_empty() {
+        messages.push(placeholder_user_message());
+        return;
+    }
+    if messages
+        .first()
+        .and_then(|message| message.get("role"))
+        .and_then(Value::as_str)
+        != Some("user")
+    {
+        messages.insert(0, placeholder_user_message());
+    }
+    if messages
+        .last()
+        .and_then(|message| message.get("role"))
+        .and_then(Value::as_str)
+        != Some("user")
+    {
+        messages.push(placeholder_user_message());
+    }
+}
+
+fn placeholder_user_message() -> Value {
+    json!({
+        "role": "user",
+        "content": [{"text": " "}],
+    })
+}
+
+fn content_blocks_or_placeholder(content: Option<&str>) -> Vec<Value> {
+    let blocks = optional_content_blocks(content);
+    if blocks.is_empty() {
+        vec![json!({"text": " "})]
+    } else {
+        blocks
+    }
+}
+
+fn optional_content_blocks(content: Option<&str>) -> Vec<Value> {
     match content.map(str::trim).filter(|s| !s.is_empty()) {
-        Some(text) => vec![json!({"text": text})],
+        Some(text) => {
+            if let Some(parts) = parse_acp_multimodal_parts(text) {
+                let blocks = bedrock_blocks_from_multimodal_parts(&parts);
+                if !blocks.is_empty() {
+                    return blocks;
+                }
+            }
+            vec![json!({"text": text})]
+        }
         None => Vec::new(),
     }
+}
+
+fn parse_acp_multimodal_parts(content: &str) -> Option<Vec<Value>> {
+    let payload = content.trim().strip_prefix(ACP_MULTIMODAL_PREFIX)?;
+    let parsed: Value = serde_json::from_str(payload).ok()?;
+    let parts = parsed.as_array()?.clone();
+    if parts.is_empty() {
+        return None;
+    }
+    parts
+        .iter()
+        .all(|part| {
+            part.as_object()
+                .and_then(|obj| obj.get("type"))
+                .and_then(Value::as_str)
+                .is_some()
+        })
+        .then_some(parts)
+}
+
+fn bedrock_blocks_from_multimodal_parts(parts: &[Value]) -> Vec<Value> {
+    let mut blocks = Vec::new();
+    for part in parts {
+        let Some(obj) = part.as_object() else {
+            continue;
+        };
+        let kind = obj.get("type").and_then(Value::as_str).unwrap_or("");
+        match kind {
+            "text" => {
+                if let Some(text) = obj
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|text| !text.is_empty())
+                {
+                    blocks.push(json!({"text": text}));
+                }
+            }
+            "image_url" | "input_image" => {
+                let url = extract_openai_image_url(obj);
+                if let Some(block) = url.and_then(bedrock_image_block_from_openai_url) {
+                    blocks.push(block);
+                } else if let Some(url) = url.filter(|url| !url.is_empty()) {
+                    blocks.push(json!({"text": format!("[Attached image]\nURL: {url}")}));
+                }
+            }
+            _ => {
+                if let Some(text) = obj
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .map(str::trim)
+                    .filter(|text| !text.is_empty())
+                {
+                    blocks.push(json!({"text": text}));
+                }
+            }
+        }
+    }
+    blocks
+}
+
+fn extract_openai_image_url(obj: &Map<String, Value>) -> Option<&str> {
+    obj.get("image_url")
+        .and_then(|v| v.get("url"))
+        .and_then(Value::as_str)
+        .or_else(|| obj.get("image_url").and_then(Value::as_str))
+        .or_else(|| obj.get("url").and_then(Value::as_str))
+        .map(str::trim)
+        .filter(|url| !url.is_empty())
+}
+
+fn bedrock_image_block_from_openai_url(url: &str) -> Option<Value> {
+    let data = url.strip_prefix("data:")?;
+    let (metadata, bytes) = data.split_once(',')?;
+    if !metadata
+        .split(';')
+        .any(|segment| segment.eq_ignore_ascii_case("base64"))
+    {
+        return None;
+    }
+    BASE64_STANDARD.decode(bytes).ok()?;
+    let media_type = metadata
+        .split(';')
+        .next()
+        .unwrap_or("image/jpeg")
+        .to_ascii_lowercase();
+    let format = match media_type.strip_prefix("image/")? {
+        "jpg" | "jpeg" => "jpeg",
+        "png" => "png",
+        "gif" => "gif",
+        "webp" => "webp",
+        _ => return None,
+    };
+    Some(json!({
+        "image": {
+            "format": format,
+            "source": {
+                "bytes": bytes,
+            },
+        },
+    }))
 }
 
 pub fn convert_tools_to_bedrock(tools: &[ToolSchema]) -> Vec<Value> {
     tools
         .iter()
         .map(|tool| {
-            let schema = serde_json::to_value(&tool.parameters).unwrap_or_else(|_| {
-                json!({
-                    "type": "object",
-                    "properties": {},
-                })
-            });
+            let schema = serde_json::to_value(&tool.parameters)
+                .ok()
+                .filter(|schema| schema.as_object().is_some_and(|obj| !obj.is_empty()))
+                .unwrap_or_else(default_bedrock_tool_schema);
             json!({
                 "toolSpec": {
                     "name": tool.name,
@@ -532,6 +801,13 @@ pub fn convert_tools_to_bedrock(tools: &[ToolSchema]) -> Vec<Value> {
         .collect()
 }
 
+fn default_bedrock_tool_schema() -> Value {
+    json!({
+        "type": "object",
+        "properties": {},
+    })
+}
+
 pub fn validate_bedrock_response(value: &Value) -> bool {
     value.get("output").and_then(|v| v.get("message")).is_some() && value.get("error").is_none()
 }
@@ -539,10 +815,10 @@ pub fn validate_bedrock_response(value: &Value) -> bool {
 pub fn map_bedrock_finish_reason(reason: Option<&str>) -> Option<String> {
     Some(
         match reason.unwrap_or("end_turn") {
-            "end_turn" => "stop",
+            "end_turn" | "stop_sequence" => "stop",
             "tool_use" => "tool_calls",
             "max_tokens" => "length",
-            "guardrail_intervened" => "content_filter",
+            "content_filtered" | "guardrail_intervened" => "content_filter",
             _ => "stop",
         }
         .to_string(),
@@ -634,10 +910,19 @@ pub fn parse_bedrock_response(json: &Value, model: &str) -> Result<LlmResponse, 
             }),
         estimated_cost: None,
     });
+    let finish_reason = if tool_calls.is_empty() {
+        map_bedrock_finish_reason(json.get("stopReason").and_then(Value::as_str))
+    } else {
+        Some("tool_calls".to_string())
+    };
     Ok(LlmResponse {
         message: Message {
             role: MessageRole::Assistant,
-            content: Some(text_parts.join("\n")),
+            content: if text_parts.is_empty() {
+                None
+            } else {
+                Some(text_parts.join("\n"))
+            },
             tool_calls: if tool_calls.is_empty() {
                 None
             } else {
@@ -654,8 +939,166 @@ pub fn parse_bedrock_response(json: &Value, model: &str) -> Result<LlmResponse, 
         },
         usage,
         model: model.to_string(),
-        finish_reason: map_bedrock_finish_reason(json.get("stopReason").and_then(Value::as_str)),
+        finish_reason,
     })
+}
+
+pub fn parse_bedrock_stream_events(json: &Value, model: &str) -> Result<LlmResponse, AgentError> {
+    let events = json
+        .get("stream")
+        .and_then(Value::as_array)
+        .or_else(|| json.as_array())
+        .ok_or_else(|| {
+            AgentError::LlmApi(format!(
+                "Invalid Bedrock ConverseStream shape: {}",
+                truncate_json(json, 600)
+            ))
+        })?;
+    let mut text = String::new();
+    let mut reasoning = String::new();
+    let mut tools: BTreeMap<u64, StreamToolAccumulator> = BTreeMap::new();
+    let mut stop_reason: Option<String> = None;
+    let mut usage: Option<UsageStats> = None;
+
+    for event in events {
+        if let Some(start) = event.get("contentBlockStart") {
+            let index = stream_content_block_index(start);
+            if let Some(tool_use) = start.get("start").and_then(|v| v.get("toolUse")) {
+                let entry = tools.entry(index).or_default();
+                entry.id = tool_use
+                    .get("toolUseId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                entry.name = tool_use
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+            }
+        }
+        if let Some(delta_event) = event.get("contentBlockDelta") {
+            let index = stream_content_block_index(delta_event);
+            if let Some(delta) = delta_event.get("delta") {
+                if let Some(fragment) = delta.get("text").and_then(Value::as_str) {
+                    text.push_str(fragment);
+                }
+                if let Some(fragment) = delta
+                    .get("reasoningContent")
+                    .and_then(|v| v.get("text"))
+                    .and_then(Value::as_str)
+                {
+                    reasoning.push_str(fragment);
+                }
+                if let Some(tool_use) = delta.get("toolUse") {
+                    let entry = tools.entry(index).or_default();
+                    if let Some(id) = tool_use.get("toolUseId").and_then(Value::as_str) {
+                        entry.id = Some(id.to_string());
+                    }
+                    if let Some(name) = tool_use.get("name").and_then(Value::as_str) {
+                        entry.name = Some(name.to_string());
+                    }
+                    if let Some(input) = tool_use.get("input").and_then(Value::as_str) {
+                        entry.input_fragments.push_str(input);
+                    } else if let Some(input) = tool_use.get("input") {
+                        entry.input_fragments.push_str(&input.to_string());
+                    }
+                }
+            }
+        }
+        if let Some(message_stop) = event.get("messageStop") {
+            stop_reason = message_stop
+                .get("stopReason")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+        }
+        if let Some(metadata) = event.get("metadata") {
+            if let Some(raw_usage) = metadata.get("usage") {
+                usage = Some(parse_bedrock_usage(raw_usage));
+            }
+        }
+    }
+
+    let tool_calls = tools
+        .into_values()
+        .filter_map(|tool| {
+            let name = tool.name?;
+            if name.trim().is_empty() {
+                return None;
+            }
+            Some(ToolCall {
+                id: tool.id.unwrap_or_default(),
+                function: FunctionCall {
+                    name,
+                    arguments: normalize_tool_input_arguments(&tool.input_fragments),
+                },
+                extra_content: None,
+            })
+        })
+        .collect::<Vec<_>>();
+    let finish_reason = if tool_calls.is_empty() {
+        map_bedrock_finish_reason(stop_reason.as_deref())
+    } else {
+        Some("tool_calls".to_string())
+    };
+    Ok(LlmResponse {
+        message: Message {
+            role: MessageRole::Assistant,
+            content: if text.is_empty() { None } else { Some(text) },
+            tool_calls: if tool_calls.is_empty() {
+                None
+            } else {
+                Some(tool_calls)
+            },
+            tool_call_id: None,
+            name: None,
+            reasoning_content: if reasoning.is_empty() {
+                None
+            } else {
+                Some(reasoning)
+            },
+            cache_control: None,
+        },
+        usage,
+        model: model.to_string(),
+        finish_reason,
+    })
+}
+
+fn stream_content_block_index(event: &Value) -> u64 {
+    event
+        .get("contentBlockIndex")
+        .and_then(Value::as_u64)
+        .unwrap_or_default()
+}
+
+fn parse_bedrock_usage(usage: &Value) -> UsageStats {
+    let prompt_tokens = usage
+        .get("inputTokens")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let completion_tokens = usage
+        .get("outputTokens")
+        .and_then(Value::as_u64)
+        .unwrap_or_default();
+    let total_tokens = usage
+        .get("totalTokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(prompt_tokens + completion_tokens);
+    UsageStats {
+        prompt_tokens,
+        completion_tokens,
+        total_tokens,
+        estimated_cost: None,
+    }
+}
+
+fn normalize_tool_input_arguments(input: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return "{}".to_string();
+    }
+    serde_json::from_str::<Value>(trimmed)
+        .map(|value| value.to_string())
+        .unwrap_or_else(|_| trimmed.to_string())
 }
 
 fn parse_openai_like_response(json: &Value, fallback_model: &str) -> Option<LlmResponse> {
@@ -763,23 +1206,81 @@ pub fn is_bedrock_anthropic_model_id(model: &str) -> bool {
         "us.anthropic.",
         "eu.anthropic.",
         "ap.anthropic.",
+        "au.anthropic.",
+        "jp.anthropic.",
+        "apac.anthropic.",
         "global.anthropic.",
     ]
     .iter()
     .any(|prefix| lower.starts_with(prefix))
 }
 
+pub fn get_bedrock_context_length(model: &str) -> u64 {
+    let model = normalized_bedrock_model_id_for_lookup(model);
+    if model.starts_with("amazon.nova-micro") {
+        BEDROCK_NOVA_MICRO_CONTEXT_LENGTH
+    } else if model.starts_with("amazon.nova-") {
+        BEDROCK_NOVA_PRO_CONTEXT_LENGTH
+    } else if model.contains("anthropic.claude") {
+        200_000
+    } else {
+        BEDROCK_DEFAULT_CONTEXT_LENGTH
+    }
+}
+
+pub fn model_supports_bedrock_tool_use(model: &str) -> bool {
+    let model = normalized_bedrock_model_id_for_lookup(model);
+    !(model.contains("deepseek.r1")
+        || model.contains("deepseek-r1")
+        || model.starts_with("stability.")
+        || model.contains(".embed")
+        || model.contains("embed-"))
+}
+
+fn normalized_bedrock_model_id_for_lookup(model: &str) -> String {
+    let lower = model.trim().to_ascii_lowercase();
+    let model = lower.rsplit('/').next().unwrap_or(lower.as_str());
+    for prefix in [
+        "global.", "us.", "eu.", "ap.", "au.", "jp.", "apac.", "aws.",
+    ] {
+        if let Some(stripped) = model.strip_prefix(prefix) {
+            return stripped.to_string();
+        }
+    }
+    model.to_string()
+}
+
+pub fn classify_bedrock_error(message: &str) -> BedrockErrorClass {
+    let lower = message.to_ascii_lowercase();
+    if lower.contains("input is too long")
+        || lower.contains("exceeds the maximum number of input tokens")
+        || lower.contains("maximum context length")
+        || lower.contains("context length")
+        || lower.contains("too many tokens")
+    {
+        BedrockErrorClass::ContextOverflow
+    } else if lower.contains("throttlingexception")
+        || lower.contains("too many concurrent requests")
+        || lower.contains("too many requests")
+        || lower.contains("rate exceeded")
+        || lower.contains("rate limit")
+    {
+        BedrockErrorClass::RateLimit
+    } else if lower.contains("modelnotreadyexception")
+        || lower.contains("modeltimeoutexception")
+        || lower.contains("serviceunavailable")
+        || lower.contains("temporarily unavailable")
+        || lower.contains("overloaded")
+    {
+        BedrockErrorClass::Overloaded
+    } else {
+        BedrockErrorClass::Unknown
+    }
+}
+
 fn map_bedrock_error(status: u16, body: &str) -> AgentError {
     let lower = body.to_ascii_lowercase();
-    if lower.contains("throttlingexception")
-        || lower.contains("too many requests")
-        || lower.contains("rate limit")
-        || status == 429
-    {
-        AgentError::RateLimited {
-            retry_after_secs: None,
-        }
-    } else if status == 401
+    if status == 401
         || status == 403
         || lower.contains("unauthorized")
         || lower.contains("accessdenied")
@@ -787,7 +1288,21 @@ fn map_bedrock_error(status: u16, body: &str) -> AgentError {
     {
         AgentError::AuthFailed(format!("Bedrock authorization failed: {body}"))
     } else {
-        AgentError::LlmApi(format!("Bedrock API error {status}: {body}"))
+        match classify_bedrock_error(body) {
+            BedrockErrorClass::ContextOverflow => AgentError::ContextTooLong,
+            BedrockErrorClass::RateLimit => AgentError::RateLimited {
+                retry_after_secs: None,
+            },
+            BedrockErrorClass::Overloaded => {
+                AgentError::LlmApi(format!("Bedrock model overloaded: {body}"))
+            }
+            BedrockErrorClass::Unknown if status == 429 => AgentError::RateLimited {
+                retry_after_secs: None,
+            },
+            BedrockErrorClass::Unknown => {
+                AgentError::LlmApi(format!("Bedrock API error {status}: {body}"))
+            }
+        }
     }
 }
 
@@ -1170,6 +1685,99 @@ mod tests {
     }
 
     #[test]
+    fn build_converse_body_passes_top_p_guardrails_and_strips_unsupported_tools() {
+        let tools = vec![ToolSchema::new("test", "Test", JsonSchema::new("object"))];
+        let body = build_converse_body(
+            "us.deepseek.r1-v1:0",
+            &[Message::user("hello")],
+            &tools,
+            None,
+            Some(0.7),
+            Some(&json!({
+                "top_p": 0.9,
+                "guardrail_config": {
+                    "guardrailIdentifier": "gr-123",
+                    "guardrailVersion": "1"
+                }
+            })),
+        );
+        assert_eq!(body["inferenceConfig"]["temperature"], 0.7);
+        assert_eq!(body["inferenceConfig"]["topP"], 0.9);
+        assert_eq!(body["guardrailConfig"]["guardrailIdentifier"], "gr-123");
+        assert!(body.get("toolConfig").is_none());
+    }
+
+    #[test]
+    fn convert_messages_merges_roles_and_enforces_user_boundaries() {
+        let messages = vec![
+            Message::user("first"),
+            Message::user("second"),
+            Message::assistant("part 1"),
+            Message::assistant("part 2"),
+        ];
+        let (_system, converted) = convert_messages_to_bedrock(&messages);
+        assert_eq!(converted.first().unwrap()["role"], "user");
+        assert_eq!(converted.last().unwrap()["role"], "user");
+        let user_messages = converted
+            .iter()
+            .filter(|message| message["role"] == "user")
+            .count();
+        let assistant_messages = converted
+            .iter()
+            .filter(|message| message["role"] == "assistant")
+            .count();
+        assert_eq!(user_messages, 2);
+        assert_eq!(assistant_messages, 1);
+        let assistant_text = converted[1]["content"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|block| block.get("text").and_then(Value::as_str))
+            .collect::<Vec<_>>();
+        assert!(assistant_text.contains(&"part 1"));
+        assert!(assistant_text.contains(&"part 2"));
+    }
+
+    #[test]
+    fn convert_messages_decodes_acp_multimodal_data_url_and_empty_placeholder() {
+        let parts = json!([
+            {"type": "text", "text": "what is here"},
+            {"type": "image_url", "image_url": {"url": "data:image/png;base64,iVBORw0KGgo="}}
+        ]);
+        let marker = format!("{ACP_MULTIMODAL_PREFIX}{parts}");
+        let (_system, converted) =
+            convert_messages_to_bedrock(&[Message::user(marker), Message::user("   ")]);
+        let blocks = converted[0]["content"].as_array().expect("content blocks");
+        assert!(blocks.iter().any(|block| block["text"] == "what is here"));
+        let image = blocks
+            .iter()
+            .find_map(|block| block.get("image"))
+            .expect("image block");
+        assert_eq!(image["format"], "png");
+        assert_eq!(image["source"]["bytes"], "iVBORw0KGgo=");
+        assert!(blocks.iter().any(|block| block["text"] == " "));
+    }
+
+    #[test]
+    fn convert_tool_schema_defaults_empty_parameters_to_object_schema() {
+        let tools = vec![ToolSchema::new(
+            "noop",
+            "No-op",
+            JsonSchema {
+                schema_type: None,
+                properties: None,
+                required: None,
+                additional_properties: None,
+            },
+        )];
+        let converted = convert_tools_to_bedrock(&tools);
+        assert_eq!(
+            converted[0]["toolSpec"]["inputSchema"]["json"],
+            json!({"type": "object", "properties": {}})
+        );
+    }
+
+    #[test]
     fn parse_bedrock_response_preserves_text_tool_reasoning_and_usage() {
         let raw = json!({
             "output": {
@@ -1203,9 +1811,80 @@ mod tests {
     }
 
     #[test]
+    fn parse_bedrock_response_handles_empty_content_and_tool_finish_override() {
+        let empty = json!({
+            "output": {"message": {"role": "assistant", "content": []}},
+            "stopReason": "end_turn",
+            "usage": {"inputTokens": 1, "outputTokens": 0}
+        });
+        let response = parse_bedrock_response(&empty, "anthropic.claude").expect("empty response");
+        assert_eq!(response.message.content, None);
+        assert_eq!(response.message.tool_calls, None);
+        assert_eq!(response.finish_reason.as_deref(), Some("stop"));
+
+        let tool = json!({
+            "output": {
+                "message": {
+                    "role": "assistant",
+                    "content": [{"toolUse": {"toolUseId": "c1", "name": "search", "input": {}}}]
+                }
+            },
+            "stopReason": "end_turn",
+            "usage": {"inputTokens": 1, "outputTokens": 1}
+        });
+        let response = parse_bedrock_response(&tool, "anthropic.claude").expect("tool response");
+        assert_eq!(response.finish_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(
+            response.message.tool_calls.unwrap()[0].function.arguments,
+            "{}"
+        );
+    }
+
+    #[test]
+    fn parse_bedrock_stream_events_collects_text_tool_reasoning_and_usage() {
+        let raw = json!({
+            "stream": [
+                {"messageStart": {"role": "assistant"}},
+                {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": "Hello"}}},
+                {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": ", world"}}},
+                {"contentBlockDelta": {"contentBlockIndex": 1, "delta": {
+                    "reasoningContent": {"text": "thinking"}
+                }}},
+                {"contentBlockStart": {"contentBlockIndex": 2, "start": {
+                    "toolUse": {"toolUseId": "call_1", "name": "read_file"}
+                }}},
+                {"contentBlockDelta": {"contentBlockIndex": 2, "delta": {
+                    "toolUse": {"input": "{\"path\":"}
+                }}},
+                {"contentBlockDelta": {"contentBlockIndex": 2, "delta": {
+                    "toolUse": {"input": "\"/tmp/f\"}"}
+                }}},
+                {"messageStop": {"stopReason": "end_turn"}},
+                {"metadata": {"usage": {"inputTokens": 5, "outputTokens": 3}}}
+            ]
+        });
+        let response = parse_bedrock_stream_events(&raw, "anthropic.claude").expect("stream");
+        assert_eq!(response.message.content.as_deref(), Some("Hello, world"));
+        assert_eq!(
+            response.message.reasoning_content.as_deref(),
+            Some("thinking")
+        );
+        assert_eq!(response.finish_reason.as_deref(), Some("tool_calls"));
+        assert_eq!(response.usage.expect("usage").total_tokens, 8);
+        let call = &response.message.tool_calls.unwrap()[0];
+        assert_eq!(call.id, "call_1");
+        assert_eq!(call.function.name, "read_file");
+        assert_eq!(call.function.arguments, r#"{"path":"/tmp/f"}"#);
+    }
+
+    #[test]
     fn finish_reason_mapping_matches_bedrock_transport_contract() {
         assert_eq!(
             map_bedrock_finish_reason(Some("end_turn")).as_deref(),
+            Some("stop")
+        );
+        assert_eq!(
+            map_bedrock_finish_reason(Some("stop_sequence")).as_deref(),
             Some("stop")
         );
         assert_eq!(
@@ -1218,6 +1897,10 @@ mod tests {
         );
         assert_eq!(
             map_bedrock_finish_reason(Some("guardrail_intervened")).as_deref(),
+            Some("content_filter")
+        );
+        assert_eq!(
+            map_bedrock_finish_reason(Some("content_filtered")).as_deref(),
             Some("content_filter")
         );
         assert_eq!(
@@ -1239,6 +1922,100 @@ mod tests {
         let ids = parse_bedrock_catalog_model_ids(&raw);
         assert_eq!(ids.len(), 2);
         assert!(ids.iter().any(|id| id.starts_with("eu.anthropic.")));
+    }
+
+    #[test]
+    fn catalog_parser_filters_unsupported_models_and_sorts_global_profiles_first() {
+        let raw = json!({
+            "modelSummaries": [
+                {
+                    "modelId": "old-model",
+                    "outputModalities": ["TEXT"],
+                    "responseStreamingSupported": true,
+                    "modelLifecycle": {"status": "LEGACY"}
+                },
+                {
+                    "modelId": "embed-model",
+                    "outputModalities": ["EMBEDDING"],
+                    "responseStreamingSupported": false,
+                    "modelLifecycle": {"status": "ACTIVE"}
+                },
+                {
+                    "modelId": "anthropic.claude-v2",
+                    "outputModalities": ["TEXT"],
+                    "responseStreamingSupported": true,
+                    "modelLifecycle": {"status": "ACTIVE"}
+                }
+            ],
+            "inferenceProfileSummaries": [
+                {"inferenceProfileId": "us.anthropic.claude-v2", "status": "ACTIVE"},
+                {"inferenceProfileId": "global.anthropic.claude-v2", "status": "ACTIVE"}
+            ]
+        });
+        let ids = parse_bedrock_catalog_model_ids(&raw);
+        assert_eq!(
+            ids.first().map(String::as_str),
+            Some("global.anthropic.claude-v2")
+        );
+        assert!(ids.iter().any(|id| id == "anthropic.claude-v2"));
+        assert!(!ids.iter().any(|id| id == "old-model"));
+        assert!(!ids.iter().any(|id| id == "embed-model"));
+    }
+
+    #[test]
+    fn bedrock_context_tool_support_and_error_helpers_match_adapter_policy() {
+        assert_eq!(
+            get_bedrock_context_length("us.anthropic.claude-sonnet-4-6"),
+            200_000
+        );
+        assert_eq!(get_bedrock_context_length("amazon.nova-pro-v1:0"), 300_000);
+        assert_eq!(
+            get_bedrock_context_length("amazon.nova-micro-v1:0"),
+            128_000
+        );
+        assert_eq!(
+            get_bedrock_context_length("unknown.model-v1:0"),
+            BEDROCK_DEFAULT_CONTEXT_LENGTH
+        );
+        assert!(model_supports_bedrock_tool_use(
+            "us.anthropic.claude-sonnet-4-6"
+        ));
+        assert!(model_supports_bedrock_tool_use("deepseek.v3.2"));
+        assert!(!model_supports_bedrock_tool_use("us.deepseek.r1-v1:0"));
+        assert!(!model_supports_bedrock_tool_use(
+            "stability.stable-diffusion-xl"
+        ));
+        assert!(!model_supports_bedrock_tool_use("cohere.embed-v4"));
+        assert_eq!(
+            classify_bedrock_error("ValidationException: input is too long").as_str(),
+            "context_overflow"
+        );
+        assert_eq!(
+            classify_bedrock_error("Too many concurrent requests").as_str(),
+            "rate_limit"
+        );
+        assert_eq!(
+            classify_bedrock_error("ModelTimeoutException").as_str(),
+            "overloaded"
+        );
+        assert_eq!(
+            classify_bedrock_error("SomeRandomError").as_str(),
+            "unknown"
+        );
+    }
+
+    #[test]
+    fn anthropic_detector_accepts_regional_inference_profile_prefixes() {
+        assert!(is_bedrock_anthropic_model_id(
+            "au.anthropic.claude-sonnet-4-6"
+        ));
+        assert!(is_bedrock_anthropic_model_id(
+            "jp.anthropic.claude-sonnet-4-6"
+        ));
+        assert!(is_bedrock_anthropic_model_id(
+            "apac.anthropic.claude-sonnet-4-6"
+        ));
+        assert!(!is_bedrock_anthropic_model_id("us.amazon.nova-pro-v1:0"));
     }
 
     #[test]
