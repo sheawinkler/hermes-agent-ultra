@@ -7,15 +7,15 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use chrono::{DateTime, Utc};
-use futures::stream::BoxStream;
+use futures::{stream::BoxStream, StreamExt};
 use hmac::{Hmac, Mac};
 use reqwest::Client;
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 
 use hermes_core::{
-    AgentError, FunctionCall, LlmProvider, LlmResponse, Message, MessageRole, StreamChunk,
-    StreamDelta, ToolCall, ToolSchema, UsageStats,
+    AgentError, FunctionCall, FunctionCallDelta, LlmProvider, LlmResponse, Message, MessageRole,
+    StreamChunk, StreamDelta, ToolCall, ToolCallDelta, ToolSchema, UsageStats,
 };
 
 type HmacSha256 = Hmac<Sha256>;
@@ -67,6 +67,12 @@ struct StreamToolAccumulator {
     id: Option<String>,
     name: Option<String>,
     input_fragments: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AwsEventStreamMessage {
+    headers: HashMap<String, String>,
+    payload: Vec<u8>,
 }
 
 #[derive(Debug, Clone)]
@@ -210,39 +216,146 @@ impl LlmProvider for BedrockProvider {
         let tools = tools.to_vec();
         let model = model.map(str::to_string);
         let extra_body = extra_body.cloned();
-        Box::pin(async_stream::stream! {
-            match provider
-                .chat_completion(
-                    &messages,
-                    &tools,
-                    max_tokens,
-                    temperature,
-                    model.as_deref(),
-                    extra_body.as_ref(),
-                )
-                .await
-            {
-                Ok(response) => {
-                    if let Some(content) = response.message.content.clone().filter(|s| !s.is_empty()) {
-                        yield Ok(StreamChunk {
-                            delta: Some(StreamDelta {
-                                content: Some(content),
-                                tool_calls: None,
-                                extra: None,
-                            }),
-                            finish_reason: None,
-                            usage: None,
-                        });
-                    }
-                    yield Ok(StreamChunk {
-                        delta: None,
-                        finish_reason: response.finish_reason,
-                        usage: response.usage,
-                    });
+        async_stream::stream! {
+            let effective_model = model
+                .as_deref()
+                .map(str::trim)
+                .filter(|m| !m.is_empty())
+                .unwrap_or(provider.model.as_str())
+                .to_string();
+            let body = build_converse_body(
+                &effective_model,
+                &messages,
+                &tools,
+                max_tokens,
+                temperature,
+                extra_body.as_ref(),
+            );
+            let body_bytes = match serde_json::to_vec(&body) {
+                Ok(bytes) => bytes,
+                Err(err) => {
+                    yield Err(AgentError::Config(format!("serialize Bedrock stream request: {err}")));
+                    return;
                 }
-                Err(err) => yield Err(err),
+            };
+            let url = format!(
+                "{}/model/{}/converse-stream",
+                provider.effective_base_url().trim_end_matches('/'),
+                percent_encode_path_segment(&effective_model)
+            );
+            let auth = match resolve_bedrock_auth() {
+                Some(auth) => auth,
+                None => {
+                    yield Err(AgentError::AuthFailed(
+                        "No AWS credentials for Bedrock; set AWS_BEARER_TOKEN_BEDROCK, AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY, or a shared credentials profile".to_string(),
+                    ));
+                    return;
+                }
+            };
+            let headers = match bedrock_request_headers(
+                "POST",
+                url.as_str(),
+                &provider.region,
+                "bedrock",
+                &body_bytes,
+                &auth,
+                bedrock_anthropic_beta_header(&effective_model).as_deref(),
+                Utc::now(),
+            ) {
+                Ok(headers) => headers,
+                Err(err) => {
+                    yield Err(err);
+                    return;
+                }
+            };
+            let mut request = {
+                let client = provider
+                    .client
+                    .lock()
+                    .map(|c| c.clone())
+                    .unwrap_or_else(|_| Client::new());
+                client.post(url.as_str()).body(body_bytes)
+            };
+            for (key, value) in headers {
+                request = request.header(key, value);
             }
-        })
+            let response = match request.send().await {
+                Ok(response) => response,
+                Err(err) => {
+                    yield Err(AgentError::LlmApi(format!("Bedrock ConverseStream request failed: {err}")));
+                    return;
+                }
+            };
+            let status = response.status();
+            if !status.is_success() {
+                let payload = response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "<no body>".to_string());
+                yield Err(map_bedrock_error(status.as_u16(), &payload));
+                return;
+            }
+
+            let mut byte_stream = response.bytes_stream();
+            let mut buffer = Vec::new();
+            let mut saw_tool_delta = false;
+            while let Some(chunk_result) = byte_stream.next().await {
+                let bytes = match chunk_result {
+                    Ok(bytes) => bytes,
+                    Err(err) => {
+                        yield Err(AgentError::LlmApi(format!("Bedrock ConverseStream read failed: {err}")));
+                        return;
+                    }
+                };
+                buffer.extend_from_slice(&bytes);
+                loop {
+                    let message = match take_aws_event_stream_message(&mut buffer) {
+                        Ok(Some(message)) => message,
+                        Ok(None) => break,
+                        Err(err) => {
+                            yield Err(err);
+                            return;
+                        }
+                    };
+                    let event = match decode_bedrock_event_stream_message(&message) {
+                        Ok(Some(event)) => event,
+                        Ok(None) => continue,
+                        Err(err) => {
+                            yield Err(err);
+                            return;
+                        }
+                    };
+                    let chunks = match bedrock_stream_event_to_chunks(&event) {
+                        Ok(chunks) => chunks,
+                        Err(err) => {
+                            yield Err(err);
+                            return;
+                        }
+                    };
+                    for mut chunk in chunks {
+                        if chunk
+                            .delta
+                            .as_ref()
+                            .and_then(|delta| delta.tool_calls.as_ref())
+                            .is_some_and(|calls| !calls.is_empty())
+                        {
+                            saw_tool_delta = true;
+                        }
+                        if saw_tool_delta && chunk.finish_reason.as_deref() == Some("stop") {
+                            chunk.finish_reason = Some("tool_calls".to_string());
+                        }
+                        yield Ok(chunk);
+                    }
+                }
+            }
+            if !buffer.is_empty() {
+                yield Err(AgentError::LlmApi(format!(
+                    "Incomplete Bedrock ConverseStream event frame: {} trailing bytes",
+                    buffer.len()
+                )));
+            }
+        }
+        .boxed()
     }
 }
 
@@ -1063,6 +1176,387 @@ pub fn parse_bedrock_stream_events(json: &Value, model: &str) -> Result<LlmRespo
     })
 }
 
+fn take_aws_event_stream_message(
+    buffer: &mut Vec<u8>,
+) -> Result<Option<AwsEventStreamMessage>, AgentError> {
+    if buffer.len() < 12 {
+        return Ok(None);
+    }
+    let total_len = read_be_u32(&buffer[0..4]) as usize;
+    let headers_len = read_be_u32(&buffer[4..8]) as usize;
+    if total_len < 16 {
+        return Err(AgentError::LlmApi(format!(
+            "Invalid Bedrock event stream frame length: {total_len}"
+        )));
+    }
+    if total_len > buffer.len() {
+        return Ok(None);
+    }
+    if headers_len > total_len.saturating_sub(16) {
+        return Err(AgentError::LlmApi(format!(
+            "Invalid Bedrock event stream headers length: {headers_len}"
+        )));
+    }
+
+    let frame: Vec<u8> = buffer.drain(..total_len).collect();
+    let expected_prelude_crc = read_be_u32(&frame[8..12]);
+    let actual_prelude_crc = crc32_ieee(&frame[..8]);
+    if expected_prelude_crc != actual_prelude_crc {
+        return Err(AgentError::LlmApi(
+            "Invalid Bedrock event stream prelude checksum".to_string(),
+        ));
+    }
+
+    let expected_message_crc = read_be_u32(&frame[total_len - 4..total_len]);
+    let actual_message_crc = crc32_ieee(&frame[..total_len - 4]);
+    if expected_message_crc != actual_message_crc {
+        return Err(AgentError::LlmApi(
+            "Invalid Bedrock event stream message checksum".to_string(),
+        ));
+    }
+
+    let headers_start = 12;
+    let headers_end = headers_start + headers_len;
+    let payload_end = total_len - 4;
+    Ok(Some(AwsEventStreamMessage {
+        headers: parse_aws_event_stream_headers(&frame[headers_start..headers_end])?,
+        payload: frame[headers_end..payload_end].to_vec(),
+    }))
+}
+
+fn decode_bedrock_event_stream_message(
+    message: &AwsEventStreamMessage,
+) -> Result<Option<Value>, AgentError> {
+    if message.payload.is_empty() {
+        return Ok(None);
+    }
+    let payload: Value = serde_json::from_slice(&message.payload).map_err(|err| {
+        AgentError::LlmApi(format!("Bedrock event stream JSON parse failed: {err}"))
+    })?;
+    let message_type = message.headers.get(":message-type").map(String::as_str);
+    let event_type = message.headers.get(":event-type").map(String::as_str);
+    if matches!(message_type, Some("exception"))
+        || event_type.is_some_and(|event| event.ends_with("Exception"))
+        || bedrock_stream_exception_status(event_type).is_some()
+        || bedrock_stream_payload_exception_status(&payload).is_some()
+    {
+        return Err(map_bedrock_error(
+            bedrock_stream_exception_status(event_type)
+                .or_else(|| bedrock_stream_payload_exception_status(&payload))
+                .unwrap_or(500),
+            &payload.to_string(),
+        ));
+    }
+    if is_bedrock_stream_event_value(&payload) {
+        return Ok(Some(payload));
+    }
+    if let Some(event_type) = event_type.filter(|event| !event.is_empty()) {
+        return Ok(Some(json!({ event_type: payload })));
+    }
+    Ok(Some(payload))
+}
+
+fn bedrock_stream_event_to_chunks(event: &Value) -> Result<Vec<StreamChunk>, AgentError> {
+    let mut chunks = Vec::new();
+    if let Some(start_event) = event.get("contentBlockStart") {
+        if let Some(tool_use) = start_event
+            .get("start")
+            .and_then(|start| start.get("toolUse"))
+        {
+            let index = stream_content_block_index(start_event) as u32;
+            let id = tool_use
+                .get("toolUseId")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            let name = tool_use
+                .get("name")
+                .and_then(Value::as_str)
+                .map(str::to_string);
+            chunks.push(StreamChunk {
+                delta: Some(StreamDelta {
+                    content: None,
+                    tool_calls: Some(vec![ToolCallDelta {
+                        index,
+                        id,
+                        function: Some(FunctionCallDelta {
+                            name,
+                            arguments: None,
+                        }),
+                    }]),
+                    extra: None,
+                }),
+                finish_reason: None,
+                usage: None,
+            });
+        }
+    }
+
+    if let Some(delta_event) = event.get("contentBlockDelta") {
+        if let Some(delta) = delta_event.get("delta") {
+            if let Some(text) = delta.get("text").and_then(Value::as_str) {
+                chunks.push(StreamChunk {
+                    delta: Some(StreamDelta {
+                        content: Some(text.to_string()),
+                        tool_calls: None,
+                        extra: None,
+                    }),
+                    finish_reason: None,
+                    usage: None,
+                });
+            }
+            if let Some(reasoning) = delta
+                .get("reasoningContent")
+                .and_then(|value| value.get("text"))
+                .and_then(Value::as_str)
+            {
+                chunks.push(StreamChunk {
+                    delta: Some(StreamDelta {
+                        content: None,
+                        tool_calls: None,
+                        extra: Some(json!({ "thinking": reasoning })),
+                    }),
+                    finish_reason: None,
+                    usage: None,
+                });
+            }
+            if let Some(tool_use) = delta.get("toolUse") {
+                let index = stream_content_block_index(delta_event) as u32;
+                let id = tool_use
+                    .get("toolUseId")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                let name = tool_use
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::to_string);
+                let arguments = tool_use.get("input").map(|input| {
+                    input
+                        .as_str()
+                        .map(str::to_string)
+                        .unwrap_or_else(|| input.to_string())
+                });
+                chunks.push(StreamChunk {
+                    delta: Some(StreamDelta {
+                        content: None,
+                        tool_calls: Some(vec![ToolCallDelta {
+                            index,
+                            id,
+                            function: Some(FunctionCallDelta { name, arguments }),
+                        }]),
+                        extra: None,
+                    }),
+                    finish_reason: None,
+                    usage: None,
+                });
+            }
+        }
+    }
+
+    if let Some(stop_event) = event.get("messageStop") {
+        chunks.push(StreamChunk {
+            delta: None,
+            finish_reason: map_bedrock_finish_reason(
+                stop_event.get("stopReason").and_then(Value::as_str),
+            ),
+            usage: None,
+        });
+    }
+
+    if let Some(metadata) = event.get("metadata") {
+        if let Some(raw_usage) = metadata.get("usage") {
+            chunks.push(StreamChunk {
+                delta: None,
+                finish_reason: None,
+                usage: Some(parse_bedrock_usage(raw_usage)),
+            });
+        }
+    }
+
+    Ok(chunks)
+}
+
+fn is_bedrock_stream_event_value(value: &Value) -> bool {
+    [
+        "messageStart",
+        "contentBlockStart",
+        "contentBlockDelta",
+        "contentBlockStop",
+        "messageStop",
+        "metadata",
+        "internalServerException",
+        "modelStreamErrorException",
+        "serviceUnavailableException",
+        "throttlingException",
+        "validationException",
+    ]
+    .iter()
+    .any(|key| value.get(*key).is_some())
+}
+
+fn bedrock_stream_exception_status(event_type: Option<&str>) -> Option<u16> {
+    match event_type? {
+        "validationException" => Some(400),
+        "throttlingException" => Some(429),
+        "modelTimeoutException" => Some(408),
+        "modelStreamErrorException" => Some(424),
+        "serviceUnavailableException" => Some(503),
+        "internalServerException" => Some(500),
+        _ => None,
+    }
+}
+
+fn bedrock_stream_payload_exception_status(payload: &Value) -> Option<u16> {
+    [
+        ("validationException", 400),
+        ("throttlingException", 429),
+        ("modelTimeoutException", 408),
+        ("modelStreamErrorException", 424),
+        ("serviceUnavailableException", 503),
+        ("internalServerException", 500),
+    ]
+    .iter()
+    .find_map(|(key, status)| payload.get(*key).map(|_| *status))
+}
+
+fn parse_aws_event_stream_headers(raw: &[u8]) -> Result<HashMap<String, String>, AgentError> {
+    let mut headers = HashMap::new();
+    let mut offset = 0;
+    while offset < raw.len() {
+        let name_len = *raw.get(offset).ok_or_else(|| {
+            AgentError::LlmApi("Malformed Bedrock event stream header name".to_string())
+        })? as usize;
+        offset += 1;
+        if name_len == 0 || offset + name_len > raw.len() {
+            return Err(AgentError::LlmApi(
+                "Malformed Bedrock event stream header name".to_string(),
+            ));
+        }
+        let name = std::str::from_utf8(&raw[offset..offset + name_len])
+            .map_err(|err| {
+                AgentError::LlmApi(format!("Bedrock event stream header name UTF-8: {err}"))
+            })?
+            .to_string();
+        offset += name_len;
+        let value_type = *raw.get(offset).ok_or_else(|| {
+            AgentError::LlmApi("Malformed Bedrock event stream header value".to_string())
+        })?;
+        offset += 1;
+        match value_type {
+            0 => {
+                headers.insert(name, "true".to_string());
+            }
+            1 => {
+                headers.insert(name, "false".to_string());
+            }
+            2 => {
+                ensure_header_bytes(raw, offset, 1)?;
+                headers.insert(name, i8::from_be_bytes([raw[offset]]).to_string());
+                offset += 1;
+            }
+            3 => {
+                ensure_header_bytes(raw, offset, 2)?;
+                headers.insert(
+                    name,
+                    i16::from_be_bytes([raw[offset], raw[offset + 1]]).to_string(),
+                );
+                offset += 2;
+            }
+            4 => {
+                ensure_header_bytes(raw, offset, 4)?;
+                headers.insert(
+                    name,
+                    i32::from_be_bytes([
+                        raw[offset],
+                        raw[offset + 1],
+                        raw[offset + 2],
+                        raw[offset + 3],
+                    ])
+                    .to_string(),
+                );
+                offset += 4;
+            }
+            5 | 8 => {
+                ensure_header_bytes(raw, offset, 8)?;
+                headers.insert(
+                    name,
+                    i64::from_be_bytes([
+                        raw[offset],
+                        raw[offset + 1],
+                        raw[offset + 2],
+                        raw[offset + 3],
+                        raw[offset + 4],
+                        raw[offset + 5],
+                        raw[offset + 6],
+                        raw[offset + 7],
+                    ])
+                    .to_string(),
+                );
+                offset += 8;
+            }
+            6 => {
+                let len = read_header_len(raw, &mut offset)?;
+                ensure_header_bytes(raw, offset, len)?;
+                headers.insert(name, hex::encode(&raw[offset..offset + len]));
+                offset += len;
+            }
+            7 => {
+                let len = read_header_len(raw, &mut offset)?;
+                ensure_header_bytes(raw, offset, len)?;
+                let value = std::str::from_utf8(&raw[offset..offset + len])
+                    .map_err(|err| {
+                        AgentError::LlmApi(format!("Bedrock event stream header UTF-8: {err}"))
+                    })?
+                    .to_string();
+                headers.insert(name, value);
+                offset += len;
+            }
+            9 => {
+                ensure_header_bytes(raw, offset, 16)?;
+                headers.insert(name, hex::encode(&raw[offset..offset + 16]));
+                offset += 16;
+            }
+            other => {
+                return Err(AgentError::LlmApi(format!(
+                    "Unsupported Bedrock event stream header value type: {other}"
+                )));
+            }
+        }
+    }
+    Ok(headers)
+}
+
+fn read_header_len(raw: &[u8], offset: &mut usize) -> Result<usize, AgentError> {
+    ensure_header_bytes(raw, *offset, 2)?;
+    let len = u16::from_be_bytes([raw[*offset], raw[*offset + 1]]) as usize;
+    *offset += 2;
+    Ok(len)
+}
+
+fn ensure_header_bytes(raw: &[u8], offset: usize, len: usize) -> Result<(), AgentError> {
+    if offset + len > raw.len() {
+        return Err(AgentError::LlmApi(
+            "Malformed Bedrock event stream header value".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn read_be_u32(bytes: &[u8]) -> u32 {
+    u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
+}
+
+fn crc32_ieee(bytes: &[u8]) -> u32 {
+    let mut crc = 0xffff_ffffu32;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            let mask = 0u32.wrapping_sub(crc & 1);
+            crc = (crc >> 1) ^ (0xedb8_8320 & mask);
+        }
+    }
+    !crc
+}
+
 fn stream_content_block_index(event: &Value) -> u64 {
     event
         .get("contentBlockIndex")
@@ -1655,6 +2149,63 @@ fn truncate_json(value: &Value, max_chars: usize) -> String {
 mod tests {
     use super::*;
     use hermes_core::JsonSchema;
+    use std::sync::OnceLock;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+    use tokio::sync::Mutex as AsyncMutex;
+
+    fn encode_event_stream_message(event_type: &str, payload: Value) -> Vec<u8> {
+        let payload = serde_json::to_vec(&payload).expect("payload JSON");
+        let mut headers = Vec::new();
+        push_event_stream_string_header(&mut headers, ":message-type", "event");
+        push_event_stream_string_header(&mut headers, ":event-type", event_type);
+        push_event_stream_string_header(&mut headers, ":content-type", "application/json");
+        let total_len = 16 + headers.len() + payload.len();
+        let mut frame = Vec::with_capacity(total_len);
+        frame.extend_from_slice(&(total_len as u32).to_be_bytes());
+        frame.extend_from_slice(&(headers.len() as u32).to_be_bytes());
+        frame.extend_from_slice(&crc32_ieee(&frame[..8]).to_be_bytes());
+        frame.extend_from_slice(&headers);
+        frame.extend_from_slice(&payload);
+        frame.extend_from_slice(&crc32_ieee(&frame).to_be_bytes());
+        frame
+    }
+
+    fn push_event_stream_string_header(out: &mut Vec<u8>, name: &str, value: &str) {
+        out.push(name.len() as u8);
+        out.extend_from_slice(name.as_bytes());
+        out.push(7);
+        out.extend_from_slice(&(value.len() as u16).to_be_bytes());
+        out.extend_from_slice(value.as_bytes());
+    }
+
+    fn bedrock_env_lock() -> &'static AsyncMutex<()> {
+        static LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| AsyncMutex::new(()))
+    }
+
+    struct ScopedEnv {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl ScopedEnv {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for ScopedEnv {
+        fn drop(&mut self) {
+            if let Some(value) = self.previous.as_ref() {
+                std::env::set_var(self.key, value);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
 
     #[test]
     fn build_converse_body_maps_messages_tools_and_1m_beta() {
@@ -1875,6 +2426,276 @@ mod tests {
         assert_eq!(call.id, "call_1");
         assert_eq!(call.function.name, "read_file");
         assert_eq!(call.function.arguments, r#"{"path":"/tmp/f"}"#);
+    }
+
+    #[test]
+    fn aws_event_stream_decoder_maps_bedrock_events_to_chunks() {
+        let frames = [
+            encode_event_stream_message(
+                "contentBlockDelta",
+                json!({"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"text": "Hello"}}}),
+            ),
+            encode_event_stream_message(
+                "contentBlockDelta",
+                json!({"contentBlockDelta": {"contentBlockIndex": 1, "delta": {
+                    "reasoningContent": {"text": "thinking"}
+                }}}),
+            ),
+            encode_event_stream_message(
+                "contentBlockStart",
+                json!({"contentBlockStart": {"contentBlockIndex": 2, "start": {
+                    "toolUse": {"toolUseId": "tool_1", "name": "read_file"}
+                }}}),
+            ),
+            encode_event_stream_message(
+                "contentBlockDelta",
+                json!({"contentBlockDelta": {"contentBlockIndex": 2, "delta": {
+                    "toolUse": {"input": "{\"path\":\"/tmp/f\"}"}
+                }}}),
+            ),
+            encode_event_stream_message(
+                "metadata",
+                json!({"metadata": {"usage": {"inputTokens": 5, "outputTokens": 3}}}),
+            ),
+            encode_event_stream_message(
+                "messageStop",
+                json!({"messageStop": {"stopReason": "end_turn"}}),
+            ),
+        ];
+        let mut buffer = Vec::new();
+        buffer.extend_from_slice(&frames[0][..frames[0].len() / 2]);
+        assert!(take_aws_event_stream_message(&mut buffer)
+            .expect("partial frame")
+            .is_none());
+        buffer.extend_from_slice(&frames[0][frames[0].len() / 2..]);
+        for frame in frames.iter().skip(1) {
+            buffer.extend_from_slice(frame);
+        }
+
+        let mut chunks = Vec::new();
+        while let Some(message) =
+            take_aws_event_stream_message(&mut buffer).expect("event stream frame")
+        {
+            let event = decode_bedrock_event_stream_message(&message)
+                .expect("bedrock event")
+                .expect("nonempty event");
+            chunks.extend(bedrock_stream_event_to_chunks(&event).expect("chunks"));
+        }
+
+        assert!(buffer.is_empty());
+        assert!(chunks.iter().any(|chunk| {
+            chunk
+                .delta
+                .as_ref()
+                .and_then(|delta| delta.content.as_deref())
+                == Some("Hello")
+        }));
+        assert!(chunks.iter().any(|chunk| {
+            chunk
+                .delta
+                .as_ref()
+                .and_then(|delta| delta.extra.as_ref())
+                .and_then(|extra| extra.get("thinking"))
+                .and_then(Value::as_str)
+                == Some("thinking")
+        }));
+        let tool_delta = chunks
+            .iter()
+            .filter_map(|chunk| chunk.delta.as_ref())
+            .filter_map(|delta| delta.tool_calls.as_ref())
+            .flat_map(|calls| calls.iter())
+            .find(|call| {
+                call.function.as_ref().and_then(|f| f.name.as_deref()) == Some("read_file")
+            })
+            .expect("tool start delta");
+        assert_eq!(tool_delta.index, 2);
+        assert_eq!(tool_delta.id.as_deref(), Some("tool_1"));
+        assert!(chunks.iter().any(|chunk| {
+            chunk
+                .delta
+                .as_ref()
+                .and_then(|delta| delta.tool_calls.as_ref())
+                .and_then(|calls| calls.first())
+                .and_then(|call| call.function.as_ref())
+                .and_then(|function| function.arguments.as_deref())
+                == Some(r#"{"path":"/tmp/f"}"#)
+        }));
+        assert_eq!(
+            chunks
+                .iter()
+                .find_map(|chunk| chunk.usage.as_ref())
+                .unwrap()
+                .total_tokens,
+            8
+        );
+        assert_eq!(
+            chunks
+                .iter()
+                .find_map(|chunk| chunk.finish_reason.as_deref()),
+            Some("stop")
+        );
+    }
+
+    #[test]
+    fn aws_event_stream_decoder_rejects_bad_crc() {
+        let mut frame = encode_event_stream_message("metadata", json!({"metadata": {"usage": {}}}));
+        let last = frame.len() - 1;
+        frame[last] ^= 0xff;
+        let mut buffer = frame;
+        let err = take_aws_event_stream_message(&mut buffer).expect_err("CRC failure");
+        assert!(matches!(err, AgentError::LlmApi(message) if message.contains("checksum")));
+    }
+
+    #[test]
+    fn crc32_ieee_matches_standard_check_value() {
+        assert_eq!(crc32_ieee(b"123456789"), 0xcbf4_3926);
+    }
+
+    #[test]
+    fn aws_event_stream_decoder_maps_payload_exceptions() {
+        let mut buffer = encode_event_stream_message(
+            "validationException",
+            json!({"validationException": {"message": "bad input"}}),
+        );
+        let message = take_aws_event_stream_message(&mut buffer)
+            .expect("event frame")
+            .expect("complete frame");
+        let err =
+            decode_bedrock_event_stream_message(&message).expect_err("stream exception error");
+        assert!(matches!(err, AgentError::LlmApi(message) if message.contains("400")));
+    }
+
+    #[tokio::test]
+    async fn bedrock_chat_completion_stream_uses_converse_stream_transport() {
+        let _lock = bedrock_env_lock().lock().await;
+        let _token = ScopedEnv::set("AWS_BEARER_TOKEN_BEDROCK", "test-token");
+        let body = [
+            encode_event_stream_message(
+                "contentBlockStart",
+                json!({"contentBlockStart": {"contentBlockIndex": 0, "start": {
+                    "toolUse": {"toolUseId": "call_1", "name": "read_file"}
+                }}}),
+            ),
+            encode_event_stream_message(
+                "contentBlockDelta",
+                json!({"contentBlockDelta": {"contentBlockIndex": 0, "delta": {
+                    "toolUse": {"input": "{\"path\":\"/tmp/f\"}"}
+                }}}),
+            ),
+            encode_event_stream_message(
+                "messageStop",
+                json!({"messageStop": {"stopReason": "end_turn"}}),
+            ),
+            encode_event_stream_message(
+                "metadata",
+                json!({"metadata": {"usage": {"inputTokens": 2, "outputTokens": 4}}}),
+            ),
+        ]
+        .concat();
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock Bedrock");
+        let addr = listener.local_addr().expect("mock address");
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.expect("accept request");
+            let mut request = Vec::new();
+            let mut buf = [0u8; 1024];
+            loop {
+                let n = socket.read(&mut buf).await.expect("read request");
+                assert!(n > 0, "client closed before headers");
+                request.extend_from_slice(&buf[..n]);
+                if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let header_end = request
+                .windows(4)
+                .position(|window| window == b"\r\n\r\n")
+                .expect("request headers")
+                + 4;
+            let headers = String::from_utf8_lossy(&request[..header_end]).to_string();
+            let content_len = headers
+                .lines()
+                .find_map(|line| {
+                    let (name, value) = line.split_once(':')?;
+                    name.eq_ignore_ascii_case("content-length")
+                        .then(|| value.trim().parse::<usize>().ok())
+                        .flatten()
+                })
+                .unwrap_or_default();
+            while request.len().saturating_sub(header_end) < content_len {
+                let n = socket.read(&mut buf).await.expect("read request body");
+                assert!(n > 0, "client closed before body");
+                request.extend_from_slice(&buf[..n]);
+            }
+            assert!(
+                headers.starts_with("POST /model/anthropic.claude/converse-stream HTTP/1.1"),
+                "unexpected request line: {headers}"
+            );
+            assert!(
+                headers
+                    .lines()
+                    .any(|line| line.eq_ignore_ascii_case("authorization: Bearer test-token")),
+                "missing bearer authorization: {headers}"
+            );
+            let response_headers = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: application/vnd.amazon.eventstream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n",
+                body.len()
+            );
+            socket
+                .write_all(response_headers.as_bytes())
+                .await
+                .expect("write response headers");
+            socket.write_all(&body).await.expect("write response body");
+        });
+
+        let provider = BedrockProvider::new()
+            .with_region("us-east-1")
+            .with_model("anthropic.claude")
+            .with_base_url(format!("http://{addr}"));
+        let chunks = provider
+            .chat_completion_stream(&[Message::user("hello")], &[], None, None, None, None)
+            .collect::<Vec<_>>()
+            .await
+            .into_iter()
+            .collect::<Result<Vec<_>, _>>()
+            .expect("stream chunks");
+        server.await.expect("mock server");
+
+        assert!(chunks.iter().any(|chunk| {
+            chunk
+                .delta
+                .as_ref()
+                .and_then(|delta| delta.tool_calls.as_ref())
+                .and_then(|calls| calls.first())
+                .and_then(|call| call.function.as_ref())
+                .and_then(|function| function.name.as_deref())
+                == Some("read_file")
+        }));
+        assert!(chunks.iter().any(|chunk| {
+            chunk
+                .delta
+                .as_ref()
+                .and_then(|delta| delta.tool_calls.as_ref())
+                .and_then(|calls| calls.first())
+                .and_then(|call| call.function.as_ref())
+                .and_then(|function| function.arguments.as_deref())
+                == Some(r#"{"path":"/tmp/f"}"#)
+        }));
+        assert_eq!(
+            chunks
+                .iter()
+                .find_map(|chunk| chunk.finish_reason.as_deref()),
+            Some("tool_calls")
+        );
+        assert_eq!(
+            chunks
+                .iter()
+                .find_map(|chunk| chunk.usage.as_ref())
+                .unwrap()
+                .total_tokens,
+            6
+        );
     }
 
     #[test]
