@@ -171,6 +171,20 @@
       "ticket": 25
     },
     {
+      "path": "tests/gateway/test_allowed_channels_widening.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Telegram, DingTalk, Mattermost, and Matrix allowed-chat/channel/room gating is covered by Rust config-env import tests and gateway platform access policy tests for aliases, no-restriction defaults, blocked non-allowlisted group traffic, mention non-bypass, and DM bypass of channel restrictions.",
+      "owner": "sheawinkler",
+      "ticket": 302
+    },
+    {
+      "path": "tests/gateway/test_allowlist_startup_check.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream startup allowlist warning semantics are covered by Rust gateway startup warning helper tests for no-config warning, SIGNAL_GROUP_ALLOWED_USERS suppression, platform allow-all suppression, global allow-all suppression, and false-like allow-all rejection; runtime gateway startup emits the warning when chat platforms are enabled without a user allowlist or explicit allow-all override.",
+      "owner": "sheawinkler",
+      "ticket": 302
+    },
+    {
       "path": "tests/gateway/test_hooks.py",
       "classification": "intentional_divergence",
       "rationale": "Upstream gateway hook discovery, wildcard emit ordering, error containment, default empty context, and emit_collect decision hooks are covered by Rust HookRegistry tests; user hook loading intentionally uses zero-Python HOOK.yaml command handlers instead of dynamic handler.py imports.",

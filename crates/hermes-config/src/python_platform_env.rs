@@ -242,6 +242,95 @@ fn apply_dingtalk_env(config: &mut GatewayConfig) {
     if let Some(v) = env_nonempty("DINGTALK_OPENAPI_ENDPOINT") {
         set_extra(dt, "openapi_endpoint", json!(v));
     }
+    if let Some(v) = env_nonempty("DINGTALK_ALLOWED_CHATS") {
+        set_extra(dt, "allowed_chats", json!(comma_list_to_strings(&v)));
+    }
+}
+
+fn apply_mattermost_env(config: &mut GatewayConfig) {
+    let server_url = env_nonempty("MATTERMOST_SERVER_URL");
+    let token = env_nonempty("MATTERMOST_TOKEN");
+    let team_id = env_nonempty("MATTERMOST_TEAM_ID");
+    let allowed_channels = env_nonempty("MATTERMOST_ALLOWED_CHANNELS");
+
+    if server_url.is_none() && token.is_none() && team_id.is_none() && allowed_channels.is_none() {
+        return;
+    }
+
+    let mattermost = config
+        .platforms
+        .entry("mattermost".into())
+        .or_insert_with(PlatformConfig::default);
+    if let Some(v) = server_url {
+        set_extra(mattermost, "server_url", json!(v));
+    }
+    if let Some(v) = token {
+        mattermost.token = Some(v);
+        let enabled_was_explicit = mattermost
+            .extra
+            .remove("_enabled_explicit")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !mattermost.enabled && !enabled_was_explicit {
+            mattermost.enabled = true;
+        }
+    }
+    if let Some(v) = team_id {
+        set_extra(mattermost, "team_id", json!(v));
+    }
+    if let Some(v) = allowed_channels {
+        set_extra(
+            mattermost,
+            "allowed_channels",
+            json!(comma_list_to_strings(&v)),
+        );
+    }
+}
+
+fn apply_matrix_env(config: &mut GatewayConfig) {
+    let homeserver_url = env_nonempty("MATRIX_HOMESERVER_URL");
+    let user_id = env_nonempty("MATRIX_USER_ID");
+    let access_token = env_nonempty("MATRIX_ACCESS_TOKEN");
+    let room_id = env_nonempty("MATRIX_ROOM_ID").or_else(|| env_nonempty("MATRIX_HOME_ROOM"));
+    let allowed_rooms = env_nonempty("MATRIX_ALLOWED_ROOMS");
+
+    if homeserver_url.is_none()
+        && user_id.is_none()
+        && access_token.is_none()
+        && room_id.is_none()
+        && allowed_rooms.is_none()
+    {
+        return;
+    }
+
+    let matrix = config
+        .platforms
+        .entry("matrix".into())
+        .or_insert_with(PlatformConfig::default);
+    if let Some(v) = homeserver_url {
+        set_extra(matrix, "homeserver_url", json!(v));
+    }
+    if let Some(v) = user_id {
+        set_extra(matrix, "user_id", json!(v));
+    }
+    if let Some(v) = access_token {
+        matrix.token = Some(v.clone());
+        set_extra(matrix, "access_token", json!(v));
+        let enabled_was_explicit = matrix
+            .extra
+            .remove("_enabled_explicit")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !matrix.enabled && !enabled_was_explicit {
+            matrix.enabled = true;
+        }
+    }
+    if let Some(v) = room_id {
+        set_extra(matrix, "room_id", json!(v));
+    }
+    if let Some(v) = allowed_rooms {
+        set_extra(matrix, "allowed_rooms", json!(comma_list_to_strings(&v)));
+    }
 }
 
 fn apply_ntfy_env(config: &mut GatewayConfig) {
@@ -370,6 +459,8 @@ pub fn apply_python_named_platform_env(config: &mut GatewayConfig) {
     apply_discord_env(config);
     apply_weixin_env(config);
     apply_dingtalk_env(config);
+    apply_mattermost_env(config);
+    apply_matrix_env(config);
     apply_ntfy_env(config);
 }
 
@@ -776,6 +867,7 @@ mod tests {
             std::env::set_var("DINGTALK_CLIENT_ID", "cid");
             std::env::set_var("DINGTALK_CLIENT_SECRET", "sec");
             std::env::set_var("DINGTALK_OPENAPI_ENDPOINT", "https://api.example.com");
+            std::env::set_var("DINGTALK_ALLOWED_CHATS", "cidABC,cidDEF");
         }
         let mut cfg = GatewayConfig::default();
         apply_python_named_platform_env(&mut cfg);
@@ -792,10 +884,51 @@ mod tests {
             dt.extra.get("openapi_endpoint").and_then(|v| v.as_str()),
             Some("https://api.example.com")
         );
+        assert_eq!(
+            dt.extra
+                .get("allowed_chats")
+                .and_then(|v| v.as_array())
+                .map(|items| items.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>()),
+            Some(vec!["cidABC", "cidDEF"])
+        );
         unsafe {
             std::env::remove_var("DINGTALK_CLIENT_ID");
             std::env::remove_var("DINGTALK_CLIENT_SECRET");
             std::env::remove_var("DINGTALK_OPENAPI_ENDPOINT");
+            std::env::remove_var("DINGTALK_ALLOWED_CHATS");
+        }
+    }
+
+    #[test]
+    fn mattermost_and_matrix_allowed_channel_envs_are_imported() {
+        let _env = env_lock();
+        unsafe {
+            std::env::set_var("MATTERMOST_ALLOWED_CHANNELS", "chanABC,chanDEF");
+            std::env::set_var("MATRIX_ALLOWED_ROOMS", "!room1:srv,!room2:srv");
+        }
+        let mut cfg = GatewayConfig::default();
+        apply_python_named_platform_env(&mut cfg);
+        let mattermost = cfg.platforms.get("mattermost").expect("mattermost block");
+        assert_eq!(
+            mattermost
+                .extra
+                .get("allowed_channels")
+                .and_then(|v| v.as_array())
+                .map(|items| items.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>()),
+            Some(vec!["chanABC", "chanDEF"])
+        );
+        let matrix = cfg.platforms.get("matrix").expect("matrix block");
+        assert_eq!(
+            matrix
+                .extra
+                .get("allowed_rooms")
+                .and_then(|v| v.as_array())
+                .map(|items| items.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>()),
+            Some(vec!["!room1:srv", "!room2:srv"])
+        );
+        unsafe {
+            std::env::remove_var("MATTERMOST_ALLOWED_CHANNELS");
+            std::env::remove_var("MATRIX_ALLOWED_ROOMS");
         }
     }
 

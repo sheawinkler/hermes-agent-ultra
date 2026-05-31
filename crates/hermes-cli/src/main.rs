@@ -51,7 +51,7 @@ use hermes_cli::App;
 use hermes_config::{
     apply_user_config_patch, gateway_pid_path_in, hermes_home, load_config, load_user_config_file,
     save_config_yaml, state_dir, user_config_field_display, validate_config, ConfigError,
-    GatewayConfig, PlatformConfig,
+    GatewayConfig, PlatformConfig, UnauthorizedDmBehavior,
 };
 use hermes_core::AgentError;
 use hermes_core::PlatformAdapter;
@@ -2700,6 +2700,13 @@ async fn run_gateway(
                 println!(
                     "Note: no chat platforms enabled in config.yaml — gateway still runs cron + HTTP webhooks."
                 );
+            } else if gateway_allowlist_startup_would_warn(&config) {
+                tracing::warn!(
+                    "No gateway user allowlist or allow-all override configured; set platform *_ALLOWED_USERS or explicit *_ALLOW_ALL_USERS to silence this warning"
+                );
+                println!(
+                    "Warning: no gateway user allowlist configured. Set platform *_ALLOWED_USERS or explicit *_ALLOW_ALL_USERS=true if this is intentional."
+                );
             }
             let requirement_issues = gateway_requirement_issues(&config);
             if !requirement_issues.is_empty() {
@@ -4260,21 +4267,138 @@ fn discord_allow_bots_bypasses_gateway_allowlist(
 
 fn build_gateway_dm_manager(config: &hermes_config::GatewayConfig) -> DmManager {
     let mut dm_manager = DmManager::with_pair_behavior();
-    for platform_cfg in config.platforms.values().filter(|p| p.enabled) {
+    for (platform, platform_cfg) in config.platforms.iter().filter(|(_, p)| p.enabled) {
+        let mut has_platform_allowlist = false;
         for user in &platform_cfg.allowed_users {
             let trimmed = user.trim();
             if !trimmed.is_empty() {
-                dm_manager.authorize_user(trimmed.to_string());
+                has_platform_allowlist = true;
+                dm_manager.authorize_user_for_platform(platform, trimmed.to_string());
             }
         }
         for admin in &platform_cfg.admin_users {
             let trimmed = admin.trim();
             if !trimmed.is_empty() {
-                dm_manager.add_admin(trimmed.to_string());
+                has_platform_allowlist = true;
+                dm_manager.add_admin_for_platform(platform, trimmed.to_string());
             }
         }
+        let behavior = if platform_cfg.unauthorized_dm_behavior == UnauthorizedDmBehavior::Pair {
+            UnauthorizedDmBehavior::Pair
+        } else if has_platform_allowlist {
+            UnauthorizedDmBehavior::Ignore
+        } else {
+            UnauthorizedDmBehavior::Pair
+        };
+        dm_manager.set_platform_unauthorized_behavior(platform, behavior);
     }
     dm_manager
+}
+
+const GATEWAY_USER_ALLOWLIST_ENV_VARS: &[&str] = &[
+    "TELEGRAM_ALLOWED_USERS",
+    "TELEGRAM_GROUP_ALLOWED_USERS",
+    "DISCORD_ALLOWED_USERS",
+    "WHATSAPP_ALLOWED_USERS",
+    "SLACK_ALLOWED_USERS",
+    "SIGNAL_ALLOWED_USERS",
+    "SIGNAL_GROUP_ALLOWED_USERS",
+    "EMAIL_ALLOWED_USERS",
+    "SMS_ALLOWED_USERS",
+    "MATTERMOST_ALLOWED_USERS",
+    "MATRIX_ALLOWED_USERS",
+    "DINGTALK_ALLOWED_USERS",
+    "FEISHU_ALLOWED_USERS",
+    "WECOM_ALLOWED_USERS",
+    "QQ_ALLOWED_USERS",
+    "QQ_GROUP_ALLOWED_USERS",
+    "GATEWAY_ALLOWED_USERS",
+];
+
+const GATEWAY_ALLOW_ALL_ENV_VARS: &[&str] = &[
+    "GATEWAY_ALLOW_ALL_USERS",
+    "TELEGRAM_ALLOW_ALL_USERS",
+    "DISCORD_ALLOW_ALL_USERS",
+    "WHATSAPP_ALLOW_ALL_USERS",
+    "SLACK_ALLOW_ALL_USERS",
+    "SIGNAL_ALLOW_ALL_USERS",
+    "EMAIL_ALLOW_ALL_USERS",
+    "SMS_ALLOW_ALL_USERS",
+    "MATTERMOST_ALLOW_ALL_USERS",
+    "MATRIX_ALLOW_ALL_USERS",
+    "DINGTALK_ALLOW_ALL_USERS",
+    "FEISHU_ALLOW_ALL_USERS",
+    "WECOM_ALLOW_ALL_USERS",
+    "QQ_ALLOW_ALL_USERS",
+];
+
+const GATEWAY_CONFIG_USER_ALLOWLIST_EXTRA_KEYS: &[&str] = &[
+    "group_allow_from",
+    "group_allowed_users",
+    "allowed_user_ids",
+    "allowed_senders",
+    "allowed_accounts",
+];
+
+fn env_value_truthy(raw: &str) -> bool {
+    matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+fn string_list_has_non_empty(values: &[String]) -> bool {
+    values.iter().any(|value| !value.trim().is_empty())
+}
+
+fn gateway_platform_config_has_allowlist(platform_cfg: &PlatformConfig) -> bool {
+    string_list_has_non_empty(&platform_cfg.allowed_users)
+        || string_list_has_non_empty(&platform_cfg.admin_users)
+        || GATEWAY_CONFIG_USER_ALLOWLIST_EXTRA_KEYS
+            .iter()
+            .any(|key| !extra_string_set(platform_cfg, key).is_empty())
+}
+
+fn gateway_platform_config_allows_all_users(platform_cfg: &PlatformConfig) -> bool {
+    extra_bool_loose(platform_cfg, "allow_all_users").unwrap_or(false)
+}
+
+fn gateway_config_has_allowlist_or_allow_all(config: &GatewayConfig) -> bool {
+    config
+        .platforms
+        .values()
+        .filter(|platform_cfg| platform_cfg.enabled)
+        .any(|platform_cfg| {
+            gateway_platform_config_has_allowlist(platform_cfg)
+                || gateway_platform_config_allows_all_users(platform_cfg)
+        })
+}
+
+fn gateway_allowlist_startup_would_warn_from_lookup<F>(mut lookup: F) -> bool
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    let any_allowlist = GATEWAY_USER_ALLOWLIST_ENV_VARS.iter().any(|key| {
+        lookup(key)
+            .map(|value| !value.trim().is_empty())
+            .unwrap_or(false)
+    });
+    let allow_all = GATEWAY_ALLOW_ALL_ENV_VARS
+        .iter()
+        .any(|key| lookup(key).is_some_and(|value| env_value_truthy(&value)));
+    !any_allowlist && !allow_all
+}
+
+fn gateway_allowlist_startup_would_warn_with_lookup<F>(config: &GatewayConfig, lookup: F) -> bool
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    !gateway_config_has_allowlist_or_allow_all(config)
+        && gateway_allowlist_startup_would_warn_from_lookup(lookup)
+}
+
+fn gateway_allowlist_startup_would_warn(config: &GatewayConfig) -> bool {
+    gateway_allowlist_startup_would_warn_with_lookup(config, |key| std::env::var(key).ok())
 }
 
 fn parse_group_access_mode(platform_cfg: &PlatformConfig) -> GroupAccessMode {
@@ -4325,6 +4449,12 @@ fn build_gateway_platform_access_policies(
         if platform.eq_ignore_ascii_case("telegram") {
             allowed_channels.extend(extra_string_set(platform_cfg, "allowed_chats"));
             allowed_channels.extend(extra_string_set(platform_cfg, "group_allowed_chats"));
+        }
+        if platform.eq_ignore_ascii_case("dingtalk") {
+            allowed_channels.extend(extra_string_set(platform_cfg, "allowed_chats"));
+        }
+        if platform.eq_ignore_ascii_case("matrix") {
+            allowed_channels.extend(extra_string_set(platform_cfg, "allowed_rooms"));
         }
         let mut ignored_channels = extra_string_set(platform_cfg, "ignored_channels");
         if platform.eq_ignore_ascii_case("telegram") {
@@ -14629,6 +14759,145 @@ mod tests {
         assert!(policy.allowed_channels.contains("-300"));
         assert!(policy.ignored_channels.contains("31"));
         assert!(policy.ignored_channels.contains("32"));
+    }
+
+    #[test]
+    fn gateway_platform_access_policy_reads_dingtalk_and_matrix_aliases() {
+        let mut config = hermes_config::GatewayConfig::default();
+        let mut dingtalk = PlatformConfig {
+            enabled: true,
+            ..PlatformConfig::default()
+        };
+        dingtalk.extra.insert(
+            "allowed_chats".to_string(),
+            serde_json::json!("cidABC,cidDEF"),
+        );
+        config.platforms.insert("dingtalk".to_string(), dingtalk);
+
+        let mut matrix = PlatformConfig {
+            enabled: true,
+            ..PlatformConfig::default()
+        };
+        matrix.extra.insert(
+            "allowed_rooms".to_string(),
+            serde_json::json!(["!room1:srv", "!room2:srv"]),
+        );
+        config.platforms.insert("matrix".to_string(), matrix);
+
+        let policies = build_gateway_platform_access_policies(&config);
+        let dingtalk = policies.get("dingtalk").expect("dingtalk policy");
+        assert!(dingtalk.allowed_channels.contains("cidABC"));
+        assert!(dingtalk.allowed_channels.contains("cidDEF"));
+        let matrix = policies.get("matrix").expect("matrix policy");
+        assert!(matrix.allowed_channels.contains("!room1:srv"));
+        assert!(matrix.allowed_channels.contains("!room2:srv"));
+    }
+
+    #[tokio::test]
+    async fn gateway_dm_manager_scopes_configured_allowlists_by_platform() {
+        let mut config = hermes_config::GatewayConfig::default();
+        let mut telegram = PlatformConfig {
+            enabled: true,
+            ..PlatformConfig::default()
+        };
+        telegram.allowed_users = vec!["123".to_string()];
+        config.platforms.insert("telegram".to_string(), telegram);
+
+        let dm = build_gateway_dm_manager(&config);
+        assert_eq!(
+            dm.handle_dm("123", "telegram").await,
+            hermes_gateway::DmDecision::Allow
+        );
+        assert!(matches!(
+            dm.handle_dm("123", "discord").await,
+            hermes_gateway::DmDecision::Pair { .. }
+        ));
+        assert_eq!(
+            dm.handle_dm("999", "telegram").await,
+            hermes_gateway::DmDecision::Deny
+        );
+    }
+
+    #[tokio::test]
+    async fn gateway_dm_manager_allows_explicit_pair_with_allowlist() {
+        let mut config = hermes_config::GatewayConfig::default();
+        let mut signal = PlatformConfig {
+            enabled: true,
+            unauthorized_dm_behavior: UnauthorizedDmBehavior::Pair,
+            ..PlatformConfig::default()
+        };
+        signal.allowed_users = vec!["+15550000001".to_string()];
+        config.platforms.insert("signal".to_string(), signal);
+
+        let dm = build_gateway_dm_manager(&config);
+        assert!(matches!(
+            dm.handle_dm("+15559999999", "signal").await,
+            hermes_gateway::DmDecision::Pair { .. }
+        ));
+    }
+
+    #[test]
+    fn gateway_allowlist_startup_warning_matches_env_contract() {
+        let env_lookup = |pairs: &[(&str, &str)]| {
+            let env = pairs
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                .collect::<std::collections::HashMap<_, _>>();
+            gateway_allowlist_startup_would_warn_from_lookup(|key| env.get(key).cloned())
+        };
+
+        assert!(env_lookup(&[]));
+        assert!(!env_lookup(&[("SIGNAL_GROUP_ALLOWED_USERS", "user1")]));
+        assert!(!env_lookup(&[("TELEGRAM_ALLOW_ALL_USERS", "true")]));
+        assert!(!env_lookup(&[("GATEWAY_ALLOW_ALL_USERS", "yes")]));
+        assert!(env_lookup(&[("GATEWAY_ALLOW_ALL_USERS", "no")]));
+
+        let empty_env = |_key: &str| -> Option<String> { None };
+        let mut config = hermes_config::GatewayConfig::default();
+        let mut telegram = PlatformConfig {
+            enabled: true,
+            ..PlatformConfig::default()
+        };
+        assert!(gateway_allowlist_startup_would_warn_with_lookup(
+            &config, empty_env
+        ));
+
+        telegram.allowed_users = vec!["123".to_string()];
+        config.platforms.insert("telegram".to_string(), telegram);
+        assert!(!gateway_allowlist_startup_would_warn_with_lookup(
+            &config, empty_env
+        ));
+
+        let mut group_config = hermes_config::GatewayConfig::default();
+        let mut signal = PlatformConfig {
+            enabled: true,
+            ..PlatformConfig::default()
+        };
+        signal.extra.insert(
+            "group_allow_from".to_string(),
+            serde_json::json!(["+15550000001"]),
+        );
+        group_config.platforms.insert("signal".to_string(), signal);
+        assert!(!gateway_allowlist_startup_would_warn_with_lookup(
+            &group_config,
+            empty_env
+        ));
+
+        let mut allow_all_config = hermes_config::GatewayConfig::default();
+        let mut discord = PlatformConfig {
+            enabled: true,
+            ..PlatformConfig::default()
+        };
+        discord
+            .extra
+            .insert("allow_all_users".to_string(), serde_json::json!(true));
+        allow_all_config
+            .platforms
+            .insert("discord".to_string(), discord);
+        assert!(!gateway_allowlist_startup_would_warn_with_lookup(
+            &allow_all_config,
+            empty_env
+        ));
     }
 
     #[test]

@@ -317,6 +317,9 @@ impl PlatformAccessPolicy {
             if allowed.is_empty() {
                 return false;
             }
+            if allowed == "*" {
+                return true;
+            }
             let allowed_no_at = allowed.strip_prefix('@').unwrap_or(allowed);
             allowed.eq_ignore_ascii_case(candidate)
                 || allowed.eq_ignore_ascii_case(candidate_no_at)
@@ -2817,6 +2820,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn gateway_group_allowlist_star_authorizes_any_sender() {
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let dm_manager = DmManager::with_ignore_behavior();
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        let mut policies = HashMap::new();
+        let mut policy = PlatformAccessPolicy {
+            group_mode: GroupAccessMode::Allowlist,
+            ..PlatformAccessPolicy::default()
+        };
+        policy.allowed_users.insert("*".to_string());
+        policies.insert("telegram".to_string(), policy);
+        gw.set_platform_access_policies(policies).await;
+
+        let incoming = IncomingMessage {
+            platform: "telegram".into(),
+            chat_id: "-100123".into(),
+            user_id: "any_user".into(),
+            text: "hello group".into(),
+            message_id: None,
+            is_dm: false,
+        };
+
+        let result = gw.route_message(&incoming).await;
+        assert!(result.is_err());
+        assert_eq!(
+            gw.session_transcript_len("telegram", "-100123", "any_user")
+                .await,
+            1
+        );
+    }
+
+    #[tokio::test]
     async fn gateway_channel_allow_and_ignore_policy_matches_discord_contract() {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let adapter = Arc::new(TestAdapter {
@@ -2885,6 +2920,62 @@ mod tests {
             2
         );
         assert_eq!(sent.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn gateway_allowed_channel_policy_blocks_mentions_but_not_dms() {
+        let sent = Arc::new(Mutex::new(Vec::new()));
+        let adapter = Arc::new(TestAdapter {
+            messages: sent.clone(),
+        });
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let mut dm_manager = DmManager::with_ignore_behavior();
+        dm_manager.authorize_user("user1");
+        let gw = Gateway::new(session_mgr, dm_manager, GatewayConfig::default());
+        gw.register_adapter("telegram", adapter).await;
+        gw.set_message_handler(Arc::new(|_messages| {
+            Box::pin(async { Ok("handled".to_string()) })
+        }))
+        .await;
+
+        let mut policies = HashMap::new();
+        let mut policy = PlatformAccessPolicy {
+            group_mode: GroupAccessMode::Open,
+            ..PlatformAccessPolicy::default()
+        };
+        policy.allowed_channels.insert("-100allowed".to_string());
+        policies.insert("telegram".to_string(), policy);
+        gw.set_platform_access_policies(policies).await;
+
+        let mentioned_blocked_group = IncomingMessage {
+            platform: "telegram".into(),
+            chat_id: "-100blocked".into(),
+            user_id: "user1".into(),
+            text: "@hermes_bot hello".into(),
+            message_id: Some("m1".into()),
+            is_dm: false,
+        };
+        assert!(gw.route_message(&mentioned_blocked_group).await.is_ok());
+        assert_eq!(
+            gw.session_transcript_len("telegram", "-100blocked", "user1")
+                .await,
+            0
+        );
+
+        let dm = IncomingMessage {
+            platform: "telegram".into(),
+            chat_id: "-100blocked".into(),
+            user_id: "user1".into(),
+            text: "dm hello".into(),
+            message_id: Some("m2".into()),
+            is_dm: true,
+        };
+        assert!(gw.route_message(&dm).await.is_ok());
+        assert_eq!(
+            gw.session_transcript_len("telegram", "-100blocked", "user1")
+                .await,
+            2
+        );
     }
 
     #[tokio::test]
