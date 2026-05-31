@@ -22,7 +22,9 @@ use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
 use hermes_tools::approval::{self, ApprovalChoice, GatewayApprovalRequest};
 
-use crate::adapter::{describe_secret, AdapterProxyConfig, BasePlatformAdapter};
+use crate::adapter::{
+    describe_secret, platform_http_client_builder, AdapterProxyConfig, BasePlatformAdapter,
+};
 use crate::format::to_telegram_markdown_v2;
 
 /// Maximum message length for Telegram (4096 characters).
@@ -785,7 +787,8 @@ impl TelegramAdapter {
             return base.build_client();
         }
 
-        let mut builder = Client::builder().resolve_to_addrs(TELEGRAM_API_HOST, &valid_fallbacks);
+        let mut builder =
+            platform_http_client_builder().resolve_to_addrs(TELEGRAM_API_HOST, &valid_fallbacks);
 
         if let Some(ref http_proxy) = base.proxy.http_proxy {
             let proxy = reqwest::Proxy::all(http_proxy).map_err(|e| {

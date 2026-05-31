@@ -69,6 +69,14 @@ impl HookEvent {
             context,
         }
     }
+
+    /// Convenience constructor for hooks that do not need event context.
+    pub fn empty(event_type: impl Into<String>) -> Self {
+        Self {
+            event_type: event_type.into(),
+            context: json!({}),
+        }
+    }
 }
 
 /// In-process hook handler. Implementations should be cheap and
@@ -78,6 +86,16 @@ pub trait HookHandler: Send + Sync {
     /// Handle one event. Errors are logged but never propagate to the
     /// gateway pipeline.
     async fn handle(&self, event: &HookEvent) -> Result<(), String>;
+
+    /// Handle one event and optionally return a decision/result payload.
+    ///
+    /// Most hooks are fire-and-forget, so the default implementation delegates
+    /// to [`HookHandler::handle`] and returns no collected value. Decision
+    /// hooks can override this without changing the normal emit path.
+    async fn handle_collect(&self, event: &HookEvent) -> Result<Option<Value>, String> {
+        self.handle(event).await?;
+        Ok(None)
+    }
 
     /// Stable identifier used in logs. Need not be unique but should help
     /// operators correlate events with hooks.
@@ -286,38 +304,12 @@ impl HookRegistry {
     /// `scope:*` wildcard matches. Errors and panics are logged and
     /// swallowed.
     pub async fn emit(&self, event: &HookEvent) {
-        let mut to_call: Vec<Arc<dyn HookHandler>> = Vec::new();
-
-        if let Some(list) = self.handlers.get(&event.event_type) {
-            to_call.extend(list.iter().cloned());
-        }
-
-        if let Some((scope, _)) = event.event_type.split_once(':') {
-            let wildcard = format!("{scope}:*");
-            if wildcard != event.event_type {
-                if let Some(list) = self.handlers.get(&wildcard) {
-                    to_call.extend(list.iter().cloned());
-                }
-            }
-        }
-
-        for handler in to_call {
-            // Catch panics so a misbehaving hook can't kill the gateway.
+        for handler in self.matching_handlers(&event.event_type) {
             let name = handler.name().to_string();
             let evt_for_call = event.clone();
-            let result =
-                std::panic::AssertUnwindSafe(async move { handler.handle(&evt_for_call).await });
-            // Note: we deliberately don't use catch_unwind here because
-            // it doesn't compose with async; Tokio's spawn isolation +
-            // the per-handler error log below is sufficient containment
-            // for normal `Err(...)` returns. True panics inside an
-            // async fn unwind to the caller's task; in production they
-            // would be caught at the agent loop's top-level
-            // spawn. Keeping the AssertUnwindSafe wrapping for future-
-            // proofing.
-            match result.0.await {
-                Ok(()) => {}
-                Err(e) => {
+            match tokio::spawn(async move { handler.handle(&evt_for_call).await }).await {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
                     tracing::warn!(
                         hook = %name,
                         event = %event.event_type,
@@ -325,8 +317,69 @@ impl HookRegistry {
                         "Hook handler returned error"
                     );
                 }
+                Err(join_error) => {
+                    tracing::warn!(
+                        hook = %name,
+                        event = %event.event_type,
+                        error = %join_error,
+                        "Hook handler panicked"
+                    );
+                }
             }
         }
+    }
+
+    /// Fire matching handlers and collect non-empty decision payloads.
+    ///
+    /// Exact handlers run before `scope:*` wildcard handlers, matching
+    /// [`HookRegistry::emit`]. Handler errors are logged and skipped so one
+    /// failing hook cannot prevent later hooks from contributing decisions.
+    pub async fn emit_collect(&self, event: &HookEvent) -> Vec<Value> {
+        let mut collected = Vec::new();
+        for handler in self.matching_handlers(&event.event_type) {
+            let name = handler.name().to_string();
+            let evt_for_call = event.clone();
+            match tokio::spawn(async move { handler.handle_collect(&evt_for_call).await }).await {
+                Ok(Ok(Some(value))) => collected.push(value),
+                Ok(Ok(None)) => {}
+                Ok(Err(e)) => {
+                    tracing::warn!(
+                        hook = %name,
+                        event = %event.event_type,
+                        error = %e,
+                        "Hook handler returned error while collecting"
+                    );
+                }
+                Err(join_error) => {
+                    tracing::warn!(
+                        hook = %name,
+                        event = %event.event_type,
+                        error = %join_error,
+                        "Hook handler panicked while collecting"
+                    );
+                }
+            }
+        }
+        collected
+    }
+
+    fn matching_handlers(&self, event_type: &str) -> Vec<Arc<dyn HookHandler>> {
+        let mut to_call: Vec<Arc<dyn HookHandler>> = Vec::new();
+
+        if let Some(list) = self.handlers.get(event_type) {
+            to_call.extend(list.iter().cloned());
+        }
+
+        if let Some((scope, _)) = event_type.split_once(':') {
+            let wildcard = format!("{scope}:*");
+            if wildcard != event_type {
+                if let Some(list) = self.handlers.get(&wildcard) {
+                    to_call.extend(list.iter().cloned());
+                }
+            }
+        }
+
+        to_call
     }
 }
 
@@ -564,6 +617,52 @@ mod tests {
         }
     }
 
+    /// In-process handler that panics. Used to prove hook isolation is real.
+    struct PanicHook;
+
+    #[async_trait]
+    impl HookHandler for PanicHook {
+        async fn handle(&self, _event: &HookEvent) -> Result<(), String> {
+            panic!("panic-hook");
+        }
+
+        async fn handle_collect(&self, _event: &HookEvent) -> Result<Option<Value>, String> {
+            panic!("panic-hook-collect");
+        }
+
+        fn name(&self) -> &str {
+            "panic"
+        }
+    }
+
+    /// In-process decision hook for `emit_collect` tests.
+    struct DecisionHook {
+        name: String,
+        value: Option<Value>,
+        error: Option<String>,
+    }
+
+    #[async_trait]
+    impl HookHandler for DecisionHook {
+        async fn handle(&self, _event: &HookEvent) -> Result<(), String> {
+            if let Some(error) = &self.error {
+                return Err(error.clone());
+            }
+            Ok(())
+        }
+
+        async fn handle_collect(&self, _event: &HookEvent) -> Result<Option<Value>, String> {
+            if let Some(error) = &self.error {
+                return Err(error.clone());
+            }
+            Ok(self.value.clone())
+        }
+
+        fn name(&self) -> &str {
+            &self.name
+        }
+    }
+
     fn write_manifest(dir: &Path, name: &str, events: &[&str], command: &[&str]) {
         std::fs::create_dir_all(dir).unwrap();
         let yaml = format!(
@@ -729,6 +828,39 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn handler_panic_is_contained_and_later_handlers_run() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mut reg = HookRegistry::new();
+        reg.register_in_process("agent:start", Arc::new(PanicHook));
+        reg.register_in_process(
+            "agent:start",
+            Arc::new(RecordingHook {
+                name: "rec".into(),
+                seen: seen.clone(),
+            }),
+        );
+        reg.emit(&HookEvent::new("agent:start", json!({}))).await;
+        assert_eq!(*seen.lock().unwrap(), vec!["agent:start".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn emit_empty_event_uses_default_object_context() {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let mut reg = HookRegistry::new();
+        reg.register_in_process(
+            "agent:start",
+            Arc::new(RecordingHook {
+                name: "rec".into(),
+                seen: seen.clone(),
+            }),
+        );
+        let event = HookEvent::empty("agent:start");
+        assert_eq!(event.context, json!({}));
+        reg.emit(&event).await;
+        assert_eq!(*seen.lock().unwrap(), vec!["agent:start".to_string()]);
+    }
+
+    #[tokio::test]
     async fn wildcard_matches_any_subevent() {
         let seen = Arc::new(Mutex::new(Vec::new()));
         let mut reg = HookRegistry::new();
@@ -781,6 +913,145 @@ mod tests {
         reg.emit(&HookEvent::new("command:reset", json!({}))).await;
         // Both fire (order: exact first, then wildcard).
         assert_eq!(seen.lock().unwrap().len(), 2);
+    }
+
+    // ---------- emit_collect decision hooks ----------
+
+    #[tokio::test]
+    async fn emit_collect_collects_decision_payloads() {
+        let mut reg = HookRegistry::new();
+        reg.register_in_process(
+            "command:status",
+            Arc::new(DecisionHook {
+                name: "allow".into(),
+                value: Some(json!({"decision": "allow"})),
+                error: None,
+            }),
+        );
+        reg.register_in_process(
+            "command:status",
+            Arc::new(DecisionHook {
+                name: "deny".into(),
+                value: Some(json!({"decision": "deny", "message": "nope"})),
+                error: None,
+            }),
+        );
+
+        let values = reg.emit_collect(&HookEvent::empty("command:status")).await;
+        assert_eq!(
+            values,
+            vec![
+                json!({"decision": "allow"}),
+                json!({"decision": "deny", "message": "nope"}),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn emit_collect_drops_none_return_values() {
+        let mut reg = HookRegistry::new();
+        reg.register_in_process(
+            "command:x",
+            Arc::new(DecisionHook {
+                name: "none-a".into(),
+                value: None,
+                error: None,
+            }),
+        );
+        reg.register_in_process(
+            "command:x",
+            Arc::new(DecisionHook {
+                name: "deny".into(),
+                value: Some(json!({"decision": "deny"})),
+                error: None,
+            }),
+        );
+        reg.register_in_process(
+            "command:x",
+            Arc::new(DecisionHook {
+                name: "none-b".into(),
+                value: None,
+                error: None,
+            }),
+        );
+
+        let values = reg.emit_collect(&HookEvent::empty("command:x")).await;
+        assert_eq!(values, vec![json!({"decision": "deny"})]);
+    }
+
+    #[tokio::test]
+    async fn emit_collect_handler_error_does_not_abort_chain() {
+        let mut reg = HookRegistry::new();
+        reg.register_in_process(
+            "command:x",
+            Arc::new(DecisionHook {
+                name: "boom".into(),
+                value: None,
+                error: Some("boom".into()),
+            }),
+        );
+        reg.register_in_process(
+            "command:x",
+            Arc::new(DecisionHook {
+                name: "allow".into(),
+                value: Some(json!({"decision": "allow"})),
+                error: None,
+            }),
+        );
+
+        let values = reg.emit_collect(&HookEvent::empty("command:x")).await;
+        assert_eq!(values, vec![json!({"decision": "allow"})]);
+    }
+
+    #[tokio::test]
+    async fn emit_collect_handler_panic_does_not_abort_chain() {
+        let mut reg = HookRegistry::new();
+        reg.register_in_process("command:x", Arc::new(PanicHook));
+        reg.register_in_process(
+            "command:x",
+            Arc::new(DecisionHook {
+                name: "allow".into(),
+                value: Some(json!({"decision": "allow"})),
+                error: None,
+            }),
+        );
+
+        let values = reg.emit_collect(&HookEvent::empty("command:x")).await;
+        assert_eq!(values, vec![json!({"decision": "allow"})]);
+    }
+
+    #[tokio::test]
+    async fn emit_collect_exact_handlers_precede_wildcards() {
+        let mut reg = HookRegistry::new();
+        reg.register_in_process(
+            "command:*",
+            Arc::new(DecisionHook {
+                name: "wildcard".into(),
+                value: Some(json!({"decision": "allow"})),
+                error: None,
+            }),
+        );
+        reg.register_in_process(
+            "command:reset",
+            Arc::new(DecisionHook {
+                name: "exact".into(),
+                value: Some(json!({"decision": "deny"})),
+                error: None,
+            }),
+        );
+
+        let values = reg.emit_collect(&HookEvent::empty("command:reset")).await;
+        assert_eq!(
+            values,
+            vec![json!({"decision": "deny"}), json!({"decision": "allow"})]
+        );
+    }
+
+    #[tokio::test]
+    async fn emit_collect_no_handlers_returns_empty_list() {
+        let reg = HookRegistry::new();
+        let values = reg.emit_collect(&HookEvent::empty("unknown:event")).await;
+        assert!(values.is_empty());
     }
 
     // ---------- builtins ----------

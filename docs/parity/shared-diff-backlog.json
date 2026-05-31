@@ -725,7 +725,7 @@
       "classification": "intentional_divergence",
       "classification_path": "plugins/memory/honcho/README.md",
       "existing_coverage": "claimed_by_shared_diff_classification",
-      "local_blob": "dbe3eebc9a56d1910a111800666634dbb1810273",
+      "local_blob": "2ff75a272a17cabd9925f8d479a0d055aaf29da0",
       "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "plugins/memory/honcho/README.md",
@@ -4306,17 +4306,17 @@
       "workstream": "WS6"
     },
     {
-      "action": "Map upstream test intent to Rust/Python contract coverage; add missing regression tests.",
-      "classification": "functional",
-      "classification_path": "tests/gateway",
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "tests/gateway/test_hooks.py",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "ac9e51919c4e46e23777ed09e69144df0dc0351e",
-      "necessity": "necessary_review",
+      "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "tests/gateway/test_hooks.py",
-      "rust_requirement": "rust_equivalent_or_contract_test_required",
-      "status": "pending_review",
-      "ticket": 25,
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 302,
       "upstream_blob": "a614f9cbe0e64d6be4ff71c5e5d81af20c32cca9",
       "workstream": "WS6"
     },
@@ -4576,17 +4576,17 @@
       "workstream": "WS6"
     },
     {
-      "action": "Map upstream test intent to Rust/Python contract coverage; add missing regression tests.",
-      "classification": "functional",
-      "classification_path": "tests/gateway",
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "tests/gateway/test_platform_http_client_limits.py",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "fe613fb1f08433f4359f227e774367eace07cfbf",
-      "necessity": "necessary_review",
+      "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "tests/gateway/test_platform_http_client_limits.py",
-      "rust_requirement": "rust_equivalent_or_contract_test_required",
-      "status": "pending_review",
-      "ticket": 25,
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 302,
       "upstream_blob": "074a6d52ec3b6ea172807db7d674e8a089c34226",
       "workstream": "WS6"
     },
@@ -15466,29 +15466,29 @@
       "workstream": "WS5"
     }
   ],
-  "generated_at_utc": "2026-05-31T09:38:06.180340+00:00",
+  "generated_at_utc": "2026-05-31T10:26:22.729802+00:00",
   "refs": {
     "local_ref": "HEAD",
-    "local_sha": "fe145f8a2b574f66af38e0e0db3797839d3b49f0",
+    "local_sha": "05dcc204cc0613dadbff360b0ededffc2fcf5417",
     "upstream_ref": "upstream/main",
     "upstream_sha": "b1a25404b638bfbd79ce4d08b49afc0ee1361528"
   },
   "summary": {
     "by_classification": {
       "branding_only": 1,
-      "functional": 603,
-      "intentional_divergence": 258,
+      "functional": 601,
+      "intentional_divergence": 260,
       "policy_only": 169
     },
     "by_rust_requirement": {
-      "not_required_for_runtime": 428,
-      "rust_equivalent_or_contract_test_required": 522,
+      "not_required_for_runtime": 430,
+      "rust_equivalent_or_contract_test_required": 520,
       "rust_primary_ux_or_documented_divergence_required": 81
     },
     "by_status": {
-      "cleared_intentional_divergence": 258,
+      "cleared_intentional_divergence": 260,
       "cleared_non_runtime": 170,
-      "pending_review": 603
+      "pending_review": 601
     },
     "by_workstream": {
       "WS3": 56,
@@ -15497,10 +15497,10 @@
       "WS6": 689,
       "WS8": 13
     },
-    "cleared_intentional_divergence": 258,
+    "cleared_intentional_divergence": 260,
     "cleared_non_runtime": 170,
     "pending_classification": 0,
-    "pending_review": 603,
+    "pending_review": 601,
     "total_shared_different": 1031
   }
 }

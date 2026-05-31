@@ -4,7 +4,9 @@
 //! `BasePlatformAdapter` with common fields (token, webhook_url, proxy)
 //! and helper methods shared by all platform adapters.
 
-use reqwest::Client;
+use std::time::Duration;
+
+use reqwest::{Client, ClientBuilder};
 use serde::{Deserialize, Serialize};
 
 use hermes_core::errors::GatewayError;
@@ -80,6 +82,62 @@ pub fn describe_secret(secret: &str) -> String {
     format!("len={}, fp={hash:016x}", trimmed.chars().count())
 }
 
+pub const DEFAULT_PLATFORM_HTTP_KEEPALIVE_EXPIRY_SECS: f64 = 2.0;
+pub const DEFAULT_PLATFORM_HTTP_MAX_KEEPALIVE: usize = 10;
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PlatformHttpClientLimits {
+    pub keepalive_expiry: Duration,
+    pub max_keepalive_connections: usize,
+}
+
+impl Default for PlatformHttpClientLimits {
+    fn default() -> Self {
+        Self {
+            keepalive_expiry: Duration::from_secs_f64(DEFAULT_PLATFORM_HTTP_KEEPALIVE_EXPIRY_SECS),
+            max_keepalive_connections: DEFAULT_PLATFORM_HTTP_MAX_KEEPALIVE,
+        }
+    }
+}
+
+fn positive_env_f64(name: &str) -> Option<f64> {
+    std::env::var(name)
+        .ok()
+        .and_then(|raw| raw.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0)
+}
+
+fn positive_env_usize(name: &str) -> Option<usize> {
+    std::env::var(name)
+        .ok()
+        .and_then(|raw| raw.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+}
+
+/// Shared HTTP pool limits for long-lived platform adapters.
+///
+/// The env names intentionally match upstream's Python/httpx helper so
+/// operator deployments can keep the same knobs while the implementation uses
+/// reqwest instead of httpx.
+pub fn platform_http_client_limits() -> PlatformHttpClientLimits {
+    PlatformHttpClientLimits {
+        keepalive_expiry: Duration::from_secs_f64(
+            positive_env_f64("HERMES_GATEWAY_HTTPX_KEEPALIVE_EXPIRY")
+                .unwrap_or(DEFAULT_PLATFORM_HTTP_KEEPALIVE_EXPIRY_SECS),
+        ),
+        max_keepalive_connections: positive_env_usize("HERMES_GATEWAY_HTTPX_MAX_KEEPALIVE")
+            .unwrap_or(DEFAULT_PLATFORM_HTTP_MAX_KEEPALIVE),
+    }
+}
+
+/// Build a reqwest client builder with the shared platform-adapter pool limits.
+pub fn platform_http_client_builder() -> ClientBuilder {
+    let limits = platform_http_client_limits();
+    Client::builder()
+        .pool_idle_timeout(limits.keepalive_expiry)
+        .pool_max_idle_per_host(limits.max_keepalive_connections)
+}
+
 impl BasePlatformAdapter {
     /// Create a new `BasePlatformAdapter` with the given token.
     pub fn new(token: impl Into<String>) -> Self {
@@ -113,7 +171,7 @@ impl BasePlatformAdapter {
 
     /// Build a `reqwest::Client` configured with proxy settings if any.
     pub fn build_client(&self) -> Result<Client, GatewayError> {
-        let mut builder = Client::builder();
+        let mut builder = platform_http_client_builder();
 
         if let Some(ref http_proxy) = self.proxy.http_proxy {
             let proxy = reqwest::Proxy::all(http_proxy).map_err(|e| {
@@ -155,6 +213,9 @@ impl BasePlatformAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn base_adapter_validate_token_ok() {
@@ -172,6 +233,48 @@ mod tests {
     fn base_adapter_build_client_no_proxy() {
         let base = BasePlatformAdapter::new("token");
         assert!(base.build_client().is_ok());
+    }
+
+    #[test]
+    fn platform_http_client_limits_default_tightens_idle_pool() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::remove_var("HERMES_GATEWAY_HTTPX_KEEPALIVE_EXPIRY");
+        std::env::remove_var("HERMES_GATEWAY_HTTPX_MAX_KEEPALIVE");
+        let limits = platform_http_client_limits();
+        assert!(limits.keepalive_expiry > Duration::ZERO);
+        assert!(limits.keepalive_expiry < Duration::from_secs(5));
+        assert!((1..=50).contains(&limits.max_keepalive_connections));
+        assert!(platform_http_client_builder().build().is_ok());
+    }
+
+    #[test]
+    fn platform_http_client_limits_honor_env_overrides() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("HERMES_GATEWAY_HTTPX_KEEPALIVE_EXPIRY", "7.5");
+        std::env::set_var("HERMES_GATEWAY_HTTPX_MAX_KEEPALIVE", "25");
+        let limits = platform_http_client_limits();
+        assert_eq!(limits.keepalive_expiry, Duration::from_secs_f64(7.5));
+        assert_eq!(limits.max_keepalive_connections, 25);
+        std::env::remove_var("HERMES_GATEWAY_HTTPX_KEEPALIVE_EXPIRY");
+        std::env::remove_var("HERMES_GATEWAY_HTTPX_MAX_KEEPALIVE");
+    }
+
+    #[test]
+    fn platform_http_client_limits_reject_garbage_env() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        std::env::set_var("HERMES_GATEWAY_HTTPX_KEEPALIVE_EXPIRY", "not-a-number");
+        std::env::set_var("HERMES_GATEWAY_HTTPX_MAX_KEEPALIVE", "0");
+        let limits = platform_http_client_limits();
+        assert_eq!(
+            limits.keepalive_expiry,
+            Duration::from_secs_f64(DEFAULT_PLATFORM_HTTP_KEEPALIVE_EXPIRY_SECS)
+        );
+        assert_eq!(
+            limits.max_keepalive_connections,
+            DEFAULT_PLATFORM_HTTP_MAX_KEEPALIVE
+        );
+        std::env::remove_var("HERMES_GATEWAY_HTTPX_KEEPALIVE_EXPIRY");
+        std::env::remove_var("HERMES_GATEWAY_HTTPX_MAX_KEEPALIVE");
     }
 
     #[test]

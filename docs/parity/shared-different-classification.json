@@ -171,6 +171,20 @@
       "ticket": 25
     },
     {
+      "path": "tests/gateway/test_hooks.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream gateway hook discovery, wildcard emit ordering, error containment, default empty context, and emit_collect decision hooks are covered by Rust HookRegistry tests; user hook loading intentionally uses zero-Python HOOK.yaml command handlers instead of dynamic handler.py imports.",
+      "owner": "sheawinkler",
+      "ticket": 302
+    },
+    {
+      "path": "tests/gateway/test_platform_http_client_limits.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream persistent-platform HTTP pool limits are covered by Rust BasePlatformAdapter reqwest pool-limit tests for default keepalive tightening, env overrides, malformed env fallback, and shared builder use by long-lived adapters; Python httpx import failure and aiohttp response-leak checks are not part of the Rust runtime.",
+      "owner": "sheawinkler",
+      "ticket": 302
+    },
+    {
       "path": "tests/gateway/test_api_server_toolset.py",
       "classification": "intentional_divergence",
       "rationale": "Upstream's API-server toolset contract is covered by Rust toolset and platform-toolset tests; the Python test file remains reference-only.",
