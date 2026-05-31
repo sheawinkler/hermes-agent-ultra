@@ -10,6 +10,7 @@
 //! Also integrates `StreamManager` for progressive message editing.
 
 use chrono::{DateTime, Utc};
+use futures::future::{AbortHandle, Abortable};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -358,6 +359,8 @@ pub struct Gateway {
     messaging_session: RwLock<Option<Arc<MessagingSessionContext>>>,
     /// Per-session mutex so concurrent inbound messages for one chat queue (Python `_running_agents` guard).
     session_serial: RwLock<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Per-session abort handles for the in-flight foreground agent route.
+    active_routes: RwLock<HashMap<String, AbortHandle>>,
     /// Concrete Discord adapter for history backfill (P2-8).
     #[cfg(feature = "discord")]
     discord_adapter: RwLock<Option<Arc<crate::platforms::discord::DiscordAdapter>>>,
@@ -497,6 +500,7 @@ impl Gateway {
             stt_enabled: RwLock::new(true),
             messaging_session: RwLock::new(None),
             session_serial: RwLock::new(HashMap::new()),
+            active_routes: RwLock::new(HashMap::new()),
             #[cfg(feature = "discord")]
             discord_adapter: RwLock::new(None),
         }
@@ -521,6 +525,16 @@ impl Gateway {
                 .clone()
         };
         mutex.lock_owned().await
+    }
+
+    async fn abort_active_route(&self, session_key: &str) -> bool {
+        let handle = self.active_routes.write().await.remove(session_key);
+        if let Some(handle) = handle {
+            handle.abort();
+            true
+        } else {
+            false
+        }
     }
 
     /// Register the agent inbound preparer (vision enrich, native multimodal, etc.).
@@ -898,6 +912,24 @@ impl Gateway {
             is_dm,
         );
         let route_id = Self::route_correlation_id(incoming, &session_key);
+        // Fast-path stop/cancel so it can interrupt an in-flight run without waiting
+        // for the per-session serial lock.
+        let stop_text = incoming.text.trim();
+        let stop_like_text = matches!(
+            stop_text,
+            "停止当前任务" | "停止当前任务。" | "停止任务" | "取消当前任务" | "取消任务"
+        );
+        if is_slash_command || stop_like_text {
+            let command = if stop_like_text {
+                GatewayCommandResult::StopAgent("⏹ Agent stopped.".to_string())
+            } else {
+                handle_command(&incoming.text)
+            };
+            if matches!(command, GatewayCommandResult::StopAgent(_)) {
+                self.apply_command_result(incoming, &session_key, command).await?;
+                return Ok(());
+            }
+        }
         let _session_serial = self.acquire_session_serial(&session_key).await;
 
         // 2. Get or create session
@@ -1045,12 +1077,32 @@ impl Gateway {
         let supports_streaming = self.config.streaming_enabled
             // 微信 iLink API 不支持消息编辑，streaming 模式会导致只显示 "..."
             && !incoming.platform.eq_ignore_ascii_case("weixin");
-        let processing_result = if supports_streaming {
-            self.route_streaming(&incoming, messages, &session_key, &route_id)
-                .await
-        } else {
-            self.route_non_streaming(&incoming, messages, &session_key, &route_id)
-                .await
+        let route_future = async {
+            if supports_streaming {
+                self.route_streaming(&incoming, messages, &session_key, &route_id)
+                    .await
+            } else {
+                self.route_non_streaming(&incoming, messages, &session_key, &route_id)
+                    .await
+            }
+        };
+        let (abort_handle, abort_reg) = AbortHandle::new_pair();
+        self.active_routes
+            .write()
+            .await
+            .insert(session_key.clone(), abort_handle);
+        let routed = Abortable::new(route_future, abort_reg).await;
+        self.active_routes.write().await.remove(&session_key);
+        let processing_result = match routed {
+            Ok(result) => result,
+            Err(_) => {
+                info!(
+                    route_id = %route_id,
+                    session_key = %session_key,
+                    "gateway route aborted by stop command"
+                );
+                Ok(())
+            }
         };
         let processing_ms = process_start.elapsed().as_millis() as u64;
         info!(
@@ -1236,6 +1288,7 @@ impl Gateway {
                 Ok(true)
             }
             GatewayCommandResult::StopAgent(reply) => {
+                let _ = self.abort_active_route(session_key).await;
                 for (task_id, status, _) in self.background_tasks.list_tasks() {
                     if status == TaskStatus::Running {
                         let _ = self.background_tasks.cancel(&task_id);

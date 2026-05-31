@@ -1,13 +1,14 @@
 use std::path::Path;
 use std::process::Stdio;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use regex::Regex;
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::process::{ChildStdout, Command};
+use tokio::process::{Child, ChildStdin, ChildStdout, Command};
+use tokio::sync::Mutex as AsyncMutex;
 use tokio::time::timeout;
 
 use hermes_core::ToolError;
@@ -46,6 +47,12 @@ struct McpResponse {
 struct McpImage {
     mime_type: Option<String>,
     data: String,
+}
+
+struct McpSession {
+    child: Child,
+    stdin: ChildStdin,
+    stdout: ChildStdout,
 }
 
 impl CuaDriverBackend {
@@ -448,6 +455,54 @@ async fn call_cua_driver_tool(name: &str, arguments: Value) -> Result<McpRespons
             "cua-driver not found. Install with `hermes computer-use install`.".to_string(),
         ));
     }
+    let mut guard = mcp_session_mutex()
+        .lock()
+        .await;
+    ensure_mcp_session(&mut guard).await?;
+    let session = guard
+        .as_mut()
+        .ok_or_else(|| ToolError::ExecutionFailed("cua-driver mcp session unavailable".into()))?;
+
+    match run_tool_call(session, name, arguments.clone()).await {
+        Ok(resp) => Ok(resp),
+        Err(first_err) => {
+            tracing::warn!(
+                error = %first_err,
+                tool = %name,
+                "cua-driver session error, restarting once"
+            );
+            *guard = None;
+            ensure_mcp_session(&mut guard).await?;
+            let session = guard.as_mut().ok_or_else(|| {
+                ToolError::ExecutionFailed("cua-driver mcp session unavailable after restart".into())
+            })?;
+            run_tool_call(session, name, arguments).await
+        }
+    }
+}
+
+fn mcp_session_mutex() -> &'static AsyncMutex<Option<McpSession>> {
+    static SESSION: OnceLock<AsyncMutex<Option<McpSession>>> = OnceLock::new();
+    SESSION.get_or_init(|| AsyncMutex::new(None))
+}
+
+async fn ensure_mcp_session(slot: &mut Option<McpSession>) -> Result<(), ToolError> {
+    let needs_new = match slot.as_mut() {
+        Some(existing) => match existing.child.try_wait() {
+            Ok(Some(_)) => true,
+            Ok(None) => false,
+            Err(_) => true,
+        },
+        None => true,
+    };
+    if !needs_new {
+        return Ok(());
+    }
+    *slot = Some(start_mcp_session().await?);
+    Ok(())
+}
+
+async fn start_mcp_session() -> Result<McpSession, ToolError> {
     let mut child = Command::new("cua-driver")
         .arg("mcp")
         .stdin(Stdio::piped())
@@ -482,18 +537,31 @@ async fn call_cua_driver_tool(name: &str, arguments: Value) -> Result<McpRespons
         json!({"jsonrpc":"2.0","method":"notifications/initialized","params":{}}),
     )
     .await?;
+    Ok(McpSession {
+        child,
+        stdin,
+        stdout,
+    })
+}
 
+async fn run_tool_call(
+    session: &mut McpSession,
+    name: &str,
+    arguments: Value,
+) -> Result<McpResponse, ToolError> {
     send_mcp_request(
-        &mut stdin,
+        &mut session.stdin,
         json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":name,"arguments":arguments}}),
     )
     .await?;
-    let response = read_mcp_message_for_id(&mut stdout, 2).await?;
-    let _ = child.kill().await;
+    let response = read_mcp_message_for_id(&mut session.stdout, 2).await?;
+    parse_mcp_response(response)
+}
 
-    let result = response.get("result").ok_or_else(|| {
-        ToolError::ExecutionFailed(format!("mcp tools/call missing result: {response}"))
-    })?;
+fn parse_mcp_response(response: Value) -> Result<McpResponse, ToolError> {
+    let result = response
+        .get("result")
+        .ok_or_else(|| ToolError::ExecutionFailed(format!("mcp tools/call missing result: {response}")))?;
     let is_error = result
         .get("isError")
         .and_then(|v| v.as_bool())

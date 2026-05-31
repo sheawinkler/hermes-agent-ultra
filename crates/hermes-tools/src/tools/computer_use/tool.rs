@@ -117,7 +117,9 @@ pub struct ComputerUseHandler {
 
 impl ComputerUseHandler {
     pub fn with_default_backend() -> Self {
-        let backend: Arc<dyn ComputerUseBackend> = if cua_driver_binary_available() {
+        let backend: Arc<dyn ComputerUseBackend> = if cfg!(target_os = "macos")
+            && cua_driver_binary_available()
+        {
             Arc::new(CuaDriverBackend::new())
         } else {
             Arc::new(FallbackCaptureBackend)

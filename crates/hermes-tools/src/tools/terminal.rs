@@ -12,6 +12,8 @@ use hermes_core::{
 
 use crate::approval::{ApprovalDecision, ApprovalManager};
 
+const TERMINAL_FOREGROUND_MAX_TIMEOUT_SECS: u64 = 600;
+
 // ---------------------------------------------------------------------------
 // TerminalHandler
 // ---------------------------------------------------------------------------
@@ -63,6 +65,7 @@ impl ToolHandler for TerminalHandler {
             .get("background")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let timeout_secs = normalize_terminal_timeout(timeout, background)?;
 
         let pty = params.get("pty").and_then(|v| v.as_bool()).unwrap_or(false);
         let stdin_data = params.get("stdin_data").and_then(|v| v.as_str());
@@ -73,7 +76,7 @@ impl ToolHandler for TerminalHandler {
             .backend
             .execute_command_with_stdin(
                 &transformed_command,
-                timeout,
+                timeout_secs,
                 workdir,
                 background,
                 pty,
@@ -99,7 +102,7 @@ impl ToolHandler for TerminalHandler {
             "timeout".into(),
             json!({
                 "type": "integer",
-                "description": "Timeout in milliseconds (default: 30000)"
+                "description": "Timeout in milliseconds (default: 30000, foreground max: 600000)"
             }),
         );
         props.insert(
@@ -139,6 +142,28 @@ impl ToolHandler for TerminalHandler {
             JsonSchema::object(props, vec!["command".into()]),
         )
     }
+}
+
+fn normalize_terminal_timeout(
+    timeout_ms: Option<u64>,
+    background: bool,
+) -> Result<Option<u64>, ToolError> {
+    let Some(timeout_ms) = timeout_ms else {
+        return Ok(None);
+    };
+    if timeout_ms == 0 {
+        return Err(ToolError::InvalidParams(
+            "timeout must be greater than 0 milliseconds".into(),
+        ));
+    }
+    let timeout_secs = timeout_ms.saturating_add(999) / 1000;
+    if !background && timeout_secs > TERMINAL_FOREGROUND_MAX_TIMEOUT_SECS {
+        return Err(ToolError::InvalidParams(format!(
+            "foreground timeout {}s exceeds {}s; use background=true for long-running commands",
+            timeout_secs, TERMINAL_FOREGROUND_MAX_TIMEOUT_SECS
+        )));
+    }
+    Ok(Some(timeout_secs))
 }
 
 /// Format command output for display.
@@ -672,5 +697,21 @@ mod tests {
         assert!(formatted.contains("out"));
         assert!(formatted.contains("err"));
         assert!(formatted.contains("exit code: 1"));
+    }
+
+    #[test]
+    fn test_normalize_terminal_timeout_ms_to_secs() {
+        assert_eq!(normalize_terminal_timeout(Some(1_500), false).unwrap(), Some(2));
+        assert_eq!(normalize_terminal_timeout(Some(30_000), false).unwrap(), Some(30));
+    }
+
+    #[test]
+    fn test_normalize_terminal_timeout_foreground_clamp() {
+        let err = normalize_terminal_timeout(Some(700_000), false).unwrap_err();
+        assert!(err.to_string().contains("foreground timeout"));
+        assert_eq!(
+            normalize_terminal_timeout(Some(700_000), true).unwrap(),
+            Some(700)
+        );
     }
 }
