@@ -192,6 +192,20 @@
       "ticket": 302
     },
     {
+      "path": "tests/gateway/test_signal_format.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Signal markdown formatting is covered by Rust Signal gateway tests for bold, italic, strikethrough, monospace, fenced code blocks with language tags, heading-to-bold conversion, UTF-16 body ranges, newline collapse, link preservation, and italic false-positive regressions for snake_case, bullet lists, and cross-line spans.",
+      "owner": "sheawinkler",
+      "ticket": 302
+    },
+    {
+      "path": "tests/gateway/test_signal_rate_limit.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Signal attachment rate-limit behavior is covered by Rust token-bucket scheduler tests for default capacity/refill, wait estimation, zero/in-capacity/over-capacity acquire, post-RPC deduction, retry-after feedback calibration, refill clamping, rate-limit detection, wait formatting, and process-wide scheduler reset.",
+      "owner": "sheawinkler",
+      "ticket": 302
+    },
+    {
       "path": "tests/gateway/test_hooks.py",
       "classification": "intentional_divergence",
       "rationale": "Upstream gateway hook discovery, wildcard emit ordering, error containment, default empty context, and emit_collect decision hooks are covered by Rust HookRegistry tests; user hook loading intentionally uses zero-Python HOOK.yaml command handlers instead of dynamic handler.py imports.",

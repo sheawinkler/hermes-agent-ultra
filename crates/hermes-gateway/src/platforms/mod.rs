@@ -17,6 +17,8 @@ pub mod whatsapp;
 
 #[cfg(feature = "signal")]
 pub mod signal;
+#[cfg(feature = "signal")]
+pub mod signal_rate_limit;
 
 #[cfg(feature = "matrix")]
 pub mod matrix;
