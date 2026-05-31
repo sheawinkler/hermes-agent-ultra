@@ -294,15 +294,15 @@ pub fn content_hash(content: impl AsRef<[u8]>) -> String {
     out
 }
 
-static SCAN_PATTERNS: LazyLock<
-    Vec<(
-        Regex,
-        &'static str,
-        &'static str,
-        &'static str,
-        &'static str,
-    )>,
-> = LazyLock::new(|| {
+type ScanPattern = (
+    Regex,
+    &'static str,
+    &'static str,
+    &'static str,
+    &'static str,
+);
+
+static SCAN_PATTERNS: LazyLock<Vec<ScanPattern>> = LazyLock::new(|| {
     [
         (
             r"(?i)\bcurl\b[^\n]*(\$\{?[A-Z_][A-Z0-9_]*\}?)",

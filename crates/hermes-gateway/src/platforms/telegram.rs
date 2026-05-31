@@ -529,7 +529,8 @@ impl TelegramTextBatcher {
         let ready_keys = self
             .pending
             .iter()
-            .filter_map(|(key, batch)| (batch.ready_at <= now).then(|| key.clone()))
+            .filter(|(_, batch)| batch.ready_at <= now)
+            .map(|(key, _)| key.clone())
             .collect::<Vec<_>>();
 
         ready_keys
@@ -652,7 +653,7 @@ impl TelegramTopicBindingStore {
             .filter(|binding| binding.chat_id == chat_id)
             .cloned()
             .collect::<Vec<_>>();
-        rows.sort_by(|a, b| b.touched_seq.cmp(&a.touched_seq));
+        rows.sort_by_key(|row| std::cmp::Reverse(row.touched_seq));
         rows
     }
 
@@ -716,6 +717,31 @@ pub struct TelegramAdapter {
     /// Inline approval callback IDs mapped to gateway session keys.
     approval_state: Mutex<HashMap<u64, String>>,
     approval_counter: AtomicU64,
+}
+
+#[derive(Clone, Copy)]
+struct TelegramMultipartRequest<'a> {
+    chat_id: &'a str,
+    file_path: &'a str,
+    caption: Option<&'a str>,
+    method: &'a str,
+    field_name: &'a str,
+    reply_to_message_id: Option<i64>,
+    message_thread_id: Option<i64>,
+}
+
+impl TelegramMultipartRequest<'_> {
+    fn has_thread_context(self) -> bool {
+        self.reply_to_message_id.is_some() || self.message_thread_id.is_some()
+    }
+
+    fn without_thread_context(self) -> Self {
+        Self {
+            reply_to_message_id: None,
+            message_thread_id: None,
+            ..self
+        }
+    }
 }
 
 impl TelegramAdapter {
@@ -952,11 +978,7 @@ impl TelegramAdapter {
                 continue;
             };
             match entity.entity_type.as_str() {
-                "mention" | "text_mention" => {
-                    if token.eq_ignore_ascii_case(&mention) {
-                        return true;
-                    }
-                }
+                "mention" | "text_mention" if token.eq_ignore_ascii_case(&mention) => return true,
                 "bot_command" if is_command => {
                     if let Some((_, addressed_to)) = token.split_once('@') {
                         return addressed_to.eq_ignore_ascii_case(bot_username);
@@ -1264,15 +1286,15 @@ impl TelegramAdapter {
         file_path: &str,
         caption: Option<&str>,
     ) -> Result<i64, GatewayError> {
-        self.send_multipart_with_options(
+        self.send_multipart_with_options(TelegramMultipartRequest {
             chat_id,
             file_path,
             caption,
-            "sendDocument",
-            "document",
-            None,
-            None,
-        )
+            method: "sendDocument",
+            field_name: "document",
+            reply_to_message_id: None,
+            message_thread_id: None,
+        })
         .await
     }
 
@@ -1284,15 +1306,15 @@ impl TelegramAdapter {
         reply_to_message_id: Option<i64>,
         message_thread_id: Option<i64>,
     ) -> Result<i64, GatewayError> {
-        self.send_multipart_with_options(
+        self.send_multipart_with_options(TelegramMultipartRequest {
             chat_id,
             file_path,
             caption,
-            "sendDocument",
-            "document",
+            method: "sendDocument",
+            field_name: "document",
             reply_to_message_id,
             message_thread_id,
-        )
+        })
         .await
     }
 
@@ -1303,15 +1325,15 @@ impl TelegramAdapter {
         file_path: &str,
         caption: Option<&str>,
     ) -> Result<i64, GatewayError> {
-        self.send_multipart_with_options(
+        self.send_multipart_with_options(TelegramMultipartRequest {
             chat_id,
             file_path,
             caption,
-            "sendPhoto",
-            "photo",
-            None,
-            None,
-        )
+            method: "sendPhoto",
+            field_name: "photo",
+            reply_to_message_id: None,
+            message_thread_id: None,
+        })
         .await
     }
 
@@ -1323,15 +1345,15 @@ impl TelegramAdapter {
         reply_to_message_id: Option<i64>,
         message_thread_id: Option<i64>,
     ) -> Result<i64, GatewayError> {
-        self.send_multipart_with_options(
+        self.send_multipart_with_options(TelegramMultipartRequest {
             chat_id,
             file_path,
             caption,
-            "sendPhoto",
-            "photo",
+            method: "sendPhoto",
+            field_name: "photo",
             reply_to_message_id,
             message_thread_id,
-        )
+        })
         .await
     }
 
@@ -1416,43 +1438,30 @@ impl TelegramAdapter {
         method: &str,
         field_name: &str,
     ) -> Result<i64, GatewayError> {
-        self.send_multipart_with_options(
-            chat_id, file_path, caption, method, field_name, None, None,
-        )
+        self.send_multipart_with_options(TelegramMultipartRequest {
+            chat_id,
+            file_path,
+            caption,
+            method,
+            field_name,
+            reply_to_message_id: None,
+            message_thread_id: None,
+        })
         .await
     }
 
     async fn send_multipart_with_options(
         &self,
-        chat_id: &str,
-        file_path: &str,
-        caption: Option<&str>,
-        method: &str,
-        field_name: &str,
-        reply_to_message_id: Option<i64>,
-        message_thread_id: Option<i64>,
+        request: TelegramMultipartRequest<'_>,
     ) -> Result<i64, GatewayError> {
-        match self
-            .send_multipart_once(
-                chat_id,
-                file_path,
-                caption,
-                method,
-                field_name,
-                reply_to_message_id,
-                message_thread_id,
-            )
-            .await
-        {
+        match self.send_multipart_once(request).await {
             Ok(id) => Ok(id),
             Err(err)
                 if Self::gateway_error_thread_or_reply_missing(&err)
-                    && (reply_to_message_id.is_some() || message_thread_id.is_some()) =>
+                    && request.has_thread_context() =>
             {
-                self.send_multipart_once(
-                    chat_id, file_path, caption, method, field_name, None, None,
-                )
-                .await
+                self.send_multipart_once(request.without_thread_context())
+                    .await
             }
             Err(err) => Err(err),
         }
@@ -1460,21 +1469,15 @@ impl TelegramAdapter {
 
     async fn send_multipart_once(
         &self,
-        chat_id: &str,
-        file_path: &str,
-        caption: Option<&str>,
-        method: &str,
-        field_name: &str,
-        reply_to_message_id: Option<i64>,
-        message_thread_id: Option<i64>,
+        request: TelegramMultipartRequest<'_>,
     ) -> Result<i64, GatewayError> {
-        let url = format!("{}/{}", self.api_base, method);
+        let url = format!("{}/{}", self.api_base, request.method);
 
-        let file_bytes = tokio::fs::read(file_path).await.map_err(|e| {
-            GatewayError::SendFailed(format!("Failed to read file {}: {}", file_path, e))
+        let file_bytes = tokio::fs::read(request.file_path).await.map_err(|e| {
+            GatewayError::SendFailed(format!("Failed to read file {}: {}", request.file_path, e))
         })?;
 
-        let file_name = std::path::Path::new(file_path)
+        let file_name = std::path::Path::new(request.file_path)
             .file_name()
             .and_then(|n| n.to_str())
             .unwrap_or("file")
@@ -1483,19 +1486,19 @@ impl TelegramAdapter {
         let part = reqwest::multipart::Part::bytes(file_bytes).file_name(file_name);
 
         let mut form = reqwest::multipart::Form::new()
-            .text("chat_id", chat_id.to_string())
-            .part(field_name.to_string(), part);
+            .text("chat_id", request.chat_id.to_string())
+            .part(request.field_name.to_string(), part);
 
-        if let Some(cap) = caption.map(str::trim).filter(|s| !s.is_empty()) {
+        if let Some(cap) = request.caption.map(str::trim).filter(|s| !s.is_empty()) {
             let truncated: String = cap.chars().take(MAX_CAPTION_LENGTH).collect();
             form = form.text("caption", truncated);
         }
 
-        if let Some(reply_id) = reply_to_message_id {
+        if let Some(reply_id) = request.reply_to_message_id {
             form = form.text("reply_to_message_id", reply_id.to_string());
         }
 
-        if let Some(thread_id) = message_thread_id {
+        if let Some(thread_id) = request.message_thread_id {
             form = form.text("message_thread_id", thread_id.to_string());
         }
 
@@ -1505,19 +1508,22 @@ impl TelegramAdapter {
             .multipart(form)
             .send()
             .await
-            .map_err(|e| GatewayError::SendFailed(format!("{} failed: {}", method, e)))?;
+            .map_err(|e| GatewayError::SendFailed(format!("{} failed: {}", request.method, e)))?;
 
         let status = resp.status();
         if status == reqwest::StatusCode::TOO_MANY_REQUESTS {
             let body_text = resp.text().await.unwrap_or_default();
             return Err(GatewayError::SendFailed(format!(
                 "Rate limited on {}: {}",
-                method, body_text
+                request.method, body_text
             )));
         }
 
         let result: TelegramResponse<SentMessage> = resp.json().await.map_err(|e| {
-            GatewayError::SendFailed(format!("Failed to parse {} response: {}", method, e))
+            GatewayError::SendFailed(format!(
+                "Failed to parse {} response: {}",
+                request.method, e
+            ))
         })?;
 
         if result.ok {
@@ -1525,14 +1531,14 @@ impl TelegramAdapter {
                 GatewayError::SendFailed(
                     result
                         .description
-                        .unwrap_or_else(|| format!("{} returned no message", method)),
+                        .unwrap_or_else(|| format!("{} returned no message", request.method)),
                 )
             })
         } else {
             Err(GatewayError::SendFailed(
                 result
                     .description
-                    .unwrap_or_else(|| format!("{} failed", method)),
+                    .unwrap_or_else(|| format!("{} failed", request.method)),
             ))
         }
     }

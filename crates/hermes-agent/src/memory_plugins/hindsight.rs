@@ -436,13 +436,15 @@ impl MemoryProviderPlugin for HindsightPlugin {
             } else {
                 match hindsight_recall(
                     &client,
-                    &base,
-                    &bank,
-                    &cfg.api_key,
-                    &q,
-                    &cfg.budget,
-                    cfg.recall_max_tokens,
-                    &cfg.recall_types,
+                    HindsightRecallRequest {
+                        base: &base,
+                        bank: &bank,
+                        api_key: &cfg.api_key,
+                        query: &q,
+                        budget: &cfg.budget,
+                        max_tokens: cfg.recall_max_tokens,
+                        recall_types: &cfg.recall_types,
+                    },
                 ) {
                     Ok(t) => t,
                     Err(e) => {
@@ -580,13 +582,15 @@ impl MemoryProviderPlugin for HindsightPlugin {
                 }
                 match hindsight_recall(
                     &client,
-                    &base,
-                    &bank,
-                    &cfg.api_key,
-                    query,
-                    &cfg.budget,
-                    cfg.recall_max_tokens,
-                    &cfg.recall_types,
+                    HindsightRecallRequest {
+                        base: &base,
+                        bank: &bank,
+                        api_key: &cfg.api_key,
+                        query,
+                        budget: &cfg.budget,
+                        max_tokens: cfg.recall_max_tokens,
+                        recall_types: &cfg.recall_types,
+                    },
                 ) {
                     Ok(text) if !text.is_empty() => json!({"result": text}).to_string(),
                     Ok(_) => json!({"result": "No relevant memories found."}).to_string(),
@@ -749,21 +753,33 @@ fn hindsight_recall_body(
     })
 }
 
+struct HindsightRecallRequest<'a> {
+    base: &'a str,
+    bank: &'a str,
+    api_key: &'a str,
+    query: &'a str,
+    budget: &'a str,
+    max_tokens: usize,
+    recall_types: &'a [String],
+}
+
 fn hindsight_recall(
     client: &Client,
-    base: &str,
-    bank: &str,
-    api_key: &str,
-    query: &str,
-    budget: &str,
-    max_tokens: usize,
-    recall_types: &[String],
+    request: HindsightRecallRequest<'_>,
 ) -> Result<String, String> {
-    let url = format!("{}/v1/default/banks/{}/memories/recall", base, bank);
-    let body = hindsight_recall_body(query, budget, max_tokens, recall_types);
+    let url = format!(
+        "{}/v1/default/banks/{}/memories/recall",
+        request.base, request.bank
+    );
+    let body = hindsight_recall_body(
+        request.query,
+        request.budget,
+        request.max_tokens,
+        request.recall_types,
+    );
     let mut req = client.post(&url).json(&body);
-    if !api_key.is_empty() {
-        req = req.bearer_auth(api_key);
+    if !request.api_key.is_empty() {
+        req = req.bearer_auth(request.api_key);
     }
     let resp = req.send().map_err(|e| e.to_string())?;
     if !resp.status().is_success() {

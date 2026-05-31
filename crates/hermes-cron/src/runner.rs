@@ -803,6 +803,14 @@ mod tests {
 
     static TEST_ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
+    fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+            .block_on(future)
+    }
+
     #[test]
     fn test_filtered_tool_schemas_excludes_cronjob() {
         // Create a minimal tool registry with a cronjob tool
@@ -940,8 +948,8 @@ mod tests {
         assert_eq!(reply.trim(), "watchdog-ok");
     }
 
-    #[tokio::test]
-    async fn test_no_agent_script_path_runs_relative_to_hermes_scripts() {
+    #[test]
+    fn test_no_agent_script_path_runs_relative_to_hermes_scripts() {
         let _lock = TEST_ENV_LOCK.lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         let scripts = home.path().join("scripts");
@@ -957,7 +965,7 @@ mod tests {
         job.no_agent = true;
         job.script = Some("watchdog.sh".to_string());
 
-        let result = runner.run_job(&job).await.expect("script-only result");
+        let result = block_on(runner.run_job(&job)).expect("script-only result");
         let reply = result
             .messages
             .iter()
@@ -967,8 +975,8 @@ mod tests {
         assert_eq!(reply.trim(), "scripts-ok");
     }
 
-    #[tokio::test]
-    async fn test_no_agent_script_path_blocks_traversal() {
+    #[test]
+    fn test_no_agent_script_path_blocks_traversal() {
         let _lock = TEST_ENV_LOCK.lock().unwrap();
         let home = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(home.path().join("scripts")).unwrap();
@@ -982,7 +990,7 @@ mod tests {
         job.no_agent = true;
         job.script = Some("../../etc/passwd".to_string());
 
-        let err = runner.run_job(&job).await.expect_err("blocked");
+        let err = block_on(runner.run_job(&job)).expect_err("blocked");
         assert!(err.to_string().contains("blocked cron script path"));
     }
 

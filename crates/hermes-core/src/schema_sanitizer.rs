@@ -48,9 +48,7 @@ fn default_object_schema() -> Value {
 
 fn schema_for_type(kind: &str) -> Value {
     let kind = kind.trim();
-    if kind == "object" {
-        default_object_schema()
-    } else if kind.is_empty() {
+    if kind == "object" || kind.is_empty() {
         default_object_schema()
     } else {
         serde_json::json!({"type": kind})

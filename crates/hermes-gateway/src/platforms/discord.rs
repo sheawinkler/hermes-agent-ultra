@@ -798,6 +798,12 @@ pub enum DiscordSkillCommandDecision {
     Dispatch { text: String },
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct DiscordSkillCommandRequest<'a> {
+    pub requested_name: &'a str,
+    pub args: &'a str,
+}
+
 pub fn discord_skill_autocomplete_choices(
     policy: &DiscordInteractionAuthPolicy,
     subject: &DiscordInteractionSubject,
@@ -833,8 +839,7 @@ pub fn discord_skill_command_decision(
     guild_id: Option<&str>,
     dm_role_auth_guild: Option<&str>,
     entries: &[DiscordSkillCommandEntry],
-    requested_name: &str,
-    args: &str,
+    request: DiscordSkillCommandRequest<'_>,
 ) -> DiscordSkillCommandDecision {
     if policy.authorize_slash(subject, channel_context, guild_id, dm_role_auth_guild)
         != DiscordAuthDecision::Allow
@@ -842,7 +847,7 @@ pub fn discord_skill_command_decision(
         return DiscordSkillCommandDecision::Unauthorized;
     }
 
-    let requested = requested_name.trim();
+    let requested = request.requested_name.trim();
     let Some(entry) = entries
         .iter()
         .find(|entry| entry.name.eq_ignore_ascii_case(requested))
@@ -852,7 +857,7 @@ pub fn discord_skill_command_decision(
         };
     };
 
-    let args = args.trim();
+    let args = request.args.trim();
     let text = if args.is_empty() {
         entry.command_key.clone()
     } else {
@@ -1434,7 +1439,7 @@ pub fn discord_command_fingerprint(commands: &[serde_json::Value]) -> String {
         .iter()
         .map(normalize_command_payload)
         .collect::<Vec<_>>();
-    normalized.sort_by(|a, b| command_key(a).cmp(&command_key(b)));
+    normalized.sort_by_key(command_key);
     serde_json::to_string(&normalized).unwrap_or_default()
 }
 
@@ -4116,8 +4121,10 @@ mod tests {
                 Some("guild-1"),
                 None,
                 &entries,
-                "alpha",
-                "extra"
+                DiscordSkillCommandRequest {
+                    requested_name: "alpha",
+                    args: "extra",
+                }
             ),
             DiscordSkillCommandDecision::Unauthorized
         );
@@ -4129,8 +4136,10 @@ mod tests {
                 Some("guild-1"),
                 None,
                 &entries,
-                "definitely-not-a-skill",
-                ""
+                DiscordSkillCommandRequest {
+                    requested_name: "definitely-not-a-skill",
+                    args: "",
+                }
             ),
             DiscordSkillCommandDecision::Unauthorized
         );
@@ -4156,8 +4165,10 @@ mod tests {
                 Some("guild-1"),
                 None,
                 &entries,
-                "alpha",
-                "extra args"
+                DiscordSkillCommandRequest {
+                    requested_name: "alpha",
+                    args: "extra args",
+                }
             ),
             DiscordSkillCommandDecision::Dispatch {
                 text: "/alpha extra args".into()
@@ -4171,8 +4182,10 @@ mod tests {
                 Some("guild-1"),
                 None,
                 &entries,
-                "missing",
-                ""
+                DiscordSkillCommandRequest {
+                    requested_name: "missing",
+                    args: "",
+                }
             ),
             DiscordSkillCommandDecision::UnknownSkill {
                 requested_name: "missing".into()

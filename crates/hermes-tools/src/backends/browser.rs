@@ -4,7 +4,12 @@
 //! and provides browser automation capabilities.
 
 use async_trait::async_trait;
+use hermes_config::{
+    cli_config_path, config_path, managed_nous_tools_enabled, resolve_managed_tool_gateway,
+    ManagedToolGatewayConfig, ResolveOptions,
+};
 use serde_json::{json, Value};
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -14,19 +19,31 @@ use hermes_core::ToolError;
 
 const BROWSERBASE_BASE_URL_DEFAULT: &str = "https://api.browserbase.com";
 const BROWSERBASE_MAX_SESSION_TIMEOUT_SECS: u64 = 21_600;
+const BROWSER_USE_BASE_URL_DEFAULT: &str = "https://api.browser-use.com/api/v3";
+const BROWSER_USE_MANAGED_TIMEOUT_MINUTES: u64 = 5;
+const BROWSER_USE_MANAGED_PROXY_COUNTRY_CODE: &str = "us";
 
 /// Resolve the default browser backend from environment.
 ///
 /// Selection order:
+/// - `HERMES_BROWSER_BACKEND=browser-use` / `BROWSER_CLOUD_PROVIDER=browser-use`
 /// - `HERMES_BROWSER_BACKEND=browserbase` / `BROWSER_CLOUD_PROVIDER=browserbase`
 /// - Browserbase credentials (`BROWSERBASE_API_KEY` + `BROWSERBASE_PROJECT_ID`)
+/// - Browser Use direct or managed gateway configuration
 /// - `HERMES_BROWSER_BACKEND=camofox`
 /// - local CDP (`CHROME_CDP_URL` or localhost default)
 pub fn browser_backend_from_env() -> Arc<dyn BrowserBackend> {
     match browser_backend_choice_from_env() {
+        "browser-use" => match BrowserUseBrowserBackend::from_env() {
+            Ok(backend) => Arc::new(backend),
+            Err(err) if explicit_browser_use_requested_from_env_or_config() => {
+                Arc::new(UnavailableBrowserBackend::new(err.to_string()))
+            }
+            Err(_) => Arc::new(CdpBrowserBackend::from_env()),
+        },
         "browserbase" => match BrowserbaseBrowserBackend::from_env() {
             Ok(backend) => Arc::new(backend),
-            Err(err) if explicit_browserbase_requested_from_env() => {
+            Err(err) if explicit_browserbase_requested_from_env_or_config() => {
                 Arc::new(UnavailableBrowserBackend::new(err.to_string()))
             }
             Err(_) => Arc::new(CdpBrowserBackend::from_env()),
@@ -36,22 +53,34 @@ pub fn browser_backend_from_env() -> Arc<dyn BrowserBackend> {
     }
 }
 
-fn explicit_browserbase_requested_from_env() -> bool {
+fn explicit_browser_use_requested_from_env_or_config() -> bool {
     for key in [
         "HERMES_BROWSER_BACKEND",
         "BROWSER_CLOUD_PROVIDER",
         "BROWSER_PROVIDER",
     ] {
         if let Some(value) = env_optional_nonempty(key) {
-            if matches!(
-                value.to_ascii_lowercase().as_str(),
-                "browserbase" | "browser-base"
-            ) {
+            if normalize_browser_provider(&value) == Some("browser-use") {
                 return true;
             }
         }
     }
-    false
+    matches!(configured_browser_cloud_provider(), Some("browser-use"))
+}
+
+fn explicit_browserbase_requested_from_env_or_config() -> bool {
+    for key in [
+        "HERMES_BROWSER_BACKEND",
+        "BROWSER_CLOUD_PROVIDER",
+        "BROWSER_PROVIDER",
+    ] {
+        if let Some(value) = env_optional_nonempty(key) {
+            if normalize_browser_provider(&value) == Some("browserbase") {
+                return true;
+            }
+        }
+    }
+    matches!(configured_browser_cloud_provider(), Some("browserbase"))
 }
 
 fn browser_backend_choice_from_env() -> &'static str {
@@ -61,19 +90,34 @@ fn browser_backend_choice_from_env() -> &'static str {
         "BROWSER_PROVIDER",
     ] {
         if let Some(value) = env_optional_nonempty(key) {
-            match value.to_ascii_lowercase().as_str() {
-                "browserbase" | "browser-base" => return "browserbase",
-                "camofox" | "camo" => return "camofox",
-                "cdp" | "chrome" | "chromium" | "local" => return "cdp",
-                _ => {}
+            if let Some(provider) = normalize_browser_provider(&value) {
+                return provider;
             }
         }
     }
 
+    if let Some(provider) = configured_browser_cloud_provider() {
+        return provider;
+    }
+
     if BrowserbaseConfig::is_configured_from_env() {
         "browserbase"
+    } else if BrowserUseConfig::is_configured_from_env_or_managed() {
+        "browser-use"
     } else {
         "cdp"
+    }
+}
+
+fn normalize_browser_provider(value: &str) -> Option<&'static str> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "browser-use" | "browser_use" | "browseruse" | "managed-browser" | "managed_browser" => {
+            Some("browser-use")
+        }
+        "browserbase" | "browser-base" => Some("browserbase"),
+        "camofox" | "camo" => Some("camofox"),
+        "cdp" | "chrome" | "chromium" | "local" => Some("cdp"),
+        _ => None,
     }
 }
 
@@ -96,11 +140,93 @@ fn env_bool(name: &str, default: bool) -> bool {
 }
 
 fn normalize_base_url(raw: &str) -> String {
+    normalize_base_url_with_default(raw, BROWSERBASE_BASE_URL_DEFAULT)
+}
+
+fn normalize_base_url_with_default(raw: &str, default: &str) -> String {
     let trimmed = raw.trim().trim_end_matches('/');
     if trimmed.is_empty() {
-        BROWSERBASE_BASE_URL_DEFAULT.to_string()
+        default.to_string()
     } else {
         trimmed.to_string()
+    }
+}
+
+fn configured_browser_cloud_provider() -> Option<&'static str> {
+    for path in [cli_config_path(), config_path()] {
+        if let Some(provider) = browser_provider_from_yaml_path(&path) {
+            return Some(provider);
+        }
+    }
+    None
+}
+
+fn browser_provider_from_yaml_path(path: &Path) -> Option<&'static str> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let value: serde_yaml::Value = serde_yaml::from_str(&text).ok()?;
+    let provider = value
+        .get("browser")
+        .and_then(|browser| browser.get("cloud_provider"))
+        .and_then(yaml_scalar_as_string)?;
+    normalize_browser_provider(&provider)
+}
+
+fn browser_use_prefers_gateway_from_config() -> bool {
+    for path in [cli_config_path(), config_path()] {
+        if let Some(prefer) = browser_use_gateway_preference_from_yaml_path(&path) {
+            return prefer;
+        }
+    }
+    false
+}
+
+fn browser_use_gateway_preference_from_yaml_path(path: &Path) -> Option<bool> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let value: serde_yaml::Value = serde_yaml::from_str(&text).ok()?;
+
+    if let Some(raw) = value
+        .get("browser")
+        .and_then(|browser| browser.get("use_gateway"))
+    {
+        return Some(yaml_truthy(raw));
+    }
+    if let Some(raw) = value
+        .get("tool_gateway")
+        .and_then(|gateway| gateway.get("browser"))
+    {
+        return Some(yaml_gateway_route(raw));
+    }
+    None
+}
+
+fn yaml_scalar_as_string(value: &serde_yaml::Value) -> Option<String> {
+    match value {
+        serde_yaml::Value::String(s) => Some(s.clone()),
+        serde_yaml::Value::Bool(b) => Some(b.to_string()),
+        serde_yaml::Value::Number(n) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+fn yaml_truthy(value: &serde_yaml::Value) -> bool {
+    match value {
+        serde_yaml::Value::Bool(b) => *b,
+        serde_yaml::Value::Number(n) => n.as_i64().map(|v| v != 0).unwrap_or(false),
+        serde_yaml::Value::String(s) => matches!(
+            s.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on" | "gateway" | "managed"
+        ),
+        _ => false,
+    }
+}
+
+fn yaml_gateway_route(value: &serde_yaml::Value) -> bool {
+    match value {
+        serde_yaml::Value::String(s) => matches!(
+            s.trim().to_ascii_lowercase().as_str(),
+            "gateway" | "managed" | "nous" | "true" | "1" | "yes" | "on"
+        ),
+        _ => yaml_truthy(value),
     }
 }
 
@@ -164,6 +290,34 @@ pub struct BrowserbaseBrowserBackend {
     session: Mutex<Option<BrowserbaseSession>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrowserUseConfig {
+    api_key: String,
+    base_url: String,
+    managed_mode: bool,
+    task_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BrowserUseSession {
+    session_name: String,
+    bb_session_id: String,
+    cdp_url: String,
+    external_call_id: Option<String>,
+}
+
+/// Browser Use cloud browser backend.
+///
+/// Supports both direct `BROWSER_USE_API_KEY` and the Nous-managed Browser Use
+/// gateway. Managed mode preserves upstream's idempotency-key behavior for
+/// in-flight or retryable session creation.
+pub struct BrowserUseBrowserBackend {
+    config: BrowserUseConfig,
+    client: reqwest::Client,
+    session: Mutex<Option<BrowserUseSession>>,
+    pending_create_key: Mutex<Option<String>>,
+}
+
 impl UnavailableBrowserBackend {
     fn new(message: String) -> Self {
         Self { message }
@@ -223,6 +377,72 @@ impl BrowserbaseConfig {
 
     pub fn base_url(&self) -> &str {
         &self.base_url
+    }
+}
+
+impl BrowserUseConfig {
+    pub fn new_direct(api_key: String) -> Self {
+        Self {
+            api_key,
+            base_url: BROWSER_USE_BASE_URL_DEFAULT.to_string(),
+            managed_mode: false,
+            task_id: "rust".to_string(),
+        }
+    }
+
+    pub fn from_env() -> Result<Self, ToolError> {
+        let direct_api_key = env_optional_nonempty("BROWSER_USE_API_KEY");
+        if let Some(api_key) = direct_api_key {
+            if !browser_use_prefers_gateway_from_config() {
+                let mut cfg = Self::new_direct(api_key);
+                if let Some(task_id) = env_optional_nonempty("HERMES_TASK_ID") {
+                    cfg.task_id = task_id;
+                }
+                return Ok(cfg);
+            }
+        }
+
+        if let Some(managed) =
+            resolve_managed_tool_gateway("browser-use", ResolveOptions::default())
+        {
+            let mut cfg = Self::from_managed(&managed);
+            if let Some(task_id) = env_optional_nonempty("HERMES_TASK_ID") {
+                cfg.task_id = task_id;
+            }
+            return Ok(cfg);
+        }
+
+        let message = if managed_nous_tools_enabled() {
+            "Browser Use requires either a direct BROWSER_USE_API_KEY credential or a managed Browser Use gateway configuration."
+        } else {
+            "Browser Use requires a direct BROWSER_USE_API_KEY credential."
+        };
+        Err(ToolError::ExecutionFailed(message.into()))
+    }
+
+    pub fn from_managed(cfg: &ManagedToolGatewayConfig) -> Self {
+        Self {
+            api_key: cfg.nous_user_token.clone(),
+            base_url: normalize_base_url_with_default(
+                &cfg.gateway_origin,
+                BROWSER_USE_BASE_URL_DEFAULT,
+            ),
+            managed_mode: true,
+            task_id: "rust".to_string(),
+        }
+    }
+
+    pub fn is_configured_from_env_or_managed() -> bool {
+        env_optional_nonempty("BROWSER_USE_API_KEY").is_some()
+            || resolve_managed_tool_gateway("browser-use", ResolveOptions::default()).is_some()
+    }
+
+    pub fn base_url(&self) -> &str {
+        &self.base_url
+    }
+
+    pub fn managed_mode(&self) -> bool {
+        self.managed_mode
     }
 }
 
@@ -297,11 +517,8 @@ impl BrowserbaseBrowserBackend {
                 ToolError::ExecutionFailed("Browserbase response missing connectUrl".into())
             })?
             .to_string();
-        let session_name = format!(
-            "hermes_{}_{}",
-            self.config.task_id,
-            Uuid::new_v4().simple().to_string()[..8].to_string()
-        );
+        let suffix = Uuid::new_v4().simple().to_string();
+        let session_name = format!("hermes_{}_{}", self.config.task_id, &suffix[..8]);
         let features = BrowserbaseFeatures {
             basic_stealth: true,
             proxies: self.config.proxies && !proxies_fallback,
@@ -392,6 +609,222 @@ impl BrowserbaseBrowserBackend {
             }
         }))
     }
+}
+
+impl BrowserUseBrowserBackend {
+    pub fn new(config: BrowserUseConfig) -> Self {
+        Self {
+            config,
+            client: reqwest::Client::new(),
+            session: Mutex::new(None),
+            pending_create_key: Mutex::new(None),
+        }
+    }
+
+    pub fn from_env() -> Result<Self, ToolError> {
+        Ok(Self::new(BrowserUseConfig::from_env()?))
+    }
+
+    pub fn config(&self) -> &BrowserUseConfig {
+        &self.config
+    }
+
+    async fn ensure_session(&self) -> Result<BrowserUseSession, ToolError> {
+        let mut guard = self.session.lock().await;
+        if let Some(session) = guard.as_ref() {
+            return Ok(session.clone());
+        }
+        let session = self.create_session().await?;
+        *guard = Some(session.clone());
+        Ok(session)
+    }
+
+    async fn create_session(&self) -> Result<BrowserUseSession, ToolError> {
+        let idempotency_key = if self.config.managed_mode {
+            Some(self.get_or_create_pending_create_key().await)
+        } else {
+            None
+        };
+
+        let response = self.post_session(idempotency_key.as_deref()).await?;
+        let status = response.status();
+        let external_call_id = if self.config.managed_mode {
+            response
+                .headers()
+                .get("x-external-call-id")
+                .and_then(|value| value.to_str().ok())
+                .map(|value| value.to_string())
+        } else {
+            None
+        };
+        let text = response.text().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to read Browser Use response: {e}"))
+        })?;
+
+        if !status.is_success() {
+            if self.config.managed_mode
+                && !browser_use_should_preserve_pending_create_key(status, &text)
+            {
+                self.clear_pending_create_key().await;
+            }
+            return Err(ToolError::ExecutionFailed(format!(
+                "Failed to create Browser Use session: {status} {text}"
+            )));
+        }
+
+        let data: Value = serde_json::from_str(&text).map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to parse Browser Use response: {e}"))
+        })?;
+        if self.config.managed_mode {
+            self.clear_pending_create_key().await;
+        }
+        let bb_session_id = data
+            .get("id")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                ToolError::ExecutionFailed("Browser Use response missing session id".into())
+            })?
+            .to_string();
+        let cdp_url = data
+            .get("cdpUrl")
+            .or_else(|| data.get("connectUrl"))
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let suffix = Uuid::new_v4().simple().to_string();
+        let session_name = format!("hermes_{}_{}", self.config.task_id, &suffix[..8]);
+        tracing::info!(
+            session_id = %bb_session_id,
+            session_name = %session_name,
+            managed = self.config.managed_mode,
+            "created Browser Use session"
+        );
+        Ok(BrowserUseSession {
+            session_name,
+            bb_session_id,
+            cdp_url,
+            external_call_id,
+        })
+    }
+
+    async fn post_session(
+        &self,
+        idempotency_key: Option<&str>,
+    ) -> Result<reqwest::Response, ToolError> {
+        let mut request = self
+            .client
+            .post(format!("{}/browsers", self.config.base_url))
+            .json(&browser_use_session_payload(self.config.managed_mode));
+        for (name, value) in browser_use_headers(&self.config, idempotency_key) {
+            request = request.header(name, value);
+        }
+        request.send().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Browser Use API connection failed: {e}"))
+        })
+    }
+
+    async fn get_or_create_pending_create_key(&self) -> String {
+        let mut guard = self.pending_create_key.lock().await;
+        if let Some(existing) = guard.as_ref() {
+            return existing.clone();
+        }
+        let created = format!("browser-use-session-create:{}", Uuid::new_v4().simple());
+        *guard = Some(created.clone());
+        created
+    }
+
+    async fn clear_pending_create_key(&self) {
+        let mut guard = self.pending_create_key.lock().await;
+        *guard = None;
+    }
+
+    pub async fn close_active_session(&self) -> Result<bool, ToolError> {
+        let mut guard = self.session.lock().await;
+        let Some(session) = guard.take() else {
+            return Ok(false);
+        };
+        self.close_session(&session.bb_session_id).await
+    }
+
+    async fn close_session(&self, session_id: &str) -> Result<bool, ToolError> {
+        let mut request = self
+            .client
+            .patch(format!("{}/browsers/{session_id}", self.config.base_url))
+            .json(&json!({"action": "stop"}));
+        for (name, value) in browser_use_headers(&self.config, None) {
+            request = request.header(name, value);
+        }
+        let resp = request
+            .send()
+            .await
+            .map_err(|e| ToolError::ExecutionFailed(format!("Browser Use close failed: {e}")))?;
+        Ok(matches!(
+            resp.status(),
+            reqwest::StatusCode::OK
+                | reqwest::StatusCode::CREATED
+                | reqwest::StatusCode::NO_CONTENT
+        ))
+    }
+
+    async fn browser_use_command(&self, method: &str, params: Value) -> Result<Value, ToolError> {
+        let session = self.ensure_session().await?;
+        Ok(json!({
+            "method": method,
+            "params": params,
+            "target": session.cdp_url,
+            "status": "sent",
+            "browser_use": {
+                "session_name": session.session_name,
+                "bb_session_id": session.bb_session_id,
+                "features": {"browser_use": true},
+                "managed_mode": self.config.managed_mode,
+                "external_call_id": session.external_call_id,
+            }
+        }))
+    }
+}
+
+fn browser_use_headers(
+    config: &BrowserUseConfig,
+    idempotency_key: Option<&str>,
+) -> Vec<(&'static str, String)> {
+    let mut headers = vec![
+        ("Content-Type", "application/json".to_string()),
+        ("X-Browser-Use-API-Key", config.api_key.clone()),
+    ];
+    if let Some(key) = idempotency_key {
+        headers.push(("X-Idempotency-Key", key.to_string()));
+    }
+    headers
+}
+
+fn browser_use_session_payload(managed_mode: bool) -> Value {
+    if managed_mode {
+        json!({
+            "timeout": BROWSER_USE_MANAGED_TIMEOUT_MINUTES,
+            "proxyCountryCode": BROWSER_USE_MANAGED_PROXY_COUNTRY_CODE,
+        })
+    } else {
+        json!({})
+    }
+}
+
+fn browser_use_should_preserve_pending_create_key(status: reqwest::StatusCode, body: &str) -> bool {
+    if status.as_u16() >= 500 {
+        return true;
+    }
+    if status != reqwest::StatusCode::CONFLICT {
+        return false;
+    }
+    let Ok(payload) = serde_json::from_str::<Value>(body) else {
+        return false;
+    };
+    payload
+        .get("error")
+        .and_then(|error| error.get("message"))
+        .and_then(|message| message.as_str())
+        .map(|message| message.to_ascii_lowercase().contains("already in progress"))
+        .unwrap_or(false)
 }
 
 fn browserbase_session_payload(
@@ -583,6 +1016,145 @@ impl BrowserBackend for BrowserbaseBrowserBackend {
             "clear" => {
                 let result = self
                     .browserbase_command(
+                        "Runtime.evaluate",
+                        json!({"expression": "console.clear(); 'cleared'"}),
+                    )
+                    .await?;
+                Ok(json!({"status": "console_cleared", "cdp": result}).to_string())
+            }
+            other => Err(ToolError::InvalidParams(format!(
+                "Unknown console action: {}",
+                other
+            ))),
+        }
+    }
+}
+
+#[async_trait]
+impl BrowserBackend for BrowserUseBrowserBackend {
+    async fn navigate(&self, url: &str) -> Result<String, ToolError> {
+        let result = self
+            .browser_use_command("Page.navigate", json!({"url": url}))
+            .await?;
+        Ok(json!({"status": "navigated", "url": url, "cdp": result}).to_string())
+    }
+
+    async fn snapshot(&self) -> Result<String, ToolError> {
+        let result = self
+            .browser_use_command("Accessibility.getFullAXTree", json!({}))
+            .await?;
+        Ok(json!({"status": "snapshot", "cdp": result}).to_string())
+    }
+
+    async fn click(&self, selector: &str) -> Result<String, ToolError> {
+        let js = format!(
+            "document.querySelector('{}')?.click(); 'clicked'",
+            selector.replace('\'', "\\'")
+        );
+        let result = self
+            .browser_use_command("Runtime.evaluate", json!({"expression": js}))
+            .await?;
+        Ok(json!({"status": "clicked", "selector": selector, "cdp": result}).to_string())
+    }
+
+    async fn r#type(&self, selector: &str, text: &str) -> Result<String, ToolError> {
+        let js = format!(
+            "let el = document.querySelector('{}'); if(el) {{ el.value = '{}'; el.dispatchEvent(new Event('input')); 'typed' }} else {{ 'not found' }}",
+            selector.replace('\'', "\\'"),
+            text.replace('\'', "\\'")
+        );
+        let result = self
+            .browser_use_command("Runtime.evaluate", json!({"expression": js}))
+            .await?;
+        Ok(
+            json!({"status": "typed", "selector": selector, "text": text, "cdp": result})
+                .to_string(),
+        )
+    }
+
+    async fn scroll(&self, direction: &str, amount: Option<u32>) -> Result<String, ToolError> {
+        let px = amount.unwrap_or(500) as i32;
+        let (x, y) = match direction {
+            "up" => (0, -px),
+            "down" => (0, px),
+            "left" => (-px, 0),
+            "right" => (px, 0),
+            _ => (0, px),
+        };
+        let js = format!("window.scrollBy({}, {}); 'scrolled'", x, y);
+        let result = self
+            .browser_use_command("Runtime.evaluate", json!({"expression": js}))
+            .await?;
+        Ok(
+            json!({"status": "scrolled", "direction": direction, "amount": px, "cdp": result})
+                .to_string(),
+        )
+    }
+
+    async fn go_back(&self) -> Result<String, ToolError> {
+        let result = self
+            .browser_use_command(
+                "Runtime.evaluate",
+                json!({"expression": "history.back(); 'back'"}),
+            )
+            .await?;
+        Ok(json!({"status": "navigated_back", "cdp": result}).to_string())
+    }
+
+    async fn press(&self, key: &str) -> Result<String, ToolError> {
+        let result = self
+            .browser_use_command(
+                "Input.dispatchKeyEvent",
+                json!({
+                    "type": "keyDown",
+                    "key": key,
+                }),
+            )
+            .await?;
+        Ok(json!({"status": "key_pressed", "key": key, "cdp": result}).to_string())
+    }
+
+    async fn get_images(&self, selector: Option<&str>) -> Result<String, ToolError> {
+        let sel = selector.unwrap_or("img");
+        let js = format!(
+            "JSON.stringify(Array.from(document.querySelectorAll('{}')).map(img => ({{src: img.src, alt: img.alt, width: img.width, height: img.height}})))",
+            sel.replace('\'', "\\'")
+        );
+        let result = self
+            .browser_use_command(
+                "Runtime.evaluate",
+                json!({"expression": js, "returnByValue": true}),
+            )
+            .await?;
+        Ok(json!({"status": "images_found", "selector": sel, "cdp": result}).to_string())
+    }
+
+    async fn vision(&self, instruction: &str) -> Result<String, ToolError> {
+        let result = self
+            .browser_use_command("Page.captureScreenshot", json!({"format": "png"}))
+            .await?;
+        Ok(json!({
+            "status": "vision_analysis",
+            "instruction": instruction,
+            "screenshot": result,
+            "note": "Screenshot captured; vision analysis requires LLM integration"
+        })
+        .to_string())
+    }
+
+    async fn console(&self, action: &str) -> Result<String, ToolError> {
+        match action {
+            "read" => {
+                let result = self
+                    .browser_use_command("Runtime.evaluate", json!({
+                        "expression": "'Console messages require Runtime.consoleAPICalled event listener'"
+                    }))
+                    .await?;
+                Ok(json!({"status": "console_read", "cdp": result}).to_string())
+            }
+            "clear" => {
+                let result = self
+                    .browser_use_command(
                         "Runtime.evaluate",
                         json!({"expression": "console.clear(); 'cleared'"}),
                     )
@@ -865,7 +1437,15 @@ mod tests {
                 "BROWSERBASE_ADVANCED_STEALTH",
                 "BROWSERBASE_KEEP_ALIVE",
                 "BROWSERBASE_SESSION_TIMEOUT",
+                "BROWSER_USE_API_KEY",
+                "BROWSER_USE_GATEWAY_URL",
+                "HERMES_ENABLE_NOUS_MANAGED_TOOLS",
                 "HERMES_TASK_ID",
+                "HERMES_HOME",
+                "HERMES_AGENT_ULTRA_HOME",
+                "TOOL_GATEWAY_USER_TOKEN",
+                "TOOL_GATEWAY_DOMAIN",
+                "TOOL_GATEWAY_SCHEME",
                 "CAMOFOX_CDP_URL",
                 "CHROME_CDP_URL",
             ];
@@ -886,6 +1466,213 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn browser_use_config_prefers_direct_key_unless_gateway_is_requested() {
+        let _scope = EnvScope::new();
+        std::env::set_var("BROWSER_USE_API_KEY", "direct-key");
+        std::env::set_var("HERMES_ENABLE_NOUS_MANAGED_TOOLS", "1");
+        std::env::set_var("TOOL_GATEWAY_USER_TOKEN", "nous-token");
+        std::env::set_var("BROWSER_USE_GATEWAY_URL", "http://127.0.0.1:3009/");
+        std::env::set_var("HERMES_TASK_ID", "task-browser-use");
+
+        let cfg = BrowserUseConfig::from_env().expect("browser use direct config");
+
+        assert_eq!(cfg.api_key, "direct-key");
+        assert_eq!(cfg.base_url(), BROWSER_USE_BASE_URL_DEFAULT);
+        assert!(!cfg.managed_mode());
+        assert_eq!(cfg.task_id, "task-browser-use");
+    }
+
+    #[test]
+    fn browser_use_config_honors_browser_use_gateway_preference() {
+        let _scope = EnvScope::new();
+        let home = tempfile::tempdir().expect("temp hermes home");
+        std::fs::write(
+            home.path().join("config.yaml"),
+            "browser:\n  cloud_provider: browser-use\n  use_gateway: true\n",
+        )
+        .expect("write config");
+        std::env::set_var("HERMES_HOME", home.path());
+        std::env::set_var("BROWSER_USE_API_KEY", "direct-key");
+        std::env::set_var("HERMES_ENABLE_NOUS_MANAGED_TOOLS", "1");
+        std::env::set_var("TOOL_GATEWAY_USER_TOKEN", "nous-token");
+        std::env::set_var("BROWSER_USE_GATEWAY_URL", "http://127.0.0.1:3009/");
+
+        let cfg = BrowserUseConfig::from_env().expect("browser use managed config");
+
+        assert_eq!(cfg.api_key, "nous-token");
+        assert_eq!(cfg.base_url(), "http://127.0.0.1:3009");
+        assert!(cfg.managed_mode());
+    }
+
+    #[test]
+    fn browser_use_payload_and_idempotency_rules_match_provider_contract() {
+        let cfg = BrowserUseConfig {
+            api_key: "key".into(),
+            base_url: BROWSER_USE_BASE_URL_DEFAULT.into(),
+            managed_mode: true,
+            task_id: "task".into(),
+        };
+
+        assert_eq!(browser_use_session_payload(false), json!({}));
+        assert_eq!(
+            browser_use_session_payload(true),
+            json!({"timeout": 5, "proxyCountryCode": "us"})
+        );
+        assert_eq!(
+            browser_use_headers(&cfg, Some("browser-use-session-create:abc")),
+            vec![
+                ("Content-Type", "application/json".to_string()),
+                ("X-Browser-Use-API-Key", "key".to_string()),
+                (
+                    "X-Idempotency-Key",
+                    "browser-use-session-create:abc".to_string()
+                ),
+            ]
+        );
+        assert!(browser_use_should_preserve_pending_create_key(
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            ""
+        ));
+        assert!(browser_use_should_preserve_pending_create_key(
+            reqwest::StatusCode::CONFLICT,
+            r#"{"error":{"message":"Managed Browser Use session creation is already in progress"}}"#
+        ));
+        assert!(!browser_use_should_preserve_pending_create_key(
+            reqwest::StatusCode::BAD_REQUEST,
+            r#"{"error":{"message":"bad request"}}"#
+        ));
+    }
+
+    #[tokio::test]
+    async fn browser_use_create_session_sends_managed_gateway_contract() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+        use tokio::sync::oneshot;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind server");
+        let addr = listener.local_addr().expect("server addr");
+        let (tx, rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut buf = Vec::new();
+            let mut tmp = [0_u8; 1024];
+            loop {
+                let n = stream.read(&mut tmp).await.expect("read request");
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&tmp[..n]);
+                let text = String::from_utf8_lossy(&buf);
+                if text.contains("\r\n\r\n") && text.contains(r#""proxyCountryCode":"us""#) {
+                    break;
+                }
+            }
+            let request = String::from_utf8_lossy(&buf).to_string();
+            let _ = tx.send(request);
+            let body =
+                r#"{"id":"bu_local_session_1","connectUrl":"wss://browser-use.example/session"}"#;
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nx-external-call-id: call-browser-use-1\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .await
+                .expect("write response");
+        });
+
+        let cfg = BrowserUseConfig {
+            api_key: "nous-token".into(),
+            base_url: format!("http://{addr}"),
+            managed_mode: true,
+            task_id: "task-browser-use-managed".into(),
+        };
+        let backend = BrowserUseBrowserBackend::new(cfg);
+        let session = backend.create_session().await.expect("create session");
+        let request = rx.await.expect("captured request").to_ascii_lowercase();
+
+        assert!(request.starts_with("post /browsers "));
+        assert!(request.contains("x-browser-use-api-key: nous-token"));
+        assert!(request.contains("x-idempotency-key: browser-use-session-create:"));
+        assert!(request.contains(r#""timeout":5"#));
+        assert!(request.contains(r#""proxycountrycode":"us""#));
+        assert_eq!(session.bb_session_id, "bu_local_session_1");
+        assert_eq!(session.cdp_url, "wss://browser-use.example/session");
+        assert_eq!(
+            session.external_call_id.as_deref(),
+            Some("call-browser-use-1")
+        );
+    }
+
+    #[tokio::test]
+    async fn browser_use_close_session_sends_stop_patch() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio::net::TcpListener;
+        use tokio::sync::oneshot;
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind server");
+        let addr = listener.local_addr().expect("server addr");
+        let (tx, rx) = oneshot::channel();
+        tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut buf = Vec::new();
+            let mut tmp = [0_u8; 1024];
+            loop {
+                let n = stream.read(&mut tmp).await.expect("read request");
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&tmp[..n]);
+                let text = String::from_utf8_lossy(&buf);
+                if text.contains("\r\n\r\n") && text.contains(r#""action":"stop""#) {
+                    break;
+                }
+            }
+            let request = String::from_utf8_lossy(&buf).to_string();
+            let _ = tx.send(request);
+            stream
+                .write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n")
+                .await
+                .expect("write response");
+        });
+
+        let cfg = BrowserUseConfig {
+            api_key: "direct-key".into(),
+            base_url: format!("http://{addr}"),
+            managed_mode: false,
+            task_id: "task-browser-use-close".into(),
+        };
+        let backend = BrowserUseBrowserBackend::new(cfg);
+
+        assert!(backend
+            .close_session("bu_local_session_close")
+            .await
+            .expect("close session"));
+        let request = rx.await.expect("captured request").to_ascii_lowercase();
+        assert!(request.starts_with("patch /browsers/bu_local_session_close "));
+        assert!(request.contains("x-browser-use-api-key: direct-key"));
+        assert!(request.contains(r#""action":"stop""#));
+    }
+
+    #[test]
+    fn browser_backend_choice_accepts_browser_use_env_and_config() {
+        let _scope = EnvScope::new();
+        std::env::set_var("BROWSER_CLOUD_PROVIDER", "browser_use");
+        assert_eq!(browser_backend_choice_from_env(), "browser-use");
+
+        std::env::remove_var("BROWSER_CLOUD_PROVIDER");
+        let home = tempfile::tempdir().expect("temp hermes home");
+        std::fs::write(
+            home.path().join("config.yaml"),
+            "browser:\n  cloud_provider: managed-browser\n",
+        )
+        .expect("write config");
+        std::env::set_var("HERMES_HOME", home.path());
+        assert_eq!(browser_backend_choice_from_env(), "browser-use");
     }
 
     #[test]
@@ -962,6 +1749,24 @@ mod tests {
     async fn explicit_browserbase_without_credentials_fails_at_runtime() {
         let _scope = EnvScope::new();
         std::env::set_var("HERMES_BROWSER_BACKEND", "browserbase");
+        let backend = browser_backend_from_env();
+        let err = backend.navigate("https://example.com").await.unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("BROWSERBASE_API_KEY and BROWSERBASE_PROJECT_ID"));
+    }
+
+    #[tokio::test]
+    async fn configured_browserbase_without_credentials_fails_at_runtime() {
+        let _scope = EnvScope::new();
+        let home = tempfile::tempdir().expect("temp hermes home");
+        std::fs::write(
+            home.path().join("config.yaml"),
+            "browser:\n  cloud_provider: browserbase\n",
+        )
+        .expect("write config");
+        std::env::set_var("HERMES_HOME", home.path());
+
         let backend = browser_backend_from_env();
         let err = backend.navigate("https://example.com").await.unwrap_err();
         assert!(err

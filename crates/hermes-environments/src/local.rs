@@ -1235,6 +1235,14 @@ mod tests {
 
     static ENV_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+    fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+            .block_on(future)
+    }
+
     struct EnvGuard {
         key: &'static str,
         original: Option<OsString>,
@@ -1456,8 +1464,8 @@ mod tests {
         assert_eq!(content, "ok");
     }
 
-    #[tokio::test]
-    async fn test_execute_command_strips_gateway_env_vars() {
+    #[test]
+    fn test_execute_command_strips_gateway_env_vars() {
         let _lock = ENV_TEST_LOCK.lock().expect("lock env");
         let _token_guard = EnvGuard::set("TOOL_GATEWAY_USER_TOKEN", "should-not-leak");
         let _managed_guard = EnvGuard::set("HERMES_ENABLE_NOUS_MANAGED_TOOLS", "1");
@@ -1465,23 +1473,21 @@ mod tests {
         let _safe_guard = EnvGuard::set("SAFE_PASSTHRU_TEST", "ok");
         let backend = LocalBackend::default();
 
-        let output = backend
-            .execute_command(
+        let output = block_on(backend.execute_command(
                 "printf '%s|%s|%s|%s' \"${TOOL_GATEWAY_USER_TOKEN:-}\" \"${HERMES_ENABLE_NOUS_MANAGED_TOOLS:-}\" \"${HERMES_HTTP_API_KEY:-}\" \"${SAFE_PASSTHRU_TEST:-}\"",
                 None,
                 None,
                 false,
                 false,
-            )
-            .await
-            .unwrap();
+        ))
+        .unwrap();
 
         assert_eq!(output.exit_code, 0);
         assert_eq!(output.stdout, "|||ok");
     }
 
-    #[tokio::test]
-    async fn test_execute_command_strips_provider_tool_and_gateway_env_vars() {
+    #[test]
+    fn test_execute_command_strips_provider_tool_and_gateway_env_vars() {
         let _lock = ENV_TEST_LOCK.lock().expect("lock env");
         let _openai_key = EnvGuard::set("OPENAI_API_KEY", "sk-should-not-leak");
         let _openai_base = EnvGuard::set("OPENAI_BASE_URL", "http://localhost:8000/v1");
@@ -1492,39 +1498,35 @@ mod tests {
         let _safe_guard = EnvGuard::set("SAFE_PASSTHRU_TEST", "ok");
         let backend = LocalBackend::default();
 
-        let output = backend
-            .execute_command(
+        let output = block_on(backend.execute_command(
                 "printf '%s|%s|%s|%s|%s|%s|%s' \"${OPENAI_API_KEY:-}\" \"${OPENAI_BASE_URL:-}\" \"${AWS_BEARER_TOKEN_BEDROCK:-}\" \"${GITHUB_TOKEN:-}\" \"${MODAL_TOKEN_SECRET:-}\" \"${GATEWAY_ALLOWED_USERS:-}\" \"${SAFE_PASSTHRU_TEST:-}\"",
                 None,
                 None,
                 false,
                 false,
-            )
-            .await
-            .unwrap();
+        ))
+        .unwrap();
 
         assert_eq!(output.exit_code, 0);
         assert_eq!(output.stdout, "||||||ok");
     }
 
-    #[tokio::test]
-    async fn test_execute_command_preserves_general_aws_credentials() {
+    #[test]
+    fn test_execute_command_preserves_general_aws_credentials() {
         let _lock = ENV_TEST_LOCK.lock().expect("lock env");
         let _access_key = EnvGuard::set("AWS_ACCESS_KEY_ID", "AKIAIOSFODNN7EXAMPLE");
         let _secret_key = EnvGuard::set("AWS_SECRET_ACCESS_KEY", "aws-secret");
         let _session = EnvGuard::set("AWS_SESSION_TOKEN", "aws-session");
         let backend = LocalBackend::default();
 
-        let output = backend
-            .execute_command(
+        let output = block_on(backend.execute_command(
                 "printf '%s|%s|%s' \"${AWS_ACCESS_KEY_ID:-}\" \"${AWS_SECRET_ACCESS_KEY:-}\" \"${AWS_SESSION_TOKEN:-}\"",
                 None,
                 None,
                 false,
                 false,
-            )
-            .await
-            .unwrap();
+        ))
+        .unwrap();
 
         assert_eq!(output.exit_code, 0);
         assert_eq!(output.stdout, "AKIAIOSFODNN7EXAMPLE|aws-secret|aws-session");
@@ -1547,30 +1549,28 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_execute_command_force_prefix_reinjects_blocked_var() {
+    #[test]
+    fn test_execute_command_force_prefix_reinjects_blocked_var() {
         let _lock = ENV_TEST_LOCK.lock().expect("lock env");
         let _blocked = EnvGuard::set("OPENAI_API_KEY", "sk-should-not-leak");
         let _forced = EnvGuard::set("_HERMES_FORCE_OPENAI_API_KEY", "sk-explicit");
         let backend = LocalBackend::default();
 
-        let output = backend
-            .execute_command(
-                "printf '%s|%s' \"${OPENAI_API_KEY:-}\" \"${_HERMES_FORCE_OPENAI_API_KEY:-}\"",
-                None,
-                None,
-                false,
-                false,
-            )
-            .await
-            .unwrap();
+        let output = block_on(backend.execute_command(
+            "printf '%s|%s' \"${OPENAI_API_KEY:-}\" \"${_HERMES_FORCE_OPENAI_API_KEY:-}\"",
+            None,
+            None,
+            false,
+            false,
+        ))
+        .unwrap();
 
         assert_eq!(output.exit_code, 0);
         assert_eq!(output.stdout, "sk-explicit|");
     }
 
-    #[tokio::test]
-    async fn test_execute_command_cleans_profile_reintroduced_blocked_vars() {
+    #[test]
+    fn test_execute_command_cleans_profile_reintroduced_blocked_vars() {
         let _lock = ENV_TEST_LOCK.lock().expect("lock env");
         let td = tempdir().unwrap();
         std::fs::write(
@@ -1581,16 +1581,14 @@ mod tests {
         let _home = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
         let backend = LocalBackend::default();
 
-        let output = backend
-            .execute_command(
-                "printf '%s|%s' \"${OPENAI_API_KEY:-}\" \"${SAFE_PASSTHRU_TEST:-}\"",
-                None,
-                None,
-                false,
-                false,
-            )
-            .await
-            .unwrap();
+        let output = block_on(backend.execute_command(
+            "printf '%s|%s' \"${OPENAI_API_KEY:-}\" \"${SAFE_PASSTHRU_TEST:-}\"",
+            None,
+            None,
+            false,
+            false,
+        ))
+        .unwrap();
 
         assert_eq!(output.exit_code, 0);
         assert_eq!(output.stdout, "|ok");

@@ -461,15 +461,11 @@ impl Gateway {
         if incoming.text.trim_start().starts_with('/') {
             return None;
         }
-        if incoming
+        incoming
             .message_id
             .as_deref()
             .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .is_none()
-        {
-            return None;
-        }
+            .filter(|s| !s.is_empty())?;
         if matches!(
             access_policy.and_then(|policy| policy.reactions_enabled),
             Some(false)

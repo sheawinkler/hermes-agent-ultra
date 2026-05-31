@@ -170,15 +170,18 @@ impl LlmProvider for BedrockProvider {
                 .unwrap_or_else(|_| Client::new());
             client.post(url.as_str()).body(body_bytes.clone())
         };
+        let anthropic_beta = bedrock_anthropic_beta_header(effective_model);
         for (key, value) in bedrock_request_headers(
-            "POST",
-            url.as_str(),
-            &self.region,
-            "bedrock",
-            &body_bytes,
+            BedrockHeaderRequest {
+                method: "POST",
+                url: url.as_str(),
+                region: &self.region,
+                service: "bedrock",
+                body: &body_bytes,
+                anthropic_beta: anthropic_beta.as_deref(),
+                now: Utc::now(),
+            },
             &auth,
-            bedrock_anthropic_beta_header(effective_model).as_deref(),
-            Utc::now(),
         )? {
             request = request.header(key, value);
         }
@@ -252,15 +255,18 @@ impl LlmProvider for BedrockProvider {
                     return;
                 }
             };
+            let anthropic_beta = bedrock_anthropic_beta_header(&effective_model);
             let headers = match bedrock_request_headers(
-                "POST",
-                url.as_str(),
-                &provider.region,
-                "bedrock",
-                &body_bytes,
+                BedrockHeaderRequest {
+                    method: "POST",
+                    url: url.as_str(),
+                    region: &provider.region,
+                    service: "bedrock",
+                    body: &body_bytes,
+                    anthropic_beta: anthropic_beta.as_deref(),
+                    now: Utc::now(),
+                },
                 &auth,
-                bedrock_anthropic_beta_header(&effective_model).as_deref(),
-                Utc::now(),
             ) {
                 Ok(headers) => headers,
                 Err(err) => {
@@ -448,11 +454,21 @@ async fn fetch_bedrock_catalog_endpoint(
     region: &str,
     auth: &BedrockAuth,
 ) -> Vec<String> {
-    let headers =
-        match bedrock_request_headers("GET", url, region, "bedrock", b"", auth, None, Utc::now()) {
-            Ok(headers) => headers,
-            Err(_) => return Vec::new(),
-        };
+    let headers = match bedrock_request_headers(
+        BedrockHeaderRequest {
+            method: "GET",
+            url,
+            region,
+            service: "bedrock",
+            body: b"",
+            anthropic_beta: None,
+            now: Utc::now(),
+        },
+        auth,
+    ) {
+        Ok(headers) => headers,
+        Err(_) => return Vec::new(),
+    };
     let client = Client::new();
     let mut request = client.get(url);
     for (key, value) in headers {
@@ -1912,22 +1928,31 @@ fn parse_ini_section(raw: &str, profile: &str) -> HashMap<String, String> {
     out
 }
 
-fn bedrock_request_headers(
-    method: &str,
-    url: &str,
-    region: &str,
-    service: &str,
-    body: &[u8],
-    auth: &BedrockAuth,
-    anthropic_beta: Option<&str>,
+#[derive(Clone, Copy)]
+struct BedrockHeaderRequest<'a> {
+    method: &'a str,
+    url: &'a str,
+    region: &'a str,
+    service: &'a str,
+    body: &'a [u8],
+    anthropic_beta: Option<&'a str>,
     now: DateTime<Utc>,
+}
+
+fn bedrock_request_headers(
+    request: BedrockHeaderRequest<'_>,
+    auth: &BedrockAuth,
 ) -> Result<BTreeMap<String, String>, AgentError> {
     let mut headers = BTreeMap::new();
     headers.insert("accept".to_string(), "application/json".to_string());
-    if method != "GET" {
+    if request.method != "GET" {
         headers.insert("content-type".to_string(), "application/json".to_string());
     }
-    if let Some(beta) = anthropic_beta.map(str::trim).filter(|s| !s.is_empty()) {
+    if let Some(beta) = request
+        .anthropic_beta
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
         headers.insert("anthropic-beta".to_string(), beta.to_string());
     }
     match auth {
@@ -1935,37 +1960,23 @@ fn bedrock_request_headers(
             headers.insert("authorization".to_string(), format!("Bearer {token}"));
             Ok(headers)
         }
-        BedrockAuth::SigV4(credentials) => sign_sigv4_headers(
-            method,
-            url,
-            region,
-            service,
-            body,
-            credentials,
-            headers,
-            now,
-        ),
+        BedrockAuth::SigV4(credentials) => sign_sigv4_headers(request, credentials, headers),
     }
 }
 
 fn sign_sigv4_headers(
-    method: &str,
-    url: &str,
-    region: &str,
-    service: &str,
-    body: &[u8],
+    request: BedrockHeaderRequest<'_>,
     credentials: &AwsCredentials,
     mut headers: BTreeMap<String, String>,
-    now: DateTime<Utc>,
 ) -> Result<BTreeMap<String, String>, AgentError> {
-    let url = reqwest::Url::parse(url)
+    let url = reqwest::Url::parse(request.url)
         .map_err(|err| AgentError::Config(format!("invalid Bedrock URL for SigV4: {err}")))?;
     let host = url
         .host_str()
         .ok_or_else(|| AgentError::Config("Bedrock SigV4 URL missing host".to_string()))?;
-    let amz_date = now.format("%Y%m%dT%H%M%SZ").to_string();
-    let short_date = now.format("%Y%m%d").to_string();
-    let payload_hash = hex::encode(Sha256::digest(body));
+    let amz_date = request.now.format("%Y%m%dT%H%M%SZ").to_string();
+    let short_date = request.now.format("%Y%m%d").to_string();
+    let payload_hash = hex::encode(Sha256::digest(request.body));
 
     headers.insert("host".to_string(), host.to_string());
     headers.insert("x-amz-date".to_string(), amz_date.clone());
@@ -1991,7 +2002,7 @@ fn sign_sigv4_headers(
     let canonical_query = canonical_query_string(&url);
     let canonical_request = format!(
         "{}\n{}\n{}\n{}\n{}\n{}",
-        method.to_ascii_uppercase(),
+        request.method.to_ascii_uppercase(),
         canonical_uri(&url),
         canonical_query,
         canonical_headers,
@@ -2001,8 +2012,8 @@ fn sign_sigv4_headers(
     let scope = format!(
         "{}/{}/{}/aws4_request",
         short_date,
-        normalized_region_or_default(region),
-        service
+        normalized_region_or_default(request.region),
+        request.service
     );
     let string_to_sign = format!(
         "AWS4-HMAC-SHA256\n{}\n{}\n{}",
@@ -2013,8 +2024,8 @@ fn sign_sigv4_headers(
     let signing_key = sigv4_signing_key(
         credentials.secret_access_key.as_bytes(),
         short_date.as_bytes(),
-        normalized_region_or_default(region).as_bytes(),
-        service.as_bytes(),
+        normalized_region_or_default(request.region).as_bytes(),
+        request.service.as_bytes(),
     )?;
     let signature = hmac_sha256_hex(&signing_key, string_to_sign.as_bytes())?;
     headers.insert(
@@ -2848,16 +2859,18 @@ mod tests {
         };
         let auth = BedrockAuth::SigV4(creds);
         let headers = bedrock_request_headers(
-            "POST",
-            "https://bedrock-runtime.us-east-1.amazonaws.com/model/anthropic.claude%3A0/converse",
-            "us-east-1",
-            "bedrock",
-            br#"{"messages":[]}"#,
+            BedrockHeaderRequest {
+                method: "POST",
+                url: "https://bedrock-runtime.us-east-1.amazonaws.com/model/anthropic.claude%3A0/converse",
+                region: "us-east-1",
+                service: "bedrock",
+                body: br#"{"messages":[]}"#,
+                anthropic_beta: Some(CONTEXT_1M_BETA),
+                now: DateTime::parse_from_rfc3339("2026-05-30T00:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+            },
             &auth,
-            Some(CONTEXT_1M_BETA),
-            DateTime::parse_from_rfc3339("2026-05-30T00:00:00Z")
-                .unwrap()
-                .with_timezone(&Utc),
         )
         .expect("headers");
         assert_eq!(

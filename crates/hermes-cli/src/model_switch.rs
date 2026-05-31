@@ -1291,6 +1291,9 @@ mod tests {
 
     #[tokio::test]
     async fn local_provider_catalog_returns_curated_without_network_dependency() {
+        let _guard = env_guard();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _env = ScopedCatalogEnv::new(tmp.path());
         let client = seeded_client(json!({}));
         let out = provider_model_ids_with_client("ollama-local", &client).await;
         let expected: Vec<String> = provider_curated_models("ollama-local")
@@ -1308,6 +1311,9 @@ mod tests {
 
     #[tokio::test]
     async fn provider_model_ids_normalizes_provider_aliases() {
+        let _guard = env_guard();
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _env = ScopedCatalogEnv::new(tmp.path());
         let client = seeded_client(json!({}));
         let aliased = provider_model_ids_with_client("ollama", &client).await;
         let canonical = provider_model_ids_with_client("ollama-local", &client).await;

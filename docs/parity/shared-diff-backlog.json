@@ -406,16 +406,16 @@
       "workstream": "WS8"
     },
     {
-      "action": "Inspect upstream/local behavior; implement Rust-native parity only if local coverage is missing.",
-      "classification": "functional",
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
       "classification_path": "plugins/browser/browser_use/provider.py",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "3d371bdd88a7f8922148a3f00df2f1f0ca78499c",
-      "necessity": "necessary_review",
+      "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "plugins/browser/browser_use/provider.py",
-      "rust_requirement": "rust_native_runtime_parity_required_if_needed",
-      "status": "pending_review",
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
       "ticket": 25,
       "upstream_blob": "46a220333446afea4d969c59a6a3021657a2f10f",
       "workstream": "WS3"
@@ -10407,7 +10407,7 @@
       "rust_requirement": "not_required_for_runtime",
       "status": "cleared_intentional_divergence",
       "ticket": 25,
-      "upstream_blob": "225b005cfe874636f8d45fcff769767f081e21b3",
+      "upstream_blob": "a66a818286ba86565bd57d94cb11f34d7f1d0c3b",
       "workstream": "WS6"
     },
     {
@@ -15466,30 +15466,30 @@
       "workstream": "WS5"
     }
   ],
-  "generated_at_utc": "2026-05-30T23:25:49.862543+00:00",
+  "generated_at_utc": "2026-05-31T01:47:24.738287+00:00",
   "refs": {
-    "local_ref": "HEAD",
-    "local_sha": "d4898938cf9acd1cc072c91da3c485241f95547c",
+    "local_ref": "main",
+    "local_sha": "cd313d674d9d42b21ef9c625690bdd76f0667add",
     "upstream_ref": "upstream/main",
-    "upstream_sha": "5921d667855880b0aa2083a50f001748aed52f3e"
+    "upstream_sha": "b1a25404b638bfbd79ce4d08b49afc0ee1361528"
   },
   "summary": {
     "by_classification": {
       "branding_only": 1,
-      "functional": 610,
-      "intentional_divergence": 251,
+      "functional": 609,
+      "intentional_divergence": 252,
       "policy_only": 169
     },
     "by_rust_requirement": {
-      "not_required_for_runtime": 421,
+      "not_required_for_runtime": 422,
       "rust_equivalent_or_contract_test_required": 526,
-      "rust_native_runtime_parity_required_if_needed": 3,
+      "rust_native_runtime_parity_required_if_needed": 2,
       "rust_primary_ux_or_documented_divergence_required": 81
     },
     "by_status": {
-      "cleared_intentional_divergence": 251,
+      "cleared_intentional_divergence": 252,
       "cleared_non_runtime": 170,
-      "pending_review": 610
+      "pending_review": 609
     },
     "by_workstream": {
       "WS3": 56,
@@ -15498,10 +15498,10 @@
       "WS6": 689,
       "WS8": 13
     },
-    "cleared_intentional_divergence": 251,
+    "cleared_intentional_divergence": 252,
     "cleared_non_runtime": 170,
     "pending_classification": 0,
-    "pending_review": 610,
+    "pending_review": 609,
     "total_shared_different": 1031
   }
 }

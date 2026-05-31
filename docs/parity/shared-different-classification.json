@@ -1866,8 +1866,8 @@
     },
     {
       "path": "plugins/browser/browser_use/provider.py",
-      "classification": "functional",
-      "rationale": "Browser Use cloud-provider plugin affects runtime browser session creation, direct-vs-managed gateway auth resolution, and managed idempotency semantics; port or cover with Rust-native browser provider contracts before clearing.",
+      "classification": "intentional_divergence",
+      "rationale": "Browser Use runtime behavior is now covered by the Rust-native browser backend, including browser-use provider selection, direct BROWSER_USE_API_KEY auth, managed Nous gateway fallback/preference, managed timeout/proxy payload, idempotency-key retry preservation, external-call-id capture, and stop-session PATCH; the Python plugin remains reference-only compatibility material.",
       "owner": "sheawinkler",
       "ticket": 25
     },

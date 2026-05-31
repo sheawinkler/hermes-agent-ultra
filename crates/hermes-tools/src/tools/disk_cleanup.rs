@@ -443,17 +443,14 @@ impl DiskCleanup {
             if parts.len() == 1 && PROTECTED_EMPTY_TOP_LEVEL.contains(&parts[0]) {
                 continue;
             }
-            match fs::read_dir(&dir) {
-                Ok(mut entries) => {
-                    if entries.next().is_some() {
-                        continue;
-                    }
-                    if fs::remove_dir(&dir).is_ok() {
-                        removed += 1;
-                        self.audit_log(&format!("DELETED: {} (empty dir)", dir.display()));
-                    }
+            if let Ok(mut entries) = fs::read_dir(&dir) {
+                if entries.next().is_some() {
+                    continue;
                 }
-                _ => {}
+                if fs::remove_dir(&dir).is_ok() {
+                    removed += 1;
+                    self.audit_log(&format!("DELETED: {} (empty dir)", dir.display()));
+                }
             }
         }
         removed
@@ -833,7 +830,7 @@ fn extract_absolute_like_paths(text: &str) -> Vec<String> {
 }
 
 fn trim_path_token(token: &str) -> &str {
-    token.trim_end_matches(|c: char| matches!(c, ',' | ';' | ':' | ')' | ']' | '}'))
+    token.trim_end_matches([',', ';', ':', ')', ']', '}'])
 }
 
 fn expand_user(path: String) -> PathBuf {

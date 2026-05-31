@@ -77,8 +77,10 @@ async fn clarify_contract_trims_question_and_normalizes_choices() {
 
 #[derive(Default)]
 struct CaptureCodeBackend {
-    calls: Mutex<Vec<(String, Option<String>, Option<u64>)>>,
+    calls: Mutex<Vec<CodeExecutionCall>>,
 }
+
+type CodeExecutionCall = (String, Option<String>, Option<u64>);
 
 #[async_trait]
 impl CodeExecutionBackend for CaptureCodeBackend {
@@ -217,12 +219,13 @@ async fn cronjob_contract_forwards_extended_create_fields_and_rejects_bad_action
             .expect("create"),
         "created"
     );
-    let calls = backend.calls.lock().expect("calls");
-    assert_eq!(calls.len(), 1);
-    assert!(calls[0].contains("create:daily:0 9 * * *:summarize"));
-    assert!(calls[0].contains("Some(\"web\")"));
-    assert!(calls[0].contains("Some(true)"));
-    drop(calls);
+    {
+        let calls = backend.calls.lock().expect("calls");
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].contains("create:daily:0 9 * * *:summarize"));
+        assert!(calls[0].contains("Some(\"web\")"));
+        assert!(calls[0].contains("Some(true)"));
+    }
 
     assert_err_contains(
         handler.execute(json!({"action": "explode"})).await,
@@ -507,8 +510,10 @@ async fn messaging_contract_accepts_all_gateway_platform_schema_names() {
 
 #[derive(Default)]
 struct CaptureSessionSearchBackend {
-    calls: Mutex<Vec<(Option<String>, Option<String>, usize, Option<String>)>>,
+    calls: Mutex<Vec<SessionSearchCall>>,
 }
+
+type SessionSearchCall = (Option<String>, Option<String>, usize, Option<String>);
 
 #[async_trait]
 impl SessionSearchBackend for CaptureSessionSearchBackend {

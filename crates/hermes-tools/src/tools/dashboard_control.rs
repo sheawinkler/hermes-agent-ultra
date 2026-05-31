@@ -230,49 +230,58 @@ mod tests {
             .expect("env lock poisoned")
     }
 
-    #[tokio::test]
-    async fn enable_status_disable_roundtrip() {
-        let _guard = env_lock();
-        let temp = tempfile::tempdir().expect("tempdir");
-        std::env::set_var("HERMES_HOME", temp.path());
-
-        let handler = DashboardControlHandler;
-        let enabled = handler
-            .execute(json!({"action":"enable","host":"127.0.0.1","port":9191}))
-            .await
-            .expect("enable");
-        let enabled_json: Value = serde_json::from_str(&enabled).expect("json");
-        assert_eq!(enabled_json["enabled"], true);
-        assert_eq!(enabled_json["port"], 9191);
-
-        let status = handler
-            .execute(json!({"action":"status"}))
-            .await
-            .expect("status");
-        let status_json: Value = serde_json::from_str(&status).expect("json");
-        assert_eq!(status_json["enabled"], true);
-        assert_eq!(status_json["host"], "127.0.0.1");
-        assert_eq!(status_json["port"], 9191);
-
-        let disabled = handler
-            .execute(json!({"action":"disable"}))
-            .await
-            .expect("disable");
-        let disabled_json: Value = serde_json::from_str(&disabled).expect("json");
-        assert_eq!(disabled_json["enabled"], false);
+    fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("test runtime")
+            .block_on(future)
     }
 
-    #[tokio::test]
-    async fn rejects_non_local_without_insecure() {
+    #[test]
+    fn enable_status_disable_roundtrip() {
+        let _guard = env_lock();
+        let temp = tempfile::tempdir().expect("tempdir");
+        std::env::set_var("HERMES_HOME", temp.path());
+
+        block_on(async {
+            let handler = DashboardControlHandler;
+            let enabled = handler
+                .execute(json!({"action":"enable","host":"127.0.0.1","port":9191}))
+                .await
+                .expect("enable");
+            let enabled_json: Value = serde_json::from_str(&enabled).expect("json");
+            assert_eq!(enabled_json["enabled"], true);
+            assert_eq!(enabled_json["port"], 9191);
+
+            let status = handler
+                .execute(json!({"action":"status"}))
+                .await
+                .expect("status");
+            let status_json: Value = serde_json::from_str(&status).expect("json");
+            assert_eq!(status_json["enabled"], true);
+            assert_eq!(status_json["host"], "127.0.0.1");
+            assert_eq!(status_json["port"], 9191);
+
+            let disabled = handler
+                .execute(json!({"action":"disable"}))
+                .await
+                .expect("disable");
+            let disabled_json: Value = serde_json::from_str(&disabled).expect("json");
+            assert_eq!(disabled_json["enabled"], false);
+        });
+    }
+
+    #[test]
+    fn rejects_non_local_without_insecure() {
         let _guard = env_lock();
         let temp = tempfile::tempdir().expect("tempdir");
         std::env::set_var("HERMES_HOME", temp.path());
 
         let handler = DashboardControlHandler;
-        let err = handler
-            .execute(json!({"action":"enable","host":"0.0.0.0","port":8080}))
-            .await
-            .expect_err("non-local should fail");
+        let err =
+            block_on(handler.execute(json!({"action":"enable","host":"0.0.0.0","port":8080})))
+                .expect_err("non-local should fail");
         match err {
             ToolError::InvalidParams(msg) => assert!(msg.contains("non-localhost")),
             other => panic!("unexpected error: {other:?}"),

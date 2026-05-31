@@ -100,8 +100,8 @@ pub use tools::web::{
 
 // Re-export real backend implementations
 pub use backends::browser::{
-    browser_backend_from_env, BrowserbaseBrowserBackend, BrowserbaseConfig, CamoFoxBrowserBackend,
-    CdpBrowserBackend,
+    browser_backend_from_env, BrowserUseBrowserBackend, BrowserUseConfig,
+    BrowserbaseBrowserBackend, BrowserbaseConfig, CamoFoxBrowserBackend, CdpBrowserBackend,
 };
 pub use backends::clarify::SignalClarifyBackend;
 pub use backends::code_execution::LocalCodeExecutionBackend;

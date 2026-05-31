@@ -278,8 +278,7 @@ impl ContextCompressor {
             .filter_map(|msg| msg.content.as_deref())
             .filter_map(summary_body_from_handoff)
             .map(|body| body.trim().to_string())
-            .filter(|body| !body.is_empty())
-            .last();
+            .rfind(|body| !body.is_empty());
     }
 
     // ------------------------------------------------------------------
