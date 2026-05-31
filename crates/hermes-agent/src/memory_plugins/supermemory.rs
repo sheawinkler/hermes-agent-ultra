@@ -14,6 +14,7 @@ use reqwest::Method;
 use serde_json::{json, Value};
 
 use crate::memory_manager::MemoryProviderPlugin;
+use crate::memory_plugins::config_io;
 
 const DEFAULT_CONTAINER_TAG: &str = "hermes";
 const DEFAULT_MAX_RECALL: usize = 10;
@@ -468,7 +469,12 @@ impl MemoryProviderPlugin for SupermemoryMemoryPlugin {
     fn is_available(&self) -> bool {
         !std::env::var("SUPERMEMORY_API_KEY")
             .unwrap_or_default()
+            .trim()
             .is_empty()
+            || config_io::json_file_has_nonempty_string(
+                &config_io::default_hermes_home().join("supermemory.json"),
+                &["api_key"],
+            )
     }
 
     fn initialize(&self, session_id: &str, hermes_home: &str) {
@@ -767,11 +773,44 @@ impl MemoryProviderPlugin for SupermemoryMemoryPlugin {
             {"key": "search_mode", "description": "hybrid|memories|documents", "default": "hybrid"}
         ]))
     }
+
+    fn save_config(&self, config: &Value) -> Result<(), String> {
+        let path = config_io::default_hermes_home().join("supermemory.json");
+        config_io::merge_and_write_owner_only(&path, config)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
 
     #[test]
     fn test_supermemory_plugin_name() {
@@ -803,5 +842,50 @@ mod tests {
         );
         assert!(out.contains("User Profile"));
         assert!(out.contains("Relevant Memories"));
+    }
+
+    #[test]
+    fn test_supermemory_config_file_activates_provider() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let _api = EnvGuard::remove("SUPERMEMORY_API_KEY");
+        std::fs::write(
+            tmp.path().join("supermemory.json"),
+            r#"{"api_key":"sm-secret"}"#,
+        )
+        .expect("write config");
+
+        assert!(SupermemoryMemoryPlugin::new().is_available());
+    }
+
+    #[test]
+    fn test_supermemory_save_config_writes_owner_only() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let path = tmp.path().join("supermemory.json");
+
+        SupermemoryMemoryPlugin::new()
+            .save_config(&json!({"api_key":"sm-secret"}))
+            .expect("save config");
+
+        let parsed: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read config"))
+                .expect("parse config");
+        assert_eq!(parsed["api_key"], "sm-secret");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path)
+                    .expect("metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
     }
 }

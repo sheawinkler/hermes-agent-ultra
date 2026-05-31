@@ -21,8 +21,10 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 
 use crate::memory_manager::MemoryProviderPlugin;
+use crate::memory_plugins::config_io;
 
 const HOST: &str = "hermes";
+const DEFAULT_BASE_URL: &str = "https://api.honcho.dev";
 const PEER_ID_HASH_ESCALATION_LENGTHS: &[usize] = &[8, 12, 16, 24, 32, 64];
 
 // ---------------------------------------------------------------------------
@@ -106,10 +108,17 @@ struct HonchoConfig {
 }
 
 impl HonchoConfig {
+    fn config_path(hermes_home: &str) -> std::path::PathBuf {
+        std::path::Path::new(hermes_home).join("honcho.json")
+    }
+
+    fn default_config_path() -> std::path::PathBuf {
+        config_io::default_hermes_home().join("honcho.json")
+    }
+
     fn from_env() -> Self {
         let api_key = std::env::var("HONCHO_API_KEY").unwrap_or_default();
-        let base_url = std::env::var("HONCHO_BASE_URL")
-            .unwrap_or_else(|_| "https://api.honcho.dev".to_string());
+        let base_url = std::env::var("HONCHO_BASE_URL").unwrap_or_default();
         let timeout_secs = std::env::var("HONCHO_TIMEOUT_SECS")
             .ok()
             .and_then(|s| s.parse::<f64>().ok())
@@ -131,7 +140,7 @@ impl HonchoConfig {
             }
         }
         Self {
-            enabled: !api_key.is_empty() || !base_url.trim().is_empty(),
+            enabled: !api_key.trim().is_empty() || !base_url.trim().is_empty(),
             api_key,
             base_url,
             recall_mode: "hybrid".to_string(),
@@ -152,7 +161,7 @@ impl HonchoConfig {
         let host = active_host();
         config.workspace_id = host.clone();
         config.ai_peer = host.clone();
-        let config_path = std::path::Path::new(hermes_home).join("honcho.json");
+        let config_path = Self::config_path(hermes_home);
         if let Ok(content) = std::fs::read_to_string(&config_path) {
             if let Ok(raw) = serde_json::from_str::<Value>(&content) {
                 Self::apply_config_value(&mut config, &raw);
@@ -162,6 +171,9 @@ impl HonchoConfig {
             }
         }
         config.base_url = config.base_url.trim_end_matches('/').to_string();
+        if config.base_url.is_empty() {
+            config.base_url = DEFAULT_BASE_URL.to_string();
+        }
         config
     }
 
@@ -173,7 +185,11 @@ impl HonchoConfig {
     }
 
     fn apply_config_value(config: &mut Self, raw: &Value) {
-        if let Some(key) = raw.get("apiKey").and_then(|v| v.as_str()) {
+        if let Some(key) = raw
+            .get("apiKey")
+            .or_else(|| raw.get("api_key"))
+            .and_then(|v| v.as_str())
+        {
             if !key.is_empty() {
                 config.api_key = key.to_string();
             }
@@ -239,7 +255,8 @@ impl HonchoConfig {
         if let Some(enabled) = raw.get("enabled").and_then(|v| v.as_bool()) {
             config.enabled = enabled;
         } else {
-            config.enabled = !config.api_key.is_empty() || !config.base_url.trim().is_empty();
+            config.enabled =
+                !config.api_key.trim().is_empty() || !config.base_url.trim().is_empty();
         }
         if let Some(map) = raw.get("endpoints").and_then(|v| v.as_object()) {
             for (key, value) in map {
@@ -474,7 +491,8 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
     }
 
     fn is_available(&self) -> bool {
-        let config = HonchoConfig::from_env();
+        let hermes_home = config_io::default_hermes_home();
+        let config = HonchoConfig::from_config_file(&hermes_home.to_string_lossy());
         config.enabled
     }
 
@@ -831,10 +849,17 @@ impl MemoryProviderPlugin for HonchoMemoryPlugin {
     }
 
     fn save_config(&self, config: &Value) -> Result<(), String> {
-        if !config.is_object() {
-            return Err("config must be a JSON object".into());
+        let mut normalized = config
+            .as_object()
+            .cloned()
+            .ok_or_else(|| "config must be a JSON object".to_string())?;
+        if let Some(value) = normalized.remove("api_key") {
+            normalized.entry("apiKey".to_string()).or_insert(value);
         }
-        Ok(())
+        config_io::merge_and_write_owner_only(
+            &HonchoConfig::default_config_path(),
+            &Value::Object(normalized),
+        )
     }
 }
 
@@ -935,10 +960,99 @@ fn generated_runtime_peer_id(config: &HonchoConfig, prefix: &str, runtime_id: &s
 mod tests {
     use super::*;
 
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
     #[test]
     fn test_honcho_plugin_name() {
         let plugin = HonchoMemoryPlugin::new();
         assert_eq!(plugin.name(), "honcho");
+    }
+
+    #[test]
+    fn test_honcho_is_not_available_without_explicit_config() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let _api = EnvGuard::remove("HONCHO_API_KEY");
+        let _url = EnvGuard::remove("HONCHO_BASE_URL");
+
+        assert!(!HonchoMemoryPlugin::new().is_available());
+    }
+
+    #[test]
+    fn test_honcho_config_file_activates_provider_without_env() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let _api = EnvGuard::remove("HONCHO_API_KEY");
+        let _url = EnvGuard::remove("HONCHO_BASE_URL");
+        std::fs::write(
+            tmp.path().join("honcho.json"),
+            r#"{"baseUrl":"http://localhost:8000","enabled":true}"#,
+        )
+        .expect("write config");
+
+        assert!(HonchoMemoryPlugin::new().is_available());
+    }
+
+    #[test]
+    fn test_honcho_save_config_normalizes_key_and_writes_owner_only() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let path = tmp.path().join("honcho.json");
+        std::fs::write(&path, r#"{"workspace":"existing"}"#).expect("write existing");
+
+        HonchoMemoryPlugin::new()
+            .save_config(&json!({"api_key":"hc-secret","baseUrl":"http://localhost:8000"}))
+            .expect("save config");
+
+        let parsed: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read config"))
+                .expect("parse config");
+        assert_eq!(parsed["workspace"], "existing");
+        assert_eq!(parsed["apiKey"], "hc-secret");
+        assert!(parsed.get("api_key").is_none());
+        assert_eq!(parsed["baseUrl"], "http://localhost:8000");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path)
+                    .expect("metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
     }
 
     #[test]

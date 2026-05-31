@@ -12,8 +12,8 @@ AI-native cross-session user modeling with multi-pass dialectic reasoning, sessi
 ## Setup
 
 ```bash
-hermes honcho setup    # full interactive wizard (cloud or local)
-hermes memory setup    # generic picker, also works
+hermes memory setup honcho   # configure Honcho directly (cloud or local)
+hermes memory setup          # initialize the file memory backend
 ```
 
 Or manually:
@@ -21,6 +21,9 @@ Or manually:
 hermes config set memory.provider honcho
 echo "HONCHO_API_KEY=***" >> ~/.hermes/.env
 ```
+
+> `hermes honcho setup` is not used by the Rust runtime: Python plugin command
+> dispatch is disabled. Use `hermes memory setup honcho` on a fresh install.
 
 ## Architecture Overview
 
@@ -154,7 +157,7 @@ In gateway deployments (Telegram, Discord, Slack, etc.) each user arrives with a
 
 **Host vs root semantics.** All three keys are accepted at both root and `hosts.<host>` levels. Host-level wins. For maps and prefixes, host-level *replaces* the root value as a whole (not merge), so a host can intentionally own its identity universe or wipe it with `userPeerAliases: {}` / `runtimePeerPrefix: ""`.
 
-**Deployment shapes** (`hermes honcho setup` asks one prompt to set these):
+**Deployment shapes** (`hermes memory setup honcho` asks one prompt to set these):
 
 - **Single-operator** — `pinUserPeer: true`. All gateway users → `peerName`. Recommended for personal use where you connect Hermes to your own Telegram/Discord/etc.
 - **Multi-user gateway** — `pinUserPeer: false`, optional `runtimePeerPrefix`. Each runtime user → own peer. Recommended for bots serving many humans.
@@ -305,18 +308,14 @@ Presets:
 
 ## CLI Commands
 
+The Rust runtime currently supports direct setup and chat tools. Legacy
+`hermes honcho ...` Python plugin commands are not dispatched in Ultra.
+
 | Command | Description |
 |---------|-------------|
-| `hermes honcho setup` | Full interactive setup wizard |
-| `hermes honcho status` | Show resolved config for active profile |
-| `hermes honcho enable` / `disable` | Toggle Honcho for active profile |
-| `hermes honcho mode <mode>` | Change recall or observation mode |
-| `hermes honcho peer --user <name>` | Update user peer name |
-| `hermes honcho peer --ai <name>` | Update AI peer name |
-| `hermes honcho tokens --context <N>` | Set context token budget |
-| `hermes honcho tokens --dialectic <N>` | Set dialectic max chars |
-| `hermes honcho map <name>` | Map current directory to a session name |
-| `hermes honcho sync` | Create host blocks for all Hermes profiles |
+| `hermes memory setup honcho` | Configure Honcho directly for the Rust runtime |
+| `hermes memory status` | Show whether the file memory backend is initialized |
+| Honcho chat tools | `honcho_profile`, `honcho_search`, `honcho_context`, `honcho_conclude` |
 
 ## Example Config
 

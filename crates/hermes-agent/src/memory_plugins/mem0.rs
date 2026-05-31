@@ -19,6 +19,7 @@ use reqwest::Method;
 use serde_json::{json, Value};
 
 use crate::memory_manager::MemoryProviderPlugin;
+use crate::memory_plugins::config_io;
 
 const BREAKER_THRESHOLD: u32 = 5;
 const BREAKER_COOLDOWN_SECS: u64 = 120;
@@ -80,6 +81,18 @@ struct Mem0Config {
 }
 
 impl Mem0Config {
+    fn config_path(hermes_home: &str) -> std::path::PathBuf {
+        std::path::Path::new(hermes_home).join("mem0.json")
+    }
+
+    fn default_config_path() -> std::path::PathBuf {
+        config_io::default_hermes_home().join("mem0.json")
+    }
+
+    fn configured_api_key_at(path: &std::path::Path) -> bool {
+        config_io::json_file_has_nonempty_string(path, &["api_key"])
+    }
+
     fn load(hermes_home: &str) -> Self {
         let mut config = Self {
             api_key: std::env::var("MEM0_API_KEY").unwrap_or_default(),
@@ -91,7 +104,7 @@ impl Mem0Config {
             rerank: true,
         };
 
-        let config_path = std::path::Path::new(hermes_home).join("mem0.json");
+        let config_path = Self::config_path(hermes_home);
         if let Ok(content) = std::fs::read_to_string(&config_path) {
             if let Ok(raw) = serde_json::from_str::<Value>(&content) {
                 if let Some(key) = raw.get("api_key").and_then(|v| v.as_str()) {
@@ -354,7 +367,11 @@ impl MemoryProviderPlugin for Mem0MemoryPlugin {
     }
 
     fn is_available(&self) -> bool {
-        !std::env::var("MEM0_API_KEY").unwrap_or_default().is_empty()
+        !std::env::var("MEM0_API_KEY")
+            .unwrap_or_default()
+            .trim()
+            .is_empty()
+            || Mem0Config::configured_api_key_at(&Mem0Config::default_config_path())
     }
 
     fn initialize(&self, session_id: &str, hermes_home: &str) {
@@ -594,16 +611,41 @@ impl MemoryProviderPlugin for Mem0MemoryPlugin {
     }
 
     fn save_config(&self, config: &Value) -> Result<(), String> {
-        if !config.is_object() {
-            return Err("config must be a JSON object".into());
-        }
-        Ok(())
+        config_io::merge_and_write_owner_only(&Mem0Config::default_config_path(), config)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::remove_var(key);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
 
     #[test]
     fn test_mem0_plugin_name() {
@@ -650,5 +692,50 @@ mod tests {
             Mem0MemoryPlugin::extract_memory_text(&item2).as_deref(),
             Some("world")
         );
+    }
+
+    #[test]
+    fn test_mem0_config_file_activates_provider() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let _api = EnvGuard::remove("MEM0_API_KEY");
+        std::fs::write(tmp.path().join("mem0.json"), r#"{"api_key":"m0-secret"}"#)
+            .expect("write config");
+
+        assert!(Mem0MemoryPlugin::new().is_available());
+    }
+
+    #[test]
+    fn test_mem0_save_config_merges_and_writes_owner_only() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let path = tmp.path().join("mem0.json");
+        std::fs::write(&path, r#"{"agent_id":"existing"}"#).expect("write existing");
+
+        Mem0MemoryPlugin::new()
+            .save_config(&json!({"api_key":"m0-secret","user_id":"operator"}))
+            .expect("save config");
+
+        let parsed: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read config"))
+                .expect("parse config");
+        assert_eq!(parsed["agent_id"], "existing");
+        assert_eq!(parsed["api_key"], "m0-secret");
+        assert_eq!(parsed["user_id"], "operator");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path)
+                    .expect("metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
     }
 }

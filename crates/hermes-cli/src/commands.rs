@@ -15,6 +15,7 @@ use std::{
 
 use bytes::Bytes;
 use hermes_agent::plugins::PluginManifest;
+use hermes_agent::MemoryProviderPlugin;
 use hermes_core::AgentError;
 use hermes_intelligence::model_metadata::{get_model_context_length, get_model_info};
 use hermes_intelligence::models_dev::default_client;
@@ -22037,6 +22038,314 @@ pub async fn handle_cli_plugins(
     Ok(())
 }
 
+fn prompt_memory_setup_value(
+    label: &str,
+    default: Option<&str>,
+    yes: bool,
+) -> Result<String, AgentError> {
+    if yes {
+        return Ok(default.unwrap_or_default().to_string());
+    }
+    match default {
+        Some(value) if !value.is_empty() && memory_setup_label_is_secret(label) => {
+            print!("{label} [set]: ");
+        }
+        Some(value) if !value.is_empty() => {
+            print!("{label} [{value}]: ");
+        }
+        _ => {
+            print!("{label}: ");
+        }
+    }
+    std::io::stdout()
+        .flush()
+        .map_err(|e| AgentError::Io(format!("flush stdout: {e}")))?;
+    let mut input = String::new();
+    std::io::stdin()
+        .read_line(&mut input)
+        .map_err(|e| AgentError::Io(format!("read setup input: {e}")))?;
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        Ok(default.unwrap_or_default().to_string())
+    } else {
+        Ok(trimmed.to_string())
+    }
+}
+
+fn memory_setup_label_is_secret(label: &str) -> bool {
+    let lower = label.to_ascii_lowercase();
+    lower.contains("api key")
+        || lower.contains("jwt")
+        || lower.contains("token")
+        || lower.contains("secret")
+}
+
+fn active_honcho_host_key_for_cli() -> String {
+    if let Ok(explicit) = std::env::var("HERMES_HONCHO_HOST") {
+        let explicit = explicit.trim();
+        if !explicit.is_empty() {
+            return explicit.to_string();
+        }
+    }
+    let profile = std::env::var("HERMES_PROFILE").unwrap_or_default();
+    let profile = profile.trim();
+    if profile.is_empty() || matches!(profile, "default" | "custom") {
+        "hermes".to_string()
+    } else if profile == "hermes" || profile.starts_with("hermes.") {
+        profile.to_string()
+    } else {
+        format!("hermes.{profile}")
+    }
+}
+
+fn honcho_ai_peer_for_host(host: &str) -> String {
+    host.strip_prefix("hermes.")
+        .filter(|profile| !profile.trim().is_empty())
+        .unwrap_or(host)
+        .to_string()
+}
+
+fn parse_honcho_aliases(raw: &str) -> serde_json::Map<String, serde_json::Value> {
+    let mut aliases = serde_json::Map::new();
+    for entry in raw.split(',') {
+        let Some((key, value)) = entry.split_once('=') else {
+            continue;
+        };
+        let key = key.trim();
+        let value = value.trim();
+        if !key.is_empty() && !value.is_empty() {
+            aliases.insert(
+                key.to_string(),
+                serde_json::Value::String(value.to_string()),
+            );
+        }
+    }
+    aliases
+}
+
+struct HonchoSetupConfigInput<'a> {
+    host: &'a str,
+    deployment: &'a str,
+    api_key: &'a str,
+    base_url: &'a str,
+    peer_name: &'a str,
+    shape: &'a str,
+    runtime_peer_prefix: &'a str,
+    aliases: &'a serde_json::Map<String, serde_json::Value>,
+}
+
+fn build_honcho_setup_config(input: HonchoSetupConfigInput<'_>) -> serde_json::Value {
+    let mut root = serde_json::Map::new();
+    let mut host_block = serde_json::Map::new();
+
+    root.insert("enabled".to_string(), serde_json::Value::Bool(true));
+    if input.deployment == "local" {
+        root.insert(
+            "baseUrl".to_string(),
+            serde_json::Value::String(input.base_url.to_string()),
+        );
+        if !input.api_key.trim().is_empty() {
+            host_block.insert(
+                "apiKey".to_string(),
+                serde_json::Value::String(input.api_key.to_string()),
+            );
+        }
+    } else if !input.api_key.trim().is_empty() {
+        root.insert(
+            "apiKey".to_string(),
+            serde_json::Value::String(input.api_key.to_string()),
+        );
+    }
+
+    host_block.insert("enabled".to_string(), serde_json::Value::Bool(true));
+    host_block.insert(
+        "workspace".to_string(),
+        serde_json::Value::String("hermes".to_string()),
+    );
+    host_block.insert(
+        "aiPeer".to_string(),
+        serde_json::Value::String(honcho_ai_peer_for_host(input.host)),
+    );
+    if !input.peer_name.trim().is_empty() {
+        host_block.insert(
+            "peerName".to_string(),
+            serde_json::Value::String(input.peer_name.to_string()),
+        );
+    }
+
+    match input.shape {
+        "single" => {
+            host_block.insert("pinUserPeer".to_string(), serde_json::Value::Bool(true));
+        }
+        "hybrid" => {
+            host_block.insert("pinUserPeer".to_string(), serde_json::Value::Bool(false));
+            if !input.aliases.is_empty() {
+                host_block.insert(
+                    "userPeerAliases".to_string(),
+                    serde_json::Value::Object(input.aliases.clone()),
+                );
+            }
+            if !input.runtime_peer_prefix.trim().is_empty() {
+                host_block.insert(
+                    "runtimePeerPrefix".to_string(),
+                    serde_json::Value::String(input.runtime_peer_prefix.to_string()),
+                );
+            }
+        }
+        _ => {
+            host_block.insert("pinUserPeer".to_string(), serde_json::Value::Bool(false));
+            if !input.runtime_peer_prefix.trim().is_empty() {
+                host_block.insert(
+                    "runtimePeerPrefix".to_string(),
+                    serde_json::Value::String(input.runtime_peer_prefix.to_string()),
+                );
+            }
+        }
+    }
+
+    let mut hosts = serde_json::Map::new();
+    hosts.insert(
+        input.host.to_string(),
+        serde_json::Value::Object(host_block),
+    );
+    root.insert("hosts".to_string(), serde_json::Value::Object(hosts));
+    serde_json::Value::Object(root)
+}
+
+fn setup_mem0_provider(yes: bool) -> Result<PathBuf, AgentError> {
+    let api_key_default = std::env::var("MEM0_API_KEY").unwrap_or_default();
+    let user_id_default =
+        std::env::var("MEM0_USER_ID").unwrap_or_else(|_| "hermes-user".to_string());
+    let agent_id_default = std::env::var("MEM0_AGENT_ID").unwrap_or_else(|_| "hermes".to_string());
+    let base_url_default =
+        std::env::var("MEM0_BASE_URL").unwrap_or_else(|_| "https://api.mem0.ai/v1".to_string());
+
+    let api_key = prompt_memory_setup_value("Mem0 API key", Some(&api_key_default), yes)?;
+    if api_key.trim().is_empty() {
+        return Err(AgentError::Config(
+            "Mem0 setup requires MEM0_API_KEY or an API key entered at the prompt.".into(),
+        ));
+    }
+    let user_id = prompt_memory_setup_value("Mem0 user_id", Some(&user_id_default), yes)?;
+    let agent_id = prompt_memory_setup_value("Mem0 agent_id", Some(&agent_id_default), yes)?;
+    let base_url = prompt_memory_setup_value("Mem0 base_url", Some(&base_url_default), yes)?;
+
+    let config = serde_json::json!({
+        "api_key": api_key,
+        "user_id": user_id,
+        "agent_id": agent_id,
+        "base_url": base_url,
+        "rerank": true
+    });
+    hermes_agent::memory_plugins::mem0::Mem0MemoryPlugin::new()
+        .save_config(&config)
+        .map_err(AgentError::Config)?;
+    Ok(hermes_config::hermes_home().join("mem0.json"))
+}
+
+fn setup_honcho_provider(yes: bool) -> Result<PathBuf, AgentError> {
+    let env_api_key = std::env::var("HONCHO_API_KEY").unwrap_or_default();
+    let env_base_url = std::env::var("HONCHO_BASE_URL").unwrap_or_default();
+    let default_deployment =
+        if env_base_url.trim().is_empty() || env_base_url.contains("api.honcho.dev") {
+            "cloud"
+        } else {
+            "local"
+        };
+    let deployment = prompt_memory_setup_value(
+        "Honcho deployment (cloud|local)",
+        Some(default_deployment),
+        yes,
+    )?
+    .to_ascii_lowercase();
+    let deployment = if deployment == "local" {
+        "local"
+    } else {
+        "cloud"
+    };
+
+    let base_url_default = if deployment == "local" {
+        if env_base_url.trim().is_empty() {
+            "http://localhost:8000".to_string()
+        } else {
+            env_base_url.clone()
+        }
+    } else {
+        env_base_url.clone()
+    };
+    let base_url = if deployment == "local" {
+        prompt_memory_setup_value("Honcho local baseUrl", Some(&base_url_default), yes)?
+    } else {
+        base_url_default
+    };
+    let api_label = if deployment == "local" {
+        "Honcho local JWT/API key (blank for no-auth local)"
+    } else {
+        "Honcho API key"
+    };
+    let api_key = prompt_memory_setup_value(api_label, Some(&env_api_key), yes)?;
+    if deployment == "cloud" && api_key.trim().is_empty() {
+        return Err(AgentError::Config(
+            "Honcho cloud setup requires HONCHO_API_KEY or an API key entered at the prompt."
+                .into(),
+        ));
+    }
+
+    let host = active_honcho_host_key_for_cli();
+    let peer_default = std::env::var("HERMES_USER").unwrap_or_default();
+    let peer_name = prompt_memory_setup_value("Honcho peerName", Some(&peer_default), yes)?;
+    let shape_input = prompt_memory_setup_value(
+        "Deployment shape (single|multi|hybrid)",
+        Some("single"),
+        yes,
+    )?
+    .to_ascii_lowercase();
+    let shape = match shape_input.as_str() {
+        "single" | "hybrid" => shape_input,
+        _ => "multi".to_string(),
+    };
+    let runtime_peer_prefix = if shape == "multi" || shape == "hybrid" {
+        prompt_memory_setup_value("Runtime peer prefix", Some(""), yes)?
+    } else {
+        String::new()
+    };
+    let alias_raw = if shape == "hybrid" {
+        prompt_memory_setup_value(
+            "Runtime aliases (comma key=peer, blank for none)",
+            Some(""),
+            yes,
+        )?
+    } else {
+        String::new()
+    };
+    let aliases = parse_honcho_aliases(&alias_raw);
+    let config = build_honcho_setup_config(HonchoSetupConfigInput {
+        host: &host,
+        deployment,
+        api_key: &api_key,
+        base_url: &base_url,
+        peer_name: &peer_name,
+        shape: &shape,
+        runtime_peer_prefix: &runtime_peer_prefix,
+        aliases: &aliases,
+    });
+
+    hermes_agent::memory_plugins::honcho::HonchoMemoryPlugin::new()
+        .save_config(&config)
+        .map_err(AgentError::Config)?;
+    Ok(hermes_config::hermes_home().join("honcho.json"))
+}
+
+fn setup_memory_provider_target(provider: &str, yes: bool) -> Result<PathBuf, AgentError> {
+    match provider.trim().to_ascii_lowercase().as_str() {
+        "mem0" => setup_mem0_provider(yes),
+        "honcho" => setup_honcho_provider(yes),
+        other => Err(AgentError::Config(format!(
+            "Unsupported memory provider setup target '{other}'. Supported: honcho, mem0"
+        ))),
+    }
+}
+
 /// Handle `hermes memory [action]`.
 pub async fn handle_cli_memory(
     action: Option<String>,
@@ -22094,6 +22403,19 @@ pub async fn handle_cli_memory(
             }
         }
         "setup" => {
+            if let Some(provider) = target
+                .as_deref()
+                .map(str::trim)
+                .filter(|provider| !provider.is_empty())
+            {
+                let path = setup_memory_provider_target(provider, yes)?;
+                println!("Configured memory provider '{}'.", provider);
+                println!("  Config: {}", path.display());
+                println!(
+                    "Memory provider config is owner-only and activates on subsequent sessions."
+                );
+                return Ok(());
+            }
             println!("Memory Provider Setup");
             println!("---------------------");
             std::fs::create_dir_all(&memories_dir)
@@ -24582,6 +24904,61 @@ mod tests {
         assert!(err
             .to_string()
             .contains("Python plugin command dispatch is disabled"));
+    }
+
+    #[test]
+    fn memory_honcho_setup_config_stores_local_jwt_under_host_block() {
+        let aliases = serde_json::Map::new();
+        let cfg = build_honcho_setup_config(HonchoSetupConfigInput {
+            host: "hermes",
+            deployment: "local",
+            api_key: "local-jwt",
+            base_url: "http://localhost:8000",
+            peer_name: "operator",
+            shape: "single",
+            runtime_peer_prefix: "",
+            aliases: &aliases,
+        });
+
+        assert_eq!(cfg["baseUrl"], "http://localhost:8000");
+        assert!(cfg.get("apiKey").is_none());
+        assert_eq!(cfg["hosts"]["hermes"]["apiKey"], "local-jwt");
+        assert_eq!(cfg["hosts"]["hermes"]["pinUserPeer"], true);
+    }
+
+    #[test]
+    fn memory_honcho_setup_config_keeps_gateway_aliases_for_hybrid_shape() {
+        let aliases = parse_honcho_aliases("telegram-1=operator, discord-2=operator");
+        let cfg = build_honcho_setup_config(HonchoSetupConfigInput {
+            host: "hermes.coder",
+            deployment: "cloud",
+            api_key: "cloud-key",
+            base_url: "",
+            peer_name: "operator",
+            shape: "hybrid",
+            runtime_peer_prefix: "gateway_",
+            aliases: &aliases,
+        });
+
+        assert_eq!(cfg["apiKey"], "cloud-key");
+        assert_eq!(cfg["hosts"]["hermes.coder"]["aiPeer"], "coder");
+        assert_eq!(cfg["hosts"]["hermes.coder"]["pinUserPeer"], false);
+        assert_eq!(
+            cfg["hosts"]["hermes.coder"]["userPeerAliases"]["telegram-1"],
+            "operator"
+        );
+        assert_eq!(
+            cfg["hosts"]["hermes.coder"]["runtimePeerPrefix"],
+            "gateway_"
+        );
+    }
+
+    #[test]
+    fn memory_setup_prompt_classifies_secret_labels() {
+        assert!(memory_setup_label_is_secret("Mem0 API key"));
+        assert!(memory_setup_label_is_secret("Honcho local JWT/API key"));
+        assert!(!memory_setup_label_is_secret("Mem0 base_url"));
+        assert!(!memory_setup_label_is_secret("Deployment shape"));
     }
 
     #[test]
