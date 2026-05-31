@@ -20,6 +20,7 @@ use reqwest::blocking::Client;
 use serde_json::{json, Value};
 
 use crate::memory_manager::MemoryProviderPlugin;
+use crate::memory_plugins::config_io;
 
 const DEFAULT_API_URL: &str = "https://api.hindsight.vectorize.io";
 const DEFAULT_LOCAL_URL: &str = "http://localhost:8888";
@@ -294,7 +295,14 @@ impl MemoryProviderPlugin for HindsightPlugin {
             return true;
         }
         // Cloud mode requires credentials (or explicit API URL for self-hosted).
-        !api_key.is_empty() || !api_url.is_empty()
+        !api_key.is_empty()
+            || !api_url.is_empty()
+            || config_io::json_file_has_nonempty_string(
+                &config_io::default_hermes_home()
+                    .join("hindsight")
+                    .join("config.json"),
+                &["api_key", "apiKey", "api_url"],
+            )
     }
 
     fn initialize(&self, session_id: &str, hermes_home: &str) {
@@ -639,9 +647,10 @@ impl MemoryProviderPlugin for HindsightPlugin {
     }
 
     fn save_config(&self, config: &Value) -> Result<(), String> {
-        // Would write to $HERMES_HOME/hindsight/config.json
-        let _ = config;
-        Ok(())
+        let path = config_io::default_hermes_home()
+            .join("hindsight")
+            .join("config.json");
+        config_io::merge_and_write_owner_only(&path, config)
     }
 }
 
@@ -876,6 +885,28 @@ fn hindsight_retain(
 mod tests {
     use super::*;
 
+    struct EnvGuard {
+        key: &'static str,
+        previous: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Self {
+            let previous = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
     #[test]
     fn test_hindsight_plugin_name() {
         let plugin = HindsightPlugin::new();
@@ -972,6 +1003,36 @@ mod tests {
         assert_eq!(body["budget"], "mid");
         assert_eq!(body["max_tokens"], 4096);
         assert_eq!(body["types"], json!(["observation"]));
+    }
+
+    #[test]
+    fn test_hindsight_save_config_writes_owner_only() {
+        let _guard = config_io::TEST_ENV_LOCK.lock().expect("env lock");
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let _home = EnvGuard::set("HERMES_HOME", tmp.path());
+        let path = tmp.path().join("hindsight").join("config.json");
+
+        HindsightPlugin::new()
+            .save_config(&json!({"api_key":"hd-secret"}))
+            .expect("save config");
+
+        let parsed: Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read config"))
+                .expect("parse config");
+        assert_eq!(parsed["api_key"], "hd-secret");
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                std::fs::metadata(&path)
+                    .expect("metadata")
+                    .permissions()
+                    .mode()
+                    & 0o777,
+                0o600
+            );
+        }
     }
 
     #[test]

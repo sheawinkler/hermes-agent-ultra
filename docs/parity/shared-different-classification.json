@@ -136,6 +136,34 @@
       "ticket": 25
     },
     {
+      "path": "tests/test_honcho_client_config.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python Honcho config permission coverage is mapped to Rust tests for owner-only atomic honcho.json writes and explicit config-file activation in crates/hermes-agent/src/memory_plugins/honcho.rs.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "tests/plugins/memory/test_hindsight_provider.py",
+      "classification": "intentional_divergence",
+      "rationale": "Hindsight recall-type defaults and secure config writes are covered by Rust memory plugin tests, including observation-only recall payloads and owner-only $HERMES_HOME/hindsight/config.json writes.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "tests/plugins/memory/test_mem0_v2.py",
+      "classification": "intentional_divergence",
+      "rationale": "Mem0 v2 behavior and secure config persistence are covered by Rust memory plugin tests for result normalization, owner-only atomic mem0.json writes, merge semantics, and config-file activation.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
+      "path": "tests/plugins/memory/test_supermemory_provider.py",
+      "classification": "intentional_divergence",
+      "rationale": "Supermemory provider setup persistence is covered by Rust tests for owner-only atomic supermemory.json writes and config-file activation; the Python test file is retained as upstream reference.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
       "path": "tests/gateway",
       "classification": "functional",
       "rationale": "Gateway test deltas exercise platform adapter behavior and must be reviewed as runtime parity coverage.",
@@ -1081,6 +1109,13 @@
       "ticket": 25
     },
     {
+      "path": "plugins/memory/honcho/README.md",
+      "classification": "intentional_divergence",
+      "rationale": "Ultra documents the Rust-native `hermes memory setup honcho` path and dot-separated profile host keys used by crates/hermes-agent/src/memory_plugins/honcho.rs; legacy Python `hermes honcho ...` command dispatch remains disabled.",
+      "owner": "sheawinkler",
+      "ticket": 304
+    },
+    {
       "path": "plugins/memory/byterover/__init__.py",
       "classification": "policy_only",
       "rationale": "The shared diff is behavior-equivalent tuple membership for action and role guards; no ByteRover runtime behavior is missing.",
@@ -1121,6 +1156,13 @@
       "rationale": "Ultra supersedes the upstream Python Honcho gateway identity resolver with the Rust Honcho memory provider resolver in crates/hermes-agent/src/memory_plugins/honcho.rs, including pinUserPeer, userPeerAliases, runtimePeerPrefix, and hash-escalated collision handling.",
       "owner": "sheawinkler",
       "ticket": 25
+    },
+    {
+      "path": "plugins/memory/mem0/__init__.py",
+      "classification": "intentional_divergence",
+      "rationale": "The remaining Python Mem0 diff is legacy save_config write mechanics; Ultra implements Rust-native owner-only atomic config writes, merge semantics, and config-file activation in crates/hermes-agent/src/memory_plugins/mem0.rs.",
+      "owner": "sheawinkler",
+      "ticket": 304
     },
     {
       "path": "plugins/memory/supermemory/__init__.py",

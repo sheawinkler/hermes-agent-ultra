@@ -721,17 +721,17 @@
       "workstream": "WS3"
     },
     {
-      "action": "Inspect upstream/local behavior; implement Rust-native parity only if local coverage is missing.",
-      "classification": "functional",
-      "classification_path": "plugins/memory",
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "plugins/memory/honcho/README.md",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "dbe3eebc9a56d1910a111800666634dbb1810273",
-      "necessity": "necessary_review",
+      "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "plugins/memory/honcho/README.md",
-      "rust_requirement": "rust_native_runtime_parity_required_if_needed",
-      "status": "pending_review",
-      "ticket": 25,
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 304,
       "upstream_blob": "3774747d05a7ba858585e9a154403bc824824a5b",
       "workstream": "WS3"
     },
@@ -796,17 +796,17 @@
       "workstream": "WS3"
     },
     {
-      "action": "Inspect upstream/local behavior; implement Rust-native parity only if local coverage is missing.",
-      "classification": "functional",
-      "classification_path": "plugins/memory",
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "plugins/memory/mem0/__init__.py",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "32d1f6ff700237a50e246a97759d549dc8248fb5",
-      "necessity": "necessary_review",
+      "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "plugins/memory/mem0/__init__.py",
-      "rust_requirement": "rust_native_runtime_parity_required_if_needed",
-      "status": "pending_review",
-      "ticket": 25,
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 304,
       "upstream_blob": "332b3ac9412957eee3a8cfd46a0503f00288098b",
       "workstream": "WS3"
     },
@@ -7936,32 +7936,32 @@
       "workstream": "WS6"
     },
     {
-      "action": "Map upstream test intent to Rust/Python contract coverage; add missing regression tests.",
-      "classification": "functional",
-      "classification_path": "tests/plugins",
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "tests/plugins/memory/test_hindsight_provider.py",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "fcda46e56b09175017ba3b6c54677ef3323de631",
-      "necessity": "necessary_review",
+      "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "tests/plugins/memory/test_hindsight_provider.py",
-      "rust_requirement": "rust_equivalent_or_contract_test_required",
-      "status": "pending_review",
-      "ticket": 25,
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 304,
       "upstream_blob": "f49c227611ae2bbaad90952034bd9e3fc1fdb520",
       "workstream": "WS6"
     },
     {
-      "action": "Map upstream test intent to Rust/Python contract coverage; add missing regression tests.",
-      "classification": "functional",
-      "classification_path": "tests/plugins",
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "tests/plugins/memory/test_mem0_v2.py",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "6f60771f5c48970d622ff4a98143c411f2825618",
-      "necessity": "necessary_review",
+      "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "tests/plugins/memory/test_mem0_v2.py",
-      "rust_requirement": "rust_equivalent_or_contract_test_required",
-      "status": "pending_review",
-      "ticket": 25,
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 304,
       "upstream_blob": "a9a8667645237e3a3615e4ee4b98bf0a31dd8264",
       "workstream": "WS6"
     },
@@ -7981,17 +7981,17 @@
       "workstream": "WS6"
     },
     {
-      "action": "Map upstream test intent to Rust/Python contract coverage; add missing regression tests.",
-      "classification": "functional",
-      "classification_path": "tests/plugins",
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "tests/plugins/memory/test_supermemory_provider.py",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "0aee459757f4ada65bbfc860504c81332588d7d3",
-      "necessity": "necessary_review",
+      "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "tests/plugins/memory/test_supermemory_provider.py",
-      "rust_requirement": "rust_equivalent_or_contract_test_required",
-      "status": "pending_review",
-      "ticket": 25,
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 304,
       "upstream_blob": "d5f1c5bb17400ddfb86dd52e32892f4fbf7d1571",
       "workstream": "WS6"
     },
@@ -9391,17 +9391,17 @@
       "workstream": "WS6"
     },
     {
-      "action": "Map upstream test intent to Rust/Python contract coverage; add missing regression tests.",
-      "classification": "functional",
-      "classification_path": "tests",
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "tests/test_honcho_client_config.py",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "feb0eb41d7c2fb5a986297920d68bf7254a6ebe8",
-      "necessity": "necessary_review",
+      "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "tests/test_honcho_client_config.py",
-      "rust_requirement": "rust_equivalent_or_contract_test_required",
-      "status": "pending_review",
-      "ticket": 25,
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
+      "ticket": 304,
       "upstream_blob": "f7b1efa151ccd5452aec4f6370fa7617ac9792e3",
       "workstream": "WS6"
     },
@@ -15466,30 +15466,29 @@
       "workstream": "WS5"
     }
   ],
-  "generated_at_utc": "2026-05-31T01:47:24.738287+00:00",
+  "generated_at_utc": "2026-05-31T09:38:06.180340+00:00",
   "refs": {
-    "local_ref": "main",
-    "local_sha": "cd313d674d9d42b21ef9c625690bdd76f0667add",
+    "local_ref": "HEAD",
+    "local_sha": "fe145f8a2b574f66af38e0e0db3797839d3b49f0",
     "upstream_ref": "upstream/main",
     "upstream_sha": "b1a25404b638bfbd79ce4d08b49afc0ee1361528"
   },
   "summary": {
     "by_classification": {
       "branding_only": 1,
-      "functional": 609,
-      "intentional_divergence": 252,
+      "functional": 603,
+      "intentional_divergence": 258,
       "policy_only": 169
     },
     "by_rust_requirement": {
-      "not_required_for_runtime": 422,
-      "rust_equivalent_or_contract_test_required": 526,
-      "rust_native_runtime_parity_required_if_needed": 2,
+      "not_required_for_runtime": 428,
+      "rust_equivalent_or_contract_test_required": 522,
       "rust_primary_ux_or_documented_divergence_required": 81
     },
     "by_status": {
-      "cleared_intentional_divergence": 252,
+      "cleared_intentional_divergence": 258,
       "cleared_non_runtime": 170,
-      "pending_review": 609
+      "pending_review": 603
     },
     "by_workstream": {
       "WS3": 56,
@@ -15498,10 +15497,10 @@
       "WS6": 689,
       "WS8": 13
     },
-    "cleared_intentional_divergence": 252,
+    "cleared_intentional_divergence": 258,
     "cleared_non_runtime": 170,
     "pending_classification": 0,
-    "pending_review": 609,
+    "pending_review": 603,
     "total_shared_different": 1031
   }
 }
