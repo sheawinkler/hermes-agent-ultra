@@ -230,6 +230,16 @@ fn yaml_gateway_route(value: &serde_yaml::Value) -> bool {
     }
 }
 
+fn browser_vision_payload(instruction: &str, screenshot: Value) -> String {
+    json!({
+        "status": "vision_analysis",
+        "instruction": instruction,
+        "screenshot": screenshot,
+        "note": "Screenshot captured; vision analysis requires LLM integration"
+    })
+    .to_string()
+}
+
 /// Browser backend using Chrome DevTools Protocol.
 /// Connects to Chrome via WebSocket for automation.
 pub struct CdpBrowserBackend {
@@ -994,13 +1004,7 @@ impl BrowserBackend for BrowserbaseBrowserBackend {
         let result = self
             .browserbase_command("Page.captureScreenshot", json!({"format": "png"}))
             .await?;
-        Ok(json!({
-            "status": "vision_analysis",
-            "instruction": instruction,
-            "screenshot": result,
-            "note": "Screenshot captured; vision analysis requires LLM integration"
-        })
-        .to_string())
+        Ok(browser_vision_payload(instruction, result))
     }
 
     async fn console(&self, action: &str) -> Result<String, ToolError> {
@@ -1133,13 +1137,7 @@ impl BrowserBackend for BrowserUseBrowserBackend {
         let result = self
             .browser_use_command("Page.captureScreenshot", json!({"format": "png"}))
             .await?;
-        Ok(json!({
-            "status": "vision_analysis",
-            "instruction": instruction,
-            "screenshot": result,
-            "note": "Screenshot captured; vision analysis requires LLM integration"
-        })
-        .to_string())
+        Ok(browser_vision_payload(instruction, result))
     }
 
     async fn console(&self, action: &str) -> Result<String, ToolError> {
@@ -1342,13 +1340,7 @@ impl BrowserBackend for CdpBrowserBackend {
         let result = self
             .cdp_command("Page.captureScreenshot", json!({"format": "png"}))
             .await?;
-        Ok(json!({
-            "status": "vision_analysis",
-            "instruction": instruction,
-            "screenshot": result,
-            "note": "Screenshot captured; vision analysis requires LLM integration"
-        })
-        .to_string())
+        Ok(browser_vision_payload(instruction, result))
     }
 
     async fn console(&self, action: &str) -> Result<String, ToolError> {
@@ -1719,6 +1711,20 @@ mod tests {
                 "timeout": 120,
                 "browserSettings": {"advancedStealth": true},
             })
+        );
+    }
+
+    #[test]
+    fn browser_vision_payload_is_llm_content_independent() {
+        let raw = browser_vision_payload("inspect", json!({"data": "png-bytes"}));
+        let value: Value = serde_json::from_str(&raw).expect("vision payload json");
+
+        assert_eq!(value["status"], "vision_analysis");
+        assert_eq!(value["instruction"], "inspect");
+        assert_eq!(value["screenshot"]["data"], "png-bytes");
+        assert_eq!(
+            value["note"],
+            "Screenshot captured; vision analysis requires LLM integration"
         );
     }
 

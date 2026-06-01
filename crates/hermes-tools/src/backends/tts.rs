@@ -268,6 +268,29 @@ pub(crate) fn tts_speed_for_provider(
     raw.map(|speed| speed.clamp(0.25, 4.0))
 }
 
+fn resolve_tts_provider_name(
+    explicit_provider: Option<&str>,
+    tts_config: &Value,
+    elevenlabs_available: bool,
+) -> String {
+    let configured_provider = tts_config
+        .get("provider")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+
+    explicit_provider
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .or(configured_provider)
+        .unwrap_or(if elevenlabs_available {
+            "elevenlabs"
+        } else {
+            "openai"
+        })
+        .to_ascii_lowercase()
+}
+
 fn command_tts_timeout(config: &Value) -> Duration {
     let seconds = number_from_config(config.get("timeout_seconds"))
         .or_else(|| number_from_config(config.get("timeout")))
@@ -887,24 +910,8 @@ impl TtsBackend for MultiTtsBackend {
         // 2. Otherwise OpenAI (cheapest HTTP-only path)
         // Zero-Python: edge_tts removed entirely — callers asking for
         // "edge_tts" receive a clear migration error.
-        let configured_provider = self
-            .tts_config
-            .get("provider")
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-            .filter(|s| !s.is_empty());
-        let resolved_provider_raw = provider
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .or(configured_provider)
-            .unwrap_or_else(|| {
-                if self.elevenlabs_key.is_some() {
-                    "elevenlabs"
-                } else {
-                    "openai"
-                }
-            });
-        let resolved_provider_key = resolved_provider_raw.to_ascii_lowercase();
+        let resolved_provider_key =
+            resolve_tts_provider_name(provider, &self.tts_config, self.elevenlabs_key.is_some());
         let resolved_provider = resolved_provider_key.as_str();
 
         let max_len = resolve_max_text_length(Some(resolved_provider), &self.tts_config);
@@ -1115,6 +1122,26 @@ mod tests {
         assert_eq!(
             tts_speed_for_provider("openai", &cfg, Some(0.1)),
             Some(0.25)
+        );
+    }
+
+    #[test]
+    fn tts_provider_resolution_treats_null_and_missing_as_default() {
+        assert_eq!(
+            resolve_tts_provider_name(None, &json!({"provider": null}), false),
+            "openai"
+        );
+        assert_eq!(
+            resolve_tts_provider_name(None, &json!({}), true),
+            "elevenlabs"
+        );
+        assert_eq!(
+            resolve_tts_provider_name(Some(" OPENAI "), &json!({"provider": "piper"}), true),
+            "openai"
+        );
+        assert_eq!(
+            resolve_tts_provider_name(None, &json!({"provider": " PIPER "}), false),
+            "piper"
         );
     }
 

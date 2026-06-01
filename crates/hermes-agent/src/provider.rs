@@ -2911,6 +2911,34 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_openai_response_null_content_is_safe() {
+        let json = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "tool_calls": [{
+                        "id": "call_null_content",
+                        "function": {
+                            "name": "read_file",
+                            "arguments": "{\"path\":\"Cargo.toml\"}"
+                        }
+                    }]
+                },
+                "finish_reason": "tool_calls"
+            }],
+            "model": "reasoning-tool-only"
+        });
+
+        let resp = parse_openai_response(&json).expect("null content response should parse");
+
+        assert_eq!(resp.message.content.as_deref(), Some(""));
+        let calls = resp.message.tool_calls.as_ref().expect("tool calls");
+        assert_eq!(calls[0].id, "call_null_content");
+        assert_eq!(calls[0].function.name, "read_file");
+    }
+
+    #[test]
     fn test_parse_openai_response_no_choices_includes_provider_context() {
         let json = serde_json::json!({
             "status": 400,
@@ -3434,6 +3462,30 @@ mod tests {
         let reasoning = resp.message.reasoning_content.as_deref().unwrap();
         assert!(reasoning.contains("Step 1"));
         assert!(reasoning.contains("Step 2"));
+    }
+
+    #[test]
+    fn test_openrouter_parse_response_null_content_preserves_reasoning() {
+        let json = serde_json::json!({
+            "choices": [{
+                "message": {
+                    "role": "assistant",
+                    "content": null,
+                    "reasoning_content": "Tool-only reasoning path"
+                },
+                "finish_reason": "stop"
+            }],
+            "model": "deepseek/deepseek-r1"
+        });
+
+        let resp = OpenRouterProvider::parse_openrouter_response(&json)
+            .expect("reasoning-only OpenRouter response should parse");
+
+        assert_eq!(resp.message.content.as_deref(), Some(""));
+        assert_eq!(
+            resp.message.reasoning_content.as_deref(),
+            Some("Tool-only reasoning path")
+        );
     }
 
     #[test]

@@ -349,16 +349,19 @@ fn is_json_null(value: &serde_json::Value) -> bool {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AuxiliaryTaskConfig {
     /// `auto` means resolve through the standard auxiliary chain.
-    #[serde(default = "default_auxiliary_provider")]
+    #[serde(
+        default = "default_auxiliary_provider",
+        deserialize_with = "deserialize_provider_or_default"
+    )]
     pub provider: String,
     /// Empty means use the selected provider's default auxiliary model.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_string_or_empty")]
     pub model: String,
     /// Direct OpenAI-compatible endpoint. When set, it takes precedence over provider.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_string_or_empty")]
     pub base_url: String,
     /// API key for a direct endpoint or explicit task provider.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "deserialize_string_or_empty")]
     pub api_key: String,
     /// Per-attempt timeout in seconds. Accepts both `timeout` and legacy `timeout_secs`.
     #[serde(
@@ -407,6 +410,32 @@ impl AuxiliaryTaskConfig {
 
 fn default_auxiliary_provider() -> String {
     "auto".to_string()
+}
+
+fn deserialize_string_or_empty<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match Option::<serde_json::Value>::deserialize(deserializer)? {
+        None | Some(serde_json::Value::Null) => Ok(String::new()),
+        Some(serde_json::Value::String(value)) => Ok(value),
+        Some(value) => Err(D::Error::custom(format!(
+            "expected string or null, got {value}"
+        ))),
+    }
+}
+
+fn deserialize_provider_or_default<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    match Option::<serde_json::Value>::deserialize(deserializer)? {
+        None | Some(serde_json::Value::Null) => Ok(default_auxiliary_provider()),
+        Some(serde_json::Value::String(value)) => Ok(value),
+        Some(value) => Err(D::Error::custom(format!(
+            "expected provider string or null, got {value}"
+        ))),
+    }
 }
 
 /// Upstream-shaped default auxiliary task table used by setup/config UIs.
@@ -1156,19 +1185,35 @@ fn default_max_output_size() -> usize {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct WebConfig {
     /// Shared legacy backend selector.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_string_or_empty",
+        skip_serializing_if = "String::is_empty"
+    )]
     pub backend: String,
 
     /// Search-specific backend selector.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_string_or_empty",
+        skip_serializing_if = "String::is_empty"
+    )]
     pub search_backend: String,
 
     /// Extract-specific backend selector.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_string_or_empty",
+        skip_serializing_if = "String::is_empty"
+    )]
     pub extract_backend: String,
 
     /// Crawl-specific backend selector.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_string_or_empty",
+        skip_serializing_if = "String::is_empty"
+    )]
     pub crawl_backend: String,
 }
 
@@ -1469,6 +1514,72 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn config_null_string_guards_match_python_tool_defaults() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+web:
+  backend: null
+  search_backend: null
+  extract_backend: null
+  crawl_backend: null
+auxiliary:
+  compression:
+    provider: null
+    model: null
+    base_url: null
+    api_key: null
+tts:
+  provider: null
+mcp_servers:
+  - name: local
+    command: hermes-mcp
+    auth: null
+"#,
+        )
+        .expect("null-valued config fields should deserialize");
+
+        assert_eq!(cfg.web, WebConfig::default());
+        let compression = cfg.auxiliary.get("compression").expect("compression task");
+        assert_eq!(compression.provider, "auto");
+        assert_eq!(compression.model, "");
+        assert_eq!(compression.base_url, "");
+        assert_eq!(compression.api_key, "");
+        assert_eq!(cfg.tts["provider"], serde_json::Value::Null);
+        assert_eq!(cfg.mcp_servers.len(), 1);
+        assert_eq!(cfg.mcp_servers[0].name, "local");
+    }
+
+    #[test]
+    fn config_null_guards_preserve_valid_strings() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+web:
+  backend: tavily
+  search_backend: brave-free
+  extract_backend: firecrawl
+  crawl_backend: tavily
+auxiliary:
+  vision:
+    provider: OPENROUTER
+    model: google/gemini-2.5-flash
+    base_url: https://router.example/v1
+    api_key: local-key
+"#,
+        )
+        .expect("valid string-valued config fields should deserialize");
+
+        assert_eq!(cfg.web.backend, "tavily");
+        assert_eq!(cfg.web.search_backend, "brave-free");
+        assert_eq!(cfg.web.extract_backend, "firecrawl");
+        assert_eq!(cfg.web.crawl_backend, "tavily");
+        let vision = cfg.auxiliary.get("vision").expect("vision task");
+        assert_eq!(vision.provider, "OPENROUTER");
+        assert_eq!(vision.model, "google/gemini-2.5-flash");
+        assert_eq!(vision.base_url, "https://router.example/v1");
+        assert_eq!(vision.api_key, "local-key");
     }
 
     #[test]

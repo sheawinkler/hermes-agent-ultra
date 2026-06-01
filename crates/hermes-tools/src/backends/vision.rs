@@ -141,6 +141,15 @@ pub(crate) fn validate_image_url_for_vision(image_url: &str) -> bool {
     !is_blocked_image_host(host)
 }
 
+pub(crate) fn vision_response_content(data: &Value) -> String {
+    data["choices"][0]["message"]["content"]
+        .as_str()
+        .map(str::trim)
+        .filter(|content| !content.is_empty())
+        .unwrap_or("No analysis available")
+        .to_string()
+}
+
 #[async_trait]
 impl VisionBackend for OpenAiVisionBackend {
     async fn analyze(&self, image_url: &str, question: &str) -> Result<String, ToolError> {
@@ -183,11 +192,7 @@ impl VisionBackend for OpenAiVisionBackend {
             ToolError::ExecutionFailed(format!("Failed to parse vision response: {}", e))
         })?;
 
-        let content = data["choices"][0]["message"]["content"]
-            .as_str()
-            .unwrap_or("No analysis available");
-
-        Ok(content.to_string())
+        Ok(vision_response_content(&data))
     }
 }
 
@@ -241,5 +246,27 @@ mod tests {
             "http://169.254.169.254/latest"
         ));
         assert!(!validate_image_url_for_vision("http://[::1]/"));
+    }
+
+    #[test]
+    fn vision_response_content_handles_null_and_empty_analysis() {
+        assert_eq!(
+            vision_response_content(&serde_json::json!({
+                "choices": [{"message": {"content": null}}]
+            })),
+            "No analysis available"
+        );
+        assert_eq!(
+            vision_response_content(&serde_json::json!({
+                "choices": [{"message": {"content": "   "}}]
+            })),
+            "No analysis available"
+        );
+        assert_eq!(
+            vision_response_content(&serde_json::json!({
+                "choices": [{"message": {"content": "  The page shows a login form.  "}}]
+            })),
+            "The page shows a login form."
+        );
     }
 }

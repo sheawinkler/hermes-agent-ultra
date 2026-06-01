@@ -2332,6 +2332,27 @@
       "rationale": "Upstream configurable tool-output limit intent is covered by Rust ToolOutputConfig defaults and tolerant parsing plus read_file pagination clamping through tool_output.max_lines; Rust keeps agent budget truncation separate from tool display limits.",
       "owner": "sheawinkler",
       "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_browser_content_none_guard.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream browser_tool LLM-content None guard intent is superseded by Rust browser vision design: browser backends return a deterministic screenshot payload without dereferencing LLM message.content, and the shared vision response parser converts null or blank multimodal analysis content to a non-empty fallback string.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_config_null_guard.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream config null-coalescing intent is covered by Rust typed config null guards: web backend selectors deserialize null as defaults, auxiliary provider/model/base_url/api_key deserialize null as safe defaults, tts.provider null falls through provider resolution, and unknown MCP auth:null does not crash parsing.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_llm_content_none_guard.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream OpenAI-compatible message.content None guard intent is covered centrally by Rust OpenAI/OpenRouter response parsing: null assistant content becomes an empty string without panicking, tool-call-only responses keep tool calls, and reasoning-only OpenRouter responses preserve reasoning_content for downstream use.",
+      "owner": "sheawinkler",
+      "ticket": 25
     }
   ]
 }
