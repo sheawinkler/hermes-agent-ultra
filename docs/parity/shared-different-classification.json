@@ -1760,6 +1760,27 @@
       "ticket": 25
     },
     {
+      "path": "tests/tools/test_approval.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream dangerous-command approval behavior is covered and superseded by Rust hermes-tools approval contracts for hardline denials, recoverable confirmations, session/permanent approvals, yolo and session-yolo gates, container backend bypass, multiline shell/disk/write patterns, sensitive env/config writes, SQL/delete/find/killall refinements, sudo stdin floors, unmanaged gateway-run service-manager protection, and gateway approval queues. Python LLM smart-approval and input-prompt mechanics are intentionally not ported into the Rust safety path.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_approval_plugin_hooks.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream pre_approval_request/post_approval_response plugin-hook intent is covered by Rust approval observer contracts: pre/post lifecycle events include surface, session key, command, pattern keys, description, permanent-allow flag, and resolved choice for CLI and gateway approval paths, while observer panics are contained and cannot alter approval decisions.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_cron_approval_mode.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream cron approval-mode behavior is covered by Rust approval contracts for cron default-deny semantics, approve/off/allow/yes aliases for recoverable commands, hardline denial preservation, and cron-origin precedence over gateway approval routing so scheduled jobs block or allow deterministically without hanging on gateway approval listeners.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "tests/tools/test_approval_heartbeat.py",
       "classification": "intentional_divergence",
       "rationale": "Current upstream heartbeat file contains setup helpers but no executable test methods; Hermes Ultra's Rust terminal approval path fail-closes without entering Python's blocking gateway approval wait, so the inactivity-heartbeat wait loop is not a Rust runtime surface.",

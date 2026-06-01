@@ -5,6 +5,8 @@
 
 use regex::Regex;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, LazyLock, Mutex};
 use std::time::Duration;
 
@@ -51,6 +53,52 @@ pub struct ApprovalPrompt {
     pub pattern_key: String,
     pub pattern_keys: Vec<String>,
     pub allow_permanent: bool,
+}
+
+/// Approval lifecycle hook emitted around user-visible approval requests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalHookKind {
+    PreApprovalRequest,
+    PostApprovalResponse,
+}
+
+impl ApprovalHookKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::PreApprovalRequest => "pre_approval_request",
+            Self::PostApprovalResponse => "post_approval_response",
+        }
+    }
+}
+
+/// Surface responsible for resolving an approval request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApprovalSurface {
+    Cli,
+    Gateway,
+}
+
+impl ApprovalSurface {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Cli => "cli",
+            Self::Gateway => "gateway",
+        }
+    }
+}
+
+/// Observer event for approval plugins/integrations.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovalHookEvent {
+    pub kind: ApprovalHookKind,
+    pub surface: ApprovalSurface,
+    pub session_key: String,
+    pub command: String,
+    pub description: String,
+    pub pattern_key: String,
+    pub pattern_keys: Vec<String>,
+    pub allow_permanent: bool,
+    pub choice: Option<ApprovalChoice>,
 }
 
 /// Final result returned by combined command guards.
@@ -208,6 +256,7 @@ pub struct CommandGuardContext {
 
 impl CommandGuardContext {
     pub fn from_env() -> Self {
+        let cron_session = env_var_enabled("HERMES_CRON_SESSION");
         Self {
             interactive: env_var_enabled("HERMES_INTERACTIVE"),
             gateway: env_var_enabled("HERMES_GATEWAY_SESSION"),
@@ -215,8 +264,8 @@ impl CommandGuardContext {
             yolo_mode: yolo_mode_from_env() || current_session_yolo_from_env(),
             approval_mode_off: false,
             sudo_password_configured: has_sudo_password_env(),
-            cron_session: env_var_enabled("HERMES_CRON_SESSION"),
-            cron_approval_deny: false,
+            cron_session,
+            cron_approval_deny: cron_session && !cron_approval_mode_approves_from_env(),
             session_key: current_session_key_from_env().or_else(|| Some("default".to_string())),
             tirith_result: Ok(None),
             gateway_approval_timeout: Duration::from_secs(300),
@@ -381,6 +430,10 @@ static CONFIRM_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         Regex::new(r"(?is)wget\s+.*\|\s*(ba)?sh\b").unwrap(),
         // Remote script process substitution
         Regex::new(r"(?is)\b(?:bash|sh|zsh|ksh)\s+<\s*(?:<\s*)?\(\s*(?:curl|wget)\b").unwrap(),
+        // Gateway restarts should go through the service manager so agents do
+        // not strand unmanaged background gateway processes.
+        Regex::new(r"(?is)\bgateway\s+run\b.*(?:--replace\b|&\s*disown\b|disown\b|&\s*$)")
+            .unwrap(),
         // Writing to system directories
         Regex::new(r"(?i)(?:>|>>)\s*/(?:private/)?(?:etc|usr|var|boot|bin)/").unwrap(),
         Regex::new(r"(?i)\|\s*tee\s+/(?:private/)?(?:etc|usr|var|boot|bin)/").unwrap(),
@@ -520,6 +573,11 @@ static DANGEROUS_COMMAND_RULES: LazyLock<Vec<CommandPatternRule>> = LazyLock::ne
             "execute remote script via process substitution",
         ),
         CommandPatternRule::new(
+            r"(?is)\bgateway\s+run\b.*(?:--replace\b|&\s*disown\b|disown\b|&\s*$)",
+            "unmanaged gateway process start",
+            "gateway process should be restarted through systemctl/service management",
+        ),
+        CommandPatternRule::new(
             r"(?i)(?:>|>>)\s*/(?:private/)?(?:etc|usr|var|boot|bin)/",
             "overwrite system config",
             "overwrite system config",
@@ -605,10 +663,14 @@ static SESSION_APPROVED: LazyLock<Mutex<HashMap<String, HashSet<String>>>> =
 static PERMANENT_APPROVED: LazyLock<Mutex<HashSet<String>>> =
     LazyLock::new(|| Mutex::new(HashSet::new()));
 type GatewayNotifyCallback = Arc<dyn Fn(GatewayApprovalRequest) + Send + Sync + 'static>;
+type ApprovalObserverCallback = Arc<dyn Fn(ApprovalHookEvent) + Send + Sync + 'static>;
 static GATEWAY_QUEUES: LazyLock<Mutex<HashMap<String, VecDeque<Arc<GatewayApprovalEntry>>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 static GATEWAY_NOTIFY_CBS: LazyLock<Mutex<HashMap<String, GatewayNotifyCallback>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+static APPROVAL_OBSERVERS: LazyLock<Mutex<HashMap<u64, ApprovalObserverCallback>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+static NEXT_APPROVAL_OBSERVER_ID: AtomicU64 = AtomicU64::new(1);
 
 #[cfg(test)]
 pub(crate) static TEST_ENV_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
@@ -632,6 +694,22 @@ fn yolo_mode_from_env() -> bool {
             matches!(v.as_str(), "1" | "true" | "yes" | "on")
         })
         .unwrap_or(false)
+}
+
+fn cron_approval_mode_value_approves(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "approve" | "allow" | "yes" | "on" | "true" | "1" | "off"
+    )
+}
+
+fn cron_approval_mode_approves_from_env() -> bool {
+    for key in ["HERMES_CRON_APPROVAL_MODE", "HERMES_APPROVALS_CRON_MODE"] {
+        if let Ok(value) = std::env::var(key) {
+            return cron_approval_mode_value_approves(&value);
+        }
+    }
+    false
 }
 
 fn current_session_key_from_env() -> Option<String> {
@@ -796,6 +874,70 @@ pub fn resolve_gateway_approval(
         entry.resolve(choice);
     }
     resolved.len()
+}
+
+/// Register an observer for approval lifecycle events.
+///
+/// Observers are intentionally best-effort: a panic in one observer is
+/// contained and cannot alter approval safety decisions.
+pub fn register_approval_observer<F>(callback: F) -> u64
+where
+    F: Fn(ApprovalHookEvent) + Send + Sync + 'static,
+{
+    let id = NEXT_APPROVAL_OBSERVER_ID.fetch_add(1, Ordering::SeqCst);
+    APPROVAL_OBSERVERS
+        .lock()
+        .expect("approval observer lock poisoned")
+        .insert(id, Arc::new(callback));
+    id
+}
+
+/// Remove a previously registered approval observer.
+pub fn unregister_approval_observer(id: u64) -> bool {
+    APPROVAL_OBSERVERS
+        .lock()
+        .expect("approval observer lock poisoned")
+        .remove(&id)
+        .is_some()
+}
+
+fn approval_surface(context: &CommandGuardContext) -> ApprovalSurface {
+    if context.gateway || context.ask {
+        ApprovalSurface::Gateway
+    } else {
+        ApprovalSurface::Cli
+    }
+}
+
+fn emit_approval_hook(
+    kind: ApprovalHookKind,
+    surface: ApprovalSurface,
+    session_key: &str,
+    command: &str,
+    prompt: &ApprovalPrompt,
+    choice: Option<ApprovalChoice>,
+) {
+    let event = ApprovalHookEvent {
+        kind,
+        surface,
+        session_key: session_key.to_string(),
+        command: command.to_string(),
+        description: prompt.description.clone(),
+        pattern_key: prompt.pattern_key.clone(),
+        pattern_keys: prompt.pattern_keys.clone(),
+        allow_permanent: prompt.allow_permanent,
+        choice,
+    };
+    let observers = APPROVAL_OBSERVERS
+        .lock()
+        .expect("approval observer lock poisoned")
+        .values()
+        .cloned()
+        .collect::<Vec<_>>();
+    for observer in observers {
+        let event = event.clone();
+        let _ = catch_unwind(AssertUnwindSafe(|| observer(event)));
+    }
 }
 
 fn cancel_gateway_approvals(session_key: &str, choice: ApprovalChoice) -> usize {
@@ -1079,8 +1221,8 @@ pub fn check_all_command_guards_with_context(
         return Ok(CommandGuardResult::approved());
     }
 
-    if !context.is_interactive_surface() {
-        if context.cron_session && context.cron_approval_deny {
+    if context.cron_session {
+        if context.cron_approval_deny {
             if let Some(finding) = detect_dangerous_command_detail(command) {
                 return Ok(CommandGuardResult::blocked(
                     format!(
@@ -1092,6 +1234,10 @@ pub fn check_all_command_guards_with_context(
                 ));
             }
         }
+        return Ok(CommandGuardResult::approved());
+    }
+
+    if !context.is_interactive_surface() {
         return Ok(CommandGuardResult::approved());
     }
 
@@ -1146,9 +1292,18 @@ pub fn check_all_command_guards_with_context(
         pattern_keys,
         allow_permanent,
     };
+    let surface = approval_surface(&context);
+    emit_approval_hook(
+        ApprovalHookKind::PreApprovalRequest,
+        surface,
+        &session_key,
+        command,
+        &prompt,
+        None,
+    );
 
     let choice = if let Some(callback) = approval_callback.as_mut() {
-        callback(prompt)
+        callback(prompt.clone())
     } else if context.gateway || context.ask {
         let request = GatewayApprovalRequest {
             session_key: session_key.clone(),
@@ -1183,6 +1338,14 @@ pub fn check_all_command_guards_with_context(
     } else {
         ApprovalChoice::Deny
     };
+    emit_approval_hook(
+        ApprovalHookKind::PostApprovalResponse,
+        surface,
+        &session_key,
+        command,
+        &prompt,
+        Some(choice),
+    );
 
     if choice == ApprovalChoice::Deny {
         return Ok(user_denied_result(primary_key, combined_desc));
@@ -1261,10 +1424,12 @@ impl ApprovalManager {
     /// Check approval using process environment toggles such as
     /// `HERMES_YOLO_MODE` and `SUDO_PASSWORD`.
     pub fn check_approval_from_env(&self, command: &str, environment: &str) -> ApprovalDecision {
+        let cron_approve =
+            env_var_enabled("HERMES_CRON_SESSION") && cron_approval_mode_approves_from_env();
         self.check_approval_with_context(
             command,
             environment,
-            yolo_mode_from_env() || current_session_yolo_from_env(),
+            yolo_mode_from_env() || current_session_yolo_from_env() || cron_approve,
             has_sudo_password_env(),
         )
     }
@@ -1401,6 +1566,11 @@ mod tests {
             .lock()
             .expect("gateway notify lock poisoned")
             .clear();
+        APPROVAL_OBSERVERS
+            .lock()
+            .expect("approval observer lock poisoned")
+            .clear();
+        NEXT_APPROVAL_OBSERVER_ID.store(1, Ordering::SeqCst);
     }
 
     fn interactive_context(tirith_result: TirithResult) -> CommandGuardContext {
@@ -1679,6 +1849,84 @@ mod tests {
                 "false-like HERMES_YOLO_MODE={value:?} must not bypass approval"
             );
         }
+    }
+
+    #[test]
+    fn test_cron_env_default_requires_confirmation_for_recoverable_commands() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _session_key = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let _cron_mode = EnvGuard::remove("HERMES_CRON_APPROVAL_MODE");
+        let _cron_mode_legacy = EnvGuard::remove("HERMES_APPROVALS_CRON_MODE");
+        let _cron = EnvGuard::set("HERMES_CRON_SESSION", "1");
+        let manager = ApprovalManager::new();
+
+        assert_eq!(
+            manager.check_approval_from_env("rm -rf /tmp/stuff", "local"),
+            ApprovalDecision::RequiresConfirmation
+        );
+    }
+
+    #[test]
+    fn test_cron_env_approve_aliases_bypass_recoverable_only() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _session_key = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let _cron_mode_legacy = EnvGuard::remove("HERMES_APPROVALS_CRON_MODE");
+        let _cron = EnvGuard::set("HERMES_CRON_SESSION", "1");
+        let manager = ApprovalManager::new();
+
+        for value in ["approve", "allow", "yes", "on", "true", "1", "off"] {
+            let _cron_mode = EnvGuard::set("HERMES_CRON_APPROVAL_MODE", value);
+            assert_eq!(
+                manager.check_approval_from_env("rm -rf /tmp/stuff", "local"),
+                ApprovalDecision::Approved,
+                "cron approval mode {value:?} should allow recoverable commands"
+            );
+            assert_eq!(
+                manager.check_approval_from_env("rm -rf /", "local"),
+                ApprovalDecision::Denied,
+                "cron approval mode {value:?} must not bypass hardline denial"
+            );
+        }
+    }
+
+    #[test]
+    fn test_cron_combined_guard_wins_over_gateway_origin() {
+        let _guard = lock_test_state();
+        reset_approval_state_unlocked();
+        let session = "cron-gateway-origin";
+        register_gateway_notify(session, |_request| {
+            panic!("cron jobs must not submit gateway approval requests");
+        });
+
+        let result = check_all_command_guards_with_context(
+            "rm -rf /tmp/cron-origin",
+            "local",
+            CommandGuardContext {
+                cron_session: true,
+                cron_approval_deny: true,
+                gateway: true,
+                ask: true,
+                session_key: Some(session.to_string()),
+                tirith_result: Ok(Some(TirithResult::allow())),
+                ..CommandGuardContext::default()
+            },
+            None,
+        )
+        .expect("cron guard should return");
+
+        assert!(!result.approved);
+        assert!(result
+            .message
+            .as_deref()
+            .unwrap_or_default()
+            .contains("cron jobs run without a user present"));
+        assert!(!has_blocking_approval(session));
+        unregister_gateway_notify(session);
+        reset_approval_state_unlocked();
     }
 
     #[test]
@@ -2004,6 +2252,128 @@ mod tests {
         assert!(!result.approved);
         assert_eq!(result.status.as_deref(), Some("pending_approval"));
         assert!(result.approval_pending);
+        reset_approval_state_unlocked();
+    }
+
+    #[test]
+    fn test_approval_observers_fire_pre_and_post_on_cli_path() {
+        let _guard = lock_test_state();
+        reset_approval_state_unlocked();
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_for_observer = events.clone();
+        let observer_id = register_approval_observer(move |event| {
+            events_for_observer.lock().unwrap().push(event);
+        });
+        let mut callback = |prompt: ApprovalPrompt| {
+            assert_eq!(prompt.command, "rm -rf /tmp/observer-cli");
+            ApprovalChoice::Once
+        };
+
+        let result = check_all_command_guards_with_context(
+            "rm -rf /tmp/observer-cli",
+            "local",
+            CommandGuardContext {
+                interactive: true,
+                session_key: Some("observer-cli".to_string()),
+                tirith_result: Ok(Some(TirithResult::allow())),
+                ..CommandGuardContext::default()
+            },
+            Some(&mut callback),
+        )
+        .expect("approval guard should return");
+
+        assert!(result.approved);
+        assert!(result.user_approved);
+        assert!(unregister_approval_observer(observer_id));
+        let events = events.lock().unwrap().clone();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, ApprovalHookKind::PreApprovalRequest);
+        assert_eq!(events[0].surface, ApprovalSurface::Cli);
+        assert_eq!(events[0].session_key, "observer-cli");
+        assert_eq!(events[0].choice, None);
+        assert_eq!(events[1].kind, ApprovalHookKind::PostApprovalResponse);
+        assert_eq!(events[1].surface, ApprovalSurface::Cli);
+        assert_eq!(events[1].choice, Some(ApprovalChoice::Once));
+        reset_approval_state_unlocked();
+    }
+
+    #[test]
+    fn test_approval_observer_panic_does_not_break_approval() {
+        let _guard = lock_test_state();
+        reset_approval_state_unlocked();
+        let observer_id = register_approval_observer(|_event| panic!("observer crashed"));
+        let mut callback = |_prompt: ApprovalPrompt| ApprovalChoice::Once;
+
+        let result = check_all_command_guards_with_context(
+            "rm -rf /tmp/observer-panic",
+            "local",
+            CommandGuardContext {
+                interactive: true,
+                session_key: Some("observer-panic".to_string()),
+                tirith_result: Ok(Some(TirithResult::allow())),
+                ..CommandGuardContext::default()
+            },
+            Some(&mut callback),
+        )
+        .expect("approval guard should return despite observer panic");
+
+        assert!(result.approved);
+        assert!(unregister_approval_observer(observer_id));
+        reset_approval_state_unlocked();
+    }
+
+    #[test]
+    fn test_approval_observers_fire_on_gateway_resolution() {
+        let _guard = lock_test_state();
+        reset_approval_state_unlocked();
+        let session = "observer-gateway";
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let events_for_observer = events.clone();
+        let observer_id = register_approval_observer(move |event| {
+            events_for_observer.lock().unwrap().push(event);
+        });
+        let (tx, rx) = std::sync::mpsc::channel();
+        register_gateway_notify(session, move |request| {
+            tx.send(request).expect("gateway request should send");
+        });
+
+        let handle = std::thread::spawn(move || {
+            check_all_command_guards_with_context(
+                "rm -rf /tmp/observer-gateway",
+                "local",
+                CommandGuardContext {
+                    gateway: true,
+                    ask: true,
+                    session_key: Some(session.to_string()),
+                    gateway_approval_timeout: Duration::from_secs(5),
+                    tirith_result: Ok(Some(TirithResult::allow())),
+                    ..CommandGuardContext::default()
+                },
+                None,
+            )
+            .expect("gateway guard should return")
+        });
+
+        let request = rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("gateway notify should fire");
+        assert_eq!(request.command, "rm -rf /tmp/observer-gateway");
+        assert_eq!(
+            resolve_gateway_approval(session, ApprovalChoice::Session, false),
+            1
+        );
+
+        let result = handle.join().expect("gateway guard thread should join");
+        assert!(result.approved);
+        assert!(result.user_approved);
+        assert!(unregister_approval_observer(observer_id));
+        unregister_gateway_notify(session);
+        let events = events.lock().unwrap().clone();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].kind, ApprovalHookKind::PreApprovalRequest);
+        assert_eq!(events[0].surface, ApprovalSurface::Gateway);
+        assert_eq!(events[1].kind, ApprovalHookKind::PostApprovalResponse);
+        assert_eq!(events[1].choice, Some(ApprovalChoice::Session));
         reset_approval_state_unlocked();
     }
 
@@ -2441,6 +2811,18 @@ mod tests {
                 "benign remote shell lookalike should be allowed for {command:?}"
             );
         }
+    }
+
+    #[test]
+    fn test_unmanaged_gateway_run_requires_service_manager_confirmation() {
+        let command = "kill 1605 && cd ~/.hermes/hermes-agent && source venv/bin/activate && python -m hermes_cli.main gateway run --replace &disown; echo done";
+        let finding =
+            detect_dangerous_command(command).expect("unmanaged gateway restart should be flagged");
+        assert!(finding.description.contains("systemctl"));
+        assert_eq!(
+            check_approval(command),
+            ApprovalDecision::RequiresConfirmation
+        );
     }
 
     #[test]
