@@ -2199,7 +2199,7 @@ dependencies = [
  "urlencoding",
  "uuid",
  "which",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
  "wiremock",
  "zip",
 ]
@@ -2333,7 +2333,7 @@ dependencies = [
  "rand 0.10.1",
  "regex",
  "reqwest 0.13.3",
- "ruma",
+ "ruma 0.16.0",
  "rustls",
  "serde",
  "serde_json",
@@ -3212,9 +3212,9 @@ dependencies = [
 
 [[package]]
 name = "libsqlite3-sys"
-version = "0.37.0"
+version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1f111c8c41e7c61a49cd34e44c7619462967221a6443b0ec299e0ac30cfb9b1"
+checksum = "a76001fb4daed01e5f2b518aac0b4dc592e7c734da63dbffcf0c64fa612a8d0c"
 dependencies = [
  "cc",
  "pkg-config",
@@ -3404,7 +3404,7 @@ dependencies = [
  "futures-util",
  "gloo-timers",
  "imbl",
- "ruma",
+ "ruma 0.15.1",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -3440,7 +3440,7 @@ dependencies = [
  "pbkdf2",
  "rand 0.10.1",
  "rmp-serde",
- "ruma",
+ "ruma 0.15.1",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -4923,10 +4923,25 @@ dependencies = [
  "assign",
  "js_int",
  "js_option",
- "ruma-client-api",
- "ruma-common",
- "ruma-events",
+ "ruma-client-api 0.23.1",
+ "ruma-common 0.18.0",
+ "ruma-events 0.33.0",
  "ruma-html",
+ "web-time",
+]
+
+[[package]]
+name = "ruma"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee4fe5bfacdb0e95e733da3b6c37d98edf46447a4a8e8dea824e0da266d8ad59"
+dependencies = [
+ "assign",
+ "js_int",
+ "js_option",
+ "ruma-client-api 0.24.0",
+ "ruma-common 0.19.0",
+ "ruma-events 0.34.0",
  "web-time",
 ]
 
@@ -4943,8 +4958,31 @@ dependencies = [
  "js_int",
  "js_option",
  "maplit",
- "ruma-common",
- "ruma-events",
+ "ruma-common 0.18.0",
+ "ruma-events 0.33.0",
+ "serde",
+ "serde_html_form",
+ "serde_json",
+ "thiserror 2.0.18",
+ "url",
+ "web-time",
+]
+
+[[package]]
+name = "ruma-client-api"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bf7ca43a888ca569168d7e3901f4dd14a777b860bb19f4c08e35414162eb261c"
+dependencies = [
+ "as_variant",
+ "assign",
+ "bytes",
+ "http",
+ "js_int",
+ "js_option",
+ "maplit",
+ "ruma-common 0.19.0",
+ "ruma-events 0.34.0",
  "serde",
  "serde_html_form",
  "serde_json",
@@ -4973,7 +5011,41 @@ dependencies = [
  "rand 0.10.1",
  "regex",
  "ruma-identifiers-validation",
- "ruma-macros",
+ "ruma-macros 0.18.0",
+ "serde",
+ "serde_html_form",
+ "serde_json",
+ "thiserror 2.0.18",
+ "time",
+ "tracing",
+ "url",
+ "uuid",
+ "web-time",
+ "wildmatch",
+ "zeroize",
+]
+
+[[package]]
+name = "ruma-common"
+version = "0.19.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c3b4f00112791b490acce57df1ce3eb3f88899b045bebcff8a29f75369640cc"
+dependencies = [
+ "as_variant",
+ "base64 0.22.1",
+ "bytes",
+ "date_header",
+ "form_urlencoded",
+ "getrandom 0.4.2",
+ "http",
+ "indexmap",
+ "js_int",
+ "konst",
+ "percent-encoding",
+ "rand 0.10.1",
+ "regex",
+ "ruma-identifiers-validation",
+ "ruma-macros 0.19.0",
  "serde",
  "serde_html_form",
  "serde_json",
@@ -4997,8 +5069,29 @@ dependencies = [
  "indexmap",
  "js_int",
  "js_option",
- "ruma-common",
- "ruma-macros",
+ "ruma-common 0.18.0",
+ "ruma-macros 0.18.0",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tracing",
+ "web-time",
+ "wildmatch",
+ "zeroize",
+]
+
+[[package]]
+name = "ruma-events"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85d2f90830fc131691349b96a69ff53444eb6c3e8dc7869c77961b43cfaf3344"
+dependencies = [
+ "as_variant",
+ "indexmap",
+ "js_int",
+ "js_option",
+ "ruma-common 0.19.0",
+ "ruma-macros 0.19.0",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
@@ -5048,10 +5141,27 @@ dependencies = [
 ]
 
 [[package]]
-name = "rusqlite"
-version = "0.39.0"
+name = "ruma-macros"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a0d2b0146dd9661bf67bb107c0bb2a55064d556eeb3fc314151b957f313bcd4e"
+checksum = "c8cfb39eaa9b9fd389126ff941e060b496add5cbbfef559d80c46e571dda459c"
+dependencies = [
+ "as_variant",
+ "cfg-if",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "ruma-identifiers-validation",
+ "serde",
+ "syn 2.0.117",
+ "toml",
+]
+
+[[package]]
+name = "rusqlite"
+version = "0.40.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1b3492ea85308705c3a5cc24fb9b9cf77273d30590349070db42991202b214c4"
 dependencies = [
  "bitflags 2.11.1",
  "fallible-iterator",
@@ -7052,15 +7162,6 @@ name = "windows-sys"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
-dependencies = [
- "windows-targets 0.52.6",
-]
-
-[[package]]
-name = "windows-sys"
-version = "0.59.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
 dependencies = [
  "windows-targets 0.52.6",
 ]
