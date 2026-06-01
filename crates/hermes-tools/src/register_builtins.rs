@@ -127,6 +127,22 @@ fn register_builtin_tools_impl(
         vec![],
     );
 
+    // -- Content framework ---------------------------------------------------
+    reg(
+        registry,
+        "content",
+        Arc::new(crate::tools::content_framework::ContentPlanHandler),
+        "🧭",
+        vec![],
+    );
+    reg(
+        registry,
+        "content",
+        Arc::new(crate::tools::content_framework::ContentNormalizeHandler),
+        "🧩",
+        vec![],
+    );
+
     // -- Terminal ------------------------------------------------------------
     reg(
         registry,

@@ -17,6 +17,8 @@ use crate::registry::ToolRegistry;
 
 /// Web search and extraction tools.
 pub const TOOLSET_WEB: &[&str] = &["web_search", "web_extract"];
+/// Reusable content retrieval framework tools.
+pub const TOOLSET_CONTENT: &[&str] = &["content_plan", "content_normalize"];
 /// Terminal command execution tools.
 pub const TOOLSET_TERMINAL: &[&str] = &["terminal", "process", "process_registry"];
 /// File system tools.
@@ -150,6 +152,10 @@ impl ToolsetManager {
             TOOLSET_WEB.iter().map(|s| s.to_string()).collect(),
         ));
         self.register(Toolset::new(
+            "content",
+            TOOLSET_CONTENT.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
             "terminal",
             TOOLSET_TERMINAL.iter().map(|s| s.to_string()).collect(),
         ));
@@ -251,6 +257,7 @@ impl ToolsetManager {
             "hermes-cli",
             vec![
                 "web",
+                "content",
                 "terminal",
                 "file",
                 "browser",
