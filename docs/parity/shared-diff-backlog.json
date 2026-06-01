@@ -11536,16 +11536,16 @@
       "workstream": "WS6"
     },
     {
-      "action": "Map upstream test intent to Rust/Python contract coverage; add missing regression tests.",
-      "classification": "functional",
-      "classification_path": "tests/tools",
+      "action": "No vendoring; verify approved divergence remains current.",
+      "classification": "intentional_divergence",
+      "classification_path": "tests/tools/test_tool_output_limits.py",
       "existing_coverage": "claimed_by_shared_diff_classification",
       "local_blob": "19fa3fc05a1bd92108aa834bfd1440f7ebc12034",
-      "necessity": "necessary_review",
+      "necessity": "approved_divergence",
       "owner": "sheawinkler",
       "path": "tests/tools/test_tool_output_limits.py",
-      "rust_requirement": "rust_equivalent_or_contract_test_required",
-      "status": "pending_review",
+      "rust_requirement": "not_required_for_runtime",
+      "status": "cleared_intentional_divergence",
       "ticket": 25,
       "upstream_blob": "b18f7f3ad0b12350e9d4208590a1363b37987811",
       "workstream": "WS6"
@@ -15586,30 +15586,30 @@
       "workstream": "WS5"
     }
   ],
-  "generated_at_utc": "2026-06-01T13:04:35.959793+00:00",
+  "generated_at_utc": "2026-06-01T14:11:57.000783+00:00",
   "refs": {
     "local_ref": "HEAD",
-    "local_sha": "3d1d0ccb5be085617926637278d0e2e2be26619a",
+    "local_sha": "cb63c1c94453be9e8161691a0fdd7e4225ec07f6",
     "upstream_ref": "upstream/main",
     "upstream_sha": "380ce4789bfc986f76863f85e1b422d840d7e178"
   },
   "summary": {
     "by_classification": {
       "branding_only": 1,
-      "functional": 570,
-      "intentional_divergence": 297,
+      "functional": 569,
+      "intentional_divergence": 298,
       "policy_only": 171
     },
     "by_rust_requirement": {
-      "not_required_for_runtime": 469,
-      "rust_equivalent_or_contract_test_required": 485,
+      "not_required_for_runtime": 470,
+      "rust_equivalent_or_contract_test_required": 484,
       "rust_native_runtime_parity_required_if_needed": 2,
       "rust_primary_ux_or_documented_divergence_required": 83
     },
     "by_status": {
-      "cleared_intentional_divergence": 297,
+      "cleared_intentional_divergence": 298,
       "cleared_non_runtime": 172,
-      "pending_review": 570
+      "pending_review": 569
     },
     "by_workstream": {
       "WS3": 56,
@@ -15618,10 +15618,10 @@
       "WS6": 693,
       "WS8": 13
     },
-    "cleared_intentional_divergence": 297,
+    "cleared_intentional_divergence": 298,
     "cleared_non_runtime": 172,
     "pending_classification": 0,
-    "pending_review": 570,
+    "pending_review": 569,
     "total_shared_different": 1039
   }
 }

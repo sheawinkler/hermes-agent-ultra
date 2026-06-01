@@ -40,13 +40,31 @@ fn normalize_read_pagination(
     offset_raw: Option<&Value>,
     limit_raw: Option<&Value>,
 ) -> (Option<u64>, Option<u64>) {
+    normalize_read_pagination_with_max_lines(offset_raw, limit_raw, configured_max_read_limit(None))
+}
+
+fn configured_max_read_limit(home_dir: Option<&str>) -> i64 {
+    hermes_config::load_config(home_dir)
+        .ok()
+        .map(|config| config.tool_output.max_lines)
+        .map(|max_lines| i64::try_from(max_lines).unwrap_or(i64::MAX))
+        .filter(|max_lines| *max_lines > 0)
+        .unwrap_or(MAX_READ_LIMIT)
+}
+
+fn normalize_read_pagination_with_max_lines(
+    offset_raw: Option<&Value>,
+    limit_raw: Option<&Value>,
+    max_lines: i64,
+) -> (Option<u64>, Option<u64>) {
     let offset = offset_raw.map(|_| {
         let normalized = parse_int_param(offset_raw, DEFAULT_READ_OFFSET).max(1);
         // Tool schema is 1-indexed while backend slicing is 0-indexed.
         normalized.saturating_sub(1) as u64
     });
+    let max_lines = max_lines.max(1);
     let limit = limit_raw
-        .map(|_| parse_int_param(limit_raw, DEFAULT_READ_LIMIT).clamp(1, MAX_READ_LIMIT) as u64);
+        .map(|_| parse_int_param(limit_raw, DEFAULT_READ_LIMIT).clamp(1, max_lines) as u64);
     (offset, limit)
 }
 
@@ -636,21 +654,60 @@ mod tests {
 
     #[test]
     fn read_pagination_normalizes_invalid_values() {
-        let (offset, limit) = normalize_read_pagination(Some(&json!(0)), Some(&json!(0)));
+        let default_max_lines = hermes_config::DEFAULT_TOOL_OUTPUT_MAX_LINES as i64;
+        let (offset, limit) = normalize_read_pagination_with_max_lines(
+            Some(&json!(0)),
+            Some(&json!(0)),
+            default_max_lines,
+        );
         assert_eq!(offset, Some(0));
         assert_eq!(limit, Some(1));
 
-        let (offset, limit) = normalize_read_pagination(Some(&json!(-10)), Some(&json!(-5)));
+        let (offset, limit) = normalize_read_pagination_with_max_lines(
+            Some(&json!(-10)),
+            Some(&json!(-5)),
+            default_max_lines,
+        );
         assert_eq!(offset, Some(0));
         assert_eq!(limit, Some(1));
 
-        let (offset, limit) = normalize_read_pagination(Some(&json!("bad")), Some(&json!("bad")));
+        let (offset, limit) = normalize_read_pagination_with_max_lines(
+            Some(&json!("bad")),
+            Some(&json!("bad")),
+            default_max_lines,
+        );
         assert_eq!(offset, Some(0));
         assert_eq!(limit, Some(500));
 
-        let (offset, limit) = normalize_read_pagination(Some(&json!(2)), Some(&json!(999_999)));
+        let (offset, limit) = normalize_read_pagination_with_max_lines(
+            Some(&json!(2)),
+            Some(&json!(999_999)),
+            default_max_lines,
+        );
         assert_eq!(offset, Some(1));
         assert_eq!(limit, Some(2000));
+    }
+
+    #[test]
+    fn read_pagination_clamps_to_configured_tool_output_lines() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            tmp.path().join("config.yaml"),
+            "tool_output:\n  max_lines: 50\n",
+        )
+        .expect("config.yaml");
+
+        let home = tmp.path().to_str().expect("utf-8 tempdir");
+        let max_lines = configured_max_read_limit(Some(home));
+        let (offset, limit) = normalize_read_pagination_with_max_lines(
+            Some(&json!(1)),
+            Some(&json!(1000)),
+            max_lines,
+        );
+
+        assert_eq!(max_lines, 50);
+        assert_eq!(offset, Some(0));
+        assert_eq!(limit, Some(50));
     }
 
     #[test]

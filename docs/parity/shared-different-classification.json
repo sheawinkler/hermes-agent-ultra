@@ -2325,6 +2325,13 @@
       "rationale": "Upstream website blocklist policy intent is covered by Rust website_policy contracts for security.website_blocklist defaults, inline and shared-file domain loading, malformed config errors, invalid shape errors, parent-domain matching, wildcard-subdomain semantics, and unreadable shared-file warning behavior.",
       "owner": "sheawinkler",
       "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_tool_output_limits.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream configurable tool-output limit intent is covered by Rust ToolOutputConfig defaults and tolerant parsing plus read_file pagination clamping through tool_output.max_lines; Rust keeps agent budget truncation separate from tool display limits.",
+      "owner": "sheawinkler",
+      "ticket": 25
     }
   ]
 }

@@ -24,8 +24,9 @@ pub use config::{
     ApprovalConfig, AuxiliaryTaskConfig, CheapModelRouteConfig, DisplayConfig, GatewayConfig,
     LlmProviderConfig, McpServerEntry, PlatformDisplayConfig, ProfileConfig, ProxyConfig,
     QuickCommandConfig, SecurityConfig, SessionsMaintenanceConfig, SkillsSettings,
-    SmartModelRoutingConfig, TerminalBackendType, TerminalConfig, ToolsSettings, WebConfig,
-    WebsiteBlocklistConfig,
+    SmartModelRoutingConfig, TerminalBackendType, TerminalConfig, ToolOutputConfig, ToolsSettings,
+    WebConfig, WebsiteBlocklistConfig, DEFAULT_TOOL_OUTPUT_MAX_BYTES,
+    DEFAULT_TOOL_OUTPUT_MAX_LINES, DEFAULT_TOOL_OUTPUT_MAX_LINE_LENGTH,
 };
 pub use loader::{
     apply_user_config_patch, atomic_json_write, atomic_json_write_pretty, atomic_write_bytes,

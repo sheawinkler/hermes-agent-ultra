@@ -42,6 +42,10 @@ pub struct GatewayConfig {
     #[serde(default)]
     pub budget: BudgetConfig,
 
+    /// Configurable raw tool-output truncation limits.
+    #[serde(default)]
+    pub tool_output: ToolOutputConfig,
+
     /// Per-platform configuration (keyed by platform name, e.g. "discord").
     #[serde(default)]
     pub platforms: HashMap<String, PlatformConfig>,
@@ -157,6 +161,7 @@ impl Default for GatewayConfig {
             system_prompt: None,
             tools: default_tools(),
             budget: BudgetConfig::default(),
+            tool_output: ToolOutputConfig::default(),
             platforms: HashMap::new(),
             platform_toolsets: default_platform_toolsets(),
             session: SessionConfig::default(),
@@ -182,6 +187,68 @@ impl Default for GatewayConfig {
             agent: AgentLoopBehaviorConfig::default(),
             home_dir: None,
         }
+    }
+}
+
+pub const DEFAULT_TOOL_OUTPUT_MAX_BYTES: usize = 50_000;
+pub const DEFAULT_TOOL_OUTPUT_MAX_LINES: usize = 2_000;
+pub const DEFAULT_TOOL_OUTPUT_MAX_LINE_LENGTH: usize = 2_000;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ToolOutputConfig {
+    pub max_bytes: usize,
+    pub max_lines: usize,
+    pub max_line_length: usize,
+}
+
+impl Default for ToolOutputConfig {
+    fn default() -> Self {
+        Self {
+            max_bytes: DEFAULT_TOOL_OUTPUT_MAX_BYTES,
+            max_lines: DEFAULT_TOOL_OUTPUT_MAX_LINES,
+            max_line_length: DEFAULT_TOOL_OUTPUT_MAX_LINE_LENGTH,
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for ToolOutputConfig {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        Ok(Self::from_value(&value))
+    }
+}
+
+impl ToolOutputConfig {
+    pub fn from_value(value: &serde_json::Value) -> Self {
+        let mut config = Self::default();
+        let Some(map) = value.as_object() else {
+            return config;
+        };
+
+        if let Some(max_bytes) = map.get("max_bytes").and_then(Self::positive_usize) {
+            config.max_bytes = max_bytes;
+        }
+        if let Some(max_lines) = map.get("max_lines").and_then(Self::positive_usize) {
+            config.max_lines = max_lines;
+        }
+        if let Some(max_line_length) = map.get("max_line_length").and_then(Self::positive_usize) {
+            config.max_line_length = max_line_length;
+        }
+
+        config
+    }
+
+    fn positive_usize(value: &serde_json::Value) -> Option<usize> {
+        if let Some(raw) = value.as_u64() {
+            return usize::try_from(raw).ok().filter(|v| *v > 0);
+        }
+        value
+            .as_str()
+            .and_then(|raw| raw.trim().parse::<usize>().ok())
+            .filter(|v| *v > 0)
     }
 }
 
@@ -1262,6 +1329,7 @@ mod tests {
         assert_eq!(cfg.max_turns, 250);
         assert!(!cfg.tools.is_empty());
         assert!(cfg.model.is_none());
+        assert_eq!(cfg.tool_output, ToolOutputConfig::default());
         assert!(cfg.auxiliary.is_empty());
         assert!(cfg.tts.is_null());
         assert!(cfg.proxy.is_none());
@@ -1461,6 +1529,63 @@ display:
         )
         .expect("quoted false");
         assert!(!disabled.display.tool_progress_command_enabled());
+    }
+
+    #[test]
+    fn tool_output_config_default_matches_upstream_limits() {
+        let tool_output = ToolOutputConfig::default();
+        assert_eq!(tool_output.max_bytes, DEFAULT_TOOL_OUTPUT_MAX_BYTES);
+        assert_eq!(tool_output.max_lines, DEFAULT_TOOL_OUTPUT_MAX_LINES);
+        assert_eq!(
+            tool_output.max_line_length,
+            DEFAULT_TOOL_OUTPUT_MAX_LINE_LENGTH
+        );
+    }
+
+    #[test]
+    fn tool_output_config_accepts_partial_positive_overrides() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+tool_output:
+  max_bytes: "75000"
+  max_lines: 50
+"#,
+        )
+        .expect("tool_output config");
+
+        assert_eq!(cfg.tool_output.max_bytes, 75_000);
+        assert_eq!(cfg.tool_output.max_lines, 50);
+        assert_eq!(
+            cfg.tool_output.max_line_length,
+            DEFAULT_TOOL_OUTPUT_MAX_LINE_LENGTH
+        );
+    }
+
+    #[test]
+    fn tool_output_config_rejects_invalid_values_to_field_defaults() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+tool_output:
+  max_bytes: null
+  max_lines: -1
+  max_line_length: 0
+"#,
+        )
+        .expect("tool_output fallback config");
+
+        assert_eq!(cfg.tool_output, ToolOutputConfig::default());
+    }
+
+    #[test]
+    fn tool_output_config_non_object_falls_back_to_defaults() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+tool_output: nonsense
+"#,
+        )
+        .expect("non-object tool_output fallback");
+
+        assert_eq!(cfg.tool_output, ToolOutputConfig::default());
     }
 
     #[test]
