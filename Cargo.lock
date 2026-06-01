@@ -1860,6 +1860,7 @@ dependencies = [
  "futures",
  "hermes-config",
  "hermes-core",
+ "hermes-cron",
  "hermes-tools",
  "hmac",
  "matrix-sdk-crypto",

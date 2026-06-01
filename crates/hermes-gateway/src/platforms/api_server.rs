@@ -18,6 +18,7 @@ use tracing::{debug, error, info, warn};
 
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
+use hermes_cron::{CronError, CronJob, CronScheduler, DeliverConfig, DeliverTarget, JobStatus};
 use hermes_tools::{ToolRegistry, ToolsetManager};
 
 use crate::adapter::BasePlatformAdapter;
@@ -173,6 +174,35 @@ pub struct RunRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct ApiCronJobCreateRequest {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    schedule: Option<String>,
+    #[serde(default)]
+    prompt: Option<String>,
+    #[serde(default)]
+    deliver: Option<serde_json::Value>,
+    #[serde(default)]
+    repeat: Option<u32>,
+    #[serde(default)]
+    skills: Option<Vec<String>>,
+    #[serde(default)]
+    script: Option<String>,
+    #[serde(default)]
+    no_agent: Option<bool>,
+    #[serde(default)]
+    enabled: Option<bool>,
+}
+
+#[derive(Clone, Copy)]
+struct ApiJobRequestContext<'a> {
+    method: &'a str,
+    raw_path: &'a str,
+    headers: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
 struct RunApprovalRequest {
     #[serde(default)]
     choice: Option<String>,
@@ -300,6 +330,7 @@ struct ApiServerRuntime {
     response_store: Arc<RwLock<ResponseStore>>,
     run_cancels: Arc<RwLock<RunCancelRegistry>>,
     run_store: Arc<RwLock<RunStore>>,
+    cron_scheduler: Arc<CronScheduler>,
     inbound_tx: Arc<RwLock<Option<mpsc::Sender<ApiInboundRequest>>>>,
     auth_token: Option<String>,
 }
@@ -534,6 +565,7 @@ pub struct ApiServerAdapter {
     response_store: Arc<RwLock<ResponseStore>>,
     run_cancels: Arc<RwLock<RunCancelRegistry>>,
     run_store: Arc<RwLock<RunStore>>,
+    cron_scheduler: Arc<CronScheduler>,
     inbound_tx: Arc<RwLock<Option<mpsc::Sender<ApiInboundRequest>>>>,
 }
 
@@ -554,6 +586,9 @@ impl ApiServerAdapter {
             response_store: Arc::new(RwLock::new(ResponseStore::default())),
             run_cancels: Arc::new(RwLock::new(RunCancelRegistry::default())),
             run_store: Arc::new(RwLock::new(RunStore::default())),
+            cron_scheduler: Arc::new(hermes_cron::cron_scheduler_for_data_dir(
+                hermes_config::paths::cron_dir(),
+            )),
             inbound_tx: Arc::new(RwLock::new(None)),
         }
     }
@@ -655,13 +690,18 @@ impl PlatformAdapter for ApiServerAdapter {
         let response_store = self.response_store.clone();
         let run_cancels = self.run_cancels.clone();
         let run_store = self.run_store.clone();
+        let cron_scheduler = self.cron_scheduler.clone();
         let inbound_tx = self.inbound_tx.clone();
         let auth_token = self.config.auth_token.clone();
+        if let Err(err) = cron_scheduler.load_persisted_jobs().await {
+            warn!("API server cron jobs failed to load persisted jobs: {err}");
+        }
         let runtime = ApiServerRuntime {
             mailbox,
             response_store,
             run_cancels,
             run_store,
+            cron_scheduler,
             inbound_tx,
             auth_token,
         };
@@ -936,6 +976,7 @@ fn capabilities_response_body() -> serde_json::Value {
             "responses": true,
             "response_store": true,
             "runs": true,
+            "cron_jobs": true,
             "conversation_mapping": true,
             "session_continuity_header": "X-Hermes-Session-Id",
             "toolsets": true,
@@ -953,6 +994,14 @@ fn capabilities_response_body() -> serde_json::Value {
             "run_events": {"method": "GET", "path": "/v1/runs/{run_id}/events"},
             "run_approval": {"method": "POST", "path": "/v1/runs/{run_id}/approval"},
             "run_stop": {"method": "POST", "path": "/v1/runs/{run_id}/stop"},
+            "jobs_list": {"method": "GET", "path": "/api/jobs"},
+            "jobs_create": {"method": "POST", "path": "/api/jobs"},
+            "jobs_get": {"method": "GET", "path": "/api/jobs/{job_id}"},
+            "jobs_update": {"method": "PATCH", "path": "/api/jobs/{job_id}"},
+            "jobs_delete": {"method": "DELETE", "path": "/api/jobs/{job_id}"},
+            "jobs_pause": {"method": "POST", "path": "/api/jobs/{job_id}/pause"},
+            "jobs_resume": {"method": "POST", "path": "/api/jobs/{job_id}/resume"},
+            "jobs_run": {"method": "POST", "path": "/api/jobs/{job_id}/run"},
             "skills": {"method": "GET", "path": "/v1/skills"},
             "toolsets": {"method": "GET", "path": "/v1/toolsets"},
         }
@@ -1072,6 +1121,455 @@ fn toolsets_response_body() -> serde_json::Value {
         "platform": "api_server",
         "data": data,
     })
+}
+
+fn boolish_query_param(query: Option<&str>, key: &str) -> bool {
+    query_param(query, key)
+        .as_deref()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn validate_api_job_id(job_id: &str) -> Result<(), serde_json::Value> {
+    if job_id.is_empty() || job_id.len() > 64 {
+        return Err(api_error("Invalid job id", "invalid_request_error", 400));
+    }
+    if job_id.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+        Ok(())
+    } else {
+        Err(api_error("Invalid job id", "invalid_request_error", 400))
+    }
+}
+
+fn clean_audit_log_value(raw: Option<&str>, max_len: usize) -> String {
+    raw.unwrap_or_default()
+        .replace(['\r', '\n'], " ")
+        .trim()
+        .chars()
+        .take(max_len)
+        .collect()
+}
+
+fn request_header_value<'a>(headers: &'a str, name: &str) -> Option<&'a str> {
+    headers.lines().find_map(|line| {
+        let (header_name, value) = line.split_once(':')?;
+        header_name
+            .trim()
+            .eq_ignore_ascii_case(name)
+            .then_some(value.trim())
+    })
+}
+
+fn audit_log_suffix(ctx: ApiJobRequestContext<'_>) -> String {
+    let mut fields = Vec::new();
+    let forwarded_for =
+        clean_audit_log_value(request_header_value(ctx.headers, "X-Forwarded-For"), 200);
+    let real_ip = clean_audit_log_value(request_header_value(ctx.headers, "X-Real-IP"), 200);
+    let user_agent = clean_audit_log_value(request_header_value(ctx.headers, "User-Agent"), 300);
+    let method = clean_audit_log_value(Some(ctx.method), 16);
+    let path = clean_audit_log_value(Some(ctx.raw_path), 500);
+
+    if !forwarded_for.is_empty() {
+        fields.push(format!("forwarded_for={forwarded_for:?}"));
+    }
+    if !real_ip.is_empty() {
+        fields.push(format!("real_ip={real_ip:?}"));
+    }
+    if !method.is_empty() {
+        fields.push(format!("method={method:?}"));
+    }
+    if !path.is_empty() {
+        fields.push(format!("path={path:?}"));
+    }
+    if !user_agent.is_empty() {
+        fields.push(format!("user_agent={user_agent:?}"));
+    }
+    if fields.is_empty() {
+        "source='unknown'".to_string()
+    } else {
+        fields.join(" ")
+    }
+}
+
+fn invalid_api_job_id_response(
+    job_id: &str,
+    ctx: Option<ApiJobRequestContext<'_>>,
+) -> Option<(HttpStatus, serde_json::Value)> {
+    match validate_api_job_id(job_id) {
+        Ok(()) => None,
+        Err(body) => {
+            if let Some(ctx) = ctx {
+                warn!(
+                    "Cron jobs API rejected invalid job_id {:?}: {}",
+                    job_id,
+                    audit_log_suffix(ctx)
+                );
+            }
+            Some((HTTP_BAD_REQUEST, body))
+        }
+    }
+}
+
+fn deliver_target_name(target: &DeliverTarget) -> &'static str {
+    match target {
+        DeliverTarget::Origin => "origin",
+        DeliverTarget::Local => "local",
+        DeliverTarget::Telegram => "telegram",
+        DeliverTarget::Discord => "discord",
+        DeliverTarget::Slack => "slack",
+        DeliverTarget::Email => "email",
+        DeliverTarget::WhatsApp => "whatsapp",
+        DeliverTarget::Signal => "signal",
+        DeliverTarget::Matrix => "matrix",
+        DeliverTarget::Mattermost => "mattermost",
+        DeliverTarget::DingTalk => "dingtalk",
+        DeliverTarget::Feishu => "feishu",
+        DeliverTarget::WeCom => "wecom",
+        DeliverTarget::Weixin => "weixin",
+        DeliverTarget::BlueBubbles => "bluebubbles",
+        DeliverTarget::Sms => "sms",
+        DeliverTarget::HomeAssistant => "homeassistant",
+        DeliverTarget::Ntfy => "ntfy",
+    }
+}
+
+fn parse_deliver_target(raw: &str) -> Option<DeliverTarget> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "origin" => Some(DeliverTarget::Origin),
+        "local" => Some(DeliverTarget::Local),
+        "telegram" => Some(DeliverTarget::Telegram),
+        "discord" => Some(DeliverTarget::Discord),
+        "slack" => Some(DeliverTarget::Slack),
+        "email" => Some(DeliverTarget::Email),
+        "whatsapp" => Some(DeliverTarget::WhatsApp),
+        "signal" => Some(DeliverTarget::Signal),
+        "matrix" => Some(DeliverTarget::Matrix),
+        "mattermost" => Some(DeliverTarget::Mattermost),
+        "dingtalk" => Some(DeliverTarget::DingTalk),
+        "feishu" => Some(DeliverTarget::Feishu),
+        "wecom" => Some(DeliverTarget::WeCom),
+        "weixin" | "wechat" => Some(DeliverTarget::Weixin),
+        "bluebubbles" | "blue_bubbles" => Some(DeliverTarget::BlueBubbles),
+        "sms" => Some(DeliverTarget::Sms),
+        "homeassistant" | "home_assistant" => Some(DeliverTarget::HomeAssistant),
+        "ntfy" => Some(DeliverTarget::Ntfy),
+        _ => None,
+    }
+}
+
+fn parse_api_deliver_config(
+    raw: Option<&serde_json::Value>,
+) -> Result<Option<DeliverConfig>, String> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    if raw.is_null() {
+        return Ok(None);
+    }
+    if let Some(value) = raw.as_str() {
+        let target = parse_deliver_target(value)
+            .ok_or_else(|| format!("Unknown deliver target '{value}'"))?;
+        return Ok(Some(DeliverConfig {
+            target,
+            platform: None,
+        }));
+    }
+    let Some(obj) = raw.as_object() else {
+        return Err("deliver must be a string or object".to_string());
+    };
+    let target_raw = obj
+        .get("target")
+        .or_else(|| obj.get("type"))
+        .or_else(|| obj.get("name"))
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "deliver.target is required".to_string())?;
+    let target = parse_deliver_target(target_raw)
+        .ok_or_else(|| format!("Unknown deliver target '{target_raw}'"))?;
+    let platform = obj
+        .get("platform")
+        .or_else(|| obj.get("recipient"))
+        .or_else(|| obj.get("chat_id"))
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToOwned::to_owned);
+    Ok(Some(DeliverConfig { target, platform }))
+}
+
+fn api_cron_job_body(job: &CronJob) -> serde_json::Value {
+    let deliver = job.deliver.as_ref().map(|deliver| {
+        let mut value = serde_json::json!(deliver_target_name(&deliver.target));
+        if let Some(platform) = deliver.platform.as_deref() {
+            value = serde_json::json!({
+                "target": deliver_target_name(&deliver.target),
+                "platform": platform,
+            });
+        }
+        value
+    });
+
+    serde_json::json!({
+        "id": job.id,
+        "name": job.name,
+        "schedule": job.schedule,
+        "prompt": job.prompt,
+        "deliver": deliver,
+        "enabled": job.status == JobStatus::Active,
+        "status": job.status.to_string(),
+        "created_at": job.created_at,
+        "last_run": job.last_run,
+        "next_run": job.next_run,
+        "repeat": job.repeat,
+        "run_count": job.run_count,
+        "skills": job.skills,
+        "script": job.script,
+        "no_agent": job.no_agent,
+        "script_timeout_seconds": job.script_timeout_seconds,
+        "script_shell": job.script_shell,
+        "workdir": job.workdir,
+        "context_from": job.context_from,
+        "last_output": job.last_output,
+    })
+}
+
+fn cron_error_to_http(error: CronError) -> (HttpStatus, serde_json::Value) {
+    match error {
+        CronError::JobNotFound(id) => (
+            HTTP_NOT_FOUND,
+            api_error(format!("Job not found: {id}"), "not_found", 404),
+        ),
+        CronError::InvalidJob(message) => (
+            HTTP_BAD_REQUEST,
+            api_error(message, "invalid_request_error", 400),
+        ),
+        CronError::JobAlreadyExists(id) => (
+            HTTP_CONFLICT,
+            api_error(format!("Job already exists: {id}"), "conflict_error", 409),
+        ),
+        other => (
+            HTTP_BAD_GATEWAY,
+            api_error(other.to_string(), "internal_error", 502),
+        ),
+    }
+}
+
+fn validate_api_cron_create(req: ApiCronJobCreateRequest) -> Result<CronJob, serde_json::Value> {
+    let name = req
+        .name
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| api_error("name is required", "invalid_request_error", 400))?;
+    if name.chars().count() > 200 {
+        return Err(api_error(
+            "Name must be 200 characters or fewer",
+            "invalid_request_error",
+            400,
+        ));
+    }
+
+    let schedule = req
+        .schedule
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| api_error("schedule is required", "invalid_request_error", 400))?;
+
+    let prompt = req.prompt.unwrap_or_default().trim().to_string();
+    if prompt.chars().count() > 5000 {
+        return Err(api_error(
+            "Prompt must be 5000 characters or fewer",
+            "invalid_request_error",
+            400,
+        ));
+    }
+    if prompt.is_empty() && req.script.as_ref().is_none_or(|v| v.trim().is_empty()) {
+        return Err(api_error(
+            "prompt is required",
+            "invalid_request_error",
+            400,
+        ));
+    }
+    if matches!(req.repeat, Some(0)) {
+        return Err(api_error(
+            "repeat must be greater than zero",
+            "invalid_request_error",
+            400,
+        ));
+    }
+
+    let mut job = CronJob::new(schedule, prompt);
+    job.name = Some(name);
+    job.deliver = match req.deliver.as_ref() {
+        Some(raw) => parse_api_deliver_config(Some(raw))
+            .map_err(|message| api_error(message, "invalid_request_error", 400))?,
+        None => Some(DeliverConfig {
+            target: DeliverTarget::Local,
+            platform: None,
+        }),
+    };
+    job.repeat = req.repeat;
+    job.skills = req
+        .skills
+        .map(|skills| {
+            skills
+                .into_iter()
+                .map(|skill| skill.trim().to_string())
+                .filter(|skill| !skill.is_empty())
+                .collect::<Vec<_>>()
+        })
+        .filter(|skills| !skills.is_empty());
+    job.script = req
+        .script
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    job.no_agent = req.no_agent.unwrap_or(false);
+    if req.enabled == Some(false) {
+        job.status = JobStatus::Paused;
+        job.next_run = None;
+    }
+    Ok(job)
+}
+
+fn apply_api_cron_updates(
+    mut job: CronJob,
+    updates: &serde_json::Map<String, serde_json::Value>,
+) -> Result<Option<CronJob>, serde_json::Value> {
+    let mut changed = false;
+    for (key, value) in updates {
+        match key.as_str() {
+            "name" => {
+                let name = value.as_str().unwrap_or_default().trim().to_string();
+                if name.chars().count() > 200 {
+                    return Err(api_error(
+                        "Name must be 200 characters or fewer",
+                        "invalid_request_error",
+                        400,
+                    ));
+                }
+                job.name = (!name.is_empty()).then_some(name);
+                changed = true;
+            }
+            "schedule" => {
+                let schedule = value.as_str().unwrap_or_default().trim().to_string();
+                if schedule.is_empty() {
+                    return Err(api_error(
+                        "schedule is required",
+                        "invalid_request_error",
+                        400,
+                    ));
+                }
+                job.schedule = schedule;
+                job.next_run = None;
+                changed = true;
+            }
+            "prompt" => {
+                let prompt = value.as_str().unwrap_or_default().trim().to_string();
+                if prompt.chars().count() > 5000 {
+                    return Err(api_error(
+                        "Prompt must be 5000 characters or fewer",
+                        "invalid_request_error",
+                        400,
+                    ));
+                }
+                job.prompt = prompt;
+                changed = true;
+            }
+            "deliver" => {
+                job.deliver = parse_api_deliver_config(Some(value))
+                    .map_err(|message| api_error(message, "invalid_request_error", 400))?;
+                changed = true;
+            }
+            "enabled" => {
+                if let Some(enabled) = value.as_bool() {
+                    job.status = if enabled {
+                        JobStatus::Active
+                    } else {
+                        JobStatus::Paused
+                    };
+                    if enabled {
+                        job.next_run = None;
+                    }
+                    changed = true;
+                }
+            }
+            "repeat" => {
+                let repeat = if value.is_null() {
+                    None
+                } else {
+                    let Some(raw) = value.as_u64() else {
+                        return Err(api_error(
+                            "repeat must be an integer",
+                            "invalid_request_error",
+                            400,
+                        ));
+                    };
+                    if raw == 0 {
+                        return Err(api_error(
+                            "repeat must be greater than zero",
+                            "invalid_request_error",
+                            400,
+                        ));
+                    }
+                    let repeat = u32::try_from(raw).map_err(|_| {
+                        api_error("repeat is too large", "invalid_request_error", 400)
+                    })?;
+                    Some(repeat)
+                };
+                job.repeat = repeat;
+                changed = true;
+            }
+            "skills" => {
+                if value.is_null() {
+                    job.skills = None;
+                } else {
+                    let Some(items) = value.as_array() else {
+                        return Err(api_error(
+                            "skills must be an array",
+                            "invalid_request_error",
+                            400,
+                        ));
+                    };
+                    let skills = items
+                        .iter()
+                        .filter_map(|item| item.as_str())
+                        .map(str::trim)
+                        .filter(|skill| !skill.is_empty())
+                        .map(ToOwned::to_owned)
+                        .collect::<Vec<_>>();
+                    job.skills = (!skills.is_empty()).then_some(skills);
+                }
+                changed = true;
+            }
+            "skill" => {
+                job.skills = value
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|skill| !skill.is_empty())
+                    .map(|skill| vec![skill.to_string()]);
+                changed = true;
+            }
+            "script" => {
+                job.script = value
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|script| !script.is_empty())
+                    .map(ToOwned::to_owned);
+                changed = true;
+            }
+            "no_agent" => {
+                if let Some(no_agent) = value.as_bool() {
+                    job.no_agent = no_agent;
+                    changed = true;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(changed.then_some(job))
 }
 
 fn response_input_messages(input: ResponseInput) -> Vec<ChatMessage> {
@@ -1390,6 +1888,179 @@ async fn run_background_request(
     }
 }
 
+async fn api_jobs_list_response(
+    cron_scheduler: Arc<CronScheduler>,
+    include_disabled: bool,
+) -> (HttpStatus, serde_json::Value) {
+    let mut jobs = cron_scheduler.list_jobs().await;
+    jobs.sort_by(|a, b| a.id.cmp(&b.id));
+    if !include_disabled {
+        jobs.retain(|job| job.status == JobStatus::Active);
+    }
+    let jobs = jobs.iter().map(api_cron_job_body).collect::<Vec<_>>();
+    (HTTP_OK, serde_json::json!({ "jobs": jobs }))
+}
+
+async fn api_jobs_create_response(
+    cron_scheduler: Arc<CronScheduler>,
+    body_bytes: &[u8],
+) -> (HttpStatus, serde_json::Value) {
+    let body_str = String::from_utf8_lossy(body_bytes);
+    let parsed: Result<ApiCronJobCreateRequest, _> = serde_json::from_str(&body_str);
+    let req = match parsed {
+        Ok(req) => req,
+        Err(err) => {
+            return (
+                HTTP_BAD_REQUEST,
+                api_error(
+                    format!("Invalid request: {err}"),
+                    "invalid_request_error",
+                    400,
+                ),
+            );
+        }
+    };
+    let job = match validate_api_cron_create(req) {
+        Ok(job) => job,
+        Err(body) => return (HTTP_BAD_REQUEST, body),
+    };
+    let job_id = match cron_scheduler.create_job(job).await {
+        Ok(job_id) => job_id,
+        Err(err) => return cron_error_to_http(err),
+    };
+    let Some(job) = cron_scheduler.get_job(&job_id).await else {
+        return (
+            HTTP_BAD_GATEWAY,
+            api_error("Created job could not be loaded", "internal_error", 502),
+        );
+    };
+    (
+        HTTP_OK,
+        serde_json::json!({ "job": api_cron_job_body(&job) }),
+    )
+}
+
+async fn api_jobs_get_response(
+    cron_scheduler: Arc<CronScheduler>,
+    job_id: &str,
+    request_context: Option<ApiJobRequestContext<'_>>,
+) -> (HttpStatus, serde_json::Value) {
+    if let Some(response) = invalid_api_job_id_response(job_id, request_context) {
+        return response;
+    }
+    match cron_scheduler.get_job(job_id).await {
+        Some(job) => (
+            HTTP_OK,
+            serde_json::json!({ "job": api_cron_job_body(&job) }),
+        ),
+        None => (HTTP_NOT_FOUND, api_error("Job not found", "not_found", 404)),
+    }
+}
+
+async fn api_jobs_update_response(
+    cron_scheduler: Arc<CronScheduler>,
+    job_id: &str,
+    body_bytes: &[u8],
+    request_context: Option<ApiJobRequestContext<'_>>,
+) -> (HttpStatus, serde_json::Value) {
+    if let Some(response) = invalid_api_job_id_response(job_id, request_context) {
+        return response;
+    }
+    let body_str = String::from_utf8_lossy(body_bytes);
+    let parsed: Result<serde_json::Value, _> = serde_json::from_str(&body_str);
+    let value = match parsed {
+        Ok(value) => value,
+        Err(err) => {
+            return (
+                HTTP_BAD_REQUEST,
+                api_error(
+                    format!("Invalid request: {err}"),
+                    "invalid_request_error",
+                    400,
+                ),
+            );
+        }
+    };
+    let Some(updates) = value.as_object() else {
+        return (
+            HTTP_BAD_REQUEST,
+            api_error(
+                "Request body must be an object",
+                "invalid_request_error",
+                400,
+            ),
+        );
+    };
+    let Some(job) = cron_scheduler.get_job(job_id).await else {
+        return (HTTP_NOT_FOUND, api_error("Job not found", "not_found", 404));
+    };
+    let Some(updated) = (match apply_api_cron_updates(job, updates) {
+        Ok(updated) => updated,
+        Err(body) => return (HTTP_BAD_REQUEST, body),
+    }) else {
+        return (
+            HTTP_BAD_REQUEST,
+            api_error("No valid fields to update", "invalid_request_error", 400),
+        );
+    };
+    if let Err(err) = cron_scheduler.update_job(job_id, updated).await {
+        return cron_error_to_http(err);
+    }
+    let Some(job) = cron_scheduler.get_job(job_id).await else {
+        return (
+            HTTP_BAD_GATEWAY,
+            api_error("Updated job could not be loaded", "internal_error", 502),
+        );
+    };
+    (
+        HTTP_OK,
+        serde_json::json!({ "job": api_cron_job_body(&job) }),
+    )
+}
+
+async fn api_jobs_delete_response(
+    cron_scheduler: Arc<CronScheduler>,
+    job_id: &str,
+    request_context: Option<ApiJobRequestContext<'_>>,
+) -> (HttpStatus, serde_json::Value) {
+    if let Some(response) = invalid_api_job_id_response(job_id, request_context) {
+        return response;
+    }
+    match cron_scheduler.remove_job(job_id).await {
+        Ok(()) => (HTTP_OK, serde_json::json!({ "ok": true })),
+        Err(err) => cron_error_to_http(err),
+    }
+}
+
+async fn api_jobs_action_response(
+    cron_scheduler: Arc<CronScheduler>,
+    job_id: &str,
+    action: &str,
+    request_context: Option<ApiJobRequestContext<'_>>,
+) -> (HttpStatus, serde_json::Value) {
+    if let Some(response) = invalid_api_job_id_response(job_id, request_context) {
+        return response;
+    }
+    let result = match action {
+        "pause" => cron_scheduler.pause_job(job_id).await,
+        "resume" => cron_scheduler.resume_job(job_id).await,
+        "run" => cron_scheduler.run_job(job_id).await.map(|_| ()),
+        _ => {
+            return (HTTP_NOT_FOUND, api_error("Not found", "not_found", 404));
+        }
+    };
+    if let Err(err) = result {
+        return cron_error_to_http(err);
+    }
+    let Some(job) = cron_scheduler.get_job(job_id).await else {
+        return (HTTP_NOT_FOUND, api_error("Job not found", "not_found", 404));
+    };
+    (
+        HTTP_OK,
+        serde_json::json!({ "job": api_cron_job_body(&job) }),
+    )
+}
+
 async fn handle_connection(
     stream: tokio::net::TcpStream,
     _peer: SocketAddr,
@@ -1402,6 +2073,7 @@ async fn handle_connection(
         response_store,
         run_cancels,
         run_store,
+        cron_scheduler,
         inbound_tx,
         auth_token,
     } = runtime;
@@ -1558,6 +2230,82 @@ async fn handle_connection(
                 )?;
                 writer.write_all(resp.as_bytes()).await?;
             }
+        }
+        ("GET", "/api/jobs") => {
+            let (status, body) = api_jobs_list_response(
+                cron_scheduler.clone(),
+                boolish_query_param(query, "include_disabled"),
+            )
+            .await;
+            let resp = json_http_response(status, &body)?;
+            writer.write_all(resp.as_bytes()).await?;
+        }
+        ("POST", "/api/jobs") => {
+            let (status, body) = api_jobs_create_response(cron_scheduler.clone(), body_bytes).await;
+            let resp = json_http_response(status, &body)?;
+            writer.write_all(resp.as_bytes()).await?;
+        }
+        ("GET", _) if parse_api_job_path(path).is_some() => {
+            let job_id = parse_api_job_path(path).expect("guard checked path");
+            let (status, body) = api_jobs_get_response(
+                cron_scheduler.clone(),
+                job_id,
+                Some(ApiJobRequestContext {
+                    method,
+                    raw_path,
+                    headers: &header_text,
+                }),
+            )
+            .await;
+            let resp = json_http_response(status, &body)?;
+            writer.write_all(resp.as_bytes()).await?;
+        }
+        ("PATCH", _) if parse_api_job_path(path).is_some() => {
+            let job_id = parse_api_job_path(path).expect("guard checked path");
+            let (status, body) = api_jobs_update_response(
+                cron_scheduler.clone(),
+                job_id,
+                body_bytes,
+                Some(ApiJobRequestContext {
+                    method,
+                    raw_path,
+                    headers: &header_text,
+                }),
+            )
+            .await;
+            let resp = json_http_response(status, &body)?;
+            writer.write_all(resp.as_bytes()).await?;
+        }
+        ("DELETE", _) if parse_api_job_path(path).is_some() => {
+            let job_id = parse_api_job_path(path).expect("guard checked path");
+            let (status, body) = api_jobs_delete_response(
+                cron_scheduler.clone(),
+                job_id,
+                Some(ApiJobRequestContext {
+                    method,
+                    raw_path,
+                    headers: &header_text,
+                }),
+            )
+            .await;
+            let resp = json_http_response(status, &body)?;
+            writer.write_all(resp.as_bytes()).await?;
+        }
+        ("POST", _) if parse_api_job_action_path(path).is_some() => {
+            let (job_id, action) = parse_api_job_action_path(path).expect("guard checked path");
+            let (status, body) = api_jobs_action_response(
+                cron_scheduler.clone(),
+                job_id,
+                action,
+                Some(ApiJobRequestContext {
+                    method,
+                    raw_path,
+                    headers: &header_text,
+                }),
+            )
+            .await;
+            let resp = json_http_response(status, &body)?;
+            writer.write_all(resp.as_bytes()).await?;
         }
         ("POST", "/v1/runs") => {
             let body_str = String::from_utf8_lossy(body_bytes);
@@ -2062,6 +2810,25 @@ fn parse_get_run_path(path: &str) -> Option<&str> {
     }
 }
 
+fn parse_api_job_action_path(path: &str) -> Option<(&str, &str)> {
+    let tail = path.strip_prefix("/api/jobs/")?;
+    let (job_id, action) = tail.split_once('/')?;
+    if job_id.is_empty() || action.contains('/') {
+        None
+    } else {
+        Some((job_id, action))
+    }
+}
+
+fn parse_api_job_path(path: &str) -> Option<&str> {
+    let job_id = path.strip_prefix("/api/jobs/")?;
+    if job_id.is_empty() || job_id.contains('/') {
+        None
+    } else {
+        Some(job_id)
+    }
+}
+
 fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() || haystack.len() < needle.len() {
         return None;
@@ -2129,6 +2896,7 @@ mod tests {
         response_store: Arc<RwLock<ResponseStore>>,
         run_cancels: Arc<RwLock<RunCancelRegistry>>,
         run_store: Arc<RwLock<RunStore>>,
+        cron_scheduler: Arc<CronScheduler>,
         inbound_tx: Arc<RwLock<Option<mpsc::Sender<ApiInboundRequest>>>>,
         auth_token: Option<String>,
     ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
@@ -2143,6 +2911,7 @@ mod tests {
                 response_store,
                 run_cancels,
                 run_store,
+                cron_scheduler,
                 inbound_tx,
                 auth_token,
             };
@@ -2164,17 +2933,25 @@ mod tests {
         response_store: Arc<RwLock<ResponseStore>>,
         run_cancels: Arc<RwLock<RunCancelRegistry>>,
         run_store: Arc<RwLock<RunStore>>,
+        cron_scheduler: Arc<CronScheduler>,
         inbound_tx: Arc<RwLock<Option<mpsc::Sender<ApiInboundRequest>>>>,
+        _cron_dir: tempfile::TempDir,
     }
 
     impl ApiTestState {
         fn new(tx: mpsc::Sender<ApiInboundRequest>) -> Self {
+            let cron_dir = tempfile::tempdir().expect("cron tempdir");
+            let cron_scheduler = Arc::new(hermes_cron::cron_scheduler_for_data_dir(
+                cron_dir.path().join("cron"),
+            ));
             Self {
                 mailbox: Arc::new(RwLock::new(ResponseMailbox::default())),
                 response_store: Arc::new(RwLock::new(ResponseStore::default())),
                 run_cancels: Arc::new(RwLock::new(RunCancelRegistry::default())),
                 run_store: Arc::new(RwLock::new(RunStore::default())),
+                cron_scheduler,
                 inbound_tx: Arc::new(RwLock::new(Some(tx))),
+                _cron_dir: cron_dir,
             }
         }
 
@@ -2184,6 +2961,7 @@ mod tests {
                 Arc::clone(&self.response_store),
                 Arc::clone(&self.run_cancels),
                 Arc::clone(&self.run_store),
+                Arc::clone(&self.cron_scheduler),
                 Arc::clone(&self.inbound_tx),
                 auth_token,
             )
@@ -2220,6 +2998,18 @@ mod tests {
 
     fn empty_request(method: &str, path: &str) -> String {
         format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\n\r\n")
+    }
+
+    fn empty_request_with_bearer(method: &str, path: &str, token: &str) -> String {
+        format!(
+            "{method} {path} HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {token}\r\n\r\n"
+        )
+    }
+
+    fn throwaway_cron_scheduler() -> Arc<CronScheduler> {
+        Arc::new(hermes_cron::cron_scheduler_for_data_dir(
+            std::env::temp_dir().join(format!("hermes-api-server-test-{}", uuid::Uuid::new_v4())),
+        ))
     }
 
     async fn wait_for_run_status(
@@ -2528,6 +3318,7 @@ mod tests {
             Arc::new(RwLock::new(ResponseStore::default())),
             Arc::new(RwLock::new(RunCancelRegistry::default())),
             Arc::new(RwLock::new(RunStore::default())),
+            throwaway_cron_scheduler(),
             Arc::new(RwLock::new(Some(tx))),
             None,
         )
@@ -2559,6 +3350,7 @@ mod tests {
             Arc::clone(&response_store),
             Arc::clone(&run_cancels),
             Arc::new(RwLock::new(RunStore::default())),
+            throwaway_cron_scheduler(),
             Arc::new(RwLock::new(Some(tx))),
             None,
         )
@@ -2603,6 +3395,229 @@ mod tests {
         assert!(response.contains("\"object\":\"response\""));
         assert!(response.contains("\"text\":\"done\""));
         assert!(response_store.read().await.entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn api_jobs_endpoint_crud_filters_and_actions() {
+        let (tx, _rx) = mpsc::channel(1);
+        let state = ApiTestState::new(tx);
+
+        let create_response = state
+            .roundtrip(
+                json_request(
+                    "POST",
+                    "/api/jobs",
+                    serde_json::json!({
+                        "name": "test-job",
+                        "schedule": "*/5 * * * *",
+                        "prompt": "do something",
+                        "repeat": 2,
+                    }),
+                ),
+                None,
+            )
+            .await;
+        assert!(create_response.starts_with("HTTP/1.1 200 OK"));
+        let created = json_body(&create_response);
+        let job_id = created["job"]["id"].as_str().expect("job id").to_string();
+        assert_eq!(created["job"]["name"], "test-job");
+        assert_eq!(created["job"]["deliver"], "local");
+        assert_eq!(created["job"]["enabled"], true);
+
+        let list_response = state
+            .roundtrip(empty_request("GET", "/api/jobs"), None)
+            .await;
+        let list = json_body(&list_response);
+        assert_eq!(list["jobs"].as_array().expect("jobs").len(), 1);
+
+        let update_response = state
+            .roundtrip(
+                json_request(
+                    "PATCH",
+                    &format!("/api/jobs/{job_id}"),
+                    serde_json::json!({
+                        "name": "updated-name",
+                        "skill": "browser",
+                        "evil_field": "ignored",
+                        "__proto__": "ignored",
+                    }),
+                ),
+                None,
+            )
+            .await;
+        assert!(update_response.starts_with("HTTP/1.1 200 OK"));
+        assert_eq!(json_body(&update_response)["job"]["name"], "updated-name");
+        assert_eq!(
+            json_body(&update_response)["job"]["skills"],
+            serde_json::json!(["browser"])
+        );
+
+        let no_valid_update_response = state
+            .roundtrip(
+                json_request(
+                    "PATCH",
+                    &format!("/api/jobs/{job_id}"),
+                    serde_json::json!({"evil_field": "ignored"}),
+                ),
+                None,
+            )
+            .await;
+        assert!(no_valid_update_response.starts_with("HTTP/1.1 400 Bad Request"));
+
+        let pause_response = state
+            .roundtrip(
+                json_request(
+                    "POST",
+                    &format!("/api/jobs/{job_id}/pause"),
+                    serde_json::json!({}),
+                ),
+                None,
+            )
+            .await;
+        assert!(pause_response.starts_with("HTTP/1.1 200 OK"));
+        assert_eq!(json_body(&pause_response)["job"]["enabled"], false);
+
+        let filtered_response = state
+            .roundtrip(empty_request("GET", "/api/jobs"), None)
+            .await;
+        assert!(json_body(&filtered_response)["jobs"]
+            .as_array()
+            .expect("jobs")
+            .is_empty());
+
+        let include_disabled_response = state
+            .roundtrip(
+                empty_request("GET", "/api/jobs?include_disabled=true"),
+                None,
+            )
+            .await;
+        assert_eq!(
+            json_body(&include_disabled_response)["jobs"]
+                .as_array()
+                .expect("jobs")
+                .len(),
+            1
+        );
+
+        let resume_response = state
+            .roundtrip(
+                json_request(
+                    "POST",
+                    &format!("/api/jobs/{job_id}/resume"),
+                    serde_json::json!({}),
+                ),
+                None,
+            )
+            .await;
+        assert!(resume_response.starts_with("HTTP/1.1 200 OK"));
+        assert_eq!(json_body(&resume_response)["job"]["enabled"], true);
+
+        let delete_response = state
+            .roundtrip(
+                empty_request("DELETE", &format!("/api/jobs/{job_id}")),
+                None,
+            )
+            .await;
+        assert!(delete_response.starts_with("HTTP/1.1 200 OK"));
+        assert_eq!(json_body(&delete_response)["ok"], true);
+
+        let missing_response = state
+            .roundtrip(empty_request("GET", &format!("/api/jobs/{job_id}")), None)
+            .await;
+        assert!(missing_response.starts_with("HTTP/1.1 404 Not Found"));
+    }
+
+    #[tokio::test]
+    async fn api_jobs_endpoint_validates_input_ids_and_auth() {
+        let (tx, _rx) = mpsc::channel(1);
+        let state = ApiTestState::new(tx);
+
+        let missing_name_response = state
+            .roundtrip(
+                json_request(
+                    "POST",
+                    "/api/jobs",
+                    serde_json::json!({
+                        "schedule": "*/5 * * * *",
+                        "prompt": "do something",
+                    }),
+                ),
+                None,
+            )
+            .await;
+        assert!(missing_name_response.starts_with("HTTP/1.1 400 Bad Request"));
+
+        let unknown_field_response = state
+            .roundtrip(
+                json_request(
+                    "PATCH",
+                    "/api/jobs/aabbccddeeff",
+                    serde_json::json!({"evil_field": "ignored"}),
+                ),
+                None,
+            )
+            .await;
+        assert!(unknown_field_response.starts_with("HTTP/1.1 404 Not Found"));
+
+        let invalid_id_response = state
+            .roundtrip(empty_request("GET", "/api/jobs/not-a-valid-hex!"), None)
+            .await;
+        assert!(invalid_id_response.starts_with("HTTP/1.1 400 Bad Request"));
+
+        let auth_response = state
+            .roundtrip(empty_request("GET", "/api/jobs"), Some("sk-secret".into()))
+            .await;
+        assert!(auth_response.starts_with("HTTP/1.1 401 Unauthorized"));
+
+        let authed_response = state
+            .roundtrip(
+                empty_request_with_bearer("GET", "/api/jobs", "sk-secret"),
+                Some("sk-secret".into()),
+            )
+            .await;
+        assert!(authed_response.starts_with("HTTP/1.1 200 OK"));
+    }
+
+    #[tokio::test]
+    async fn api_jobs_endpoint_manual_run_updates_job_state() {
+        let (tx, _rx) = mpsc::channel(1);
+        let state = ApiTestState::new(tx);
+        let create_response = state
+            .roundtrip(
+                json_request(
+                    "POST",
+                    "/api/jobs",
+                    serde_json::json!({
+                        "name": "script-job",
+                        "schedule": "*/5 * * * *",
+                        "prompt": "run script",
+                        "script": "printf job-ok",
+                        "no_agent": true,
+                    }),
+                ),
+                None,
+            )
+            .await;
+        assert!(create_response.starts_with("HTTP/1.1 200 OK"));
+        let job_id = json_body(&create_response)["job"]["id"]
+            .as_str()
+            .expect("job id")
+            .to_string();
+
+        let run_response = state
+            .roundtrip(
+                json_request(
+                    "POST",
+                    &format!("/api/jobs/{job_id}/run"),
+                    serde_json::json!({}),
+                ),
+                None,
+            )
+            .await;
+        assert!(run_response.starts_with("HTTP/1.1 200 OK"));
+        let run = json_body(&run_response);
+        assert_eq!(run["job"]["id"], job_id);
+        assert!(run["job"]["last_run"].is_string());
     }
 
     #[tokio::test]
