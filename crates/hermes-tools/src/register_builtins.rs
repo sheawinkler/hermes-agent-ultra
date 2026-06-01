@@ -47,6 +47,24 @@ pub fn register_builtin_tools(
             None,
         );
     }
+    fn reg_with_check(
+        registry: &ToolRegistry,
+        toolset: &str,
+        handler: Arc<dyn ToolHandler>,
+        emoji: &str,
+        env_deps: Vec<String>,
+        check_fn: Arc<dyn Fn() -> bool + Send + Sync>,
+    ) {
+        let schema = handler.schema();
+        let name = schema.name.clone();
+        let desc = schema.description.clone();
+        registry.register(
+            name, toolset, schema, handler, check_fn, env_deps, true, desc, emoji, None,
+        );
+    }
+
+    let terminal_requirements_check: Arc<dyn Fn() -> bool + Send + Sync> =
+        Arc::new(crate::terminal_requirements::check_terminal_requirements);
 
     // -- Web tools -----------------------------------------------------------
     reg(
@@ -78,7 +96,7 @@ pub fn register_builtin_tools(
     );
 
     // -- Terminal ------------------------------------------------------------
-    reg(
+    reg_with_check(
         registry,
         "terminal",
         Arc::new(crate::tools::terminal::TerminalHandler::new(
@@ -86,8 +104,9 @@ pub fn register_builtin_tools(
         )),
         "💻",
         vec![],
+        terminal_requirements_check.clone(),
     );
-    reg(
+    reg_with_check(
         registry,
         "terminal",
         Arc::new(crate::tools::terminal::ProcessHandler::new(Arc::new(
@@ -95,10 +114,11 @@ pub fn register_builtin_tools(
         ))),
         "🧵",
         vec![],
+        terminal_requirements_check.clone(),
     );
 
     // -- File tools ----------------------------------------------------------
-    reg(
+    reg_with_check(
         registry,
         "file",
         Arc::new(crate::tools::file::ReadFileHandler::new(
@@ -106,8 +126,9 @@ pub fn register_builtin_tools(
         )),
         "📖",
         vec![],
+        terminal_requirements_check.clone(),
     );
-    reg(
+    reg_with_check(
         registry,
         "file",
         Arc::new(crate::tools::file::WriteFileHandler::new(
@@ -115,6 +136,7 @@ pub fn register_builtin_tools(
         )),
         "✏️",
         vec![],
+        terminal_requirements_check.clone(),
     );
     reg(
         registry,
@@ -534,12 +556,13 @@ pub fn register_builtin_tools(
     );
 
     // -- Process registry ----------------------------------------------------
-    reg(
+    reg_with_check(
         registry,
         "terminal",
         Arc::new(crate::tools::process_registry::ProcessRegistryHandler::default()),
         "📊",
         vec![],
+        terminal_requirements_check,
     );
 
     // -- Transcription -------------------------------------------------------
@@ -638,4 +661,217 @@ fn dirs_home() -> Option<PathBuf> {
     std::env::var_os("HOME")
         .or_else(|| std::env::var_os("USERPROFILE"))
         .map(PathBuf::from)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use async_trait::async_trait;
+    use hermes_core::{AgentError, CommandOutput, Skill, SkillMeta};
+    use serde_json::Value;
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    struct EnvGuard {
+        key: &'static str,
+        original: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let original = std::env::var(key).ok();
+            unsafe { std::env::set_var(key, value) };
+            Self { key, original }
+        }
+
+        fn remove(key: &'static str) -> Self {
+            let original = std::env::var(key).ok();
+            unsafe { std::env::remove_var(key) };
+            Self { key, original }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            unsafe {
+                if let Some(value) = &self.original {
+                    std::env::set_var(self.key, value);
+                } else {
+                    std::env::remove_var(self.key);
+                }
+            }
+        }
+    }
+
+    struct MockTerminalBackend;
+
+    #[async_trait]
+    impl TerminalBackend for MockTerminalBackend {
+        async fn execute_command(
+            &self,
+            _command: &str,
+            _timeout: Option<u64>,
+            _workdir: Option<&str>,
+            _background: bool,
+            _pty: bool,
+        ) -> Result<CommandOutput, AgentError> {
+            Ok(CommandOutput {
+                exit_code: 0,
+                stdout: String::new(),
+                stderr: String::new(),
+            })
+        }
+
+        async fn read_file(
+            &self,
+            _path: &str,
+            _offset: Option<u64>,
+            _limit: Option<u64>,
+        ) -> Result<String, AgentError> {
+            Ok(String::new())
+        }
+
+        async fn write_file(&self, _path: &str, _content: &str) -> Result<(), AgentError> {
+            Ok(())
+        }
+
+        async fn file_exists(&self, _path: &str) -> Result<bool, AgentError> {
+            Ok(false)
+        }
+
+        async fn list_processes(&self) -> Result<Value, AgentError> {
+            Ok(serde_json::json!([]))
+        }
+    }
+
+    struct MockSkillProvider;
+
+    #[async_trait]
+    impl SkillProvider for MockSkillProvider {
+        async fn create_skill(
+            &self,
+            name: &str,
+            content: &str,
+            category: Option<&str>,
+        ) -> Result<Skill, AgentError> {
+            Ok(Skill {
+                name: name.into(),
+                content: content.into(),
+                category: category.map(String::from),
+                description: None,
+            })
+        }
+
+        async fn get_skill(&self, _name: &str) -> Result<Option<Skill>, AgentError> {
+            Ok(None)
+        }
+
+        async fn list_skills(&self) -> Result<Vec<SkillMeta>, AgentError> {
+            Ok(Vec::new())
+        }
+
+        async fn update_skill(&self, name: &str, content: &str) -> Result<Skill, AgentError> {
+            Ok(Skill {
+                name: name.into(),
+                content: content.into(),
+                category: None,
+                description: None,
+            })
+        }
+
+        async fn delete_skill(&self, _name: &str) -> Result<(), AgentError> {
+            Ok(())
+        }
+    }
+
+    fn registered_names() -> Vec<String> {
+        let registry = ToolRegistry::new();
+        register_builtin_tools(
+            &registry,
+            Arc::new(MockTerminalBackend),
+            Arc::new(MockSkillProvider),
+        );
+        let mut names: Vec<String> = registry
+            .get_definitions()
+            .into_iter()
+            .map(|s| s.name)
+            .collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn local_backend_exposes_terminal_and_terminal_backed_file_tools() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let home = tempfile::tempdir().expect("temp home");
+        let _home = EnvGuard::set("HOME", home.path().to_string_lossy().as_ref());
+        let _terminal_env = EnvGuard::set("TERMINAL_ENV", "local");
+        let names = registered_names();
+
+        for expected in [
+            "terminal",
+            "process",
+            "process_registry",
+            "read_file",
+            "write_file",
+            "patch",
+            "search_files",
+        ] {
+            assert!(
+                names.contains(&expected.to_string()),
+                "local backend should expose {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_backend_hides_terminal_backed_tools_but_keeps_local_file_tools() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let home = tempfile::tempdir().expect("temp home");
+        let _home = EnvGuard::set("HOME", home.path().to_string_lossy().as_ref());
+        let _terminal_env = EnvGuard::set("TERMINAL_ENV", "unknown-backend");
+        let _ssh_host = EnvGuard::remove("TERMINAL_SSH_HOST");
+        let _ssh_user = EnvGuard::remove("TERMINAL_SSH_USER");
+        let names = registered_names();
+
+        for hidden in [
+            "terminal",
+            "process",
+            "process_registry",
+            "read_file",
+            "write_file",
+        ] {
+            assert!(
+                !names.contains(&hidden.to_string()),
+                "invalid backend should hide {hidden}"
+            );
+        }
+        for independent in ["patch", "search_files", "execute_code"] {
+            assert!(
+                names.contains(&independent.to_string()),
+                "invalid backend should keep independent tool {independent}"
+            );
+        }
+    }
+
+    #[test]
+    fn managed_modal_backend_exposes_terminal_tools_without_direct_modal_credentials() {
+        let _lock = ENV_LOCK.lock().unwrap();
+        let home = tempfile::tempdir().expect("temp home");
+        let _home = EnvGuard::set("HOME", home.path().to_string_lossy().as_ref());
+        let _userprofile = EnvGuard::set("USERPROFILE", home.path().to_string_lossy().as_ref());
+        let _terminal_env = EnvGuard::set("TERMINAL_ENV", "modal");
+        let _modal_mode = EnvGuard::set("TERMINAL_MODAL_MODE", "managed");
+        let _modal_id = EnvGuard::remove("MODAL_TOKEN_ID");
+        let _modal_secret = EnvGuard::remove("MODAL_TOKEN_SECRET");
+        let _enabled = EnvGuard::set("HERMES_ENABLE_NOUS_MANAGED_TOOLS", "1");
+        let _token = EnvGuard::set("TOOL_GATEWAY_USER_TOKEN", "nous-token");
+        let _domain = EnvGuard::set("TOOL_GATEWAY_DOMAIN", "tools.example.invalid");
+        let names = registered_names();
+
+        assert!(names.contains(&"terminal".to_string()));
+        assert!(names.contains(&"process".to_string()));
+        assert!(names.contains(&"execute_code".to_string()));
+    }
 }

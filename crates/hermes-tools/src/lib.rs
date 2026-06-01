@@ -16,6 +16,7 @@ pub mod register_builtins;
 pub mod registry;
 pub mod rtk_filter;
 pub mod teams_pipeline;
+pub mod terminal_requirements;
 pub mod tool_policy;
 pub mod tools;
 pub mod toolset;

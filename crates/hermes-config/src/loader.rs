@@ -7,7 +7,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 // Re-export ConfigError for convenience
 pub use hermes_core::ConfigError;
 
-use crate::config::{GatewayConfig, LlmProviderConfig, ProxyConfig};
+use crate::config::{
+    GatewayConfig, LlmProviderConfig, ProxyConfig, TerminalBackendType, TerminalConfig,
+};
 use crate::merge::merge_configs;
 use crate::paths;
 use crate::platform::PlatformConfig;
@@ -305,6 +307,8 @@ pub fn load_config(home_dir: Option<&str>) -> Result<GatewayConfig, ConfigError>
             }
         }
     }
+
+    bridge_terminal_config_to_env(&config.terminal);
 
     // Layer 3: environment variables (highest priority)
     apply_env_overrides(&mut config);
@@ -1061,14 +1065,56 @@ fn config_key_routes_to_env(key: &str) -> Option<String> {
     }
 }
 
+pub fn terminal_config_env_bridge_pairs() -> &'static [(&'static str, &'static str)] {
+    &[
+        ("backend", "TERMINAL_ENV"),
+        ("env_type", "TERMINAL_ENV"),
+        ("workdir", "TERMINAL_CWD"),
+        ("cwd", "TERMINAL_CWD"),
+        ("timeout", "TERMINAL_TIMEOUT"),
+        ("max_output_size", "TERMINAL_MAX_OUTPUT_SIZE"),
+        ("docker_container_id", "TERMINAL_DOCKER_CONTAINER_ID"),
+        ("docker_image", "TERMINAL_DOCKER_IMAGE"),
+        (
+            "docker_mount_cwd_to_workspace",
+            "TERMINAL_DOCKER_MOUNT_CWD_TO_WORKSPACE",
+        ),
+        (
+            "docker_run_as_host_user",
+            "TERMINAL_DOCKER_RUN_AS_HOST_USER",
+        ),
+        ("container_cpu", "TERMINAL_CONTAINER_CPU"),
+        ("container_memory", "TERMINAL_CONTAINER_MEMORY"),
+        ("container_disk", "TERMINAL_CONTAINER_DISK"),
+        ("container_persistent", "TERMINAL_CONTAINER_PERSISTENT"),
+        ("docker_env", "TERMINAL_DOCKER_ENV"),
+        ("docker_forward_env", "TERMINAL_DOCKER_FORWARD_ENV"),
+        ("docker_volumes", "TERMINAL_DOCKER_VOLUMES"),
+        ("vercel_runtime", "TERMINAL_VERCEL_RUNTIME"),
+        ("modal_mode", "TERMINAL_MODAL_MODE"),
+        ("shell_init_files", "TERMINAL_SHELL_INIT_FILES"),
+        ("auto_source_bashrc", "TERMINAL_AUTO_SOURCE_BASHRC"),
+        ("ssh_host", "TERMINAL_SSH_HOST"),
+        ("ssh_port", "TERMINAL_SSH_PORT"),
+        ("ssh_user", "TERMINAL_SSH_USER"),
+        ("ssh_key_path", "TERMINAL_SSH_KEY_PATH"),
+    ]
+}
+
+pub fn terminal_config_env_bridge_key(key: &str) -> Option<&'static str> {
+    let normalized = key
+        .trim()
+        .strip_prefix("terminal.")
+        .unwrap_or_else(|| key.trim())
+        .replace('-', "_")
+        .to_ascii_lowercase();
+    terminal_config_env_bridge_pairs()
+        .iter()
+        .find_map(|(config_key, env_key)| (*config_key == normalized).then_some(*env_key))
+}
+
 fn config_env_bridge_key(key: &str) -> Option<String> {
-    match key.trim().replace('-', "_").to_ascii_lowercase().as_str() {
-        "terminal.docker_mount_cwd_to_workspace" => {
-            Some("TERMINAL_DOCKER_MOUNT_CWD_TO_WORKSPACE".to_string())
-        }
-        "terminal.vercel_runtime" => Some("TERMINAL_VERCEL_RUNTIME".to_string()),
-        _ => None,
-    }
+    terminal_config_env_bridge_key(key).map(ToString::to_string)
 }
 
 fn split_config_key(key: &str) -> Vec<String> {
@@ -1233,6 +1279,273 @@ pub fn load_from_json(path: &Path) -> Result<GatewayConfig, ConfigError> {
     Ok(config)
 }
 
+fn env_var_nonempty(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn parse_bool_env(name: &str, value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => {
+            tracing::warn!("{name} is not a valid bool-like value: {value}");
+            None
+        }
+    }
+}
+
+fn parse_list_env(value: &str, split_colon: bool) -> Vec<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    if trimmed.starts_with('[') {
+        if let Ok(values) = serde_json::from_str::<Vec<String>>(trimmed) {
+            return values
+                .into_iter()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .collect();
+        }
+    }
+    let delimiter = if trimmed.contains(',') || !split_colon {
+        ','
+    } else {
+        ':'
+    };
+    trimmed
+        .split(delimiter)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn set_env_if_missing(name: &str, value: String) {
+    if value.trim().is_empty() || env_var_nonempty(name).is_some() {
+        return;
+    }
+    // SAFETY: configuration loading runs during CLI/gateway startup.
+    unsafe { std::env::set_var(name, value) };
+}
+
+fn bridge_terminal_config_to_env(terminal: &TerminalConfig) {
+    let default = TerminalConfig::default();
+    if terminal.backend != default.backend {
+        set_env_if_missing(
+            "TERMINAL_ENV",
+            match terminal.backend {
+                TerminalBackendType::Local => "local",
+                TerminalBackendType::Docker => "docker",
+                TerminalBackendType::Ssh => "ssh",
+                TerminalBackendType::Daytona => "daytona",
+                TerminalBackendType::Modal => "modal",
+                TerminalBackendType::Singularity => "singularity",
+            }
+            .to_string(),
+        );
+    }
+    if terminal.timeout != default.timeout {
+        set_env_if_missing("TERMINAL_TIMEOUT", terminal.timeout.to_string());
+    }
+    if terminal.max_output_size != default.max_output_size {
+        set_env_if_missing(
+            "TERMINAL_MAX_OUTPUT_SIZE",
+            terminal.max_output_size.to_string(),
+        );
+    }
+    if let Some(value) = &terminal.workdir {
+        set_env_if_missing("TERMINAL_CWD", value.clone());
+    }
+    if let Some(value) = &terminal.docker_container_id {
+        set_env_if_missing("TERMINAL_DOCKER_CONTAINER_ID", value.clone());
+    }
+    if let Some(value) = &terminal.docker_image {
+        set_env_if_missing("TERMINAL_DOCKER_IMAGE", value.clone());
+    }
+    if terminal.docker_mount_cwd_to_workspace != default.docker_mount_cwd_to_workspace {
+        set_env_if_missing(
+            "TERMINAL_DOCKER_MOUNT_CWD_TO_WORKSPACE",
+            terminal.docker_mount_cwd_to_workspace.to_string(),
+        );
+    }
+    if terminal.docker_run_as_host_user != default.docker_run_as_host_user {
+        set_env_if_missing(
+            "TERMINAL_DOCKER_RUN_AS_HOST_USER",
+            terminal.docker_run_as_host_user.to_string(),
+        );
+    }
+    if let Some(value) = terminal.container_cpu {
+        set_env_if_missing("TERMINAL_CONTAINER_CPU", value.to_string());
+    }
+    if let Some(value) = terminal.container_memory {
+        set_env_if_missing("TERMINAL_CONTAINER_MEMORY", value.to_string());
+    }
+    if let Some(value) = terminal.container_disk {
+        set_env_if_missing("TERMINAL_CONTAINER_DISK", value.to_string());
+    }
+    if terminal.container_persistent != default.container_persistent {
+        set_env_if_missing(
+            "TERMINAL_CONTAINER_PERSISTENT",
+            terminal.container_persistent.to_string(),
+        );
+    }
+    if let Some(value) = &terminal.docker_env {
+        set_env_if_missing("TERMINAL_DOCKER_ENV", value.clone());
+    }
+    if !terminal.docker_forward_env.is_empty() {
+        set_env_if_missing(
+            "TERMINAL_DOCKER_FORWARD_ENV",
+            terminal.docker_forward_env.join(","),
+        );
+    }
+    if !terminal.docker_volumes.is_empty() {
+        set_env_if_missing("TERMINAL_DOCKER_VOLUMES", terminal.docker_volumes.join(","));
+    }
+    if let Some(value) = &terminal.vercel_runtime {
+        set_env_if_missing("TERMINAL_VERCEL_RUNTIME", value.clone());
+    }
+    if let Some(value) = &terminal.modal_mode {
+        set_env_if_missing("TERMINAL_MODAL_MODE", value.clone());
+    }
+    if !terminal.shell_init_files.is_empty() {
+        set_env_if_missing(
+            "TERMINAL_SHELL_INIT_FILES",
+            terminal.shell_init_files.join(","),
+        );
+    }
+    if terminal.auto_source_bashrc != default.auto_source_bashrc {
+        set_env_if_missing(
+            "TERMINAL_AUTO_SOURCE_BASHRC",
+            terminal.auto_source_bashrc.to_string(),
+        );
+    }
+    if let Some(value) = &terminal.ssh_host {
+        set_env_if_missing("TERMINAL_SSH_HOST", value.clone());
+    }
+    if let Some(value) = terminal.ssh_port {
+        set_env_if_missing("TERMINAL_SSH_PORT", value.to_string());
+    }
+    if let Some(value) = &terminal.ssh_user {
+        set_env_if_missing("TERMINAL_SSH_USER", value.clone());
+    }
+    if let Some(value) = &terminal.ssh_key_path {
+        set_env_if_missing("TERMINAL_SSH_KEY_PATH", value.clone());
+    }
+}
+
+fn apply_terminal_env_overrides(config: &mut TerminalConfig) {
+    if let Some(v) =
+        env_var_nonempty("TERMINAL_ENV").or_else(|| env_var_nonempty("TERMINAL_BACKEND"))
+    {
+        match TerminalBackendType::from_env_name(&v) {
+            Some(backend) => config.backend = backend,
+            None => tracing::warn!("Unknown TERMINAL_ENV '{v}'"),
+        }
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_TIMEOUT") {
+        if let Ok(n) = v.parse::<u64>() {
+            config.timeout = n;
+        } else {
+            tracing::warn!("TERMINAL_TIMEOUT is not a valid u64: {v}");
+        }
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_MAX_OUTPUT_SIZE") {
+        if let Ok(n) = v.parse::<usize>() {
+            config.max_output_size = n;
+        } else {
+            tracing::warn!("TERMINAL_MAX_OUTPUT_SIZE is not a valid usize: {v}");
+        }
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_CWD") {
+        config.workdir = Some(v);
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_DOCKER_CONTAINER_ID") {
+        config.docker_container_id = Some(v);
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_DOCKER_IMAGE") {
+        config.docker_image = Some(v);
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_DOCKER_MOUNT_CWD_TO_WORKSPACE")
+        .and_then(|v| parse_bool_env("TERMINAL_DOCKER_MOUNT_CWD_TO_WORKSPACE", &v))
+    {
+        config.docker_mount_cwd_to_workspace = v;
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_DOCKER_RUN_AS_HOST_USER")
+        .and_then(|v| parse_bool_env("TERMINAL_DOCKER_RUN_AS_HOST_USER", &v))
+    {
+        config.docker_run_as_host_user = v;
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_CONTAINER_CPU") {
+        if let Ok(n) = v.parse::<u32>() {
+            config.container_cpu = Some(n);
+        } else {
+            tracing::warn!("TERMINAL_CONTAINER_CPU is not a valid u32: {v}");
+        }
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_CONTAINER_MEMORY") {
+        if let Ok(n) = v.parse::<u64>() {
+            config.container_memory = Some(n);
+        } else {
+            tracing::warn!("TERMINAL_CONTAINER_MEMORY is not a valid u64: {v}");
+        }
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_CONTAINER_DISK") {
+        if let Ok(n) = v.parse::<u64>() {
+            config.container_disk = Some(n);
+        } else {
+            tracing::warn!("TERMINAL_CONTAINER_DISK is not a valid u64: {v}");
+        }
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_CONTAINER_PERSISTENT")
+        .and_then(|v| parse_bool_env("TERMINAL_CONTAINER_PERSISTENT", &v))
+    {
+        config.container_persistent = v;
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_DOCKER_ENV") {
+        config.docker_env = Some(v);
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_DOCKER_FORWARD_ENV") {
+        config.docker_forward_env = parse_list_env(&v, false);
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_DOCKER_VOLUMES") {
+        config.docker_volumes = parse_list_env(&v, false);
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_VERCEL_RUNTIME") {
+        config.vercel_runtime = Some(v);
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_MODAL_MODE") {
+        config.modal_mode = Some(v);
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_SHELL_INIT_FILES") {
+        config.shell_init_files = parse_list_env(&v, true);
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_AUTO_SOURCE_BASHRC")
+        .and_then(|v| parse_bool_env("TERMINAL_AUTO_SOURCE_BASHRC", &v))
+    {
+        config.auto_source_bashrc = v;
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_SSH_HOST") {
+        config.ssh_host = Some(v);
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_SSH_PORT") {
+        if let Ok(n) = v.parse::<u16>() {
+            config.ssh_port = Some(n);
+        } else {
+            tracing::warn!("TERMINAL_SSH_PORT is not a valid u16: {v}");
+        }
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_SSH_USER") {
+        config.ssh_user = Some(v);
+    }
+    if let Some(v) = env_var_nonempty("TERMINAL_SSH_KEY_PATH") {
+        config.ssh_key_path = Some(v);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // apply_env_overrides
 // ---------------------------------------------------------------------------
@@ -1265,6 +1578,8 @@ pub fn load_from_json(path: &Path) -> Result<GatewayConfig, ConfigError> {
 /// 另见 [`crate::python_platform_env::apply_python_named_platform_env`]：
 /// `WEIXIN_*`、`DINGTALK_*` 等与 Python `gateway/platforms/*.py` 一致的键写入 `platforms`。
 pub fn apply_env_overrides(config: &mut GatewayConfig) {
+    apply_terminal_env_overrides(&mut config.terminal);
+
     if let Ok(v) = std::env::var("HERMES_MODEL") {
         config.model = Some(v);
     }
@@ -1472,6 +1787,15 @@ mod tests {
     use std::sync::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    fn clear_terminal_env_bridge_vars() {
+        for (_, env_key) in terminal_config_env_bridge_pairs() {
+            // SAFETY: tests serialize env mutation with ENV_LOCK.
+            unsafe { std::env::remove_var(env_key) };
+        }
+        // SAFETY: tests serialize env mutation with ENV_LOCK.
+        unsafe { std::env::remove_var("TERMINAL_BACKEND") };
+    }
 
     #[test]
     fn validate_valid_config() {
@@ -1704,6 +2028,7 @@ llm_providers:
         use tempfile::tempdir;
 
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_terminal_env_bridge_vars();
         let dir = tempdir().unwrap();
         let result =
             set_user_config_value(dir.path(), "terminal.vercel_runtime", "python3.13").unwrap();
@@ -1718,6 +2043,120 @@ llm_providers:
 
         // SAFETY: test process serializes env mutation via ENV_LOCK.
         unsafe { std::env::remove_var("TERMINAL_VERCEL_RUNTIME") };
+    }
+
+    #[test]
+    fn terminal_config_bridge_map_covers_critical_writable_keys() {
+        let keys = terminal_config_env_bridge_pairs()
+            .iter()
+            .map(|(key, _)| *key)
+            .collect::<std::collections::HashSet<_>>();
+        for key in [
+            "backend",
+            "docker_run_as_host_user",
+            "docker_mount_cwd_to_workspace",
+            "docker_env",
+            "docker_image",
+            "container_cpu",
+            "container_memory",
+            "container_disk",
+            "container_persistent",
+            "shell_init_files",
+            "auto_source_bashrc",
+            "vercel_runtime",
+            "modal_mode",
+        ] {
+            assert!(keys.contains(key), "missing terminal bridge key: {key}");
+            assert!(
+                terminal_config_env_bridge_key(&format!("terminal.{key}")).is_some(),
+                "terminal.{key} should map to an env var"
+            );
+        }
+    }
+
+    #[test]
+    fn set_user_config_value_bridges_all_terminal_runtime_keys() {
+        use tempfile::tempdir;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_terminal_env_bridge_vars();
+        let dir = tempdir().unwrap();
+        for (key, value, env_key) in [
+            (
+                "terminal.docker_run_as_host_user",
+                "true",
+                "TERMINAL_DOCKER_RUN_AS_HOST_USER",
+            ),
+            (
+                "terminal.docker_mount_cwd_to_workspace",
+                "true",
+                "TERMINAL_DOCKER_MOUNT_CWD_TO_WORKSPACE",
+            ),
+            ("terminal.docker_env", "FOO=bar", "TERMINAL_DOCKER_ENV"),
+            (
+                "terminal.shell_init_files",
+                "~/custom.sh",
+                "TERMINAL_SHELL_INIT_FILES",
+            ),
+            (
+                "terminal.auto_source_bashrc",
+                "false",
+                "TERMINAL_AUTO_SOURCE_BASHRC",
+            ),
+        ] {
+            let result = set_user_config_value(dir.path(), key, value).unwrap();
+            assert!(result.wrote_config(), "{key} should write config");
+            assert!(result.wrote_env(), "{key} should write env");
+            assert_eq!(result.env_key.as_deref(), Some(env_key));
+        }
+        let env_text = std::fs::read_to_string(dir.path().join(".env")).unwrap();
+        assert!(env_text.contains("TERMINAL_DOCKER_RUN_AS_HOST_USER=true"));
+        assert!(env_text.contains("TERMINAL_DOCKER_ENV=FOO=bar"));
+        assert!(env_text.contains("TERMINAL_AUTO_SOURCE_BASHRC=false"));
+        clear_terminal_env_bridge_vars();
+    }
+
+    #[test]
+    fn load_config_bridges_terminal_yaml_to_env_without_overriding_existing_env() {
+        use tempfile::tempdir;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_terminal_env_bridge_vars();
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.yaml"),
+            r#"
+terminal:
+  backend: docker
+  docker_image: rust:1.90
+  docker_env: FOO=bar
+  docker_mount_cwd_to_workspace: true
+  shell_init_files: "~/custom.sh"
+  auto_source_bashrc: false
+"#,
+        )
+        .unwrap();
+        // SAFETY: test process serializes env mutation via ENV_LOCK.
+        unsafe { std::env::set_var("TERMINAL_DOCKER_IMAGE", "already-set") };
+
+        let cfg = load_config(Some(dir.path().to_string_lossy().as_ref())).unwrap();
+        assert_eq!(cfg.terminal.backend, TerminalBackendType::Docker);
+        assert_eq!(cfg.terminal.docker_image.as_deref(), Some("already-set"));
+        assert_eq!(std::env::var("TERMINAL_ENV").unwrap(), "docker");
+        assert_eq!(
+            std::env::var("TERMINAL_DOCKER_IMAGE").unwrap(),
+            "already-set"
+        );
+        assert_eq!(std::env::var("TERMINAL_DOCKER_ENV").unwrap(), "FOO=bar");
+        assert_eq!(
+            std::env::var("TERMINAL_DOCKER_MOUNT_CWD_TO_WORKSPACE").unwrap(),
+            "true"
+        );
+        assert_eq!(
+            std::env::var("TERMINAL_AUTO_SOURCE_BASHRC").unwrap(),
+            "false"
+        );
+        clear_terminal_env_bridge_vars();
     }
 
     #[test]

@@ -15,6 +15,22 @@ pub struct DockerBackend {
     image: Option<String>,
     /// Mount the host cwd at /workspace when creating a container.
     mount_cwd_to_workspace: bool,
+    /// Run the container as the host uid/gid when supported.
+    run_as_host_user: bool,
+    /// CPU limit for newly-created containers.
+    container_cpu: Option<u32>,
+    /// Memory limit in MiB for newly-created containers.
+    container_memory: Option<u64>,
+    /// Disk limit in MiB for newly-created containers.
+    container_disk: Option<u64>,
+    /// Keep container after it stops.
+    container_persistent: bool,
+    /// Extra env vars to pass to Docker as KEY=VALUE entries.
+    docker_env: Option<String>,
+    /// Host env-var names to forward.
+    docker_forward_env: Vec<String>,
+    /// Extra Docker volume specs.
+    docker_volumes: Vec<String>,
     /// Default timeout in seconds.
     default_timeout: u64,
     /// Maximum output size in bytes.
@@ -32,6 +48,14 @@ impl DockerBackend {
         container_id: Option<String>,
         image: Option<String>,
         mount_cwd_to_workspace: bool,
+        run_as_host_user: bool,
+        container_cpu: Option<u32>,
+        container_memory: Option<u64>,
+        container_disk: Option<u64>,
+        container_persistent: bool,
+        docker_env: Option<String>,
+        docker_forward_env: Vec<String>,
+        docker_volumes: Vec<String>,
         default_timeout: u64,
         max_output_size: usize,
     ) -> Self {
@@ -39,9 +63,83 @@ impl DockerBackend {
             container_id: Mutex::new(container_id),
             image: image.or_else(|| Some("ubuntu:22.04".to_string())),
             mount_cwd_to_workspace,
+            run_as_host_user,
+            container_cpu,
+            container_memory,
+            container_disk,
+            container_persistent,
+            docker_env,
+            docker_forward_env,
+            docker_volumes,
             default_timeout,
             max_output_size,
         }
+    }
+
+    fn docker_env_pairs(&self) -> Vec<String> {
+        self.docker_env
+            .as_deref()
+            .unwrap_or("")
+            .split(',')
+            .map(str::trim)
+            .filter(|entry| !entry.is_empty() && entry.contains('='))
+            .map(ToString::to_string)
+            .collect()
+    }
+
+    fn build_run_args(&self, image: &str) -> Vec<String> {
+        let mut args = vec!["run".to_string(), "-d".to_string(), "--tty".to_string()];
+        if !self.container_persistent {
+            args.push("--rm".to_string());
+        }
+        if self.run_as_host_user {
+            #[cfg(unix)]
+            {
+                let uid = unsafe { libc::getuid() };
+                let gid = unsafe { libc::getgid() };
+                args.push("--user".to_string());
+                args.push(format!("{uid}:{gid}"));
+            }
+        }
+        if let Some(cpu) = self.container_cpu {
+            args.push("--cpus".to_string());
+            args.push(cpu.to_string());
+        }
+        if let Some(memory) = self.container_memory {
+            args.push("--memory".to_string());
+            args.push(format!("{memory}m"));
+        }
+        if let Some(disk) = self.container_disk {
+            args.push("--storage-opt".to_string());
+            args.push(format!("size={disk}m"));
+        }
+        for env_pair in self.docker_env_pairs() {
+            args.push("-e".to_string());
+            args.push(env_pair);
+        }
+        for env_name in &self.docker_forward_env {
+            if let Ok(value) = std::env::var(env_name) {
+                args.push("-e".to_string());
+                args.push(format!("{env_name}={value}"));
+            }
+        }
+        for volume in &self.docker_volumes {
+            args.push("-v".to_string());
+            args.push(volume.clone());
+        }
+        if self.mount_cwd_to_workspace {
+            if let Ok(cwd) = std::env::current_dir() {
+                args.push("-v".to_string());
+                args.push(format!("{}:/workspace", cwd.display()));
+                args.push("-w".to_string());
+                args.push("/workspace".to_string());
+            }
+        }
+        args.push(image.to_string());
+        args.push("tail".to_string());
+        args.push("-f".to_string());
+        args.push("/dev/null".to_string());
+        args
     }
 
     /// Ensure we have a running container. If `container_id` is None,
@@ -63,19 +161,7 @@ impl DockerBackend {
 
         tracing::info!("Creating Docker container from image: {}", image);
 
-        let mut args = vec!["run".to_string(), "-d".to_string(), "--tty".to_string()];
-        if self.mount_cwd_to_workspace {
-            if let Ok(cwd) = std::env::current_dir() {
-                args.push("-v".to_string());
-                args.push(format!("{}:/workspace", cwd.display()));
-                args.push("-w".to_string());
-                args.push("/workspace".to_string());
-            }
-        }
-        args.push(image.clone());
-        args.push("tail".to_string());
-        args.push("-f".to_string());
-        args.push("/dev/null".to_string());
+        let args = self.build_run_args(image);
 
         let output = TokioCommand::new("docker")
             .args(&args)
@@ -277,6 +363,70 @@ impl TerminalBackend for DockerBackend {
 
         // test -e returns 0 if file exists, 1 otherwise
         Ok(output.status.success())
+    }
+}
+
+#[cfg(test)]
+mod quote_tests {
+    use super::*;
+
+    struct EnvGuard {
+        key: &'static str,
+        old: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let old = std::env::var(key).ok();
+            std::env::set_var(key, value);
+            Self { key, old }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            if let Some(old) = &self.old {
+                std::env::set_var(self.key, old);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
+    #[test]
+    fn build_run_args_include_terminal_config_env_and_resource_flags() {
+        let _forward = EnvGuard::set("HERMES_DOCKER_FORWARD_TEST", "forwarded");
+        let backend = DockerBackend::new(
+            None,
+            Some("rust:1.90".to_string()),
+            false,
+            true,
+            Some(2),
+            Some(4096),
+            Some(51200),
+            true,
+            Some("FOO=bar,BAZ=qux".to_string()),
+            vec!["HERMES_DOCKER_FORWARD_TEST".to_string()],
+            vec!["/host/cache:/cache".to_string()],
+            120,
+            1_048_576,
+        );
+
+        let args = backend.build_run_args("rust:1.90");
+        assert!(args.windows(2).any(|w| w == ["--cpus", "2"]));
+        assert!(args.windows(2).any(|w| w == ["--memory", "4096m"]));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["--storage-opt", "size=51200m"]));
+        assert!(args.windows(2).any(|w| w == ["-e", "FOO=bar"]));
+        assert!(args.windows(2).any(|w| w == ["-e", "BAZ=qux"]));
+        assert!(args
+            .windows(2)
+            .any(|w| w == ["-e", "HERMES_DOCKER_FORWARD_TEST=forwarded"]));
+        assert!(args.windows(2).any(|w| w == ["-v", "/host/cache:/cache"]));
+        assert!(!args.iter().any(|arg| arg == "--rm"));
+        #[cfg(unix)]
+        assert!(args.iter().any(|arg| arg == "--user"));
     }
 }
 

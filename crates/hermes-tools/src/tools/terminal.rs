@@ -4,7 +4,8 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use regex::Regex;
 use serde_json::{json, Value};
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use hermes_core::{
     tool_schema, CommandOutput, JsonSchema, TerminalBackend, ToolError, ToolHandler, ToolSchema,
@@ -113,16 +114,48 @@ fn long_lived_foreground_error(command: &str) -> Option<String> {
 
 /// Tool for executing terminal commands via an injected backend.
 pub struct TerminalHandler {
-    backend: std::sync::Arc<dyn TerminalBackend>,
+    backend: Arc<dyn TerminalBackend>,
     approval: ApprovalManager,
+    task_cwds: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl TerminalHandler {
-    pub fn new(backend: std::sync::Arc<dyn TerminalBackend>) -> Self {
+    pub fn new(backend: Arc<dyn TerminalBackend>) -> Self {
         Self {
             backend,
             approval: ApprovalManager::new(),
+            task_cwds: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    pub fn set_task_cwd(&self, task_id: impl Into<String>, cwd: impl Into<String>) {
+        let task_id = task_id.into();
+        let cwd = cwd.into();
+        if task_id.trim().is_empty() || cwd.trim().is_empty() {
+            return;
+        }
+        self.task_cwds
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(task_id, cwd);
+    }
+
+    pub fn clear_task_cwd(&self, task_id: &str) {
+        self.task_cwds
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(task_id);
+    }
+
+    fn task_cwd(&self, task_id: &str) -> Option<String> {
+        if task_id.trim().is_empty() {
+            return None;
+        }
+        self.task_cwds
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(task_id)
+            .cloned()
     }
 }
 
@@ -175,7 +208,17 @@ impl ToolHandler for TerminalHandler {
             ApprovalDecision::Approved => {}
         }
 
-        let workdir = params.get("workdir").and_then(|v| v.as_str());
+        let explicit_workdir = params.get("workdir").and_then(|v| v.as_str());
+        let task_workdir = explicit_workdir
+            .is_none()
+            .then(|| {
+                params
+                    .get("task_id")
+                    .and_then(|v| v.as_str())
+                    .and_then(|task_id| self.task_cwd(task_id))
+            })
+            .flatten();
+        let workdir = explicit_workdir.or(task_workdir.as_deref());
 
         let pty = params.get("pty").and_then(|v| v.as_bool()).unwrap_or(false);
         let stdin_data = params.get("stdin_data").and_then(|v| v.as_str());
@@ -222,7 +265,14 @@ impl ToolHandler for TerminalHandler {
             "workdir".into(),
             json!({
                 "type": "string",
-                "description": "Working directory for the command"
+                "description": "Working directory for the command. Overrides registered task cwd."
+            }),
+        );
+        props.insert(
+            "task_id".into(),
+            json!({
+                "type": "string",
+                "description": "Optional task/session id used to resolve a registered cwd when workdir is omitted"
             }),
         );
         props.insert(
@@ -680,6 +730,63 @@ mod tests {
         }
     }
 
+    #[derive(Default)]
+    struct RecordingBackend {
+        calls: Arc<Mutex<Vec<Option<String>>>>,
+    }
+
+    #[async_trait]
+    impl TerminalBackend for RecordingBackend {
+        async fn execute_command(
+            &self,
+            cmd: &str,
+            timeout: Option<u64>,
+            workdir: Option<&str>,
+            background: bool,
+            pty: bool,
+        ) -> Result<CommandOutput, AgentError> {
+            self.execute_command_with_stdin(cmd, timeout, workdir, background, pty, None)
+                .await
+        }
+
+        async fn execute_command_with_stdin(
+            &self,
+            _cmd: &str,
+            _timeout: Option<u64>,
+            workdir: Option<&str>,
+            _background: bool,
+            _pty: bool,
+            _stdin_data: Option<&str>,
+        ) -> Result<CommandOutput, AgentError> {
+            self.calls
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(workdir.map(ToString::to_string));
+            Ok(CommandOutput {
+                exit_code: 0,
+                stdout: "ok".to_string(),
+                stderr: String::new(),
+            })
+        }
+
+        async fn read_file(
+            &self,
+            _path: &str,
+            _offset: Option<u64>,
+            _limit: Option<u64>,
+        ) -> Result<String, AgentError> {
+            Ok(String::new())
+        }
+
+        async fn write_file(&self, _path: &str, _content: &str) -> Result<(), AgentError> {
+            Ok(())
+        }
+
+        async fn file_exists(&self, _path: &str) -> Result<bool, AgentError> {
+            Ok(true)
+        }
+    }
+
     struct MockProcessBackend;
 
     #[async_trait]
@@ -760,6 +867,49 @@ mod tests {
         let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
         let result = block_on(handler.execute(json!({"command": "echo hello"}))).unwrap();
         assert!(result.contains("echo hello"));
+    }
+
+    #[test]
+    fn test_terminal_handler_uses_registered_task_cwd_when_workdir_omitted() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let backend = Arc::new(RecordingBackend::default());
+        let calls = backend.calls.clone();
+        let handler = TerminalHandler::new(backend);
+        handler.set_task_cwd("acp-session-1", "/workspace/acp");
+
+        block_on(handler.execute(json!({
+            "command": "pwd",
+            "task_id": "acp-session-1"
+        })))
+        .unwrap();
+
+        let calls = calls.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(calls.as_slice(), [Some("/workspace/acp".to_string())]);
+    }
+
+    #[test]
+    fn test_terminal_handler_explicit_workdir_wins_over_task_cwd() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let backend = Arc::new(RecordingBackend::default());
+        let calls = backend.calls.clone();
+        let handler = TerminalHandler::new(backend);
+        handler.set_task_cwd("acp-session-1", "/workspace/acp");
+
+        block_on(handler.execute(json!({
+            "command": "pwd",
+            "task_id": "acp-session-1",
+            "workdir": "/explicit/workdir"
+        })))
+        .unwrap();
+
+        let calls = calls.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(calls.as_slice(), [Some("/explicit/workdir".to_string())]);
     }
 
     #[test]

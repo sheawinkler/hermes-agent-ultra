@@ -1760,6 +1760,48 @@
       "ticket": 25
     },
     {
+      "path": "tests/tools/test_local_interrupt_cleanup.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream local interrupt-cleanup intent is covered by Rust LocalBackend foreground child ownership: foreground process groups are killed on timeout and when the command future is aborted, with regression coverage proving marker child processes are gone after cancellation.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_local_shell_init.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream local shell init intent is covered by Rust LocalBackend config-driven shell startup sourcing: explicit shell_init_files, auto_source_bashrc disablement, HOME/env expansion, bash/zsh/profile ordering, and an execution test that sources an explicit init file before the command.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_terminal_config_env_sync.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream terminal config/env drift intent is covered by Rust hermes-config central bridge mapping, config-set env sync, YAML-to-env load bridging without overriding existing env, Docker resource/env/volume consumption, and backend manager plumbing for terminal runtime keys.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_terminal_requirements.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream terminal requirements intent is covered by Rust terminal_requirements gates for local, docker, singularity/apptainer, ssh host/user, modal direct/managed selection, daytona API-key presence, and unknown backend rejection; local Vercel Sandbox Python salvage is intentionally not exposed because no Rust terminal backend exists for it.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_terminal_task_cwd.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream ACP task cwd intent is covered by Rust TerminalHandler task cwd registration: commands with task_id inherit registered cwd when workdir is omitted, and explicit workdir keeps precedence.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_terminal_tool_requirements.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream tool availability intent is covered by Rust ToolRegistry check_fn gating for terminal-backed tools: local and managed-modal backends expose terminal/process/file tools, invalid terminal backends hide terminal/process/read_file/write_file/process_registry, and Rust execute_code remains independently available as local non-Python execution.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "tests/tools/test_url_safety.py",
       "classification": "intentional_divergence",
       "rationale": "Upstream URL safety/SSRF intent is covered by Rust hermes-tools url_safety contracts for http/https-only parsing, DNS fail-closed behavior, private/reserved IPv4 and IPv6 blocking including CGNAT, benchmark, multicast, and IPv4-mapped IPv6 ranges, metadata hostname/IP always-blocking, allow_private_urls toggle semantics, and the exact QQ multimedia benchmark-IP exception.",
