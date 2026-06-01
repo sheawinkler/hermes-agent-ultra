@@ -94,6 +94,7 @@ use crate::background::{BackgroundTaskManager, TaskStatus};
 use crate::commands::{GatewayCommandResult, handle_command};
 use crate::dm::{DmDecision, DmManager};
 use crate::hooks::{HookEvent, HookRegistry};
+use crate::attachment_inference;
 use crate::pairing_store::DmPairingStore;
 use crate::platforms::helpers::extract_inline_images;
 use crate::session::SessionManager;
@@ -1840,9 +1841,29 @@ impl Gateway {
             .await;
 
         // Send response back to the platform (text + MEDIA: local attachments)
-        self.deliver_response_attachments(&incoming.platform, &incoming.chat_id, &response)
+        let (mut attachment_failures, cleaned, mut attachments_delivered) = self
+            .deliver_response_attachments(&incoming.platform, &incoming.chat_id, &response)
             .await;
-        self.send_incoming_reply(incoming, &response, None).await?;
+        if attachments_delivered == 0 {
+            let (inferred_failures, inferred_delivered) = self
+                .deliver_inferred_attachments(
+                    &incoming.platform,
+                    &incoming.chat_id,
+                    &incoming.text,
+                    &response,
+                    session_key,
+                )
+                .await;
+            attachment_failures.extend(inferred_failures);
+            attachments_delivered += inferred_delivered;
+        }
+        let reply_text = Self::reply_text_with_attachment_outcome(
+            cleaned,
+            &attachment_failures,
+            &incoming.text,
+            attachments_delivered,
+        );
+        self.send_incoming_reply(incoming, &reply_text, None).await?;
         self.flush_post_delivery_messages(
             &incoming.platform,
             &incoming.chat_id,
@@ -2244,15 +2265,40 @@ impl Gateway {
             "gateway streaming agent finished"
         );
 
-        self.deliver_response_attachments(&incoming.platform, &incoming.chat_id, &response)
+        let (mut attachment_failures, cleaned, mut attachments_delivered) = self
+            .deliver_response_attachments(&incoming.platform, &incoming.chat_id, &response)
             .await;
+        if attachments_delivered == 0 {
+            let (inferred_failures, inferred_delivered) = self
+                .deliver_inferred_attachments(
+                    &incoming.platform,
+                    &incoming.chat_id,
+                    &incoming.text,
+                    &response,
+                    session_key,
+                )
+                .await;
+            attachment_failures.extend(inferred_failures);
+            attachments_delivered += inferred_delivered;
+        }
+        let fallback_text = Self::reply_text_with_attachment_outcome(
+            cleaned,
+            &attachment_failures,
+            &incoming.text,
+            attachments_delivered,
+        );
 
         if let Some(worker) = native_worker {
             let _ = worker.await;
             // If native stream could not start, fall back to one-shot delivery.
             if !native_started.load(Ordering::Acquire) || native_failed.load(Ordering::Acquire) {
-                self.send_message(&incoming.platform, &incoming.chat_id, &response, None)
-                    .await?;
+                self.send_message(
+                    &incoming.platform,
+                    &incoming.chat_id,
+                    &fallback_text,
+                    None,
+                )
+                .await?;
             }
         } else if let Some(stream_id) = stream_id {
             if let (Some(edit_lock), Some(finalized)) =
@@ -2823,21 +2869,38 @@ impl Gateway {
     // Message sending (delegates to adapters)
     // -----------------------------------------------------------------------
 
-    /// Deliver `MEDIA:<path>` attachments and bare local paths from an agent response.
-    pub async fn deliver_response_attachments(&self, platform: &str, chat_id: &str, text: &str) {
-        let (media_files, _cleaned) = extract_media(text);
+    /// Deliver `MEDIA:<path>` attachments from an agent response.
+    ///
+    /// Returns `(failure summaries, cleaned text, successfully delivered count)`.
+    pub async fn deliver_response_attachments(
+        &self,
+        platform: &str,
+        chat_id: &str,
+        text: &str,
+    ) -> (Vec<String>, String, usize) {
+        let (media_files, cleaned) = extract_media(text);
+        let mut failures = Vec::new();
+        let mut delivered = 0usize;
         for (media_path, _is_voice) in media_files {
             match resolve_outbound_media_path(&media_path) {
                 Ok(resolved) => {
                     let path_str = resolved.to_string_lossy().into_owned();
-                    if let Err(err) = self.send_file(platform, chat_id, &path_str, None).await {
-                        warn!(
-                            platform = platform,
-                            chat_id = chat_id,
-                            path = %path_str,
-                            error = %err,
-                            "failed to deliver MEDIA attachment from agent response"
-                        );
+                    match self.send_file(platform, chat_id, &path_str, None).await {
+                        Ok(()) => delivered += 1,
+                        Err(err) => {
+                            warn!(
+                                platform = platform,
+                                chat_id = chat_id,
+                                path = %path_str,
+                                error = %err,
+                                "failed to deliver MEDIA attachment from agent response"
+                            );
+                            let label = std::path::Path::new(&path_str)
+                                .file_name()
+                                .and_then(|n| n.to_str())
+                                .unwrap_or(path_str.as_str());
+                            failures.push(format!("{label} ({err})"));
+                        }
                     }
                 }
                 Err(err) => {
@@ -2848,8 +2911,97 @@ impl Gateway {
                         error = %err,
                         "skipping MEDIA attachment (file missing or path invalid)"
                     );
+                    failures.push(format!("{media_path} ({err})"));
                 }
             }
+        }
+        (failures, cleaned, delivered)
+    }
+
+    /// When the user asked for an attachment but the agent omitted `MEDIA:` tags, try to
+    /// infer paths from the conversation (filenames, recent `read_file` tool calls, etc.).
+    pub async fn deliver_inferred_attachments(
+        &self,
+        platform: &str,
+        chat_id: &str,
+        user_text: &str,
+        response: &str,
+        session_key: &str,
+    ) -> (Vec<String>, usize) {
+        let messages = self.session_manager.get_messages(session_key).await;
+        let paths =
+            crate::attachment_inference::infer_attachment_paths(user_text, response, &messages);
+        if paths.is_empty() {
+            return (Vec::new(), 0);
+        }
+
+        let mut failures = Vec::new();
+        let mut delivered = 0usize;
+        for path in paths {
+            let path_str = path.to_string_lossy().into_owned();
+            match self.send_file(platform, chat_id, &path_str, None).await {
+                Ok(()) => {
+                    delivered += 1;
+                    info!(
+                        platform = platform,
+                        chat_id = chat_id,
+                        path = %path_str,
+                        "gateway inferred attachment delivered"
+                    );
+                }
+                Err(err) => {
+                    warn!(
+                        platform = platform,
+                        chat_id = chat_id,
+                        path = %path_str,
+                        error = %err,
+                        "failed to deliver inferred attachment"
+                    );
+                    let label = std::path::Path::new(&path_str)
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .unwrap_or(path_str.as_str());
+                    failures.push(format!("{label} ({err})"));
+                }
+            }
+        }
+        (failures, delivered)
+    }
+
+    fn reply_text_with_attachment_outcome(
+        cleaned: String,
+        failures: &[String],
+        user_text: &str,
+        attachments_delivered: usize,
+    ) -> String {
+        let mut text = Self::reply_text_with_attachment_failures(cleaned, failures);
+        if attachments_delivered == 0
+            && crate::attachment_inference::user_requests_attachment(user_text)
+            && failures.is_empty()
+        {
+            let hint = "⚠️ 未能找到可发送的附件文件，请说明文件名（例如 AGENTS.md）或完整路径。";
+            if text.trim().is_empty() {
+                text = hint.to_string();
+            } else {
+                text = format!("{text}\n\n{hint}");
+            }
+        }
+        text
+    }
+
+    fn reply_text_with_attachment_failures(cleaned: String, failures: &[String]) -> String {
+        if failures.is_empty() {
+            return cleaned;
+        }
+        let notice = failures
+            .iter()
+            .map(|f| format!("⚠️ 附件发送失败: {f}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        if cleaned.trim().is_empty() {
+            notice
+        } else {
+            format!("{cleaned}\n\n{notice}")
         }
     }
 

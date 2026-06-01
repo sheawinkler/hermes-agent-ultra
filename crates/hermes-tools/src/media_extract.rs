@@ -12,7 +12,7 @@ static MEDIA_PATTERN: LazyLock<Regex> = LazyLock::new(|| {
             `[^`\n]+` |
             "[^"\n]+" |
             '[^'\n]+' |
-            (?:~/|/)[^\s`"',;:)}\]]+\.(?:png|jpe?g|gif|webp|mp4|mov|avi|mkv|webm|ogg|opus|mp3|wav|m4a|flac|epub|pdf|zip|rar|7z|docx?|xlsx?|pptx?|txt|csv|apk|ipa)
+            (?:[A-Za-z]:[/\\]|~/|/)[^\s`"',;:)}\]]+\.(?:png|jpe?g|gif|webp|mp4|mov|avi|mkv|webm|ogg|opus|mp3|wav|m4a|flac|epub|pdf|zip|rar|7z|docx?|xlsx?|pptx?|txt|md|csv|apk|ipa)
         )
         [`"']?
         "#,
@@ -85,5 +85,22 @@ mod tests {
         let (media, _) = extract_media("[[audio_as_voice]]\nMEDIA:~/voice.ogg");
         assert_eq!(media.len(), 1);
         assert!(media[0].1);
+    }
+
+    #[test]
+    fn extracts_markdown_file_path() {
+        let (media, cleaned) = extract_media("Here\nMEDIA:/workspace/AGENTS.md\nDone");
+        assert_eq!(media.len(), 1);
+        assert!(media[0].0.ends_with("AGENTS.md") || media[0].0.contains("AGENTS.md"));
+        assert!(!cleaned.contains("MEDIA:"));
+    }
+
+    #[test]
+    fn extracts_windows_drive_path() {
+        let (media, cleaned) =
+            extract_media("MEDIA:C:/code/flowy/hermes-agent-ultra/AGENTS.md");
+        assert_eq!(media.len(), 1);
+        assert!(media[0].0.contains("AGENTS.md"));
+        assert!(cleaned.is_empty());
     }
 }

@@ -12,6 +12,7 @@
 //! - Platform-specific adapters behind feature flags
 
 pub mod adapter;
+pub mod attachment_inference;
 pub mod background;
 pub mod channel_directory;
 pub mod commands;

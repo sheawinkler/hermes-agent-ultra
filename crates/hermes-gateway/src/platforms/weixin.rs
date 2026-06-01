@@ -163,6 +163,11 @@ fn aes128_ecb_decrypt(ciphertext: &[u8], key_bytes: &[u8; 16]) -> Result<Vec<u8>
     pkcs7_unpad(&padded)
 }
 
+fn aes_key_for_api(aes_key: &[u8; 16]) -> String {
+    let hex: String = aes_key.iter().map(|b| format!("{b:02x}")).collect();
+    base64::engine::general_purpose::STANDARD.encode(hex.as_bytes())
+}
+
 fn parse_aes_key(aes_key_b64: &str) -> Result<[u8; 16], GatewayError> {
     let decoded = base64::engine::general_purpose::STANDARD
         .decode(aes_key_b64.trim())
@@ -292,6 +297,21 @@ fn assert_weixin_cdn_url(url: &str) -> Result<(), GatewayError> {
 fn is_stale_session(ret: i64, errcode: i64, errmsg: &str) -> bool {
     (ret == RATE_LIMIT_ERRCODE || errcode == RATE_LIMIT_ERRCODE)
         && errmsg.to_lowercase() == "unknown error"
+}
+
+fn raise_for_ilink_send(resp: &Value, operation: &str) -> Result<(), GatewayError> {
+    let ret = resp.get("ret").and_then(|v| v.as_i64()).unwrap_or(0);
+    let errcode = resp.get("errcode").and_then(|v| v.as_i64()).unwrap_or(0);
+    if ret == 0 && errcode == 0 {
+        return Ok(());
+    }
+    let errmsg = resp
+        .get("errmsg")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    Err(GatewayError::SendFailed(format!(
+        "weixin {operation} failed: ret={ret} errcode={errcode} errmsg={errmsg}"
+    )))
 }
 
 /// Classify a chat by its ID suffix.
@@ -468,6 +488,16 @@ impl WeChatAdapter {
 
     pub async fn set_inbound_sender(&self, tx: mpsc::Sender<IncomingMessage>) {
         *self.inner.inbound_tx.write().await = Some(tx);
+    }
+
+    #[cfg(test)]
+    pub async fn test_set_context_token(&self, user_id: &str, token: &str) {
+        let key = format!("{}:{}", self.inner.config.account_id, user_id);
+        self.inner
+            .context_tokens
+            .lock()
+            .await
+            .insert(key, token.to_string());
     }
 
     fn accounts_dir() -> PathBuf {
@@ -670,12 +700,13 @@ impl WeChatAdapter {
             }
             ITEM_VOICE => {
                 let voice = item.get("voice_item")?;
-                if !voice
+                // Transcription is handled in `extract_voice_text`; only download raw audio when absent.
+                if voice
                     .get("text")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .trim()
-                    .is_empty()
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .is_some()
                 {
                     return None;
                 }
@@ -1009,6 +1040,26 @@ impl WeChatAdapter {
         String::new()
     }
 
+    /// WeChat iLink often attaches ASR text on `voice_item.text`; use it as the user message.
+    fn extract_voice_text(item_list: &[Value]) -> String {
+        let mut parts = Vec::new();
+        for item in item_list {
+            if item.get("type").and_then(|v| v.as_i64()) != Some(ITEM_VOICE as i64) {
+                continue;
+            }
+            if let Some(t) = item
+                .get("voice_item")
+                .and_then(|v| v.get("text"))
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                parts.push(t.to_string());
+            }
+        }
+        parts.join("\n")
+    }
+
     async fn is_dup(inner: &WeixinInner, msg_id: &str) -> bool {
         if msg_id.is_empty() {
             return false;
@@ -1091,6 +1142,13 @@ impl WeChatAdapter {
             .cloned()
             .unwrap_or_default();
         let mut text = Self::extract_text(&item_list);
+        let voice_text = Self::extract_voice_text(&item_list);
+        if !voice_text.is_empty() {
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(&voice_text);
+        }
 
         // Content fingerprint dedup: MD5 of text content per sender
         if !text.is_empty() {
@@ -1322,6 +1380,7 @@ impl WeChatAdapter {
             &aeskey_hex,
         )
         .await?;
+        raise_for_ilink_send(&upload_resp, "getuploadurl")?;
 
         let upload_param = upload_resp
             .get("upload_param")
@@ -1338,14 +1397,14 @@ impl WeChatAdapter {
             let resp = self
                 .inner
                 .client
-                .put(upload_full_url)
+                .post(upload_full_url)
                 .timeout(Duration::from_secs(120))
                 .header("Content-Type", "application/octet-stream")
                 .body(ciphertext.clone())
                 .send()
                 .await
                 .map_err(|e| {
-                    GatewayError::ConnectionFailed(format!("weixin CDN PUT upload_full_url: {e}"))
+                    GatewayError::ConnectionFailed(format!("weixin CDN POST upload_full_url: {e}"))
                 })?;
             let _status = resp.status();
             let ep = resp
@@ -1373,7 +1432,7 @@ impl WeChatAdapter {
             .await
             .get(&ctx_key)
             .cloned();
-        let aes_key_b64 = base64::engine::general_purpose::STANDARD.encode(aes_key);
+        let aes_key_b64 = aes_key_for_api(&aes_key);
         let media_item = Self::outbound_media_item(
             media_kind,
             &encrypted_query_param,
@@ -1389,20 +1448,53 @@ impl WeChatAdapter {
             "client_id": client_id,
             "message_type": MSG_TYPE_BOT,
             "message_state": MSG_STATE_FINISH,
-            "item_list": [media_item],
+            "item_list": [media_item.clone()],
         });
         if let Some(ref t) = ctx {
             msg.as_object_mut()
                 .unwrap()
                 .insert("context_token".into(), json!(t));
         }
-        Self::ilink_post(
+        let resp = Self::ilink_post(
             &self.inner,
             EP_SEND_MESSAGE,
             json!({ "msg": msg }),
             API_TIMEOUT_MS,
         )
         .await?;
+
+        let ret = resp.get("ret").and_then(|v| v.as_i64()).unwrap_or(0);
+        let errcode = resp.get("errcode").and_then(|v| v.as_i64()).unwrap_or(0);
+        let errmsg = resp
+            .get("errmsg")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        if is_stale_session(ret, errcode, errmsg) {
+            debug!(
+                to_user_id,
+                "weixin: stale session on file send, retrying without context_token"
+            );
+            self.inner.context_tokens.lock().await.remove(&ctx_key);
+            let _ = Self::persist_context(&self.inner).await;
+            let msg2 = json!({
+                "from_user_id": "",
+                "to_user_id": to_user_id,
+                "client_id": format!("hermes-weixin-{}", Uuid::new_v4().simple()),
+                "message_type": MSG_TYPE_BOT,
+                "message_state": MSG_STATE_FINISH,
+                "item_list": [media_item],
+            });
+            let retry_resp = Self::ilink_post(
+                &self.inner,
+                EP_SEND_MESSAGE,
+                json!({ "msg": msg2 }),
+                API_TIMEOUT_MS,
+            )
+            .await?;
+            raise_for_ilink_send(&retry_resp, "sendmessage file")?;
+        } else {
+            raise_for_ilink_send(&resp, "sendmessage file")?;
+        }
         Ok(())
     }
 
@@ -1953,8 +2045,64 @@ impl PlatformAdapter for WeChatAdapter {
 }
 
 #[cfg(test)]
+mod weixin_inbound_text_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn extract_voice_text_reads_wechat_transcription() {
+        let items = vec![json!({
+            "type": ITEM_VOICE,
+            "voice_item": { "text": "你好，帮我查一下天气" }
+        })];
+        assert_eq!(
+            WeChatAdapter::extract_voice_text(&items),
+            "你好，帮我查一下天气"
+        );
+    }
+
+    #[test]
+    fn extract_voice_text_skips_empty_transcription() {
+        let items = vec![json!({
+            "type": ITEM_VOICE,
+            "voice_item": { "text": "   " }
+        })];
+        assert!(WeChatAdapter::extract_voice_text(&items).is_empty());
+    }
+
+    #[test]
+    fn extract_voice_text_joins_multiple_voice_items() {
+        let items = vec![
+            json!({
+                "type": ITEM_VOICE,
+                "voice_item": { "text": "第一段" }
+            }),
+            json!({
+                "type": ITEM_VOICE,
+                "voice_item": { "text": "第二段" }
+            }),
+        ];
+        assert_eq!(
+            WeChatAdapter::extract_voice_text(&items),
+            "第一段\n第二段"
+        );
+    }
+}
+
+#[cfg(test)]
 mod weixin_crypto_tests {
     use super::*;
+
+    #[test]
+    fn aes_key_for_api_is_base64_of_hex() {
+        let key = [0u8, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+        let encoded = aes_key_for_api(&key);
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&encoded)
+            .expect("decode");
+        assert_eq!(decoded, b"000102030405060708090a0b0c0d0e0f");
+        assert_eq!(parse_aes_key(&encoded).unwrap(), key);
+    }
 
     #[test]
     fn parse_aes_key_raw_16_bytes() {
@@ -2157,10 +2305,84 @@ mod weixin_send_file_tests {
             .pointer("/msg/item_list/0/file_item/media/aes_key")
             .and_then(|v| v.as_str())
             .expect("aes b64");
-        let aes_raw = base64::engine::general_purpose::STANDARD
+        let decoded = base64::engine::general_purpose::STANDARD
             .decode(aes_b64)
             .expect("decode aes key");
-        assert_eq!(aes_raw.len(), 16);
+        assert_eq!(decoded.len(), 32);
+        assert!(decoded.iter().all(|b| b.is_ascii_hexdigit()));
+    }
+
+    #[tokio::test]
+    async fn send_ilink_file_retries_without_context_token_on_stale_session() {
+        let server = MockServer::start().await;
+
+        Mock::given(method("POST"))
+            .and(path("/ilink/bot/getuploadurl"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ret": 0,
+                "upload_param": "up_param_stale"
+            })))
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/upload"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("x-encrypted-param", "enc_param_stale")
+                    .set_body_string("ok"),
+            )
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/ilink/bot/sendmessage"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ret": -2,
+                "errcode": -2,
+                "errmsg": "unknown error"
+            })))
+            .up_to_n_times(1)
+            .mount(&server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(path("/ilink/bot/sendmessage"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"ret": 0})))
+            .mount(&server)
+            .await;
+
+        let mut tf = tempfile::Builder::new()
+            .suffix(".md")
+            .tempfile()
+            .expect("temp file");
+        tf.write_all(b"# AGENTS\n").expect("write plain");
+        tf.flush().expect("flush");
+
+        let adapter = WeChatAdapter::new(sample_cfg(&server.uri())).expect("adapter");
+        adapter
+            .test_set_context_token("wxid_target", "stale_ctx")
+            .await;
+        adapter
+            .send_ilink_file("wxid_target", tf.path(), None)
+            .await
+            .expect("send file after stale retry");
+
+        let requests = server.received_requests().await.expect("requests");
+        let send_reqs: Vec<_> = requests
+            .iter()
+            .filter(|r| r.url.path() == "/ilink/bot/sendmessage")
+            .collect();
+        assert_eq!(send_reqs.len(), 2);
+
+        let first: Value = serde_json::from_slice(&send_reqs[0].body).expect("first send json");
+        assert_eq!(
+            first.pointer("/msg/context_token").and_then(|v| v.as_str()),
+            Some("stale_ctx")
+        );
+
+        let second: Value = serde_json::from_slice(&send_reqs[1].body).expect("second send json");
+        assert!(second.get("msg").and_then(|m| m.get("context_token")).is_none());
     }
 }
 

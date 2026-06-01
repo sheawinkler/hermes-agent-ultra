@@ -141,11 +141,15 @@ inline, audio files as voice messages, and other files as attachments.",
         (
             "weixin",
             "You are on Weixin/WeChat. Markdown formatting is supported, so you may use it when \
-it improves readability, but keep the message compact and chat-friendly. You can send media files natively: \
-include MEDIA:/absolute/path/to/file in your response. Images are sent as native \
-photos, videos play inline when supported, and other files arrive as downloadable \
-documents. You can also include image URLs in markdown format ![alt](url) and they \
-will be downloaded and sent as native media when possible.",
+it improves readability, but keep the message compact and chat-friendly. \
+You CAN send media files natively — to deliver a file to the user, include \
+MEDIA:/absolute/path/to/file in your response, or call send_message with file=<file_path> \
+and optional caption. Images (.jpg, .png, .webp) are sent as native photos, \
+videos (.mp4) play inline when supported, and other files (.pdf, .docx, .xlsx, .md, .txt, etc.) \
+arrive as downloadable documents. You can also include image URLs in markdown format \
+![alt](url) and they will be downloaded and sent as native media when possible. \
+Do NOT tell the user you sent a file unless you actually used MEDIA: or send_message(file=...) — \
+use one of those whenever a file delivery is appropriate.",
         ),
         (
             "wecom",
