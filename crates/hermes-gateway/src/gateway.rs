@@ -41,6 +41,13 @@ fn non_streaming_feedback_delay_ms() -> u64 {
         .unwrap_or(1200)
 }
 
+fn platform_wants_processing_ack(platform: &str) -> bool {
+    matches!(
+        platform.trim().to_ascii_lowercase().as_str(),
+        "wecom" | "weixin" | "feishu"
+    )
+}
+
 fn streaming_feedback_delay_ms() -> u64 {
     std::env::var("HERMES_GATEWAY_STREAMING_FEEDBACK_DELAY_MS")
         .ok()
@@ -1679,8 +1686,8 @@ impl Gateway {
         runtime_context.deferred_post_delivery_released = Some(deferred_release.clone());
         let context_handler = self.message_handler_with_context.read().await.clone();
         let feedback_done = Arc::new(AtomicBool::new(false));
-        if incoming.platform.eq_ignore_ascii_case("wecom") {
-            let adapter = self.get_adapter("wecom").await;
+        if platform_wants_processing_ack(&incoming.platform) {
+            let adapter = self.get_adapter(&incoming.platform).await;
             let chat_id = incoming.chat_id.clone();
             let done = feedback_done.clone();
             tokio::spawn(async move {
@@ -3110,6 +3117,14 @@ mod tests {
     use async_trait::async_trait;
     use hermes_config::session::SessionConfig;
     use std::sync::Mutex;
+
+    #[test]
+    fn platform_wants_processing_ack_for_chat_platforms() {
+        assert!(platform_wants_processing_ack("weixin"));
+        assert!(platform_wants_processing_ack("wecom"));
+        assert!(platform_wants_processing_ack("feishu"));
+        assert!(!platform_wants_processing_ack("discord"));
+    }
 
     struct TestAdapter {
         messages: Arc<Mutex<Vec<(String, String)>>>,

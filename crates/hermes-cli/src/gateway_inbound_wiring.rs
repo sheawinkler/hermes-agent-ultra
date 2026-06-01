@@ -104,7 +104,7 @@ pub fn gateway_status_message_visible(event_type: &str, message: &str) -> bool {
     if message.trim().is_empty() {
         return false;
     }
-    if event_type == "tool_progress" {
+    if event_type == "tool_progress" || event_type == "tool_failure" {
         return true;
     }
     if event_type != "lifecycle" {
@@ -226,6 +226,14 @@ pub fn make_gateway_on_thinking_callback(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gateway_status_shows_tool_failure() {
+        assert!(gateway_status_message_visible(
+            "tool_failure",
+            "处理中：该网页拒绝自动抓取，正在尝试浏览器打开…"
+        ));
+    }
 
     #[test]
     fn gateway_status_shows_tool_progress() {

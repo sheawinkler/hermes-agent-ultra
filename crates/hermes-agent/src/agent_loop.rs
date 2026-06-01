@@ -1727,6 +1727,35 @@ fn format_tool_progress_message(turn: u32, tool_names: &[String], pulse: u32) ->
     }
 }
 
+fn summarize_tool_failure_for_user(tool_name: &str, error: &str) -> Option<String> {
+    let err = error.to_ascii_lowercase();
+    match tool_name {
+        "web_extract"
+            if err.contains("403")
+                || err.contains("401")
+                || err.contains("blocks automated") =>
+        {
+            Some("处理中：该网页拒绝自动抓取，正在尝试浏览器打开…".to_string())
+        }
+        "browser_navigate"
+            if err.contains("cdp not reachable")
+                || err.contains("auto-start")
+                || err.contains("chrome executable not found") =>
+        {
+            Some("处理中：正在启动浏览器读取页面，请稍候…".to_string())
+        }
+        "browser_navigate" if err.contains("did not become ready") => {
+            Some("处理中：浏览器启动较慢，仍在等待…".to_string())
+        }
+        "web_search"
+            if err.contains("timed out") || err.contains("failed after trying") =>
+        {
+            Some("处理中：网络搜索较慢，正在尝试其他搜索引擎…".to_string())
+        }
+        _ => None,
+    }
+}
+
 struct ToolProgressWatchdog {
     handle: Option<tokio::task::JoinHandle<()>>,
     stop: Arc<AtomicBool>,
@@ -4867,6 +4896,21 @@ impl AgentLoop {
         }
     }
 
+    fn emit_tool_failure_notices(&self, tool_calls: &[ToolCall], results: &[ToolResult]) {
+        for tc in tool_calls {
+            let Some(result) = results
+                .iter()
+                .find(|r| r.tool_call_id == tc.id && r.is_error)
+            else {
+                continue;
+            };
+            if let Some(msg) = summarize_tool_failure_for_user(&tc.function.name, &result.content)
+            {
+                self.emit_status("tool_failure", &msg);
+            }
+        }
+    }
+
     /// Surface provider chain-of-thought to UIs (`on_thinking` / gateway stream).
     fn emit_thinking_delta(&self, text: &str) {
         if text.trim().is_empty() {
@@ -7021,6 +7065,7 @@ impl AgentLoop {
                 elapsed_ms = tool_elapsed,
                 "agent tool batch finished"
             );
+            self.emit_tool_failure_notices(&tool_calls, &results);
             let turn_tool_error_rate = if results.is_empty() {
                 0.0
             } else {
@@ -8502,6 +8547,7 @@ impl AgentLoop {
                 streaming = true,
                 "agent tool batch finished"
             );
+            self.emit_tool_failure_notices(&tool_calls, &results);
             let turn_tool_error_rate = if results.is_empty() {
                 0.0
             } else {
@@ -16046,5 +16092,25 @@ mod tests {
 
         let local = vec!["todo".to_string()];
         assert!(format_tool_progress_message(1, &local, 1).contains("todo"));
+    }
+
+    #[test]
+    fn test_summarize_tool_failure_for_user_web_extract_403() {
+        let msg = summarize_tool_failure_for_user(
+            "web_extract",
+            "HTTP 403 Forbidden when fetching 'https://zhuanlan.zhihu.com/p/1'. This site blocks automated access.",
+        )
+        .expect("expected user notice");
+        assert!(msg.contains("拒绝自动抓取"));
+    }
+
+    #[test]
+    fn test_summarize_tool_failure_for_user_browser_cdp() {
+        let msg = summarize_tool_failure_for_user(
+            "browser_navigate",
+            "Chrome CDP not reachable. Start Chrome with --remote-debugging-port=9222 or set HERMES_BROWSER_AUTO_START=1",
+        )
+        .expect("expected user notice");
+        assert!(msg.contains("浏览器"));
     }
 }
