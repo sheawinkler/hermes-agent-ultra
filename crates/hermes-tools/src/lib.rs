@@ -23,6 +23,7 @@ pub mod toolset;
 pub mod toolset_distributions;
 pub mod tts_streaming;
 pub mod v4a_patch;
+pub mod website_policy;
 
 // Re-export registry types
 pub use registry::{ToolEntry, ToolEntryInfo, ToolRegistry};

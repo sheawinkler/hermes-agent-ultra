@@ -1,4 +1,4 @@
-//! Real web tool backends: Exa/Tavily/Firecrawl/xAI/SearXNG search,
+//! Real web tool backends: Exa/Tavily/Firecrawl/xAI/SearXNG/Brave/DDG search,
 //! Firecrawl/Tavily extract, Tavily crawl, and local fallbacks.
 
 use async_trait::async_trait;
@@ -47,7 +47,9 @@ impl WebSearchBackend for FallbackSearchBackend {
                  - FIRECRAWL_API_KEY or FIRECRAWL_API_URL (https://firecrawl.dev)\n\
                  - XAI_API_KEY with HERMES_WEB_SEARCH_BACKEND=xai (https://x.ai)\n\
                  - SERPER_API_KEY (https://serper.dev)\n\
-                 - SEARXNG_BASE_URL (https://docs.searxng.org/dev/search_api.html)\n\n\
+                 - SEARXNG_BASE_URL or SEARXNG_URL (https://docs.searxng.org/dev/search_api.html)\n\
+                 - BRAVE_SEARCH_API_KEY with HERMES_WEB_SEARCH_BACKEND=brave-free\n\
+                 - HERMES_WEB_SEARCH_BACKEND=ddgs for keyless DuckDuckGo Instant Answer search\n\n\
                  Query was: {}", query
             ),
             "query": query,
@@ -101,6 +103,8 @@ impl WebCrawlBackend for FallbackCrawlBackend {
 const MAX_EXTRACT_BYTES: usize = 512_000; // 500 KB
 const TAVILY_BASE_URL_DEFAULT: &str = "https://api.tavily.com";
 const SEARXNG_SEARCH_PATH: &str = "/search";
+const BRAVE_SEARCH_URL_DEFAULT: &str = "https://api.search.brave.com/res/v1/web/search";
+const DDG_INSTANT_ANSWER_URL_DEFAULT: &str = "https://api.duckduckgo.com/";
 const FIRECRAWL_BASE_URL_DEFAULT: &str = "https://api.firecrawl.dev";
 const XAI_BASE_URL_DEFAULT: &str = "https://api.x.ai/v1";
 const XAI_WEB_MODEL_DEFAULT: &str = "grok-4.3";
@@ -109,6 +113,30 @@ const XAI_WEB_TIMEOUT_SECS_DEFAULT: u64 = 90;
 /// A web extraction backend that fetches HTML via reqwest with no external API dependency.
 pub struct SimpleExtractBackend {
     client: Client,
+}
+
+/// Extract backend for search-only providers selected via legacy `web.backend`.
+pub struct SearchOnlyExtractBackend {
+    provider: &'static str,
+}
+
+impl SearchOnlyExtractBackend {
+    pub fn new(provider: &'static str) -> Self {
+        Self { provider }
+    }
+}
+
+#[async_trait]
+impl WebExtractBackend for SearchOnlyExtractBackend {
+    async fn extract(&self, url: &str, _include_links: bool) -> Result<String, ToolError> {
+        Ok(json!({
+            "success": false,
+            "error": format!("{} is a search-only web backend and cannot extract URLs", self.provider),
+            "url": url,
+            "provider": self.provider,
+        })
+        .to_string())
+    }
 }
 
 impl SimpleExtractBackend {
@@ -677,6 +705,26 @@ fn tavily_crawl_payload(
     payload
 }
 
+fn search_result(
+    title: impl Into<String>,
+    url: impl Into<String>,
+    description: impl Into<String>,
+    score: Option<f64>,
+    position: usize,
+) -> Value {
+    let title = title.into();
+    let url = url.into();
+    let description = description.into();
+    json!({
+        "title": title,
+        "url": url,
+        "description": description,
+        "text": description,
+        "score": score.unwrap_or(0.0),
+        "position": position,
+    })
+}
+
 fn normalize_tavily_documents(response: &Value, fallback_url: &str) -> Vec<Value> {
     let mut documents = Vec::new();
     if let Some(results) = response.get("results").and_then(|v| v.as_array()) {
@@ -757,15 +805,19 @@ impl SearxngSearchBackend {
         }
     }
 
-    /// Create from `SEARXNG_BASE_URL`.
+    /// Create from `SEARXNG_BASE_URL` or upstream-compatible `SEARXNG_URL`.
     pub fn from_env() -> Result<Self, ToolError> {
-        let base_url = std::env::var("SEARXNG_BASE_URL").map_err(|_| {
-            ToolError::ExecutionFailed("SEARXNG_BASE_URL environment variable not set".into())
-        })?;
+        let base_url = std::env::var("SEARXNG_BASE_URL")
+            .or_else(|_| std::env::var("SEARXNG_URL"))
+            .map_err(|_| {
+                ToolError::ExecutionFailed(
+                    "SEARXNG_BASE_URL or SEARXNG_URL environment variable not set".into(),
+                )
+            })?;
         let base_url = base_url.trim();
         if base_url.is_empty() {
             return Err(ToolError::ExecutionFailed(
-                "SEARXNG_BASE_URL environment variable is empty".into(),
+                "SEARXNG_BASE_URL/SEARXNG_URL environment variable is empty".into(),
             ));
         }
         Ok(Self::new(base_url.to_string()))
@@ -815,43 +867,275 @@ impl WebSearchBackend for SearxngSearchBackend {
         let data: Value = serde_json::from_str(&text).map_err(|e| {
             ToolError::ExecutionFailed(format!("Failed to parse SearXNG response: {}", e))
         })?;
-        let formatted: Vec<Value> = data
+        let mut rows: Vec<Value> = data
             .get("results")
             .and_then(|r| r.as_array())
             .map(|arr| {
                 arr.iter()
-                    .take(num_results)
                     .map(|r| {
-                        json!({
-                            "title": r.get("title").and_then(|v| v.as_str()).unwrap_or(""),
-                            "url": r.get("url").and_then(|v| v.as_str()).unwrap_or(""),
-                            "text": r
-                                .get("content")
-                                .or_else(|| r.get("snippet"))
-                                .and_then(|v| v.as_str())
-                                .unwrap_or(""),
-                            "score": r.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0),
-                        })
+                        let description = r
+                            .get("content")
+                            .or_else(|| r.get("snippet"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        search_result(
+                            r.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                            r.get("url").and_then(|v| v.as_str()).unwrap_or(""),
+                            description,
+                            r.get("score").and_then(|v| v.as_f64()),
+                            0,
+                        )
                     })
                     .collect()
             })
             .unwrap_or_default();
+        rows.sort_by(|a, b| {
+            let left = a.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            let right = b.get("score").and_then(|v| v.as_f64()).unwrap_or(0.0);
+            right
+                .partial_cmp(&left)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        for (idx, row) in rows.iter_mut().take(num_results).enumerate() {
+            row["position"] = json!(idx + 1);
+        }
+        let formatted: Vec<Value> = rows.into_iter().take(num_results).collect();
 
         serde_json::to_string_pretty(&json!({ "results": formatted }))
             .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {}", e)))
     }
 }
 
+// ---------------------------------------------------------------------------
+// BraveFreeSearchBackend
+// ---------------------------------------------------------------------------
+
+/// Brave Search API backend using the free web endpoint.
+pub struct BraveFreeSearchBackend {
+    client: Client,
+    api_key: String,
+    endpoint: String,
+}
+
+impl BraveFreeSearchBackend {
+    pub fn new(api_key: String, endpoint: String) -> Self {
+        Self {
+            client: Client::new(),
+            api_key,
+            endpoint,
+        }
+    }
+
+    pub fn from_env() -> Result<Self, ToolError> {
+        let api_key = std::env::var("BRAVE_SEARCH_API_KEY").map_err(|_| {
+            ToolError::ExecutionFailed("BRAVE_SEARCH_API_KEY environment variable not set".into())
+        })?;
+        let api_key = api_key.trim();
+        if api_key.is_empty() {
+            return Err(ToolError::ExecutionFailed(
+                "BRAVE_SEARCH_API_KEY environment variable is empty".into(),
+            ));
+        }
+        let endpoint = std::env::var("BRAVE_SEARCH_URL")
+            .unwrap_or_else(|_| BRAVE_SEARCH_URL_DEFAULT.to_string());
+        Ok(Self::new(api_key.to_string(), endpoint))
+    }
+
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+}
+
+#[async_trait]
+impl WebSearchBackend for BraveFreeSearchBackend {
+    async fn search(
+        &self,
+        query: &str,
+        num_results: usize,
+        _category: Option<&str>,
+    ) -> Result<String, ToolError> {
+        let count = num_results.clamp(1, 20).to_string();
+        let resp = self
+            .client
+            .get(&self.endpoint)
+            .header("X-Subscription-Token", &self.api_key)
+            .query(&[("q", query), ("count", count.as_str())])
+            .send()
+            .await
+            .map_err(|e| ToolError::ExecutionFailed(format!("Brave Search request failed: {e}")))?;
+        let status = resp.status();
+        let text = resp.text().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to read Brave Search response: {e}"))
+        })?;
+        if !status.is_success() {
+            return Err(ToolError::ExecutionFailed(format!(
+                "Brave Search API error ({status}): {text}"
+            )));
+        }
+        let data: Value = serde_json::from_str(&text).map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to parse Brave Search response: {e}"))
+        })?;
+        let formatted = normalize_brave_results(&data, num_results);
+        serde_json::to_string_pretty(&json!({ "results": formatted, "provider": "brave-free" }))
+            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {e}")))
+    }
+}
+
+fn normalize_brave_results(response: &Value, limit: usize) -> Vec<Value> {
+    response
+        .get("web")
+        .and_then(|web| web.get("results"))
+        .and_then(|results| results.as_array())
+        .map(|rows| {
+            rows.iter()
+                .take(limit)
+                .enumerate()
+                .map(|(idx, row)| {
+                    search_result(
+                        row.get("title").and_then(|v| v.as_str()).unwrap_or(""),
+                        row.get("url").and_then(|v| v.as_str()).unwrap_or(""),
+                        row.get("description")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(""),
+                        None,
+                        idx + 1,
+                    )
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+// ---------------------------------------------------------------------------
+// DuckDuckGoSearchBackend
+// ---------------------------------------------------------------------------
+
+/// Keyless DuckDuckGo Instant Answer backend.
+pub struct DuckDuckGoSearchBackend {
+    client: Client,
+    endpoint: String,
+}
+
+impl DuckDuckGoSearchBackend {
+    pub fn new(endpoint: String) -> Self {
+        Self {
+            client: Client::new(),
+            endpoint,
+        }
+    }
+
+    pub fn from_env() -> Result<Self, ToolError> {
+        Ok(Self::new(std::env::var("DDG_SEARCH_URL").unwrap_or_else(
+            |_| DDG_INSTANT_ANSWER_URL_DEFAULT.to_string(),
+        )))
+    }
+
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+}
+
+#[async_trait]
+impl WebSearchBackend for DuckDuckGoSearchBackend {
+    async fn search(
+        &self,
+        query: &str,
+        num_results: usize,
+        _category: Option<&str>,
+    ) -> Result<String, ToolError> {
+        let resp = self
+            .client
+            .get(&self.endpoint)
+            .query(&[
+                ("q", query),
+                ("format", "json"),
+                ("no_html", "1"),
+                ("skip_disambig", "1"),
+            ])
+            .send()
+            .await
+            .map_err(|e| {
+                ToolError::ExecutionFailed(format!("DuckDuckGo search request failed: {e}"))
+            })?;
+        let status = resp.status();
+        let text = resp.text().await.map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to read DuckDuckGo response: {e}"))
+        })?;
+        if !status.is_success() {
+            return Err(ToolError::ExecutionFailed(format!(
+                "DuckDuckGo API error ({status}): {text}"
+            )));
+        }
+        let data: Value = serde_json::from_str(&text).map_err(|e| {
+            ToolError::ExecutionFailed(format!("Failed to parse DuckDuckGo response: {e}"))
+        })?;
+        let formatted = normalize_duckduckgo_results(&data, num_results);
+        serde_json::to_string_pretty(&json!({ "results": formatted, "provider": "ddgs" }))
+            .map_err(|e| ToolError::ExecutionFailed(format!("Failed to serialize results: {e}")))
+    }
+}
+
+fn normalize_duckduckgo_results(response: &Value, limit: usize) -> Vec<Value> {
+    let mut rows = Vec::new();
+    if let Some(url) = response
+        .get("AbstractURL")
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.trim().is_empty())
+    {
+        rows.push(search_result(
+            response
+                .get("Heading")
+                .and_then(|v| v.as_str())
+                .unwrap_or(""),
+            url,
+            response
+                .get("AbstractText")
+                .and_then(|v| v.as_str())
+                .unwrap_or(""),
+            None,
+            0,
+        ));
+    }
+    collect_duckduckgo_related(response.get("RelatedTopics"), &mut rows);
+    for (idx, row) in rows.iter_mut().take(limit).enumerate() {
+        row["position"] = json!(idx + 1);
+    }
+    rows.into_iter().take(limit).collect()
+}
+
+fn collect_duckduckgo_related(value: Option<&Value>, rows: &mut Vec<Value>) {
+    let Some(Value::Array(items)) = value else {
+        return;
+    };
+    for item in items {
+        if let Some(topics) = item.get("Topics") {
+            collect_duckduckgo_related(Some(topics), rows);
+            continue;
+        }
+        let Some(url) = item
+            .get("FirstURL")
+            .and_then(|v| v.as_str())
+            .filter(|v| !v.trim().is_empty())
+        else {
+            continue;
+        };
+        let text = item.get("Text").and_then(|v| v.as_str()).unwrap_or("");
+        let title = text.split(" - ").next().unwrap_or(text);
+        rows.push(search_result(title, url, text, None, 0));
+    }
+}
+
 /// Resolve preferred web-search backend from environment.
 ///
 /// Priority:
-/// 1. Explicit `HERMES_WEB_SEARCH_BACKEND` override
-///    - `exa`, `tavily`, `firecrawl`, `xai`, `searxng`, `fallback`
+/// 1. Explicit `HERMES_WEB_SEARCH_BACKEND` override, then legacy `HERMES_WEB_BACKEND`
+///    - `exa`, `tavily`, `firecrawl`, `xai`, `searxng`, `brave-free`, `ddgs`, `fallback`
 /// 2. Exa (`EXA_API_KEY`)
 /// 3. Tavily (`TAVILY_API_KEY`, optional `TAVILY_BASE_URL`)
 /// 4. Firecrawl (`FIRECRAWL_API_KEY`, `FIRECRAWL_API_URL`, or managed gateway)
-/// 5. SearXNG (`SEARXNG_BASE_URL`)
-/// 6. Fallback helpful message backend
+/// 5. SearXNG (`SEARXNG_BASE_URL` or `SEARXNG_URL`)
+/// 6. Brave (`BRAVE_SEARCH_API_KEY`)
+/// 7. Keyless DDG fallback
 pub fn search_backend_from_env_or_fallback() -> Box<dyn WebSearchBackend> {
     match search_backend_choice_from_env() {
         "exa" => ExaSearchBackend::from_env()
@@ -869,20 +1153,22 @@ pub fn search_backend_from_env_or_fallback() -> Box<dyn WebSearchBackend> {
         "searxng" => SearxngSearchBackend::from_env()
             .map(|b| Box::new(b) as Box<dyn WebSearchBackend>)
             .unwrap_or_else(|_| Box::new(FallbackSearchBackend::new())),
+        "brave-free" => BraveFreeSearchBackend::from_env()
+            .map(|b| Box::new(b) as Box<dyn WebSearchBackend>)
+            .unwrap_or_else(|_| Box::new(FallbackSearchBackend::new())),
+        "ddgs" => DuckDuckGoSearchBackend::from_env()
+            .map(|b| Box::new(b) as Box<dyn WebSearchBackend>)
+            .unwrap_or_else(|_| Box::new(FallbackSearchBackend::new())),
         _ => Box::new(FallbackSearchBackend::new()),
     }
 }
 
 fn search_backend_choice_from_env() -> &'static str {
-    if let Ok(choice) = std::env::var("HERMES_WEB_SEARCH_BACKEND") {
-        match choice.trim().to_ascii_lowercase().as_str() {
-            "exa" => return "exa",
-            "tavily" => return "tavily",
-            "firecrawl" => return "firecrawl",
-            "xai" | "grok" => return "xai",
-            "searxng" | "searx" => return "searxng",
-            "fallback" | "none" | "off" | "disabled" => return "fallback",
-            _ => {}
+    if let Some(choice) = env_optional_nonempty("HERMES_WEB_SEARCH_BACKEND")
+        .or_else(|| env_optional_nonempty("HERMES_WEB_BACKEND"))
+    {
+        if let Some(normalized) = normalize_search_backend_choice(&choice) {
+            return normalized;
         }
     }
 
@@ -892,17 +1178,34 @@ fn search_backend_choice_from_env() -> &'static str {
         "tavily"
     } else if firecrawl_direct_config_present() || firecrawl_managed_config_present() {
         "firecrawl"
-    } else if env_present_nonempty("SEARXNG_BASE_URL") {
+    } else if searxng_config_present() {
         "searxng"
+    } else if env_present_nonempty("BRAVE_SEARCH_API_KEY") {
+        "brave-free"
     } else {
-        "fallback"
+        "ddgs"
+    }
+}
+
+fn normalize_search_backend_choice(choice: &str) -> Option<&'static str> {
+    match choice.trim().to_ascii_lowercase().as_str() {
+        "exa" => Some("exa"),
+        "tavily" => Some("tavily"),
+        "firecrawl" => Some("firecrawl"),
+        "xai" | "grok" => Some("xai"),
+        "searxng" | "searx" => Some("searxng"),
+        "brave" | "brave-free" | "brave_free" => Some("brave-free"),
+        "ddg" | "ddgs" | "duckduckgo" => Some("ddgs"),
+        "fallback" | "none" | "off" | "disabled" => Some("fallback"),
+        _ => None,
     }
 }
 
 /// Resolve preferred web-extract backend from environment.
 ///
 /// Priority:
-/// 1. Explicit `HERMES_WEB_EXTRACT_BACKEND` override: `firecrawl`, `tavily`, `simple`
+/// 1. Explicit `HERMES_WEB_EXTRACT_BACKEND` override, then legacy `HERMES_WEB_BACKEND`
+///    (`firecrawl`, `tavily`, `simple`; search-only backends return a clear error)
 /// 2. Firecrawl direct/self-hosted/managed when configured
 /// 3. Tavily when configured
 /// 4. Simple local HTML fetch fallback
@@ -914,6 +1217,11 @@ pub fn extract_backend_from_env_or_fallback() -> Box<dyn WebExtractBackend> {
         "tavily" => TavilyExtractBackend::from_env()
             .map(|b| Box::new(b) as Box<dyn WebExtractBackend>)
             .unwrap_or_else(|_| Box::new(SimpleExtractBackend::new())),
+        "search-only:brave-free" => Box::new(SearchOnlyExtractBackend::new("brave-free")),
+        "search-only:ddgs" => Box::new(SearchOnlyExtractBackend::new("ddgs")),
+        "search-only:searxng" => Box::new(SearchOnlyExtractBackend::new("searxng")),
+        "search-only:exa" => Box::new(SearchOnlyExtractBackend::new("exa")),
+        "search-only:xai" => Box::new(SearchOnlyExtractBackend::new("xai")),
         _ => Box::new(SimpleExtractBackend::new()),
     }
 }
@@ -924,6 +1232,20 @@ fn extract_backend_choice_from_env() -> &'static str {
             "firecrawl" => return "firecrawl",
             "tavily" => return "tavily",
             "simple" | "fallback" | "local" | "none" | "off" | "disabled" => return "simple",
+            _ => {}
+        }
+    }
+    if let Some(choice) = env_optional_nonempty("HERMES_WEB_BACKEND")
+        .and_then(|choice| normalize_search_backend_choice(&choice).map(str::to_string))
+    {
+        match choice.as_str() {
+            "firecrawl" => return "firecrawl",
+            "tavily" => return "tavily",
+            "brave-free" => return "search-only:brave-free",
+            "ddgs" => return "search-only:ddgs",
+            "searxng" => return "search-only:searxng",
+            "exa" => return "search-only:exa",
+            "xai" => return "search-only:xai",
             _ => {}
         }
     }
@@ -960,6 +1282,13 @@ fn crawl_backend_choice_from_env() -> &'static str {
             _ => {}
         }
     }
+    if let Some(choice) = env_optional_nonempty("HERMES_WEB_BACKEND")
+        .and_then(|choice| normalize_search_backend_choice(&choice).map(str::to_string))
+    {
+        if choice == "tavily" {
+            return "tavily";
+        }
+    }
 
     if env_present_nonempty("TAVILY_API_KEY") {
         "tavily"
@@ -973,6 +1302,10 @@ fn env_present_nonempty(name: &str) -> bool {
         .ok()
         .map(|v| !v.trim().is_empty())
         .unwrap_or(false)
+}
+
+fn searxng_config_present() -> bool {
+    env_present_nonempty("SEARXNG_BASE_URL") || env_present_nonempty("SEARXNG_URL")
 }
 
 fn env_optional_nonempty(name: &str) -> Option<String> {
@@ -1688,8 +2021,13 @@ mod web_search_env_tests {
                 "TOOL_GATEWAY_DOMAIN",
                 "TOOL_GATEWAY_SCHEME",
                 "SEARXNG_BASE_URL",
+                "SEARXNG_URL",
+                "BRAVE_SEARCH_API_KEY",
+                "BRAVE_SEARCH_URL",
+                "DDG_SEARCH_URL",
                 "XAI_API_KEY",
                 "XAI_BASE_URL",
+                "HERMES_WEB_BACKEND",
                 "HERMES_WEB_SEARCH_BACKEND",
                 "HERMES_WEB_EXTRACT_BACKEND",
                 "HERMES_WEB_CRAWL_BACKEND",
@@ -1775,6 +2113,14 @@ mod web_search_env_tests {
     }
 
     #[test]
+    fn searxng_from_env_accepts_upstream_url_alias() {
+        let _scope = EnvScope::new();
+        std::env::set_var("SEARXNG_URL", "https://search.example.com/");
+        let backend = SearxngSearchBackend::from_env().expect("searxng backend from alias");
+        assert_eq!(backend.base_url(), "https://search.example.com");
+    }
+
+    #[test]
     fn search_backend_choice_uses_searxng_when_only_base_url_available() {
         let _scope = EnvScope::new();
         std::env::set_var("SEARXNG_BASE_URL", "https://search.example.com");
@@ -1792,7 +2138,7 @@ mod web_search_env_tests {
     fn search_backend_choice_uses_xai_only_when_explicit() {
         let _scope = EnvScope::new();
         std::env::set_var("XAI_API_KEY", "xai-key");
-        assert_eq!(search_backend_choice_from_env(), "fallback");
+        assert_eq!(search_backend_choice_from_env(), "ddgs");
         std::env::set_var("HERMES_WEB_SEARCH_BACKEND", "xai");
         assert_eq!(search_backend_choice_from_env(), "xai");
     }
@@ -1805,9 +2151,31 @@ mod web_search_env_tests {
         assert_eq!(search_backend_choice_from_env(), "searxng");
     }
 
-    #[tokio::test]
-    async fn search_backend_falls_back_when_keys_missing() {
+    #[test]
+    fn search_backend_choice_honors_legacy_generic_web_backend() {
         let _scope = EnvScope::new();
+        std::env::set_var("HERMES_WEB_BACKEND", "brave");
+        std::env::set_var("EXA_API_KEY", "exa-key");
+        assert_eq!(search_backend_choice_from_env(), "brave-free");
+    }
+
+    #[test]
+    fn search_backend_choice_uses_brave_when_key_is_available() {
+        let _scope = EnvScope::new();
+        std::env::set_var("BRAVE_SEARCH_API_KEY", "brave-key");
+        assert_eq!(search_backend_choice_from_env(), "brave-free");
+    }
+
+    #[test]
+    fn search_backend_choice_uses_keyless_ddg_as_last_resort() {
+        let _scope = EnvScope::new();
+        assert_eq!(search_backend_choice_from_env(), "ddgs");
+    }
+
+    #[tokio::test]
+    async fn search_backend_falls_back_when_explicitly_disabled() {
+        let _scope = EnvScope::new();
+        std::env::set_var("HERMES_WEB_SEARCH_BACKEND", "fallback");
         let backend = search_backend_from_env_or_fallback();
         let out = backend
             .search("hello", 3, None)
@@ -1824,6 +2192,13 @@ mod web_search_env_tests {
         assert_eq!(extract_backend_choice_from_env(), "tavily");
         std::env::set_var("FIRECRAWL_API_KEY", "fire-key");
         assert_eq!(extract_backend_choice_from_env(), "firecrawl");
+    }
+
+    #[test]
+    fn extract_backend_choice_reports_search_only_generic_backend() {
+        let _scope = EnvScope::new();
+        std::env::set_var("HERMES_WEB_BACKEND", "ddgs");
+        assert_eq!(extract_backend_choice_from_env(), "search-only:ddgs");
     }
 
     #[test]
@@ -1883,6 +2258,44 @@ mod web_search_env_tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0]["title"], "Rust");
         assert_eq!(rows[0]["text"], "lang");
+    }
+
+    #[test]
+    fn normalize_brave_results_maps_positions_and_limit() {
+        let rows = normalize_brave_results(
+            &json!({
+                "web": {
+                    "results": [
+                        {"title": "A", "url": "https://a.example", "description": "desc a"},
+                        {"title": "B", "url": "https://b.example", "description": "desc b"}
+                    ]
+                }
+            }),
+            1,
+        );
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["title"], "A");
+        assert_eq!(rows[0]["description"], "desc a");
+        assert_eq!(rows[0]["position"], 1);
+    }
+
+    #[test]
+    fn normalize_duckduckgo_results_flattens_related_topics() {
+        let rows = normalize_duckduckgo_results(
+            &json!({
+                "RelatedTopics": [
+                    {"Text": "A - desc a", "FirstURL": "https://a.example"},
+                    {"Topics": [
+                        {"Text": "B - desc b", "FirstURL": "https://b.example"}
+                    ]}
+                ]
+            }),
+            5,
+        );
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["title"], "A");
+        assert_eq!(rows[1]["url"], "https://b.example");
+        assert_eq!(rows[1]["position"], 2);
     }
 
     #[test]

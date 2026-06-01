@@ -122,6 +122,7 @@ fn arb_gateway_config() -> impl Strategy<Value = GatewayConfig> {
                 streaming,
                 display: Default::default(),
                 terminal: TerminalConfig::default(),
+                web: Default::default(),
                 llm_providers: HashMap::new(),
                 fallback_model: None,
                 fallback_models: Vec::new(),

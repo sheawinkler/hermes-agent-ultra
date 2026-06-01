@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 pub use hermes_core::ConfigError;
 
 use crate::config::{
-    GatewayConfig, LlmProviderConfig, ProxyConfig, TerminalBackendType, TerminalConfig,
+    GatewayConfig, LlmProviderConfig, ProxyConfig, TerminalBackendType, TerminalConfig, WebConfig,
 };
 use crate::merge::merge_configs;
 use crate::paths;
@@ -309,6 +309,7 @@ pub fn load_config(home_dir: Option<&str>) -> Result<GatewayConfig, ConfigError>
     }
 
     bridge_terminal_config_to_env(&config.terminal);
+    bridge_web_config_to_env(&config.web);
 
     // Layer 3: environment variables (highest priority)
     apply_env_overrides(&mut config);
@@ -501,7 +502,7 @@ fn normalize_provider_secrets(config: &mut GatewayConfig) {
     });
 }
 
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, llm.<provider>.api_key|api_key_env|base_url|model|command|args|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, llm.<provider>.api_key|api_key_env|base_url|model|command|args|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
 
 fn mask_secret(s: &str) -> String {
     if s.is_empty() {
@@ -609,6 +610,18 @@ fn apply_user_config_patch_dotted(
                 }
             };
             config.security.allow_private_urls = parsed;
+        }
+        ["web", "backend"] => {
+            config.web.backend = value.trim().to_string();
+        }
+        ["web", "search_backend"] => {
+            config.web.search_backend = value.trim().to_string();
+        }
+        ["web", "extract_backend"] => {
+            config.web.extract_backend = value.trim().to_string();
+        }
+        ["web", "crawl_backend"] => {
+            config.web.crawl_backend = value.trim().to_string();
         }
         ["sessions", "auto_prune"] => {
             let normalized = value.trim().to_ascii_lowercase();
@@ -820,6 +833,26 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .unwrap_or_else(|| "(not set)".to_string())),
+        ["web", "backend"] => Ok(if config.web.backend.trim().is_empty() {
+            "(not set)".to_string()
+        } else {
+            config.web.backend.clone()
+        }),
+        ["web", "search_backend"] => Ok(if config.web.search_backend.trim().is_empty() {
+            "(not set)".to_string()
+        } else {
+            config.web.search_backend.clone()
+        }),
+        ["web", "extract_backend"] => Ok(if config.web.extract_backend.trim().is_empty() {
+            "(not set)".to_string()
+        } else {
+            config.web.extract_backend.clone()
+        }),
+        ["web", "crawl_backend"] => Ok(if config.web.crawl_backend.trim().is_empty() {
+            "(not set)".to_string()
+        } else {
+            config.web.crawl_backend.clone()
+        }),
         ["sessions", "auto_prune"] => Ok(config.sessions.auto_prune.to_string()),
         ["sessions", "retention_days"] => Ok(config.sessions.retention_days.to_string()),
         ["sessions", "vacuum_after_prune"] => Ok(config.sessions.vacuum_after_prune.to_string()),
@@ -1113,8 +1146,31 @@ pub fn terminal_config_env_bridge_key(key: &str) -> Option<&'static str> {
         .find_map(|(config_key, env_key)| (*config_key == normalized).then_some(*env_key))
 }
 
+pub fn web_config_env_bridge_pairs() -> &'static [(&'static str, &'static str)] {
+    &[
+        ("backend", "HERMES_WEB_BACKEND"),
+        ("search_backend", "HERMES_WEB_SEARCH_BACKEND"),
+        ("extract_backend", "HERMES_WEB_EXTRACT_BACKEND"),
+        ("crawl_backend", "HERMES_WEB_CRAWL_BACKEND"),
+    ]
+}
+
+pub fn web_config_env_bridge_key(key: &str) -> Option<&'static str> {
+    let normalized = key
+        .trim()
+        .strip_prefix("web.")
+        .unwrap_or_else(|| key.trim())
+        .replace('-', "_")
+        .to_ascii_lowercase();
+    web_config_env_bridge_pairs()
+        .iter()
+        .find_map(|(config_key, env_key)| (*config_key == normalized).then_some(*env_key))
+}
+
 fn config_env_bridge_key(key: &str) -> Option<String> {
-    terminal_config_env_bridge_key(key).map(ToString::to_string)
+    terminal_config_env_bridge_key(key)
+        .or_else(|| web_config_env_bridge_key(key))
+        .map(ToString::to_string)
 }
 
 fn split_config_key(key: &str) -> Vec<String> {
@@ -1437,6 +1493,36 @@ fn bridge_terminal_config_to_env(terminal: &TerminalConfig) {
     }
 }
 
+fn bridge_web_config_to_env(web: &WebConfig) {
+    if !web.backend.trim().is_empty() {
+        set_env_if_missing("HERMES_WEB_BACKEND", web.backend.clone());
+    }
+    if !web.search_backend.trim().is_empty() {
+        set_env_if_missing("HERMES_WEB_SEARCH_BACKEND", web.search_backend.clone());
+    }
+    if !web.extract_backend.trim().is_empty() {
+        set_env_if_missing("HERMES_WEB_EXTRACT_BACKEND", web.extract_backend.clone());
+    }
+    if !web.crawl_backend.trim().is_empty() {
+        set_env_if_missing("HERMES_WEB_CRAWL_BACKEND", web.crawl_backend.clone());
+    }
+}
+
+fn apply_web_env_overrides(config: &mut WebConfig) {
+    if let Some(v) = env_var_nonempty("HERMES_WEB_BACKEND") {
+        config.backend = v;
+    }
+    if let Some(v) = env_var_nonempty("HERMES_WEB_SEARCH_BACKEND") {
+        config.search_backend = v;
+    }
+    if let Some(v) = env_var_nonempty("HERMES_WEB_EXTRACT_BACKEND") {
+        config.extract_backend = v;
+    }
+    if let Some(v) = env_var_nonempty("HERMES_WEB_CRAWL_BACKEND") {
+        config.crawl_backend = v;
+    }
+}
+
 fn apply_terminal_env_overrides(config: &mut TerminalConfig) {
     if let Some(v) =
         env_var_nonempty("TERMINAL_ENV").or_else(|| env_var_nonempty("TERMINAL_BACKEND"))
@@ -1579,6 +1665,7 @@ fn apply_terminal_env_overrides(config: &mut TerminalConfig) {
 /// `WEIXIN_*`、`DINGTALK_*` 等与 Python `gateway/platforms/*.py` 一致的键写入 `platforms`。
 pub fn apply_env_overrides(config: &mut GatewayConfig) {
     apply_terminal_env_overrides(&mut config.terminal);
+    apply_web_env_overrides(&mut config.web);
 
     if let Ok(v) = std::env::var("HERMES_MODEL") {
         config.model = Some(v);
@@ -1795,6 +1882,13 @@ mod tests {
         }
         // SAFETY: tests serialize env mutation with ENV_LOCK.
         unsafe { std::env::remove_var("TERMINAL_BACKEND") };
+    }
+
+    fn clear_web_env_bridge_vars() {
+        for (_, env_key) in web_config_env_bridge_pairs() {
+            // SAFETY: tests serialize env mutation with ENV_LOCK.
+            unsafe { std::env::remove_var(env_key) };
+        }
     }
 
     #[test]
@@ -2114,6 +2208,94 @@ llm_providers:
         assert!(env_text.contains("TERMINAL_DOCKER_ENV=FOO=bar"));
         assert!(env_text.contains("TERMINAL_AUTO_SOURCE_BASHRC=false"));
         clear_terminal_env_bridge_vars();
+    }
+
+    #[test]
+    fn web_config_bridge_map_covers_runtime_backend_keys() {
+        let keys = web_config_env_bridge_pairs()
+            .iter()
+            .map(|(key, _)| *key)
+            .collect::<std::collections::HashSet<_>>();
+        for key in [
+            "backend",
+            "search_backend",
+            "extract_backend",
+            "crawl_backend",
+        ] {
+            assert!(keys.contains(key), "missing web bridge key: {key}");
+            assert!(
+                web_config_env_bridge_key(&format!("web.{key}")).is_some(),
+                "web.{key} should map to an env var"
+            );
+        }
+    }
+
+    #[test]
+    fn set_user_config_value_bridges_web_backend_keys() {
+        use tempfile::tempdir;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_web_env_bridge_vars();
+        let dir = tempdir().unwrap();
+        for (key, value, env_key) in [
+            ("web.backend", "firecrawl", "HERMES_WEB_BACKEND"),
+            (
+                "web.search_backend",
+                "brave-free",
+                "HERMES_WEB_SEARCH_BACKEND",
+            ),
+            (
+                "web.extract_backend",
+                "tavily",
+                "HERMES_WEB_EXTRACT_BACKEND",
+            ),
+            ("web.crawl_backend", "tavily", "HERMES_WEB_CRAWL_BACKEND"),
+        ] {
+            let result = set_user_config_value(dir.path(), key, value).unwrap();
+            assert!(result.wrote_config(), "{key} should write config");
+            assert!(result.wrote_env(), "{key} should write env");
+            assert_eq!(result.env_key.as_deref(), Some(env_key));
+        }
+        let env_text = std::fs::read_to_string(dir.path().join(".env")).unwrap();
+        assert!(env_text.contains("HERMES_WEB_SEARCH_BACKEND=brave-free"));
+        clear_web_env_bridge_vars();
+    }
+
+    #[test]
+    fn load_config_bridges_web_yaml_to_env_without_overriding_existing_env() {
+        use tempfile::tempdir;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        clear_web_env_bridge_vars();
+        let dir = tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("config.yaml"),
+            r#"
+web:
+  backend: firecrawl
+  search_backend: searxng
+  extract_backend: tavily
+  crawl_backend: tavily
+"#,
+        )
+        .unwrap();
+        // SAFETY: test process serializes env mutation via ENV_LOCK.
+        unsafe { std::env::set_var("HERMES_WEB_SEARCH_BACKEND", "brave-free") };
+
+        let cfg = load_config(Some(dir.path().to_string_lossy().as_ref())).unwrap();
+        assert_eq!(cfg.web.backend, "firecrawl");
+        assert_eq!(cfg.web.search_backend, "brave-free");
+        assert_eq!(cfg.web.extract_backend, "tavily");
+        assert_eq!(std::env::var("HERMES_WEB_BACKEND").unwrap(), "firecrawl");
+        assert_eq!(
+            std::env::var("HERMES_WEB_SEARCH_BACKEND").unwrap(),
+            "brave-free"
+        );
+        assert_eq!(
+            std::env::var("HERMES_WEB_EXTRACT_BACKEND").unwrap(),
+            "tavily"
+        );
+        clear_web_env_bridge_vars();
     }
 
     #[test]

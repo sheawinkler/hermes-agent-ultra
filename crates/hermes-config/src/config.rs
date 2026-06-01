@@ -70,6 +70,10 @@ pub struct GatewayConfig {
     #[serde(default)]
     pub terminal: TerminalConfig,
 
+    /// Web search/extract/crawl backend selection.
+    #[serde(default)]
+    pub web: WebConfig,
+
     /// Named LLM provider configurations.
     #[serde(default)]
     pub llm_providers: HashMap<String, LlmProviderConfig>,
@@ -160,6 +164,7 @@ impl Default for GatewayConfig {
             streaming: StreamingConfig::default(),
             display: DisplayConfig::default(),
             terminal: TerminalConfig::default(),
+            web: WebConfig::default(),
             llm_providers: HashMap::new(),
             fallback_model: None,
             fallback_models: Vec::new(),
@@ -1077,6 +1082,30 @@ fn default_max_output_size() -> usize {
 }
 
 // ---------------------------------------------------------------------------
+// WebConfig
+// ---------------------------------------------------------------------------
+
+/// Web backend selection knobs aligned with Python config shape.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct WebConfig {
+    /// Shared legacy backend selector.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub backend: String,
+
+    /// Search-specific backend selector.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub search_backend: String,
+
+    /// Extract-specific backend selector.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub extract_backend: String,
+
+    /// Crawl-specific backend selector.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub crawl_backend: String,
+}
+
+// ---------------------------------------------------------------------------
 // ApprovalConfig
 // ---------------------------------------------------------------------------
 
@@ -1121,14 +1150,35 @@ pub struct SecurityConfig {
     /// RFC1918/CGNAT/benchmark ranges.
     #[serde(default)]
     pub allow_private_urls: bool,
+
+    /// Website/domain blocklist used by web-facing tools.
+    #[serde(default)]
+    pub website_blocklist: WebsiteBlocklistConfig,
 }
 
 impl Default for SecurityConfig {
     fn default() -> Self {
         Self {
             allow_private_urls: false,
+            website_blocklist: WebsiteBlocklistConfig::default(),
         }
     }
+}
+
+/// Website/domain blocklist configuration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
+pub struct WebsiteBlocklistConfig {
+    /// Enable domain blocklist enforcement.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Inline blocked domains or wildcard domain patterns.
+    #[serde(default)]
+    pub domains: Vec<String>,
+
+    /// Additional newline-delimited blocklist files.
+    #[serde(default)]
+    pub shared_files: Vec<String>,
 }
 
 /// Skills configuration.
@@ -1434,6 +1484,18 @@ display:
     fn security_config_default() {
         let s = SecurityConfig::default();
         assert!(!s.allow_private_urls);
+        assert!(!s.website_blocklist.enabled);
+        assert!(s.website_blocklist.domains.is_empty());
+        assert!(s.website_blocklist.shared_files.is_empty());
+    }
+
+    #[test]
+    fn web_config_default_matches_upstream_empty_selectors() {
+        let web = WebConfig::default();
+        assert_eq!(web.backend, "");
+        assert_eq!(web.search_backend, "");
+        assert_eq!(web.extract_backend, "");
+        assert_eq!(web.crawl_backend, "");
     }
 
     #[test]

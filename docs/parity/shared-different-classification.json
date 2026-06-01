@@ -2290,6 +2290,41 @@
       "rationale": "API-server cron jobs behavior is covered by Rust-native gateway contracts backed by hermes_cron: list/create/get/update/delete, include_disabled filtering, pause/resume/manual run, default local delivery, whitelisted updates including skill aliases, required-field and length validation, repeat validation, invalid-ID rejection with source-context logging, and bearer-auth gating. Python-only cron-unavailable and mock self-binding branches are not applicable because the Rust gateway links the scheduler directly and exercises real scheduler calls.",
       "owner": "sheawinkler",
       "ticket": 303
+    },
+    {
+      "path": "tests/tools/test_web_providers_brave_free.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Brave free provider intent is covered by Rust BraveFreeSearchBackend contracts for BRAVE_SEARCH_API_KEY gating, X-Subscription-Token requests, count clamping, result normalization, explicit/generic backend selection, auto-detect priority, and search-only extract/crawl error routing.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_web_providers_ddgs.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream ddgs provider intent is covered by Rust DuckDuckGoSearchBackend contracts for keyless DuckDuckGo search, abstract/related-topic normalization, one-indexed positions, explicit/generic ddgs and duckduckgo backend aliases, last-resort auto-detect, and search-only extract/crawl error routing.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_web_providers_searxng.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream SearXNG provider intent is covered by Rust SearxngSearchBackend contracts for SEARXNG_BASE_URL and SEARXNG_URL aliases, trailing-slash normalization, score-descending sorting, limit truncation, result normalization, availability checks, and search-only extract/crawl errors.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_web_tools_tavily.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Tavily web-tool intent is covered by Rust Tavily search/extract/crawl backend contracts for API-key body payloads, base URL handling, search result normalization, extracted document and failed-result normalization, and handler dispatch through the Rust web tool backend registry.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_website_policy.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream website blocklist policy intent is covered by Rust website_policy contracts for security.website_blocklist defaults, inline and shared-file domain loading, malformed config errors, invalid shape errors, parent-domain matching, wildcard-subdomain semantics, and unreadable shared-file warning behavior.",
+      "owner": "sheawinkler",
+      "ticket": 25
     }
   ]
 }

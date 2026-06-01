@@ -24,7 +24,8 @@ pub use config::{
     ApprovalConfig, AuxiliaryTaskConfig, CheapModelRouteConfig, DisplayConfig, GatewayConfig,
     LlmProviderConfig, McpServerEntry, PlatformDisplayConfig, ProfileConfig, ProxyConfig,
     QuickCommandConfig, SecurityConfig, SessionsMaintenanceConfig, SkillsSettings,
-    SmartModelRoutingConfig, TerminalBackendType, TerminalConfig, ToolsSettings,
+    SmartModelRoutingConfig, TerminalBackendType, TerminalConfig, ToolsSettings, WebConfig,
+    WebsiteBlocklistConfig,
 };
 pub use loader::{
     apply_user_config_patch, atomic_json_write, atomic_json_write_pretty, atomic_write_bytes,
