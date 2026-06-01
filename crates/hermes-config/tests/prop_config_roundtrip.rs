@@ -126,6 +126,7 @@ fn arb_gateway_config() -> impl Strategy<Value = GatewayConfig> {
                 fallback_models: Vec::new(),
                 smart_model_routing: SmartModelRoutingConfig::default(),
                 auxiliary: Default::default(),
+                quick_commands: Default::default(),
                 tts: serde_json::Value::Null,
                 proxy: None,
                 approval: ApprovalConfig::default(),

@@ -10,7 +10,7 @@ use std::{
     fmt::Write as _,
     io::Write as _,
     path::{Path, PathBuf},
-    time::SystemTime,
+    time::{Duration, SystemTime},
 };
 
 use bytes::Bytes;
@@ -3396,11 +3396,144 @@ fn canonical_command(cmd: &str) -> &str {
 // Command dispatcher
 // ---------------------------------------------------------------------------
 
+enum QuickCommandDispatch {
+    Handled,
+    Alias { cmd: String, args: Vec<String> },
+}
+
+fn quick_command_key(cmd: &str) -> String {
+    cmd.trim()
+        .trim_start_matches('/')
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .replace('-', "_")
+}
+
+fn quick_command_args(args: &[&str]) -> String {
+    args.join(" ")
+}
+
+fn split_slash_command(input: &str) -> (String, Vec<String>) {
+    let trimmed = input.trim();
+    let mut parts = trimmed.split_whitespace();
+    let cmd = parts.next().unwrap_or(trimmed).to_string();
+    let args = parts.map(ToString::to_string).collect();
+    (cmd, args)
+}
+
+async fn run_quick_exec(
+    name: &str,
+    command: &str,
+    timeout_secs: u64,
+) -> Result<String, AgentError> {
+    let child = tokio::process::Command::new("sh")
+        .arg("-c")
+        .arg(command)
+        .kill_on_drop(true)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output();
+    let output = match tokio::time::timeout(Duration::from_secs(timeout_secs), child).await {
+        Ok(result) => result.map_err(|e| {
+            AgentError::ToolExecution(format!("quick command `{name}` failed: {e}"))
+        })?,
+        Err(_) => {
+            return Ok(format!(
+                "Quick command `{name}` timed out after {timeout_secs}s."
+            ));
+        }
+    };
+
+    let stdout = String::from_utf8_lossy(&output.stdout)
+        .trim_end()
+        .to_string();
+    if !stdout.trim().is_empty() {
+        return Ok(stdout);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr)
+        .trim_end()
+        .to_string();
+    if !stderr.trim().is_empty() {
+        return Ok(stderr);
+    }
+    Ok("Quick command completed with no output.".to_string())
+}
+
+async fn handle_quick_command(
+    app: &mut App,
+    cmd: &str,
+    args: &[&str],
+) -> Result<Option<QuickCommandDispatch>, AgentError> {
+    let key = quick_command_key(cmd);
+    let Some(quick) = app.config.quick_commands.get(&key).cloned() else {
+        return Ok(None);
+    };
+
+    match quick.kind.trim().to_ascii_lowercase().as_str() {
+        "exec" => {
+            let Some(command) = quick.command.as_deref().filter(|v| !v.trim().is_empty()) else {
+                emit_command_output(
+                    app,
+                    format!("Quick command `{key}` has no command defined."),
+                );
+                return Ok(Some(QuickCommandDispatch::Handled));
+            };
+            let output = run_quick_exec(&key, command, quick.timeout_secs()).await?;
+            emit_command_output(app, output);
+            Ok(Some(QuickCommandDispatch::Handled))
+        }
+        "alias" => {
+            let Some(target) = quick.target.as_deref().filter(|v| !v.trim().is_empty()) else {
+                emit_command_output(app, format!("Quick command `{key}` has no target defined."));
+                return Ok(Some(QuickCommandDispatch::Handled));
+            };
+            let mut rewritten = target.trim().to_string();
+            let extra = quick_command_args(args);
+            if !extra.is_empty() {
+                rewritten.push(' ');
+                rewritten.push_str(&extra);
+            }
+            let (alias_cmd, alias_args) = split_slash_command(&rewritten);
+            Ok(Some(QuickCommandDispatch::Alias {
+                cmd: alias_cmd,
+                args: alias_args,
+            }))
+        }
+        other => {
+            emit_command_output(
+                app,
+                format!("Quick command `{key}` has unsupported type `{other}`."),
+            );
+            Ok(Some(QuickCommandDispatch::Handled))
+        }
+    }
+}
+
 /// Handle a slash command.
 ///
 /// `cmd` is the full command token including the `/` prefix
 /// (e.g. `/model`, `/new`). `args` are the remaining tokens.
 pub async fn handle_slash_command(
+    app: &mut App,
+    cmd: &str,
+    args: &[&str],
+) -> Result<CommandResult, AgentError> {
+    if let Some(dispatch) = handle_quick_command(app, cmd, args).await? {
+        match dispatch {
+            QuickCommandDispatch::Handled => return Ok(CommandResult::Handled),
+            QuickCommandDispatch::Alias { cmd, args } => {
+                let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+                return dispatch_slash_command(app, &cmd, &arg_refs).await;
+            }
+        }
+    }
+
+    dispatch_slash_command(app, cmd, args).await
+}
+
+async fn dispatch_slash_command(
     app: &mut App,
     cmd: &str,
     args: &[&str],
@@ -24896,6 +25029,12 @@ mod tests {
             .unwrap_or_default()
     }
 
+    fn insert_quick_command(app: &mut App, name: &str, command: hermes_config::QuickCommandConfig) {
+        let mut config = (*app.config).clone();
+        config.quick_commands.insert(name.to_string(), command);
+        app.config = Arc::new(config);
+    }
+
     #[tokio::test]
     async fn external_plugin_command_rejects_python_dispatch() {
         let err = handle_cli_external_plugin_subcommand(vec!["honcho".to_string()])
@@ -24992,6 +25131,113 @@ mod tests {
         let results = autocomplete_contextual("/objective behavior ");
         assert!(results.contains(&"/objective behavior strict ".to_string()));
         assert!(results.contains(&"/objective behavior sigma ".to_string()));
+    }
+
+    #[tokio::test]
+    async fn quick_exec_command_prints_stdout_before_agent_loop() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+        insert_quick_command(
+            &mut app,
+            "dn",
+            hermes_config::QuickCommandConfig {
+                kind: "exec".to_string(),
+                command: Some("printf daily-note".to_string()),
+                ..Default::default()
+            },
+        );
+
+        let result = handle_slash_command(&mut app, "/dn", &[])
+            .await
+            .expect("quick command");
+
+        assert_eq!(result, CommandResult::Handled);
+        assert_eq!(latest_ui_assistant_text(&app), "daily-note");
+    }
+
+    #[tokio::test]
+    async fn quick_exec_no_output_and_timeout_have_user_visible_replies() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+        insert_quick_command(
+            &mut app,
+            "empty",
+            hermes_config::QuickCommandConfig {
+                kind: "exec".to_string(),
+                command: Some("true".to_string()),
+                ..Default::default()
+            },
+        );
+        insert_quick_command(
+            &mut app,
+            "slow",
+            hermes_config::QuickCommandConfig {
+                kind: "exec".to_string(),
+                command: Some("sleep 1".to_string()),
+                timeout_secs: Some(0),
+                ..Default::default()
+            },
+        );
+
+        handle_slash_command(&mut app, "/empty", &[])
+            .await
+            .expect("empty command");
+        assert!(latest_ui_assistant_text(&app).contains("no output"));
+
+        handle_slash_command(&mut app, "/slow", &[])
+            .await
+            .expect("timeout command");
+        assert!(latest_ui_assistant_text(&app).contains("timed out"));
+    }
+
+    #[tokio::test]
+    async fn quick_alias_rewrites_to_builtin_and_passes_args() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+        insert_quick_command(
+            &mut app,
+            "sc",
+            hermes_config::QuickCommandConfig {
+                kind: "alias".to_string(),
+                target: Some("/queue".to_string()),
+                ..Default::default()
+            },
+        );
+
+        handle_slash_command(&mut app, "/sc", &["some", "args"])
+            .await
+            .expect("alias command");
+
+        assert!(latest_ui_assistant_text(&app).contains("some args"));
+    }
+
+    #[tokio::test]
+    async fn quick_command_takes_priority_over_builtin_slash_command() {
+        let _guard = env_test_lock();
+        let tmp = tempdir().expect("tempdir");
+        let _home_guard = TempHomeGuard::new(tmp.path());
+        let mut app = build_test_app_with_stream(tmp.path()).await;
+        insert_quick_command(
+            &mut app,
+            "help",
+            hermes_config::QuickCommandConfig {
+                kind: "exec".to_string(),
+                command: Some("printf overridden".to_string()),
+                ..Default::default()
+            },
+        );
+
+        handle_slash_command(&mut app, "/help", &[])
+            .await
+            .expect("overridden help");
+
+        assert_eq!(latest_ui_assistant_text(&app), "overridden");
     }
 
     #[tokio::test]

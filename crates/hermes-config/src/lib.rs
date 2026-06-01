@@ -22,7 +22,7 @@ pub mod streaming;
 pub use config::{
     default_auxiliary_task_configs, AgentLoopBehaviorConfig, ApprovalConfig, AuxiliaryTaskConfig,
     CheapModelRouteConfig, GatewayConfig, LlmProviderConfig, McpServerEntry, ProfileConfig,
-    ProxyConfig, SecurityConfig, SessionsMaintenanceConfig, SkillsSettings,
+    ProxyConfig, QuickCommandConfig, SecurityConfig, SessionsMaintenanceConfig, SkillsSettings,
     SmartModelRoutingConfig, TerminalBackendType, TerminalConfig, ToolsSettings,
 };
 pub use loader::{

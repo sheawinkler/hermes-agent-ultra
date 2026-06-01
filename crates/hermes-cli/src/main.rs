@@ -2760,6 +2760,7 @@ async fn run_gateway(
             // Build gateway runtime and context-aware message handler.
             let runtime_gateway_config = RuntimeGatewayConfig {
                 streaming_enabled: config.streaming.enabled,
+                quick_commands: config.quick_commands.clone(),
                 ..RuntimeGatewayConfig::default()
             };
             let session_manager = Arc::new(SessionManager::new(config.session.clone()));

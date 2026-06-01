@@ -88,6 +88,10 @@ pub struct GatewayConfig {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub auxiliary: BTreeMap<String, AuxiliaryTaskConfig>,
 
+    /// User-defined slash commands that bypass the agent loop.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub quick_commands: BTreeMap<String, QuickCommandConfig>,
+
     /// Upstream-compatible TTS configuration block.
     ///
     /// Kept as structured JSON because upstream accepts provider-specific
@@ -155,6 +159,7 @@ impl Default for GatewayConfig {
             fallback_models: Vec::new(),
             smart_model_routing: SmartModelRoutingConfig::default(),
             auxiliary: BTreeMap::new(),
+            quick_commands: BTreeMap::new(),
             tts: serde_json::Value::Null,
             proxy: None,
             approval: ApprovalConfig::default(),
@@ -167,6 +172,55 @@ impl Default for GatewayConfig {
             home_dir: None,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuickCommandConfig {
+    /// Command kind. Supported runtime kinds: `exec` and `alias`.
+    #[serde(
+        default = "default_quick_command_type",
+        rename = "type",
+        alias = "kind"
+    )]
+    pub kind: String,
+
+    /// Shell command to run for `exec`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+
+    /// Slash command target for `alias`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+
+    /// Optional execution timeout in seconds. Defaults to 30.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+
+    /// Back-compat alias for `timeout_secs`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout: Option<u64>,
+}
+
+impl Default for QuickCommandConfig {
+    fn default() -> Self {
+        Self {
+            kind: default_quick_command_type(),
+            command: None,
+            target: None,
+            timeout_secs: None,
+            timeout: None,
+        }
+    }
+}
+
+impl QuickCommandConfig {
+    pub fn timeout_secs(&self) -> u64 {
+        self.timeout_secs.or(self.timeout).unwrap_or(30)
+    }
+}
+
+fn default_quick_command_type() -> String {
+    "exec".to_string()
 }
 
 fn is_json_null(value: &serde_json::Value) -> bool {
@@ -1040,6 +1094,32 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn quick_commands_deserialize_exec_and_alias_configs() {
+        let cfg: GatewayConfig = serde_yaml::from_str(
+            r#"
+quick_commands:
+  dn:
+    type: exec
+    command: echo daily-note
+    timeout_secs: 5
+  sc:
+    type: alias
+    target: /context
+"#,
+        )
+        .expect("quick command config");
+
+        let exec = cfg.quick_commands.get("dn").expect("exec command");
+        assert_eq!(exec.kind, "exec");
+        assert_eq!(exec.command.as_deref(), Some("echo daily-note"));
+        assert_eq!(exec.timeout_secs(), 5);
+
+        let alias = cfg.quick_commands.get("sc").expect("alias command");
+        assert_eq!(alias.kind, "alias");
+        assert_eq!(alias.target.as_deref(), Some("/context"));
     }
 
     #[test]

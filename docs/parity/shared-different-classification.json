@@ -1151,6 +1151,13 @@
       "ticket": 25
     },
     {
+      "path": "tests/cli/test_quick_commands.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream quick-command behavior is covered by Rust shared quick_commands config, CLI slash dispatch that runs exec commands before built-ins, alias forwarding, no-output and timeout replies, plus gateway quick-command exec/alias handling from runtime config.",
+      "owner": "sheawinkler",
+      "ticket": 302
+    },
+    {
       "path": "tests/tui_gateway",
       "classification": "functional",
       "rationale": "TUI gateway tests cover interactive gateway behavior and must stay parity-reviewed against Rust-native UX/runtime contracts.",

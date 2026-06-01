@@ -10,12 +10,15 @@
 //! Also integrates `StreamManager` for progressive message editing.
 
 use chrono::{DateTime, Utc};
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
+use std::time::Duration;
 use tokio::sync::RwLock;
 use tracing::{debug, error, info, warn};
 
+use hermes_config::QuickCommandConfig;
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
 use hermes_core::types::{Message, MessageRole};
@@ -54,6 +57,10 @@ pub struct GatewayConfig {
     /// Streaming configuration.
     #[serde(default)]
     pub streaming: StreamConfig,
+
+    /// User-defined slash commands that bypass the agent loop.
+    #[serde(default)]
+    pub quick_commands: BTreeMap<String, QuickCommandConfig>,
 }
 
 impl Default for GatewayConfig {
@@ -64,6 +71,7 @@ impl Default for GatewayConfig {
             media_cache_max_bytes: 0,
             streaming_enabled: false,
             streaming: StreamConfig::default(),
+            quick_commands: BTreeMap::new(),
         }
     }
 }
@@ -901,11 +909,128 @@ impl Gateway {
         Ok(())
     }
 
+    fn quick_command_key(raw: &str) -> String {
+        raw.trim()
+            .trim_start_matches('/')
+            .split_whitespace()
+            .next()
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .replace('-', "_")
+    }
+
+    fn split_slash_command(input: &str) -> (String, String) {
+        let trimmed = input.trim();
+        let mut parts = trimmed.splitn(2, char::is_whitespace);
+        let cmd = parts.next().unwrap_or(trimmed).to_string();
+        let args = parts.next().unwrap_or_default().trim().to_string();
+        (cmd, args)
+    }
+
+    async fn run_quick_exec(
+        name: &str,
+        command: &str,
+        timeout_secs: u64,
+    ) -> Result<String, GatewayError> {
+        let child = tokio::process::Command::new("sh")
+            .arg("-c")
+            .arg(command)
+            .kill_on_drop(true)
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output();
+        let output = match tokio::time::timeout(Duration::from_secs(timeout_secs), child).await {
+            Ok(result) => result.map_err(|e| {
+                GatewayError::Platform(format!("quick command `{name}` failed: {e}"))
+            })?,
+            Err(_) => {
+                return Ok(format!(
+                    "Quick command `{name}` timed out after {timeout_secs}s."
+                ));
+            }
+        };
+
+        let stdout = String::from_utf8_lossy(&output.stdout)
+            .trim_end()
+            .to_string();
+        if !stdout.trim().is_empty() {
+            return Ok(stdout);
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr)
+            .trim_end()
+            .to_string();
+        if !stderr.trim().is_empty() {
+            return Ok(stderr);
+        }
+        Ok("Quick command completed with no output.".to_string())
+    }
+
+    async fn resolve_quick_command(&self, input: &str) -> Result<Option<String>, GatewayError> {
+        let (cmd, args) = Self::split_slash_command(input);
+        let key = Self::quick_command_key(&cmd);
+        let Some(quick) = self.config.quick_commands.get(&key).cloned() else {
+            return Ok(None);
+        };
+
+        match quick.kind.trim().to_ascii_lowercase().as_str() {
+            "exec" => {
+                let Some(command) = quick.command.as_deref().filter(|v| !v.trim().is_empty())
+                else {
+                    return Ok(Some(format!(
+                        "Quick command `{key}` has no command defined."
+                    )));
+                };
+                Ok(Some(
+                    Self::run_quick_exec(&key, command, quick.timeout_secs()).await?,
+                ))
+            }
+            "alias" => {
+                let Some(target) = quick.target.as_deref().filter(|v| !v.trim().is_empty()) else {
+                    return Ok(Some(format!(
+                        "Quick command `{key}` has no target defined."
+                    )));
+                };
+                let mut rewritten = target.trim().to_string();
+                if !args.is_empty() {
+                    rewritten.push(' ');
+                    rewritten.push_str(&args);
+                }
+                Ok(match handle_command(&rewritten) {
+                    GatewayCommandResult::Reply(text)
+                    | GatewayCommandResult::ShowHelp(text)
+                    | GatewayCommandResult::Unknown(text)
+                    | GatewayCommandResult::ResetSession(text)
+                    | GatewayCommandResult::SwitchFast(text)
+                    | GatewayCommandResult::ToggleVerbose(text)
+                    | GatewayCommandResult::ToggleYolo(text)
+                    | GatewayCommandResult::ToggleReasoning(text)
+                    | GatewayCommandResult::ShowUsage(text)
+                    | GatewayCommandResult::ShowStatus(text)
+                    | GatewayCommandResult::CompressContext(text)
+                    | GatewayCommandResult::StopAgent(text) => Some(text),
+                    GatewayCommandResult::SwitchModel { reply, .. }
+                    | GatewayCommandResult::SwitchPersonality { reply, .. }
+                    | GatewayCommandResult::SetHome { reply, .. } => Some(reply),
+                    _ => Some(format!("Quick command `{key}` routed to `{rewritten}`.")),
+                })
+            }
+            other => Ok(Some(format!(
+                "Quick command `{key}` has unsupported type `{other}`."
+            ))),
+        }
+    }
+
     async fn execute_slash_command(
         &self,
         incoming: &IncomingMessage,
         session_key: &str,
     ) -> Result<bool, GatewayError> {
+        if let Some(reply) = self.resolve_quick_command(&incoming.text).await? {
+            self.send_message(&incoming.platform, &incoming.chat_id, &reply, None)
+                .await?;
+            return Ok(true);
+        }
+
         let result = handle_command(&incoming.text);
         if !matches!(result, GatewayCommandResult::Unknown(_)) {
             if let Some(command_name) = Self::extract_command_name(&incoming.text) {
@@ -2502,6 +2627,92 @@ mod tests {
         fn platform_name(&self) -> &str {
             "test"
         }
+    }
+
+    #[tokio::test]
+    async fn gateway_quick_exec_returns_stdout_from_config() {
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let dm_manager = DmManager::with_pair_behavior();
+        let mut cfg = GatewayConfig::default();
+        cfg.quick_commands.insert(
+            "limits".to_string(),
+            QuickCommandConfig {
+                kind: "exec".to_string(),
+                command: Some("printf ok".to_string()),
+                ..Default::default()
+            },
+        );
+        let gw = Gateway::new(session_mgr, dm_manager, cfg);
+
+        let reply = gw
+            .resolve_quick_command("/limits")
+            .await
+            .expect("quick command")
+            .expect("reply");
+
+        assert_eq!(reply, "ok");
+    }
+
+    #[tokio::test]
+    async fn gateway_quick_exec_reports_timeout_and_missing_command() {
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let dm_manager = DmManager::with_pair_behavior();
+        let mut cfg = GatewayConfig::default();
+        cfg.quick_commands.insert(
+            "slow".to_string(),
+            QuickCommandConfig {
+                kind: "exec".to_string(),
+                command: Some("sleep 1".to_string()),
+                timeout_secs: Some(0),
+                ..Default::default()
+            },
+        );
+        cfg.quick_commands.insert(
+            "oops".to_string(),
+            QuickCommandConfig {
+                kind: "exec".to_string(),
+                ..Default::default()
+            },
+        );
+        let gw = Gateway::new(session_mgr, dm_manager, cfg);
+
+        let timeout = gw
+            .resolve_quick_command("/slow")
+            .await
+            .expect("timeout command")
+            .expect("timeout reply");
+        assert!(timeout.contains("timed out"));
+
+        let missing = gw
+            .resolve_quick_command("/oops")
+            .await
+            .expect("missing command")
+            .expect("missing reply");
+        assert!(missing.contains("no command defined"));
+    }
+
+    #[tokio::test]
+    async fn gateway_quick_alias_routes_to_builtin_command() {
+        let session_mgr = Arc::new(SessionManager::new(SessionConfig::default()));
+        let dm_manager = DmManager::with_pair_behavior();
+        let mut cfg = GatewayConfig::default();
+        cfg.quick_commands.insert(
+            "stat".to_string(),
+            QuickCommandConfig {
+                kind: "alias".to_string(),
+                target: Some("/status".to_string()),
+                ..Default::default()
+            },
+        );
+        let gw = Gateway::new(session_mgr, dm_manager, cfg);
+
+        let reply = gw
+            .resolve_quick_command("/stat")
+            .await
+            .expect("alias command")
+            .expect("alias reply");
+
+        assert!(reply.contains("Status information"));
     }
 
     #[async_trait]
