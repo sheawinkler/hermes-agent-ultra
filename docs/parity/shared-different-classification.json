@@ -2199,6 +2199,13 @@
       "rationale": "Upstream gateway /verbose tool-progress behavior is covered by Rust DisplayConfig and gateway runtime tests: bool-like display.tool_progress_command gating, quoted false disablement, per-platform/default tool_progress resolution, off/new/all/verbose cycling, and runtime verbose/tool_progress state updates.",
       "owner": "sheawinkler",
       "ticket": 302
+    },
+    {
+      "path": "tests/gateway/test_api_server_jobs.py",
+      "classification": "intentional_divergence",
+      "rationale": "API-server cron jobs behavior is covered by Rust-native gateway contracts backed by hermes_cron: list/create/get/update/delete, include_disabled filtering, pause/resume/manual run, default local delivery, whitelisted updates including skill aliases, required-field and length validation, repeat validation, invalid-ID rejection with source-context logging, and bearer-auth gating. Python-only cron-unavailable and mock self-binding branches are not applicable because the Rust gateway links the scheduler directly and exercises real scheduler calls.",
+      "owner": "sheawinkler",
+      "ticket": 303
     }
   ]
 }

@@ -33,6 +33,7 @@ webhook = []
 hermes-core = { workspace = true }
 hermes-config = { workspace = true }
 hermes-tools = { workspace = true }
+hermes-cron = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
