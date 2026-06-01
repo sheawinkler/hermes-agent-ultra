@@ -2173,6 +2173,13 @@
       "ticket": 302
     },
     {
+      "path": "tests/gateway/test_api_server_bind_guard.py",
+      "classification": "intentional_divergence",
+      "rationale": "API-server bind-address guard behavior is covered by Rust ApiServerAdapter contracts: network-accessible IPv4/IPv6 and mapped addresses require auth tokens, loopback binds remain allowed without auth, hostname resolution fails closed, and start() rejects unsafe non-loopback binds without an auth token.",
+      "owner": "sheawinkler",
+      "ticket": 303
+    },
+    {
       "path": "tests/gateway/test_gateway_command_help.py",
       "classification": "intentional_divergence",
       "rationale": "Gateway help/start command behavior is covered by Rust gateway command contracts: /start is a no-op platform start event, /commands aliases /help, registered command bypass recognizes aliases, and generated help exposes normalized lowercase command names.",
