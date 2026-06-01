@@ -13,7 +13,6 @@ use crate::credential_guard::CredentialGuard;
 
 const DEFAULT_READ_OFFSET: i64 = 1;
 const DEFAULT_READ_LIMIT: i64 = 500;
-const MAX_READ_LIMIT: i64 = 2000;
 const DEFAULT_SEARCH_OFFSET: i64 = 0;
 const DEFAULT_SEARCH_LIMIT: i64 = 50;
 pub const DEFAULT_MAX_READ_CHARS: usize = 200_000;
@@ -44,12 +43,34 @@ fn normalize_read_pagination(
 }
 
 fn configured_max_read_limit(home_dir: Option<&str>) -> i64 {
-    hermes_config::load_config(home_dir)
-        .ok()
-        .map(|config| config.tool_output.max_lines)
-        .map(|max_lines| i64::try_from(max_lines).unwrap_or(i64::MAX))
-        .filter(|max_lines| *max_lines > 0)
-        .unwrap_or(MAX_READ_LIMIT)
+    let home = home_dir
+        .map(PathBuf::from)
+        .unwrap_or_else(hermes_config::paths::hermes_home);
+    let config = load_tool_output_config_without_env_side_effects(&home);
+    i64::try_from(config.tool_output.max_lines)
+        .unwrap_or(i64::MAX)
+        .max(1)
+}
+
+fn load_tool_output_config_without_env_side_effects(home: &Path) -> hermes_config::GatewayConfig {
+    let mut config = hermes_config::GatewayConfig::default();
+    let gateway_json_path = home.join("gateway.json");
+    if gateway_json_path.exists() {
+        if let Ok(json_config) = hermes_config::loader::load_from_json(&gateway_json_path) {
+            config = json_config;
+        }
+    }
+
+    for config_path in [home.join("config.yaml"), home.join("cli-config.yaml")] {
+        if !config_path.exists() {
+            continue;
+        }
+        if let Ok(yaml_config) = hermes_config::load_user_config_file(&config_path) {
+            config = hermes_config::merge_configs(&yaml_config, &config);
+        }
+    }
+
+    config
 }
 
 fn normalize_read_pagination_with_max_lines(
