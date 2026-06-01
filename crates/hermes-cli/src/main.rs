@@ -5562,9 +5562,16 @@ fn telegram_gateway_message(msg: TelegramIncomingMessage) -> GatewayIncomingMess
         .or(msg.username)
         .unwrap_or_else(|| "unknown".to_string());
 
+    let chat_id = match msg.message_thread_id {
+        Some(thread_id) if msg.is_group && thread_id != 0 => {
+            format!("{}:{}", msg.chat_id, thread_id)
+        }
+        _ => msg.chat_id.to_string(),
+    };
+
     GatewayIncomingMessage {
         platform: "telegram".to_string(),
-        chat_id: msg.chat_id.to_string(),
+        chat_id,
         user_id,
         text,
         message_id: Some(msg.message_id.to_string()),
@@ -14642,6 +14649,39 @@ mod tests {
         assert_eq!(cfg.host, "0.0.0.0");
         assert_eq!(cfg.port, 9123);
         assert_eq!(cfg.auth_token.as_deref(), Some("platform-token"));
+    }
+
+    #[test]
+    fn telegram_gateway_message_preserves_group_topic_in_chat_id() {
+        let incoming = TelegramIncomingMessage {
+            chat_id: -1001,
+            user_id: Some(42),
+            username: Some("alice".to_string()),
+            text: Some("topic hello".to_string()),
+            message_id: 77,
+            is_voice: false,
+            is_photo: false,
+            is_sticker: false,
+            is_document: false,
+            voice_file_id: None,
+            photo_file_id: None,
+            sticker_file_id: None,
+            document_file_id: None,
+            document_file_name: None,
+            document_mime_type: None,
+            document_file_size: None,
+            reply_to_message_id: None,
+            message_thread_id: Some(17585),
+            chat_type: hermes_gateway::platforms::telegram::ChatKind::Supergroup,
+            is_group: true,
+            callback_query_id: None,
+            callback_data: None,
+        };
+
+        let routed = telegram_gateway_message(incoming);
+        assert_eq!(routed.chat_id, "-1001:17585");
+        assert_eq!(routed.user_id, "42");
+        assert!(!routed.is_dm);
     }
 
     #[test]

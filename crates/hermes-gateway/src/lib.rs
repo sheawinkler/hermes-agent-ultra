@@ -12,6 +12,7 @@
 //! - Platform-specific adapters behind feature flags
 
 pub mod adapter;
+pub mod agent_cache;
 pub mod background;
 pub mod channel_directory;
 pub mod commands;
@@ -26,6 +27,7 @@ pub mod mirror;
 pub mod pairing;
 pub mod platforms;
 pub mod session;
+pub mod session_control;
 pub mod ssrf;
 pub mod sticker_cache;
 pub mod stream;
@@ -39,6 +41,16 @@ pub use hermes_core::types::Message;
 
 // Re-export gateway orchestrator and runtime context
 pub use gateway::{Gateway, GatewayRuntimeContext};
+
+// Re-export gateway cache/session-control contracts
+pub use agent_cache::{
+    agent_config_signature, extract_cache_busting_config, AgentConfigSignatureInput,
+    GatewayAgentCache,
+};
+pub use session_control::{
+    build_session_key, BusyInputMode, BusyMessageDecision, BusySessionCoordinator, MessageEvent,
+    MessageType, ProcessingOutcome, SessionSource,
+};
 
 // Re-export session management
 pub use session::{Session, SessionManager};

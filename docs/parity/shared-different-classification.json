@@ -234,6 +234,34 @@
       "ticket": 302
     },
     {
+      "path": "tests/gateway/test_agent_cache.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream gateway agent-cache invalidation is covered by Rust GatewayAgentCache and agent_config_signature tests for stable model/provider/toolset/system/cache-key signatures, full-token secret-safe hashing, documented cache-busting config extraction, signature misses, LRU eviction, idle TTL cleanup, and release hooks.",
+      "owner": "sheawinkler",
+      "ticket": 302
+    },
+    {
+      "path": "tests/gateway/test_base_topic_sessions.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream base-topic session behavior is covered by Rust session-control and Telegram bridge tests that preserve distinct thread/topic session keys, encode incoming Telegram group topics as composite chat IDs, split them back into Bot API chat_id/message_thread_id on send, and keep invalid or lobby thread suffixes unchanged.",
+      "owner": "sheawinkler",
+      "ticket": 302
+    },
+    {
+      "path": "tests/gateway/test_busy_session_ack.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream active-session busy acknowledgement behavior is covered by Rust BusySessionCoordinator tests for queue, interrupt, and steer modes, acknowledgement cooldown/debounce, pending follow-up replacement, agent interrupt/steer handoff, status-rich interrupt acknowledgements, command bypass, and pending replay after finish.",
+      "owner": "sheawinkler",
+      "ticket": 302
+    },
+    {
+      "path": "tests/gateway/test_command_bypass_active_session.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream command-bypass behavior is covered by Rust gateway command registry tests for canonical slash commands, Telegram bot suffix stripping, hyphen-to-underscore normalization, registered command bypass decisions, unknown-command rejection, file-path false positives, and active-session bypass integration.",
+      "owner": "sheawinkler",
+      "ticket": 302
+    },
+    {
       "path": "tests/gateway/test_api_server_toolset.py",
       "classification": "intentional_divergence",
       "rationale": "Upstream's API-server toolset contract is covered by Rust toolset and platform-toolset tests; the Python test file remains reference-only.",

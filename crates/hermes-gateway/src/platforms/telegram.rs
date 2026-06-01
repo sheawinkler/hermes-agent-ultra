@@ -778,6 +778,22 @@ impl TelegramAdapter {
         &self.config
     }
 
+    fn split_gateway_chat_thread(chat_id: &str) -> (&str, Option<i64>) {
+        let Some((base_chat_id, thread_id)) = chat_id.rsplit_once(':') else {
+            return (chat_id, None);
+        };
+        if base_chat_id.trim().is_empty() || thread_id.trim().is_empty() {
+            return (chat_id, None);
+        }
+        if base_chat_id.parse::<i64>().is_err() {
+            return (chat_id, None);
+        }
+        match thread_id.parse::<i64>() {
+            Ok(0) | Err(_) => (chat_id, None),
+            Ok(thread_id) => (base_chat_id, Some(thread_id)),
+        }
+    }
+
     fn build_client(
         base: &BasePlatformAdapter,
         fallback_ips: &[String],
@@ -1117,6 +1133,8 @@ impl TelegramAdapter {
         keyboard: Option<InlineKeyboardMarkup>,
         message_thread_id: Option<i64>,
     ) -> Result<Vec<i64>, GatewayError> {
+        let (chat_id, inferred_thread_id) = Self::split_gateway_chat_thread(chat_id);
+        let message_thread_id = message_thread_id.or(inferred_thread_id);
         let chunks = split_message(text, MAX_MESSAGE_LENGTH);
         let mut message_ids = Vec::new();
 
@@ -1455,8 +1473,11 @@ impl TelegramAdapter {
 
     async fn send_multipart_with_options(
         &self,
-        request: TelegramMultipartRequest<'_>,
+        mut request: TelegramMultipartRequest<'_>,
     ) -> Result<i64, GatewayError> {
+        let (chat_id, inferred_thread_id) = Self::split_gateway_chat_thread(request.chat_id);
+        request.chat_id = chat_id;
+        request.message_thread_id = request.message_thread_id.or(inferred_thread_id);
         match self.send_multipart_once(request).await {
             Ok(id) => Ok(id),
             Err(err)
@@ -1906,6 +1927,8 @@ impl TelegramAdapter {
         reply_to_message_id: Option<i64>,
         message_thread_id: Option<i64>,
     ) -> Result<(), GatewayError> {
+        let (chat_id, inferred_thread_id) = Self::split_gateway_chat_thread(chat_id);
+        let message_thread_id = message_thread_id.or(inferred_thread_id);
         let mut body = serde_json::json!({
             "chat_id": chat_id,
             "photo": image_url,
@@ -2467,6 +2490,22 @@ mod tests {
     }
 
     #[test]
+    fn telegram_split_gateway_chat_thread_preserves_topic_suffix() {
+        assert_eq!(
+            TelegramAdapter::split_gateway_chat_thread("-1001:17585"),
+            ("-1001", Some(17585))
+        );
+        assert_eq!(
+            TelegramAdapter::split_gateway_chat_thread("-1001:0"),
+            ("-1001:0", None)
+        );
+        assert_eq!(
+            TelegramAdapter::split_gateway_chat_thread("room:server"),
+            ("room:server", None)
+        );
+    }
+
+    #[test]
     fn telegram_merge_caption_uses_exact_dedupe() {
         assert_eq!(TelegramAdapter::merge_caption(None, "Hello"), "Hello");
         assert_eq!(
@@ -2784,6 +2823,44 @@ mod tests {
             .and_then(|v| v.as_str())
             .unwrap()
             .contains("\\[world\\]\\_1"));
+    }
+
+    #[tokio::test]
+    async fn telegram_encoded_gateway_chat_id_sends_to_topic_thread() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/botfake_token_12345/sendMessage"))
+            .and(body_partial_json(serde_json::json!({
+                "chat_id": "-1001",
+                "message_thread_id": 17585,
+                "text": "topic hello"
+            })))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "ok": true,
+                "result": { "message_id": 88 }
+            })))
+            .mount(&server)
+            .await;
+
+        let mut adapter = test_adapter(test_config());
+        adapter.api_base = format!("{}/botfake_token_12345", server.uri());
+
+        let ids = adapter
+            .send_text("-1001:17585", "topic hello", None, None)
+            .await
+            .unwrap();
+        assert_eq!(ids, vec![88]);
+        let requests = server.received_requests().await.expect("requests");
+        assert_eq!(requests.len(), 1);
+        let body: Value = requests[0].body_json().expect("json body");
+        assert_eq!(
+            body.pointer("/chat_id").and_then(|v| v.as_str()),
+            Some("-1001")
+        );
+        assert_eq!(
+            body.pointer("/message_thread_id").and_then(|v| v.as_i64()),
+            Some(17585)
+        );
     }
 
     #[test]

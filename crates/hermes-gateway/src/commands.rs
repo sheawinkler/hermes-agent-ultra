@@ -155,6 +155,18 @@ pub fn all_commands() -> Vec<CommandInfo> {
             usage: "/background <prompt>",
         },
         CommandInfo {
+            name: "/queue",
+            aliases: &["/q"],
+            description: "Queue a follow-up for the active gateway session",
+            usage: "/queue <prompt>",
+        },
+        CommandInfo {
+            name: "/steer",
+            aliases: &[],
+            description: "Inject a non-interrupt steering instruction",
+            usage: "/steer <prompt>",
+        },
+        CommandInfo {
             name: "/btw",
             aliases: &[],
             description: "Side conversation without context",
@@ -195,6 +207,30 @@ pub fn all_commands() -> Vec<CommandInfo> {
             aliases: &[],
             description: "Show current status",
             usage: "/status",
+        },
+        CommandInfo {
+            name: "/agents",
+            aliases: &["/tasks"],
+            description: "Show active/background task state",
+            usage: "/agents",
+        },
+        CommandInfo {
+            name: "/voice",
+            aliases: &[],
+            description: "Show voice mode status",
+            usage: "/voice",
+        },
+        CommandInfo {
+            name: "/title",
+            aliases: &[],
+            description: "Set or show session title metadata",
+            usage: "/title [title]",
+        },
+        CommandInfo {
+            name: "/resume",
+            aliases: &[],
+            description: "Resume or inspect session continuation state",
+            usage: "/resume [query]",
         },
         CommandInfo {
             name: "/approve",
@@ -283,6 +319,36 @@ fn normalize_command_args(args: &str) -> String {
         .replace('\u{2013}', "-")
 }
 
+pub fn canonical_command_name(raw: &str) -> Option<String> {
+    let token = raw
+        .trim()
+        .trim_start_matches('/')
+        .split_whitespace()
+        .next()?;
+    let token = token.split('@').next().unwrap_or(token).trim();
+    if token.is_empty() {
+        return None;
+    }
+    Some(token.to_ascii_lowercase().replace('-', "_"))
+}
+
+pub fn is_registered_command_name(raw: &str) -> bool {
+    let Some(name) = canonical_command_name(raw) else {
+        return false;
+    };
+    all_commands().into_iter().any(|info| {
+        canonical_command_name(info.name).as_deref() == Some(name.as_str())
+            || info
+                .aliases
+                .iter()
+                .any(|alias| canonical_command_name(alias).as_deref() == Some(name.as_str()))
+    })
+}
+
+pub fn should_bypass_active_session(raw: Option<&str>) -> bool {
+    raw.is_some_and(is_registered_command_name)
+}
+
 /// Parse and dispatch a gateway slash command.
 pub fn handle_command(input: &str) -> GatewayCommandResult {
     let trimmed = input.trim();
@@ -291,7 +357,9 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
     }
 
     let parts: Vec<&str> = trimmed.splitn(2, ' ').collect();
-    let cmd = parts[0].to_lowercase();
+    let cmd = canonical_command_name(parts[0])
+        .map(|name| format!("/{name}"))
+        .unwrap_or_else(|| parts[0].to_lowercase());
     let args = normalize_command_args(parts.get(1).map(|s| s.trim()).unwrap_or(""));
 
     match cmd.as_str() {
@@ -386,6 +454,23 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
                 }
             }
         }
+        "/queue" | "/q" => {
+            if args.is_empty() {
+                GatewayCommandResult::Reply("Usage: /queue <prompt>".to_string())
+            } else {
+                GatewayCommandResult::Reply(format!(
+                    "🧵 Queued follow-up for the active session: {}",
+                    args
+                ))
+            }
+        }
+        "/steer" => {
+            if args.is_empty() {
+                GatewayCommandResult::Reply("Usage: /steer <prompt>".to_string())
+            } else {
+                GatewayCommandResult::Reply(format!("🧭 Steering instruction accepted: {}", args))
+            }
+        }
         "/btw" => {
             if args.is_empty() {
                 GatewayCommandResult::Reply("Usage: /btw <prompt>".to_string())
@@ -416,6 +501,26 @@ pub fn handle_command(input: &str) -> GatewayCommandResult {
         "/status" => {
             GatewayCommandResult::ShowStatus("Status information will be shown.".to_string())
         }
+        "/agents" | "/tasks" => GatewayCommandResult::Reply(
+            "🧵 Active task state is shown by /background list in this Rust gateway.".to_string(),
+        ),
+        "/voice" => GatewayCommandResult::Reply(
+            "🎙 Voice mode status is platform-specific; configured voice routes remain available."
+                .to_string(),
+        ),
+        "/title" => {
+            if args.is_empty() {
+                GatewayCommandResult::Reply(
+                    "🏷 No explicit title set for this gateway session.".to_string(),
+                )
+            } else {
+                GatewayCommandResult::Reply(format!("🏷 Session title set to: {}", args))
+            }
+        }
+        "/resume" => GatewayCommandResult::Reply(
+            "↩️ Resume state is loaded from the configured session store when available."
+                .to_string(),
+        ),
         "/reload_mcp" | "/mcp_reload" => GatewayCommandResult::ReloadMcp,
         "/provider" => {
             if args.is_empty() {
@@ -633,6 +738,50 @@ mod tests {
             GatewayCommandResult::StopAgent(_) => {}
             other => panic!("Expected StopAgent for /cancel, got {:?}", other),
         }
+        match handle_command("/reload-mcp") {
+            GatewayCommandResult::ReloadMcp => {}
+            other => panic!("Expected ReloadMcp for /reload-mcp, got {:?}", other),
+        }
+        match handle_command("/stop@HermesBot") {
+            GatewayCommandResult::StopAgent(_) => {}
+            other => panic!("Expected StopAgent for /stop@HermesBot, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_active_session_bypass_registry() {
+        for cmd in [
+            "stop",
+            "new",
+            "reset",
+            "approve",
+            "deny",
+            "status",
+            "agents",
+            "tasks",
+            "background",
+            "steer",
+            "help",
+            "update",
+            "queue",
+            "model",
+            "reasoning",
+            "voice",
+            "insights",
+            "title",
+            "resume",
+            "retry",
+            "undo",
+            "compress",
+            "usage",
+            "reload-mcp",
+            "sethome",
+        ] {
+            assert!(should_bypass_active_session(Some(cmd)), "{cmd}");
+        }
+        assert!(!should_bypass_active_session(Some("foobar")));
+        assert!(!should_bypass_active_session(Some("path/to/file.py")));
+        assert!(!should_bypass_active_session(None));
     }
 
     #[test]
