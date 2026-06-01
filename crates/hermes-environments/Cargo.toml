@@ -24,6 +24,9 @@ tracing = { workspace = true }
 async-trait = { workspace = true }
 reqwest = { workspace = true }
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tempfile = "3"
 hermes-config = { workspace = true, features = ["test-helpers"] }

@@ -12,6 +12,101 @@ use hermes_core::{
 
 use crate::approval::{ApprovalDecision, ApprovalManager};
 
+const DEFAULT_FOREGROUND_MAX_TIMEOUT_SECS: u64 = 600;
+
+fn foreground_max_timeout_secs() -> u64 {
+    std::env::var("TERMINAL_MAX_FOREGROUND_TIMEOUT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(DEFAULT_FOREGROUND_MAX_TIMEOUT_SECS)
+}
+
+fn has_unquoted_trailing_background_operator(command: &str) -> bool {
+    let mut idx = command.len();
+    while idx > 0 {
+        let Some((prev, ch)) = command[..idx].char_indices().next_back() else {
+            return false;
+        };
+        if !ch.is_whitespace() {
+            idx = prev;
+            break;
+        }
+        idx = prev;
+    }
+    if !command[idx..].starts_with('&') {
+        return false;
+    }
+    let mut slash_count = 0usize;
+    let mut pos = idx;
+    while pos > 0 {
+        let Some((prev, ch)) = command[..pos].char_indices().next_back() else {
+            break;
+        };
+        if ch != '\\' {
+            break;
+        }
+        slash_count += 1;
+        pos = prev;
+    }
+    slash_count.is_multiple_of(2)
+}
+
+fn foreground_background_wrapper_error(command: &str) -> Option<String> {
+    let lower = command.trim().to_ascii_lowercase();
+    let padded = format!(" {lower} ");
+    if has_unquoted_trailing_background_operator(command) {
+        return Some(
+            "Foreground command uses '&' shell backgrounding. Use terminal(background=true) so Hermes can track lifecycle and output.".to_string(),
+        );
+    }
+    if lower.starts_with("nohup ") || padded.contains(" nohup ") {
+        return Some(
+            "Foreground command uses nohup. Use terminal(background=true) instead of shell-level background wrappers.".to_string(),
+        );
+    }
+    if lower.starts_with("setsid ") || padded.contains(" setsid ") || padded.contains(" disown ") {
+        return Some(
+            "Foreground command uses setsid/disown. Use terminal(background=true) so Hermes can manage the process.".to_string(),
+        );
+    }
+    None
+}
+
+fn is_help_variant(command: &str) -> bool {
+    command
+        .split_ascii_whitespace()
+        .any(|part| matches!(part, "--help" | "-h" | "help"))
+}
+
+fn long_lived_foreground_error(command: &str) -> Option<String> {
+    if is_help_variant(command) {
+        return None;
+    }
+    let lower = command.trim().to_ascii_lowercase();
+    let padded = format!(" {lower} ");
+    let long_lived = [
+        " pnpm dev ",
+        " npm run dev ",
+        " yarn dev ",
+        " bun dev ",
+        " next dev ",
+        " vite ",
+        " webpack serve ",
+        " cargo watch ",
+        " python -m http.server ",
+        " python3 -m http.server ",
+        " uvicorn ",
+        " gunicorn ",
+    ]
+    .iter()
+    .any(|needle| padded.contains(needle));
+
+    long_lived.then(|| {
+        "This foreground command appears to start a long-lived server/watch process. Run it with background=true, then verify readiness with logs or a health check.".to_string()
+    })
+}
+
 // ---------------------------------------------------------------------------
 // TerminalHandler
 // ---------------------------------------------------------------------------
@@ -39,6 +134,28 @@ impl ToolHandler for TerminalHandler {
             .and_then(|v| v.as_str())
             .ok_or_else(|| ToolError::InvalidParams("Missing 'command' parameter".into()))?;
 
+        let timeout = params.get("timeout").and_then(|v| v.as_u64());
+        let background = params
+            .get("background")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        if !background {
+            if let Some(timeout) = timeout {
+                let max_timeout = foreground_max_timeout_secs();
+                if timeout > max_timeout {
+                    return Err(ToolError::ExecutionFailed(format!(
+                        "Foreground timeout {timeout}s exceeds max {max_timeout}s. Use background=true with process polling for longer commands."
+                    )));
+                }
+            }
+            if let Some(error) = foreground_background_wrapper_error(command) {
+                return Err(ToolError::ExecutionFailed(error));
+            }
+            if let Some(error) = long_lived_foreground_error(command) {
+                return Err(ToolError::ExecutionFailed(error));
+            }
+        }
+
         match self.approval.check_approval_from_env(command, "local") {
             ApprovalDecision::Denied => {
                 return Err(ToolError::ExecutionFailed(format!(
@@ -58,14 +175,7 @@ impl ToolHandler for TerminalHandler {
             ApprovalDecision::Approved => {}
         }
 
-        let timeout = params.get("timeout").and_then(|v| v.as_u64());
-
         let workdir = params.get("workdir").and_then(|v| v.as_str());
-
-        let background = params
-            .get("background")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
 
         let pty = params.get("pty").and_then(|v| v.as_bool()).unwrap_or(false);
         let stdin_data = params.get("stdin_data").and_then(|v| v.as_str());
@@ -102,7 +212,10 @@ impl ToolHandler for TerminalHandler {
             "timeout".into(),
             json!({
                 "type": "integer",
-                "description": "Timeout in milliseconds (default: 30000)"
+                "description": format!(
+                    "Timeout in seconds. Foreground commands above {}s are rejected; use background=true for longer jobs.",
+                    foreground_max_timeout_secs()
+                )
             }),
         );
         props.insert(
@@ -624,6 +737,18 @@ mod tests {
         let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
         let schema = handler.schema();
         assert_eq!(schema.name, "terminal");
+        let timeout_desc = schema
+            .parameters
+            .properties
+            .as_ref()
+            .expect("properties")
+            .get("timeout")
+            .and_then(Value::as_object)
+            .and_then(|obj| obj.get("description"))
+            .and_then(Value::as_str)
+            .expect("timeout description");
+        assert!(timeout_desc.contains("600s"));
+        assert!(timeout_desc.contains("background=true"));
     }
 
     #[test]
@@ -635,6 +760,84 @@ mod tests {
         let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
         let result = block_on(handler.execute(json!({"command": "echo hello"}))).unwrap();
         assert!(result.contains("echo hello"));
+    }
+
+    #[test]
+    fn test_terminal_handler_rejects_foreground_timeout_above_cap() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _max = EnvGuard::remove("TERMINAL_MAX_FOREGROUND_TIMEOUT");
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
+
+        let err = block_on(handler.execute(json!({"command": "echo hello", "timeout": 9999})))
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("9999s"));
+        assert!(msg.contains("600s"));
+        assert!(msg.contains("background=true"));
+    }
+
+    #[test]
+    fn test_terminal_handler_allows_background_timeout_above_cap() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _max = EnvGuard::remove("TERMINAL_MAX_FOREGROUND_TIMEOUT");
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
+
+        let result = block_on(handler.execute(json!({
+            "command": "python server.py",
+            "background": true,
+            "timeout": 9999
+        })))
+        .unwrap();
+        assert!(result.contains("python server.py"));
+    }
+
+    #[test]
+    fn test_terminal_handler_rejects_shell_background_wrappers_in_foreground() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
+
+        let err = block_on(handler.execute(json!({
+            "command": "nohup pnpm dev > /tmp/hermes-server.log 2>&1 &"
+        })))
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("background=true"));
+        assert!(msg.to_ascii_lowercase().contains("background"));
+    }
+
+    #[test]
+    fn test_terminal_handler_rejects_long_lived_server_foreground() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
+
+        let err = block_on(handler.execute(json!({"command": "pnpm dev"}))).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.to_ascii_lowercase().contains("long-lived"));
+        assert!(msg.contains("background=true"));
+    }
+
+    #[test]
+    fn test_terminal_handler_allows_help_variant_for_server_command() {
+        let _lock = TEST_ENV_LOCK.lock().unwrap();
+        let _yolo = EnvGuard::remove("HERMES_YOLO_MODE");
+        let _session = EnvGuard::remove("HERMES_SESSION_KEY");
+        let _sudo = EnvGuard::remove("SUDO_PASSWORD");
+        let handler = TerminalHandler::new(std::sync::Arc::new(MockBackend));
+
+        let result = block_on(handler.execute(json!({"command": "pnpm dev --help"}))).unwrap();
+        assert!(result.contains("pnpm dev --help"));
     }
 
     #[test]

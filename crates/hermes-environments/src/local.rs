@@ -13,6 +13,7 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio::process::ChildStdin;
 use tokio::process::Command as TokioCommand;
 use tokio::sync::Mutex as AsyncMutex;
+use tokio::task::JoinHandle;
 
 use hermes_core::{AgentError, CommandOutput, TerminalBackend};
 
@@ -20,6 +21,7 @@ const PROCESS_OUTPUT_WINDOW_CHARS: usize = 200_000;
 const PROCESS_PREVIEW_CHARS: usize = 1_000;
 const PROCESS_WAIT_OUTPUT_CHARS: usize = 2_000;
 const PROCESS_LOG_DEFAULT_LINES: usize = 200;
+const FOREGROUND_DRAIN_GRACE_MS: u64 = 120;
 
 static NEXT_PROCESS_ID: AtomicU64 = AtomicU64::new(1);
 
@@ -165,6 +167,132 @@ impl LocalBackend {
         }
     }
 
+    fn append_bytes(output: &Arc<Mutex<Vec<u8>>>, bytes: &[u8], max_bytes: usize) {
+        let mut guard = output.lock().unwrap_or_else(|e| e.into_inner());
+        let remaining = max_bytes.saturating_sub(guard.len());
+        if remaining > 0 {
+            guard.extend_from_slice(&bytes[..bytes.len().min(remaining)]);
+        }
+    }
+
+    async fn read_stream_to_bytes<R>(
+        mut stream: R,
+        output: Arc<Mutex<Vec<u8>>>,
+        max_output_bytes: usize,
+    ) where
+        R: AsyncRead + Unpin,
+    {
+        let mut chunk = [0_u8; 4096];
+        loop {
+            match stream.read(&mut chunk).await {
+                Ok(0) => break,
+                Ok(read) => Self::append_bytes(&output, &chunk[..read], max_output_bytes),
+                Err(err) => {
+                    let note = format!("\n[stream read error: {err}]");
+                    Self::append_bytes(&output, note.as_bytes(), max_output_bytes);
+                    break;
+                }
+            }
+        }
+    }
+
+    fn decode_output(bytes: &Arc<Mutex<Vec<u8>>>) -> String {
+        let guard = bytes.lock().unwrap_or_else(|e| e.into_inner());
+        String::from_utf8_lossy(&guard).to_string()
+    }
+
+    async fn finish_or_abort_reader(mut handle: JoinHandle<()>) {
+        if tokio::time::timeout(std::time::Duration::from_millis(50), &mut handle)
+            .await
+            .is_err()
+        {
+            // A shell-backgrounded grandchild may still hold the pipe open
+            // after the parent shell exits. Abort the reader instead of
+            // waiting for EOF from an unmanaged descendant.
+            handle.abort();
+            let _ = handle.await;
+        }
+    }
+
+    async fn collect_foreground_child(
+        &self,
+        mut cmd: TokioCommand,
+        timeout_secs: u64,
+        stdin_payload: Option<Vec<u8>>,
+        spawn_label: &str,
+        timeout_label: &str,
+    ) -> Result<CommandOutput, AgentError> {
+        configure_foreground_process_group(&mut cmd);
+        let mut child = cmd
+            .spawn()
+            .map_err(|e| AgentError::Io(format!("Failed to spawn {spawn_label}: {e}")))?;
+        if let Some(payload) = stdin_payload {
+            if let Some(mut stdin) = child.stdin.take() {
+                stdin
+                    .write_all(&payload)
+                    .await
+                    .map_err(|e| AgentError::Io(format!("Failed to write stdin: {e}")))?;
+                stdin
+                    .flush()
+                    .await
+                    .map_err(|e| AgentError::Io(format!("Failed to flush stdin: {e}")))?;
+            }
+        }
+
+        let stdout = Arc::new(Mutex::new(Vec::new()));
+        let stderr = Arc::new(Mutex::new(Vec::new()));
+        let mut stdout_task = child.stdout.take().map(|stream| {
+            let stdout = stdout.clone();
+            let max = self.max_output_size;
+            tokio::spawn(async move {
+                Self::read_stream_to_bytes(stream, stdout, max).await;
+            })
+        });
+        let mut stderr_task = child.stderr.take().map(|stream| {
+            let stderr = stderr.clone();
+            let max = self.max_output_size;
+            tokio::spawn(async move {
+                Self::read_stream_to_bytes(stream, stderr, max).await;
+            })
+        });
+
+        let wait_result =
+            tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), child.wait()).await;
+
+        match wait_result {
+            Ok(Ok(status)) => {
+                tokio::time::sleep(std::time::Duration::from_millis(FOREGROUND_DRAIN_GRACE_MS))
+                    .await;
+                if let Some(handle) = stdout_task.take() {
+                    Self::finish_or_abort_reader(handle).await;
+                }
+                if let Some(handle) = stderr_task.take() {
+                    Self::finish_or_abort_reader(handle).await;
+                }
+                Ok(CommandOutput {
+                    exit_code: status.code().unwrap_or(-1),
+                    stdout: Self::decode_output(&stdout),
+                    stderr: Self::decode_output(&stderr),
+                })
+            }
+            Ok(Err(e)) => Err(AgentError::Io(format!(
+                "Failed to wait for {spawn_label}: {e}"
+            ))),
+            Err(_) => {
+                terminate_child_process(&mut child).await;
+                if let Some(handle) = stdout_task.take() {
+                    Self::finish_or_abort_reader(handle).await;
+                }
+                if let Some(handle) = stderr_task.take() {
+                    Self::finish_or_abort_reader(handle).await;
+                }
+                Err(AgentError::Timeout(format!(
+                    "{timeout_label} timed out after {timeout_secs} seconds"
+                )))
+            }
+        }
+    }
+
     fn terminate_pid(pid: u32) -> Result<(), AgentError> {
         #[cfg(unix)]
         {
@@ -198,6 +326,46 @@ impl LocalBackend {
             }
         }
     }
+}
+
+#[cfg(unix)]
+fn configure_foreground_process_group(cmd: &mut TokioCommand) {
+    unsafe {
+        cmd.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
+#[cfg(not(unix))]
+fn configure_foreground_process_group(_cmd: &mut TokioCommand) {}
+
+#[cfg(unix)]
+async fn terminate_child_process(child: &mut tokio::process::Child) {
+    if let Some(pid) = child.id() {
+        let pgid = -(pid as i32);
+        unsafe {
+            libc::kill(pgid, libc::SIGTERM);
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        match child.try_wait() {
+            Ok(Some(_)) => return,
+            Ok(None) | Err(_) => unsafe {
+                libc::kill(pgid, libc::SIGKILL);
+            },
+        }
+    }
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+}
+
+#[cfg(not(unix))]
+async fn terminate_child_process(child: &mut tokio::process::Child) {
+    let _ = child.kill().await;
+    let _ = child.wait().await;
 }
 
 fn home_dir() -> Option<PathBuf> {
@@ -533,6 +701,155 @@ else printf '%s\n' \"Hermes could not find bash or zsh in PATH. Run 'exec zsh -l
     }
 }
 
+fn rewrite_compound_background(command: &str) -> String {
+    let mut out = String::with_capacity(command.len());
+    for line in command.split_inclusive('\n') {
+        let (body, newline) = line
+            .strip_suffix('\n')
+            .map(|body| (body, "\n"))
+            .unwrap_or((line, ""));
+        out.push_str(&rewrite_compound_background_line(body));
+        out.push_str(newline);
+    }
+    out
+}
+
+fn rewrite_compound_background_line(line: &str) -> String {
+    if line.trim_start().starts_with('#') {
+        return line.to_string();
+    }
+    let Some(amp_idx) = trailing_background_ampersand(line) else {
+        return line.to_string();
+    };
+    let Some(op) = last_top_level_chain_operator(line, amp_idx) else {
+        return line.to_string();
+    };
+
+    let mut tail_start = op.end;
+    while tail_start < amp_idx {
+        let Some(ch) = line[tail_start..amp_idx].chars().next() else {
+            break;
+        };
+        if !ch.is_whitespace() {
+            break;
+        }
+        tail_start += ch.len_utf8();
+    }
+    if line[tail_start..amp_idx].trim().is_empty() {
+        return line.to_string();
+    }
+
+    let mut rewritten = String::with_capacity(line.len() + 4);
+    rewritten.push_str(&line[..tail_start]);
+    rewritten.push_str("{ ");
+    rewritten.push_str(&line[tail_start..=amp_idx]);
+    rewritten.push_str(" }");
+    rewritten.push_str(&line[amp_idx + 1..]);
+    rewritten
+}
+
+#[derive(Clone, Copy)]
+struct ChainOperator {
+    end: usize,
+}
+
+fn trailing_background_ampersand(line: &str) -> Option<usize> {
+    let mut idx = line.len();
+    while idx > 0 {
+        let (prev, ch) = line[..idx].char_indices().next_back()?;
+        if !ch.is_whitespace() {
+            idx = prev;
+            break;
+        }
+        idx = prev;
+    }
+    if line[idx..].chars().next()? != '&' || is_escaped(line, idx) {
+        return None;
+    }
+    if idx > 0 && line[..idx].ends_with('&') {
+        return None;
+    }
+    Some(idx)
+}
+
+fn is_escaped(input: &str, idx: usize) -> bool {
+    let mut count = 0usize;
+    let mut pos = idx;
+    while pos > 0 {
+        let Some((prev, ch)) = input[..pos].char_indices().next_back() else {
+            break;
+        };
+        if ch != '\\' {
+            break;
+        }
+        count += 1;
+        pos = prev;
+    }
+    count % 2 == 1
+}
+
+fn last_top_level_chain_operator(line: &str, stop: usize) -> Option<ChainOperator> {
+    let mut last = None;
+    let mut single = false;
+    let mut double = false;
+    let mut paren_depth = 0usize;
+    let mut command_sub_depth = 0usize;
+    let mut iter = line[..stop].char_indices().peekable();
+
+    while let Some((idx, ch)) = iter.next() {
+        if is_escaped(line, idx) {
+            continue;
+        }
+        if single {
+            if ch == '\'' {
+                single = false;
+            }
+            continue;
+        }
+        if double {
+            if ch == '"' {
+                double = false;
+                continue;
+            }
+            if ch == '$' && iter.peek().is_some_and(|(_, next)| *next == '(') {
+                command_sub_depth += 1;
+                iter.next();
+            }
+            continue;
+        }
+
+        match ch {
+            '\'' => single = true,
+            '"' => double = true,
+            '$' if iter.peek().is_some_and(|(_, next)| *next == '(') => {
+                command_sub_depth += 1;
+                iter.next();
+            }
+            '(' if command_sub_depth == 0 => paren_depth += 1,
+            ')' if command_sub_depth > 0 => command_sub_depth -= 1,
+            ')' if paren_depth > 0 => paren_depth -= 1,
+            ';' if paren_depth == 0 && command_sub_depth == 0 => last = None,
+            '|' if paren_depth == 0 && command_sub_depth == 0 => {
+                if iter.peek().is_some_and(|(_, next)| *next == '|') {
+                    iter.next();
+                    last = Some(ChainOperator { end: idx + 2 });
+                } else {
+                    last = None;
+                }
+            }
+            '&' if paren_depth == 0
+                && command_sub_depth == 0
+                && iter.peek().is_some_and(|(_, next)| *next == '&') =>
+            {
+                iter.next();
+                last = Some(ChainOperator { end: idx + 2 });
+            }
+            _ => {}
+        }
+    }
+    last
+}
+
 impl Default for LocalBackend {
     fn default() -> Self {
         Self::new(120, 1_048_576)
@@ -550,7 +867,8 @@ impl TerminalBackend for LocalBackend {
         pty: bool,
     ) -> Result<CommandOutput, AgentError> {
         let timeout_secs = timeout.unwrap_or(self.default_timeout);
-        let command_with_profiles = with_login_profile_sources(command);
+        let rewritten_command = rewrite_compound_background(command);
+        let command_with_profiles = with_login_profile_sources(&rewritten_command);
 
         if pty && !background {
             // PTY mode: allocate a pseudo-terminal for interactive commands.
@@ -574,37 +892,15 @@ impl TerminalBackend for LocalBackend {
                     pty_cmd.current_dir(resolve_path(dir)?);
                 }
 
-                let result =
-                    tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
-                        let output = pty_cmd.output().await.map_err(|e| {
-                            AgentError::Io(format!("Failed to spawn PTY command: {}", e))
-                        })?;
-                        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                        Ok(CommandOutput {
-                            exit_code: output.status.code().unwrap_or(-1),
-                            stdout: if stdout.len() > self.max_output_size {
-                                stdout[..self.max_output_size].to_string()
-                            } else {
-                                stdout
-                            },
-                            stderr: if stderr.len() > self.max_output_size {
-                                stderr[..self.max_output_size].to_string()
-                            } else {
-                                stderr
-                            },
-                        })
-                    })
+                return self
+                    .collect_foreground_child(
+                        pty_cmd,
+                        timeout_secs,
+                        None,
+                        "PTY command",
+                        "PTY command",
+                    )
                     .await;
-
-                return match result {
-                    Ok(Ok(output)) => Ok(output),
-                    Ok(Err(e)) => Err(e),
-                    Err(_) => Err(AgentError::Timeout(format!(
-                        "PTY command timed out after {} seconds",
-                        timeout_secs
-                    ))),
-                };
             }
 
             #[cfg(not(unix))]
@@ -652,110 +948,78 @@ impl TerminalBackend for LocalBackend {
             cmd.stdin(Stdio::null());
         }
 
+        if !background {
+            return self
+                .collect_foreground_child(cmd, timeout_secs, None, "command", "Command")
+                .await;
+        }
+
         let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
             let mut child = cmd
                 .spawn()
                 .map_err(|e| AgentError::Io(format!("Failed to spawn command: {}", e)))?;
 
-            // In background mode, track the process session and return immediately.
-            if background {
-                let session_id = Self::next_process_session_id();
-                let pid = child.id();
-                let output = Arc::new(Mutex::new(String::new()));
-                let status = Arc::new(Mutex::new(ProcessStatus::default()));
-                let stdin = Arc::new(AsyncMutex::new(child.stdin.take()));
-                let max_output_chars = self.max_process_output_chars();
-                let session = ProcessSession {
-                    id: session_id.clone(),
-                    command: command.to_string(),
-                    pid,
-                    started_at: Self::now_unix_ts(),
-                    status: status.clone(),
-                    output: output.clone(),
-                    stdin,
-                };
-                self.background_processes
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner())
-                    .insert(session_id.clone(), session);
+            let session_id = Self::next_process_session_id();
+            let pid = child.id();
+            let output = Arc::new(Mutex::new(String::new()));
+            let status = Arc::new(Mutex::new(ProcessStatus::default()));
+            let stdin = Arc::new(AsyncMutex::new(child.stdin.take()));
+            let max_output_chars = self.max_process_output_chars();
+            let session = ProcessSession {
+                id: session_id.clone(),
+                command: rewritten_command.clone(),
+                pid,
+                started_at: Self::now_unix_ts(),
+                status: status.clone(),
+                output: output.clone(),
+                stdin,
+            };
+            self.background_processes
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(session_id.clone(), session);
 
-                if let Some(stdout) = child.stdout.take() {
-                    let output = output.clone();
-                    tokio::spawn(async move {
-                        Self::read_stream_to_buffer(stdout, output, max_output_chars).await;
-                    });
-                }
-                if let Some(stderr) = child.stderr.take() {
-                    let output = output.clone();
-                    tokio::spawn(async move {
-                        Self::read_stream_to_buffer(stderr, output, max_output_chars).await;
-                    });
-                }
-
+            if let Some(stdout) = child.stdout.take() {
+                let output = output.clone();
                 tokio::spawn(async move {
-                    match child.wait().await {
-                        Ok(exit) => {
-                            let mut guard = status.lock().unwrap_or_else(|e| e.into_inner());
-                            guard.exited = true;
-                            guard.exit_code = exit.code();
-                        }
-                        Err(err) => {
-                            let mut guard = status.lock().unwrap_or_else(|e| e.into_inner());
-                            guard.exited = true;
-                            guard.exit_code = Some(-1);
-                            let note = format!("\n[wait error: {err}]");
-                            Self::append_output(&output, &note, max_output_chars);
-                        }
-                    }
+                    Self::read_stream_to_buffer(stdout, output, max_output_chars).await;
                 });
-
-                let started = json!({
-                    "output": "Background process started",
-                    "session_id": session_id,
-                    "pid": pid,
-                    "exit_code": 0,
-                    "error": Value::Null
-                });
-                return Ok(CommandOutput {
-                    exit_code: 0,
-                    stdout: started.to_string(),
-                    stderr: String::new(),
+            }
+            if let Some(stderr) = child.stderr.take() {
+                let output = output.clone();
+                tokio::spawn(async move {
+                    Self::read_stream_to_buffer(stderr, output, max_output_chars).await;
                 });
             }
 
-            let output = child
-                .wait_with_output()
-                .await
-                .map_err(|e| AgentError::Io(format!("Failed to wait for command: {}", e)))?;
+            tokio::spawn(async move {
+                match child.wait().await {
+                    Ok(exit) => {
+                        let mut guard = status.lock().unwrap_or_else(|e| e.into_inner());
+                        guard.exited = true;
+                        guard.exit_code = exit.code();
+                    }
+                    Err(err) => {
+                        let mut guard = status.lock().unwrap_or_else(|e| e.into_inner());
+                        guard.exited = true;
+                        guard.exit_code = Some(-1);
+                        let note = format!("\n[wait error: {err}]");
+                        Self::append_output(&output, &note, max_output_chars);
+                    }
+                }
+            });
 
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-
-            // Truncate output if it exceeds max_output_size
-            let stdout = if stdout.len() > self.max_output_size {
-                tracing::warn!(
-                    "Command output exceeded max size ({} bytes), truncating",
-                    stdout.len()
-                );
-                stdout[..self.max_output_size].to_string()
-            } else {
-                stdout
-            };
-
-            let stderr = if stderr.len() > self.max_output_size {
-                tracing::warn!(
-                    "Command stderr exceeded max size ({} bytes), truncating",
-                    stderr.len()
-                );
-                stderr[..self.max_output_size].to_string()
-            } else {
-                stderr
-            };
-
+            let started = json!({
+                "output": "Background process started",
+                "session_id": session_id,
+                "pid": pid,
+                "exit_code": 0,
+                "error": Value::Null
+            });
             Ok(CommandOutput {
-                exit_code: output.status.code().unwrap_or(-1),
-                stdout,
-                stderr,
+                exit_code: 0,
+                stdout: started.to_string(),
+                stderr: String::new(),
             })
         })
         .await;
@@ -784,7 +1048,8 @@ impl TerminalBackend for LocalBackend {
                 .execute_command(command, timeout, workdir, background, pty)
                 .await;
         };
-        let command_with_profiles = with_login_profile_sources(command);
+        let rewritten_command = rewrite_compound_background(command);
+        let command_with_profiles = with_login_profile_sources(&rewritten_command);
 
         if background {
             let started = self
@@ -824,49 +1089,15 @@ impl TerminalBackend for LocalBackend {
                     pty_cmd.current_dir(resolve_path(dir)?);
                 }
 
-                let result =
-                    tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
-                        let mut child = pty_cmd.spawn().map_err(|e| {
-                            AgentError::Io(format!("Failed to spawn PTY command: {}", e))
-                        })?;
-                        if let Some(mut stdin) = child.stdin.take() {
-                            stdin.write_all(stdin_owned.as_bytes()).await.map_err(|e| {
-                                AgentError::Io(format!("Failed to write PTY stdin: {e}"))
-                            })?;
-                            stdin.flush().await.map_err(|e| {
-                                AgentError::Io(format!("Failed to flush PTY stdin: {e}"))
-                            })?;
-                        }
-
-                        let output = child.wait_with_output().await.map_err(|e| {
-                            AgentError::Io(format!("Failed to wait for PTY command: {}", e))
-                        })?;
-                        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                        Ok(CommandOutput {
-                            exit_code: output.status.code().unwrap_or(-1),
-                            stdout: if stdout.len() > self.max_output_size {
-                                stdout[..self.max_output_size].to_string()
-                            } else {
-                                stdout
-                            },
-                            stderr: if stderr.len() > self.max_output_size {
-                                stderr[..self.max_output_size].to_string()
-                            } else {
-                                stderr
-                            },
-                        })
-                    })
+                return self
+                    .collect_foreground_child(
+                        pty_cmd,
+                        timeout_secs,
+                        Some(stdin_owned.as_bytes().to_vec()),
+                        "PTY command",
+                        "PTY command",
+                    )
                     .await;
-
-                return match result {
-                    Ok(Ok(output)) => Ok(output),
-                    Ok(Err(e)) => Err(e),
-                    Err(_) => Err(AgentError::Timeout(format!(
-                        "PTY command timed out after {} seconds",
-                        timeout_secs
-                    ))),
-                };
             }
 
             #[cfg(not(unix))]
@@ -888,51 +1119,14 @@ impl TerminalBackend for LocalBackend {
             cmd.current_dir(resolve_path(dir)?);
         }
 
-        let result = tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), async {
-            let mut child = cmd
-                .spawn()
-                .map_err(|e| AgentError::Io(format!("Failed to spawn command: {}", e)))?;
-            if let Some(mut stdin) = child.stdin.take() {
-                stdin
-                    .write_all(stdin_owned.as_bytes())
-                    .await
-                    .map_err(|e| AgentError::Io(format!("Failed to write stdin: {e}")))?;
-                stdin
-                    .flush()
-                    .await
-                    .map_err(|e| AgentError::Io(format!("Failed to flush stdin: {e}")))?;
-            }
-
-            let output = child
-                .wait_with_output()
-                .await
-                .map_err(|e| AgentError::Io(format!("Failed to wait for command: {}", e)))?;
-            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            Ok(CommandOutput {
-                exit_code: output.status.code().unwrap_or(-1),
-                stdout: if stdout.len() > self.max_output_size {
-                    stdout[..self.max_output_size].to_string()
-                } else {
-                    stdout
-                },
-                stderr: if stderr.len() > self.max_output_size {
-                    stderr[..self.max_output_size].to_string()
-                } else {
-                    stderr
-                },
-            })
-        })
-        .await;
-
-        match result {
-            Ok(Ok(output)) => Ok(output),
-            Ok(Err(e)) => Err(e),
-            Err(_) => Err(AgentError::Timeout(format!(
-                "Command timed out after {} seconds",
-                timeout_secs
-            ))),
-        }
+        self.collect_foreground_child(
+            cmd,
+            timeout_secs,
+            Some(stdin_owned.into_bytes()),
+            "command",
+            "Command",
+        )
+        .await
     }
 
     async fn read_file(
@@ -1293,6 +1487,36 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_rewrite_compound_background_contract() {
+        assert_eq!(rewrite_compound_background("A && B &"), "A && { B & }");
+        assert_eq!(rewrite_compound_background("A || B &"), "A || { B & }");
+        assert_eq!(
+            rewrite_compound_background("A && B && C &"),
+            "A && B && { C & }"
+        );
+        assert_eq!(
+            rewrite_compound_background("cd /tmp && server &\nsleep 1"),
+            "cd /tmp && { server & }\nsleep 1"
+        );
+        assert_eq!(rewrite_compound_background("sleep 5 &"), "sleep 5 &");
+        assert_eq!(rewrite_compound_background("A && B | C &"), "A && B | C &");
+        assert_eq!(
+            rewrite_compound_background("A && B &>/dev/null &"),
+            "A && { B &>/dev/null & }"
+        );
+        assert_eq!(
+            rewrite_compound_background("echo 'A && B &'"),
+            "echo 'A && B &'"
+        );
+        assert_eq!(
+            rewrite_compound_background("   A && B &"),
+            "   A && { B & }"
+        );
+        let once = rewrite_compound_background("A && B &");
+        assert_eq!(rewrite_compound_background(&once), once);
+    }
+
     #[cfg(not(unix))]
     #[test]
     fn test_with_login_profile_sources_is_passthrough_off_unix() {
@@ -1344,6 +1568,73 @@ mod tests {
             Err(AgentError::Timeout(_)) => {}
             _ => panic!("Expected timeout error"),
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_plain_shell_background_child_does_not_hang_foreground_collection() {
+        let backend = LocalBackend::new(10, 1_048_576);
+        let marker = "hermes_bg_nohang_marker";
+        let probe = "hermes_bg_nohang_probe";
+        let command = format!("python3 -c 'import time; time.sleep(60)' {probe} & echo {marker}");
+        let started = std::time::Instant::now();
+        let output = backend
+            .execute_command(&command, Some(5), None, false, false)
+            .await
+            .unwrap();
+        let elapsed = started.elapsed();
+        let _ = std::process::Command::new("pkill")
+            .args(["-f", probe])
+            .status();
+
+        assert!(
+            elapsed < std::time::Duration::from_secs(3),
+            "foreground collection hung for {elapsed:?}"
+        );
+        assert_eq!(output.exit_code, 0);
+        assert!(output.stdout.contains(marker), "stdout={:?}", output.stdout);
+    }
+
+    #[tokio::test]
+    async fn test_foreground_collection_preserves_multibyte_utf8_boundaries() {
+        let backend = LocalBackend::new(10, 100_000);
+        let command = "python3 -c 'import sys; sys.stdout.buffer.write(chr(0x65e5).encode(\"utf-8\") * 10000); sys.stdout.buffer.write(b\"\\n\")'";
+        let output = backend
+            .execute_command(command, Some(10), None, false, false)
+            .await
+            .unwrap();
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(output.stdout.matches('\u{65e5}').count(), 10_000);
+        assert!(!output.stdout.contains("binary output detected"));
+    }
+
+    #[tokio::test]
+    async fn test_foreground_collection_preserves_high_volume_line_output() {
+        let backend = LocalBackend::new(10, 1_048_576);
+        let output = backend
+            .execute_command("seq 1 3000", Some(10), None, false, false)
+            .await
+            .unwrap();
+        let lines = output.stdout.trim().split('\n').collect::<Vec<_>>();
+        assert_eq!(output.exit_code, 0);
+        assert_eq!(lines.len(), 3000);
+        assert_eq!(lines.first().copied(), Some("1"));
+        assert_eq!(lines.last().copied(), Some("3000"));
+    }
+
+    #[tokio::test]
+    async fn test_foreground_collection_replaces_invalid_utf8() {
+        let backend = LocalBackend::new(10, 1_048_576);
+        let command = "python3 -c 'import sys; sys.stdout.buffer.write(b\"before \"); sys.stdout.buffer.write(b\"\\xff\\xfe\"); sys.stdout.buffer.write(b\" after\\n\")'";
+        let output = backend
+            .execute_command(command, Some(5), None, false, false)
+            .await
+            .unwrap();
+        assert_eq!(output.exit_code, 0);
+        assert!(output.stdout.contains("before"));
+        assert!(output.stdout.contains("after"));
+        assert!(output.stdout.contains('\u{fffd}'));
+        assert!(!output.stdout.contains("binary output detected"));
     }
 
     #[tokio::test]

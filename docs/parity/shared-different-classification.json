@@ -1739,6 +1739,27 @@
       "ticket": 25
     },
     {
+      "path": "tests/tools/test_local_background_child_hang.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream local background-child pipe-hang intent is covered by Rust LocalBackend foreground collector contracts for shell-background child prompt return, high-volume output, timeout behavior, multibyte and invalid UTF-8 preservation, and process-group timeout cleanup.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_terminal_compound_background.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream compound-background rewrite intent is covered by Rust LocalBackend rewrite_compound_background contracts for &&/|| chains, redirects, quoting, idempotence, newlines, pipes, and simple-background passthrough.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_terminal_foreground_timeout_cap.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream foreground timeout cap and background-wrapper/server guard intent is covered by Rust TerminalHandler contracts for explicit >600s foreground rejection, background exemption, schema hint, nohup/& wrapper rejection, long-lived server detection, and help passthrough.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
       "path": "tests/tools/test_url_safety.py",
       "classification": "intentional_divergence",
       "rationale": "Upstream URL safety/SSRF intent is covered by Rust hermes-tools url_safety contracts for http/https-only parsing, DNS fail-closed behavior, private/reserved IPv4 and IPv6 blocking including CGNAT, benchmark, multicast, and IPv4-mapped IPv6 ranges, metadata hostname/IP always-blocking, allow_private_urls toggle semantics, and the exact QQ multimedia benchmark-IP exception.",

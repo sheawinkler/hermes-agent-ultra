@@ -1814,6 +1814,7 @@ dependencies = [
  "async-trait",
  "hermes-config",
  "hermes-core",
+ "libc",
  "reqwest",
  "serde",
  "serde_json",
