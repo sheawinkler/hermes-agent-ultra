@@ -21,6 +21,7 @@ pub mod interrupt;
 pub mod lsp_context;
 pub mod memory_manager;
 pub mod memory_plugins;
+pub mod model_normalize;
 pub mod oauth;
 pub mod plugins;
 pub mod provider;

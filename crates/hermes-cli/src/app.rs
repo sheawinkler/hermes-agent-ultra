@@ -6285,6 +6285,10 @@ pub fn provider_api_key_from_env(provider: &str) -> Option<String> {
 pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvider> {
     let (provider_name, model_name) = resolve_provider_and_model(config, model);
     let runtime_provider = normalize_runtime_provider_name(provider_name.as_str());
+    let model_name = hermes_agent::model_normalize::normalize_model_for_provider(
+        model_name.as_str(),
+        runtime_provider.as_str(),
+    );
 
     let provider_config = config
         .llm_providers

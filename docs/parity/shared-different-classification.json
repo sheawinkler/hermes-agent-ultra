@@ -2395,6 +2395,41 @@
       "rationale": "Upstream managed Browserbase/Browser Use/Modal intent is covered by Rust provider contracts: Browserbase remains direct-credential only, Browser Use supports direct and Nous-managed gateway modes with timeout/proxy payloads, idempotency-key preservation across timeout/in-progress conflicts, external-call-id persistence, and Modal backend selection is covered by hermes-config managed gateway and hermes-tools terminal/register_builtins contracts.",
       "owner": "sheawinkler",
       "ticket": 25
+    },
+    {
+      "path": "tests/hermes_cli/test_model_normalize.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream provider-aware model normalization intent is now implemented in Rust hermes-agent::model_normalize and wired into CLI build_provider, AgentLoop runtime provider construction, and auxiliary main-runtime providers. Rust tests cover dot preservation for opencode-go, Anthropic dot-to-hyphen conversion, Copilot bare dot notation, aggregator vendor-prefix insertion, matching-only native prefix stripping, vendor detection, and DeepSeek V-series/reasoner folding.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/hermes_cli/test_model_validation.py",
+      "classification": "intentional_divergence",
+      "rationale": "Python /model validation behavior is superseded by Rust CLI model-switch contracts: provider aliases/capabilities are covered by crates/hermes-cli providers/model_switch/commands tests, provider catalogs are resolved through curated/models.dev/live OpenAI-compatible helpers, unlisted Codex models are soft-accepted, and runtime-facing model IDs now pass through shared Rust provider-aware normalization before provider construction.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/hermes_cli/test_runtime_provider_resolution.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream runtime-provider resolution intent is covered by Rust AgentLoop and CLI runtime provider contracts: provider aliases, api_key/api_key_env/base_url precedence, OAuth token-store refresh for openai-codex and qwen-oauth, credential-pool fallback, local no-key providers, and StepFun/Copilot/direct provider defaults are tested; this tranche adds shared model normalization to runtime-routed provider construction.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/hermes_cli/test_models.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream hermes_cli.models catalog/model-id intent is covered by Rust provider registry and model_switch contracts: known provider and OAuth snapshots, curated provider model lists, models.dev merge ordering and deduplication, OpenRouter curated-only safety, Nous/OpenRouter agentic merge, local provider fallbacks, signed provider catalog cache verification, and provider-aware model normalization for runtime IDs.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/hermes_cli/test_model_catalog.py",
+      "classification": "intentional_divergence",
+      "rationale": "Python remote manifest/cache behavior is intentionally replaced by Rust provider catalog resolution: curated models plus models.dev/live provider discovery are cached in a signed provider-model cache, stale or tampered cache payloads are rejected, and provider_catalog_entries exposes bounded previews with total model counts for CLI/TUI listing.",
+      "owner": "sheawinkler",
+      "ticket": 25
     }
   ]
 }
