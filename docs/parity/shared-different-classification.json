@@ -2180,6 +2180,13 @@
       "ticket": 303
     },
     {
+      "path": "tests/gateway/test_api_server_runs.py",
+      "classification": "intentional_divergence",
+      "rationale": "API-server /v1/runs behavior is covered by Rust-native TCP contracts for run start/status/events/stop, explicit session IDs, inbound gateway dispatch, completion usage/output, cancellation event closure, approval-no-pending conflicts, bool-like approval parsing, invalid conversation-history rejection without allocation, and auth gating.",
+      "owner": "sheawinkler",
+      "ticket": 303
+    },
+    {
       "path": "tests/gateway/test_gateway_command_help.py",
       "classification": "intentional_divergence",
       "rationale": "Gateway help/start command behavior is covered by Rust gateway command contracts: /start is a no-op platform start event, /commands aliases /help, registered command bypass recognizes aliases, and generated help exposes normalized lowercase command names.",

@@ -156,6 +156,31 @@ pub struct ResponsesRequest {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct RunRequest {
+    pub input: ResponseInput,
+    #[serde(default)]
+    pub conversation_history: Option<Vec<ChatMessage>>,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub user: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub provider: Option<String>,
+    #[serde(default)]
+    pub personality: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RunApprovalRequest {
+    #[serde(default)]
+    choice: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_boolish")]
+    all: bool,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum ResponseInput {
     Text(String),
@@ -215,7 +240,7 @@ pub struct ChatChoice {
     pub finish_reason: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct UsageInfo {
     pub prompt_tokens: u32,
     pub completion_tokens: u32,
@@ -267,6 +292,16 @@ pub struct ApiInboundRequest {
     pub provider: Option<String>,
     pub personality: Option<String>,
     pub prompt: String,
+}
+
+#[derive(Clone)]
+struct ApiServerRuntime {
+    mailbox: Arc<RwLock<ResponseMailbox>>,
+    response_store: Arc<RwLock<ResponseStore>>,
+    run_cancels: Arc<RwLock<RunCancelRegistry>>,
+    run_store: Arc<RwLock<RunStore>>,
+    inbound_tx: Arc<RwLock<Option<mpsc::Sender<ApiInboundRequest>>>>,
+    auth_token: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -375,6 +410,117 @@ struct RunCancelRegistry {
     pending: HashMap<String, Arc<Notify>>,
 }
 
+#[derive(Debug, Clone)]
+struct RunRecord {
+    run_id: String,
+    session_id: String,
+    user_id: String,
+    model: Option<String>,
+    provider: Option<String>,
+    personality: Option<String>,
+    status: String,
+    output: Option<String>,
+    usage: UsageInfo,
+    last_event: Option<String>,
+    events: Vec<serde_json::Value>,
+    created_at: i64,
+    completed_at: Option<i64>,
+}
+
+impl RunRecord {
+    fn new(
+        run_id: String,
+        session_id: String,
+        user_id: String,
+        model: Option<String>,
+        provider: Option<String>,
+        personality: Option<String>,
+    ) -> Self {
+        let mut record = Self {
+            run_id,
+            session_id,
+            user_id,
+            model,
+            provider,
+            personality,
+            status: "queued".to_string(),
+            output: None,
+            usage: UsageInfo {
+                prompt_tokens: 0,
+                completion_tokens: 0,
+                total_tokens: 0,
+            },
+            last_event: None,
+            events: Vec::new(),
+            created_at: chrono::Utc::now().timestamp(),
+            completed_at: None,
+        };
+        record.push_event("run.queued", None);
+        record
+    }
+
+    fn is_active(&self) -> bool {
+        matches!(self.status.as_str(), "queued" | "running" | "stopping")
+    }
+
+    fn is_terminal(&self) -> bool {
+        matches!(self.status.as_str(), "completed" | "cancelled" | "failed")
+    }
+
+    fn push_event(&mut self, event_type: &str, extra: Option<serde_json::Value>) {
+        self.last_event = Some(event_type.to_string());
+        let mut event = serde_json::json!({
+            "type": event_type,
+            "run_id": self.run_id,
+            "status": self.status,
+            "created_at": chrono::Utc::now().timestamp(),
+        });
+        if let Some(extra) = extra {
+            if let (Some(target), Some(source)) = (event.as_object_mut(), extra.as_object()) {
+                for (key, value) in source {
+                    target.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        self.events.push(event);
+    }
+}
+
+#[derive(Default)]
+struct RunStore {
+    records: HashMap<String, RunRecord>,
+    notifiers: HashMap<String, Arc<Notify>>,
+}
+
+impl RunStore {
+    fn insert(&mut self, record: RunRecord) {
+        let run_id = record.run_id.clone();
+        self.notifiers
+            .insert(run_id.clone(), Arc::new(Notify::new()));
+        self.records.insert(run_id, record);
+    }
+
+    fn get(&self, run_id: &str) -> Option<RunRecord> {
+        self.records.get(run_id).cloned()
+    }
+
+    fn notifier(&self, run_id: &str) -> Option<Arc<Notify>> {
+        self.notifiers.get(run_id).cloned()
+    }
+
+    fn update<F>(&mut self, run_id: &str, f: F) -> Option<RunRecord>
+    where
+        F: FnOnce(&mut RunRecord),
+    {
+        let record = self.records.get_mut(run_id)?;
+        f(record);
+        if let Some(notifier) = self.notifiers.get(run_id) {
+            notifier.notify_waiters();
+        }
+        Some(record.clone())
+    }
+}
+
 // ---------------------------------------------------------------------------
 // ApiServerAdapter
 // ---------------------------------------------------------------------------
@@ -387,6 +533,7 @@ pub struct ApiServerAdapter {
     mailbox: Arc<RwLock<ResponseMailbox>>,
     response_store: Arc<RwLock<ResponseStore>>,
     run_cancels: Arc<RwLock<RunCancelRegistry>>,
+    run_store: Arc<RwLock<RunStore>>,
     inbound_tx: Arc<RwLock<Option<mpsc::Sender<ApiInboundRequest>>>>,
 }
 
@@ -406,6 +553,7 @@ impl ApiServerAdapter {
             mailbox: Arc::new(RwLock::new(ResponseMailbox::default())),
             response_store: Arc::new(RwLock::new(ResponseStore::default())),
             run_cancels: Arc::new(RwLock::new(RunCancelRegistry::default())),
+            run_store: Arc::new(RwLock::new(RunStore::default())),
             inbound_tx: Arc::new(RwLock::new(None)),
         }
     }
@@ -506,16 +654,22 @@ impl PlatformAdapter for ApiServerAdapter {
         let mailbox = self.mailbox.clone();
         let response_store = self.response_store.clone();
         let run_cancels = self.run_cancels.clone();
+        let run_store = self.run_store.clone();
         let inbound_tx = self.inbound_tx.clone();
         let auth_token = self.config.auth_token.clone();
+        let runtime = ApiServerRuntime {
+            mailbox,
+            response_store,
+            run_cancels,
+            run_store,
+            inbound_tx,
+            auth_token,
+        };
 
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
         *self.shutdown_tx.write().await = Some(shutdown_tx);
 
         tokio::spawn(async move {
-            let mailbox = mailbox;
-            let auth_token = auth_token;
-
             let listener = match tokio::net::TcpListener::bind(addr).await {
                 Ok(l) => l,
                 Err(e) => {
@@ -533,21 +687,13 @@ impl PlatformAdapter for ApiServerAdapter {
                     accept = listener.accept() => {
                         match accept {
                             Ok((stream, peer)) => {
-                                let mailbox = mailbox.clone();
-                                let response_store = response_store.clone();
-                                let run_cancels = run_cancels.clone();
-                                let inbound_tx = inbound_tx.clone();
-                                let auth_token = auth_token.clone();
+                                let runtime = runtime.clone();
                                 tokio::spawn(async move {
                                     if let Err(e) =
                                         handle_connection(
                                             stream,
                                             peer,
-                                            mailbox,
-                                            response_store,
-                                            run_cancels,
-                                            inbound_tx,
-                                            auth_token,
+                                            runtime,
                                         )
                                         .await
                                     {
@@ -789,6 +935,7 @@ fn capabilities_response_body() -> serde_json::Value {
             "chat_completions": true,
             "responses": true,
             "response_store": true,
+            "runs": true,
             "conversation_mapping": true,
             "session_continuity_header": "X-Hermes-Session-Id",
             "toolsets": true,
@@ -801,7 +948,10 @@ fn capabilities_response_body() -> serde_json::Value {
             "responses": {"method": "POST", "path": "/v1/responses"},
             "response_get": {"method": "GET", "path": "/v1/responses/{response_id}"},
             "response_delete": {"method": "DELETE", "path": "/v1/responses/{response_id}"},
+            "run_start": {"method": "POST", "path": "/v1/runs"},
             "run_status": {"method": "GET", "path": "/v1/runs/{run_id}"},
+            "run_events": {"method": "GET", "path": "/v1/runs/{run_id}/events"},
+            "run_approval": {"method": "POST", "path": "/v1/runs/{run_id}/approval"},
             "run_stop": {"method": "POST", "path": "/v1/runs/{run_id}/stop"},
             "skills": {"method": "GET", "path": "/v1/skills"},
             "toolsets": {"method": "GET", "path": "/v1/toolsets"},
@@ -934,6 +1084,111 @@ fn response_input_messages(input: ResponseInput) -> Vec<ChatMessage> {
     }
 }
 
+fn input_messages_have_non_empty_user_content(messages: &[ChatMessage]) -> bool {
+    messages.iter().any(|message| {
+        message.role.trim().eq_ignore_ascii_case("user") && !message.content.trim().is_empty()
+    })
+}
+
+fn estimated_usage(prompt: &str, content: &str) -> UsageInfo {
+    let prompt_tokens = (prompt.len() as u32 / 4).max(1);
+    let completion_tokens = (content.len() as u32 / 4).max(1);
+    UsageInfo {
+        prompt_tokens,
+        completion_tokens,
+        total_tokens: prompt_tokens + completion_tokens,
+    }
+}
+
+fn run_response_body(record: &RunRecord) -> serde_json::Value {
+    let mut body = serde_json::json!({
+        "id": record.run_id,
+        "run_id": record.run_id,
+        "object": "hermes.run",
+        "status": record.status,
+        "session_id": record.session_id,
+        "user": record.user_id,
+        "created_at": record.created_at,
+        "last_event": record.last_event,
+        "usage": record.usage,
+    });
+
+    if let Some(model) = record.model.as_deref() {
+        body["model"] = serde_json::json!(model);
+    }
+    if let Some(provider) = record.provider.as_deref() {
+        body["provider"] = serde_json::json!(provider);
+    }
+    if let Some(personality) = record.personality.as_deref() {
+        body["personality"] = serde_json::json!(personality);
+    }
+    if let Some(output) = record.output.as_deref() {
+        body["output"] = serde_json::json!(output);
+    }
+    if let Some(completed_at) = record.completed_at {
+        body["completed_at"] = serde_json::json!(completed_at);
+    }
+    body
+}
+
+fn run_events_sse_body(record: &RunRecord) -> String {
+    let mut out = String::new();
+    for event in &record.events {
+        let event_type = event["type"].as_str().unwrap_or("run.event");
+        out.push_str("event: ");
+        out.push_str(event_type);
+        out.push('\n');
+        out.push_str("data: ");
+        out.push_str(&event.to_string());
+        out.push_str("\n\n");
+    }
+    out.push_str("data: [DONE]\n\n");
+    out
+}
+
+async fn wait_for_run_event_snapshot(
+    run_store: Arc<RwLock<RunStore>>,
+    run_id: &str,
+) -> Option<RunRecord> {
+    loop {
+        let (record, notifier) = {
+            let guard = run_store.read().await;
+            (guard.get(run_id)?, guard.notifier(run_id))
+        };
+        if record.is_terminal() {
+            return Some(record);
+        }
+
+        let Some(notifier) = notifier else {
+            return Some(record);
+        };
+        let notified = notifier.notified();
+        tokio::pin!(notified);
+
+        if let Some(latest) = run_store.read().await.get(run_id) {
+            if latest.is_terminal() {
+                return Some(latest);
+            }
+        } else {
+            return None;
+        }
+
+        if tokio::time::timeout(Duration::from_secs(120), &mut notified)
+            .await
+            .is_err()
+        {
+            return run_store.read().await.get(run_id);
+        }
+    }
+}
+
+fn make_run_id() -> String {
+    format!(
+        "run_{}",
+        uuid::Uuid::new_v4().to_string().replace('-', "")[..24].to_string()
+    )
+}
+
 fn make_responses_api_body(
     response_id: &str,
     model: &str,
@@ -1058,16 +1313,98 @@ async fn run_api_request(
     reply
 }
 
+async fn run_background_request(
+    mailbox: Arc<RwLock<ResponseMailbox>>,
+    run_cancels: Arc<RwLock<RunCancelRegistry>>,
+    run_store: Arc<RwLock<RunStore>>,
+    inbound_tx: Arc<RwLock<Option<mpsc::Sender<ApiInboundRequest>>>>,
+    inbound: ApiInboundRequest,
+    mailbox_key: String,
+) {
+    let run_id = inbound.request_id.clone();
+    let prompt = inbound.prompt.clone();
+
+    let should_start = run_store
+        .write()
+        .await
+        .update(&run_id, |record| {
+            if record.status == "stopping" {
+                record.status = "cancelled".to_string();
+                record.completed_at = Some(chrono::Utc::now().timestamp());
+                record.push_event(
+                    "run.failed",
+                    Some(serde_json::json!({"error": "Run stopped before dispatch"})),
+                );
+            } else {
+                record.status = "running".to_string();
+                record.push_event("run.running", None);
+            }
+        })
+        .map(|record| record.status == "running")
+        .unwrap_or(false);
+
+    if !should_start {
+        return;
+    }
+
+    let result = run_api_request(mailbox, run_cancels, inbound_tx, inbound, mailbox_key).await;
+    match result {
+        Ok(reply) => {
+            let usage = estimated_usage(&prompt, &reply);
+            run_store.write().await.update(&run_id, |record| {
+                record.status = "completed".to_string();
+                record.output = Some(reply.clone());
+                record.usage = usage;
+                record.completed_at = Some(chrono::Utc::now().timestamp());
+                record.push_event(
+                    "run.completed",
+                    Some(serde_json::json!({
+                        "output": reply,
+                        "usage": record.usage,
+                    })),
+                );
+            });
+        }
+        Err((status, body)) => {
+            let message = body["error"]["message"]
+                .as_str()
+                .unwrap_or("Gateway request failed")
+                .to_string();
+            run_store.write().await.update(&run_id, |record| {
+                record.status = if status.code == HTTP_CONFLICT.code || record.status == "stopping"
+                {
+                    "cancelled".to_string()
+                } else {
+                    "failed".to_string()
+                };
+                record.completed_at = Some(chrono::Utc::now().timestamp());
+                record.push_event(
+                    "run.failed",
+                    Some(serde_json::json!({
+                        "error": message,
+                        "code": status.code,
+                    })),
+                );
+            });
+        }
+    }
+}
+
 async fn handle_connection(
     stream: tokio::net::TcpStream,
     _peer: SocketAddr,
-    mailbox: Arc<RwLock<ResponseMailbox>>,
-    response_store: Arc<RwLock<ResponseStore>>,
-    run_cancels: Arc<RwLock<RunCancelRegistry>>,
-    inbound_tx: Arc<RwLock<Option<mpsc::Sender<ApiInboundRequest>>>>,
-    auth_token: Option<String>,
+    runtime: ApiServerRuntime,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     use tokio::io::AsyncWriteExt;
+
+    let ApiServerRuntime {
+        mailbox,
+        response_store,
+        run_cancels,
+        run_store,
+        inbound_tx,
+        auth_token,
+    } = runtime;
 
     let (mut reader, mut writer) = stream.into_split();
     let raw = read_http_request(&mut reader).await?;
@@ -1116,17 +1453,32 @@ async fn handle_connection(
 
     if method == "POST" {
         if let Some(run_id) = parse_stop_run_path(path) {
-            let stop_waiter = {
-                let guard = run_cancels.read().await;
-                guard.pending.get(run_id).cloned()
-            };
+            let stop_record = run_store.write().await.update(run_id, |record| {
+                if record.is_active() {
+                    record.status = "stopping".to_string();
+                    record.push_event("run.stopping", None);
+                }
+            });
 
-            if let Some(waiter) = stop_waiter {
+            if let Some(record) = stop_record.filter(|record| record.status == "stopping") {
+                if let Some(waiter) = run_cancels.read().await.pending.get(run_id).cloned() {
+                    waiter.notify_waiters();
+                }
+                let body = serde_json::json!({
+                    "id": run_id,
+                    "run_id": run_id,
+                    "object": "hermes.run",
+                    "status": record.status,
+                });
+                let resp = json_http_response(HTTP_OK, &body)?;
+                writer.write_all(resp.as_bytes()).await?;
+            } else if let Some(waiter) = run_cancels.read().await.pending.get(run_id).cloned() {
                 waiter.notify_waiters();
                 let body = serde_json::json!({
                     "id": run_id,
-                    "object": "run",
-                    "status": "stopped"
+                    "run_id": run_id,
+                    "object": "hermes.run",
+                    "status": "stopping"
                 });
                 let resp = json_http_response(HTTP_OK, &body)?;
                 writer.write_all(resp.as_bytes()).await?;
@@ -1205,6 +1557,171 @@ async fn handle_connection(
                     &api_error("Response not found", "not_found", 404),
                 )?;
                 writer.write_all(resp.as_bytes()).await?;
+            }
+        }
+        ("POST", "/v1/runs") => {
+            let body_str = String::from_utf8_lossy(body_bytes);
+            let parsed: Result<RunRequest, _> = serde_json::from_str(&body_str);
+            match parsed {
+                Ok(req) => {
+                    let run_id = make_run_id();
+                    let mut input_messages = response_input_messages(req.input);
+                    if !input_messages_have_non_empty_user_content(&input_messages) {
+                        let resp = json_http_response(
+                            HTTP_BAD_REQUEST,
+                            &api_error(
+                                "Request must include non-empty input",
+                                "invalid_request_error",
+                                400,
+                            ),
+                        )?;
+                        writer.write_all(resp.as_bytes()).await?;
+                        return Ok(());
+                    }
+
+                    let mut messages = req.conversation_history.unwrap_or_default();
+                    messages.append(&mut input_messages);
+                    let prompt = build_prompt_from_messages(&messages).unwrap_or_default();
+                    if prompt.trim().is_empty() {
+                        let resp = json_http_response(
+                            HTTP_BAD_REQUEST,
+                            &api_error(
+                                "Request must include at least one user message",
+                                "invalid_request_error",
+                                400,
+                            ),
+                        )?;
+                        writer.write_all(resp.as_bytes()).await?;
+                        return Ok(());
+                    }
+
+                    let session_id = req.session_id.clone().unwrap_or_else(|| run_id.clone());
+                    let user_id = req
+                        .user
+                        .clone()
+                        .filter(|u| !u.trim().is_empty())
+                        .unwrap_or_else(|| "api-client".to_string());
+                    let record = RunRecord::new(
+                        run_id.clone(),
+                        session_id.clone(),
+                        user_id.clone(),
+                        req.model.clone(),
+                        req.provider.clone(),
+                        req.personality.clone(),
+                    );
+                    run_store.write().await.insert(record);
+
+                    let inbound = ApiInboundRequest {
+                        request_id: run_id.clone(),
+                        session_id: session_id.clone(),
+                        user_id,
+                        model: req.model.clone(),
+                        provider: req.provider.clone(),
+                        personality: req.personality.clone(),
+                        prompt,
+                    };
+
+                    tokio::spawn(run_background_request(
+                        mailbox.clone(),
+                        run_cancels.clone(),
+                        run_store.clone(),
+                        inbound_tx.clone(),
+                        inbound,
+                        session_id.clone(),
+                    ));
+
+                    let body = serde_json::json!({
+                        "id": run_id,
+                        "run_id": run_id,
+                        "object": "hermes.run",
+                        "status": "started",
+                        "session_id": session_id,
+                    });
+                    let resp = json_http_response(
+                        HttpStatus {
+                            code: 202,
+                            reason: "Accepted",
+                        },
+                        &body,
+                    )?;
+                    writer.write_all(resp.as_bytes()).await?;
+                }
+                Err(e) => {
+                    let resp = json_http_response(
+                        HTTP_BAD_REQUEST,
+                        &api_error(
+                            format!("Invalid request: {e}"),
+                            "invalid_request_error",
+                            400,
+                        ),
+                    )?;
+                    writer.write_all(resp.as_bytes()).await?;
+                }
+            }
+        }
+        ("GET", _) if parse_run_events_path(path).is_some() => {
+            let run_id = parse_run_events_path(path).expect("guard checked path");
+            let record = wait_for_run_event_snapshot(run_store.clone(), run_id).await;
+            if let Some(record) = record {
+                let header = sse_http_header();
+                writer.write_all(header.as_bytes()).await?;
+                let data = run_events_sse_body(&record);
+                writer.write_all(data.as_bytes()).await?;
+            } else {
+                let resp = json_http_response(
+                    HTTP_NOT_FOUND,
+                    &api_error("Run not found", "not_found", 404),
+                )?;
+                writer.write_all(resp.as_bytes()).await?;
+            }
+        }
+        ("GET", _) if parse_get_run_path(path).is_some() => {
+            let run_id = parse_get_run_path(path).expect("guard checked path");
+            let record = run_store.read().await.get(run_id);
+            if let Some(record) = record {
+                let resp = json_http_response(HTTP_OK, &run_response_body(&record))?;
+                writer.write_all(resp.as_bytes()).await?;
+            } else {
+                let resp = json_http_response(
+                    HTTP_NOT_FOUND,
+                    &api_error("Run not found", "not_found", 404),
+                )?;
+                writer.write_all(resp.as_bytes()).await?;
+            }
+        }
+        ("POST", _) if parse_run_approval_path(path).is_some() => {
+            let run_id = parse_run_approval_path(path).expect("guard checked path");
+            if run_store.read().await.get(run_id).is_none() {
+                let resp = json_http_response(
+                    HTTP_NOT_FOUND,
+                    &api_error("Run not found", "not_found", 404),
+                )?;
+                writer.write_all(resp.as_bytes()).await?;
+                return Ok(());
+            }
+            let body_str = String::from_utf8_lossy(body_bytes);
+            let parsed: Result<RunApprovalRequest, _> = serde_json::from_str(&body_str);
+            match parsed {
+                Ok(req) => {
+                    let _choice = req.choice;
+                    let _all = req.all;
+                    let resp = json_http_response(
+                        HTTP_CONFLICT,
+                        &api_error("Run has no pending approval", "approval_not_pending", 409),
+                    )?;
+                    writer.write_all(resp.as_bytes()).await?;
+                }
+                Err(e) => {
+                    let resp = json_http_response(
+                        HTTP_BAD_REQUEST,
+                        &api_error(
+                            format!("Invalid request: {e}"),
+                            "invalid_request_error",
+                            400,
+                        ),
+                    )?;
+                    writer.write_all(resp.as_bytes()).await?;
+                }
             }
         }
         ("POST", "/v1/chat/completions") => {
@@ -1518,6 +2035,33 @@ fn parse_stop_run_path(path: &str) -> Option<&str> {
     }
 }
 
+fn parse_run_events_path(path: &str) -> Option<&str> {
+    let run_id = path.strip_prefix("/v1/runs/")?.strip_suffix("/events")?;
+    if run_id.is_empty() || run_id.contains('/') {
+        None
+    } else {
+        Some(run_id)
+    }
+}
+
+fn parse_run_approval_path(path: &str) -> Option<&str> {
+    let run_id = path.strip_prefix("/v1/runs/")?.strip_suffix("/approval")?;
+    if run_id.is_empty() || run_id.contains('/') {
+        None
+    } else {
+        Some(run_id)
+    }
+}
+
+fn parse_get_run_path(path: &str) -> Option<&str> {
+    let run_id = path.strip_prefix("/v1/runs/")?;
+    if run_id.is_empty() || run_id.contains('/') {
+        None
+    } else {
+        Some(run_id)
+    }
+}
+
 fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() || haystack.len() < needle.len() {
         return None;
@@ -1584,6 +2128,7 @@ mod tests {
         mailbox: Arc<RwLock<ResponseMailbox>>,
         response_store: Arc<RwLock<ResponseStore>>,
         run_cancels: Arc<RwLock<RunCancelRegistry>>,
+        run_store: Arc<RwLock<RunStore>>,
         inbound_tx: Arc<RwLock<Option<mpsc::Sender<ApiInboundRequest>>>>,
         auth_token: Option<String>,
     ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
@@ -1593,17 +2138,17 @@ mod tests {
         let addr = listener.local_addr().expect("local addr");
         let handle = tokio::spawn(async move {
             let (stream, peer) = listener.accept().await.expect("accept");
-            handle_connection(
-                stream,
-                peer,
+            let runtime = ApiServerRuntime {
                 mailbox,
                 response_store,
                 run_cancels,
+                run_store,
                 inbound_tx,
                 auth_token,
-            )
-            .await
-            .expect("handle connection");
+            };
+            handle_connection(stream, peer, runtime)
+                .await
+                .expect("handle connection");
         });
         (addr, handle)
     }
@@ -1612,6 +2157,89 @@ mod tests {
         let mut bytes = Vec::new();
         stream.read_to_end(&mut bytes).await.expect("read response");
         String::from_utf8(bytes).expect("utf8 response")
+    }
+
+    struct ApiTestState {
+        mailbox: Arc<RwLock<ResponseMailbox>>,
+        response_store: Arc<RwLock<ResponseStore>>,
+        run_cancels: Arc<RwLock<RunCancelRegistry>>,
+        run_store: Arc<RwLock<RunStore>>,
+        inbound_tx: Arc<RwLock<Option<mpsc::Sender<ApiInboundRequest>>>>,
+    }
+
+    impl ApiTestState {
+        fn new(tx: mpsc::Sender<ApiInboundRequest>) -> Self {
+            Self {
+                mailbox: Arc::new(RwLock::new(ResponseMailbox::default())),
+                response_store: Arc::new(RwLock::new(ResponseStore::default())),
+                run_cancels: Arc::new(RwLock::new(RunCancelRegistry::default())),
+                run_store: Arc::new(RwLock::new(RunStore::default())),
+                inbound_tx: Arc::new(RwLock::new(Some(tx))),
+            }
+        }
+
+        async fn roundtrip(&self, request: String, auth_token: Option<String>) -> String {
+            let (addr, handle) = spawn_one_request_server(
+                Arc::clone(&self.mailbox),
+                Arc::clone(&self.response_store),
+                Arc::clone(&self.run_cancels),
+                Arc::clone(&self.run_store),
+                Arc::clone(&self.inbound_tx),
+                auth_token,
+            )
+            .await;
+
+            let mut client = tokio::net::TcpStream::connect(addr).await.expect("connect");
+            client
+                .write_all(request.as_bytes())
+                .await
+                .expect("write request");
+            client.shutdown().await.expect("shutdown write side");
+            let response = read_http_response(client).await;
+            handle.await.expect("server task");
+            response
+        }
+    }
+
+    fn json_body(response: &str) -> serde_json::Value {
+        let body = response
+            .split_once("\r\n\r\n")
+            .map(|(_, body)| body)
+            .expect("http body");
+        serde_json::from_str(body).expect("json body")
+    }
+
+    fn json_request(method: &str, path: &str, body: serde_json::Value) -> String {
+        let body = body.to_string();
+        format!(
+            "{method} {path} HTTP/1.1\r\nHost: localhost\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        )
+    }
+
+    fn empty_request(method: &str, path: &str) -> String {
+        format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\n\r\n")
+    }
+
+    async fn wait_for_run_status(
+        run_store: &Arc<RwLock<RunStore>>,
+        run_id: &str,
+        expected: &str,
+    ) -> RunRecord {
+        for _ in 0..50 {
+            if let Some(record) = run_store.read().await.get(run_id) {
+                if record.status == expected {
+                    return record;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        run_store
+            .read()
+            .await
+            .get(run_id)
+            .expect("run should exist")
     }
 
     #[test]
@@ -1749,6 +2377,24 @@ mod tests {
     }
 
     #[test]
+    fn parse_run_routes_accept_only_expected_subresources() {
+        assert_eq!(
+            parse_get_run_path("/v1/runs/run_abc123"),
+            Some("run_abc123")
+        );
+        assert_eq!(
+            parse_run_events_path("/v1/runs/run_abc123/events"),
+            Some("run_abc123")
+        );
+        assert_eq!(
+            parse_run_approval_path("/v1/runs/run_abc123/approval"),
+            Some("run_abc123")
+        );
+        assert_eq!(parse_get_run_path("/v1/runs/run_abc123/events"), None);
+        assert_eq!(parse_run_events_path("/v1/runs/run_abc123"), None);
+    }
+
+    #[test]
     fn api_boolish_fields_accept_quoted_false() {
         let chat: ChatCompletionRequest = serde_json::from_value(serde_json::json!({
             "model": "hermes-agent",
@@ -1767,6 +2413,13 @@ mod tests {
         .expect("quoted false stream/store should deserialize");
         assert!(!responses.stream);
         assert!(!responses.store);
+
+        let approval: RunApprovalRequest = serde_json::from_value(serde_json::json!({
+            "choice": "once",
+            "all": "false",
+        }))
+        .expect("quoted false all should deserialize");
+        assert!(!approval.all);
     }
 
     #[test]
@@ -1874,6 +2527,7 @@ mod tests {
             Arc::new(RwLock::new(ResponseMailbox::default())),
             Arc::new(RwLock::new(ResponseStore::default())),
             Arc::new(RwLock::new(RunCancelRegistry::default())),
+            Arc::new(RwLock::new(RunStore::default())),
             Arc::new(RwLock::new(Some(tx))),
             None,
         )
@@ -1904,6 +2558,7 @@ mod tests {
             Arc::clone(&mailbox),
             Arc::clone(&response_store),
             Arc::clone(&run_cancels),
+            Arc::new(RwLock::new(RunStore::default())),
             Arc::new(RwLock::new(Some(tx))),
             None,
         )
@@ -1948,5 +2603,202 @@ mod tests {
         assert!(response.contains("\"object\":\"response\""));
         assert!(response.contains("\"text\":\"done\""));
         assert!(response_store.read().await.entries.is_empty());
+    }
+
+    #[tokio::test]
+    async fn runs_endpoint_starts_completes_status_and_events() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let state = ApiTestState::new(tx);
+        let start_response = state
+            .roundtrip(
+                json_request(
+                    "POST",
+                    "/v1/runs",
+                    serde_json::json!({
+                        "model": "hermes-agent",
+                        "input": "hello",
+                        "session_id": "space-session",
+                    }),
+                ),
+                None,
+            )
+            .await;
+
+        assert!(start_response.starts_with("HTTP/1.1 202 Accepted"));
+        let start = json_body(&start_response);
+        assert_eq!(start["status"], "started");
+        let run_id = start["run_id"].as_str().expect("run id").to_string();
+        assert!(run_id.starts_with("run_"));
+
+        let inbound = rx.recv().await.expect("inbound run");
+        assert_eq!(inbound.request_id, run_id);
+        assert_eq!(inbound.session_id, "space-session");
+        assert_eq!(inbound.prompt, "hello");
+
+        let sender = state
+            .mailbox
+            .read()
+            .await
+            .pending
+            .get("space-session")
+            .cloned()
+            .expect("pending run response");
+        sender.send("done".to_string()).await.expect("send reply");
+        let record = wait_for_run_status(&state.run_store, &run_id, "completed").await;
+        assert_eq!(record.output.as_deref(), Some("done"));
+
+        let status_response = state
+            .roundtrip(empty_request("GET", &format!("/v1/runs/{run_id}")), None)
+            .await;
+        assert!(status_response.starts_with("HTTP/1.1 200 OK"));
+        let status = json_body(&status_response);
+        assert_eq!(status["run_id"], run_id);
+        assert_eq!(status["status"], "completed");
+        assert_eq!(status["session_id"], "space-session");
+        assert_eq!(status["output"], "done");
+        assert_eq!(status["last_event"], "run.completed");
+        assert!(status["usage"]["total_tokens"].as_u64().unwrap_or_default() > 0);
+
+        let events_response = state
+            .roundtrip(
+                empty_request("GET", &format!("/v1/runs/{run_id}/events")),
+                None,
+            )
+            .await;
+        assert!(events_response.starts_with("HTTP/1.1 200 OK"));
+        assert!(events_response.contains("Content-Type: text/event-stream"));
+        assert!(events_response.contains("event: run.completed"));
+        assert!(events_response.contains("\"output\":\"done\""));
+        assert!(events_response.contains("data: [DONE]"));
+    }
+
+    #[tokio::test]
+    async fn runs_endpoint_rejects_invalid_history_without_allocating_run() {
+        let (tx, _rx) = mpsc::channel(1);
+        let state = ApiTestState::new(tx);
+        let response = state
+            .roundtrip(
+                json_request(
+                    "POST",
+                    "/v1/runs",
+                    serde_json::json!({
+                        "input": "hello",
+                        "conversation_history": {"role": "user"},
+                    }),
+                ),
+                None,
+            )
+            .await;
+
+        assert!(response.starts_with("HTTP/1.1 400 Bad Request"));
+        assert!(state.run_store.read().await.records.is_empty());
+    }
+
+    #[tokio::test]
+    async fn runs_stop_marks_active_run_cancelled_and_events_emit_failure() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let state = ApiTestState::new(tx);
+        let start_response = state
+            .roundtrip(
+                json_request("POST", "/v1/runs", serde_json::json!({"input": "hold"})),
+                None,
+            )
+            .await;
+        let run_id = json_body(&start_response)["run_id"]
+            .as_str()
+            .expect("run id")
+            .to_string();
+        let inbound = rx.recv().await.expect("inbound run");
+        assert_eq!(inbound.request_id, run_id);
+
+        let stop_response = state
+            .roundtrip(
+                json_request(
+                    "POST",
+                    &format!("/v1/runs/{run_id}/stop"),
+                    serde_json::json!({}),
+                ),
+                None,
+            )
+            .await;
+        assert!(stop_response.starts_with("HTTP/1.1 200 OK"));
+        let stop = json_body(&stop_response);
+        assert_eq!(stop["run_id"], run_id);
+        assert_eq!(stop["status"], "stopping");
+
+        let record = wait_for_run_status(&state.run_store, &run_id, "cancelled").await;
+        assert_eq!(record.last_event.as_deref(), Some("run.failed"));
+
+        let status_response = state
+            .roundtrip(empty_request("GET", &format!("/v1/runs/{run_id}")), None)
+            .await;
+        let status = json_body(&status_response);
+        assert_eq!(status["status"], "cancelled");
+
+        let events_response = state
+            .roundtrip(
+                empty_request("GET", &format!("/v1/runs/{run_id}/events")),
+                None,
+            )
+            .await;
+        assert!(events_response.contains("event: run.failed"));
+        assert!(events_response.contains("Run stopped"));
+    }
+
+    #[tokio::test]
+    async fn runs_approval_without_pending_returns_conflict() {
+        let (tx, mut rx) = mpsc::channel(1);
+        let state = ApiTestState::new(tx);
+        let start_response = state
+            .roundtrip(
+                json_request("POST", "/v1/runs", serde_json::json!({"input": "hello"})),
+                None,
+            )
+            .await;
+        let run_id = json_body(&start_response)["run_id"]
+            .as_str()
+            .expect("run id")
+            .to_string();
+
+        let inbound = rx.recv().await.expect("inbound run");
+        let sender = state
+            .mailbox
+            .read()
+            .await
+            .pending
+            .get(&inbound.session_id)
+            .cloned()
+            .expect("pending run response");
+        sender.send("done".to_string()).await.expect("send reply");
+        let _record = wait_for_run_status(&state.run_store, &run_id, "completed").await;
+
+        let approval_response = state
+            .roundtrip(
+                json_request(
+                    "POST",
+                    &format!("/v1/runs/{run_id}/approval"),
+                    serde_json::json!({"choice": "once", "all": "false"}),
+                ),
+                None,
+            )
+            .await;
+        assert!(approval_response.starts_with("HTTP/1.1 409 Conflict"));
+        let body = json_body(&approval_response);
+        assert_eq!(body["error"]["code"], "409");
+        assert_eq!(body["error"]["type"], "approval_not_pending");
+    }
+
+    #[tokio::test]
+    async fn runs_endpoints_require_bearer_auth_when_configured() {
+        let (tx, _rx) = mpsc::channel(1);
+        let state = ApiTestState::new(tx);
+        let response = state
+            .roundtrip(
+                json_request("POST", "/v1/runs", serde_json::json!({"input": "hello"})),
+                Some("sk-secret".to_string()),
+            )
+            .await;
+        assert!(response.starts_with("HTTP/1.1 401 Unauthorized"));
+        assert!(state.run_store.read().await.records.is_empty());
     }
 }
