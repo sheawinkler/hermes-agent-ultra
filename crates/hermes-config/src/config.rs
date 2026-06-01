@@ -210,6 +210,9 @@ pub fn default_platform_toolsets() -> HashMap<String, Vec<String>> {
     map.insert("discord".to_string(), vec!["hermes-discord".to_string()]);
     map.insert("whatsapp".to_string(), vec!["hermes-whatsapp".to_string()]);
     map.insert("slack".to_string(), vec!["hermes-slack".to_string()]);
+    map.insert("feishu".to_string(), vec!["hermes-feishu".to_string()]);
+    map.insert("weixin".to_string(), vec!["hermes-weixin".to_string()]);
+    map.insert("wecom".to_string(), vec!["hermes-wecom".to_string()]);
     map
 }
 

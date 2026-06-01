@@ -18,7 +18,11 @@ use crate::registry::ToolRegistry;
 /// Web search and extraction tools.
 pub const TOOLSET_WEB: &[&str] = &["web_search", "web_extract"];
 /// Reusable content retrieval framework tools.
-pub const TOOLSET_CONTENT: &[&str] = &["content_plan", "content_normalize"];
+pub const TOOLSET_CONTENT: &[&str] = &[
+    "content_plan",
+    "content_execute",
+    "content_normalize",
+];
 /// Terminal command execution tools.
 pub const TOOLSET_TERMINAL: &[&str] = &["terminal", "process", "process_registry"];
 /// File system tools.
@@ -77,6 +81,15 @@ pub const TOOLSET_SYSTEM: &[&str] = &["env_passthrough", "credential_files", "to
 pub const TOOLSET_MIXTURE_OF_AGENTS: &[&str] = &["mixture_of_agents"];
 /// Background desktop automation (macOS).
 pub const TOOLSET_COMPUTER_USE: &[&str] = &["computer_use"];
+/// Feishu/Lark OpenAPI tools (calendar, docs, tasks, chat history).
+pub const TOOLSET_FEISHU: &[&str] = &[
+    "feishu_calendar",
+    "feishu_docs",
+    "feishu_task",
+    "feishu_chat_history",
+];
+/// Quick capture inbox (fragments + optional reminders).
+pub const TOOLSET_CAPTURE: &[&str] = &["capture"];
 
 // ---------------------------------------------------------------------------
 // Toolset
@@ -258,6 +271,7 @@ impl ToolsetManager {
             vec![
                 "web",
                 "content",
+                "capture",
                 "terminal",
                 "file",
                 "browser",
@@ -308,6 +322,29 @@ impl ToolsetManager {
                 .into_iter()
                 .map(String::from)
                 .collect(),
+        ));
+        self.register(Toolset::new(
+            "feishu",
+            TOOLSET_FEISHU.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::new(
+            "capture",
+            TOOLSET_CAPTURE.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.register(Toolset::with_includes(
+            "hermes-feishu",
+            vec!["hermes-cli", "feishu"]
+                .into_iter()
+                .map(String::from)
+                .collect(),
+        ));
+        self.register(Toolset::with_includes(
+            "hermes-weixin",
+            vec!["hermes-cli"].into_iter().map(String::from).collect(),
+        ));
+        self.register(Toolset::with_includes(
+            "hermes-wecom",
+            vec!["hermes-cli"].into_iter().map(String::from).collect(),
         ));
     }
 
@@ -492,6 +529,14 @@ mod tests {
         assert!(names.contains(&"web".to_string()));
         assert!(names.contains(&"terminal".to_string()));
         assert!(names.contains(&"file".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_hermes_feishu_includes_feishu_tools() {
+        let manager = ToolsetManager::new(empty_registry());
+        let tools = manager.resolve_toolset_unfiltered("hermes-feishu").unwrap();
+        assert!(tools.contains(&"feishu_calendar".to_string()));
+        assert!(tools.contains(&"browser_navigate".to_string()));
     }
 
     #[test]

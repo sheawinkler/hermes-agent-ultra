@@ -25,7 +25,33 @@ pub fn default_platform_toolsets() -> HashMap<String, Vec<String>> {
     map.insert("discord".to_string(), vec!["hermes-discord".to_string()]);
     map.insert("whatsapp".to_string(), vec!["hermes-whatsapp".to_string()]);
     map.insert("slack".to_string(), vec!["hermes-slack".to_string()]);
+    map.insert("feishu".to_string(), vec!["hermes-feishu".to_string()]);
+    map.insert("weixin".to_string(), vec!["hermes-weixin".to_string()]);
+    map.insert("wecom".to_string(), vec!["hermes-wecom".to_string()]);
     map
+}
+
+/// Optional system hint when entry platform differs from available exec backends.
+/// Mirrors Python: cross-platform work uses `send_message` + platform toolsets, not SessionProfile.
+pub fn cross_platform_system_hint(platform: &str, allowed_tools: &[String]) -> Option<String> {
+    let platform = platform.trim().to_ascii_lowercase();
+    let has_feishu = allowed_tools.iter().any(|t| t.starts_with("feishu_"));
+    let has_send = allowed_tools.iter().any(|t| t == "send_message");
+    match platform.as_str() {
+        "weixin" | "wecom" if has_feishu || has_send => Some(
+            "You are replying on a WeChat-class channel. Feishu/Lark calendar, docs, and tasks \
+             are available via feishu_* tools when enabled. To notify another platform, use \
+             send_message with an explicit platform and chat_id. Cron reminders auto-deliver to \
+             the current chat when deliver is omitted."
+                .to_string(),
+        ),
+        "feishu" if has_send => Some(
+            "You are in Feishu/Lark. Use feishu_* tools for workspace data. To reach users on other \
+             channels, use send_message with platform and chat_id."
+                .to_string(),
+        ),
+        _ => None,
+    }
 }
 
 /// Configured toolset tokens for a platform, with default fallback.
@@ -208,6 +234,30 @@ mod tests {
         register(&reg, "execute_code", "code_execution");
         register(&reg, "delegate_task", "delegation");
         reg
+    }
+
+    #[test]
+    fn platform_defaults_include_feishu_and_weixin() {
+        let defaults = default_platform_toolsets();
+        assert_eq!(
+            defaults.get("feishu").map(|v| v.as_slice()),
+            Some(["hermes-feishu".to_string()].as_slice())
+        );
+        assert_eq!(
+            defaults.get("weixin").map(|v| v.as_slice()),
+            Some(["hermes-weixin".to_string()].as_slice())
+        );
+    }
+
+    #[test]
+    fn cross_platform_hint_for_weixin_with_feishu_tools() {
+        let tools = vec![
+            "send_message".to_string(),
+            "feishu_calendar".to_string(),
+        ];
+        let hint = cross_platform_system_hint("weixin", &tools);
+        assert!(hint.is_some());
+        assert!(hint.unwrap().contains("feishu_*"));
     }
 
     #[test]

@@ -7,19 +7,41 @@ use std::sync::{Arc, Mutex};
 use hermes_agent::{
     split_messages_for_run_conversation, AgentCallbacks, RunConversationParams,
 };
-use hermes_core::{Message, MessageRole, StreamChunk};
+use hermes_core::{Message, MessageRole, StreamChunk, ToolSchema};
 use hermes_gateway::tool_backends::ClarifyDispatcher;
 use hermes_gateway::{Gateway, GatewayError, GatewayRuntimeContext};
 use hermes_tools::ToolRegistry;
 
 use hermes_cli::app::bridge_tool_registry;
-use hermes_cli::platform_toolsets::{resolve_platform_tool_schemas, tool_definition_summary};
+use hermes_cli::platform_toolsets::{
+    cross_platform_system_hint, resolve_platform_tool_schemas, tool_definition_summary,
+};
 use hermes_cli::tool_preview::{build_tool_preview_from_value, tool_emoji};
 
 use crate::{
     extract_last_assistant_reply, get_or_build_gateway_cached_agent, resolve_model_for_gateway,
-    truncate_hook_tool_result, GatewayAgentCache,
+    truncate_hook_tool_result,     GatewayAgentCache,
 };
+
+fn prepend_cross_platform_hint(
+    platform: &str,
+    tool_schemas: &[ToolSchema],
+    history: &mut Vec<Message>,
+) {
+    let names: Vec<String> = tool_schemas.iter().map(|s| s.name.clone()).collect();
+    let Some(hint) = cross_platform_system_hint(platform, &names) else {
+        return;
+    };
+    let duplicate = history.iter().any(|m| {
+        m.content
+            .as_deref()
+            .map(|c| c.contains("WeChat-class channel") || c.contains("Feishu/Lark"))
+            .unwrap_or(false)
+    });
+    if !duplicate {
+        history.insert(0, Message::system(hint));
+    }
+}
 
 #[derive(Clone)]
 pub(crate) struct GatewayHandlerDeps {
@@ -198,6 +220,8 @@ pub(crate) async fn gateway_handle_message_non_streaming(
     let (history, user_message) = split_messages_for_run_conversation(messages).ok_or_else(|| {
         GatewayError::Platform("session has no user message for run_conversation".into())
     })?;
+    let mut history = history;
+    prepend_cross_platform_hint(&ctx.platform, &tool_schemas, &mut history);
     let task_id = Some(ctx.session_key.clone());
     let mut agent = agent.lock().await;
     agent.callbacks = Arc::new(callbacks);
@@ -424,6 +448,8 @@ pub(crate) async fn gateway_handle_message_streaming(
     let (history, user_message) = split_messages_for_run_conversation(messages).ok_or_else(|| {
         GatewayError::Platform("session has no user message for run_conversation".into())
     })?;
+    let mut history = history;
+    prepend_cross_platform_hint(&ctx.platform, &tool_schemas, &mut history);
     let task_id = Some(ctx.session_key.clone());
     let mut agent = agent.lock().await;
     agent.callbacks = Arc::new(callbacks);
