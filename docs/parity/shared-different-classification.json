@@ -2353,6 +2353,48 @@
       "rationale": "Upstream OpenAI-compatible message.content None guard intent is covered centrally by Rust OpenAI/OpenRouter response parsing: null assistant content becomes an empty string without panicking, tool-call-only responses keep tool calls, and reasoning-only OpenRouter responses preserve reasoning_content for downstream use.",
       "owner": "sheawinkler",
       "ticket": 25
+    },
+    {
+      "path": "tests/cli/test_cli_browser_connect.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream CLI browser-connect intent is covered by Rust /browser CDP helpers: websocket/http probe normalization, Chrome/Chromium/Brave/Edge candidate ordering across macOS/Linux/Windows/WSL paths, shell-safe manual command rendering, detached launch support, /browser launch, and persisted CHROME_CDP_URL connect/disconnect behavior.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_browser_chromium_check.py",
+      "classification": "intentional_divergence",
+      "rationale": "Python Playwright/agent-browser Chromium install checks are superseded by the Rust browser backend model: local browser support is CDP-first, /browser launch discovers installed Chromium-family browsers directly, websocket/http CDP probes validate readiness, cloud providers do not require local Chromium, and explicit CDP override bypasses auto cloud/Camofox routing.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_browser_cloud_fallback.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream cloud-fallback intent is covered by Rust CloudFallbackBrowserBackend and backend selection contracts: Browserbase/Browser Use runtime command failures warn and retry local CDP, fallback responses preserve local success with fallback_from_cloud/provider/reason metadata, CDP override bypasses auto cloud detection, and explicit provider selection still remains explicit.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_browser_homebrew_paths.py",
+      "classification": "intentional_divergence",
+      "rationale": "Python Homebrew/Termux agent-browser PATH construction is intentionally not required in Rust because browser automation no longer shells through the Node agent-browser CLI; Rust uses direct CDP, /browser launch discovers native Chromium-family browser binaries, and CDP probes verify readiness instead of relying on npx/node path fallbacks.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_browser_secret_exfil.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream browser/web secret-exfiltration intent is covered by Rust URL and observation guards: browser navigation and web extract reject secret-like query parameters such as api_key/token/access_token, snapshot/web content redaction removes secret assignments and bearer/provider tokens before returning observations, and normal non-secret URLs remain allowed.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/tools/test_managed_browserbase_and_modal.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream managed Browserbase/Browser Use/Modal intent is covered by Rust provider contracts: Browserbase remains direct-credential only, Browser Use supports direct and Nous-managed gateway modes with timeout/proxy payloads, idempotency-key preservation across timeout/in-progress conflicts, external-call-id persistence, and Modal backend selection is covered by hermes-config managed gateway and hermes-tools terminal/register_builtins contracts.",
+      "owner": "sheawinkler",
+      "ticket": 25
     }
   ]
 }

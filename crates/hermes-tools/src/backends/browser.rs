@@ -8,10 +8,14 @@ use hermes_config::{
     cli_config_path, config_path, managed_nous_tools_enabled, resolve_managed_tool_gateway,
     ManagedToolGatewayConfig, ResolveOptions,
 };
+use regex::Regex;
 use serde_json::{json, Value};
+use std::net::IpAddr;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::OnceLock;
 use tokio::sync::Mutex;
+use url::Url;
 use uuid::Uuid;
 
 use crate::tools::browser::BrowserBackend;
@@ -22,6 +26,25 @@ const BROWSERBASE_MAX_SESSION_TIMEOUT_SECS: u64 = 21_600;
 const BROWSER_USE_BASE_URL_DEFAULT: &str = "https://api.browser-use.com/api/v3";
 const BROWSER_USE_MANAGED_TIMEOUT_MINUTES: u64 = 5;
 const BROWSER_USE_MANAGED_PROXY_COUNTRY_CODE: &str = "us";
+#[cfg(test)]
+const CAMOFOX_STATE_DIR_NAME: &str = "browser_auth";
+#[cfg(test)]
+const CAMOFOX_STATE_SUBDIR: &str = "camofox";
+
+#[cfg(test)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CamofoxIdentity {
+    user_id: String,
+    session_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CamofoxLoopbackRewrite {
+    from: String,
+    to: String,
+    original_url: String,
+    rewritten_url: String,
+}
 
 /// Resolve the default browser backend from environment.
 ///
@@ -35,14 +58,20 @@ const BROWSER_USE_MANAGED_PROXY_COUNTRY_CODE: &str = "us";
 pub fn browser_backend_from_env() -> Arc<dyn BrowserBackend> {
     match browser_backend_choice_from_env() {
         "browser-use" => match BrowserUseBrowserBackend::from_env() {
-            Ok(backend) => Arc::new(backend),
+            Ok(backend) => Arc::new(CloudFallbackBrowserBackend::new(
+                "BrowserUseProvider",
+                Arc::new(backend),
+            )),
             Err(err) if explicit_browser_use_requested_from_env_or_config() => {
                 Arc::new(UnavailableBrowserBackend::new(err.to_string()))
             }
             Err(_) => Arc::new(CdpBrowserBackend::from_env()),
         },
         "browserbase" => match BrowserbaseBrowserBackend::from_env() {
-            Ok(backend) => Arc::new(backend),
+            Ok(backend) => Arc::new(CloudFallbackBrowserBackend::new(
+                "BrowserbaseProvider",
+                Arc::new(backend),
+            )),
             Err(err) if explicit_browserbase_requested_from_env_or_config() => {
                 Arc::new(UnavailableBrowserBackend::new(err.to_string()))
             }
@@ -96,6 +125,10 @@ fn browser_backend_choice_from_env() -> &'static str {
         }
     }
 
+    if cdp_override_from_env() {
+        return "cdp";
+    }
+
     if let Some(provider) = configured_browser_cloud_provider() {
         return provider;
     }
@@ -104,6 +137,8 @@ fn browser_backend_choice_from_env() -> &'static str {
         "browserbase"
     } else if BrowserUseConfig::is_configured_from_env_or_managed() {
         "browser-use"
+    } else if camofox_mode_enabled_from_env() {
+        "camofox"
     } else {
         "cdp"
     }
@@ -137,6 +172,181 @@ fn env_bool(name: &str, default: bool) -> bool {
             )
         })
         .unwrap_or(default)
+}
+
+fn cdp_override_from_env() -> bool {
+    env_optional_nonempty("CHROME_CDP_URL")
+        .or_else(|| env_optional_nonempty("BROWSER_CDP_URL"))
+        .is_some()
+}
+
+fn camofox_mode_enabled_from_env() -> bool {
+    env_optional_nonempty("CAMOFOX_URL").is_some() && !cdp_override_from_env()
+}
+
+#[cfg(test)]
+fn camofox_state_dir_for_home(home: &Path) -> std::path::PathBuf {
+    home.join(CAMOFOX_STATE_DIR_NAME).join(CAMOFOX_STATE_SUBDIR)
+}
+
+#[cfg(test)]
+fn camofox_identity_for_home(home: &Path, task_id: Option<&str>) -> CamofoxIdentity {
+    use sha2::{Digest, Sha256};
+
+    let state_dir = camofox_state_dir_for_home(home);
+    let scope_root = state_dir.to_string_lossy();
+    let logical_scope = task_id
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .unwrap_or("default");
+    let user_digest =
+        hex::encode(Sha256::digest(format!("camofox-user:{scope_root}")))[..10].to_string();
+    let session_digest = hex::encode(Sha256::digest(format!(
+        "camofox-session:{scope_root}:{logical_scope}"
+    )))[..16]
+        .to_string();
+    CamofoxIdentity {
+        user_id: format!("hermes_{user_digest}"),
+        session_key: format!("task_{session_digest}"),
+    }
+}
+
+fn camofox_loopback_rewrite_enabled_from_env() -> bool {
+    env_bool("CAMOFOX_REWRITE_LOOPBACK_URLS", false)
+}
+
+fn camofox_loopback_alias_from_env() -> String {
+    env_optional_nonempty("CAMOFOX_LOOPBACK_HOST_ALIAS")
+        .unwrap_or_else(|| "host.docker.internal".to_string())
+}
+
+fn is_loopback_hostname(host: &str) -> bool {
+    let normalized = host.trim().trim_matches(['[', ']']).to_ascii_lowercase();
+    matches!(normalized.as_str(), "localhost" | "localhost.localdomain")
+        || normalized
+            .parse::<IpAddr>()
+            .map(|addr| addr.is_loopback())
+            .unwrap_or(false)
+}
+
+fn rewrite_loopback_url_for_camofox(
+    input: &str,
+    enabled: bool,
+    alias: &str,
+) -> (String, Option<CamofoxLoopbackRewrite>) {
+    if !enabled || alias.trim().is_empty() {
+        return (input.to_string(), None);
+    }
+
+    let Ok(mut parsed) = Url::parse(input) else {
+        return (input.to_string(), None);
+    };
+    if !matches!(parsed.scheme(), "http" | "https") {
+        return (input.to_string(), None);
+    }
+    let Some(host) = parsed
+        .host_str()
+        .map(|host| host.trim_matches(['[', ']']).to_string())
+    else {
+        return (input.to_string(), None);
+    };
+    if !is_loopback_hostname(&host) {
+        return (input.to_string(), None);
+    }
+    if parsed.set_host(Some(alias.trim())).is_err() {
+        return (input.to_string(), None);
+    }
+    let rewritten = parsed.to_string();
+    (
+        rewritten.clone(),
+        Some(CamofoxLoopbackRewrite {
+            from: host,
+            to: alias.trim().to_string(),
+            original_url: input.to_string(),
+            rewritten_url: rewritten,
+        }),
+    )
+}
+
+fn secret_url_param(key: &str) -> bool {
+    let key = key
+        .trim()
+        .trim_matches(|c: char| c == '-' || c == '_' || c.is_ascii_whitespace())
+        .to_ascii_lowercase();
+    key.contains("token")
+        || key.contains("secret")
+        || key.contains("password")
+        || key.contains("authorization")
+        || key.contains("credential")
+        || (key.contains("api") && key.contains("key"))
+        || key == "key"
+}
+
+fn validate_url_does_not_exfiltrate_secret(input: &str) -> Result<(), ToolError> {
+    let Ok(parsed) = Url::parse(input) else {
+        return Ok(());
+    };
+    for (key, value) in parsed.query_pairs() {
+        if secret_url_param(&key) && !value.trim().is_empty() {
+            return Err(ToolError::InvalidParams(format!(
+                "Blocked URL: query parameter '{key}' looks like an API key or token; pass secrets via local env/vault, not browser or web URLs."
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn secret_assignment_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r#"(?i)\b(api[_-]?key|token|secret|password|authorization|credential)\b\s*[:=]\s*["']?([A-Za-z0-9_\-./]{8,})"#,
+        )
+        .expect("secret assignment regex")
+    })
+}
+
+fn bearer_token_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"(?i)\bBearer\s+[A-Za-z0-9_\-./]{12,}"#).expect("bearer token regex")
+    })
+}
+
+fn provider_token_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r#"\b(?:sk|ghp|github_pat|or)-[A-Za-z0-9_\-]{12,}"#)
+            .expect("provider token regex")
+    })
+}
+
+fn redact_browser_observation(input: &str) -> String {
+    let redacted = secret_assignment_re().replace_all(input, "$1=[REDACTED]");
+    let redacted = bearer_token_re().replace_all(&redacted, "Bearer [REDACTED]");
+    provider_token_re()
+        .replace_all(&redacted, "[REDACTED_SECRET]")
+        .to_string()
+}
+
+fn add_fallback_metadata(mut value: Value, provider: &str, reason: &str) -> Value {
+    if let Some(obj) = value.as_object_mut() {
+        obj.insert("fallback_from_cloud".into(), Value::Bool(true));
+        obj.insert("fallback_provider".into(), provider.into());
+        obj.insert("fallback_reason".into(), reason.into());
+        return value;
+    }
+    json!({
+        "fallback_from_cloud": true,
+        "fallback_provider": provider,
+        "fallback_reason": reason,
+        "local_result": value,
+    })
+}
+
+fn browser_fallback_response(local_result: String, provider: &str, reason: &str) -> String {
+    let value = serde_json::from_str::<Value>(&local_result).unwrap_or(Value::String(local_result));
+    add_fallback_metadata(value, provider, reason).to_string()
 }
 
 fn normalize_base_url(raw: &str) -> String {
@@ -257,6 +467,12 @@ pub struct CamoFoxBrowserBackend {
     profile: String,
 }
 
+struct CloudFallbackBrowserBackend {
+    provider: &'static str,
+    cloud: Arc<dyn BrowserBackend>,
+    local: CdpBrowserBackend,
+}
+
 struct UnavailableBrowserBackend {
     message: String,
 }
@@ -335,6 +551,27 @@ impl UnavailableBrowserBackend {
 
     fn unavailable(&self) -> ToolError {
         ToolError::ExecutionFailed(self.message.clone())
+    }
+}
+
+impl CloudFallbackBrowserBackend {
+    fn new(provider: &'static str, cloud: Arc<dyn BrowserBackend>) -> Self {
+        Self {
+            provider,
+            cloud,
+            local: CdpBrowserBackend::from_env(),
+        }
+    }
+
+    fn fallback_error(&self, cloud_err: &ToolError, local_err: ToolError) -> ToolError {
+        ToolError::ExecutionFailed(format!(
+            "{} failed: {}; local CDP fallback failed: {}",
+            self.provider, cloud_err, local_err
+        ))
+    }
+
+    fn mark_fallback(&self, local_result: String, cloud_err: &ToolError) -> String {
+        browser_fallback_response(local_result, self.provider, &cloud_err.to_string())
     }
 }
 
@@ -902,8 +1139,162 @@ impl BrowserBackend for UnavailableBrowserBackend {
 }
 
 #[async_trait]
+impl BrowserBackend for CloudFallbackBrowserBackend {
+    async fn navigate(&self, url: &str) -> Result<String, ToolError> {
+        match self.cloud.navigate(url).await {
+            Ok(result) => Ok(result),
+            Err(cloud_err) => {
+                tracing::warn!(provider = self.provider, error = %cloud_err, "cloud browser command failed; trying local CDP fallback");
+                let local = self
+                    .local
+                    .navigate(url)
+                    .await
+                    .map_err(|local_err| self.fallback_error(&cloud_err, local_err))?;
+                Ok(self.mark_fallback(local, &cloud_err))
+            }
+        }
+    }
+
+    async fn snapshot(&self) -> Result<String, ToolError> {
+        match self.cloud.snapshot().await {
+            Ok(result) => Ok(result),
+            Err(cloud_err) => {
+                tracing::warn!(provider = self.provider, error = %cloud_err, "cloud browser snapshot failed; trying local CDP fallback");
+                let local = self
+                    .local
+                    .snapshot()
+                    .await
+                    .map_err(|local_err| self.fallback_error(&cloud_err, local_err))?;
+                Ok(self.mark_fallback(local, &cloud_err))
+            }
+        }
+    }
+
+    async fn click(&self, selector: &str) -> Result<String, ToolError> {
+        match self.cloud.click(selector).await {
+            Ok(result) => Ok(result),
+            Err(cloud_err) => {
+                tracing::warn!(provider = self.provider, error = %cloud_err, "cloud browser click failed; trying local CDP fallback");
+                let local = self
+                    .local
+                    .click(selector)
+                    .await
+                    .map_err(|local_err| self.fallback_error(&cloud_err, local_err))?;
+                Ok(self.mark_fallback(local, &cloud_err))
+            }
+        }
+    }
+
+    async fn r#type(&self, selector: &str, text: &str) -> Result<String, ToolError> {
+        match self.cloud.r#type(selector, text).await {
+            Ok(result) => Ok(result),
+            Err(cloud_err) => {
+                tracing::warn!(provider = self.provider, error = %cloud_err, "cloud browser type failed; trying local CDP fallback");
+                let local = self
+                    .local
+                    .r#type(selector, text)
+                    .await
+                    .map_err(|local_err| self.fallback_error(&cloud_err, local_err))?;
+                Ok(self.mark_fallback(local, &cloud_err))
+            }
+        }
+    }
+
+    async fn scroll(&self, direction: &str, amount: Option<u32>) -> Result<String, ToolError> {
+        match self.cloud.scroll(direction, amount).await {
+            Ok(result) => Ok(result),
+            Err(cloud_err) => {
+                tracing::warn!(provider = self.provider, error = %cloud_err, "cloud browser scroll failed; trying local CDP fallback");
+                let local = self
+                    .local
+                    .scroll(direction, amount)
+                    .await
+                    .map_err(|local_err| self.fallback_error(&cloud_err, local_err))?;
+                Ok(self.mark_fallback(local, &cloud_err))
+            }
+        }
+    }
+
+    async fn go_back(&self) -> Result<String, ToolError> {
+        match self.cloud.go_back().await {
+            Ok(result) => Ok(result),
+            Err(cloud_err) => {
+                tracing::warn!(provider = self.provider, error = %cloud_err, "cloud browser back failed; trying local CDP fallback");
+                let local = self
+                    .local
+                    .go_back()
+                    .await
+                    .map_err(|local_err| self.fallback_error(&cloud_err, local_err))?;
+                Ok(self.mark_fallback(local, &cloud_err))
+            }
+        }
+    }
+
+    async fn press(&self, key: &str) -> Result<String, ToolError> {
+        match self.cloud.press(key).await {
+            Ok(result) => Ok(result),
+            Err(cloud_err) => {
+                tracing::warn!(provider = self.provider, error = %cloud_err, "cloud browser key press failed; trying local CDP fallback");
+                let local = self
+                    .local
+                    .press(key)
+                    .await
+                    .map_err(|local_err| self.fallback_error(&cloud_err, local_err))?;
+                Ok(self.mark_fallback(local, &cloud_err))
+            }
+        }
+    }
+
+    async fn get_images(&self, selector: Option<&str>) -> Result<String, ToolError> {
+        match self.cloud.get_images(selector).await {
+            Ok(result) => Ok(result),
+            Err(cloud_err) => {
+                tracing::warn!(provider = self.provider, error = %cloud_err, "cloud browser images failed; trying local CDP fallback");
+                let local = self
+                    .local
+                    .get_images(selector)
+                    .await
+                    .map_err(|local_err| self.fallback_error(&cloud_err, local_err))?;
+                Ok(self.mark_fallback(local, &cloud_err))
+            }
+        }
+    }
+
+    async fn vision(&self, instruction: &str) -> Result<String, ToolError> {
+        match self.cloud.vision(instruction).await {
+            Ok(result) => Ok(result),
+            Err(cloud_err) => {
+                tracing::warn!(provider = self.provider, error = %cloud_err, "cloud browser vision failed; trying local CDP fallback");
+                let local = self
+                    .local
+                    .vision(instruction)
+                    .await
+                    .map_err(|local_err| self.fallback_error(&cloud_err, local_err))?;
+                Ok(self.mark_fallback(local, &cloud_err))
+            }
+        }
+    }
+
+    async fn console(&self, action: &str) -> Result<String, ToolError> {
+        match self.cloud.console(action).await {
+            Ok(result) => Ok(result),
+            Err(cloud_err) => {
+                tracing::warn!(provider = self.provider, error = %cloud_err, "cloud browser console failed; trying local CDP fallback");
+                let local = self
+                    .local
+                    .console(action)
+                    .await
+                    .map_err(|local_err| self.fallback_error(&cloud_err, local_err))?;
+                Ok(self.mark_fallback(local, &cloud_err))
+            }
+        }
+    }
+}
+
+#[async_trait]
 impl BrowserBackend for BrowserbaseBrowserBackend {
     async fn navigate(&self, url: &str) -> Result<String, ToolError> {
+        validate_url_does_not_exfiltrate_secret(url)?;
         let result = self
             .browserbase_command("Page.navigate", json!({"url": url}))
             .await?;
@@ -914,7 +1305,9 @@ impl BrowserBackend for BrowserbaseBrowserBackend {
         let result = self
             .browserbase_command("Accessibility.getFullAXTree", json!({}))
             .await?;
-        Ok(json!({"status": "snapshot", "cdp": result}).to_string())
+        Ok(redact_browser_observation(
+            &json!({"status": "snapshot", "cdp": result}).to_string(),
+        ))
     }
 
     async fn click(&self, selector: &str) -> Result<String, ToolError> {
@@ -1037,6 +1430,7 @@ impl BrowserBackend for BrowserbaseBrowserBackend {
 #[async_trait]
 impl BrowserBackend for BrowserUseBrowserBackend {
     async fn navigate(&self, url: &str) -> Result<String, ToolError> {
+        validate_url_does_not_exfiltrate_secret(url)?;
         let result = self
             .browser_use_command("Page.navigate", json!({"url": url}))
             .await?;
@@ -1047,7 +1441,9 @@ impl BrowserBackend for BrowserUseBrowserBackend {
         let result = self
             .browser_use_command("Accessibility.getFullAXTree", json!({}))
             .await?;
-        Ok(json!({"status": "snapshot", "cdp": result}).to_string())
+        Ok(redact_browser_observation(
+            &json!({"status": "snapshot", "cdp": result}).to_string(),
+        ))
     }
 
     async fn click(&self, selector: &str) -> Result<String, ToolError> {
@@ -1178,6 +1574,7 @@ impl CamoFoxBrowserBackend {
     pub fn from_env() -> Self {
         let endpoint = std::env::var("CAMOFOX_CDP_URL")
             .or_else(|_| std::env::var("CHROME_CDP_URL"))
+            .or_else(|_| std::env::var("BROWSER_CDP_URL"))
             .unwrap_or_else(|_| "http://localhost:9222".to_string());
         let profile = std::env::var("CAMOFOX_PROFILE").unwrap_or_else(|_| "default".to_string());
         Self::new(endpoint, profile)
@@ -1194,8 +1591,9 @@ impl CdpBrowserBackend {
 
     /// Create from environment variable `CHROME_CDP_URL` or default localhost.
     pub fn from_env() -> Self {
-        let endpoint =
-            std::env::var("CHROME_CDP_URL").unwrap_or_else(|_| "http://localhost:9222".to_string());
+        let endpoint = std::env::var("CHROME_CDP_URL")
+            .or_else(|_| std::env::var("BROWSER_CDP_URL"))
+            .unwrap_or_else(|_| "http://localhost:9222".to_string());
         Self::new(endpoint)
     }
 
@@ -1238,6 +1636,7 @@ impl CdpBrowserBackend {
 #[async_trait]
 impl BrowserBackend for CdpBrowserBackend {
     async fn navigate(&self, url: &str) -> Result<String, ToolError> {
+        validate_url_does_not_exfiltrate_secret(url)?;
         let result = self
             .cdp_command("Page.navigate", json!({"url": url}))
             .await?;
@@ -1248,7 +1647,9 @@ impl BrowserBackend for CdpBrowserBackend {
         let result = self
             .cdp_command("Accessibility.getFullAXTree", json!({}))
             .await?;
-        Ok(json!({"status": "snapshot", "cdp": result}).to_string())
+        Ok(redact_browser_observation(
+            &json!({"status": "snapshot", "cdp": result}).to_string(),
+        ))
     }
 
     async fn click(&self, selector: &str) -> Result<String, ToolError> {
@@ -1371,9 +1772,37 @@ impl BrowserBackend for CdpBrowserBackend {
 #[async_trait]
 impl BrowserBackend for CamoFoxBrowserBackend {
     async fn navigate(&self, url: &str) -> Result<String, ToolError> {
-        let mut result = self.inner.navigate(url).await?;
-        result.push_str(&format!("\n{{\"camofox_profile\":\"{}\"}}", self.profile));
-        Ok(result)
+        let alias = camofox_loopback_alias_from_env();
+        let (browser_url, rewrite) = rewrite_loopback_url_for_camofox(
+            url,
+            camofox_loopback_rewrite_enabled_from_env(),
+            &alias,
+        );
+        let result = self.inner.navigate(&browser_url).await?;
+        let mut value =
+            serde_json::from_str::<Value>(&result).unwrap_or_else(|_| json!({"result": result}));
+        if let Some(obj) = value.as_object_mut() {
+            obj.insert("camofox_profile".into(), self.profile.clone().into());
+            if let Some(rewrite) = rewrite {
+                obj.insert("requested_url".into(), rewrite.original_url.clone().into());
+                obj.insert(
+                    "url_rewrite".into(),
+                    json!({
+                        "from": rewrite.from,
+                        "to": rewrite.to,
+                        "original_url": rewrite.original_url,
+                        "rewritten_url": rewrite.rewritten_url,
+                    }),
+                );
+                obj.insert(
+                    "warning".into(),
+                    "Rewrote loopback URL for Docker-hosted Camofox".into(),
+                );
+            }
+            Ok(value.to_string())
+        } else {
+            Ok(value.to_string())
+        }
     }
 
     async fn snapshot(&self) -> Result<String, ToolError> {
@@ -1438,8 +1867,12 @@ mod tests {
                 "TOOL_GATEWAY_USER_TOKEN",
                 "TOOL_GATEWAY_DOMAIN",
                 "TOOL_GATEWAY_SCHEME",
+                "CAMOFOX_URL",
                 "CAMOFOX_CDP_URL",
                 "CHROME_CDP_URL",
+                "BROWSER_CDP_URL",
+                "CAMOFOX_REWRITE_LOOPBACK_URLS",
+                "CAMOFOX_LOOPBACK_HOST_ALIAS",
             ];
             let original = keys.iter().map(|k| (*k, std::env::var(k).ok())).collect();
             for k in &keys {
@@ -1458,6 +1891,150 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn camofox_mode_env_honors_cdp_override() {
+        let _scope = EnvScope::new();
+        std::env::set_var("CAMOFOX_URL", "http://localhost:9377");
+        assert!(camofox_mode_enabled_from_env());
+        assert_eq!(browser_backend_choice_from_env(), "camofox");
+
+        std::env::set_var(
+            "BROWSER_CDP_URL",
+            "ws://127.0.0.1:9222/devtools/browser/abc",
+        );
+        assert!(!camofox_mode_enabled_from_env());
+        assert_eq!(browser_backend_choice_from_env(), "cdp");
+
+        std::env::set_var("BROWSER_CDP_URL", "  ");
+        assert!(camofox_mode_enabled_from_env());
+    }
+
+    #[test]
+    fn camofox_identity_is_profile_scoped_and_task_stable() {
+        let profile_a = tempfile::tempdir().expect("profile a");
+        let profile_b = tempfile::tempdir().expect("profile b");
+
+        assert_eq!(
+            camofox_state_dir_for_home(profile_a.path()),
+            profile_a.path().join("browser_auth").join("camofox")
+        );
+        let first = camofox_identity_for_home(profile_a.path(), Some("task-1"));
+        let second = camofox_identity_for_home(profile_a.path(), Some("task-1"));
+        let other_task = camofox_identity_for_home(profile_a.path(), Some("task-2"));
+        let other_profile = camofox_identity_for_home(profile_b.path(), Some("task-1"));
+
+        assert_eq!(first, second);
+        assert!(first.user_id.starts_with("hermes_"));
+        assert!(first.session_key.starts_with("task_"));
+        assert_eq!(first.user_id, other_task.user_id);
+        assert_ne!(first.session_key, other_task.session_key);
+        assert_ne!(first.user_id, other_profile.user_id);
+    }
+
+    #[test]
+    fn camofox_loopback_rewrite_is_opt_in_and_preserves_url_parts() {
+        let (unchanged, metadata) = rewrite_loopback_url_for_camofox(
+            "http://127.0.0.1:8766/#settings",
+            false,
+            "host.docker.internal",
+        );
+        assert_eq!(unchanged, "http://127.0.0.1:8766/#settings");
+        assert!(metadata.is_none());
+
+        let (rewritten, metadata) = rewrite_loopback_url_for_camofox(
+            "http://127.0.0.1:8766/path?q=1#settings",
+            true,
+            "host.docker.internal",
+        );
+        let metadata = metadata.expect("rewrite metadata");
+        assert_eq!(
+            rewritten,
+            "http://host.docker.internal:8766/path?q=1#settings"
+        );
+        assert_eq!(metadata.from, "127.0.0.1");
+        assert_eq!(metadata.to, "host.docker.internal");
+        assert_eq!(
+            metadata.original_url,
+            "http://127.0.0.1:8766/path?q=1#settings"
+        );
+        assert_eq!(metadata.rewritten_url, rewritten);
+
+        let (rewritten_v6, metadata_v6) =
+            rewrite_loopback_url_for_camofox("http://[::1]:8080/path", true, "192.168.1.10");
+        assert_eq!(rewritten_v6, "http://192.168.1.10:8080/path");
+        assert_eq!(metadata_v6.expect("v6 rewrite").from, "::1");
+
+        let (public_url, public_metadata) = rewrite_loopback_url_for_camofox(
+            "https://example.com:8443/path?q=1#top",
+            true,
+            "host.docker.internal",
+        );
+        assert_eq!(public_url, "https://example.com:8443/path?q=1#top");
+        assert!(public_metadata.is_none());
+    }
+
+    #[test]
+    fn browser_url_secret_exfiltration_guard_blocks_sensitive_query_params() {
+        let err = validate_url_does_not_exfiltrate_secret(
+            "https://example.com/callback?api_key=sk-abcdef1234567890",
+        )
+        .expect_err("api key should be blocked");
+        assert!(err.to_string().contains("api_key"));
+        assert!(err.to_string().contains("API key or token"));
+
+        let err = validate_url_does_not_exfiltrate_secret(
+            "https://openrouter.ai/callback?token=or-abcdef1234567890",
+        )
+        .expect_err("token should be blocked");
+        assert!(err.to_string().contains("token"));
+
+        validate_url_does_not_exfiltrate_secret("https://example.com/search?q=api_key docs")
+            .expect("normal search URL should be allowed");
+    }
+
+    #[test]
+    fn browser_observation_redaction_removes_secret_values() {
+        let redacted = redact_browser_observation(
+            "Dashboard api_key = FAKESECRETVALUE1234567890 token: ghp_fakeToken1234567890 Authorization: Bearer abcdefghijklmnop",
+        );
+        assert!(!redacted.contains("FAKESECRETVALUE1234567890"));
+        assert!(!redacted.contains("ghp_fakeToken1234567890"));
+        assert!(!redacted.contains("abcdefghijklmnop"));
+        assert!(redacted.contains("Dashboard"));
+        assert!(redacted.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn browser_cloud_fallback_response_preserves_local_success_with_metadata() {
+        let local = json!({
+            "status": "navigated",
+            "url": "https://example.com",
+            "features": {"local": true}
+        })
+        .to_string();
+        let rendered = browser_fallback_response(local, "BrowserUseProvider", "401 Unauthorized");
+        let value: Value = serde_json::from_str(&rendered).expect("fallback json");
+
+        assert_eq!(value["status"], "navigated");
+        assert_eq!(value["fallback_from_cloud"], true);
+        assert_eq!(value["fallback_provider"], "BrowserUseProvider");
+        assert_eq!(value["fallback_reason"], "401 Unauthorized");
+        assert_eq!(value["features"]["local"], true);
+    }
+
+    #[test]
+    fn browser_cdp_override_bypasses_auto_cloud_provider_detection() {
+        let _scope = EnvScope::new();
+        std::env::set_var("BROWSER_USE_API_KEY", "direct-key");
+        assert_eq!(browser_backend_choice_from_env(), "browser-use");
+
+        std::env::set_var("CHROME_CDP_URL", "ws://host:9222/devtools/browser/abc");
+        assert_eq!(browser_backend_choice_from_env(), "cdp");
+
+        std::env::set_var("HERMES_BROWSER_BACKEND", "browser-use");
+        assert_eq!(browser_backend_choice_from_env(), "browser-use");
     }
 
     #[test]

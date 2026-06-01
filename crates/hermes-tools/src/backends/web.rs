@@ -2,8 +2,11 @@
 //! Firecrawl/Tavily extract, Tavily crawl, and local fallbacks.
 
 use async_trait::async_trait;
+use regex::Regex;
 use reqwest::Client;
 use serde_json::{json, Value};
+use std::sync::OnceLock;
+use url::Url;
 
 use crate::tools::web::{WebCrawlBackend, WebExtractBackend, WebSearchBackend};
 use hermes_config::managed_gateway::{
@@ -110,6 +113,47 @@ const XAI_BASE_URL_DEFAULT: &str = "https://api.x.ai/v1";
 const XAI_WEB_MODEL_DEFAULT: &str = "grok-4.3";
 const XAI_WEB_TIMEOUT_SECS_DEFAULT: u64 = 90;
 
+fn secret_url_param(key: &str) -> bool {
+    let key = key.trim().to_ascii_lowercase();
+    key.contains("token")
+        || key.contains("secret")
+        || key.contains("password")
+        || key.contains("authorization")
+        || key.contains("credential")
+        || (key.contains("api") && key.contains("key"))
+        || key == "key"
+}
+
+fn validate_url_does_not_exfiltrate_secret(input: &str) -> Result<(), ToolError> {
+    let Ok(parsed) = Url::parse(input) else {
+        return Ok(());
+    };
+    for (key, value) in parsed.query_pairs() {
+        if secret_url_param(&key) && !value.trim().is_empty() {
+            return Err(ToolError::InvalidParams(format!(
+                "Blocked URL: query parameter '{key}' looks like an API key or token; pass secrets via local env/vault, not web URLs."
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn web_secret_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(
+            r#"(?i)\b(api[_-]?key|token|secret|password|authorization|credential)\b\s*[:=]\s*["']?([A-Za-z0-9_\-./]{8,})"#,
+        )
+        .expect("web secret regex")
+    })
+}
+
+fn redact_web_content(input: &str) -> String {
+    web_secret_re()
+        .replace_all(input, "$1=[REDACTED]")
+        .to_string()
+}
+
 /// A web extraction backend that fetches HTML via reqwest with no external API dependency.
 pub struct SimpleExtractBackend {
     client: Client,
@@ -129,6 +173,7 @@ impl SearchOnlyExtractBackend {
 #[async_trait]
 impl WebExtractBackend for SearchOnlyExtractBackend {
     async fn extract(&self, url: &str, _include_links: bool) -> Result<String, ToolError> {
+        validate_url_does_not_exfiltrate_secret(url)?;
         Ok(json!({
             "success": false,
             "error": format!("{} is a search-only web backend and cannot extract URLs", self.provider),
@@ -160,6 +205,7 @@ impl Default for SimpleExtractBackend {
 #[async_trait]
 impl WebExtractBackend for SimpleExtractBackend {
     async fn extract(&self, url: &str, _include_links: bool) -> Result<String, ToolError> {
+        validate_url_does_not_exfiltrate_secret(url)?;
         let resp =
             self.client.get(url).send().await.map_err(|e| {
                 ToolError::ExecutionFailed(format!("Failed to fetch '{}': {}", url, e))
@@ -189,7 +235,7 @@ impl WebExtractBackend for SimpleExtractBackend {
             let result = json!({
                 "url": url,
                 "content_type": content_type,
-                "content": text,
+                "content": redact_web_content(&text),
                 "truncated": true,
                 "original_size": bytes.len(),
             });
@@ -199,7 +245,7 @@ impl WebExtractBackend for SimpleExtractBackend {
 
         let text = String::from_utf8_lossy(&bytes);
 
-        let content = strip_html_tags(&text);
+        let content = redact_web_content(&strip_html_tags(&text));
 
         let result = json!({
             "url": url,
@@ -547,6 +593,7 @@ impl TavilyExtractBackend {
 #[async_trait]
 impl WebExtractBackend for TavilyExtractBackend {
     async fn extract(&self, url: &str, _include_links: bool) -> Result<String, ToolError> {
+        validate_url_does_not_exfiltrate_secret(url)?;
         let body = json!({
             "api_key": self.api_key,
             "urls": [url],
@@ -1930,6 +1977,7 @@ impl FirecrawlExtractBackend {
 #[async_trait]
 impl WebExtractBackend for FirecrawlExtractBackend {
     async fn extract(&self, url: &str, include_links: bool) -> Result<String, ToolError> {
+        validate_url_does_not_exfiltrate_secret(url)?;
         let body = json!({
             "url": url,
             "formats": ["markdown"],
@@ -2053,6 +2101,27 @@ mod web_search_env_tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn web_extract_url_guard_blocks_secret_query_params() {
+        let err = validate_url_does_not_exfiltrate_secret(
+            "https://example.com/page?access_token=secret-token-123456789",
+        )
+        .expect_err("access token should be blocked");
+        assert!(err.to_string().contains("access_token"));
+
+        validate_url_does_not_exfiltrate_secret("https://example.com/page?q=token rotation")
+            .expect("ordinary search query should be allowed");
+    }
+
+    #[test]
+    fn web_content_redaction_removes_secret_values() {
+        let redacted =
+            redact_web_content("Dashboard password = hunter2token token: abcdefghijklmnop");
+        assert!(!redacted.contains("hunter2token"));
+        assert!(!redacted.contains("abcdefghijklmnop"));
+        assert!(redacted.contains("[REDACTED]"));
     }
 
     #[test]

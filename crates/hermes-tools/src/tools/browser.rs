@@ -412,10 +412,18 @@ impl BrowserConsoleHandler {
 #[async_trait]
 impl ToolHandler for BrowserConsoleHandler {
     async fn execute(&self, params: Value) -> Result<String, ToolError> {
-        let action = params
-            .get("action")
-            .and_then(|v| v.as_str())
-            .unwrap_or("read");
+        let action = if params
+            .get("clear")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            "clear"
+        } else {
+            params
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("read")
+        };
         self.backend.console(action).await
     }
 
@@ -427,6 +435,14 @@ impl ToolHandler for BrowserConsoleHandler {
             "enum": ["read", "clear"],
             "default": "read"
         }));
+        props.insert(
+            "clear".into(),
+            json!({
+                "type": "boolean",
+                "description": "Clear console output after reading; compatibility alias for action='clear'",
+                "default": false
+            }),
+        );
         tool_schema(
             "browser_console",
             "Read or clear the browser console.",
@@ -500,5 +516,19 @@ mod tests {
         let handler = BrowserSnapshotHandler::new(backend());
         let result = handler.execute(json!({})).await.unwrap();
         assert!(result.contains("snapshot"));
+    }
+
+    #[tokio::test]
+    async fn browser_console_clear_bool_is_compat_alias_for_action_clear() {
+        let handler = BrowserConsoleHandler::new(backend());
+        let result = handler.execute(json!({"clear": true})).await.unwrap();
+        assert_eq!(result, "Console: clear");
+
+        let schema = handler.schema();
+        let props = schema
+            .parameters
+            .properties
+            .expect("browser_console properties");
+        assert!(props.contains_key("clear"));
     }
 }

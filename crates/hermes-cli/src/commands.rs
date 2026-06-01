@@ -3,7 +3,7 @@
 //! Defines and dispatches all supported `/` commands in the interactive
 //! REPL, and provides auto-completion suggestions.
 
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::{
     collections::{HashMap, HashSet},
@@ -9344,6 +9344,297 @@ fn browser_http_probe_base(endpoint: &str) -> String {
     }
 }
 
+const DEFAULT_BROWSER_CDP_PORT: u16 = 9222;
+const DEFAULT_BROWSER_CDP_URL: &str = "http://127.0.0.1:9222";
+const DARWIN_BROWSER_APPS: &[&str] = &[
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+    "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+];
+const LINUX_BROWSER_GROUPS: &[(&[&str], &[&str])] = &[
+    (
+        &["google-chrome", "google-chrome-stable"],
+        &[
+            "/opt/google/chrome/chrome",
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+        ],
+    ),
+    (
+        &["chromium-browser", "chromium"],
+        &["/usr/bin/chromium-browser", "/usr/bin/chromium"],
+    ),
+    (
+        &["brave-browser", "brave-browser-stable", "brave"],
+        &[
+            "/usr/bin/brave-browser",
+            "/usr/bin/brave-browser-stable",
+            "/usr/bin/brave",
+            "/snap/bin/brave",
+            "/opt/brave.com/brave/brave-browser",
+            "/opt/brave.com/brave/brave",
+            "/opt/brave-bin/brave",
+        ],
+    ),
+    (
+        &["microsoft-edge", "microsoft-edge-stable", "msedge"],
+        &[
+            "/usr/bin/microsoft-edge",
+            "/usr/bin/microsoft-edge-stable",
+            "/opt/microsoft/msedge/microsoft-edge",
+            "/opt/microsoft/msedge/msedge",
+        ],
+    ),
+];
+const WINDOWS_BROWSER_GROUPS: &[(&[&str], &[&[&str]])] = &[
+    (
+        &["chrome.exe", "chrome"],
+        &[&["Google", "Chrome", "Application", "chrome.exe"]],
+    ),
+    (
+        &["chromium.exe", "chromium"],
+        &[
+            &["Chromium", "Application", "chrome.exe"],
+            &["Chromium", "Application", "chromium.exe"],
+        ],
+    ),
+    (
+        &["brave.exe", "brave"],
+        &[&["BraveSoftware", "Brave-Browser", "Application", "brave.exe"]],
+    ),
+    (
+        &["msedge.exe", "msedge"],
+        &[&["Microsoft", "Edge", "Application", "msedge.exe"]],
+    ),
+];
+
+fn chrome_debug_data_dir() -> PathBuf {
+    hermes_config::hermes_home().join("chrome-debug")
+}
+
+fn chrome_debug_args(port: u16) -> Vec<String> {
+    vec![
+        format!("--remote-debugging-port={port}"),
+        format!("--user-data-dir={}", chrome_debug_data_dir().display()),
+        "--no-first-run".to_string(),
+        "--no-default-browser-check".to_string(),
+    ]
+}
+
+fn path_key(path: &str) -> String {
+    path.replace('\\', "/").to_ascii_lowercase()
+}
+
+fn push_browser_candidate<F>(
+    out: &mut Vec<String>,
+    seen: &mut HashSet<String>,
+    candidate: Option<String>,
+    is_file: &F,
+) where
+    F: Fn(&str) -> bool,
+{
+    let Some(candidate) = candidate.filter(|v| !v.trim().is_empty()) else {
+        return;
+    };
+    let key = path_key(&candidate);
+    if seen.insert(key) && is_file(&candidate) {
+        out.push(candidate);
+    }
+}
+
+fn join_windows_path(base: &str, parts: &[&str]) -> String {
+    let mut result = base.trim_end_matches(['\\', '/']).to_string();
+    for part in parts {
+        result.push('\\');
+        result.push_str(part);
+    }
+    result
+}
+
+fn chrome_debug_candidates_with<E, W, F>(
+    system: &str,
+    env_get: E,
+    which: W,
+    is_file: F,
+) -> Vec<String>
+where
+    E: Fn(&str) -> Option<String>,
+    W: Fn(&str) -> Option<String>,
+    F: Fn(&str) -> bool,
+{
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+
+    if system == "Darwin" {
+        for app in DARWIN_BROWSER_APPS {
+            push_browser_candidate(&mut out, &mut seen, Some((*app).to_string()), &is_file);
+        }
+        return out;
+    }
+
+    if system == "Windows" {
+        let install_bases = [
+            env_get("ProgramFiles"),
+            env_get("ProgramFiles(x86)"),
+            env_get("LOCALAPPDATA"),
+        ];
+        for (names, install_groups) in WINDOWS_BROWSER_GROUPS {
+            for name in *names {
+                push_browser_candidate(&mut out, &mut seen, which(name), &is_file);
+            }
+            for base in install_bases.iter().flatten() {
+                for parts in *install_groups {
+                    push_browser_candidate(
+                        &mut out,
+                        &mut seen,
+                        Some(join_windows_path(base, parts)),
+                        &is_file,
+                    );
+                }
+            }
+        }
+        return out;
+    }
+
+    for (names, install_paths) in LINUX_BROWSER_GROUPS {
+        for name in *names {
+            push_browser_candidate(&mut out, &mut seen, which(name), &is_file);
+        }
+        for install_path in *install_paths {
+            push_browser_candidate(
+                &mut out,
+                &mut seen,
+                Some((*install_path).to_string()),
+                &is_file,
+            );
+        }
+    }
+    for base in ["/mnt/c/Program Files", "/mnt/c/Program Files (x86)"] {
+        for (_, install_groups) in WINDOWS_BROWSER_GROUPS {
+            for parts in *install_groups {
+                push_browser_candidate(
+                    &mut out,
+                    &mut seen,
+                    Some(join_windows_path(base, parts)),
+                    &is_file,
+                );
+            }
+        }
+    }
+    out
+}
+
+fn which_on_path(name: &str) -> Option<String> {
+    let candidate = Path::new(name);
+    if candidate.is_absolute() && candidate.is_file() {
+        return Some(name.to_string());
+    }
+    let paths = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&paths) {
+        let joined = dir.join(name);
+        if joined.is_file() {
+            return Some(joined.display().to_string());
+        }
+    }
+    None
+}
+
+fn get_chrome_debug_candidates(system: &str) -> Vec<String> {
+    chrome_debug_candidates_with(
+        system,
+        |key| std::env::var(key).ok(),
+        which_on_path,
+        |candidate| Path::new(candidate).is_file(),
+    )
+}
+
+fn quote_posix_arg(arg: &str) -> String {
+    if !arg.is_empty()
+        && arg
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "@%_+=:,./-".contains(c))
+    {
+        arg.to_string()
+    } else {
+        format!("'{}'", arg.replace('\'', "'\\''"))
+    }
+}
+
+fn quote_windows_arg(arg: &str) -> String {
+    if !arg.is_empty() && !arg.chars().any(|c| c.is_whitespace() || c == '"') {
+        arg.to_string()
+    } else {
+        format!("\"{}\"", arg.replace('"', "\\\""))
+    }
+}
+
+fn manual_chrome_debug_command_with_candidates(
+    port: u16,
+    system: &str,
+    candidates: &[String],
+) -> Option<String> {
+    if let Some(first) = candidates.first() {
+        let mut argv = vec![first.clone()];
+        argv.extend(chrome_debug_args(port));
+        let rendered = if system == "Windows" {
+            argv.iter()
+                .map(|arg| quote_windows_arg(arg))
+                .collect::<Vec<_>>()
+                .join(" ")
+        } else {
+            argv.iter()
+                .map(|arg| quote_posix_arg(arg))
+                .collect::<Vec<_>>()
+                .join(" ")
+        };
+        return Some(rendered);
+    }
+
+    if system == "Darwin" {
+        return Some(format!(
+            "open -a \"Google Chrome\" --args --remote-debugging-port={port} --user-data-dir=\"{}\" --no-first-run --no-default-browser-check",
+            chrome_debug_data_dir().display()
+        ));
+    }
+    None
+}
+
+fn manual_chrome_debug_command(port: u16, system: &str) -> Option<String> {
+    let candidates = get_chrome_debug_candidates(system);
+    manual_chrome_debug_command_with_candidates(port, system, &candidates)
+}
+
+fn try_launch_chrome_debug(port: u16, system: &str) -> bool {
+    let candidates = get_chrome_debug_candidates(system);
+    if candidates.is_empty() {
+        return false;
+    }
+    let _ = std::fs::create_dir_all(chrome_debug_data_dir());
+    for candidate in candidates {
+        let mut command = Command::new(&candidate);
+        command.args(chrome_debug_args(port));
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            command.process_group(0);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x00000008 | 0x00000200);
+        }
+        if command.spawn().is_ok() {
+            return true;
+        }
+    }
+    false
+}
+
 async fn browser_probe(endpoint: &str) -> Result<String, AgentError> {
     let base = browser_http_probe_base(endpoint)
         .trim_end_matches('/')
@@ -9396,13 +9687,13 @@ async fn handle_browser_command(app: &mut App, args: &[&str]) -> Result<CommandR
     match action.as_str() {
         "status" | "show" => {
             let endpoint = std::env::var("CHROME_CDP_URL")
-                .unwrap_or_else(|_| "http://localhost:9222".to_string());
+                .unwrap_or_else(|_| DEFAULT_BROWSER_CDP_URL.to_string());
             match browser_probe(&endpoint).await {
                 Ok(summary) => emit_command_output(app, summary),
                 Err(err) => emit_command_output(
                     app,
                     format!(
-                        "Browser status (configured endpoint: {})\nProbe error: {}\nTip: `/browser connect [ws://host:port or http://host:port]`",
+                        "Browser status (configured endpoint: {})\nProbe error: {}\nTip: `/browser connect [ws://host:port or http://host:port]` or `/browser launch`",
                         endpoint, err
                     ),
                 ),
@@ -9410,7 +9701,7 @@ async fn handle_browser_command(app: &mut App, args: &[&str]) -> Result<CommandR
             Ok(CommandResult::Handled)
         }
         "connect" => {
-            let endpoint = args.get(1).copied().unwrap_or("http://localhost:9222");
+            let endpoint = args.get(1).copied().unwrap_or(DEFAULT_BROWSER_CDP_URL);
             std::env::set_var("CHROME_CDP_URL", endpoint);
             persist_browser_cdp_url(Some(endpoint))?;
             match browser_probe(endpoint).await {
@@ -9432,6 +9723,40 @@ async fn handle_browser_command(app: &mut App, args: &[&str]) -> Result<CommandR
             }
             Ok(CommandResult::Handled)
         }
+        "launch" | "start" => {
+            let port = args
+                .get(1)
+                .and_then(|raw| raw.parse::<u16>().ok())
+                .unwrap_or(DEFAULT_BROWSER_CDP_PORT);
+            let endpoint = format!("http://127.0.0.1:{port}");
+            let system = match std::env::consts::OS {
+                "macos" => "Darwin",
+                "windows" => "Windows",
+                _ => "Linux",
+            };
+            if try_launch_chrome_debug(port, system) {
+                std::env::set_var("CHROME_CDP_URL", &endpoint);
+                persist_browser_cdp_url(Some(&endpoint))?;
+                emit_command_output(
+                    app,
+                    format!(
+                        "Launched Chromium-family browser debug session on {endpoint}. Saved CHROME_CDP_URL to {}/.env.",
+                        hermes_config::hermes_home().display()
+                    ),
+                );
+            } else {
+                let manual = manual_chrome_debug_command(port, system).unwrap_or_else(|| {
+                    "Install Chrome/Chromium/Brave/Edge and rerun `/browser launch`.".to_string()
+                });
+                emit_command_output(
+                    app,
+                    format!(
+                        "Could not auto-launch a Chromium-family browser.\nManual command:\n{manual}"
+                    ),
+                );
+            }
+            Ok(CommandResult::Handled)
+        }
         "disconnect" => {
             std::env::remove_var("CHROME_CDP_URL");
             persist_browser_cdp_url(None)?;
@@ -9444,7 +9769,7 @@ async fn handle_browser_command(app: &mut App, args: &[&str]) -> Result<CommandR
         _ => {
             emit_command_output(
                 app,
-                "Usage: /browser [status|connect [ws://host:port|http://host:port]|disconnect]",
+                "Usage: /browser [status|connect [ws://host:port|http://host:port]|launch [port]|disconnect]",
             );
             Ok(CommandResult::Handled)
         }
@@ -25922,6 +26247,98 @@ mod tests {
         assert!(SLASH_COMMANDS.iter().any(|(name, _)| *name == "/browser"));
         let results = autocomplete("/bro");
         assert!(results.contains(&"/browser"));
+    }
+
+    #[test]
+    fn browser_connect_candidates_prefer_chrome_before_brave_on_linux() {
+        let chrome = "/usr/bin/google-chrome";
+        let brave = "/usr/bin/brave-browser";
+        let candidates = chrome_debug_candidates_with(
+            "Linux",
+            |_| None,
+            |name| match name {
+                "google-chrome" => Some(chrome.to_string()),
+                "brave-browser" => Some(brave.to_string()),
+                _ => None,
+            },
+            |candidate| candidate == chrome || candidate == brave,
+        );
+
+        assert_eq!(candidates[..2], [chrome.to_string(), brave.to_string()]);
+        let command =
+            manual_chrome_debug_command_with_candidates(9222, "Linux", &candidates).unwrap();
+        assert!(command.starts_with("/usr/bin/google-chrome --remote-debugging-port=9222"));
+        assert!(command.contains("--no-first-run"));
+        assert!(command.contains("--no-default-browser-check"));
+    }
+
+    #[test]
+    fn browser_connect_candidates_prefer_install_path_before_later_provider_on_path() {
+        let chrome = "/opt/google/chrome/chrome";
+        let brave = "/usr/bin/brave-browser";
+        let candidates = chrome_debug_candidates_with(
+            "Linux",
+            |_| None,
+            |name| (name == "brave-browser").then(|| brave.to_string()),
+            |candidate| candidate == chrome || candidate == brave,
+        );
+
+        assert_eq!(candidates[..2], [chrome.to_string(), brave.to_string()]);
+    }
+
+    #[test]
+    fn browser_connect_candidates_include_arch_brave_and_edge_paths() {
+        let brave = "/opt/brave-bin/brave";
+        let edge = "/usr/bin/microsoft-edge-stable";
+        let candidates = chrome_debug_candidates_with(
+            "Linux",
+            |_| None,
+            |_| None,
+            |candidate| candidate == brave || candidate == edge,
+        );
+
+        assert_eq!(candidates, vec![brave.to_string(), edge.to_string()]);
+    }
+
+    #[test]
+    fn browser_connect_windows_candidates_prefer_chrome_install_before_brave_path() {
+        let chrome = "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
+        let brave = "C:\\Brave\\brave.exe";
+        let candidates = chrome_debug_candidates_with(
+            "Windows",
+            |key| (key == "ProgramFiles").then(|| "C:\\Program Files".to_string()),
+            |name| (name == "brave.exe").then(|| brave.to_string()),
+            |candidate| candidate == chrome || candidate == brave,
+        );
+
+        assert_eq!(candidates[..2], [chrome.to_string(), brave.to_string()]);
+        let command =
+            manual_chrome_debug_command_with_candidates(9333, "Windows", &candidates).unwrap();
+        assert!(command.starts_with("\"C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe\" --remote-debugging-port=9333"));
+        assert!(!command.contains('\''));
+    }
+
+    #[test]
+    fn browser_connect_manual_command_uses_posix_quoting_for_wsl_paths() {
+        let chrome = "/mnt/c/Program Files/Google/Chrome/Application/chrome.exe".to_string();
+        let command =
+            manual_chrome_debug_command_with_candidates(9222, "Linux", &[chrome]).unwrap();
+
+        assert!(command.starts_with(
+            "'/mnt/c/Program Files/Google/Chrome/Application/chrome.exe' --remote-debugging-port=9222"
+        ));
+    }
+
+    #[test]
+    fn browser_probe_base_accepts_websocket_cdp_urls() {
+        assert_eq!(
+            browser_http_probe_base("ws://127.0.0.1:9222/devtools/browser/abc"),
+            "http://127.0.0.1:9222/devtools/browser/abc"
+        );
+        assert_eq!(
+            browser_http_probe_base("wss://example.com/devtools/browser/abc"),
+            "https://example.com/devtools/browser/abc"
+        );
     }
 
     #[test]
