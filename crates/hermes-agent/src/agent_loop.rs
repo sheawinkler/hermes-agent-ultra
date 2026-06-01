@@ -3261,6 +3261,9 @@ impl AgentLoop {
             })?;
         let base_url = self.resolve_runtime_base_url(provider, route_base_url);
         let mode = api_mode.unwrap_or(&self.config.api_mode);
+        let normalized_model_name =
+            crate::model_normalize::normalize_model_for_provider(model_name, provider);
+        let model_name = normalized_model_name.as_str();
 
         let provider_obj: Arc<dyn LlmProvider> = match provider {
             "openai" | "codex" | "openai-codex" => {

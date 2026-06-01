@@ -337,6 +337,8 @@ fn build_main_runtime_candidate(
     let api_key = resolve_main_api_key(main, label).or_else(|| {
         provider_allows_no_api_key(label, base_url.as_deref()).then(|| "local-no-key".to_string())
     })?;
+    let normalized_model = crate::model_normalize::normalize_model_for_provider(model, label);
+    let model = normalized_model.as_str();
 
     let provider: Arc<dyn LlmProvider> = match label {
         "openrouter" => Arc::new(
