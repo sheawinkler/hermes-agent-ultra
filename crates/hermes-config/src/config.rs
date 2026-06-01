@@ -675,6 +675,56 @@ where
     deserializer.deserialize_any(BoolishVisitor)
 }
 
+fn deserialize_string_list<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct StringListVisitor;
+
+    impl<'de> Visitor<'de> for StringListVisitor {
+        type Value = Vec<String>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a string, comma-separated string, or list of strings")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: DeError,
+        {
+            Ok(value
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(ToString::to_string)
+                .collect())
+        }
+
+        fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
+        where
+            E: DeError,
+        {
+            self.visit_str(&value)
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::SeqAccess<'de>,
+        {
+            let mut values = Vec::new();
+            while let Some(value) = seq.next_element::<String>()? {
+                let trimmed = value.trim();
+                if !trimmed.is_empty() {
+                    values.push(trimmed.to_string());
+                }
+            }
+            Ok(values)
+        }
+    }
+
+    deserializer.deserialize_any(StringListVisitor)
+}
+
 fn default_tools() -> Vec<String> {
     vec![
         "bash".into(),
@@ -851,11 +901,25 @@ impl Default for TerminalBackendType {
     }
 }
 
+impl TerminalBackendType {
+    pub fn from_env_name(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "local" => Some(Self::Local),
+            "docker" => Some(Self::Docker),
+            "ssh" => Some(Self::Ssh),
+            "daytona" => Some(Self::Daytona),
+            "modal" => Some(Self::Modal),
+            "singularity" | "apptainer" => Some(Self::Singularity),
+            _ => None,
+        }
+    }
+}
+
 /// Configuration for terminal/command-execution backends.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TerminalConfig {
     /// Which backend type to use.
-    #[serde(default)]
+    #[serde(default, alias = "env_type")]
     pub backend: TerminalBackendType,
 
     /// Timeout in seconds for a single command.
@@ -867,7 +931,7 @@ pub struct TerminalConfig {
     pub max_output_size: usize,
 
     /// Working directory override for command execution.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "cwd")]
     pub workdir: Option<String>,
 
     /// Docker container id/name to reuse instead of creating a new one.
@@ -882,9 +946,68 @@ pub struct TerminalConfig {
     #[serde(default, skip_serializing_if = "is_false")]
     pub docker_mount_cwd_to_workspace: bool,
 
+    /// Run Docker containers as the host uid/gid where supported.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub docker_run_as_host_user: bool,
+
+    /// Docker container CPU limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container_cpu: Option<u32>,
+
+    /// Docker/container memory limit in MiB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container_memory: Option<u64>,
+
+    /// Docker/container disk limit in MiB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container_disk: Option<u64>,
+
+    /// Whether container-backed terminal sessions should persist.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub container_persistent: bool,
+
+    /// Extra env-vars for Docker/container execution, kept as a portable string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub docker_env: Option<String>,
+
+    /// Host env-var names to forward into Docker/container execution.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_string_list",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub docker_forward_env: Vec<String>,
+
+    /// Extra Docker volume specs.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_string_list",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub docker_volumes: Vec<String>,
+
     /// Runtime name for Vercel-backed terminal execution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vercel_runtime: Option<String>,
+
+    /// Modal backend selection mode: auto, direct, or managed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub modal_mode: Option<String>,
+
+    /// Explicit shell init files to source before local commands.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_string_list",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub shell_init_files: Vec<String>,
+
+    /// Auto-source common shell startup files when no explicit list is set.
+    #[serde(
+        default = "default_auto_source_bashrc",
+        skip_serializing_if = "is_true"
+    )]
+    pub auto_source_bashrc: bool,
 
     /// SSH backend host.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -913,7 +1036,18 @@ impl Default for TerminalConfig {
             docker_container_id: None,
             docker_image: None,
             docker_mount_cwd_to_workspace: false,
+            docker_run_as_host_user: false,
+            container_cpu: None,
+            container_memory: None,
+            container_disk: None,
+            container_persistent: false,
+            docker_env: None,
+            docker_forward_env: Vec::new(),
+            docker_volumes: Vec::new(),
             vercel_runtime: None,
+            modal_mode: None,
+            shell_init_files: Vec::new(),
+            auto_source_bashrc: default_auto_source_bashrc(),
             ssh_host: None,
             ssh_port: None,
             ssh_user: None,
@@ -926,8 +1060,16 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 
+fn is_true(value: &bool) -> bool {
+    *value
+}
+
 fn default_terminal_timeout() -> u64 {
     120
+}
+
+fn default_auto_source_bashrc() -> bool {
+    true
 }
 
 fn default_max_output_size() -> usize {

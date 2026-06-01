@@ -15,6 +15,7 @@ use tokio::process::Command as TokioCommand;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::task::JoinHandle;
 
+use hermes_config::TerminalConfig;
 use hermes_core::{AgentError, CommandOutput, TerminalBackend};
 
 const PROCESS_OUTPUT_WINDOW_CHARS: usize = 200_000;
@@ -48,6 +49,10 @@ pub struct LocalBackend {
     default_timeout: u64,
     /// Maximum output size in bytes before truncation.
     max_output_size: usize,
+    /// Explicit shell init files for local command prelude.
+    shell_init_files: Vec<String>,
+    /// Auto-source common shell startup files when no explicit list is set.
+    auto_source_bashrc: bool,
     /// Background processes tracked by session id for lifecycle operations.
     background_processes: Arc<Mutex<HashMap<String, ProcessSession>>>,
 }
@@ -55,9 +60,36 @@ pub struct LocalBackend {
 impl LocalBackend {
     /// Create a new local backend with the given defaults.
     pub fn new(default_timeout: u64, max_output_size: usize) -> Self {
+        let (shell_init_files, auto_source_bashrc) = terminal_shell_init_config_from_env();
+        Self::new_with_shell_init(
+            default_timeout,
+            max_output_size,
+            shell_init_files,
+            auto_source_bashrc,
+        )
+    }
+
+    /// Create a local backend directly from terminal configuration.
+    pub fn from_terminal_config(config: &TerminalConfig) -> Self {
+        Self::new_with_shell_init(
+            config.timeout,
+            config.max_output_size,
+            config.shell_init_files.clone(),
+            config.auto_source_bashrc,
+        )
+    }
+
+    pub fn new_with_shell_init(
+        default_timeout: u64,
+        max_output_size: usize,
+        shell_init_files: Vec<String>,
+        auto_source_bashrc: bool,
+    ) -> Self {
         Self {
             default_timeout,
             max_output_size,
+            shell_init_files,
+            auto_source_bashrc,
             background_processes: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -223,11 +255,12 @@ impl LocalBackend {
         timeout_label: &str,
     ) -> Result<CommandOutput, AgentError> {
         configure_foreground_process_group(&mut cmd);
-        let mut child = cmd
+        let child = cmd
             .spawn()
             .map_err(|e| AgentError::Io(format!("Failed to spawn {spawn_label}: {e}")))?;
+        let mut child_guard = ForegroundChildGuard::new(child);
         if let Some(payload) = stdin_payload {
-            if let Some(mut stdin) = child.stdin.take() {
+            if let Some(mut stdin) = child_guard.child_mut().stdin.take() {
                 stdin
                     .write_all(&payload)
                     .await
@@ -241,14 +274,14 @@ impl LocalBackend {
 
         let stdout = Arc::new(Mutex::new(Vec::new()));
         let stderr = Arc::new(Mutex::new(Vec::new()));
-        let mut stdout_task = child.stdout.take().map(|stream| {
+        let mut stdout_task = child_guard.child_mut().stdout.take().map(|stream| {
             let stdout = stdout.clone();
             let max = self.max_output_size;
             tokio::spawn(async move {
                 Self::read_stream_to_bytes(stream, stdout, max).await;
             })
         });
-        let mut stderr_task = child.stderr.take().map(|stream| {
+        let mut stderr_task = child_guard.child_mut().stderr.take().map(|stream| {
             let stderr = stderr.clone();
             let max = self.max_output_size;
             tokio::spawn(async move {
@@ -256,8 +289,11 @@ impl LocalBackend {
             })
         });
 
-        let wait_result =
-            tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), child.wait()).await;
+        let wait_result = tokio::time::timeout(
+            std::time::Duration::from_secs(timeout_secs),
+            child_guard.child_mut().wait(),
+        )
+        .await;
 
         match wait_result {
             Ok(Ok(status)) => {
@@ -269,6 +305,7 @@ impl LocalBackend {
                 if let Some(handle) = stderr_task.take() {
                     Self::finish_or_abort_reader(handle).await;
                 }
+                child_guard.disarm();
                 Ok(CommandOutput {
                     exit_code: status.code().unwrap_or(-1),
                     stdout: Self::decode_output(&stdout),
@@ -279,7 +316,8 @@ impl LocalBackend {
                 "Failed to wait for {spawn_label}: {e}"
             ))),
             Err(_) => {
-                terminate_child_process(&mut child).await;
+                terminate_child_process(child_guard.child_mut()).await;
+                child_guard.disarm();
                 if let Some(handle) = stdout_task.take() {
                     Self::finish_or_abort_reader(handle).await;
                 }
@@ -342,6 +380,56 @@ fn configure_foreground_process_group(cmd: &mut TokioCommand) {
 
 #[cfg(not(unix))]
 fn configure_foreground_process_group(_cmd: &mut TokioCommand) {}
+
+struct ForegroundChildGuard {
+    child: Option<tokio::process::Child>,
+    pid: Option<u32>,
+}
+
+impl ForegroundChildGuard {
+    fn new(child: tokio::process::Child) -> Self {
+        let pid = child.id();
+        Self {
+            child: Some(child),
+            pid,
+        }
+    }
+
+    fn child_mut(&mut self) -> &mut tokio::process::Child {
+        self.child.as_mut().expect("foreground child present")
+    }
+
+    fn disarm(&mut self) {
+        self.child.take();
+    }
+}
+
+impl Drop for ForegroundChildGuard {
+    fn drop(&mut self) {
+        let Some(mut child) = self.child.take() else {
+            return;
+        };
+        terminate_child_process_sync(self.pid);
+        let _ = child.start_kill();
+    }
+}
+
+#[cfg(unix)]
+fn terminate_child_process_sync(pid: Option<u32>) {
+    if let Some(pid) = pid {
+        let pgid = -(pid as i32);
+        unsafe {
+            libc::kill(pgid, libc::SIGTERM);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        unsafe {
+            libc::kill(pgid, libc::SIGKILL);
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn terminate_child_process_sync(_pid: Option<u32>) {}
 
 #[cfg(unix)]
 async fn terminate_child_process(child: &mut tokio::process::Child) {
@@ -623,6 +711,151 @@ fn shell_env_cleanup_snippet() -> String {
     snippet
 }
 
+fn parse_shell_init_list(value: &str) -> Vec<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Vec::new();
+    }
+    if trimmed.starts_with('[') {
+        if let Ok(values) = serde_json::from_str::<Vec<String>>(trimmed) {
+            return values
+                .into_iter()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .collect();
+        }
+    }
+    let delimiter = if trimmed.contains(',') { ',' } else { ':' };
+    trimmed
+        .split(delimiter)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn bool_env_or_default(name: &str, default: bool) -> bool {
+    let Some(value) = std::env::var(name).ok() else {
+        return default;
+    };
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => true,
+        "0" | "false" | "no" | "off" => false,
+        _ => default,
+    }
+}
+
+fn terminal_shell_init_config_from_env() -> (Vec<String>, bool) {
+    let explicit = std::env::var("TERMINAL_SHELL_INIT_FILES")
+        .ok()
+        .map(|v| parse_shell_init_list(&v))
+        .unwrap_or_default();
+    let auto_source_bashrc = bool_env_or_default("TERMINAL_AUTO_SOURCE_BASHRC", true);
+    (explicit, auto_source_bashrc)
+}
+
+fn expand_env_refs(input: &str) -> String {
+    let mut output = String::new();
+    let mut rest = input;
+    while let Some(start) = rest.find("${") {
+        output.push_str(&rest[..start]);
+        let after_open = &rest[start + 2..];
+        let Some(end) = after_open.find('}') else {
+            output.push_str(&rest[start..]);
+            return output;
+        };
+        let name = &after_open[..end];
+        if !name.is_empty()
+            && name
+                .bytes()
+                .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'_')
+        {
+            if let Ok(value) = std::env::var(name) {
+                output.push_str(&value);
+            }
+        } else {
+            output.push_str("${");
+            output.push_str(name);
+            output.push('}');
+        }
+        rest = &after_open[end + 1..];
+    }
+    output.push_str(rest);
+    output
+}
+
+fn expand_shell_init_path(input: &str) -> PathBuf {
+    let expanded = expand_env_refs(input.trim());
+    if expanded == "~" {
+        return home_dir().unwrap_or_else(|| PathBuf::from(expanded));
+    }
+    if let Some(rest) = expanded.strip_prefix("~/") {
+        if let Some(home) = home_dir() {
+            return home.join(rest);
+        }
+    }
+    PathBuf::from(expanded)
+}
+
+fn resolve_existing_shell_init_files(paths: impl IntoIterator<Item = PathBuf>) -> Vec<PathBuf> {
+    paths.into_iter().filter(|p| p.is_file()).collect()
+}
+
+fn auto_shell_init_candidates(shell: &str) -> Vec<PathBuf> {
+    let Some(home) = home_dir() else {
+        return Vec::new();
+    };
+    match shell {
+        "zsh" => [".zshenv", ".zprofile", ".zshrc", ".profile"]
+            .into_iter()
+            .map(|file| home.join(file))
+            .collect(),
+        _ => [".profile", ".bash_profile", ".bashrc"]
+            .into_iter()
+            .map(|file| home.join(file))
+            .collect(),
+    }
+}
+
+fn resolve_shell_init_files_for_shell(
+    shell: &str,
+    explicit_files: &[String],
+    auto_source_bashrc: bool,
+) -> Vec<PathBuf> {
+    if !explicit_files.is_empty() {
+        return resolve_existing_shell_init_files(
+            explicit_files
+                .iter()
+                .map(|path| expand_shell_init_path(path.as_str())),
+        );
+    }
+    if !auto_source_bashrc {
+        return Vec::new();
+    }
+    resolve_existing_shell_init_files(auto_shell_init_candidates(shell))
+}
+
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn shell_source_prelude(files: &[PathBuf]) -> String {
+    let mut prelude = String::new();
+    if files.is_empty() {
+        return prelude;
+    }
+    prelude.push_str("set +e; ");
+    for file in files {
+        let quoted = shell_single_quote(&file.to_string_lossy());
+        prelude.push_str("[ -r ");
+        prelude.push_str(&quoted);
+        prelude.push_str(" ] && . ");
+        prelude.push_str(&quoted);
+        prelude.push_str(" || true; ");
+    }
+    prelude
+}
+
 fn scrub_subprocess_env(cmd: &mut TokioCommand) {
     let mut forced = Vec::new();
     for (key, _) in std::env::vars() {
@@ -657,20 +890,26 @@ fn scrub_subprocess_env(cmd: &mut TokioCommand) {
     cmd.env("PATH", normalized_path);
 }
 
-fn with_login_profile_sources(command: &str) -> String {
+fn with_login_profile_sources(
+    command: &str,
+    explicit_files: &[String],
+    auto_source_bashrc: bool,
+) -> String {
     #[cfg(unix)]
     {
         let cleanup = shell_env_cleanup_snippet();
-        fn shell_single_quote(value: &str) -> String {
-            format!("'{}'", value.replace('\'', "'\\''"))
-        }
-
-        let bash_command = shell_single_quote(&format!(
-            "[ -f \"$HOME/.profile\" ] && . \"$HOME/.profile\"; [ -f \"$HOME/.bash_profile\" ] && . \"$HOME/.bash_profile\"; {cleanup}{command}"
+        let bash_prelude = shell_source_prelude(&resolve_shell_init_files_for_shell(
+            "bash",
+            explicit_files,
+            auto_source_bashrc,
         ));
-        let zsh_command = shell_single_quote(&format!(
-            "[ -f \"$HOME/.zshenv\" ] && . \"$HOME/.zshenv\"; [ -f \"$HOME/.zprofile\" ] && . \"$HOME/.zprofile\"; [ -f \"$HOME/.zshrc\" ] && . \"$HOME/.zshrc\"; [ -f \"$HOME/.profile\" ] && . \"$HOME/.profile\"; {cleanup}{command}"
+        let zsh_prelude = shell_source_prelude(&resolve_shell_init_files_for_shell(
+            "zsh",
+            explicit_files,
+            auto_source_bashrc,
         ));
+        let bash_command = shell_single_quote(&format!("{bash_prelude}{cleanup}{command}"));
+        let zsh_command = shell_single_quote(&format!("{zsh_prelude}{cleanup}{command}"));
         let preferred_shell = std::env::var("SHELL")
             .ok()
             .and_then(|raw| {
@@ -697,6 +936,8 @@ else printf '%s\n' \"Hermes could not find bash or zsh in PATH. Run 'exec zsh -l
     }
     #[cfg(not(unix))]
     {
+        let _ = explicit_files;
+        let _ = auto_source_bashrc;
         command.to_string()
     }
 }
@@ -868,7 +1109,11 @@ impl TerminalBackend for LocalBackend {
     ) -> Result<CommandOutput, AgentError> {
         let timeout_secs = timeout.unwrap_or(self.default_timeout);
         let rewritten_command = rewrite_compound_background(command);
-        let command_with_profiles = with_login_profile_sources(&rewritten_command);
+        let command_with_profiles = with_login_profile_sources(
+            &rewritten_command,
+            &self.shell_init_files,
+            self.auto_source_bashrc,
+        );
 
         if pty && !background {
             // PTY mode: allocate a pseudo-terminal for interactive commands.
@@ -1049,7 +1294,11 @@ impl TerminalBackend for LocalBackend {
                 .await;
         };
         let rewritten_command = rewrite_compound_background(command);
-        let command_with_profiles = with_login_profile_sources(&rewritten_command);
+        let command_with_profiles = with_login_profile_sources(
+            &rewritten_command,
+            &self.shell_init_files,
+            self.auto_source_bashrc,
+        );
 
         if background {
             let started = self
@@ -1437,6 +1686,33 @@ mod tests {
             .block_on(future)
     }
 
+    #[cfg(unix)]
+    fn pids_for_marker(marker: &str) -> Vec<u32> {
+        let output = std::process::Command::new("ps")
+            .args(["-axo", "pid=,command="])
+            .output()
+            .expect("ps output");
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter(|line| line.contains(marker))
+            .filter_map(|line| line.split_whitespace().next()?.parse::<u32>().ok())
+            .collect()
+    }
+
+    #[cfg(unix)]
+    async fn wait_for_marker(marker: &str, present: bool, timeout: std::time::Duration) -> bool {
+        let deadline = std::time::Instant::now() + timeout;
+        while std::time::Instant::now() < deadline {
+            let found = !pids_for_marker(marker).is_empty();
+            if found == present {
+                return true;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        let found = !pids_for_marker(marker).is_empty();
+        found == present
+    }
+
     struct EnvGuard {
         key: &'static str,
         original: Option<OsString>,
@@ -1462,21 +1738,29 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn test_with_login_profile_sources_prepends_profile_loads() {
-        let wrapped = with_login_profile_sources("echo hi");
+        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let td = tempdir().unwrap();
+        for file in [".profile", ".bash_profile", ".bashrc", ".zshrc"] {
+            std::fs::write(td.path().join(file), "export HERMES_TEST=1\n").unwrap();
+        }
+        let _home = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
+        let wrapped = with_login_profile_sources("echo hi", &[], true);
         assert!(wrapped.contains("command -v bash"));
         assert!(wrapped.contains("exec bash -lc"));
-        assert!(wrapped.contains(". \"$HOME/.bash_profile\""));
+        assert!(wrapped.contains(".bash_profile"));
+        assert!(wrapped.contains(".bashrc"));
         assert!(wrapped.contains("command -v zsh"));
         assert!(wrapped.contains("exec zsh -lc"));
-        assert!(wrapped.contains(". \"$HOME/.zshrc\""));
+        assert!(wrapped.contains(".zshrc"));
         assert!(wrapped.contains("echo hi"));
     }
 
     #[cfg(unix)]
     #[test]
     fn test_with_login_profile_sources_prefers_user_shell_when_supported() {
+        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
         let _shell = EnvGuard::set("SHELL", "/bin/zsh");
-        let wrapped = with_login_profile_sources("echo hi");
+        let wrapped = with_login_profile_sources("echo hi", &[], true);
         let preferred = "if command -v zsh >/dev/null 2>&1; then exec zsh -lc";
         let fallback = "if command -v bash >/dev/null 2>&1; then exec bash -lc";
         let preferred_idx = wrapped.find(preferred).expect("preferred zsh branch");
@@ -1485,6 +1769,73 @@ mod tests {
             preferred_idx < fallback_idx,
             "preferred shell branch should come before fallback"
         );
+    }
+
+    #[test]
+    fn test_resolve_shell_init_files_auto_profile_before_bashrc() {
+        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let td = tempdir().unwrap();
+        for file in [".profile", ".bash_profile", ".bashrc"] {
+            std::fs::write(td.path().join(file), "export HERMES_TEST=1\n").unwrap();
+        }
+        let _home = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
+
+        let resolved = resolve_shell_init_files_for_shell("bash", &[], true);
+        let names = resolved
+            .iter()
+            .filter_map(|p| p.file_name().and_then(|name| name.to_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(names, [".profile", ".bash_profile", ".bashrc"]);
+    }
+
+    #[test]
+    fn test_resolve_shell_init_files_explicit_list_wins_over_auto() {
+        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let td = tempdir().unwrap();
+        std::fs::write(td.path().join(".bashrc"), "export FROM_BASHRC=1\n").unwrap();
+        let custom = td.path().join("custom.sh");
+        std::fs::write(&custom, "export FROM_CUSTOM=1\n").unwrap();
+        let _home = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
+
+        let resolved = resolve_shell_init_files_for_shell(
+            "bash",
+            &[custom.to_string_lossy().to_string()],
+            true,
+        );
+        assert_eq!(resolved, [custom]);
+    }
+
+    #[test]
+    fn test_resolve_shell_init_files_auto_source_off_suppresses_defaults() {
+        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let td = tempdir().unwrap();
+        std::fs::write(td.path().join(".bashrc"), "export FROM_BASHRC=1\n").unwrap();
+        let _home = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
+
+        let resolved = resolve_shell_init_files_for_shell("bash", &[], false);
+        assert!(resolved.is_empty());
+    }
+
+    #[test]
+    fn test_resolve_shell_init_files_expands_home_and_env_vars() {
+        let _lock = ENV_TEST_LOCK.lock().expect("lock env");
+        let td = tempdir().unwrap();
+        let rc_dir = td.path().join("rc");
+        std::fs::create_dir_all(&rc_dir).unwrap();
+        let custom = rc_dir.join("custom.sh");
+        std::fs::write(&custom, "export FROM_CUSTOM=1\n").unwrap();
+        let _home = EnvGuard::set("HOME", td.path().to_string_lossy().as_ref());
+        let _custom_dir = EnvGuard::set("CUSTOM_RC_DIR", rc_dir.to_string_lossy().as_ref());
+
+        let home_resolved =
+            resolve_shell_init_files_for_shell("bash", &["~/rc/custom.sh".to_string()], false);
+        let env_resolved = resolve_shell_init_files_for_shell(
+            "bash",
+            &["${CUSTOM_RC_DIR}/custom.sh".to_string()],
+            false,
+        );
+        assert_eq!(home_resolved.as_slice(), std::slice::from_ref(&custom));
+        assert_eq!(env_resolved, [custom]);
     }
 
     #[test]
@@ -1520,7 +1871,7 @@ mod tests {
     #[cfg(not(unix))]
     #[test]
     fn test_with_login_profile_sources_is_passthrough_off_unix() {
-        let wrapped = with_login_profile_sources("echo hi");
+        let wrapped = with_login_profile_sources("echo hi", &[], true);
         assert_eq!(wrapped, "echo hi");
     }
 
@@ -1558,6 +1909,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_execute_command_sources_explicit_shell_init_file() {
+        let td = tempdir().unwrap();
+        let init = td.path().join("custom-init.sh");
+        std::fs::write(
+            &init,
+            "export HERMES_SHELL_INIT_PROBE=probe-ok\nexport PATH=\"/opt/shell-init-probe/bin:$PATH\"\n",
+        )
+        .unwrap();
+        let backend = LocalBackend::new_with_shell_init(
+            10,
+            1_048_576,
+            vec![init.to_string_lossy().to_string()],
+            false,
+        );
+
+        let output = backend
+            .execute_command(
+                "printf '%s|%s' \"$HERMES_SHELL_INIT_PROBE\" \"$PATH\"",
+                Some(10),
+                Some(td.path().to_string_lossy().as_ref()),
+                false,
+                false,
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(output.exit_code, 0);
+        assert!(output.stdout.contains("probe-ok"));
+        assert!(output.stdout.contains("/opt/shell-init-probe/bin"));
+    }
+
+    #[tokio::test]
     async fn test_execute_command_timeout() {
         let backend = LocalBackend::new(1, 1_048_576);
         let result = backend
@@ -1568,6 +1951,34 @@ mod tests {
             Err(AgentError::Timeout(_)) => {}
             _ => panic!("Expected timeout error"),
         }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_foreground_child_group_is_killed_when_future_is_aborted() {
+        let backend = Arc::new(LocalBackend::new(60, 1_048_576));
+        let marker = format!("hermes_abort_guard_{}", std::process::id());
+        let command = format!("python3 -c 'import time; time.sleep(60)' {marker}");
+        let task = {
+            let backend = backend.clone();
+            tokio::spawn(async move {
+                backend
+                    .execute_command(&command, Some(60), None, false, false)
+                    .await
+            })
+        };
+
+        assert!(
+            wait_for_marker(&marker, true, std::time::Duration::from_secs(5)).await,
+            "test setup failed to observe marker process"
+        );
+        task.abort();
+        let _ = task.await;
+        assert!(
+            wait_for_marker(&marker, false, std::time::Duration::from_secs(5)).await,
+            "foreground process marker survived future cancellation: {:?}",
+            pids_for_marker(&marker)
+        );
     }
 
     #[cfg(unix)]
