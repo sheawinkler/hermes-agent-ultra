@@ -2265,6 +2265,35 @@ impl PlatformAdapter for TelegramAdapter {
             .await
     }
 
+    async fn delete_message(&self, chat_id: &str, message_id: &str) -> Result<bool, GatewayError> {
+        let (base_chat_id, thread_id) = Self::split_gateway_chat_thread(chat_id);
+        let message_id = if thread_id.is_some() {
+            message_id
+                .split_once(':')
+                .map(|(_, id)| id)
+                .unwrap_or(message_id)
+        } else {
+            message_id
+        };
+        let url = format!("{}/deleteMessage", self.api_base);
+        let message_id = message_id.parse::<i64>().map_err(|err| {
+            GatewayError::SendFailed(format!("invalid Telegram message_id '{message_id}': {err}"))
+        })?;
+        let body = serde_json::json!({
+            "chat_id": base_chat_id,
+            "message_id": message_id,
+        });
+        let resp: TelegramResponse<bool> = self.post_json(&url, &body).await?;
+        if resp.ok {
+            Ok(resp.result.unwrap_or(true))
+        } else {
+            Err(GatewayError::SendFailed(
+                resp.description
+                    .unwrap_or_else(|| "deleteMessage failed".to_string()),
+            ))
+        }
+    }
+
     async fn add_reaction(
         &self,
         chat_id: &str,

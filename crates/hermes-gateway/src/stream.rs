@@ -61,6 +61,11 @@ pub struct StreamConfig {
     /// Removed on the final flush.
     #[serde(default = "default_cursor")]
     pub cursor: String,
+
+    /// Send the final answer as a fresh message when the editable preview has
+    /// been visible longer than this many seconds. `0` disables the behavior.
+    #[serde(default = "default_fresh_final_after_seconds")]
+    pub fresh_final_after_seconds: f64,
 }
 
 impl Default for StreamConfig {
@@ -70,6 +75,7 @@ impl Default for StreamConfig {
             buffer_threshold: default_buffer_threshold(),
             max_message_length: default_max_message_length(),
             cursor: default_cursor(),
+            fresh_final_after_seconds: default_fresh_final_after_seconds(),
         }
     }
 }
@@ -88,6 +94,10 @@ fn default_max_message_length() -> usize {
 
 fn default_cursor() -> String {
     " ▉".to_string()
+}
+
+fn default_fresh_final_after_seconds() -> f64 {
+    60.0
 }
 
 // ---------------------------------------------------------------------------
@@ -353,6 +363,8 @@ pub struct StreamConsumer {
     max_flood_strikes: u8,
     current_edit_interval_ms: u64,
     final_response_sent: bool,
+    final_content_delivered: bool,
+    message_created_at: Option<Instant>,
 }
 
 impl StreamConsumer {
@@ -375,6 +387,8 @@ impl StreamConsumer {
             max_flood_strikes: default_max_flood_strikes(),
             current_edit_interval_ms: interval,
             final_response_sent: false,
+            final_content_delivered: false,
+            message_created_at: None,
         }
     }
 
@@ -402,6 +416,10 @@ impl StreamConsumer {
 
     pub fn final_response_sent(&self) -> bool {
         self.final_response_sent
+    }
+
+    pub fn final_content_delivered(&self) -> bool {
+        self.final_content_delivered
     }
 
     pub fn edit_supported(&self) -> bool {
@@ -446,7 +464,22 @@ impl StreamConsumer {
     pub fn mark_done(&mut self) {
         if self.already_sent && !self.accumulated.is_empty() {
             self.final_response_sent = true;
+            self.final_content_delivered = true;
         }
+    }
+
+    /// Return true when a turn-final segment should be sent as a fresh
+    /// message instead of editing an old preview in place.
+    pub fn should_send_fresh_final(&self, finalize: bool) -> bool {
+        if !finalize || self.config.fresh_final_after_seconds <= 0.0 {
+            return false;
+        }
+        if self.message_id.as_deref() == Some("__no_edit__") || self.message_id.is_none() {
+            return false;
+        }
+        self.message_created_at
+            .map(|created| created.elapsed().as_secs_f64() >= self.config.fresh_final_after_seconds)
+            .unwrap_or(false)
     }
 
     // -- Flush decision -----------------------------------------------------
@@ -522,7 +555,26 @@ impl StreamConsumer {
         self.already_sent = true;
         self.last_sent_text = self.get_display_text(false);
         self.last_edit_time = Some(Instant::now());
+        self.message_created_at.get_or_insert_with(Instant::now);
         self.flood_strikes = 0;
+    }
+
+    /// Record a successful fresh-final send. Segment-boundary callers pass
+    /// `is_turn_final=false`, which updates the visible message without
+    /// claiming the actual assistant final answer was delivered.
+    pub fn mark_fresh_final_success(&mut self, message_id: &str, is_turn_final: bool) {
+        self.message_id = Some(message_id.to_string());
+        self.already_sent = true;
+        self.last_sent_text = self.accumulated.clone();
+        self.last_edit_time = Some(Instant::now());
+        self.message_created_at = Some(Instant::now());
+        if is_turn_final {
+            self.final_response_sent = true;
+            self.final_content_delivered = true;
+        } else {
+            self.final_response_sent = false;
+            self.final_content_delivered = false;
+        }
     }
 
     /// Record a failed edit.
@@ -567,6 +619,9 @@ impl StreamConsumer {
         self.last_sent_text.clear();
         self.fallback_final_send = false;
         self.fallback_prefix.clear();
+        self.message_created_at = None;
+        self.final_response_sent = false;
+        self.final_content_delivered = false;
     }
 
     /// Variant of `reset_segment` that preserves the `"__no_edit__"` sentinel
@@ -603,6 +658,7 @@ mod tests {
         assert_eq!(config.buffer_threshold, 50);
         assert_eq!(config.max_message_length, 4096);
         assert_eq!(config.cursor, " ▉");
+        assert_eq!(config.fresh_final_after_seconds, 60.0);
     }
 
     // -- StreamSegmentEvent -------------------------------------------------
@@ -664,6 +720,7 @@ mod tests {
             buffer_threshold: 5,
             max_message_length: 4096,
             cursor: default_cursor(),
+            fresh_final_after_seconds: default_fresh_final_after_seconds(),
         });
 
         let handle = manager.start_stream("telegram", "chat1").await;
@@ -710,6 +767,7 @@ mod tests {
         assert!(c.accumulated().is_empty());
         assert!(!c.already_sent());
         assert!(!c.final_response_sent());
+        assert!(!c.final_content_delivered());
         assert!(c.edit_supported());
         assert!(!c.fallback_final_send());
         assert_eq!(c.flood_strikes(), 0);
@@ -837,6 +895,7 @@ mod tests {
         c.mark_edit_success("msg_1");
         c.fallback_final_send = true;
         c.fallback_prefix = "prefix".to_string();
+        c.mark_done();
 
         c.reset_segment();
 
@@ -845,6 +904,8 @@ mod tests {
         assert!(c.last_sent_text.is_empty());
         assert!(!c.fallback_final_send());
         assert!(c.fallback_prefix.is_empty());
+        assert!(!c.final_response_sent());
+        assert!(!c.final_content_delivered());
     }
 
     #[test]
@@ -910,6 +971,7 @@ mod tests {
         c.already_sent = true;
         c.mark_done();
         assert!(c.final_response_sent());
+        assert!(c.final_content_delivered());
     }
 
     #[test]
@@ -918,5 +980,61 @@ mod tests {
         c.already_sent = true;
         c.mark_done();
         assert!(!c.final_response_sent());
+        assert!(!c.final_content_delivered());
+    }
+
+    #[test]
+    fn consumer_fresh_final_threshold_is_configurable_and_sentinel_safe() {
+        let mut disabled = StreamConsumer::new(
+            "tg",
+            "c1",
+            StreamConfig {
+                fresh_final_after_seconds: 0.0,
+                ..StreamConfig::default()
+            },
+        );
+        disabled.on_delta("preview");
+        disabled.mark_edit_success("msg_1");
+        assert!(!disabled.should_send_fresh_final(true));
+
+        let mut no_edit = StreamConsumer::new(
+            "tg",
+            "c1",
+            StreamConfig {
+                fresh_final_after_seconds: 0.001,
+                ..StreamConfig::default()
+            },
+        );
+        no_edit.on_delta("preview");
+        no_edit.mark_edit_success("__no_edit__");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        assert!(!no_edit.should_send_fresh_final(true));
+    }
+
+    #[test]
+    fn consumer_fresh_final_marks_only_turn_final_segments_delivered() {
+        let mut c = StreamConsumer::new(
+            "telegram",
+            "chat",
+            StreamConfig {
+                fresh_final_after_seconds: 0.001,
+                ..StreamConfig::default()
+            },
+        );
+        c.on_delta("preamble");
+        c.mark_edit_success("preview");
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        assert!(c.should_send_fresh_final(true));
+
+        c.mark_fresh_final_success("fresh-preamble", false);
+        assert!(!c.final_response_sent());
+        assert!(!c.final_content_delivered());
+
+        c.reset_segment();
+        c.on_delta("final answer");
+        c.mark_edit_success("final-preview");
+        c.mark_fresh_final_success("fresh-final", true);
+        assert!(c.final_response_sent());
+        assert!(c.final_content_delivered());
     }
 }
