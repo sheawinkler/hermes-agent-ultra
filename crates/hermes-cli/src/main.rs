@@ -4936,10 +4936,30 @@ fn build_api_server_config(platform_cfg: &PlatformConfig) -> ApiServerConfig {
 }
 
 fn build_webhook_config(platform_cfg: &PlatformConfig, secret: String) -> WebhookConfig {
+    let routes = platform_cfg
+        .extra
+        .get("routes")
+        .cloned()
+        .and_then(|value| serde_json::from_value(value).ok())
+        .unwrap_or_default();
     WebhookConfig {
+        host: extra_string(platform_cfg, "host").unwrap_or_else(|| "0.0.0.0".to_string()),
         port: extra_u16(platform_cfg, "port", 9000),
         path: extra_string(platform_cfg, "path").unwrap_or_else(|| "/webhook".to_string()),
         secret,
+        rate_limit: platform_cfg
+            .extra
+            .get("rate_limit")
+            .and_then(|v| v.as_u64())
+            .and_then(|v| u32::try_from(v).ok())
+            .unwrap_or(30),
+        max_body_bytes: platform_cfg
+            .extra
+            .get("max_body_bytes")
+            .and_then(|v| v.as_u64())
+            .and_then(|v| usize::try_from(v).ok())
+            .unwrap_or(1_048_576),
+        routes,
     }
 }
 
@@ -5207,6 +5227,20 @@ async fn register_gateway_adapters(
                     phone_number_id: extra_string(platform_cfg, "phone_number_id"),
                     business_account_id: extra_string(platform_cfg, "business_account_id"),
                     verify_token: extra_string(platform_cfg, "verify_token"),
+                    reply_prefix: platform_cfg
+                        .extra
+                        .get("reply_prefix")
+                        .and_then(|v| v.as_str())
+                        .map(str::to_string),
+                    require_mention: extra_bool(platform_cfg, "require_mention", false),
+                    mention_patterns: extra_string_vec(platform_cfg, "mention_patterns"),
+                    free_response_chats: extra_string_vec(platform_cfg, "free_response_chats"),
+                    dm_policy: extra_string(platform_cfg, "dm_policy")
+                        .unwrap_or_else(|| "open".to_string()),
+                    allow_from: extra_string_vec(platform_cfg, "allow_from"),
+                    group_policy: extra_string(platform_cfg, "group_policy")
+                        .unwrap_or_else(|| "open".to_string()),
+                    group_allow_from: extra_string_vec(platform_cfg, "group_allow_from"),
                     proxy: Default::default(),
                 };
                 match WhatsAppAdapter::new(wa_cfg) {

@@ -3,15 +3,23 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use futures::{SinkExt, StreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
+use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::Message;
 use tracing::{info, warn};
 
 use hermes_core::errors::GatewayError;
 use hermes_core::traits::{ParseMode, PlatformAdapter};
 
 use crate::adapter::{AdapterProxyConfig, BasePlatformAdapter};
+
+#[cfg(test)]
+use std::future::Future;
+
+const MATTERMOST_WS_BACKOFF_STEPS: &[u64] = &[2, 5, 10, 30, 60];
 
 // ---------------------------------------------------------------------------
 // Incoming message types
@@ -72,6 +80,18 @@ impl MattermostAdapter {
 
     pub fn config(&self) -> &MattermostConfig {
         &self.config
+    }
+
+    fn websocket_url(&self) -> String {
+        let trimmed = self.config.server_url.trim_end_matches('/');
+        let ws_base = if let Some(rest) = trimmed.strip_prefix("https://") {
+            format!("wss://{rest}")
+        } else if let Some(rest) = trimmed.strip_prefix("http://") {
+            format!("ws://{rest}")
+        } else {
+            trimmed.to_string()
+        };
+        format!("{ws_base}/api/v4/websocket")
     }
 
     /// Send a message via Mattermost REST API.
@@ -145,6 +165,165 @@ impl MattermostAdapter {
             message,
             is_bot,
         })
+    }
+
+    fn map_ws_error(err: tokio_tungstenite::tungstenite::Error) -> GatewayError {
+        match err {
+            tokio_tungstenite::tungstenite::Error::Http(response)
+                if matches!(response.status().as_u16(), 401 | 403) =>
+            {
+                GatewayError::Auth(format!(
+                    "Mattermost WebSocket auth error: {}",
+                    response.status()
+                ))
+            }
+            tokio_tungstenite::tungstenite::Error::Http(response) => {
+                GatewayError::ConnectionFailed(format!(
+                    "Mattermost WebSocket handshake error: {}",
+                    response.status()
+                ))
+            }
+            other => GatewayError::ConnectionFailed(format!("Mattermost WebSocket error: {other}")),
+        }
+    }
+
+    /// Connect to the Mattermost real-time API and forward parsed post events.
+    pub async fn ws_connect_and_listen<F>(&self, callback: &mut F) -> Result<(), GatewayError>
+    where
+        F: FnMut(IncomingMattermostMessage) + Send,
+    {
+        let url = self.websocket_url();
+        let (mut socket, _) = connect_async(url.as_str())
+            .await
+            .map_err(Self::map_ws_error)?;
+
+        let auth = serde_json::json!({
+            "seq": 1,
+            "action": "authentication_challenge",
+            "data": { "token": self.config.token },
+        });
+        socket
+            .send(Message::Text(auth.to_string()))
+            .await
+            .map_err(Self::map_ws_error)?;
+
+        loop {
+            tokio::select! {
+                _ = self.stop_signal.notified() => {
+                    info!("Mattermost WebSocket stop signal received");
+                    break;
+                }
+                frame = socket.next() => {
+                    match frame {
+                        Some(Ok(Message::Text(text))) => {
+                            if let Ok(event) = serde_json::from_str::<MattermostWsEvent>(text.as_str()) {
+                                if let Some(message) = Self::parse_ws_event(&event) {
+                                    callback(message);
+                                }
+                            }
+                        }
+                        Some(Ok(Message::Ping(payload))) => {
+                            socket
+                                .send(Message::Pong(payload))
+                                .await
+                                .map_err(Self::map_ws_error)?;
+                        }
+                        Some(Ok(Message::Close(_))) | None => break,
+                        Some(Ok(_)) => {}
+                        Some(Err(err)) => return Err(Self::map_ws_error(err)),
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Run the reconnect loop. Auth errors are terminal; transient errors back off.
+    pub async fn ws_loop<F>(&self, mut callback: F) -> Result<(), GatewayError>
+    where
+        F: FnMut(IncomingMattermostMessage) + Send,
+    {
+        let mut backoff_idx = 0usize;
+
+        while self.base.is_running() {
+            match self.ws_connect_and_listen(&mut callback).await {
+                Ok(()) => {
+                    backoff_idx = 0;
+                    if self.base.is_running() {
+                        warn!("Mattermost WebSocket disconnected; reconnecting");
+                    }
+                }
+                Err(GatewayError::Auth(msg)) => {
+                    self.base.mark_stopped();
+                    return Err(GatewayError::Auth(msg));
+                }
+                Err(err) => {
+                    let delay_secs = MATTERMOST_WS_BACKOFF_STEPS
+                        [backoff_idx.min(MATTERMOST_WS_BACKOFF_STEPS.len() - 1)];
+                    warn!(
+                        error = %err,
+                        retry_in_secs = delay_secs,
+                        "Mattermost WebSocket transient error, backing off"
+                    );
+                    backoff_idx =
+                        (backoff_idx + 1).min(MATTERMOST_WS_BACKOFF_STEPS.len().saturating_sub(1));
+                    tokio::select! {
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(delay_secs)) => {}
+                        _ = self.stop_signal.notified() => break,
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    #[cfg(test)]
+    async fn ws_reconnect_loop_with_backoff<F, Fut>(
+        &self,
+        backoff_steps: &[u64],
+        mut connect_and_listen: F,
+    ) -> Result<(), GatewayError>
+    where
+        F: FnMut() -> Fut,
+        Fut: Future<Output = Result<(), GatewayError>>,
+    {
+        let mut backoff_idx = 0usize;
+
+        while self.base.is_running() {
+            match connect_and_listen().await {
+                Ok(()) => {
+                    backoff_idx = 0;
+                    if self.base.is_running() {
+                        warn!("Mattermost WebSocket disconnected; reconnecting");
+                    }
+                }
+                Err(GatewayError::Auth(msg)) => {
+                    self.base.mark_stopped();
+                    return Err(GatewayError::Auth(msg));
+                }
+                Err(err) => {
+                    let delay_secs = if backoff_steps.is_empty() {
+                        0
+                    } else {
+                        backoff_steps[backoff_idx.min(backoff_steps.len() - 1)]
+                    };
+                    warn!(
+                        error = %err,
+                        retry_in_secs = delay_secs,
+                        "Mattermost WebSocket transient error, backing off"
+                    );
+                    backoff_idx = (backoff_idx + 1).min(backoff_steps.len().saturating_sub(1));
+                    tokio::select! {
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(delay_secs)) => {}
+                        _ = self.stop_signal.notified() => break,
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     /// Fetch the authenticated user's profile (`GET /api/v4/users/me`).
@@ -480,6 +659,105 @@ impl PlatformAdapter for MattermostAdapter {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn test_adapter() -> MattermostAdapter {
+        MattermostAdapter::new(MattermostConfig {
+            server_url: "https://mattermost.example.com/".to_string(),
+            token: "test-token".to_string(),
+            team_id: None,
+            proxy: AdapterProxyConfig::default(),
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn websocket_url_uses_ws_scheme_and_realtime_path() {
+        let adapter = test_adapter();
+        assert_eq!(
+            adapter.websocket_url(),
+            "wss://mattermost.example.com/api/v4/websocket"
+        );
+
+        let local = MattermostAdapter::new(MattermostConfig {
+            server_url: "http://127.0.0.1:8065".to_string(),
+            token: "test-token".to_string(),
+            team_id: None,
+            proxy: AdapterProxyConfig::default(),
+        })
+        .unwrap();
+        assert_eq!(
+            local.websocket_url(),
+            "ws://127.0.0.1:8065/api/v4/websocket"
+        );
+    }
+
+    #[tokio::test]
+    async fn ws_reconnect_loop_stops_on_auth_error_without_retry() {
+        let adapter = test_adapter();
+        adapter.base.mark_running();
+        let attempts = AtomicUsize::new(0);
+
+        let result = adapter
+            .ws_reconnect_loop_with_backoff(&[0], || {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Err(GatewayError::Auth("401 Unauthorized".to_string())))
+            })
+            .await;
+
+        assert!(matches!(result, Err(GatewayError::Auth(_))));
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
+        assert!(!adapter.is_running());
+    }
+
+    #[tokio::test]
+    async fn ws_reconnect_loop_retries_transient_errors() {
+        let adapter = test_adapter();
+        adapter.base.mark_running();
+        let attempts = AtomicUsize::new(0);
+
+        let result = adapter
+            .ws_reconnect_loop_with_backoff(&[0], || {
+                let attempt = attempts.fetch_add(1, Ordering::SeqCst) + 1;
+                if attempt >= 2 {
+                    adapter.base.mark_stopped();
+                    std::future::ready(Ok(()))
+                } else {
+                    std::future::ready(Err(GatewayError::ConnectionFailed(
+                        "network timeout".to_string(),
+                    )))
+                }
+            })
+            .await;
+
+        assert!(result.is_ok());
+        assert_eq!(attempts.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn parse_ws_event_extracts_posted_message() {
+        let event = MattermostWsEvent {
+            event: "posted".to_string(),
+            data: Some(serde_json::json!({
+                "post": serde_json::json!({
+                    "id": "post-1",
+                    "channel_id": "channel-1",
+                    "user_id": "user-1",
+                    "message": "hello",
+                    "props": { "from_bot": "true" }
+                }).to_string()
+            })),
+            broadcast: None,
+            seq: Some(2),
+        };
+
+        let msg = MattermostAdapter::parse_ws_event(&event).expect("posted event");
+        assert_eq!(msg.post_id, "post-1");
+        assert_eq!(msg.channel_id, "channel-1");
+        assert_eq!(msg.user_id, "user-1");
+        assert_eq!(msg.message, "hello");
+        assert!(msg.is_bot);
+    }
 
     #[test]
     fn remote_image_file_name_keeps_extension() {

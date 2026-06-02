@@ -3515,6 +3515,118 @@
       "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
       "owner": "sheawinkler",
       "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_document_cache.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream document-cache intent is covered by Rust MediaCache byte-cache contracts: safe leaf-name preservation, path traversal stripping, null-byte stripping, unique filenames, supported document MIME/extension mapping, image/document routing, and invalid-image rejection.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_gateway_shutdown.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream gateway shutdown/resource-drain intent is covered by Rust Gateway stop_all/session-finalize contracts and existing runtime shutdown tests for active session finalization, adapter stop isolation, idle expiry finalization, and hook containment; Rust process/tool cleanup uses native runtime registries instead of Python runner mocks.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_stream_consumer_fresh_final.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream fresh-final streaming intent is covered by Rust StreamConfig/StreamConsumer contracts for configurable fresh_final_after_seconds, no-edit sentinel safety, stale-preview fresh-final decisions, non-final segment behavior, turn-final delivery marking, reset clearing, and Telegram delete_message support for best-effort stale preview cleanup.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_voice_mode_platform_isolation.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream voice-mode platform-isolation intent is covered by Rust VoiceManager platform-keyed joined-channel state and voice command contracts; platform/channel identifiers are normalized separately so same chat/channel IDs on different platforms do not collide.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_webhook_adapter.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream generic webhook adapter intent is covered by Rust WebhookAdapter contracts for GitHub/GitLab/generic/Svix signature validation, INSECURE_NO_AUTH loopback-only guard, body-size limits, route prompt rendering, event filtering, idempotency, fixed-window rate limiting, health/outbound endpoints, and handler dispatch.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_webhook_deliver_only.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream webhook deliver_only intent is covered by Rust WebhookRouteConfig and adapter contracts that render target chat/user templates, enqueue direct outbound delivery messages with platform targeting, preserve auth/idempotency/rate-limit checks, and bypass agent invocation.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_webhook_dynamic_routes.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream dynamic webhook route intent is covered by Rust WebhookConfig route hydration from platform config plus dynamic /webhooks/{route} dispatch, static route resolution, per-route secrets, route-specific prompt/event/delivery settings, and CLI config bridging.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_webhook_integration.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream webhook integration intent is covered by Rust end-to-end webhook route handling: signed provider payload validation, dot-notation template rendering into MessageEvent text, route event filtering, deliver/log/direct outbound handling, health checks, and route-specific chat/user/session isolation.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_wecom.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream WeCom outbound-media intent is covered by Rust WeCom adapter contracts for image URL fallback text, content-type-derived filenames, existing-extension preservation, and feature-gated adapter compilation with gateway delivery routing.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_wecom_callback.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream WeCom callback intent is covered by Rust WeCom callback contracts for signature stability, encrypted callback rejection on bad signatures, group-mention stripping, image fallback text, and remote image filename/content-type normalization.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_weixin.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Weixin crypto/media/file-send intent is covered by Rust Weixin contracts for AES key parsing and AES-128-ECB roundtrips, malformed ciphertext rejection, image URL fallback/filename normalization, group policy behavior, and iLink file upload parameter routing.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_whatsapp_connect.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream WhatsApp connect/config intent is covered by Rust WhatsApp config and bridge contracts for reply_prefix, mention gating, DM/group policies, allowlists, bridge send body construction, link media body behavior, and startup/runtime adapter compilation behind the whatsapp feature.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_whatsapp_formatting.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream WhatsApp formatting/chunking intent is covered by Rust WhatsAppAdapter contracts for Markdown-to-WhatsApp conversion, header/link/strike/bold conversion, inline/fenced-code protection, reply prefix application, and char-boundary-safe message chunking.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_whatsapp_group_gating.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream WhatsApp DM/group gating intent is covered by Rust should_process_message contracts for require_mention, custom mention regexes, free-response chats, DM disabled/allowlist policies, group disabled/allowlist policies, normalized WhatsApp IDs, bot mentions, quoted bot replies, slash-command bypass, and mention-text cleanup.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_whatsapp_reply_prefix.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream WhatsApp reply_prefix intent is covered by Rust CLI config hydration and WhatsApp formatted_outbound_text tests that preserve explicit prefixes, support empty prefixes, and apply prefixes before WhatsApp formatting/chunking.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_ws_auth_retry.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream auth-aware retry intent is covered by Rust Matrix sync_loop auth failure handling for 401/403 and Rust Mattermost WebSocket reconnect contracts that stop immediately on auth errors while retrying transient failures with backoff.",
+      "owner": "sheawinkler",
+      "ticket": 25
     }
   ]
 }

@@ -129,6 +129,15 @@ pub trait PlatformAdapter: Send + Sync {
             .await
     }
 
+    /// Delete a previously sent message when the platform supports it.
+    async fn delete_message(
+        &self,
+        _chat_id: &str,
+        _message_id: &str,
+    ) -> Result<bool, GatewayError> {
+        Ok(false)
+    }
+
     /// Add a reaction emoji to a message if the platform supports it.
     async fn add_reaction(
         &self,
