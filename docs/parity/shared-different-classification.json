@@ -2815,6 +2815,706 @@
       "rationale": "Upstream Python run_agent test intent is superseded by Rust-native run-agent runtime contracts. Existing Rust coverage spans AgentLoop retry/failover, streaming collection, compression boundaries and persistence, session persistence, interrupt handling, budget/context pressure, provider headers/cache/reasoning, strict schema sanitization, memory/background-review nudges, and tool-loop guardrails. This tranche adds Rust tool-call argument repair/normalization, object-valued tool-argument parsing, 413/generic context-overflow classification, streaming repair before the truncation retry gate, and non-vision multimodal fallback in provider request assembly.",
       "owner": "sheawinkler",
       "ticket": 25
+    },
+    {
+      "path": "tests/gateway/conftest.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/restart_test_helpers.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_7100_transient_failure_transcript.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_api_server.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_auth_fallback.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_auto_continue.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_background_command.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_background_process_notifications.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_bluebubbles.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_busy_session_auth_bypass.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_clean_shutdown_marker.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_compress_command.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_config.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_config_cwd_bridge.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_config_env_bridge_authority.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_dingtalk.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_display_config.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_dm_topics.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_duplicate_reply_suppression.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_email.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_ephemeral_reply.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_extract_local_files.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_fallback_eviction.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_feishu.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_feishu_approval_buttons.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_feishu_bot_admission.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_feishu_comment.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_fresh_reset_skill_injection.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_gateway_inactivity_timeout.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_google_chat.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_internal_event_bypass_pairing.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_interrupt_key_match.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_irc_adapter.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_matrix.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_matrix_mention.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_matrix_voice.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_mattermost.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_media_download_retry.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_media_extraction.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_message_deduplicator.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_mirror.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_model_switch_persistence.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_msgraph_webhook.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_ntfy_plugin.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_pairing.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_platform_base.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_platform_connected_checkers.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_platform_reconnect.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_platform_registry.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_proxy_mode.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_qqbot.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_queue_consumption.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_reload_skills_discord_resync.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_replay_entry_fields.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_restart_drain.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_restart_notification.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_restart_redelivery_dedup.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_restart_resume_pending.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_resume_command.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_retry_replacement.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_run_cleanup_progress.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_run_progress_interrupt.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_run_progress_topics.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_runner_fatal_adapter.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_runner_startup_failures.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_send_image_file.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_send_multiple_images.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_session.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_session_dm_thread_seeding.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_session_hygiene.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_session_info.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_session_model_override_routing.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_session_race_guard.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_session_reset_notify.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_session_split_brain_11016.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_session_state_cleanup.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_session_store_prune.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_shutdown_cache_cleanup.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_signal.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_slack.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_slack_approval_buttons.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_sms.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_sse_agent_cancel.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_ssl_certs.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_status.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_status_command.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_step_callback_compat.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_sticker_cache.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_stream_consumer.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_stt_config.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_stuck_loop.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_teams.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_text_batching.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_title_command.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_transcript_offset.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_tts_media_routing.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_update_command.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_update_streaming.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_usage_command.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
+    },
+    {
+      "path": "tests/gateway/test_voice_command.py",
+      "classification": "intentional_divergence",
+      "rationale": "Upstream Python gateway test intent is superseded by Rust-native gateway runtime contracts. Existing Rust coverage spans access policy, DM pairing/auth fallback, command handling, sessions, status/usage/compression, platform adapters, media extraction, webhooks, delivery routing, hooks, approvals, voice, and streaming consumers. This tranche adds bounded platform message-id redelivery suppression, definitive streaming final-response delivery before deferred messages, and asynchronous /background and /btw result/error notifications to the origin chat, covered by hermes-gateway unit and primary-platform contract tests.",
+      "owner": "sheawinkler",
+      "ticket": 25
     }
   ]
 }

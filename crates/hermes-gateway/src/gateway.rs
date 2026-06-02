@@ -10,7 +10,7 @@
 //! Also integrates `StreamManager` for progressive message editing.
 
 use chrono::{DateTime, Utc};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -30,6 +30,8 @@ use crate::hooks::{HookEvent, HookRegistry};
 use crate::platforms::helpers::extract_inline_images;
 use crate::session::{Session, SessionManager};
 use crate::stream::{StreamConfig, StreamManager};
+
+const DEFAULT_MESSAGE_DEDUP_CAPACITY: usize = 4096;
 
 // ---------------------------------------------------------------------------
 // GatewayConfig
@@ -244,6 +246,42 @@ struct SessionRuntimeState {
     reasoning: bool,
 }
 
+#[derive(Debug)]
+struct MessageDeduplicator {
+    seen: HashSet<String>,
+    order: VecDeque<String>,
+    capacity: usize,
+}
+
+impl Default for MessageDeduplicator {
+    fn default() -> Self {
+        Self {
+            seen: HashSet::new(),
+            order: VecDeque::new(),
+            capacity: DEFAULT_MESSAGE_DEDUP_CAPACITY,
+        }
+    }
+}
+
+impl MessageDeduplicator {
+    fn seen_or_record(&mut self, key: String) -> bool {
+        if self.seen.contains(&key) {
+            return true;
+        }
+
+        while self.seen.len() >= self.capacity {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            self.seen.remove(&oldest);
+        }
+
+        self.seen.insert(key.clone());
+        self.order.push_back(key);
+        false
+    }
+}
+
 impl Default for SessionRuntimeState {
     fn default() -> Self {
         Self {
@@ -299,6 +337,8 @@ pub struct Gateway {
     hook_registry: RwLock<Option<Arc<HookRegistry>>>,
     /// Per-platform allowlist policy for group and slash-command traffic.
     platform_access_policies: RwLock<HashMap<String, PlatformAccessPolicy>>,
+    /// Bounded duplicate guard for platform redeliveries/restarts.
+    message_deduplicator: RwLock<MessageDeduplicator>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -427,6 +467,7 @@ impl Gateway {
             mcp_reload_generation: RwLock::new(0),
             hook_registry: RwLock::new(None),
             platform_access_policies: RwLock::new(HashMap::new()),
+            message_deduplicator: RwLock::new(MessageDeduplicator::default()),
         }
     }
 
@@ -799,6 +840,16 @@ impl Gateway {
                     return Ok(());
                 }
             }
+        }
+
+        if self.should_suppress_duplicate(incoming).await {
+            debug!(
+                platform = incoming.platform,
+                chat_id = incoming.chat_id,
+                message_id = incoming.message_id.as_deref().unwrap_or_default(),
+                "Duplicate platform message redelivery suppressed"
+            );
+            return Ok(());
         }
 
         // 2. Get or create session
@@ -1878,6 +1929,10 @@ impl Gateway {
             .await;
         self.bump_output_usage(session_key, response.chars().count())
             .await;
+        if !response.trim().is_empty() {
+            self.send_message(&incoming.platform, &incoming.chat_id, &response, None)
+                .await?;
+        }
         self.flush_post_delivery_messages(
             &incoming.platform,
             &incoming.chat_id,
@@ -2259,6 +2314,10 @@ impl Gateway {
         }
         let manager = self.background_tasks.clone();
         let task_id_for_task = task_id.clone();
+        let adapters = self.adapters.read().await.clone();
+        let platform = incoming.platform.clone();
+        let chat_id = incoming.chat_id.clone();
+        let notify_task_id = task_id.clone();
         // Python `GatewayRunner._run_background_task`: only `user_message=prompt` (fresh session).
         // Python `_run_btw_task`: `conversation_history` snapshot + ephemeral user turn (no tools).
         let original_messages = if isolated_context {
@@ -2287,12 +2346,57 @@ impl Gateway {
             };
 
             match result {
-                Ok(result) => manager.complete(&task_id_for_task, result),
-                Err(err) => manager.fail(&task_id_for_task, err.to_string()),
+                Ok(result) => {
+                    manager.complete(&task_id_for_task, result.clone());
+                    if let Some(adapter) = adapters.get(&platform) {
+                        let prefix = if isolated_context {
+                            "💬 /btw result".to_string()
+                        } else {
+                            format!("✅ Background task {notify_task_id} completed")
+                        };
+                        let _ = adapter
+                            .send_message(&chat_id, &format!("{prefix}:\n{result}"), None)
+                            .await;
+                    }
+                }
+                Err(err) => {
+                    let error = err.to_string();
+                    manager.fail(&task_id_for_task, error.clone());
+                    if let Some(adapter) = adapters.get(&platform) {
+                        let prefix = if isolated_context {
+                            "❌ /btw failed".to_string()
+                        } else {
+                            format!("❌ Background task {notify_task_id} failed")
+                        };
+                        let _ = adapter
+                            .send_message(&chat_id, &format!("{prefix}: {error}"), None)
+                            .await;
+                    }
+                }
             }
         });
 
         Ok(true)
+    }
+
+    fn dedup_key(incoming: &IncomingMessage) -> Option<String> {
+        let message_id = incoming.message_id.as_deref()?.trim();
+        if message_id.is_empty() {
+            return None;
+        }
+        Some(format!(
+            "{}:{}:{}",
+            incoming.platform.trim().to_ascii_lowercase(),
+            incoming.chat_id.trim(),
+            message_id
+        ))
+    }
+
+    async fn should_suppress_duplicate(&self, incoming: &IncomingMessage) -> bool {
+        let Some(key) = Self::dedup_key(incoming) else {
+            return false;
+        };
+        self.message_deduplicator.write().await.seen_or_record(key)
     }
 
     /// `preview = prompt[:60] + ("..." if len(prompt) > 60 else "")` (Python gateway).
@@ -4654,13 +4758,17 @@ mod tests {
         );
         gw.set_platform_access_policies(policies).await;
 
-        assert!(gw.route_message(&incoming).await.is_ok());
+        let second_incoming = IncomingMessage {
+            message_id: Some("457".into()),
+            ..incoming
+        };
+        assert!(gw.route_message(&second_incoming).await.is_ok());
         assert_eq!(
             reactions.lock().unwrap().clone(),
             vec![
-                "add:123:456:👀".to_string(),
-                "remove:123:456:👀".to_string(),
-                "add:123:456:👍".to_string()
+                "add:123:457:👀".to_string(),
+                "remove:123:457:👀".to_string(),
+                "add:123:457:👍".to_string()
             ]
         );
     }
@@ -4980,7 +5088,11 @@ mod tests {
         let ordered: Vec<String> = msgs.iter().map(|(_, t)| t.clone()).collect();
         assert_eq!(
             ordered,
-            vec!["...".to_string(), "💾 stream-bg-review".to_string()]
+            vec![
+                "...".to_string(),
+                "stream-final".to_string(),
+                "💾 stream-bg-review".to_string()
+            ]
         );
     }
 
