@@ -25,6 +25,7 @@ use hermes_agent::provider::{
 use hermes_agent::providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
 };
+use hermes_agent::smart_model_routing::ApiMode;
 use hermes_agent::sub_agent_orchestrator::SubAgentOrchestrator;
 use hermes_agent::{
     AgentCallbacks, AgentConfig, AgentLoop, InterruptController, SessionPersistence,
@@ -4308,6 +4309,52 @@ mod tests {
     }
 
     #[test]
+    fn test_build_agent_config_preserves_same_host_provider_api_modes() {
+        let mut cfg = GatewayConfig::default();
+        cfg.llm_providers.insert(
+            "codex".to_string(),
+            LlmProviderConfig {
+                api_key_env: Some("CODEX_KEY".to_string()),
+                base_url: Some("https://gateway.example.com/v1".to_string()),
+                api_mode: Some("codex_responses".to_string()),
+                ..LlmProviderConfig::default()
+            },
+        );
+        cfg.llm_providers.insert(
+            "anthropic".to_string(),
+            LlmProviderConfig {
+                api_key_env: Some("ANTHROPIC_KEY".to_string()),
+                base_url: Some("https://gateway.example.com/v1".to_string()),
+                api_mode: Some("anthropic_messages".to_string()),
+                ..LlmProviderConfig::default()
+            },
+        );
+
+        let agent_cfg = build_agent_config(&cfg, "codex:gpt-5");
+        let codex = agent_cfg
+            .runtime_providers
+            .get("codex")
+            .expect("codex runtime provider should exist");
+        let anthropic = agent_cfg
+            .runtime_providers
+            .get("anthropic")
+            .expect("anthropic runtime provider should exist");
+
+        assert_eq!(codex.api_key_env.as_deref(), Some("CODEX_KEY"));
+        assert_eq!(
+            codex.base_url.as_deref(),
+            Some("https://gateway.example.com/v1")
+        );
+        assert_eq!(codex.api_mode, Some(ApiMode::CodexResponses));
+        assert_eq!(anthropic.api_key_env.as_deref(), Some("ANTHROPIC_KEY"));
+        assert_eq!(
+            anthropic.base_url.as_deref(),
+            Some("https://gateway.example.com/v1")
+        );
+        assert_eq!(anthropic.api_mode, Some(ApiMode::AnthropicMessages));
+    }
+
+    #[test]
     fn test_build_agent_config_maps_named_custom_runtime_provider() {
         let mut cfg = GatewayConfig::default();
         cfg.llm_providers.insert(
@@ -5602,6 +5649,16 @@ fn build_retry_config(config: &GatewayConfig) -> hermes_agent::agent_loop::Retry
     retry_cfg
 }
 
+fn parse_provider_api_mode(value: &str) -> Option<ApiMode> {
+    match value.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+        "chat_completions" => Some(ApiMode::ChatCompletions),
+        "anthropic_messages" => Some(ApiMode::AnthropicMessages),
+        "codex_responses" => Some(ApiMode::CodexResponses),
+        "bedrock_converse" => Some(ApiMode::BedrockConverse),
+        _ => None,
+    }
+}
+
 pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
     let (resolved_provider, _) = resolve_provider_and_model(config, model);
     let runtime_provider = normalize_runtime_provider_name(resolved_provider.as_str());
@@ -5667,6 +5724,7 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
                         api_key: cfg.api_key.clone(),
                         api_key_env: cfg.api_key_env.clone(),
                         base_url: cfg.base_url.clone(),
+                        api_mode: cfg.api_mode.as_deref().and_then(parse_provider_api_mode),
                         command: cfg.command.clone(),
                         args: cfg.args.clone(),
                         oauth_token_url: cfg.oauth_token_url.clone(),

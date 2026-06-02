@@ -440,6 +440,7 @@ pub fn load_user_config_file(path: &Path) -> Result<GatewayConfig, ConfigError> 
     if path.exists() {
         let mut cfg = load_from_yaml_preserving_env_refs(path)?;
         normalize_provider_secrets(&mut cfg);
+        validate_config(&cfg)?;
         Ok(cfg)
     } else {
         Ok(GatewayConfig::default())
@@ -492,6 +493,7 @@ fn normalize_provider_secrets(config: &mut GatewayConfig) {
             || provider.command.is_some()
             || !provider.args.is_empty()
             || provider.model.is_some()
+            || provider.api_mode.is_some()
             || provider.max_tokens.is_some()
             || provider.temperature.is_some()
             || provider.extra_body.is_some()
@@ -502,7 +504,7 @@ fn normalize_provider_secrets(config: &mut GatewayConfig) {
     });
 }
 
-const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, llm.<provider>.api_key|api_key_env|base_url|model|command|args|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
+const CONFIG_PATCH_HELP: &str = "model, personality, max_turns, system_prompt, budget.max_result_size_chars, budget.max_aggregate_chars, proxy.http, proxy.socks, security.allow_private_urls, web.backend|search_backend|extract_backend|crawl_backend, sessions.auto_prune|retention_days|vacuum_after_prune|min_interval_hours, llm.<provider>.api_key|api_key_env|base_url|model|api_mode|command|args|oauth_token_url|oauth_client_id, auxiliary.<task>.provider|model|base_url|api_key|timeout|download_timeout, smart_model_routing.enabled|max_simple_chars|max_simple_words|cheap_model.model|cheap_model.provider";
 
 fn mask_secret(s: &str) -> String {
     if s.is_empty() {
@@ -512,6 +514,20 @@ fn mask_secret(s: &str) -> String {
         "***".to_string()
     } else {
         format!("***{}", &s[s.len() - 4..])
+    }
+}
+
+fn normalize_provider_api_mode(value: &str) -> Result<String, ConfigError> {
+    let normalized = value.trim().to_ascii_lowercase().replace('-', "_");
+    match normalized.as_str() {
+        "chat_completions"
+        | "anthropic_messages"
+        | "codex_responses"
+        | "bedrock_converse" => Ok(normalized),
+        _ => Err(ConfigError::ValidationError(format!(
+            "llm provider api_mode must be one of chat_completions, anthropic_messages, codex_responses, bedrock_converse: {}",
+            value
+        ))),
     }
 }
 
@@ -711,6 +727,7 @@ fn apply_user_config_patch_dotted(
                 "api_key_env" => entry.api_key_env = Some(value.to_string()),
                 "base_url" => entry.base_url = Some(value.to_string()),
                 "model" => entry.model = Some(value.to_string()),
+                "api_mode" => entry.api_mode = Some(normalize_provider_api_mode(value)?),
                 "command" => entry.command = Some(value.to_string()),
                 "args" => {
                     entry.args = value
@@ -723,7 +740,7 @@ fn apply_user_config_patch_dotted(
                 "oauth_client_id" => entry.oauth_client_id = Some(value.to_string()),
                 other => {
                     return Err(ConfigError::NotFound(format!(
-                        "unknown llm field: llm.{}.{} (supported: api_key, api_key_env, base_url, model, command, args, oauth_token_url, oauth_client_id)",
+                        "unknown llm field: llm.{}.{} (supported: api_key, api_key_env, base_url, model, api_mode, command, args, oauth_token_url, oauth_client_id)",
                         provider, other
                     )));
                 }
@@ -879,6 +896,13 @@ pub fn user_config_field_display(config: &GatewayConfig, key: &str) -> Result<St
             .llm_providers
             .get(*provider)
             .and_then(|c| c.model.as_deref())
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "(not set)".to_string())),
+        ["llm", provider, "api_mode"] => Ok(config
+            .llm_providers
+            .get(*provider)
+            .and_then(|c| c.api_mode.as_deref())
             .filter(|s| !s.is_empty())
             .map(|s| s.to_string())
             .unwrap_or_else(|| "(not set)".to_string())),
@@ -1858,6 +1882,13 @@ pub fn validate_config(config: &GatewayConfig) -> Result<(), ConfigError> {
                 )));
             }
         }
+        if let Some(api_mode) = &provider.api_mode {
+            normalize_provider_api_mode(api_mode).map_err(|_| {
+                ConfigError::ValidationError(format!(
+                    "llm_providers.{name}.api_mode must be one of chat_completions, anthropic_messages, codex_responses, bedrock_converse"
+                ))
+            })?;
+        }
     }
 
     Ok(())
@@ -2440,11 +2471,56 @@ auxiliary:
     }
 
     #[test]
+    fn load_user_config_file_parses_llm_provider_api_mode() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        std::fs::write(
+            &path,
+            r#"
+llm_providers:
+  codex:
+    base_url: https://gateway.example.com/v1
+    api_key_env: CODEX_KEY
+    api_mode: codex_responses
+"#,
+        )
+        .unwrap();
+
+        let loaded = load_user_config_file(&path).unwrap();
+        let provider = loaded.llm_providers.get("codex").expect("codex provider");
+        assert_eq!(provider.api_mode.as_deref(), Some("codex_responses"));
+    }
+
+    #[test]
+    fn load_user_config_file_rejects_unknown_llm_provider_api_mode() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        std::fs::write(
+            &path,
+            r#"
+llm_providers:
+  custom:
+    base_url: https://gateway.example.com/v1
+    api_mode: random_wire_shape
+"#,
+        )
+        .unwrap();
+
+        let err = load_user_config_file(&path).unwrap_err().to_string();
+        assert!(err.contains("llm_providers.custom.api_mode"));
+    }
+
+    #[test]
     fn apply_patch_dotted_llm_proxy_budget() {
         let mut c = GatewayConfig::default();
         apply_user_config_patch(&mut c, "llm.openai.api_key", "sk-test").unwrap();
         apply_user_config_patch(&mut c, "llm.openai.base_url", "https://api.openai.com/v1")
             .unwrap();
+        apply_user_config_patch(&mut c, "llm.openai.api_mode", "codex-responses").unwrap();
         apply_user_config_patch(&mut c, "llm.openai.command", "copilot-language-server").unwrap();
         apply_user_config_patch(&mut c, "llm.openai.args", "--stdio,--model,gpt-4o-mini").unwrap();
         apply_user_config_patch(&mut c, "proxy.http", "http://127.0.0.1:8080").unwrap();
@@ -2460,6 +2536,10 @@ auxiliary:
         assert_eq!(
             c.llm_providers.get("openai").unwrap().base_url.as_deref(),
             Some("https://api.openai.com/v1")
+        );
+        assert_eq!(
+            c.llm_providers.get("openai").unwrap().api_mode.as_deref(),
+            Some("codex_responses")
         );
         assert_eq!(
             c.llm_providers.get("openai").unwrap().command.as_deref(),
@@ -2488,6 +2568,10 @@ auxiliary:
         assert_eq!(
             user_config_field_display(&c, "llm.openai.command").unwrap(),
             "copilot-language-server"
+        );
+        assert_eq!(
+            user_config_field_display(&c, "llm.openai.api_mode").unwrap(),
+            "codex_responses"
         );
         assert_eq!(
             user_config_field_display(&c, "llm.openai.args").unwrap(),

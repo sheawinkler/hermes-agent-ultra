@@ -36,6 +36,7 @@ use hermes_agent::providers_extra::{
     CopilotProvider, KimiProvider, MiniMaxProvider, NousProvider, QwenProvider,
 };
 use hermes_agent::session_persistence::SessionPersistence;
+use hermes_agent::smart_model_routing::ApiMode;
 use hermes_agent::{leading_system_prompt_for_persist, AgentConfig, AgentLoop};
 use hermes_config::GatewayConfig;
 use hermes_core::errors::GatewayError;
@@ -683,6 +684,16 @@ impl IntoResponse for HttpError {
     }
 }
 
+fn parse_provider_api_mode(value: &str) -> Option<ApiMode> {
+    match value.trim().to_ascii_lowercase().replace('-', "_").as_str() {
+        "chat_completions" => Some(ApiMode::ChatCompletions),
+        "anthropic_messages" => Some(ApiMode::AnthropicMessages),
+        "codex_responses" => Some(ApiMode::CodexResponses),
+        "bedrock_converse" => Some(ApiMode::BedrockConverse),
+        _ => None,
+    }
+}
+
 pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
     let provider_from_model = model.split_once(':').map(|(p, _)| p.to_string());
     let skip_context_files_env = std::env::var("HERMES_SKIP_CONTEXT_FILES")
@@ -711,6 +722,7 @@ pub fn build_agent_config(config: &GatewayConfig, model: &str) -> AgentConfig {
                         api_key: cfg.api_key.clone(),
                         api_key_env: cfg.api_key_env.clone(),
                         base_url: cfg.base_url.clone(),
+                        api_mode: cfg.api_mode.as_deref().and_then(parse_provider_api_mode),
                         command: cfg.command.clone(),
                         args: cfg.args.clone(),
                         oauth_token_url: cfg.oauth_token_url.clone(),

@@ -188,6 +188,9 @@ pub struct RuntimeProviderConfig {
     pub api_key_env: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
+    /// Optional provider-specific wire protocol override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_mode: Option<ApiMode>,
     /// Optional external process command for provider runtimes (Python parity metadata).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
@@ -7099,21 +7102,33 @@ impl AgentLoop {
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map(str::to_string);
-        let base_url = provider
+        let runtime_provider = provider
             .as_ref()
             .and_then(|p| self.config.runtime_providers.get(p))
-            .and_then(|c| {
-                c.base_url
-                    .as_ref()
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
+            .or_else(|| {
+                provider.as_ref().and_then(|p| {
+                    self.config
+                        .runtime_providers
+                        .iter()
+                        .find(|(name, _)| name.eq_ignore_ascii_case(p))
+                        .map(|(_, cfg)| cfg)
+                })
             });
+        let base_url = runtime_provider.and_then(|c| {
+            c.base_url
+                .as_ref()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        });
+        let api_mode = runtime_provider
+            .and_then(|c| c.api_mode.clone())
+            .unwrap_or_else(|| self.config.api_mode.clone());
         let (command, args) = self.resolve_runtime_command_args(provider.as_deref());
         PrimaryRuntime {
             model: self.config.model.clone(),
             provider,
             base_url,
-            api_mode: self.config.api_mode.clone(),
+            api_mode,
             command,
             args,
             credential_pool: self.primary_credential_pool.clone(),
@@ -10121,6 +10136,7 @@ mod tests {
                 provider.to_string(),
                 RuntimeProviderConfig {
                     base_url: Some(base_url.to_string()),
+                    api_mode: None,
                     ..RuntimeProviderConfig::default()
                 },
             );
@@ -11354,6 +11370,7 @@ mod tests {
                 api_key: Some("sk-test-key".to_string()),
                 api_key_env: None,
                 base_url: None,
+                api_mode: None,
                 command: None,
                 args: Vec::new(),
                 oauth_token_url: None,
@@ -11435,6 +11452,7 @@ mod tests {
                 api_key: Some("sk-test-key".to_string()),
                 api_key_env: None,
                 base_url: None,
+                api_mode: None,
                 command: None,
                 args: Vec::new(),
                 oauth_token_url: None,
@@ -11738,6 +11756,7 @@ mod tests {
                 api_key: Some("sk-test-key".to_string()),
                 api_key_env: None,
                 base_url: Some("https://api.openai.com/v1".to_string()),
+                api_mode: None,
                 command: Some("copilot-language-server".to_string()),
                 args: vec![
                     "--stdio".to_string(),
@@ -11818,6 +11837,7 @@ mod tests {
                 api_key: Some("sk-test-key".to_string()),
                 api_key_env: None,
                 base_url: Some("https://api.openai.com/v1".to_string()),
+                api_mode: None,
                 command: None,
                 args: Vec::new(),
                 oauth_token_url: None,
@@ -11907,6 +11927,7 @@ mod tests {
                 api_key: Some("sk-qwen-oauth".to_string()),
                 api_key_env: None,
                 base_url: Some("https://dashscope.aliyuncs.com/compatible-mode/v1".to_string()),
+                api_mode: None,
                 command: None,
                 args: Vec::new(),
                 oauth_token_url: None,
@@ -11987,6 +12008,7 @@ mod tests {
                 api_key: Some("stepfun-test-key".to_string()),
                 api_key_env: None,
                 base_url: None,
+                api_mode: None,
                 command: None,
                 args: Vec::new(),
                 oauth_token_url: None,
@@ -12077,6 +12099,7 @@ mod tests {
                 api_key: None,
                 api_key_env: None,
                 base_url: None,
+                api_mode: None,
                 command: None,
                 args: Vec::new(),
                 oauth_token_url: None,
@@ -12182,6 +12205,7 @@ mod tests {
                 api_key: None,
                 api_key_env: None,
                 base_url: None,
+                api_mode: None,
                 command: None,
                 args: Vec::new(),
                 oauth_token_url: None,
@@ -12478,6 +12502,7 @@ mod tests {
                 api_key: None,
                 api_key_env: None,
                 base_url: Some("acp://copilot".to_string()),
+                api_mode: None,
                 command: Some("definitely-not-installed-copilot-cli".to_string()),
                 args: vec!["--acp".to_string(), "--stdio".to_string()],
                 oauth_token_url: None,
@@ -12558,6 +12583,7 @@ mod tests {
                 api_key: None,
                 api_key_env: None,
                 base_url: Some("acp+tcp://127.0.0.1:8765".to_string()),
+                api_mode: None,
                 command: Some("definitely-not-installed-copilot-cli".to_string()),
                 args: vec!["--acp".to_string(), "--stdio".to_string()],
                 oauth_token_url: None,
@@ -13010,6 +13036,7 @@ mod tests {
                 api_key: None,
                 api_key_env: None,
                 base_url: None,
+                api_mode: None,
                 command: None,
                 args: Vec::new(),
                 oauth_token_url: Some("https://cfg.example.com/token".to_string()),
@@ -13024,6 +13051,7 @@ mod tests {
                 api_key: None,
                 api_key_env: None,
                 base_url: None,
+                api_mode: None,
                 command: None,
                 args: Vec::new(),
                 oauth_token_url: Some("https://cfg.example.com/custom-token".to_string()),
@@ -13101,6 +13129,7 @@ mod tests {
                 api_key: None,
                 api_key_env: Some("MY_FALLBACK_KEY".to_string()),
                 base_url: None,
+                api_mode: None,
                 command: None,
                 args: Vec::new(),
                 oauth_token_url: None,

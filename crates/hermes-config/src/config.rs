@@ -870,6 +870,10 @@ pub struct LlmProviderConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
 
+    /// Explicit provider wire protocol, e.g. `chat_completions` or `codex_responses`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub api_mode: Option<String>,
+
     /// Maximum tokens in the completion response.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
@@ -910,6 +914,7 @@ impl Default for LlmProviderConfig {
             command: None,
             args: Vec::new(),
             model: None,
+            api_mode: None,
             max_tokens: None,
             temperature: None,
             extra_body: None,

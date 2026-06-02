@@ -2417,10 +2417,10 @@
       "ticket": 25
     },
     {
-      "classification": "functional",
+      "classification": "intentional_divergence",
       "owner": "sheawinkler",
       "path": "tests/hermes_cli",
-      "rationale": "CLI tests define user-facing command and setup behavior and must stay parity-reviewed.",
+      "rationale": "Upstream Python hermes_cli tests remain reference-only; Rust-first CLI/provider/gateway/config behavior is covered by docs/parity/hermes-cli-test-coverage.json and enforced by crates/hermes-parity-tests/tests/hermes_cli_test_coverage_contract.rs.",
       "ticket": 25
     },
     {

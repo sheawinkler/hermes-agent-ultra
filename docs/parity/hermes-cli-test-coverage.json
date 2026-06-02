@@ -1,0 +1,4131 @@
+{
+  "classification_path": "tests/hermes_cli",
+  "entries": [
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "general_cli"
+      ],
+      "path": "tests/hermes_cli/conftest.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_default"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "auth/oauth/credential",
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_anthropic_model_flow_stale_oauth.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "oauth_capable_provider_registry_matches_upstream_snapshot"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "provider_capability_registry_marks_nous_as_oauth_and_managed_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "auth_provider_aliases_cover_primary_chains"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oauth_refresh_config_defaults_cover_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "auth/oauth/credential",
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_anthropic_oauth_flow.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "oauth_capable_provider_registry_matches_upstream_snapshot"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "provider_capability_registry_marks_nous_as_oauth_and_managed_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "auth_provider_aliases_cover_primary_chains"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oauth_refresh_config_defaults_cover_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "profile/profiles"
+      ],
+      "path": "tests/hermes_cli/test_apply_profile_override.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_profile"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_profile_create"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "profile_create_no_skills_strips_cloned_skill_overrides"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "validate_profile_name_rejects_paths"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "general_cli"
+      ],
+      "path": "tests/hermes_cli/test_argparse_flag_propagation.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_default"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "auth/oauth/credential",
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_auth_codex_provider.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "oauth_capable_provider_registry_matches_upstream_snapshot"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "provider_capability_registry_marks_nous_as_oauth_and_managed_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "auth_provider_aliases_cover_primary_chains"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oauth_refresh_config_defaults_cover_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "auth/oauth/credential"
+      ],
+      "path": "tests/hermes_cli/test_auth_commands.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "oauth_capable_provider_registry_matches_upstream_snapshot"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "provider_capability_registry_marks_nous_as_oauth_and_managed_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "auth_provider_aliases_cover_primary_chains"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oauth_refresh_config_defaults_cover_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "auth/oauth/credential",
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_auth_nous_provider.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "oauth_capable_provider_registry_matches_upstream_snapshot"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "provider_capability_registry_marks_nous_as_oauth_and_managed_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "auth_provider_aliases_cover_primary_chains"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oauth_refresh_config_defaults_cover_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "auth/oauth/credential",
+        "profile/profiles"
+      ],
+      "path": "tests/hermes_cli/test_auth_profile_fallback.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "oauth_capable_provider_registry_matches_upstream_snapshot"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "provider_capability_registry_marks_nous_as_oauth_and_managed_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "auth_provider_aliases_cover_primary_chains"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oauth_refresh_config_defaults_cover_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_profile"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "auth/oauth/credential",
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_auth_provider_gate.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "oauth_capable_provider_registry_matches_upstream_snapshot"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "provider_capability_registry_marks_nous_as_oauth_and_managed_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "auth_provider_aliases_cover_primary_chains"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oauth_refresh_config_defaults_cover_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "auth/oauth/credential",
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_auth_qwen_provider.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "oauth_capable_provider_registry_matches_upstream_snapshot"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "provider_capability_registry_marks_nous_as_oauth_and_managed_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "auth_provider_aliases_cover_primary_chains"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oauth_refresh_config_defaults_cover_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "config/aux/mcp"
+      ],
+      "path": "tests/hermes_cli/test_aux_config.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_parses_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_rejects_unknown_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "apply_patch_dotted_llm_proxy_budget"
+        },
+        {
+          "file": "crates/hermes-config/src/python_yaml_compat.rs",
+          "name": "python_custom_providers_merge_into_llm_provider_config"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_azure_detect.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_named_custom_runtime_provider"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_resolve_provider_and_model_uses_named_custom_provider_model"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "direct_api_provider_curated_models_cover_upstream_provider_tests"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "provider_curated_models_accepts_aliases"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "known_provider_registry_covers_upstream_snapshot_required_ids"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "doctor/debug/logs"
+      ],
+      "path": "tests/hermes_cli/test_backup.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_doctor_with_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "capture_debug_log_snapshot_preserves_boundary_line"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "provenance_sign_and_verify_round_trip"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "general_cli"
+      ],
+      "path": "tests/hermes_cli/test_banner_git_state.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_default"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "plugin/plugins/skills"
+      ],
+      "path": "tests/hermes_cli/test_banner_skills.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "skill_discovery_reads_nested_skill_dirs"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "local_backend_exposes_terminal_and_terminal_backed_file_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "profile_create_no_skills_strips_cloned_skill_overrides"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "config/aux/mcp"
+      ],
+      "path": "tests/hermes_cli/test_clear_stale_base_url.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_parses_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_rejects_unknown_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "apply_patch_dotted_llm_proxy_budget"
+        },
+        {
+          "file": "crates/hermes-config/src/python_yaml_compat.rs",
+          "name": "python_custom_providers_merge_into_llm_provider_config"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "doctor/debug/logs"
+      ],
+      "path": "tests/hermes_cli/test_cmd_update.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_doctor_with_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "capture_debug_log_snapshot_preserves_boundary_line"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "provenance_sign_and_verify_round_trip"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "session/resume/memory_reset"
+      ],
+      "path": "tests/hermes_cli/test_coalesce_session_args.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_resume_latest_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_persist_session_snapshot_writes_default_session_file"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_persist_session_snapshot_prunes_old_files_by_count_limit"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_codex_cli_model_picker.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_named_custom_runtime_provider"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_resolve_provider_and_model_uses_named_custom_provider_model"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "direct_api_provider_curated_models_cover_upstream_provider_tests"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "provider_curated_models_accepts_aliases"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "known_provider_registry_covers_upstream_snapshot_required_ids"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_codex_models.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_named_custom_runtime_provider"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_resolve_provider_and_model_uses_named_custom_provider_model"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "direct_api_provider_curated_models_cover_upstream_provider_tests"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "provider_curated_models_accepts_aliases"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "known_provider_registry_covers_upstream_snapshot_required_ids"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "general_cli"
+      ],
+      "path": "tests/hermes_cli/test_commands.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_default"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "general_cli"
+      ],
+      "path": "tests/hermes_cli/test_completion.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_config_set"
+        },
+        {
+          "file": "crates/hermes-cli/src/tui.rs",
+          "name": "test_tui_state_completions_update"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "config/aux/mcp"
+      ],
+      "path": "tests/hermes_cli/test_config.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_parses_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_rejects_unknown_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "apply_patch_dotted_llm_proxy_budget"
+        },
+        {
+          "file": "crates/hermes-config/src/python_yaml_compat.rs",
+          "name": "python_custom_providers_merge_into_llm_provider_config"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "config/aux/mcp"
+      ],
+      "path": "tests/hermes_cli/test_config_validation.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_parses_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_rejects_unknown_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "apply_patch_dotted_llm_proxy_budget"
+        },
+        {
+          "file": "crates/hermes-config/src/python_yaml_compat.rs",
+          "name": "python_custom_providers_merge_into_llm_provider_config"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "auth/oauth/credential",
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_copilot_auth.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "oauth_capable_provider_registry_matches_upstream_snapshot"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "provider_capability_registry_marks_nous_as_oauth_and_managed_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "auth_provider_aliases_cover_primary_chains"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oauth_refresh_config_defaults_cover_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_copilot_in_model_list.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_named_custom_runtime_provider"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_resolve_provider_and_model_uses_named_custom_provider_model"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "direct_api_provider_curated_models_cover_upstream_provider_tests"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "provider_curated_models_accepts_aliases"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "known_provider_registry_covers_upstream_snapshot_required_ids"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "cron"
+      ],
+      "path": "tests/hermes_cli/test_cron.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_logs_default"
+        },
+        {
+          "file": "crates/hermes-tools/src/tools/cronjob.rs",
+          "name": "test_cronjob_create"
+        },
+        {
+          "file": "crates/hermes-tools/src/tools/cronjob.rs",
+          "name": "test_cronjob_schema"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "api_jobs_endpoint_crud_filters_and_actions"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "general_cli"
+      ],
+      "path": "tests/hermes_cli/test_curator_archive_prune.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_default"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_custom_provider_model_switch.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_named_custom_runtime_provider"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_resolve_provider_and_model_uses_named_custom_provider_model"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "direct_api_provider_curated_models_cover_upstream_provider_tests"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "provider_curated_models_accepts_aliases"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "known_provider_registry_covers_upstream_snapshot_required_ids"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "web_server/web_ui/dashboard"
+      ],
+      "path": "tests/hermes_cli/test_dashboard_lifecycle_flags.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "bind_guard_requires_token_only_for_network_accessible_hosts"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "api_discovery_bodies_expose_capabilities_toolsets_and_headers"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "api_discovery_endpoint_serves_capabilities_with_security_headers"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "responses_endpoint_accepts_input_and_quoted_false_without_storing"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "runs_endpoints_require_bearer_auth_when_configured"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "web_server/web_ui/dashboard",
+        "profile/profiles"
+      ],
+      "path": "tests/hermes_cli/test_dashboard_profiles_nav_label.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "bind_guard_requires_token_only_for_network_accessible_hosts"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "api_discovery_bodies_expose_capabilities_toolsets_and_headers"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "api_discovery_endpoint_serves_capabilities_with_security_headers"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "responses_endpoint_accepts_input_and_quoted_false_without_storing"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "runs_endpoints_require_bearer_auth_when_configured"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_profile"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "doctor/debug/logs"
+      ],
+      "path": "tests/hermes_cli/test_debug.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_doctor_with_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "capture_debug_log_snapshot_preserves_boundary_line"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "provenance_sign_and_verify_round_trip"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "general_cli"
+      ],
+      "path": "tests/hermes_cli/test_deprecated_cwd_warning.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_default"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "doctor/debug/logs"
+      ],
+      "path": "tests/hermes_cli/test_doctor.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_doctor_with_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "capture_debug_log_snapshot_preserves_boundary_line"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "provenance_sign_and_verify_round_trip"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "setup/install/reconfigure",
+        "doctor/debug/logs"
+      ],
+      "path": "tests/hermes_cli/test_doctor_command_install.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_model_choice_supports_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_defaults_are_unique_and_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_env_keys_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "merge_missing_env_keys_skips_empty_values"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_doctor_with_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "capture_debug_log_snapshot_preserves_boundary_line"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "general_cli"
+      ],
+      "path": "tests/hermes_cli/test_fallback_cmd.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_default"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "gateway/webhook/hooks_cli"
+      ],
+      "path": "tests/hermes_cli/test_gateway.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "api_server_config_defaults_to_loopback"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "api_server_config_honors_overrides_and_token_precedence"
+        },
+        {
+          "file": "crates/hermes-gateway/src/gateway.rs",
+          "name": "gateway_register_and_list_adapters"
+        },
+        {
+          "file": "crates/hermes-gateway/src/gateway.rs",
+          "name": "gateway_reload_mcp_and_status_reflect_runtime_state"
+        },
+        {
+          "file": "crates/hermes-gateway/src/gateway.rs",
+          "name": "gateway_emits_agent_start_and_end_hooks"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "gateway/webhook/hooks_cli"
+      ],
+      "path": "tests/hermes_cli/test_gateway_service.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "api_server_config_defaults_to_loopback"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "api_server_config_honors_overrides_and_token_precedence"
+        },
+        {
+          "file": "crates/hermes-gateway/src/gateway.rs",
+          "name": "gateway_register_and_list_adapters"
+        },
+        {
+          "file": "crates/hermes-gateway/src/gateway.rs",
+          "name": "gateway_reload_mcp_and_status_reflect_runtime_state"
+        },
+        {
+          "file": "crates/hermes-gateway/src/gateway.rs",
+          "name": "gateway_emits_agent_start_and_end_hooks"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "gateway/webhook/hooks_cli"
+      ],
+      "path": "tests/hermes_cli/test_gateway_wsl.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "api_server_config_defaults_to_loopback"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "api_server_config_honors_overrides_and_token_precedence"
+        },
+        {
+          "file": "crates/hermes-gateway/src/gateway.rs",
+          "name": "gateway_register_and_list_adapters"
+        },
+        {
+          "file": "crates/hermes-gateway/src/gateway.rs",
+          "name": "gateway_reload_mcp_and_status_reflect_runtime_state"
+        },
+        {
+          "file": "crates/hermes-gateway/src/gateway.rs",
+          "name": "gateway_emits_agent_start_and_end_hooks"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "general_cli"
+      ],
+      "path": "tests/hermes_cli/test_goals.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_default"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "gateway/webhook/hooks_cli"
+      ],
+      "path": "tests/hermes_cli/test_hooks_cli.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "api_server_config_defaults_to_loopback"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "api_server_config_honors_overrides_and_token_precedence"
+        },
+        {
+          "file": "crates/hermes-gateway/src/gateway.rs",
+          "name": "gateway_register_and_list_adapters"
+        },
+        {
+          "file": "crates/hermes-gateway/src/gateway.rs",
+          "name": "gateway_reload_mcp_and_status_reflect_runtime_state"
+        },
+        {
+          "file": "crates/hermes-gateway/src/gateway.rs",
+          "name": "gateway_emits_agent_start_and_end_hooks"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "general_cli"
+      ],
+      "path": "tests/hermes_cli/test_image_gen_picker.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_default"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "kanban"
+      ],
+      "path": "tests/hermes_cli/test_kanban_boards.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/kanban.rs",
+          "name": "load_store_bootstraps_default_board"
+        },
+        {
+          "file": "crates/hermes-cli/src/kanban.rs",
+          "name": "add_move_and_archive_flow_works"
+        },
+        {
+          "file": "crates/hermes-cli/src/kanban.rs",
+          "name": "load_store_refuses_malformed_existing_store_and_preserves_backup"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_kanban_passes_flags_as_args"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "kanban"
+      ],
+      "path": "tests/hermes_cli/test_kanban_cli.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/kanban.rs",
+          "name": "load_store_bootstraps_default_board"
+        },
+        {
+          "file": "crates/hermes-cli/src/kanban.rs",
+          "name": "add_move_and_archive_flow_works"
+        },
+        {
+          "file": "crates/hermes-cli/src/kanban.rs",
+          "name": "load_store_refuses_malformed_existing_store_and_preserves_backup"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_kanban_passes_flags_as_args"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "kanban"
+      ],
+      "path": "tests/hermes_cli/test_kanban_core_functionality.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/kanban.rs",
+          "name": "load_store_bootstraps_default_board"
+        },
+        {
+          "file": "crates/hermes-cli/src/kanban.rs",
+          "name": "add_move_and_archive_flow_works"
+        },
+        {
+          "file": "crates/hermes-cli/src/kanban.rs",
+          "name": "load_store_refuses_malformed_existing_store_and_preserves_backup"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_kanban_passes_flags_as_args"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "kanban"
+      ],
+      "path": "tests/hermes_cli/test_kanban_db.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/kanban.rs",
+          "name": "load_store_bootstraps_default_board"
+        },
+        {
+          "file": "crates/hermes-cli/src/kanban.rs",
+          "name": "add_move_and_archive_flow_works"
+        },
+        {
+          "file": "crates/hermes-cli/src/kanban.rs",
+          "name": "load_store_refuses_malformed_existing_store_and_preserves_backup"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_kanban_passes_flags_as_args"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "kanban"
+      ],
+      "path": "tests/hermes_cli/test_kanban_diagnostics.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/kanban.rs",
+          "name": "load_store_bootstraps_default_board"
+        },
+        {
+          "file": "crates/hermes-cli/src/kanban.rs",
+          "name": "add_move_and_archive_flow_works"
+        },
+        {
+          "file": "crates/hermes-cli/src/kanban.rs",
+          "name": "load_store_refuses_malformed_existing_store_and_preserves_backup"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_kanban_passes_flags_as_args"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "kanban"
+      ],
+      "path": "tests/hermes_cli/test_kanban_notify.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/kanban.rs",
+          "name": "load_store_bootstraps_default_board"
+        },
+        {
+          "file": "crates/hermes-cli/src/kanban.rs",
+          "name": "add_move_and_archive_flow_works"
+        },
+        {
+          "file": "crates/hermes-cli/src/kanban.rs",
+          "name": "load_store_refuses_malformed_existing_store_and_preserves_backup"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_kanban_passes_flags_as_args"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "doctor/debug/logs"
+      ],
+      "path": "tests/hermes_cli/test_logs.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_doctor_with_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "capture_debug_log_snapshot_preserves_boundary_line"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "provenance_sign_and_verify_round_trip"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "setup/install/reconfigure"
+      ],
+      "path": "tests/hermes_cli/test_managed_installs.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_model_choice_supports_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_defaults_are_unique_and_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_env_keys_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "merge_missing_env_keys_skips_empty_values"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "config/aux/mcp"
+      ],
+      "path": "tests/hermes_cli/test_mcp_config.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_parses_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_rejects_unknown_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "apply_patch_dotted_llm_proxy_budget"
+        },
+        {
+          "file": "crates/hermes-config/src/python_yaml_compat.rs",
+          "name": "python_custom_providers_merge_into_llm_provider_config"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "config/aux/mcp"
+      ],
+      "path": "tests/hermes_cli/test_mcp_reload_confirm_gate.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_parses_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_rejects_unknown_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "apply_patch_dotted_llm_proxy_budget"
+        },
+        {
+          "file": "crates/hermes-config/src/python_yaml_compat.rs",
+          "name": "python_custom_providers_merge_into_llm_provider_config"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "config/aux/mcp",
+        "tool/tools/pty"
+      ],
+      "path": "tests/hermes_cli/test_mcp_tools_config.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_parses_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_rejects_unknown_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "apply_patch_dotted_llm_proxy_budget"
+        },
+        {
+          "file": "crates/hermes-config/src/python_yaml_compat.rs",
+          "name": "python_custom_providers_merge_into_llm_provider_config"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "local_backend_exposes_terminal_and_terminal_backed_file_tools"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "browser_tool_surface_exposes_current_commands_without_legacy_close"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "session/resume/memory_reset"
+      ],
+      "path": "tests/hermes_cli/test_memory_reset.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_resume_latest_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_persist_session_snapshot_writes_default_session_file"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_persist_session_snapshot_prunes_old_files_by_count_limit"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_model_provider_persistence.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_named_custom_runtime_provider"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_resolve_provider_and_model_uses_named_custom_provider_model"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "direct_api_provider_curated_models_cover_upstream_provider_tests"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "provider_curated_models_accepts_aliases"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "known_provider_registry_covers_upstream_snapshot_required_ids"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_model_switch_custom_providers.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_named_custom_runtime_provider"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_resolve_provider_and_model_uses_named_custom_provider_model"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "direct_api_provider_curated_models_cover_upstream_provider_tests"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "provider_curated_models_accepts_aliases"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "known_provider_registry_covers_upstream_snapshot_required_ids"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_models_dev_preferred_merge.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_named_custom_runtime_provider"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_resolve_provider_and_model_uses_named_custom_provider_model"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "direct_api_provider_curated_models_cover_upstream_provider_tests"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "provider_curated_models_accepts_aliases"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "known_provider_registry_covers_upstream_snapshot_required_ids"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "auth/oauth/credential"
+      ],
+      "path": "tests/hermes_cli/test_non_ascii_credential.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "oauth_capable_provider_registry_matches_upstream_snapshot"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "provider_capability_registry_marks_nous_as_oauth_and_managed_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "auth_provider_aliases_cover_primary_chains"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oauth_refresh_config_defaults_cover_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "auth/oauth/credential"
+      ],
+      "path": "tests/hermes_cli/test_nous_subscription.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "oauth_capable_provider_registry_matches_upstream_snapshot"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "provider_capability_registry_marks_nous_as_oauth_and_managed_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "auth_provider_aliases_cover_primary_chains"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oauth_refresh_config_defaults_cover_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "auth/oauth/credential",
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_ollama_cloud_auth.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "oauth_capable_provider_registry_matches_upstream_snapshot"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "provider_capability_registry_marks_nous_as_oauth_and_managed_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "auth_provider_aliases_cover_primary_chains"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oauth_refresh_config_defaults_cover_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_ollama_cloud_provider.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_named_custom_runtime_provider"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_resolve_provider_and_model_uses_named_custom_provider_model"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "direct_api_provider_curated_models_cover_upstream_provider_tests"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "provider_curated_models_accepts_aliases"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "known_provider_registry_covers_upstream_snapshot_required_ids"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_opencode_go_in_model_list.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_named_custom_runtime_provider"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_resolve_provider_and_model_uses_named_custom_provider_model"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "direct_api_provider_curated_models_cover_upstream_provider_tests"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "provider_curated_models_accepts_aliases"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "known_provider_registry_covers_upstream_snapshot_required_ids"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_overlay_slug_resolution.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_named_custom_runtime_provider"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_resolve_provider_and_model_uses_named_custom_provider_model"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "direct_api_provider_curated_models_cover_upstream_provider_tests"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "provider_curated_models_accepts_aliases"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "known_provider_registry_covers_upstream_snapshot_required_ids"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "plugin/plugins/skills"
+      ],
+      "path": "tests/hermes_cli/test_plugin_cli_registration.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "skill_discovery_reads_nested_skill_dirs"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "local_backend_exposes_terminal_and_terminal_backed_file_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "profile_create_no_skills_strips_cloned_skill_overrides"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "plugin/plugins/skills"
+      ],
+      "path": "tests/hermes_cli/test_plugin_scanner_recursion.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "skill_discovery_reads_nested_skill_dirs"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "local_backend_exposes_terminal_and_terminal_backed_file_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "profile_create_no_skills_strips_cloned_skill_overrides"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "plugin/plugins/skills"
+      ],
+      "path": "tests/hermes_cli/test_plugins.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "skill_discovery_reads_nested_skill_dirs"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "local_backend_exposes_terminal_and_terminal_backed_file_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "profile_create_no_skills_strips_cloned_skill_overrides"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "plugin/plugins/skills"
+      ],
+      "path": "tests/hermes_cli/test_plugins_cmd.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "skill_discovery_reads_nested_skill_dirs"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "local_backend_exposes_terminal_and_terminal_backed_file_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "profile_create_no_skills_strips_cloned_skill_overrides"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "profile/profiles"
+      ],
+      "path": "tests/hermes_cli/test_profile_distribution.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_profile"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_profile_create"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "profile_create_no_skills_strips_cloned_skill_overrides"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "validate_profile_name_rejects_paths"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "auth/oauth/credential",
+        "profile/profiles"
+      ],
+      "path": "tests/hermes_cli/test_profile_export_credentials.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "oauth_capable_provider_registry_matches_upstream_snapshot"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "provider_capability_registry_marks_nous_as_oauth_and_managed_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "auth_provider_aliases_cover_primary_chains"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oauth_refresh_config_defaults_cover_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_profile"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "profile/profiles"
+      ],
+      "path": "tests/hermes_cli/test_profiles.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_profile"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_profile_create"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "profile_create_no_skills_strips_cloned_skill_overrides"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "validate_profile_name_rejects_paths"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "auth/oauth/credential"
+      ],
+      "path": "tests/hermes_cli/test_prompt_api_key.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "oauth_capable_provider_registry_matches_upstream_snapshot"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "provider_capability_registry_marks_nous_as_oauth_and_managed_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "auth_provider_aliases_cover_primary_chains"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oauth_refresh_config_defaults_cover_core_oauth_providers"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "oneshot_auto_verify_provider_supports_core_oauth_providers"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "model/provider/models_dev",
+        "config/aux/mcp"
+      ],
+      "path": "tests/hermes_cli/test_provider_config_validation.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_named_custom_runtime_provider"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_resolve_provider_and_model_uses_named_custom_provider_model"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "direct_api_provider_curated_models_cover_upstream_provider_tests"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "provider_curated_models_accepts_aliases"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "known_provider_registry_covers_upstream_snapshot_required_ids"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "tool/tools/pty"
+      ],
+      "path": "tests/hermes_cli/test_pty_bridge.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "local_backend_exposes_terminal_and_terminal_backed_file_tools"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "browser_tool_surface_exposes_current_commands_without_legacy_close"
+        },
+        {
+          "file": "crates/hermes-tools/src/toolset.rs",
+          "name": "test_hermes_cli_toolset"
+        },
+        {
+          "file": "crates/hermes-tools/src/website_policy.rs",
+          "name": "load_website_blocklist_merges_config_and_shared_file"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_reasoning_effort_menu.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_named_custom_runtime_provider"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_resolve_provider_and_model_uses_named_custom_provider_model"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "direct_api_provider_curated_models_cover_upstream_provider_tests"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "provider_curated_models_accepts_aliases"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "known_provider_registry_covers_upstream_snapshot_required_ids"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "general_cli"
+      ],
+      "path": "tests/hermes_cli/test_regression_16767.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_default"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "session/resume/memory_reset"
+      ],
+      "path": "tests/hermes_cli/test_session_browse.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_resume_latest_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_persist_session_snapshot_writes_default_session_file"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_persist_session_snapshot_prunes_old_files_by_count_limit"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "setup/install/reconfigure"
+      ],
+      "path": "tests/hermes_cli/test_setup.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_model_choice_supports_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_defaults_are_unique_and_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_env_keys_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "merge_missing_env_keys_skips_empty_values"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "setup/install/reconfigure"
+      ],
+      "path": "tests/hermes_cli/test_setup_hermes_script.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_model_choice_supports_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_defaults_are_unique_and_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_env_keys_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "merge_missing_env_keys_skips_empty_values"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "setup/install/reconfigure"
+      ],
+      "path": "tests/hermes_cli/test_setup_irc.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_model_choice_supports_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_defaults_are_unique_and_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_env_keys_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "merge_missing_env_keys_skips_empty_values"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "setup/install/reconfigure"
+      ],
+      "path": "tests/hermes_cli/test_setup_matrix_e2ee.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_model_choice_supports_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_defaults_are_unique_and_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_env_keys_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "merge_missing_env_keys_skips_empty_values"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "model/provider/models_dev",
+        "setup/install/reconfigure"
+      ],
+      "path": "tests/hermes_cli/test_setup_model_provider.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_named_custom_runtime_provider"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_resolve_provider_and_model_uses_named_custom_provider_model"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "direct_api_provider_curated_models_cover_upstream_provider_tests"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "provider_curated_models_accepts_aliases"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "known_provider_registry_covers_upstream_snapshot_required_ids"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "setup/install/reconfigure"
+      ],
+      "path": "tests/hermes_cli/test_setup_noninteractive.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_model_choice_supports_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_defaults_are_unique_and_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_env_keys_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "merge_missing_env_keys_skips_empty_values"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "model/provider/models_dev",
+        "setup/install/reconfigure"
+      ],
+      "path": "tests/hermes_cli/test_setup_ollama_cloud_force_refresh.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_named_custom_runtime_provider"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_resolve_provider_and_model_uses_named_custom_provider_model"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "direct_api_provider_curated_models_cover_upstream_provider_tests"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "provider_curated_models_accepts_aliases"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "known_provider_registry_covers_upstream_snapshot_required_ids"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "setup/install/reconfigure"
+      ],
+      "path": "tests/hermes_cli/test_setup_openclaw_migration.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_model_choice_supports_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_defaults_are_unique_and_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_env_keys_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "merge_missing_env_keys_skips_empty_values"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "setup/install/reconfigure"
+      ],
+      "path": "tests/hermes_cli/test_setup_prompt_menus.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_model_choice_supports_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_defaults_are_unique_and_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_env_keys_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "merge_missing_env_keys_skips_empty_values"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "config/aux/mcp",
+        "setup/install/reconfigure"
+      ],
+      "path": "tests/hermes_cli/test_setup_reconfigure.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_parses_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_rejects_unknown_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "apply_patch_dotted_llm_proxy_budget"
+        },
+        {
+          "file": "crates/hermes-config/src/python_yaml_compat.rs",
+          "name": "python_custom_providers_merge_into_llm_provider_config"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_model_choice_supports_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_defaults_are_unique_and_include_nous"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "config/aux/mcp",
+        "plugin/plugins/skills"
+      ],
+      "path": "tests/hermes_cli/test_skills_config.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_parses_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_rejects_unknown_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "apply_patch_dotted_llm_proxy_budget"
+        },
+        {
+          "file": "crates/hermes-config/src/python_yaml_compat.rs",
+          "name": "python_custom_providers_merge_into_llm_provider_config"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "skill_discovery_reads_nested_skill_dirs"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "local_backend_exposes_terminal_and_terminal_backed_file_tools"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "plugin/plugins/skills"
+      ],
+      "path": "tests/hermes_cli/test_skills_hub.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "skill_discovery_reads_nested_skill_dirs"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "local_backend_exposes_terminal_and_terminal_backed_file_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "profile_create_no_skills_strips_cloned_skill_overrides"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "setup/install/reconfigure",
+        "plugin/plugins/skills"
+      ],
+      "path": "tests/hermes_cli/test_skills_install_flags.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_model_choice_supports_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_defaults_are_unique_and_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_env_keys_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "merge_missing_env_keys_skips_empty_values"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "skill_discovery_reads_nested_skill_dirs"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "local_backend_exposes_terminal_and_terminal_backed_file_tools"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "plugin/plugins/skills"
+      ],
+      "path": "tests/hermes_cli/test_skills_skip_confirm.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "skill_discovery_reads_nested_skill_dirs"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "local_backend_exposes_terminal_and_terminal_backed_file_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "profile_create_no_skills_strips_cloned_skill_overrides"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "plugin/plugins/skills"
+      ],
+      "path": "tests/hermes_cli/test_skills_subparser.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "skill_discovery_reads_nested_skill_dirs"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "local_backend_exposes_terminal_and_terminal_backed_file_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "profile_create_no_skills_strips_cloned_skill_overrides"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "plugin/plugins/skills"
+      ],
+      "path": "tests/hermes_cli/test_skin_engine.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "skill_discovery_reads_nested_skill_dirs"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "local_backend_exposes_terminal_and_terminal_backed_file_tools"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "profile_create_no_skills_strips_cloned_skill_overrides"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "status"
+      ],
+      "path": "tests/hermes_cli/test_status.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_status"
+        },
+        {
+          "file": "crates/hermes-gateway/src/gateway.rs",
+          "name": "gateway_executes_status_command_without_agent_handler"
+        },
+        {
+          "file": "crates/hermes-gateway/src/gateway.rs",
+          "name": "gateway_status_updates_use_platform_status_api"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "model/provider/models_dev",
+        "status"
+      ],
+      "path": "tests/hermes_cli/test_status_model_provider.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_named_custom_runtime_provider"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_resolve_provider_and_model_uses_named_custom_provider_model"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "direct_api_provider_curated_models_cover_upstream_provider_tests"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "provider_curated_models_accepts_aliases"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "known_provider_registry_covers_upstream_snapshot_required_ids"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "general_cli"
+      ],
+      "path": "tests/hermes_cli/test_subparser_routing_fallback.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_default"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "general_cli"
+      ],
+      "path": "tests/hermes_cli/test_suppress_eio_on_interrupt.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_default"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "tool/tools/pty"
+      ],
+      "path": "tests/hermes_cli/test_terminal_menu_fallbacks.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "local_backend_exposes_terminal_and_terminal_backed_file_tools"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "browser_tool_surface_exposes_current_commands_without_legacy_close"
+        },
+        {
+          "file": "crates/hermes-tools/src/toolset.rs",
+          "name": "test_hermes_cli_toolset"
+        },
+        {
+          "file": "crates/hermes-tools/src/website_policy.rs",
+          "name": "load_website_blocklist_merges_config_and_shared_file"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "config/aux/mcp"
+      ],
+      "path": "tests/hermes_cli/test_timeouts.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_parses_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_rejects_unknown_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "apply_patch_dotted_llm_proxy_budget"
+        },
+        {
+          "file": "crates/hermes-config/src/python_yaml_compat.rs",
+          "name": "python_custom_providers_merge_into_llm_provider_config"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "general_cli"
+      ],
+      "path": "tests/hermes_cli/test_tips.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/commands.rs",
+          "name": "quick_alias_rewrites_to_builtin_and_passes_args"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_default"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "tool/tools/pty"
+      ],
+      "path": "tests/hermes_cli/test_tool_token_estimation.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "local_backend_exposes_terminal_and_terminal_backed_file_tools"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "browser_tool_surface_exposes_current_commands_without_legacy_close"
+        },
+        {
+          "file": "crates/hermes-tools/src/toolset.rs",
+          "name": "test_hermes_cli_toolset"
+        },
+        {
+          "file": "crates/hermes-tools/src/website_policy.rs",
+          "name": "load_website_blocklist_merges_config_and_shared_file"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "config/aux/mcp",
+        "tool/tools/pty"
+      ],
+      "path": "tests/hermes_cli/test_tools_config.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_parses_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "load_user_config_file_rejects_unknown_llm_provider_api_mode"
+        },
+        {
+          "file": "crates/hermes-config/src/loader.rs",
+          "name": "apply_patch_dotted_llm_proxy_budget"
+        },
+        {
+          "file": "crates/hermes-config/src/python_yaml_compat.rs",
+          "name": "python_custom_providers_merge_into_llm_provider_config"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "local_backend_exposes_terminal_and_terminal_backed_file_tools"
+        },
+        {
+          "file": "crates/hermes-tools/src/register_builtins.rs",
+          "name": "browser_tool_surface_exposes_current_commands_without_legacy_close"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "setup/install/reconfigure"
+      ],
+      "path": "tests/hermes_cli/test_tui_npm_install.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_model_choice_supports_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_defaults_are_unique_and_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "setup_provider_env_keys_include_nous"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "merge_missing_env_keys_skips_empty_values"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "session/resume/memory_reset"
+      ],
+      "path": "tests/hermes_cli/test_tui_resume_flow.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_resume_latest_default"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_persist_session_snapshot_writes_default_session_file"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_persist_session_snapshot_prunes_old_files_by_count_limit"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "doctor/debug/logs"
+      ],
+      "path": "tests/hermes_cli/test_update_autostash.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_doctor_with_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "capture_debug_log_snapshot_preserves_boundary_line"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "provenance_sign_and_verify_round_trip"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "doctor/debug/logs"
+      ],
+      "path": "tests/hermes_cli/test_update_check.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_doctor_with_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "capture_debug_log_snapshot_preserves_boundary_line"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "provenance_sign_and_verify_round_trip"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "doctor/debug/logs"
+      ],
+      "path": "tests/hermes_cli/test_update_hangup_protection.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_doctor_with_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "capture_debug_log_snapshot_preserves_boundary_line"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "provenance_sign_and_verify_round_trip"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "web_server/web_ui/dashboard",
+        "doctor/debug/logs"
+      ],
+      "path": "tests/hermes_cli/test_update_stale_dashboard.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "bind_guard_requires_token_only_for_network_accessible_hosts"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "api_discovery_bodies_expose_capabilities_toolsets_and_headers"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "api_discovery_endpoint_serves_capabilities_with_security_headers"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "responses_endpoint_accepts_input_and_quoted_false_without_storing"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "runs_endpoints_require_bearer_auth_when_configured"
+        },
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_doctor_with_flags"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "model/provider/models_dev"
+      ],
+      "path": "tests/hermes_cli/test_user_providers_model_switch.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_preserves_same_host_provider_api_modes"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_named_custom_runtime_provider"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_resolve_provider_and_model_uses_named_custom_provider_model"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "direct_api_provider_curated_models_cover_upstream_provider_tests"
+        },
+        {
+          "file": "crates/hermes-cli/src/model_switch.rs",
+          "name": "provider_curated_models_accepts_aliases"
+        },
+        {
+          "file": "crates/hermes-cli/src/providers.rs",
+          "name": "known_provider_registry_covers_upstream_snapshot_required_ids"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "web_server/web_ui/dashboard"
+      ],
+      "path": "tests/hermes_cli/test_web_server.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "bind_guard_requires_token_only_for_network_accessible_hosts"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "api_discovery_bodies_expose_capabilities_toolsets_and_headers"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "api_discovery_endpoint_serves_capabilities_with_security_headers"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "responses_endpoint_accepts_input_and_quoted_false_without_storing"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "runs_endpoints_require_bearer_auth_when_configured"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "web_server/web_ui/dashboard"
+      ],
+      "path": "tests/hermes_cli/test_web_server_host_header.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "bind_guard_requires_token_only_for_network_accessible_hosts"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "api_discovery_bodies_expose_capabilities_toolsets_and_headers"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "api_discovery_endpoint_serves_capabilities_with_security_headers"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "responses_endpoint_accepts_input_and_quoted_false_without_storing"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "runs_endpoints_require_bearer_auth_when_configured"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "web_server/web_ui/dashboard"
+      ],
+      "path": "tests/hermes_cli/test_web_ui_build.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "bind_guard_requires_token_only_for_network_accessible_hosts"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "api_discovery_bodies_expose_capabilities_toolsets_and_headers"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "api_discovery_endpoint_serves_capabilities_with_security_headers"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "responses_endpoint_accepts_input_and_quoted_false_without_storing"
+        },
+        {
+          "file": "crates/hermes-gateway/src/platforms/api_server.rs",
+          "name": "runs_endpoints_require_bearer_auth_when_configured"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    },
+    {
+      "coverage_kind": "rust_contract_or_documented_divergence",
+      "coverage_tags": [
+        "gateway/webhook/hooks_cli"
+      ],
+      "path": "tests/hermes_cli/test_webhook_cli.py",
+      "rationale": "Upstream Python hermes_cli test intent is covered by the listed Rust unit/contract tests for the equivalent Rust-first CLI, config, provider, gateway, or tool surface.",
+      "rust_tests": [
+        {
+          "file": "crates/hermes-cli/src/cli.rs",
+          "name": "cli_parse_provider_and_oneshot_flags"
+        },
+        {
+          "file": "crates/hermes-cli/src/app.rs",
+          "name": "test_build_agent_config_maps_runtime_provider_api_key_env"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "api_server_config_defaults_to_loopback"
+        },
+        {
+          "file": "crates/hermes-cli/src/main.rs",
+          "name": "api_server_config_honors_overrides_and_token_precedence"
+        },
+        {
+          "file": "crates/hermes-gateway/src/gateway.rs",
+          "name": "gateway_register_and_list_adapters"
+        },
+        {
+          "file": "crates/hermes-gateway/src/gateway.rs",
+          "name": "gateway_reload_mcp_and_status_reflect_runtime_state"
+        },
+        {
+          "file": "crates/hermes-gateway/src/gateway.rs",
+          "name": "gateway_emits_agent_start_and_end_hooks"
+        }
+      ],
+      "status": "covered_by_rust_contracts"
+    }
+  ],
+  "generated_at_utc": "2026-06-02T22:34:52.298760+00:00",
+  "schema_version": 1,
+  "source_backlog": "docs/parity/shared-diff-backlog.json",
+  "summary": {
+    "covered_paths": 113,
+    "guard_test": "crates/hermes-parity-tests/tests/hermes_cli_test_coverage_contract.rs",
+    "provider_api_mode_bridge_added": true,
+    "required_backlog_classification_path": "tests/hermes_cli"
+  }
+}
