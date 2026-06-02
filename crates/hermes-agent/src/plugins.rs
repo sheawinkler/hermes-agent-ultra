@@ -721,6 +721,27 @@ dependencies:
     }
 
     #[test]
+    fn test_discover_plugins_preserves_model_provider_kind() {
+        let tmp = tempfile::tempdir().unwrap();
+        let plugin_dir = tmp.path().join("plugins").join("test-model-provider");
+        std::fs::create_dir_all(&plugin_dir).unwrap();
+        std::fs::write(
+            plugin_dir.join("plugin.yaml"),
+            "name: test-model-provider\nversion: \"0.1.0\"\ndescription: Test\nkind: model-provider\n",
+        )
+        .unwrap();
+        std::fs::write(
+            plugin_dir.join("__init__.py"),
+            "raise AssertionError('model-provider plugins are profile manifests, not generic runtime plugins')\n",
+        )
+        .unwrap();
+
+        let discovered = PluginManager::discover_plugins(tmp.path());
+        assert_eq!(discovered.len(), 1);
+        assert_eq!(discovered[0].0.kind.as_deref(), Some("model-provider"));
+    }
+
+    #[test]
     fn test_discover_plugins_with_options_includes_project_when_enabled() {
         let home = tempfile::tempdir().unwrap();
         let cwd = tempfile::tempdir().unwrap();

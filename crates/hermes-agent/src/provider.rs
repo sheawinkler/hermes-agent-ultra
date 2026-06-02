@@ -30,8 +30,19 @@ use hermes_core::{
 };
 
 use crate::credential_pool::CredentialPool;
+use crate::provider_profiles;
 use crate::rate_limit::RateLimitTracker;
 use crate::tool_call_args::arguments_value_to_string;
+
+struct ChatRequestParams<'a> {
+    messages: &'a [Message],
+    tools: &'a [ToolSchema],
+    max_tokens: Option<u32>,
+    temperature: Option<f64>,
+    effective_model: &'a str,
+    extra_body: Option<&'a Value>,
+    stream: bool,
+}
 
 const ACP_MULTIMODAL_PREFIX: &str = "__hermes_acp_parts_json__:";
 pub const OPENAI_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
@@ -234,6 +245,8 @@ pub struct GenericProvider {
     pub rate_limiter: Option<Arc<RateLimitTracker>>,
     /// Optional credential pool for key rotation.
     pub credential_pool: Option<Arc<CredentialPool>>,
+    /// Optional OpenAI-compatible provider profile used for request shaping.
+    pub provider_profile: Option<String>,
 }
 
 impl GenericProvider {
@@ -252,6 +265,7 @@ impl GenericProvider {
             extra_headers: Vec::new(),
             rate_limiter: None,
             credential_pool: None,
+            provider_profile: None,
         }
     }
 
@@ -270,6 +284,13 @@ impl GenericProvider {
     /// Set the default model.
     pub fn with_model(mut self, model: impl Into<String>) -> Self {
         self.model = model.into();
+        self
+    }
+
+    /// Attach a Rust-native provider profile for request shaping.
+    pub fn with_provider_profile(mut self, profile: impl Into<String>) -> Self {
+        self.provider_profile =
+            provider_profiles::canonical_provider_profile_id(&profile.into()).map(str::to_string);
         self
     }
 
@@ -341,10 +362,9 @@ impl GenericProvider {
         // Vision preprocessing: if user content contains local file-like paths,
         // add a hint field used by downstream adapters.
         let needs_vision_preprocess = messages.iter().any(|m| {
-            m.content
-                .as_deref()
-                .map(|c| c.contains(".png") || c.contains(".jpg") || c.contains("data:image/"))
-                .unwrap_or(false)
+            m.content.as_ref().is_some_and(|c| {
+                c.contains(".png") || c.contains(".jpg") || c.contains("data:image/")
+            })
         });
         if needs_vision_preprocess {
             body["vision_preprocessed"] = serde_json::json!(true);
@@ -497,6 +517,7 @@ impl GenericProvider {
 
     fn is_local_request_control_key(key: &str) -> bool {
         matches!(key, "strict_tool_calls" | "strict_api" | "provider_strict")
+            || provider_profiles::local_control_key_for_profile(None, key)
     }
 
     fn merge_extra_body_fields(body: &mut Value, extra_body: Option<&Value>) {
@@ -509,6 +530,23 @@ impl GenericProvider {
             }
             body[k] = v.clone();
         }
+    }
+
+    fn profile_for_extra_body<'a>(&'a self, extra_body: Option<&'a Value>) -> Option<&'a str> {
+        extra_body
+            .and_then(|value| value.get("provider_profile"))
+            .and_then(Value::as_str)
+            .and_then(provider_profiles::canonical_provider_profile_id)
+            .or(self.provider_profile.as_deref())
+    }
+
+    fn merge_extra_body_fields_for_profile(
+        body: &mut Value,
+        profile: Option<&str>,
+        extra_body: Option<&Value>,
+    ) {
+        let cleaned = provider_profiles::clean_extra_body_for_profile(profile, extra_body);
+        Self::merge_extra_body_fields(body, cleaned.as_ref());
     }
 
     fn sanitize_messages_for_api(
@@ -590,6 +628,51 @@ impl GenericProvider {
                 .collect(),
         );
         hermes_core::sanitize_tool_schemas(Some(&formatted)).unwrap_or(formatted)
+    }
+
+    fn chat_request_body(&self, request: ChatRequestParams<'_>) -> Value {
+        let ChatRequestParams {
+            messages,
+            tools,
+            max_tokens,
+            temperature,
+            effective_model,
+            extra_body,
+            stream,
+        } = request;
+        let profile = self.profile_for_extra_body(extra_body);
+        let strict_tool_sanitize = Self::should_sanitize_tool_calls(extra_body);
+        let mut api_messages =
+            Self::sanitize_messages_for_api(messages, strict_tool_sanitize, effective_model);
+        provider_profiles::normalize_messages_for_profile(profile, &mut api_messages);
+
+        let mut body = serde_json::json!({
+            "model": effective_model,
+            "messages": api_messages,
+        });
+        if stream {
+            body["stream"] = Value::Bool(true);
+        }
+
+        if let Some(mt) =
+            max_tokens.or_else(|| profile.and_then(provider_profiles::default_max_tokens))
+        {
+            body["max_tokens"] = serde_json::json!(mt);
+        }
+        if !profile.is_some_and(provider_profiles::omit_temperature) {
+            if let Some(temp) = temperature {
+                body["temperature"] = serde_json::json!(temp);
+            }
+        }
+        if !tools.is_empty() {
+            body["tools"] =
+                format_tools_for_openai_api_with_model(tools, effective_model, &self.base_url);
+        }
+        Self::merge_extra_body_fields_for_profile(&mut body, profile, extra_body);
+        self.apply_runtime_hints(&mut body, messages, extra_body);
+        provider_profiles::apply_profile_to_body(profile, &mut body, effective_model, extra_body);
+        self.apply_opencode_go_reasoning_controls(&mut body, effective_model);
+        body
     }
 
     fn build_request(
@@ -871,28 +954,15 @@ impl LlmProvider for GenericProvider {
 
         let effective_model = model.unwrap_or(&self.model);
         let api_key = self.effective_api_key();
-        let strict_tool_sanitize = Self::should_sanitize_tool_calls(extra_body);
-        let api_messages =
-            Self::sanitize_messages_for_api(messages, strict_tool_sanitize, effective_model);
-
-        let mut body = serde_json::json!({
-            "model": effective_model,
-            "messages": api_messages,
+        let body = self.chat_request_body(ChatRequestParams {
+            messages,
+            tools,
+            max_tokens,
+            temperature,
+            effective_model,
+            extra_body,
+            stream: false,
         });
-
-        if let Some(mt) = max_tokens {
-            body["max_tokens"] = serde_json::json!(mt);
-        }
-        if let Some(temp) = temperature {
-            body["temperature"] = serde_json::json!(temp);
-        }
-        if !tools.is_empty() {
-            body["tools"] =
-                format_tools_for_openai_api_with_model(tools, effective_model, &self.base_url);
-        }
-        Self::merge_extra_body_fields(&mut body, extra_body);
-        self.apply_runtime_hints(&mut body, messages, extra_body);
-        self.apply_opencode_go_reasoning_controls(&mut body, effective_model);
 
         let url = format!("{}/chat/completions", self.base_url.trim_end_matches('/'));
 
@@ -941,36 +1011,15 @@ impl LlmProvider for GenericProvider {
 
             let effective_model = model.as_deref().unwrap_or(&provider.model);
             let api_key = provider.effective_api_key();
-            let strict_tool_sanitize = GenericProvider::should_sanitize_tool_calls(extra_body.as_ref());
-            let api_messages =
-                GenericProvider::sanitize_messages_for_api(
-                    &messages,
-                    strict_tool_sanitize,
-                    effective_model,
-                );
-
-            let mut body = serde_json::json!({
-                "model": effective_model,
-                "messages": api_messages,
-                "stream": true,
+            let mut body = provider.chat_request_body(ChatRequestParams {
+                messages: &messages,
+                tools: &tools,
+                max_tokens,
+                temperature,
+                effective_model,
+                extra_body: extra_body.as_ref(),
+                stream: true,
             });
-
-            if let Some(mt) = max_tokens {
-                body["max_tokens"] = serde_json::json!(mt);
-            }
-            if let Some(temp) = temperature {
-                body["temperature"] = serde_json::json!(temp);
-            }
-            if !tools.is_empty() {
-                body["tools"] = format_tools_for_openai_api_with_model(
-                    &tools,
-                    effective_model,
-                    &provider.base_url,
-                );
-            }
-            GenericProvider::merge_extra_body_fields(&mut body, extra_body.as_ref());
-            provider.apply_runtime_hints(&mut body, &messages, extra_body.as_ref());
-            provider.apply_opencode_go_reasoning_controls(&mut body, effective_model);
             // Request usage in the final streaming chunk
             body["stream_options"] = serde_json::json!({"include_usage": true});
 
@@ -2008,7 +2057,8 @@ impl OpenRouterProvider {
     /// Create a new OpenRouter provider with the given API key.
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
-            inner: GenericProvider::new("https://openrouter.ai/api/v1", api_key, "openai/gpt-4o"),
+            inner: GenericProvider::new("https://openrouter.ai/api/v1", api_key, "openai/gpt-4o")
+                .with_provider_profile("openrouter"),
             http_referer: None,
             x_title: None,
         }
@@ -2228,6 +2278,14 @@ impl LlmProvider for OpenRouterProvider {
         // Build a provider clone with OpenRouter headers
         let mut provider = self.inner.clone();
         provider.extra_headers = self.build_headers();
+        let effective_model = model.unwrap_or(&self.inner.model);
+        provider
+            .extra_headers
+            .extend(provider_profiles::extra_headers_for_profile(
+                Some("openrouter"),
+                effective_model,
+                extra_body,
+            ));
         let cache_control = Self::parse_response_cache_control(extra_body);
         if cache_control.enabled {
             provider
@@ -2243,34 +2301,18 @@ impl LlmProvider for OpenRouterProvider {
         let merged_extra = Self::merge_extra_body(extra_body);
 
         // Use GenericProvider for the actual request
-        let effective_model = model.unwrap_or(&self.inner.model);
         provider.check_rate_limit().await;
 
         let api_key = provider.effective_api_key();
-        let strict_tool_sanitize =
-            GenericProvider::should_sanitize_tool_calls(merged_extra.as_ref());
-        let api_messages = GenericProvider::sanitize_messages_for_api(
+        let body = provider.chat_request_body(ChatRequestParams {
             messages,
-            strict_tool_sanitize,
+            tools,
+            max_tokens,
+            temperature,
             effective_model,
-        );
-
-        let mut body = serde_json::json!({
-            "model": effective_model,
-            "messages": api_messages,
+            extra_body: merged_extra.as_ref(),
+            stream: false,
         });
-
-        if let Some(mt) = max_tokens {
-            body["max_tokens"] = serde_json::json!(mt);
-        }
-        if let Some(temp) = temperature {
-            body["temperature"] = serde_json::json!(temp);
-        }
-        if !tools.is_empty() {
-            body["tools"] =
-                format_tools_for_openai_api_with_model(tools, effective_model, &provider.base_url);
-        }
-        GenericProvider::merge_extra_body_fields(&mut body, merged_extra.as_ref());
 
         let cache_key = if cache_control.enabled && !cache_control.clear {
             Self::response_cache_key(effective_model, &body)
@@ -2328,6 +2370,14 @@ impl LlmProvider for OpenRouterProvider {
         // Use GenericProvider's streaming with OpenRouter headers
         let mut provider = self.inner.clone();
         provider.extra_headers = self.build_headers();
+        let effective_model = model.unwrap_or(&self.inner.model);
+        provider
+            .extra_headers
+            .extend(provider_profiles::extra_headers_for_profile(
+                Some("openrouter"),
+                effective_model,
+                extra_body,
+            ));
         let merged_extra = Self::merge_extra_body(extra_body);
 
         provider.chat_completion_stream(
@@ -2773,6 +2823,8 @@ mod tests {
             "strict_api": true,
             "strict_tool_calls": true,
             "provider_strict": true,
+            "provider_profile": "openrouter",
+            "provider_preferences": {"allow": ["anthropic"]},
             "temperature": 0.2
         });
         let mut body = serde_json::json!({"model": "m", "messages": []});
@@ -2780,7 +2832,165 @@ mod tests {
         assert!(body.get("strict_api").is_none());
         assert!(body.get("strict_tool_calls").is_none());
         assert!(body.get("provider_strict").is_none());
+        assert!(body.get("provider_profile").is_none());
+        assert!(body.get("provider_preferences").is_none());
         assert_eq!(body["temperature"], 0.2);
+    }
+
+    #[test]
+    fn test_provider_profile_request_body_defaults_and_qwen_messages() {
+        let provider = GenericProvider::new("https://dashscope.example/v1", "key", "qwen3.5")
+            .with_provider_profile("qwen-oauth");
+        let messages = vec![Message::system("Be helpful"), Message::user("hello")];
+        let extra = serde_json::json!({
+            "qwen_session_metadata": {"sessionId": "s123", "promptId": "p456"},
+            "provider_profile": "qwen-oauth"
+        });
+
+        let body = provider.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: Some(0.4),
+            effective_model: "qwen3.5",
+            extra_body: Some(&extra),
+            stream: false,
+        });
+
+        assert_eq!(body["max_tokens"], 65_536);
+        assert_eq!(body["temperature"], 0.4);
+        assert_eq!(body["vl_high_resolution_images"], true);
+        assert_eq!(
+            body["metadata"],
+            serde_json::json!({"sessionId": "s123", "promptId": "p456"})
+        );
+        assert!(body.get("qwen_session_metadata").is_none());
+        assert!(body.get("provider_profile").is_none());
+        assert_eq!(
+            body["messages"][0]["content"][0]["cache_control"],
+            serde_json::json!({"type": "ephemeral"})
+        );
+        assert_eq!(
+            body["messages"][1]["content"][0],
+            serde_json::json!({"type": "text", "text": "hello"})
+        );
+    }
+
+    #[test]
+    fn test_provider_profile_request_body_kimi_reasoning_contract() {
+        let provider = GenericProvider::new("https://api.moonshot.ai/v1", "key", "kimi-k2")
+            .with_provider_profile("kimi");
+        let messages = vec![Message::user("hello")];
+
+        let enabled = provider.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: Some(0.7),
+            effective_model: "kimi-k2",
+            extra_body: Some(
+                &serde_json::json!({"reasoning": {"enabled": true, "effort": "high"}}),
+            ),
+            stream: false,
+        });
+        assert_eq!(enabled["max_tokens"], 32_000);
+        assert!(enabled.get("temperature").is_none());
+        assert_eq!(enabled["thinking"], serde_json::json!({"type": "enabled"}));
+        assert_eq!(enabled["reasoning_effort"], "high");
+        assert!(enabled.get("reasoning").is_none());
+
+        let disabled = provider.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: Some(0.7),
+            effective_model: "kimi-k2",
+            extra_body: Some(&serde_json::json!({"reasoning_config": {"enabled": false}})),
+            stream: false,
+        });
+        assert_eq!(
+            disabled["thinking"],
+            serde_json::json!({"type": "disabled"})
+        );
+        assert!(disabled.get("reasoning_effort").is_none());
+    }
+
+    #[test]
+    fn test_provider_profile_request_body_openrouter_nous_and_custom_contracts() {
+        let messages = vec![Message::user("hello")];
+
+        let openrouter = GenericProvider::new(
+            "https://openrouter.ai/api/v1",
+            "key",
+            "openrouter/pareto-code",
+        )
+        .with_provider_profile("openrouter");
+        let or_body = openrouter.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: None,
+            effective_model: "openrouter/pareto-code",
+            extra_body: Some(&serde_json::json!({
+                "provider_preferences": {"allow": ["anthropic"], "sort": "price"},
+                "openrouter_min_coding_score": 0.65,
+                "supports_reasoning": true,
+                "session_id": "sess-123"
+            })),
+            stream: false,
+        });
+        assert_eq!(
+            or_body["provider"],
+            serde_json::json!({"allow": ["anthropic"], "sort": "price"})
+        );
+        assert_eq!(or_body["session_id"], "sess-123");
+        assert_eq!(
+            or_body["plugins"],
+            serde_json::json!([{"id": "pareto-router", "min_coding_score": 0.65}])
+        );
+        assert_eq!(
+            or_body["reasoning"],
+            serde_json::json!({"enabled": true, "effort": "medium"})
+        );
+        assert!(or_body.get("provider_preferences").is_none());
+
+        let nous = GenericProvider::new(
+            "https://inference-api.nousresearch.com/v1",
+            "key",
+            "hermes-3",
+        )
+        .with_provider_profile("nous");
+        let nous_body = nous.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: None,
+            effective_model: "hermes-3",
+            extra_body: Some(&serde_json::json!({
+                "supports_reasoning": true,
+                "reasoning": {"enabled": false}
+            })),
+            stream: false,
+        });
+        assert_eq!(
+            nous_body["tags"],
+            serde_json::json!(["product=hermes-agent"])
+        );
+        assert!(nous_body.get("reasoning").is_none());
+
+        let custom = GenericProvider::new("http://127.0.0.1:11434/v1", "key", "qwen3:72b")
+            .with_provider_profile("ollama-local");
+        let custom_body = custom.chat_request_body(ChatRequestParams {
+            messages: &messages,
+            tools: &[],
+            max_tokens: None,
+            temperature: None,
+            effective_model: "qwen3:72b",
+            extra_body: Some(&serde_json::json!({"ollama_num_ctx": 131072})),
+            stream: false,
+        });
+        assert_eq!(custom_body["options"]["num_ctx"], 131_072);
+        assert!(custom_body.get("ollama_num_ctx").is_none());
     }
 
     #[test]

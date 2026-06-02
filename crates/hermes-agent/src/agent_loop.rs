@@ -3335,7 +3335,9 @@ impl AgentLoop {
             "stepfun" => {
                 let url =
                     base_url.unwrap_or_else(|| "https://api.stepfun.ai/step_plan/v1".to_string());
-                Arc::new(GenericProvider::new(url, &api_key, model_name))
+                Arc::new(
+                    GenericProvider::new(url, &api_key, model_name).with_provider_profile(provider),
+                )
             }
             "nous" => {
                 let mut p = NousProvider::new(&api_key).with_model(model_name);
@@ -3363,7 +3365,8 @@ impl AgentLoop {
             }
             _ => {
                 let url = base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-                let mut g = GenericProvider::new(url, &api_key, model_name);
+                let mut g =
+                    GenericProvider::new(url, &api_key, model_name).with_provider_profile(provider);
                 if let Some(pool) = credential_pool {
                     g = g.with_credential_pool(pool.clone());
                 }

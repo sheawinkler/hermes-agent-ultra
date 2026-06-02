@@ -4,6 +4,7 @@ pub const KNOWN_PROVIDERS: &[&str] = &[
     "openrouter",
     "codex",
     "openai-codex",
+    "custom",
     "qwen",
     "qwen-oauth",
     "google-gemini-cli",
@@ -22,6 +23,7 @@ pub const KNOWN_PROVIDERS: &[&str] = &[
     "alibaba",
     "alibaba-coding-plan",
     "arcee",
+    "azure-foundry",
     "bedrock",
     "deepseek",
     "huggingface",
@@ -95,6 +97,7 @@ pub fn canonical_provider_id(provider: &str) -> String {
         "qwen-cli" | "qwen-portal" => "qwen-oauth".to_string(),
         "gemini-cli" | "gemini-oauth" => "google-gemini-cli".to_string(),
         "google" | "google-gemini" | "google-ai-studio" => "gemini".to_string(),
+        "azure" | "azure-ai-foundry" | "azure_ai_foundry" => "azure-foundry".to_string(),
         "step" | "step-plan" => "stepfun".to_string(),
         "moonshot" | "kimi-coding" | "kimi-coding-cn" => "kimi".to_string(),
         "alibaba" | "alibaba-coding-plan" => "qwen".to_string(),
@@ -298,6 +301,8 @@ mod tests {
         assert_eq!(canonical_provider_id("google-ai-studio"), "gemini");
         assert_eq!(canonical_provider_id("arcee-ai"), "arcee");
         assert_eq!(canonical_provider_id("arceeai"), "arcee");
+        assert_eq!(canonical_provider_id("azure"), "azure-foundry");
+        assert_eq!(canonical_provider_id("azure-ai-foundry"), "azure-foundry");
         assert_eq!(canonical_provider_id("mimo"), "xiaomi");
         assert_eq!(canonical_provider_id("xiaomi-mimo"), "xiaomi");
         assert_eq!(canonical_provider_id("tencent-cloud"), "tencent-tokenhub");
@@ -307,5 +312,55 @@ mod tests {
         assert_eq!(canonical_provider_id("amazon-bedrock"), "bedrock");
         assert_eq!(canonical_provider_id("amazon"), "bedrock");
         assert_eq!(canonical_provider_id("minimax_cn"), "minimax-cn");
+    }
+
+    #[test]
+    fn bundled_model_provider_plugin_dirs_are_known() {
+        let plugins_dir =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../plugins/model-providers");
+        let mut plugin_dirs = Vec::new();
+        for entry in std::fs::read_dir(&plugins_dir)
+            .unwrap_or_else(|err| panic!("read {} failed: {}", plugins_dir.display(), err))
+        {
+            let path = entry.expect("dir entry").path();
+            if !path.is_dir() {
+                continue;
+            }
+            assert!(
+                path.join("__init__.py").exists(),
+                "{} missing __init__.py",
+                path.display()
+            );
+            assert!(
+                path.join("plugin.yaml").exists(),
+                "{} missing plugin.yaml",
+                path.display()
+            );
+            plugin_dirs.push(
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .expect("utf8 provider dir")
+                    .to_string(),
+            );
+        }
+        assert!(
+            plugin_dirs.len() >= 28,
+            "expected at least 28 bundled provider plugins, got {}",
+            plugin_dirs.len()
+        );
+
+        let known: BTreeSet<String> = known_providers()
+            .into_iter()
+            .map(|provider| provider.to_string())
+            .collect();
+        let missing: Vec<String> = plugin_dirs
+            .into_iter()
+            .filter(|provider| !known.contains(provider))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "bundled model-provider plugin dirs missing from Rust known_providers: {:?}",
+            missing
+        );
     }
 }

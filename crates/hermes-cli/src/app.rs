@@ -4855,6 +4855,11 @@ mod tests {
         );
         assert_eq!(normalize_runtime_provider_name("arcee-ai"), "arcee");
         assert_eq!(normalize_runtime_provider_name("arceeai"), "arcee");
+        assert_eq!(normalize_runtime_provider_name("azure"), "azure-foundry");
+        assert_eq!(
+            normalize_runtime_provider_name("azure-ai-foundry"),
+            "azure-foundry"
+        );
         assert_eq!(normalize_runtime_provider_name("mimo"), "xiaomi");
         assert_eq!(normalize_runtime_provider_name("xiaomi-mimo"), "xiaomi");
         assert_eq!(
@@ -5783,6 +5788,7 @@ fn normalize_runtime_provider_name(provider: &str) -> String {
         "qwen-cli" | "qwen-portal" => "qwen-oauth".to_string(),
         "gemini-cli" | "gemini-oauth" => "google-gemini-cli".to_string(),
         "google" | "google-gemini" | "google-ai-studio" => "gemini".to_string(),
+        "azure" | "azure-ai-foundry" | "azure_ai_foundry" => "azure-foundry".to_string(),
         "step" | "step-plan" => "stepfun".to_string(),
         "moonshot" | "kimi-coding" | "kimi-coding-cn" => "kimi".to_string(),
         "alibaba" | "alibaba-coding-plan" => "qwen".to_string(),
@@ -6407,7 +6413,10 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
         }
         "stepfun" => {
             let url = base_url.unwrap_or_else(|| STEPFUN_BASE_URL.to_string());
-            Arc::new(GenericProvider::new(url, &api_key, model_name.as_str()))
+            Arc::new(
+                GenericProvider::new(url, &api_key, model_name.as_str())
+                    .with_provider_profile(runtime_provider.as_str()),
+            )
         }
         "nous" => {
             let mut p = NousProvider::new(&api_key).with_model(model_name.as_str());
@@ -6426,11 +6435,17 @@ pub fn build_provider(config: &GatewayConfig, model: &str) -> Arc<dyn LlmProvide
         }
         "ollama-local" | "llama-cpp" | "vllm" | "mlx" | "apple-ane" | "sglang" | "tgi" => {
             let url = base_url.unwrap_or_else(|| "http://127.0.0.1:11434/v1".to_string());
-            Arc::new(GenericProvider::new(url, &api_key, model_name.as_str()))
+            Arc::new(
+                GenericProvider::new(url, &api_key, model_name.as_str())
+                    .with_provider_profile(runtime_provider.as_str()),
+            )
         }
         _ => {
             let url = base_url.unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-            Arc::new(GenericProvider::new(url, &api_key, model_name.as_str()))
+            Arc::new(
+                GenericProvider::new(url, &api_key, model_name.as_str())
+                    .with_provider_profile(runtime_provider.as_str()),
+            )
         }
     }
 }

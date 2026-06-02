@@ -61,7 +61,8 @@ impl QwenProvider {
                 "https://dashscope.aliyuncs.com/compatible-mode/v1",
                 api_key,
                 "qwen-turbo",
-            ),
+            )
+            .with_provider_profile("qwen-oauth"),
         }
     }
 
@@ -130,7 +131,8 @@ pub struct KimiProvider {
 impl KimiProvider {
     pub fn new(api_key: impl Into<String>) -> Self {
         Self {
-            inner: GenericProvider::new("https://api.moonshot.cn/v1", api_key, "moonshot-v1-8k"),
+            inner: GenericProvider::new("https://api.moonshot.cn/v1", api_key, "moonshot-v1-8k")
+                .with_provider_profile("kimi-coding"),
         }
     }
 
@@ -272,7 +274,8 @@ impl NousProvider {
                 "https://inference-api.nousresearch.com/v1",
                 api_key,
                 "hermes-3-llama-3.1-405b",
-            ),
+            )
+            .with_provider_profile("nous"),
         }
     }
 

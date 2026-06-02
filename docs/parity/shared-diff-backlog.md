@@ -1,22 +1,22 @@
 # Shared-Different Backlog
 
-Generated: `2026-06-02T10:27:18.354950+00:00`
+Generated: `2026-06-02T16:27:30.320571+00:00`
 
 ## Summary
 
 - Total shared-different paths: `1052`
 - Pending classification: `0`
-- Pending functional review: `382`
+- Pending functional review: `376`
 - Cleared non-runtime: `174`
-- Cleared intentional divergence: `496`
+- Cleared intentional divergence: `502`
 
 ## Status Counts
 
 | Status | Count |
 | --- | ---: |
-| `cleared_intentional_divergence` | 496 |
+| `cleared_intentional_divergence` | 502 |
+| `pending_review` | 376 |
 | `cleared_non_runtime` | 174 |
-| `pending_review` | 382 |
 
 ## Workstream Counts
 
@@ -48,11 +48,9 @@ Generated: `2026-06-02T10:27:18.354950+00:00`
 | `tests/skills` | 6 |
 | `tests/honcho_plugin` | 5 |
 | `tests/stress` | 5 |
-| `tests/providers` | 4 |
 | `tests/tui_gateway` | 4 |
 | `tests/integration` | 3 |
 | `ui-tui` | 3 |
-| `plugins/model-providers` | 2 |
 | `tests/e2e` | 2 |
 | `plugins/observability` | 1 |
 | `plugins/video_gen` | 1 |

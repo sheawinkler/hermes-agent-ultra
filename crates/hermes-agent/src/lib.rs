@@ -25,6 +25,7 @@ pub mod model_normalize;
 pub mod oauth;
 pub mod plugins;
 pub mod provider;
+pub mod provider_profiles;
 pub mod providers_extra;
 pub mod python_alignment;
 pub mod rate_limit;
