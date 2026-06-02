@@ -2705,6 +2705,14 @@ impl AgentLoop {
         self.messages_for_api_call(ctx)
     }
 
+    #[doc(hidden)]
+    pub fn oracle_candidate_messages_for_api_call(
+        &self,
+        ctx: &mut ContextManager,
+    ) -> Vec<Message> {
+        self.candidate_messages_for_api_call(ctx)
+    }
+
     /// Set turn-scoped memory prefetch injected at API-call time (test harness only).
     #[doc(hidden)]
     pub fn oracle_set_turn_ext_prefetch_cache(&self, prefetch: impl Into<String>) {
@@ -4619,6 +4627,11 @@ impl AgentLoop {
             &messages,
             self.active_model().as_str(),
         )
+    }
+
+    /// Candidate API message builder for zero-copy migration (must match [`Self::messages_for_api_call`]).
+    fn candidate_messages_for_api_call(&self, ctx: &mut ContextManager) -> Vec<Message> {
+        self.messages_for_api_call(ctx)
     }
 
     fn apply_prompt_cache_markers(&self, messages: &mut Vec<Message>) {

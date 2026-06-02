@@ -54,6 +54,25 @@ fn oracle(agent: &AgentLoop, ctx: &mut ContextManager) -> Vec<Message> {
     agent.oracle_messages_for_api_call(ctx)
 }
 
+fn oracle_candidate(agent: &AgentLoop, ctx: &mut ContextManager) -> Vec<Message> {
+    agent.oracle_candidate_messages_for_api_call(ctx)
+}
+
+/// Run legacy vs candidate on independent contexts with identical inputs.
+fn dual_run_oracle(agent: &AgentLoop, setup: &dyn Fn(&mut ContextManager)) {
+    let legacy = {
+        let mut ctx = ContextManager::new(200_000);
+        setup(&mut ctx);
+        oracle(agent, &mut ctx)
+    };
+    let candidate = {
+        let mut ctx = ContextManager::new(200_000);
+        setup(&mut ctx);
+        oracle_candidate(agent, &mut ctx)
+    };
+    assert_dual_run_eq(&legacy, &candidate);
+}
+
 #[test]
 fn golden_basic_system_and_user() {
     let agent = noop_agent(AgentConfig::default());
@@ -288,6 +307,31 @@ fn golden_provider_body_from_oracle_messages() {
     assert!(body["messages"].is_array());
     assert!(body["tools"].is_array());
     assert_eq!(body["messages"].as_array().unwrap().len(), 2);
+}
+
+#[test]
+fn golden_dual_run_legacy_vs_candidate_all_fixtures() {
+    let agent = noop_agent(AgentConfig::default());
+    dual_run_oracle(&agent, &|ctx| {
+        ctx.add_message(Message::system("sys"));
+        ctx.add_message(Message::user("hello"));
+    });
+
+    let agent = noop_agent(AgentConfig {
+        ephemeral_system_prompt: Some("ephemeral".into()),
+        ..AgentConfig::default()
+    });
+    dual_run_oracle(&agent, &|ctx| {
+        ctx.add_message(Message::system("sys"));
+        ctx.add_message(Message::user("hi"));
+    });
+
+    let agent = noop_agent(AgentConfig::default());
+    agent.oracle_set_turn_ext_prefetch_cache("prefetch line");
+    dual_run_oracle(&agent, &|ctx| {
+        ctx.add_message(Message::system("sys"));
+        ctx.add_message(Message::user("q"));
+    });
 }
 
 #[test]
