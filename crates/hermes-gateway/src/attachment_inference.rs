@@ -1,4 +1,7 @@
 //! Infer local file paths when users request attachments but the agent omits `MEDIA:` tags.
+//!
+//! Candidates are collected **only from the current user message** — not from agent replies,
+//! session history, or prior tool calls — to avoid sending unrelated files.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -7,11 +10,10 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use hermes_config::resolve_outbound_media_path;
-use hermes_core::types::{Message, MessageRole};
 
 static FILENAME_RE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r"(?i)([\w.-]+\.(?:md|txt|pdf|docx?|xlsx?|pptx?|png|jpe?g|gif|webp|zip|csv|json|yaml|yml))",
+        r"(?i)([A-Za-z0-9_.-]+\.(?:md|txt|pdf|docx?|xlsx?|pptx?|png|jpe?g|gif|webp|zip|csv|json|yaml|yml))",
     )
     .expect("valid filename regex")
 });
@@ -94,46 +96,6 @@ fn workspace_roots() -> Vec<PathBuf> {
     roots
 }
 
-fn paths_from_tool_calls(messages: &[Message]) -> Vec<String> {
-    let mut paths = Vec::new();
-    for msg in messages {
-        if msg.role == MessageRole::Assistant {
-            let Some(tool_calls) = msg.tool_calls.as_ref() else {
-                continue;
-            };
-            for tc in tool_calls {
-                let name = tc.function.name.as_str();
-                if !matches!(name, "read_file" | "write_file" | "patch" | "search_files") {
-                    continue;
-                }
-                let Ok(args) = serde_json::from_str::<serde_json::Value>(&tc.function.arguments)
-                else {
-                    continue;
-                };
-                for key in ["path", "file_path", "file"] {
-                    if let Some(p) = args.get(key).and_then(|v| v.as_str()) {
-                        let trimmed = p.trim();
-                        if !trimmed.is_empty() {
-                            paths.push(trimmed.to_string());
-                        }
-                    }
-                }
-            }
-        } else if msg.role == MessageRole::Tool {
-            if let Some(content) = &msg.content {
-                paths.extend(extract_filename_candidates(content));
-                for line in content.lines() {
-                    let trimmed = line.trim();
-                    if looks_like_path(trimmed) {
-                        paths.push(trimmed.to_string());
-                    }
-                }
-            }
-        }
-    }
-    paths
-}
-
 fn looks_like_path(candidate: &str) -> bool {
     candidate.starts_with('/')
         || candidate.starts_with('\\')
@@ -151,6 +113,18 @@ fn resolve_filename_in_roots(filename: &str, roots: &[PathBuf]) -> Option<PathBu
         if let Ok(resolved) = resolve_outbound_media_path(&joined.to_string_lossy()) {
             return Some(resolved);
         }
+        if let Ok(entries) = std::fs::read_dir(root) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                let name_str = name.to_string_lossy();
+                if name_str.eq_ignore_ascii_case(filename)
+                    && let Ok(resolved) =
+                        resolve_outbound_media_path(&entry.path().to_string_lossy())
+                {
+                    return Some(resolved);
+                }
+            }
+        }
     }
     None
 }
@@ -163,30 +137,16 @@ fn push_unique(out: &mut Vec<PathBuf>, seen: &mut HashSet<String>, path: PathBuf
 }
 
 /// Infer local files to attach when `MEDIA:` tags are missing from the assistant reply.
-pub fn infer_attachment_paths(
-    user_text: &str,
-    response: &str,
-    session_messages: &[Message],
-) -> Vec<PathBuf> {
-    let wants_attachment =
-        user_requests_attachment(user_text) || response_claims_attachment_sent(response);
-    if !wants_attachment {
+///
+/// Only inspects `user_text` for filenames and absolute paths; ignores agent replies and
+/// session history so unrelated files are never bundled in.
+pub fn infer_attachment_paths(user_text: &str) -> Vec<PathBuf> {
+    if !user_requests_attachment(user_text) {
         return Vec::new();
     }
 
     let roots = workspace_roots();
-    let mut candidates: Vec<String> = Vec::new();
-    candidates.extend(extract_filename_candidates(user_text));
-    candidates.extend(extract_filename_candidates(response));
-    for msg in session_messages {
-        if msg.role != MessageRole::User {
-            continue;
-        }
-        if let Some(content) = &msg.content {
-            candidates.extend(extract_filename_candidates(content));
-        }
-    }
-    candidates.extend(paths_from_tool_calls(session_messages));
+    let candidates = extract_filename_candidates(user_text);
 
     let mut resolved = Vec::new();
     let mut seen = HashSet::new();
@@ -213,11 +173,16 @@ mod tests {
     use std::fs;
     use std::sync::Mutex;
 
+    use hermes_core::types::Message;
+
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn detects_attachment_intent_and_sent_claim() {
         assert!(user_requests_attachment("重新发给我 以附件形式发我"));
+        assert!(user_requests_attachment(
+            "将你当前路径下的readme.md文件发送给我"
+        ));
         assert!(response_claims_attachment_sent("已经以附件形式发给你了 ✅"));
     }
 
@@ -229,7 +194,7 @@ mod tests {
         fs::write(&file, "# agents").expect("write");
         crate::test_env::set_var("TERMINAL_CWD", dir.path());
 
-        let paths = infer_attachment_paths("把 AGENTS.md 以附件发我", "好的", &[]);
+        let paths = infer_attachment_paths("把 AGENTS.md 以附件发我");
         assert_eq!(paths.len(), 1);
         assert!(paths[0].ends_with("AGENTS.md"));
 
@@ -237,49 +202,94 @@ mod tests {
     }
 
     #[test]
-    fn infers_from_read_file_tool_call() {
+    fn infers_only_from_current_user_message() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().expect("tempdir");
-        let file = dir.path().join("notes.txt");
-        fs::write(&file, "hello").expect("write");
-        let path_str = file.to_string_lossy().into_owned();
-        let path_json = path_str.replace('\\', "\\\\");
+        let readme = dir.path().join("readme.md");
+        let agents = dir.path().join("AGENTS.md");
+        fs::write(&readme, "# readme").expect("write");
+        fs::write(&agents, "# agents").expect("write");
         crate::test_env::set_var("TERMINAL_CWD", dir.path());
 
-        let messages = vec![Message::assistant_with_tool_calls(
+        let _messages = vec![Message::assistant_with_tool_calls(
             None,
             vec![hermes_core::ToolCall {
                 id: "tc1".into(),
                 function: hermes_core::FunctionCall {
                     name: "read_file".into(),
-                    arguments: format!(r#"{{"path":"{path_json}"}}"#),
+                    arguments: format!(
+                        r#"{{"path":"{}"}}"#,
+                        agents.to_string_lossy().replace('\\', "\\\\")
+                    ),
                 },
                 extra_content: None,
             }],
         )];
 
-        let paths = infer_attachment_paths("重新以附件形式发我", "已经发给你了", &messages);
-        assert_eq!(paths.len(), 1);
-        assert!(paths[0].ends_with("notes.txt"));
+        let paths = infer_attachment_paths("将你当前路径下的readme.md文件发送给我");
+        assert_eq!(paths.len(), 1, "expected readme.md from TERMINAL_CWD");
+        assert!(paths[0].ends_with("readme.md"));
 
         crate::test_env::remove_var("TERMINAL_CWD");
     }
 
     #[test]
-    fn infers_windows_absolute_path_from_response() {
+    fn does_not_trigger_on_response_claim_alone() {
+        assert!(!user_requests_attachment("你好，今天天气怎么样？"));
+        let paths = infer_attachment_paths("你好，今天天气怎么样？");
+        assert!(paths.is_empty());
+    }
+
+    #[test]
+    fn infers_windows_absolute_path_from_user_message() {
         let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().expect("tempdir");
-        let file = dir.path().join("AGENTS.md");
-        fs::write(&file, "# agents").expect("write");
+        let file = dir.path().join("photo.jpg");
+        fs::write(&file, b"fake jpeg").expect("write");
         let path_str = file.to_string_lossy().into_owned();
-        let response = format!("路径 {path_str}");
+        let user_text = format!(r#"将这张图片发给我 {path_str}"#);
 
-        let paths = infer_attachment_paths(
-            "重新以附件形式发我",
-            &response,
-            &[],
-        );
+        let paths = infer_attachment_paths(&user_text);
         assert_eq!(paths.len(), 1);
-        assert!(paths[0].ends_with("AGENTS.md"));
+        assert!(paths[0].ends_with("photo.jpg"));
+    }
+
+    #[test]
+    fn infers_multiple_when_user_names_two_files() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().expect("tempdir");
+        let agents = dir.path().join("AGENTS.md");
+        let readme = dir.path().join("README.md");
+        fs::write(&agents, "# agents").expect("write");
+        fs::write(&readme, "# readme").expect("write");
+        crate::test_env::set_var("TERMINAL_CWD", dir.path());
+
+        let paths = infer_attachment_paths("把 AGENTS.md 和 README.md 以附件发我");
+        assert_eq!(paths.len(), 2);
+        let names: HashSet<_> = paths
+            .iter()
+            .filter_map(|p| p.file_name().and_then(|n| n.to_str()))
+            .collect();
+        assert!(names.contains("AGENTS.md"));
+        assert!(names.contains("README.md"));
+
+        crate::test_env::remove_var("TERMINAL_CWD");
+    }
+
+    #[test]
+    fn ignores_historical_user_messages() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().expect("tempdir");
+        let readme = dir.path().join("README.md");
+        let agents = dir.path().join("AGENTS.md");
+        fs::write(&readme, "# readme").expect("write");
+        fs::write(&agents, "# agents").expect("write");
+        crate::test_env::set_var("TERMINAL_CWD", dir.path());
+
+        let _prior = Message::user("把 AGENTS.md 以附件发我");
+        let paths = infer_attachment_paths("重新以附件形式发我");
+        assert!(paths.is_empty());
+
+        crate::test_env::remove_var("TERMINAL_CWD");
     }
 }

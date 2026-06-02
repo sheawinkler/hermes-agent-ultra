@@ -13,6 +13,7 @@ use chrono::{DateTime, Utc};
 use futures::future::{AbortHandle, Abortable};
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
@@ -94,7 +95,6 @@ use crate::background::{BackgroundTaskManager, TaskStatus};
 use crate::commands::{GatewayCommandResult, handle_command};
 use crate::dm::{DmDecision, DmManager};
 use crate::hooks::{HookEvent, HookRegistry};
-use crate::attachment_inference;
 use crate::pairing_store::DmPairingStore;
 use crate::platforms::helpers::extract_inline_images;
 use crate::session::SessionManager;
@@ -354,6 +354,45 @@ impl Default for SessionRuntimeState {
 
 /// Central orchestrator for all platform adapters.
 ///
+/// Tracks outbound file deliveries during a single inbound route (tool + MEDIA).
+#[derive(Debug, Default)]
+struct TurnOutboundTracker {
+    platform: String,
+    chat_id: String,
+    paths: StdMutex<Vec<PathBuf>>,
+}
+
+impl TurnOutboundTracker {
+    fn new(platform: impl Into<String>, chat_id: impl Into<String>) -> Self {
+        Self {
+            platform: platform.into(),
+            chat_id: chat_id.into(),
+            paths: StdMutex::new(Vec::new()),
+        }
+    }
+
+    fn matches(&self, platform: &str, chat_id: &str) -> bool {
+        self.platform.eq_ignore_ascii_case(platform) && self.chat_id == chat_id
+    }
+
+    fn record(&self, path: PathBuf) {
+        let key = path.to_string_lossy().to_lowercase();
+        if let Ok(mut guard) = self.paths.lock() {
+            if guard
+                .iter()
+                .any(|existing| existing.to_string_lossy().to_lowercase() == key)
+            {
+                return;
+            }
+            guard.push(path);
+        }
+    }
+
+    fn count(&self) -> usize {
+        self.paths.lock().map(|g| g.len()).unwrap_or(0)
+    }
+}
+
 /// The `Gateway` owns a collection of named `PlatformAdapter` instances,
 /// a `SessionManager`, a `DmManager`, and a `StreamManager`. It provides
 /// a unified interface to start/stop adapters and route messages.
@@ -396,6 +435,8 @@ pub struct Gateway {
     session_serial: RwLock<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     /// Per-session abort handles for the in-flight foreground agent route.
     active_routes: RwLock<HashMap<String, AbortHandle>>,
+    /// Outbound files delivered during the current inbound route (tool + MEDIA).
+    turn_outbound: StdMutex<HashMap<String, TurnOutboundTracker>>,
     /// Concrete Discord adapter for history backfill (P2-8).
     #[cfg(feature = "discord")]
     discord_adapter: RwLock<Option<Arc<crate::platforms::discord::DiscordAdapter>>>,
@@ -536,8 +577,50 @@ impl Gateway {
             messaging_session: RwLock::new(None),
             session_serial: RwLock::new(HashMap::new()),
             active_routes: RwLock::new(HashMap::new()),
+            turn_outbound: StdMutex::new(HashMap::new()),
             #[cfg(feature = "discord")]
             discord_adapter: RwLock::new(None),
+        }
+    }
+
+    fn begin_turn_outbound_tracking(&self, session_key: &str, platform: &str, chat_id: &str) {
+        let mut guard = self
+            .turn_outbound
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        guard.insert(
+            session_key.to_string(),
+            TurnOutboundTracker::new(platform, chat_id),
+        );
+    }
+
+    fn clear_turn_outbound_tracking(&self, session_key: &str) {
+        let mut guard = self
+            .turn_outbound
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        guard.remove(session_key);
+    }
+
+    fn turn_outbound_file_count(&self, session_key: &str) -> usize {
+        self.turn_outbound
+            .lock()
+            .ok()
+            .and_then(|g| g.get(session_key).map(TurnOutboundTracker::count))
+            .unwrap_or(0)
+    }
+
+    fn record_turn_outbound_file(&self, platform: &str, chat_id: &str, file_path: &str) {
+        let path = hermes_config::resolve_outbound_media_path(file_path)
+            .unwrap_or_else(|_| PathBuf::from(file_path));
+        let canonical = path.canonicalize().unwrap_or(path);
+        if let Ok(guard) = self.turn_outbound.lock() {
+            for tracker in guard.values() {
+                if tracker.matches(platform, chat_id) {
+                    tracker.record(canonical);
+                    return;
+                }
+            }
         }
     }
 
@@ -1164,6 +1247,11 @@ impl Gateway {
         let supports_streaming = self.config.streaming_enabled
             // 微信 iLink API 不支持消息编辑，streaming 模式会导致只显示 "..."
             && !incoming.platform.eq_ignore_ascii_case("weixin");
+        self.begin_turn_outbound_tracking(
+            &session_key,
+            &incoming.platform,
+            &incoming.chat_id,
+        );
         let route_future = async {
             if supports_streaming {
                 self.route_streaming(&incoming, messages, &session_key, &route_id)
@@ -1180,6 +1268,7 @@ impl Gateway {
             .insert(session_key.clone(), abort_handle);
         let routed = Abortable::new(route_future, abort_reg).await;
         self.active_routes.write().await.remove(&session_key);
+        self.clear_turn_outbound_tracking(&session_key);
         typing_guard.finish().await;
         let processing_result = match routed {
             Ok(result) => result,
@@ -1841,22 +1930,15 @@ impl Gateway {
             .await;
 
         // Send response back to the platform (text + MEDIA: local attachments)
-        let (mut attachment_failures, cleaned, mut attachments_delivered) = self
-            .deliver_response_attachments(&incoming.platform, &incoming.chat_id, &response)
+        let (attachment_failures, cleaned, attachments_delivered) = self
+            .finalize_outbound_attachments(
+                &incoming.platform,
+                &incoming.chat_id,
+                &incoming.text,
+                &response,
+                session_key,
+            )
             .await;
-        if attachments_delivered == 0 {
-            let (inferred_failures, inferred_delivered) = self
-                .deliver_inferred_attachments(
-                    &incoming.platform,
-                    &incoming.chat_id,
-                    &incoming.text,
-                    &response,
-                    session_key,
-                )
-                .await;
-            attachment_failures.extend(inferred_failures);
-            attachments_delivered += inferred_delivered;
-        }
         let reply_text = Self::reply_text_with_attachment_outcome(
             cleaned,
             &attachment_failures,
@@ -2265,22 +2347,15 @@ impl Gateway {
             "gateway streaming agent finished"
         );
 
-        let (mut attachment_failures, cleaned, mut attachments_delivered) = self
-            .deliver_response_attachments(&incoming.platform, &incoming.chat_id, &response)
+        let (attachment_failures, cleaned, attachments_delivered) = self
+            .finalize_outbound_attachments(
+                &incoming.platform,
+                &incoming.chat_id,
+                &incoming.text,
+                &response,
+                session_key,
+            )
             .await;
-        if attachments_delivered == 0 {
-            let (inferred_failures, inferred_delivered) = self
-                .deliver_inferred_attachments(
-                    &incoming.platform,
-                    &incoming.chat_id,
-                    &incoming.text,
-                    &response,
-                    session_key,
-                )
-                .await;
-            attachment_failures.extend(inferred_failures);
-            attachments_delivered += inferred_delivered;
-        }
         let fallback_text = Self::reply_text_with_attachment_outcome(
             cleaned,
             &attachment_failures,
@@ -2918,19 +2993,39 @@ impl Gateway {
         (failures, cleaned, delivered)
     }
 
-    /// When the user asked for an attachment but the agent omitted `MEDIA:` tags, try to
-    /// infer paths from the conversation (filenames, recent `read_file` tool calls, etc.).
-    pub async fn deliver_inferred_attachments(
+    /// Deliver `MEDIA:` tags, then infer missing attachments only when nothing was sent yet.
+    async fn finalize_outbound_attachments(
         &self,
         platform: &str,
         chat_id: &str,
         user_text: &str,
         response: &str,
         session_key: &str,
+    ) -> (Vec<String>, String, usize) {
+        let (mut attachment_failures, cleaned, media_delivered) = self
+            .deliver_response_attachments(platform, chat_id, response)
+            .await;
+        let mut attachments_delivered =
+            media_delivered.max(self.turn_outbound_file_count(session_key));
+        if attachments_delivered == 0 {
+            let (inferred_failures, inferred_delivered) = self
+                .deliver_inferred_attachments(platform, chat_id, user_text)
+                .await;
+            attachment_failures.extend(inferred_failures);
+            attachments_delivered += inferred_delivered;
+        }
+        (attachment_failures, cleaned, attachments_delivered)
+    }
+
+    /// When the user asked for an attachment but the agent omitted `MEDIA:` tags, try to
+    /// infer paths from the current user message (filenames and absolute paths only).
+    pub async fn deliver_inferred_attachments(
+        &self,
+        platform: &str,
+        chat_id: &str,
+        user_text: &str,
     ) -> (Vec<String>, usize) {
-        let messages = self.session_manager.get_messages(session_key).await;
-        let paths =
-            crate::attachment_inference::infer_attachment_paths(user_text, response, &messages);
+        let paths = crate::attachment_inference::infer_attachment_paths(user_text);
         if paths.is_empty() {
             return (Vec::new(), 0);
         }
@@ -3118,7 +3213,9 @@ impl Gateway {
         let adapter = self.get_adapter(platform).await.ok_or_else(|| {
             GatewayError::Platform(format!("No adapter registered for platform: {}", platform))
         })?;
-        adapter.send_file(chat_id, file_path, caption).await
+        adapter.send_file(chat_id, file_path, caption).await?;
+        self.record_turn_outbound_file(platform, chat_id, file_path);
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
@@ -5627,5 +5724,35 @@ mod tests {
         let names: Vec<String> = events.iter().map(|(name, _)| name.clone()).collect();
         assert!(names.contains(&"session:end".to_string()));
         assert!(names.contains(&"session:reset".to_string()));
+    }
+
+    #[test]
+    fn turn_outbound_tracker_records_and_counts_by_platform_chat() {
+        let gw = Gateway::new(
+            Arc::new(SessionManager::new(SessionConfig::default())),
+            DmManager::with_pair_behavior(),
+            GatewayConfig::default(),
+        );
+        gw.begin_turn_outbound_tracking("weixin:chat1", "weixin", "chat1");
+        let cargo_toml = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
+        gw.record_turn_outbound_file("weixin", "chat1", cargo_toml);
+        assert_eq!(gw.turn_outbound_file_count("weixin:chat1"), 1);
+        assert_eq!(gw.turn_outbound_file_count("weixin:other"), 0);
+        gw.clear_turn_outbound_tracking("weixin:chat1");
+        assert_eq!(gw.turn_outbound_file_count("weixin:chat1"), 0);
+    }
+
+    #[test]
+    fn turn_outbound_tracker_skips_unrelated_platform_chat() {
+        let gw = Gateway::new(
+            Arc::new(SessionManager::new(SessionConfig::default())),
+            DmManager::with_pair_behavior(),
+            GatewayConfig::default(),
+        );
+        gw.begin_turn_outbound_tracking("weixin:chat1", "weixin", "chat1");
+        let cargo_toml = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
+        gw.record_turn_outbound_file("telegram", "999", cargo_toml);
+        assert_eq!(gw.turn_outbound_file_count("weixin:chat1"), 0);
+        gw.clear_turn_outbound_tracking("weixin:chat1");
     }
 }
