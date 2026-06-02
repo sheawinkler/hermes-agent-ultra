@@ -959,7 +959,8 @@ impl CronRunner {
         let base: Vec<ToolSchema> = self
             .tool_registry
             .schemas()
-            .into_iter()
+            .iter()
+            .cloned()
             .filter(|schema| schema.name != "cronjob")
             .collect();
         let base_names: HashSet<String> = base.iter().map(|s| s.name.clone()).collect();

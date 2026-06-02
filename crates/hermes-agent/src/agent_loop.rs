@@ -100,9 +100,19 @@ impl std::fmt::Debug for ToolEntry {
 ///
 /// The full-featured implementation lives in `hermes-tools`; this minimal
 /// version exists so the agent loop can be tested and used independently.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ToolRegistry {
     tools: HashMap<String, ToolEntry>,
+    schemas_cache: std::sync::RwLock<Option<Arc<[ToolSchema]>>>,
+}
+
+impl Clone for ToolRegistry {
+    fn clone(&self) -> Self {
+        Self {
+            tools: self.tools.clone(),
+            schemas_cache: std::sync::RwLock::new(None),
+        }
+    }
 }
 
 impl ToolRegistry {
@@ -110,6 +120,7 @@ impl ToolRegistry {
     pub fn new() -> Self {
         Self {
             tools: HashMap::new(),
+            schemas_cache: std::sync::RwLock::new(None),
         }
     }
 
@@ -122,6 +133,9 @@ impl ToolRegistry {
     ) {
         self.tools
             .insert(name.into(), ToolEntry { schema, handler });
+        if let Ok(mut cache) = self.schemas_cache.write() {
+            *cache = None;
+        }
     }
 
     /// Look up a tool by name.
@@ -129,9 +143,29 @@ impl ToolRegistry {
         self.tools.get(name)
     }
 
-    /// Return all registered tool schemas.
-    pub fn schemas(&self) -> Vec<ToolSchema> {
-        self.tools.values().map(|e| e.schema.clone()).collect()
+    /// Return cached tool schemas (stable name order; shared across calls).
+    pub fn schemas(&self) -> Arc<[ToolSchema]> {
+        if let Ok(cache) = self.schemas_cache.read() {
+            if let Some(ref cached) = *cache {
+                return Arc::clone(cached);
+            }
+        }
+        let mut names: Vec<&String> = self.tools.keys().collect();
+        names.sort();
+        let built: Arc<[ToolSchema]> = names
+            .into_iter()
+            .map(|name| self.tools[name].schema.clone())
+            .collect::<Vec<_>>()
+            .into();
+        if let Ok(mut cache) = self.schemas_cache.write() {
+            *cache = Some(Arc::clone(&built));
+        }
+        built
+    }
+
+    /// Clone all schemas into a vec (legacy callers; prefer [`Self::schemas`]).
+    pub fn schemas_vec(&self) -> Vec<ToolSchema> {
+        self.schemas().to_vec()
     }
 
     /// Return all registered tool names.
@@ -2157,6 +2191,8 @@ pub struct AgentLoop {
     interest_store: Option<Arc<Mutex<InterestStore>>>,
     /// Dedupes per-session user-message POI ingest.
     interest_synced_user_hashes: Arc<Mutex<HashSet<u64>>>,
+    /// Messages prefix already scanned by [`Self::interest_sync_user_messages`].
+    interest_synced_message_len: Arc<Mutex<usize>>,
     /// Optional plugin manager for lifecycle hooks.
     pub plugin_manager: Option<Arc<std::sync::Mutex<PluginManager>>>,
     /// Callbacks for progress reporting.
@@ -2618,6 +2654,7 @@ impl AgentLoop {
             memory_manager: None,
             interest_store: None,
             interest_synced_user_hashes: Arc::new(Mutex::new(HashSet::new())),
+            interest_synced_message_len: Arc::new(Mutex::new(0)),
             plugin_manager: None,
             callbacks: Arc::new(AgentCallbacks::default()),
             delegate_depth: 0,
@@ -2781,6 +2818,7 @@ impl AgentLoop {
             memory_manager: None,
             interest_store: None,
             interest_synced_user_hashes: Arc::new(Mutex::new(HashSet::new())),
+            interest_synced_message_len: Arc::new(Mutex::new(0)),
             plugin_manager: None,
             callbacks: Arc::new(AgentCallbacks::default()),
             delegate_depth: 0,
@@ -3100,6 +3138,15 @@ impl AgentLoop {
         guard.render_prefetch_block(query).unwrap_or_default()
     }
 
+    fn reset_interest_sync_cursor(&self) {
+        if let Ok(mut len) = self.interest_synced_message_len.lock() {
+            *len = 0;
+        }
+        if let Ok(mut synced) = self.interest_synced_user_hashes.lock() {
+            synced.clear();
+        }
+    }
+
     fn interest_sync_user_messages(&self, messages: &[Message]) {
         if !self.config().interest.enabled || !self.config().interest.uses_rules() {
             return;
@@ -3107,13 +3154,20 @@ impl AgentLoop {
         let Some(ref store) = self.interest_store else {
             return;
         };
+        let Ok(mut synced_len) = self.interest_synced_message_len.lock() else {
+            return;
+        };
+        let start = *synced_len;
+        if start >= messages.len() {
+            return;
+        }
         let Ok(mut synced) = self.interest_synced_user_hashes.lock() else {
             return;
         };
         let Ok(guard) = store.lock() else {
             return;
         };
-        for msg in messages {
+        for msg in messages.iter().skip(start) {
             if msg.role != MessageRole::User {
                 continue;
             }
@@ -3135,6 +3189,7 @@ impl AgentLoop {
             }
             let _ = ingest_user_message(&guard, trimmed, 0.35);
         }
+        *synced_len = messages.len();
     }
 
     fn interest_on_session_end(&self, messages: &[Message]) {
@@ -4693,6 +4748,7 @@ impl AgentLoop {
         let mut final_messages = compressed;
         Self::patch_leading_system_message(&mut final_messages, &new_system);
         ctx.replace_messages(final_messages.clone());
+        self.reset_interest_sync_cursor();
 
         let new_session_id = Self::new_compression_session_id();
         if let Ok(mut cfg) = self.config_runtime.write() {
@@ -6036,7 +6092,10 @@ impl AgentLoop {
             .unwrap_or_default();
 
         // Determine which tools to expose
-        let tool_schemas: Vec<ToolSchema> = tools.unwrap_or_else(|| self.tool_registry.schemas());
+        let tool_schemas: Arc<[ToolSchema]> = match tools {
+            Some(v) => Arc::from(v),
+            None => self.tool_registry.schemas(),
+        };
 
         // Build and inject system prompt (or reuse session-level cache for prefix stability)
         let (system_content, restored_system) =
@@ -7457,7 +7516,10 @@ impl AgentLoop {
             .and_then(|m| m.content.clone())
             .unwrap_or_default();
 
-        let tool_schemas: Vec<ToolSchema> = tools.unwrap_or_else(|| self.tool_registry.schemas());
+        let tool_schemas: Arc<[ToolSchema]> = match tools {
+            Some(v) => Arc::from(v),
+            None => self.tool_registry.schemas(),
+        };
         let (system_content, restored_system) =
             self.resolve_initial_system_prompt(&task_hint, &tool_schemas);
         ctx.add_message(Message::system(&system_content));
