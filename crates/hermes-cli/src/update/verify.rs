@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::process::Command;
 use hermes_core::errors::AgentError;
 use sha2::{Sha256, Digest};
 
@@ -11,7 +12,7 @@ fn parse_checksum_for_file(checksums_text: &str, filename: &str) -> Option<Strin
             if parts.len() == 2 {
                 let entry_filename = parts[1].trim().trim_start_matches('*');
                 if entry_filename == filename {
-                    return Some(parts[0].to_string());
+                    return Some(parts[0].to_string())
                 }
             }
             None
@@ -26,50 +27,53 @@ fn compute_sha256(data: &[u8]) -> String {
     result.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
-/// 验证下载的 binary 的 SHA256 校验和
+/// 验证下载的 archive 的 SHA256 校验和
+/// archive_path: 下载的 zip/tar.gz 文件路径
+/// checksum_url: checksums.sha256 文件 URL
+/// expected_filename: archive 文件名（如 hermes-windows-x86_64.zip）
 pub async fn verify_checksum(
-    binary_path: &Path,
+    archive_path: &Path,
     checksum_url: &str,
     expected_filename: &str,
 ) -> Result<(), AgentError> {
-    // Download checksums file
-    let client = reqwest::Client::builder()
-        .user_agent("hermes-agent-ultra")
-        .build()
-        .map_err(|e| AgentError::Io(format!("Failed to create HTTP client: {e}")))?;
+    // Download checksums file using curl (system TLS)
+    let mut cmd = Command::new("curl");
+    cmd.args([
+        "-sSfL",
+        "-H", "User-Agent: hermes-agent-ultra",
+    ]);
+    if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+        cmd.args(["-H", &format!("Authorization: Bearer {token}")]);
+    }
+    cmd.arg(checksum_url);
 
-    let resp = client
-        .get(checksum_url)
-        .send()
-        .await
-        .map_err(|e| AgentError::Io(format!("Failed to download checksums: {e}")))?;
+    let output = cmd.output()
+        .map_err(|e| AgentError::Io(format!("Failed to run curl for checksums: {e}")))?;
 
-    if !resp.status().is_success() {
-        tracing::warn!("Checksums file not available (status {}), skipping verification", resp.status());
+    if !output.status.success() {
+        tracing::warn!("Checksums file not available, skipping verification");
         return Ok(());
     }
 
-    let checksums_text = resp
-        .text()
-        .await
-        .map_err(|e| AgentError::Io(format!("Failed to read checksums: {e}")))?;
+    let checksums_text = String::from_utf8(output.stdout)
+        .map_err(|e| AgentError::Io(format!("Invalid UTF-8 in checksums: {e}")))?;
 
-    let expected_hash = parse_checksum_for_file(&checksums_text, expected_filename)
-        .ok_or_else(|| {
-            AgentError::Io(format!(
-                "No checksum found for '{}' in checksums file", expected_filename
-            ))
-        })?;
+    let expected_hash = match parse_checksum_for_file(&checksums_text, expected_filename) {
+        Some(h) => h,
+        None => {
+            tracing::warn!("No checksum entry for '{}' in checksums file, skipping verification", expected_filename);
+            return Ok(());
+        }
+    };
 
-    // Compute actual hash
-    let binary_data = std::fs::read(binary_path)
-        .map_err(|e| AgentError::Io(format!("Failed to read binary for checksum: {e}")))?;
+    // Compute actual hash of the archive
+    let archive_data = std::fs::read(archive_path)
+        .map_err(|e| AgentError::Io(format!("Failed to read archive for checksum: {e}")))?;
 
-    let actual_hash = compute_sha256(&binary_data);
+    let actual_hash = compute_sha256(&archive_data);
 
     if actual_hash != expected_hash.to_lowercase() {
-        // Cleanup the suspicious binary
-        let _ = std::fs::remove_file(binary_path);
+        let _ = std::fs::remove_file(archive_path);
         return Err(AgentError::Io(format!(
             "SHA256 checksum mismatch!\n  Expected: {}\n  Actual:   {}\nThe downloaded file has been removed for safety.",
             expected_hash, actual_hash

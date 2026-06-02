@@ -589,7 +589,7 @@ async fn run(cli: Cli) {
             snapshot_path,
             bundle,
         } => run_doctor(cli, deep, self_heal, snapshot, snapshot_path, bundle).await,
-        CliCommand::Update { check, yes, rollback, force } => run_update(check, yes, rollback, force).await,
+        CliCommand::Update { check, yes, rollback, force, source } => run_update(check, yes, rollback, force, source).await,
         CliCommand::EliteCheck { json, strict } => run_elite_check(cli, json, strict).await,
         CliCommand::VerifyProvenance {
             path,
@@ -11551,7 +11551,7 @@ fn build_doctor_support_bundle(cli: &Cli, snapshot_path: &Path) -> Result<PathBu
 }
 
 /// Handle `hermes update`.
-async fn run_update(check: bool, yes: bool, rollback: bool, force: bool) -> Result<(), AgentError> {
+async fn run_update(check: bool, yes: bool, rollback: bool, force: bool, source: Option<String>) -> Result<(), AgentError> {
     // Clean up leftover .old files from previous update
     hermes_cli::update::replace::cleanup_old();
 
@@ -11569,6 +11569,7 @@ async fn run_update(check: bool, yes: bool, rollback: bool, force: bool) -> Resu
     hermes_cli::update::perform_update(hermes_cli::update::UpdateOptions {
         yes,
         force,
+        source,
     }).await
 }
 

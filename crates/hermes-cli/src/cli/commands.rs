@@ -146,6 +146,9 @@ struct UpdateArgs {
     /// Force update even if already on latest version
     #[arg(long)]
     force: bool,
+    /// Force update source: "github" or "modelscope"
+    #[arg(long, value_parser = ["github", "modelscope"])]
+    source: Option<String>,
 }
 
 pub fn parse_update(args: &[OsString]) -> Result<CliCommand, clap::Error> {
@@ -154,6 +157,7 @@ pub fn parse_update(args: &[OsString]) -> Result<CliCommand, clap::Error> {
         yes: a.yes,
         rollback: a.rollback,
         force: a.force,
+        source: a.source,
     })
 }
 

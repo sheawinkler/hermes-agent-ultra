@@ -3,21 +3,23 @@ pub mod github;
 pub mod download;
 pub mod verify;
 pub mod replace;
+pub mod modelscope;
+pub mod probe;
 
 use hermes_core::errors::AgentError;
-use crate::update::github::{GitHubSource, ReleaseSource};
 use crate::update::platform::Platform;
 
 /// 更新选项
 pub struct UpdateOptions {
     pub yes: bool,
     pub force: bool,
+    pub source: Option<String>,
 }
 
 /// 检查是否有更新可用（兼容旧接口）
 pub async fn check_for_updates() -> Result<String, AgentError> {
     let platform = Platform::detect()?;
-    let source = GitHubSource::new();
+    let source = probe::select_fastest_source(None).await;
 
     let info = source.fetch_latest(&platform).await?;
     let current = env!("CARGO_PKG_VERSION");
@@ -46,7 +48,7 @@ pub async fn perform_update(opts: UpdateOptions) -> Result<(), AgentError> {
     println!("Platform: {}-{}", platform.os, platform.arch);
 
     // 2. Fetch latest release info
-    let source = GitHubSource::new();
+    let source = probe::select_fastest_source(opts.source.as_deref()).await;
     println!("Checking for updates from {}...", source.name());
     let info = source.fetch_latest(&platform).await?;
 
@@ -78,18 +80,21 @@ pub async fn perform_update(opts: UpdateOptions) -> Result<(), AgentError> {
     }
 
     // 5. Download and extract
-    let new_binary = download::download_and_extract(
+    let (archive_path, new_binary) = download::download_and_extract(
         &info.artifact_url,
         &platform,
         true, // show progress
     ).await?;
 
-    // 6. Verify checksum (if available)
+    // 6. Verify checksum (on archive, not extracted binary)
     if let Some(ref checksum_url) = info.checksum_url {
-        verify::verify_checksum(&new_binary, checksum_url, &platform.artifact_name()).await?;
+        verify::verify_checksum(&archive_path, checksum_url, &platform.artifact_name()).await?;
     } else {
         tracing::warn!("No checksums.sha256 available for this release, skipping verification");
     }
+
+    // Cleanup archive
+    let _ = std::fs::remove_file(&archive_path);
 
     // 7. Self-replace
     replace::self_replace(&new_binary)?;

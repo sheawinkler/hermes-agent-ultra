@@ -184,3 +184,12 @@ jobs:
             dist/security/release-sbom.cdx.json
             scripts/install.sh
             Formula/hermes-agent-ultra.rb
+      - name: Upload to ModelScope
+        env:
+          MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
+        run: |
+          pip install modelscope
+          python3 scripts/upload-modelscope-release.py \
+            --repo flowy2025/agent \
+            --version "${GITHUB_REF_NAME}" \
+            --dist-dir dist/

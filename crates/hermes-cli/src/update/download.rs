@@ -1,71 +1,47 @@
 use std::path::PathBuf;
+use std::process::Command;
 use hermes_core::errors::AgentError;
-use indicatif::{ProgressBar, ProgressStyle};
-use tokio::io::AsyncWriteExt;
 use crate::update::platform::Platform;
 
-/// 下载 artifact 并解压出 binary，返回临时文件路径
+/// 下载 artifact 并解压出 binary
+/// 返回 (archive_path, extracted_binary_path)，archive 由调用者负责清理
 pub async fn download_and_extract(
     url: &str,
     platform: &Platform,
     show_progress: bool,
-) -> Result<PathBuf, AgentError> {
-    let client = reqwest::Client::builder()
-        .user_agent("hermes-agent-ultra")
-        .build()
-        .map_err(|e| AgentError::Io(format!("Failed to create HTTP client: {e}")))?;
-
-    let resp = client
-        .get(url)
-        .send()
-        .await
-        .map_err(|e| AgentError::Io(format!("Download failed: {e}")))?;
-
-    if !resp.status().is_success() {
-        return Err(AgentError::Io(format!("Download returned status {}", resp.status())));
-    }
-
-    let total_size = resp.content_length().unwrap_or(0);
-
-    let pb = if show_progress && total_size > 0 {
-        let pb = ProgressBar::new(total_size);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("{msg} [{bar:40.cyan/blue}] {bytes}/{total_bytes} ({eta})")
-                .unwrap_or_else(|_| ProgressStyle::default_bar())
-                .progress_chars("=>-"),
-        );
-        pb.set_message("Downloading");
-        Some(pb)
-    } else {
-        None
-    };
-
-    // Download to temp file
+) -> Result<(PathBuf, PathBuf), AgentError> {
     let temp_dir = std::env::temp_dir();
     let archive_path = temp_dir.join(platform.artifact_name());
-    let mut file = tokio::fs::File::create(&archive_path)
-        .await
-        .map_err(|e| AgentError::Io(format!("Failed to create temp file: {e}")))?;
 
-    let mut stream = resp.bytes_stream();
-    use futures::StreamExt;
-    while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| AgentError::Io(format!("Download stream error: {e}")))?;
-        file.write_all(&chunk)
-            .await
-            .map_err(|e| AgentError::Io(format!("Failed to write temp file: {e}")))?;
-        if let Some(ref pb) = pb {
-            pb.inc(chunk.len() as u64);
+    if show_progress {
+        println!("Downloading {} ...", url);
+    }
+
+    let mut cmd = Command::new("curl");
+    cmd.args([
+        "-sSL",
+        "-o", &archive_path.to_string_lossy(),
+        "-H", "User-Agent: hermes-agent-ultra",
+    ]);
+    // Only attach GitHub token for GitHub URLs
+    if url.contains("github.com") || url.contains("githubusercontent.com") {
+        if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+            cmd.args(["-H", &format!("Authorization: Bearer {token}")]);
+            cmd.args(["-H", "Accept: application/octet-stream"]);
         }
     }
-    file.flush()
-        .await
-        .map_err(|e| AgentError::Io(format!("Failed to flush temp file: {e}")))?;
-    drop(file);
+    cmd.arg(url);
 
-    if let Some(pb) = pb {
-        pb.finish_with_message("Download complete");
+    let output = cmd.output()
+        .map_err(|e| AgentError::Io(format!("Failed to run curl: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(AgentError::Io(format!("Download failed: {stderr}")));
+    }
+
+    if show_progress {
+        println!("Download complete.");
     }
 
     // Extract binary from archive
@@ -78,10 +54,8 @@ pub async fn download_and_extract(
         extract_tar_gz(&archive_path, binary_name, &extracted_path)?;
     }
 
-    // Cleanup archive
-    let _ = std::fs::remove_file(&archive_path);
-
-    Ok(extracted_path)
+    // Archive kept for checksum verification; caller cleans up
+    Ok((archive_path, extracted_path))
 }
 
 fn extract_tar_gz(

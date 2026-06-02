@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use hermes_core::errors::AgentError;
 use serde::Deserialize;
+use std::process::Command;
 use crate::update::platform::Platform;
 
 /// Release 信息
@@ -27,7 +28,7 @@ pub struct GitHubSource {
 impl GitHubSource {
     pub fn new() -> Self {
         let repo = std::env::var("HERMES_UPDATE_REPO")
-            .unwrap_or_else(|_| "sheawinkler/hermes-agent-ultra".to_string());
+            .unwrap_or_else(|_| "Michael-Lfx/hermes-agent-ultra".to_string());
         Self { repo }
     }
 
@@ -54,6 +55,31 @@ struct GitHubAsset {
     browser_download_url: String,
 }
 
+/// Use system curl (schannel on Windows) to bypass rustls TLS issues
+/// with corporate VPN/proxy certificates.
+fn curl_get(url: &str) -> Result<String, AgentError> {
+    let mut cmd = Command::new("curl");
+    cmd.args([
+        "-sSfL",
+        "-H", "User-Agent: hermes-agent-ultra",
+    ]);
+    if let Ok(token) = std::env::var("GITHUB_TOKEN") {
+        cmd.args(["-H", &format!("Authorization: Bearer {token}")]);
+    }
+    cmd.arg(url);
+
+    let output = cmd.output()
+        .map_err(|e| AgentError::Io(format!("Failed to run curl: {e}")))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(AgentError::Io(format!("curl failed: {stderr}")));
+    }
+
+    String::from_utf8(output.stdout)
+        .map_err(|e| AgentError::Io(format!("Invalid UTF-8 in response: {e}")))
+}
+
 #[async_trait]
 impl ReleaseSource for GitHubSource {
     fn name(&self) -> &str {
@@ -61,26 +87,10 @@ impl ReleaseSource for GitHubSource {
     }
 
     async fn fetch_latest(&self, platform: &Platform) -> Result<ReleaseInfo, AgentError> {
-        let client = reqwest::Client::builder()
-            .user_agent("hermes-agent-ultra")
-            .build()
-            .map_err(|e| AgentError::Io(format!("Failed to create HTTP client: {e}")))?;
-
-        let resp = client
-            .get(&self.api_url())
-            .send()
-            .await
+        let body = curl_get(&self.api_url())
             .map_err(|e| AgentError::Io(format!("Failed to fetch release info: {e}")))?;
 
-        if !resp.status().is_success() {
-            return Err(AgentError::Io(format!(
-                "GitHub API returned status {}", resp.status()
-            )));
-        }
-
-        let release: GitHubRelease = resp
-            .json()
-            .await
+        let release: GitHubRelease = serde_json::from_str(&body)
             .map_err(|e| AgentError::Io(format!("Failed to parse release JSON: {e}")))?;
 
         let artifact_name = platform.artifact_name();
@@ -123,7 +133,7 @@ mod tests {
         // SAFETY: test-only env manipulation; tests run single-threaded for env vars
         unsafe { std::env::remove_var("HERMES_UPDATE_REPO") };
         let source = GitHubSource::new();
-        assert_eq!(source.repo, "sheawinkler/hermes-agent-ultra");
+        assert_eq!(source.repo, "Michael-Lfx/hermes-agent-ultra");
     }
 
     #[test]
